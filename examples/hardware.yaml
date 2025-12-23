@@ -1,0 +1,40 @@
+# arca-router Hardware Configuration
+#
+# This file maps physical NIC PCI addresses to logical interface names.
+# It ensures consistent interface naming across reboots.
+#
+# Find your NIC PCI addresses with: lspci | grep Ethernet
+
+interfaces:
+  # Intel NIC example (using AVF native driver)
+  - name: "ge-0/0/0"
+    pci: "0000:03:00.0"
+    driver: "avf"
+    description: "WAN Uplink - ISP Connection"
+
+  - name: "ge-0/0/1"
+    pci: "0000:03:00.1"
+    driver: "avf"
+    description: "LAN Interface - Internal Network"
+
+  # Mellanox NIC example (using RDMA native driver)
+  # Uncomment if using Mellanox NICs:
+  # - name: "xe-0/1/0"
+  #   pci: "0000:3b:00.0"
+  #   driver: "rdma"
+  #   description: "10G Uplink"
+
+  # - name: "xe-0/1/1"
+  #   pci: "0000:3b:00.1"
+  #   driver: "rdma"
+  #   description: "10G Backup"
+
+# Driver types:
+# - avf:  Intel Adaptive Virtual Function (native kernel driver)
+# - rdma: Mellanox RDMA (native kernel driver)
+# - dpdk: DPDK mode (advanced, not recommended for Phase 1)
+
+# Interface naming convention:
+# - ge-X/Y/Z: Gigabit Ethernet (1GbE)
+# - xe-X/Y/Z: 10 Gigabit Ethernet (10GbE)
+# Where X=FPC, Y=PIC, Z=Port (Junos-style naming)
