@@ -1,0 +1,107 @@
+name: arca-router
+version: ${VERSION}
+release: 1
+epoch: 0
+arch: x86_64
+license: MIT
+vendor: akam1o
+maintainer: akam1o <akam1o@users.noreply.github.com>
+homepage: https://github.com/akam1o/arca-router
+description: |
+  ARCA Router - VPP-based Network Router Daemon
+
+  Phase 1 (MVP): Mock VPP mode for testing and development.
+  Provides Junos-style configuration interface for VPP-based routing.
+
+# Phase 1: No VPP dependency (mock mode only)
+# Phase 2: Add VPP dependency when real client is implemented
+# depends:
+#   - vpp >= 23.10
+
+contents:
+  # Binary
+  - src: build/bin/arca-routerd
+    dst: /usr/sbin/arca-routerd
+    file_info:
+      mode: 0755
+      owner: root
+      group: root
+
+  # Configuration directory
+  - dst: /etc/arca-router
+    type: dir
+    file_info:
+      mode: 0755
+      owner: root
+      group: root
+
+  # Example configurations (installed as .example, not active configs)
+  - src: examples/arca.conf
+    dst: /etc/arca-router/arca.conf.example
+    type: config
+    file_info:
+      mode: 0644
+      owner: root
+      group: root
+
+  - src: examples/hardware.yaml
+    dst: /etc/arca-router/hardware.yaml.example
+    type: config
+    file_info:
+      mode: 0644
+      owner: root
+      group: root
+
+  # systemd unit file
+  - src: build/systemd/arca-routerd.service
+    dst: /usr/lib/systemd/system/arca-routerd.service
+    file_info:
+      mode: 0644
+      owner: root
+      group: root
+
+  # Runtime data directory
+  - dst: /var/lib/arca-router
+    type: dir
+    file_info:
+      mode: 0755
+      owner: root
+      group: root
+
+  # Log directory
+  - dst: /var/log/arca-router
+    type: dir
+    file_info:
+      mode: 0750
+      owner: root
+      group: root
+
+  # logrotate configuration
+  - src: build/package/logrotate.conf
+    dst: /etc/logrotate.d/arca-router
+    type: config
+    file_info:
+      mode: 0644
+      owner: root
+      group: root
+
+# Installation scripts
+scripts:
+  preinstall: build/package/scripts/preinstall.sh
+  postinstall: build/package/scripts/postinstall.sh
+  preuninstall: build/package/scripts/preuninstall.sh
+  postuninstall: build/package/scripts/postuninstall.sh
+  posttrans: build/package/scripts/posttrans.sh
+
+# RPM-specific settings
+rpm:
+  group: System Environment/Daemons
+  compression: xz
+  signature:
+    key_file: ""
+    key_id: ""
+
+overrides:
+  rpm:
+    # Use x86_64 for RPM architecture
+    arch: x86_64
