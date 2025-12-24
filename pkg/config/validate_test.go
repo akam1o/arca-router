@@ -269,3 +269,467 @@ func TestValidate_NilConfig(t *testing.T) {
 		t.Error("Validate() on nil config should return error")
 	}
 }
+
+// Test RoutingOptions validation
+func TestValidate_RoutingOptions(t *testing.T) {
+	tests := []struct {
+		name    string
+		config  *Config
+		wantErr bool
+	}{
+		{
+			name: "valid routing options",
+			config: &Config{
+				RoutingOptions: &RoutingOptions{
+					AutonomousSystem: 65001,
+					RouterID:         "10.0.1.1",
+					StaticRoutes: []*StaticRoute{
+						{Prefix: "0.0.0.0/0", NextHop: "192.168.1.1"},
+						{Prefix: "10.0.0.0/8", NextHop: "10.0.0.1", Distance: 10},
+					},
+				},
+			},
+			wantErr: false,
+		},
+		{
+			name: "invalid router-id - not IP",
+			config: &Config{
+				RoutingOptions: &RoutingOptions{
+					RouterID: "invalid",
+				},
+			},
+			wantErr: true,
+		},
+		{
+			name: "invalid router-id - IPv6",
+			config: &Config{
+				RoutingOptions: &RoutingOptions{
+					RouterID: "2001:db8::1",
+				},
+			},
+			wantErr: true,
+		},
+		{
+			name: "invalid static route - bad prefix",
+			config: &Config{
+				RoutingOptions: &RoutingOptions{
+					StaticRoutes: []*StaticRoute{
+						{Prefix: "invalid", NextHop: "10.0.0.1"},
+					},
+				},
+			},
+			wantErr: true,
+		},
+		{
+			name: "invalid static route - bad next-hop",
+			config: &Config{
+				RoutingOptions: &RoutingOptions{
+					StaticRoutes: []*StaticRoute{
+						{Prefix: "0.0.0.0/0", NextHop: "invalid"},
+					},
+				},
+			},
+			wantErr: true,
+		},
+		{
+			name: "invalid static route - distance out of range",
+			config: &Config{
+				RoutingOptions: &RoutingOptions{
+					StaticRoutes: []*StaticRoute{
+						{Prefix: "0.0.0.0/0", NextHop: "10.0.0.1", Distance: 256},
+					},
+				},
+			},
+			wantErr: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := tt.config.Validate()
+			if (err != nil) != tt.wantErr {
+				t.Errorf("Validate() error = %v, wantErr %v", err, tt.wantErr)
+			}
+		})
+	}
+}
+
+// Test BGP validation
+func TestValidate_BGP(t *testing.T) {
+	tests := []struct {
+		name    string
+		config  *Config
+		wantErr bool
+	}{
+		{
+			name: "valid BGP configuration",
+			config: &Config{
+				RoutingOptions: &RoutingOptions{
+					AutonomousSystem: 65001,
+				},
+				Protocols: &ProtocolConfig{
+					BGP: &BGPConfig{
+						Groups: map[string]*BGPGroup{
+							"IBGP": {
+								Type: "internal",
+								Neighbors: map[string]*BGPNeighbor{
+									"10.0.1.2": {
+										IP:     "10.0.1.2",
+										PeerAS: 65001,
+									},
+								},
+							},
+						},
+					},
+				},
+			},
+			wantErr: false,
+		},
+		{
+			name: "BGP without AS number",
+			config: &Config{
+				Protocols: &ProtocolConfig{
+					BGP: &BGPConfig{
+						Groups: map[string]*BGPGroup{
+							"IBGP": {
+								Type: "internal",
+								Neighbors: map[string]*BGPNeighbor{
+									"10.0.1.2": {IP: "10.0.1.2", PeerAS: 65001},
+								},
+							},
+						},
+					},
+				},
+			},
+			wantErr: true,
+		},
+		{
+			name: "BGP with no groups",
+			config: &Config{
+				RoutingOptions: &RoutingOptions{AutonomousSystem: 65001},
+				Protocols: &ProtocolConfig{
+					BGP: &BGPConfig{
+						Groups: map[string]*BGPGroup{},
+					},
+				},
+			},
+			wantErr: true,
+		},
+		{
+			name: "BGP group without type",
+			config: &Config{
+				RoutingOptions: &RoutingOptions{AutonomousSystem: 65001},
+				Protocols: &ProtocolConfig{
+					BGP: &BGPConfig{
+						Groups: map[string]*BGPGroup{
+							"TEST": {
+								Neighbors: map[string]*BGPNeighbor{
+									"10.0.1.2": {IP: "10.0.1.2", PeerAS: 65001},
+								},
+							},
+						},
+					},
+				},
+			},
+			wantErr: true,
+		},
+		{
+			name: "BGP group with invalid type",
+			config: &Config{
+				RoutingOptions: &RoutingOptions{AutonomousSystem: 65001},
+				Protocols: &ProtocolConfig{
+					BGP: &BGPConfig{
+						Groups: map[string]*BGPGroup{
+							"TEST": {
+								Type: "invalid",
+								Neighbors: map[string]*BGPNeighbor{
+									"10.0.1.2": {IP: "10.0.1.2", PeerAS: 65001},
+								},
+							},
+						},
+					},
+				},
+			},
+			wantErr: true,
+		},
+		{
+			name: "BGP neighbor without peer-as",
+			config: &Config{
+				RoutingOptions: &RoutingOptions{AutonomousSystem: 65001},
+				Protocols: &ProtocolConfig{
+					BGP: &BGPConfig{
+						Groups: map[string]*BGPGroup{
+							"TEST": {
+								Type: "internal",
+								Neighbors: map[string]*BGPNeighbor{
+									"10.0.1.2": {IP: "10.0.1.2"},
+								},
+							},
+						},
+					},
+				},
+			},
+			wantErr: true,
+		},
+		{
+			name: "BGP neighbor with invalid IP",
+			config: &Config{
+				RoutingOptions: &RoutingOptions{AutonomousSystem: 65001},
+				Protocols: &ProtocolConfig{
+					BGP: &BGPConfig{
+						Groups: map[string]*BGPGroup{
+							"TEST": {
+								Type: "internal",
+								Neighbors: map[string]*BGPNeighbor{
+									"invalid": {IP: "invalid", PeerAS: 65001},
+								},
+							},
+						},
+					},
+				},
+			},
+			wantErr: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := tt.config.Validate()
+			if (err != nil) != tt.wantErr {
+				t.Errorf("Validate() error = %v, wantErr %v", err, tt.wantErr)
+			}
+		})
+	}
+}
+
+// Test OSPF validation
+func TestValidate_OSPF(t *testing.T) {
+	tests := []struct {
+		name    string
+		config  *Config
+		wantErr bool
+	}{
+		{
+			name: "valid OSPF with routing-options router-id",
+			config: &Config{
+				Interfaces: map[string]*Interface{
+					"ge-0/0/0": {
+						Units: map[int]*Unit{
+							0: {
+								Family: map[string]*Family{
+									"inet": {Addresses: []string{"10.0.0.1/24"}},
+								},
+							},
+						},
+					},
+				},
+				RoutingOptions: &RoutingOptions{
+					RouterID: "10.0.1.1",
+				},
+				Protocols: &ProtocolConfig{
+					OSPF: &OSPFConfig{
+						Areas: map[string]*OSPFArea{
+							"0.0.0.0": {
+								AreaID: "0.0.0.0",
+								Interfaces: map[string]*OSPFInterface{
+									"ge-0/0/0": {Name: "ge-0/0/0"},
+								},
+							},
+						},
+					},
+				},
+			},
+			wantErr: false,
+		},
+		{
+			name: "valid OSPF with protocol-level router-id",
+			config: &Config{
+				Interfaces: map[string]*Interface{
+					"ge-0/0/0": {
+						Units: map[int]*Unit{
+							0: {
+								Family: map[string]*Family{
+									"inet": {Addresses: []string{"10.0.0.1/24"}},
+								},
+							},
+						},
+					},
+				},
+				Protocols: &ProtocolConfig{
+					OSPF: &OSPFConfig{
+						RouterID: "10.0.1.2",
+						Areas: map[string]*OSPFArea{
+							"0": {
+								AreaID: "0",
+								Interfaces: map[string]*OSPFInterface{
+									"ge-0/0/0": {Name: "ge-0/0/0"},
+								},
+							},
+						},
+					},
+				},
+			},
+			wantErr: false,
+		},
+		{
+			name: "OSPF without router-id",
+			config: &Config{
+				Interfaces: map[string]*Interface{
+					"ge-0/0/0": {
+						Units: map[int]*Unit{
+							0: {
+								Family: map[string]*Family{
+									"inet": {Addresses: []string{"10.0.0.1/24"}},
+								},
+							},
+						},
+					},
+				},
+				Protocols: &ProtocolConfig{
+					OSPF: &OSPFConfig{
+						Areas: map[string]*OSPFArea{
+							"0.0.0.0": {
+								AreaID: "0.0.0.0",
+								Interfaces: map[string]*OSPFInterface{
+									"ge-0/0/0": {Name: "ge-0/0/0"},
+								},
+							},
+						},
+					},
+				},
+			},
+			wantErr: true,
+		},
+		{
+			name: "OSPF with IPv6 router-id",
+			config: &Config{
+				Interfaces: map[string]*Interface{
+					"ge-0/0/0": {
+						Units: map[int]*Unit{
+							0: {
+								Family: map[string]*Family{
+									"inet": {Addresses: []string{"10.0.0.1/24"}},
+								},
+							},
+						},
+					},
+				},
+				Protocols: &ProtocolConfig{
+					OSPF: &OSPFConfig{
+						RouterID: "2001:db8::1",
+						Areas: map[string]*OSPFArea{
+							"0.0.0.0": {
+								AreaID: "0.0.0.0",
+								Interfaces: map[string]*OSPFInterface{
+									"ge-0/0/0": {Name: "ge-0/0/0"},
+								},
+							},
+						},
+					},
+				},
+			},
+			wantErr: true,
+		},
+		{
+			name: "OSPF with no areas",
+			config: &Config{
+				RoutingOptions: &RoutingOptions{RouterID: "10.0.1.1"},
+				Protocols: &ProtocolConfig{
+					OSPF: &OSPFConfig{
+						Areas: map[string]*OSPFArea{},
+					},
+				},
+			},
+			wantErr: true,
+		},
+		{
+			name: "OSPF with IPv6 area-id",
+			config: &Config{
+				Interfaces: map[string]*Interface{
+					"ge-0/0/0": {
+						Units: map[int]*Unit{
+							0: {
+								Family: map[string]*Family{
+									"inet": {Addresses: []string{"10.0.0.1/24"}},
+								},
+							},
+						},
+					},
+				},
+				RoutingOptions: &RoutingOptions{RouterID: "10.0.1.1"},
+				Protocols: &ProtocolConfig{
+					OSPF: &OSPFConfig{
+						Areas: map[string]*OSPFArea{
+							"2001:db8::1": {
+								AreaID: "2001:db8::1",
+								Interfaces: map[string]*OSPFInterface{
+									"ge-0/0/0": {Name: "ge-0/0/0"},
+								},
+							},
+						},
+					},
+				},
+			},
+			wantErr: true,
+		},
+		{
+			name: "OSPF with non-existent interface",
+			config: &Config{
+				Interfaces:     map[string]*Interface{}, // Empty interfaces map
+				RoutingOptions: &RoutingOptions{RouterID: "10.0.1.1"},
+				Protocols: &ProtocolConfig{
+					OSPF: &OSPFConfig{
+						Areas: map[string]*OSPFArea{
+							"0.0.0.0": {
+								AreaID: "0.0.0.0",
+								Interfaces: map[string]*OSPFInterface{
+									"ge-9/9/9": {Name: "ge-9/9/9"},
+								},
+							},
+						},
+					},
+				},
+			},
+			wantErr: true,
+		},
+		{
+			name: "OSPF with invalid metric",
+			config: &Config{
+				Interfaces: map[string]*Interface{
+					"ge-0/0/0": {
+						Units: map[int]*Unit{
+							0: {
+								Family: map[string]*Family{
+									"inet": {Addresses: []string{"10.0.0.1/24"}},
+								},
+							},
+						},
+					},
+				},
+				RoutingOptions: &RoutingOptions{RouterID: "10.0.1.1"},
+				Protocols: &ProtocolConfig{
+					OSPF: &OSPFConfig{
+						Areas: map[string]*OSPFArea{
+							"0.0.0.0": {
+								AreaID: "0.0.0.0",
+								Interfaces: map[string]*OSPFInterface{
+									"ge-0/0/0": {Name: "ge-0/0/0", Metric: 70000},
+								},
+							},
+						},
+					},
+				},
+			},
+			wantErr: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := tt.config.Validate()
+			if (err != nil) != tt.wantErr {
+				t.Errorf("Validate() error = %v, wantErr %v", err, tt.wantErr)
+			}
+		})
+	}
+}

@@ -52,6 +52,9 @@ type applyResult struct {
 	TotalInterfaces   int
 	CreatedInterfaces int
 	FailedInterfaces  []string
+	TotalLCPPairs     int
+	CreatedLCPPairs   int
+	FailedLCPPairs    []failedLCPPair
 	TotalAddresses    int
 	AppliedAddresses  int
 	FailedAddresses   []failedAddress
@@ -64,17 +67,25 @@ type failedAddress struct {
 	Error     string
 }
 
+type failedLCPPair struct {
+	Interface  string
+	LinuxName  string
+	Error      string
+	RolledBack bool
+}
+
 func (r *applyResult) HasErrors() bool {
-	return len(r.FailedInterfaces) > 0 || len(r.FailedAddresses) > 0
+	return len(r.FailedInterfaces) > 0 || len(r.FailedAddresses) > 0 || len(r.FailedLCPPairs) > 0
 }
 
 func (r *applyResult) ErrorCount() int {
-	return len(r.FailedInterfaces) + len(r.FailedAddresses)
+	return len(r.FailedInterfaces) + len(r.FailedAddresses) + len(r.FailedLCPPairs)
 }
 
 func (r *applyResult) String() string {
-	return fmt.Sprintf("Interfaces: %d/%d created, Addresses: %d/%d applied, Errors: %d",
+	return fmt.Sprintf("Interfaces: %d/%d created, LCP: %d/%d created, Addresses: %d/%d applied, Errors: %d",
 		r.CreatedInterfaces, r.TotalInterfaces,
+		r.CreatedLCPPairs, r.TotalLCPPairs,
 		r.AppliedAddresses, r.TotalAddresses,
 		r.ErrorCount())
 }
@@ -164,6 +175,16 @@ func applyConfigWithDeps(
 		log.Warn("Failed to create interfaces", slog.Any("interfaces", result.FailedInterfaces))
 	}
 
+	if len(result.FailedLCPPairs) > 0 {
+		for _, flcp := range result.FailedLCPPairs {
+			log.Warn("Failed to create LCP pair",
+				slog.String("interface", flcp.Interface),
+				slog.String("linux_name", flcp.LinuxName),
+				slog.String("error", flcp.Error),
+				slog.Bool("rolled_back", flcp.RolledBack))
+		}
+	}
+
 	if len(result.FailedAddresses) > 0 {
 		for _, fa := range result.FailedAddresses {
 			log.Warn("Failed to apply address",
@@ -194,6 +215,8 @@ func applyVPPConfig(
 	result := &applyResult{
 		TotalInterfaces:  len(hwConfig.Interfaces),
 		FailedInterfaces: make([]string, 0),
+		TotalLCPPairs:    len(hwConfig.Interfaces),
+		FailedLCPPairs:   make([]failedLCPPair, 0),
 		FailedAddresses:  make([]failedAddress, 0),
 	}
 
@@ -243,6 +266,44 @@ func applyVPPConfig(
 		result.CreatedInterfaces++
 		ifaceLog.Info("VPP interface created",
 			slog.Uint64("sw_if_index", uint64(vppIface.SwIfIndex)))
+
+		// Step 6.1b: Create LCP interface pair
+		// Convert Junos interface name to Linux format
+		linuxIfName, err := vpp.ConvertJunosToLinuxName(iface.Name)
+		if err != nil {
+			ifaceLog.Error("Failed to convert interface name to Linux format",
+				slog.String("junos_name", iface.Name),
+				slog.Any("error", err))
+			result.FailedLCPPairs = append(result.FailedLCPPairs, failedLCPPair{
+				Interface:  iface.Name,
+				LinuxName:  "",
+				Error:      fmt.Sprintf("name conversion failed: %v", err),
+				RolledBack: false,
+			})
+			// LCP is optional for Phase 2 - continue with interface setup
+			ifaceLog.Warn("Continuing without LCP pair for this interface")
+		} else {
+			ifaceLog.Info("Creating LCP interface pair",
+				slog.String("linux_name", linuxIfName))
+
+			if err := vppClient.CreateLCPInterface(ctx, vppIface.SwIfIndex, linuxIfName); err != nil {
+				ifaceLog.Error("Failed to create LCP interface pair",
+					slog.String("linux_name", linuxIfName),
+					slog.Any("error", err))
+				result.FailedLCPPairs = append(result.FailedLCPPairs, failedLCPPair{
+					Interface:  iface.Name,
+					LinuxName:  linuxIfName,
+					Error:      err.Error(),
+					RolledBack: false,
+				})
+				// LCP is optional for Phase 2 - continue with interface setup
+				ifaceLog.Warn("Continuing without LCP pair for this interface")
+			} else {
+				result.CreatedLCPPairs++
+				ifaceLog.Info("LCP interface pair created",
+					slog.String("linux_name", linuxIfName))
+			}
+		}
 
 		// Set interface administratively up
 		if err := vppClient.SetInterfaceUp(ctx, vppIface.SwIfIndex); err != nil {

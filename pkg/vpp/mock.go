@@ -11,10 +11,11 @@ import (
 
 // MockClient is a mock implementation of the VPP Client interface for testing
 type MockClient struct {
-	mu         sync.RWMutex
-	connected  bool
-	interfaces map[uint32]*Interface
-	nextIfIdx  uint32
+	mu            sync.RWMutex
+	connected     bool
+	interfaces    map[uint32]*Interface
+	lcpInterfaces map[uint32]*LCPInterface
+	nextIfIdx     uint32
 
 	// Hooks for testing error scenarios
 	ConnectError                error
@@ -25,13 +26,18 @@ type MockClient struct {
 	DeleteInterfaceAddressError error
 	GetInterfaceError           error
 	ListInterfacesError         error
+	CreateLCPInterfaceError     error
+	DeleteLCPInterfaceError     error
+	GetLCPInterfaceError        error
+	ListLCPInterfacesError      error
 }
 
 // NewMockClient creates a new mock VPP client
 func NewMockClient() *MockClient {
 	return &MockClient{
-		interfaces: make(map[uint32]*Interface),
-		nextIfIdx:  1, // Start from 1 (0 is reserved for local0)
+		interfaces:    make(map[uint32]*Interface),
+		lcpInterfaces: make(map[uint32]*LCPInterface),
+		nextIfIdx:     1, // Start from 1 (0 is reserved for local0)
 	}
 }
 
@@ -476,6 +482,7 @@ func (m *MockClient) Reset() {
 
 	m.connected = false
 	m.interfaces = make(map[uint32]*Interface)
+	m.lcpInterfaces = make(map[uint32]*LCPInterface)
 	m.nextIfIdx = 1
 
 	m.ConnectError = nil
@@ -486,4 +493,181 @@ func (m *MockClient) Reset() {
 	m.DeleteInterfaceAddressError = nil
 	m.GetInterfaceError = nil
 	m.ListInterfacesError = nil
+	m.CreateLCPInterfaceError = nil
+	m.DeleteLCPInterfaceError = nil
+	m.GetLCPInterfaceError = nil
+	m.ListLCPInterfacesError = nil
+}
+
+// CreateLCPInterface creates a mock LCP interface pair
+func (m *MockClient) CreateLCPInterface(ctx context.Context, ifIndex uint32, linuxIfName string) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+
+	if m.CreateLCPInterfaceError != nil {
+		return m.CreateLCPInterfaceError
+	}
+
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	if !m.connected {
+		return errors.New(
+			errors.ErrCodeVPPConnection,
+			"Not connected to VPP",
+			"VPP connection not established",
+			"Connect to VPP before creating LCP interfaces",
+		)
+	}
+
+	// Check if VPP interface exists
+	if _, ok := m.interfaces[ifIndex]; !ok {
+		return errors.New(
+			errors.ErrCodeVPPOperation,
+			fmt.Sprintf("VPP interface with index %d not found", ifIndex),
+			"VPP interface does not exist",
+			"Create the VPP interface before creating LCP pair",
+		)
+	}
+
+	// Check if LCP pair already exists
+	if _, exists := m.lcpInterfaces[ifIndex]; exists {
+		return errors.New(
+			errors.ErrCodeVPPOperation,
+			fmt.Sprintf("LCP pair already exists for interface %d", ifIndex),
+			"LCP pair already configured",
+			"Delete the existing LCP pair before creating a new one",
+		)
+	}
+
+	// Validate Linux interface name
+	if err := ValidateLinuxIfName(linuxIfName); err != nil {
+		return err
+	}
+
+	// Create LCP interface
+	lcp := &LCPInterface{
+		VPPSwIfIndex: ifIndex,
+		LinuxIfName:  linuxIfName,
+		HostIfType:   "tap",
+		Netns:        "",
+	}
+
+	m.lcpInterfaces[ifIndex] = lcp
+	return nil
+}
+
+// DeleteLCPInterface removes a mock LCP interface pair
+func (m *MockClient) DeleteLCPInterface(ctx context.Context, ifIndex uint32) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+
+	if m.DeleteLCPInterfaceError != nil {
+		return m.DeleteLCPInterfaceError
+	}
+
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	if !m.connected {
+		return errors.New(
+			errors.ErrCodeVPPConnection,
+			"Not connected to VPP",
+			"VPP connection not established",
+			"Connect to VPP before deleting LCP interfaces",
+		)
+	}
+
+	if _, exists := m.lcpInterfaces[ifIndex]; !exists {
+		return errors.New(
+			errors.ErrCodeVPPOperation,
+			fmt.Sprintf("LCP pair not found for interface %d", ifIndex),
+			"LCP pair does not exist",
+			"LCP pair must exist to be deleted",
+		)
+	}
+
+	delete(m.lcpInterfaces, ifIndex)
+	return nil
+}
+
+// GetLCPInterface retrieves mock LCP interface information by VPP interface index
+func (m *MockClient) GetLCPInterface(ctx context.Context, ifIndex uint32) (*LCPInterface, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+
+	if m.GetLCPInterfaceError != nil {
+		return nil, m.GetLCPInterfaceError
+	}
+
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	if !m.connected {
+		return nil, errors.New(
+			errors.ErrCodeVPPConnection,
+			"Not connected to VPP",
+			"VPP connection not established",
+			"Connect to VPP before getting LCP interface information",
+		)
+	}
+
+	lcp, ok := m.lcpInterfaces[ifIndex]
+	if !ok {
+		return nil, errors.New(
+			errors.ErrCodeVPPOperation,
+			fmt.Sprintf("LCP pair not found for interface %d", ifIndex),
+			"LCP pair does not exist",
+			"LCP pair must exist to retrieve its information",
+		)
+	}
+
+	// Return a copy
+	return &LCPInterface{
+		VPPSwIfIndex: lcp.VPPSwIfIndex,
+		LinuxIfName:  lcp.LinuxIfName,
+		JunosName:    lcp.JunosName,
+		HostIfType:   lcp.HostIfType,
+		Netns:        lcp.Netns,
+	}, nil
+}
+
+// ListLCPInterfaces lists all mock LCP interface pairs
+func (m *MockClient) ListLCPInterfaces(ctx context.Context) ([]*LCPInterface, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+
+	if m.ListLCPInterfacesError != nil {
+		return nil, m.ListLCPInterfacesError
+	}
+
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	if !m.connected {
+		return nil, errors.New(
+			errors.ErrCodeVPPConnection,
+			"Not connected to VPP",
+			"VPP connection not established",
+			"Connect to VPP before listing LCP interfaces",
+		)
+	}
+
+	interfaces := make([]*LCPInterface, 0, len(m.lcpInterfaces))
+	for _, lcp := range m.lcpInterfaces {
+		// Return copies
+		interfaces = append(interfaces, &LCPInterface{
+			VPPSwIfIndex: lcp.VPPSwIfIndex,
+			LinuxIfName:  lcp.LinuxIfName,
+			JunosName:    lcp.JunosName,
+			HostIfType:   lcp.HostIfType,
+			Netns:        lcp.Netns,
+		})
+	}
+
+	return interfaces, nil
 }

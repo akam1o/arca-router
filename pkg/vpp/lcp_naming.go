@@ -23,11 +23,11 @@ var (
 
 // ConvertJunosToLinuxName converts a Junos interface name to Linux format.
 // Examples:
-//   ge-0/0/0     → ge000
-//   xe-1/2/3     → xe123
-//   et-0/1/2     → et012
-//   ge-0/0/0.10  → ge000v10
-//   ge-0/0/10    → ge0010
+//   ge-0/0/0     → ge0-0-0
+//   xe-1/2/3     → xe1-2-3
+//   et-0/1/2     → et0-1-2
+//   ge-0/0/0.10  → ge0-0-0v10
+//   ge-0/0/10    → ge0-0-10
 //
 // For names that would exceed 15 characters or have potential collisions,
 // a deterministic hash suffix is appended.

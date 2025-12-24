@@ -1,6 +1,7 @@
 package config
 
 import (
+	"os"
 	"strings"
 	"testing"
 )
@@ -277,5 +278,360 @@ func TestParser_OnlyComments(t *testing.T) {
 
 	if len(config.Interfaces) != 0 {
 		t.Errorf("Expected empty config, got %d interfaces", len(config.Interfaces))
+	}
+}
+
+// Test routing-options parsing
+func TestParser_RoutingOptions(t *testing.T) {
+	input := `set routing-options autonomous-system 65001
+set routing-options router-id 10.0.1.1
+set routing-options static route 0.0.0.0/0 next-hop 192.168.1.254
+set routing-options static route 10.0.0.0/8 next-hop 10.0.0.1 distance 10`
+
+	parser := NewParser(strings.NewReader(input))
+	config, err := parser.Parse()
+	if err != nil {
+		t.Fatalf("Parse() error = %v", err)
+	}
+
+	if config.RoutingOptions == nil {
+		t.Fatal("RoutingOptions is nil")
+	}
+
+	// Check AS number
+	if config.RoutingOptions.AutonomousSystem != 65001 {
+		t.Errorf("Expected AS 65001, got %d", config.RoutingOptions.AutonomousSystem)
+	}
+
+	// Check router-id
+	if config.RoutingOptions.RouterID != "10.0.1.1" {
+		t.Errorf("Expected router-id 10.0.1.1, got %s", config.RoutingOptions.RouterID)
+	}
+
+	// Check static routes
+	if len(config.RoutingOptions.StaticRoutes) != 2 {
+		t.Fatalf("Expected 2 static routes, got %d", len(config.RoutingOptions.StaticRoutes))
+	}
+
+	// Check default route
+	if config.RoutingOptions.StaticRoutes[0].Prefix != "0.0.0.0/0" {
+		t.Errorf("Expected prefix 0.0.0.0/0, got %s", config.RoutingOptions.StaticRoutes[0].Prefix)
+	}
+	if config.RoutingOptions.StaticRoutes[0].NextHop != "192.168.1.254" {
+		t.Errorf("Expected next-hop 192.168.1.254, got %s", config.RoutingOptions.StaticRoutes[0].NextHop)
+	}
+
+	// Check route with distance
+	if config.RoutingOptions.StaticRoutes[1].Distance != 10 {
+		t.Errorf("Expected distance 10, got %d", config.RoutingOptions.StaticRoutes[1].Distance)
+	}
+}
+
+// Test BGP parsing
+func TestParser_BGP(t *testing.T) {
+	input := `set routing-options autonomous-system 65001
+set protocols bgp group IBGP type internal
+set protocols bgp group IBGP neighbor 10.0.1.2 peer-as 65001
+set protocols bgp group IBGP neighbor 10.0.1.2 description "Internal Peer"
+set protocols bgp group IBGP neighbor 10.0.1.2 local-address 10.0.1.1
+set protocols bgp group EBGP type external
+set protocols bgp group EBGP neighbor 10.0.2.2 peer-as 65002`
+
+	parser := NewParser(strings.NewReader(input))
+	config, err := parser.Parse()
+	if err != nil {
+		t.Fatalf("Parse() error = %v", err)
+	}
+
+	if config.Protocols == nil {
+		t.Fatal("Protocols is nil")
+	}
+
+	if config.Protocols.BGP == nil {
+		t.Fatal("BGP is nil")
+	}
+
+	// Check groups
+	if len(config.Protocols.BGP.Groups) != 2 {
+		t.Fatalf("Expected 2 BGP groups, got %d", len(config.Protocols.BGP.Groups))
+	}
+
+	// Check IBGP group
+	ibgp := config.Protocols.BGP.Groups["IBGP"]
+	if ibgp == nil {
+		t.Fatal("IBGP group is nil")
+	}
+	if ibgp.Type != "internal" {
+		t.Errorf("Expected IBGP type internal, got %s", ibgp.Type)
+	}
+	if len(ibgp.Neighbors) != 1 {
+		t.Fatalf("Expected 1 IBGP neighbor, got %d", len(ibgp.Neighbors))
+	}
+
+	// Check IBGP neighbor
+	neighbor := ibgp.Neighbors["10.0.1.2"]
+	if neighbor == nil {
+		t.Fatal("IBGP neighbor 10.0.1.2 is nil")
+	}
+	if neighbor.PeerAS != 65001 {
+		t.Errorf("Expected peer-as 65001, got %d", neighbor.PeerAS)
+	}
+	if neighbor.Description != "Internal Peer" {
+		t.Errorf("Expected description 'Internal Peer', got %s", neighbor.Description)
+	}
+	if neighbor.LocalAddress != "10.0.1.1" {
+		t.Errorf("Expected local-address 10.0.1.1, got %s", neighbor.LocalAddress)
+	}
+
+	// Check EBGP group
+	ebgp := config.Protocols.BGP.Groups["EBGP"]
+	if ebgp == nil {
+		t.Fatal("EBGP group is nil")
+	}
+	if ebgp.Type != "external" {
+		t.Errorf("Expected EBGP type external, got %s", ebgp.Type)
+	}
+}
+
+// Test OSPF parsing
+func TestParser_OSPF(t *testing.T) {
+	input := `set routing-options router-id 10.0.1.1
+set protocols ospf router-id 10.0.1.2
+set protocols ospf area 0.0.0.0 interface ge-0/0/0
+set protocols ospf area 0.0.0.0 interface ge-0/0/1 passive
+set protocols ospf area 0.0.0.0 interface ge-0/0/1 metric 100
+set protocols ospf area 0.0.0.0 interface ge-0/0/1 priority 1`
+
+	parser := NewParser(strings.NewReader(input))
+	config, err := parser.Parse()
+	if err != nil {
+		t.Fatalf("Parse() error = %v", err)
+	}
+
+	if config.Protocols == nil {
+		t.Fatal("Protocols is nil")
+	}
+
+	if config.Protocols.OSPF == nil {
+		t.Fatal("OSPF is nil")
+	}
+
+	// Check OSPF router-id
+	if config.Protocols.OSPF.RouterID != "10.0.1.2" {
+		t.Errorf("Expected OSPF router-id 10.0.1.2, got %s", config.Protocols.OSPF.RouterID)
+	}
+
+	// Check areas
+	if len(config.Protocols.OSPF.Areas) != 1 {
+		t.Fatalf("Expected 1 OSPF area, got %d", len(config.Protocols.OSPF.Areas))
+	}
+
+	// Check area 0
+	area := config.Protocols.OSPF.Areas["0.0.0.0"]
+	if area == nil {
+		t.Fatal("OSPF area 0.0.0.0 is nil")
+	}
+
+	// Check interfaces
+	if len(area.Interfaces) != 2 {
+		t.Fatalf("Expected 2 OSPF interfaces, got %d", len(area.Interfaces))
+	}
+
+	// Check ge-0/0/0
+	if0 := area.Interfaces["ge-0/0/0"]
+	if if0 == nil {
+		t.Fatal("OSPF interface ge-0/0/0 is nil")
+	}
+	if if0.Passive {
+		t.Error("Expected ge-0/0/0 to be non-passive")
+	}
+
+	// Check ge-0/0/1
+	if1 := area.Interfaces["ge-0/0/1"]
+	if if1 == nil {
+		t.Fatal("OSPF interface ge-0/0/1 is nil")
+	}
+	if !if1.Passive {
+		t.Error("Expected ge-0/0/1 to be passive")
+	}
+	if if1.Metric != 100 {
+		t.Errorf("Expected metric 100, got %d", if1.Metric)
+	}
+	if if1.Priority != 1 {
+		t.Errorf("Expected priority 1, got %d", if1.Priority)
+	}
+}
+
+// Test complete Phase 2 configuration
+func TestParser_Phase2Complete(t *testing.T) {
+	input := `set system host-name router1
+set interfaces ge-0/0/0 description "Uplink"
+set interfaces ge-0/0/0 unit 0 family inet address 10.0.1.1/24
+set routing-options autonomous-system 65001
+set routing-options router-id 10.0.1.1
+set routing-options static route 0.0.0.0/0 next-hop 10.0.1.254
+set protocols bgp group IBGP type internal
+set protocols bgp group IBGP neighbor 10.0.1.2 peer-as 65001
+set protocols ospf area 0.0.0.0 interface ge-0/0/0`
+
+	parser := NewParser(strings.NewReader(input))
+	config, err := parser.Parse()
+	if err != nil {
+		t.Fatalf("Parse() error = %v", err)
+	}
+
+	// Validate system
+	if config.System == nil || config.System.HostName != "router1" {
+		t.Error("System hostname not parsed correctly")
+	}
+
+	// Validate interfaces
+	if len(config.Interfaces) != 1 {
+		t.Errorf("Expected 1 interface, got %d", len(config.Interfaces))
+	}
+
+	// Validate routing options
+	if config.RoutingOptions == nil {
+		t.Fatal("RoutingOptions is nil")
+	}
+	if config.RoutingOptions.AutonomousSystem != 65001 {
+		t.Errorf("Expected AS 65001, got %d", config.RoutingOptions.AutonomousSystem)
+	}
+	if len(config.RoutingOptions.StaticRoutes) != 1 {
+		t.Errorf("Expected 1 static route, got %d", len(config.RoutingOptions.StaticRoutes))
+	}
+
+	// Validate BGP
+	if config.Protocols == nil || config.Protocols.BGP == nil {
+		t.Fatal("BGP is nil")
+	}
+	if len(config.Protocols.BGP.Groups) != 1 {
+		t.Errorf("Expected 1 BGP group, got %d", len(config.Protocols.BGP.Groups))
+	}
+
+	// Validate OSPF
+	if config.Protocols.OSPF == nil {
+		t.Fatal("OSPF is nil")
+	}
+	if len(config.Protocols.OSPF.Areas) != 1 {
+		t.Errorf("Expected 1 OSPF area, got %d", len(config.Protocols.OSPF.Areas))
+	}
+}
+
+// Test parsing errors
+func TestParser_RoutingErrors(t *testing.T) {
+	tests := []struct {
+		name  string
+		input string
+	}{
+		{
+			name:  "duplicate static route",
+			input: `set routing-options static route 0.0.0.0/0 next-hop 10.0.0.1
+set routing-options static route 0.0.0.0/0 next-hop 10.0.0.2`,
+		},
+		{
+			name:  "invalid AS number",
+			input: `set routing-options autonomous-system invalid`,
+		},
+		{
+			name:  "BGP without group name",
+			input: `set protocols bgp type internal`,
+		},
+		{
+			name:  "OSPF without area",
+			input: `set protocols ospf interface ge-0/0/0`,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			parser := NewParser(strings.NewReader(tt.input))
+			_, err := parser.Parse()
+			if err == nil {
+				t.Errorf("Expected error for %s, got nil", tt.name)
+			}
+		})
+	}
+}
+
+// Test Phase 2 sample configuration file
+func TestParser_Phase2SampleFile(t *testing.T) {
+	// Read the sample configuration file
+	file, err := os.Open("../../examples/arca-phase2.conf")
+	if err != nil {
+		t.Fatalf("Failed to open arca-phase2.conf: %v", err)
+	}
+	defer file.Close()
+
+	parser := NewParser(file)
+	config, err := parser.Parse()
+	if err != nil {
+		t.Fatalf("Parse() error = %v", err)
+	}
+
+	// Validate system
+	if config.System == nil || config.System.HostName != "router1" {
+		t.Error("Expected hostname 'router1'")
+	}
+
+	// Validate interfaces
+	if len(config.Interfaces) != 3 {
+		t.Errorf("Expected 3 interfaces, got %d", len(config.Interfaces))
+	}
+
+	// Validate routing options
+	if config.RoutingOptions == nil {
+		t.Fatal("RoutingOptions is nil")
+	}
+	if config.RoutingOptions.AutonomousSystem != 65001 {
+		t.Errorf("Expected AS 65001, got %d", config.RoutingOptions.AutonomousSystem)
+	}
+	if config.RoutingOptions.RouterID != "10.0.1.1" {
+		t.Errorf("Expected router-id 10.0.1.1, got %s", config.RoutingOptions.RouterID)
+	}
+	if len(config.RoutingOptions.StaticRoutes) != 2 {
+		t.Errorf("Expected 2 static routes, got %d", len(config.RoutingOptions.StaticRoutes))
+	}
+
+	// Validate BGP
+	if config.Protocols == nil || config.Protocols.BGP == nil {
+		t.Fatal("BGP is nil")
+	}
+	if len(config.Protocols.BGP.Groups) != 2 {
+		t.Errorf("Expected 2 BGP groups, got %d", len(config.Protocols.BGP.Groups))
+	}
+
+	// Validate IBGP group
+	ibgp := config.Protocols.BGP.Groups["IBGP"]
+	if ibgp == nil {
+		t.Fatal("IBGP group not found")
+	}
+	if ibgp.Type != "internal" {
+		t.Errorf("Expected IBGP type internal, got %s", ibgp.Type)
+	}
+
+	// Validate EBGP group
+	ebgp := config.Protocols.BGP.Groups["EBGP"]
+	if ebgp == nil {
+		t.Fatal("EBGP group not found")
+	}
+	if ebgp.Type != "external" {
+		t.Errorf("Expected EBGP type external, got %s", ebgp.Type)
+	}
+
+	// Validate OSPF
+	if config.Protocols.OSPF == nil {
+		t.Fatal("OSPF is nil")
+	}
+	if config.Protocols.OSPF.RouterID != "10.0.1.1" {
+		t.Errorf("Expected OSPF router-id 10.0.1.1, got %s", config.Protocols.OSPF.RouterID)
+	}
+	if len(config.Protocols.OSPF.Areas) != 1 {
+		t.Errorf("Expected 1 OSPF area, got %d", len(config.Protocols.OSPF.Areas))
+	}
+
+	// Validate configuration
+	if err := config.Validate(); err != nil {
+		t.Errorf("Validation failed: %v", err)
 	}
 }
