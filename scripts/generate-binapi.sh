@@ -141,7 +141,7 @@ for api_file in "${API_FILES[@]}"; do
     echo "Processing: $api_name"
 
     binapi-generator \
-        --input-file="$api_file" \
+        --input="$api_file" \
         --output-dir="$OUTPUT_DIR" \
         --gen=rpc \
         --import-prefix="github.com/akam1o/arca-router/pkg/vpp/binapi"
