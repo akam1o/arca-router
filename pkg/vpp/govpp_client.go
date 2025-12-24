@@ -13,6 +13,7 @@ import (
 	vppif "github.com/akam1o/arca-router/pkg/vpp/binapi/interface"
 	"github.com/akam1o/arca-router/pkg/vpp/binapi/interface_types"
 	"github.com/akam1o/arca-router/pkg/vpp/binapi/ip_types"
+	"github.com/akam1o/arca-router/pkg/vpp/binapi/lcp"
 	"github.com/akam1o/arca-router/pkg/vpp/binapi/rdma"
 	"go.fd.io/govpp/adapter/socketclient"
 	"go.fd.io/govpp/api"
@@ -592,6 +593,147 @@ func checkSocketAccess(path string) error {
 	}
 
 	return nil
+}
+
+// CreateLCPInterface creates an LCP pair for an existing VPP interface
+func (c *govppClient) CreateLCPInterface(ctx context.Context, ifIndex uint32, linuxIfName string) error {
+	if c.ch == nil {
+		return fmt.Errorf("not connected to VPP")
+	}
+
+	// Validate Linux interface name
+	if err := ValidateLinuxIfName(linuxIfName); err != nil {
+		return fmt.Errorf("invalid Linux interface name: %w", err)
+	}
+
+	// Check for context cancellation
+	select {
+	case <-ctx.Done():
+		return fmt.Errorf("operation cancelled: %w", ctx.Err())
+	default:
+	}
+
+	// Use lcp_itf_pair_add_del_v2 (most stable for VPP 24.10)
+	req := &lcp.LcpItfPairAddDelV2{
+		IsAdd:      true,
+		SwIfIndex:  interface_types.InterfaceIndex(ifIndex),
+		HostIfName: linuxIfName,
+		HostIfType: lcp.LCP_API_ITF_HOST_TAP, // Always use TAP
+		Netns:      "",                       // Default namespace
+	}
+
+	reply := &lcp.LcpItfPairAddDelV2Reply{}
+	if err := c.ch.SendRequest(req).ReceiveReply(reply); err != nil {
+		return fmt.Errorf("failed to create LCP pair: %w", err)
+	}
+
+	if reply.Retval != 0 {
+		return fmt.Errorf("LCP pair add failed: retval=%d (VPP error code)", reply.Retval)
+	}
+
+	return nil
+}
+
+// DeleteLCPInterface removes an LCP pair
+func (c *govppClient) DeleteLCPInterface(ctx context.Context, ifIndex uint32) error {
+	if c.ch == nil {
+		return fmt.Errorf("not connected to VPP")
+	}
+
+	// Check for context cancellation
+	select {
+	case <-ctx.Done():
+		return fmt.Errorf("operation cancelled: %w", ctx.Err())
+	default:
+	}
+
+	// Use lcp_itf_pair_add_del_v2
+	req := &lcp.LcpItfPairAddDelV2{
+		IsAdd:     false,
+		SwIfIndex: interface_types.InterfaceIndex(ifIndex),
+		// Other fields not needed for delete
+	}
+
+	reply := &lcp.LcpItfPairAddDelV2Reply{}
+	if err := c.ch.SendRequest(req).ReceiveReply(reply); err != nil {
+		return fmt.Errorf("failed to delete LCP pair: %w", err)
+	}
+
+	if reply.Retval != 0 {
+		return fmt.Errorf("LCP pair delete failed: retval=%d (VPP error code)", reply.Retval)
+	}
+
+	return nil
+}
+
+// GetLCPInterface retrieves LCP pair information by VPP interface index
+func (c *govppClient) GetLCPInterface(ctx context.Context, ifIndex uint32) (*LCPInterface, error) {
+	if c.ch == nil {
+		return nil, fmt.Errorf("not connected to VPP")
+	}
+
+	// Get all LCP pairs and filter by ifIndex
+	pairs, err := c.ListLCPInterfaces(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	for _, pair := range pairs {
+		if pair.VPPSwIfIndex == ifIndex {
+			return pair, nil
+		}
+	}
+
+	return nil, fmt.Errorf("LCP pair not found for interface index %d", ifIndex)
+}
+
+// ListLCPInterfaces lists all LCP pairs
+func (c *govppClient) ListLCPInterfaces(ctx context.Context) ([]*LCPInterface, error) {
+	if c.ch == nil {
+		return nil, fmt.Errorf("not connected to VPP")
+	}
+
+	// Send dump request (cursor=0xFFFFFFFF means get all)
+	req := &lcp.LcpItfPairGet{
+		Cursor: 0xFFFFFFFF,
+	}
+
+	reqCtx := c.ch.SendMultiRequest(req)
+
+	var interfaces []*LCPInterface
+	for {
+		// Check for context cancellation in loop
+		select {
+		case <-ctx.Done():
+			return nil, fmt.Errorf("operation cancelled: %w", ctx.Err())
+		default:
+		}
+
+		msg := &lcp.LcpItfPairDetails{}
+		stop, err := reqCtx.ReceiveReply(msg)
+		if err != nil {
+			return nil, fmt.Errorf("failed to receive LCP pair details: %w", err)
+		}
+		if stop {
+			break
+		}
+
+		// Convert to LCPInterface
+		hostIfType := "tap"
+		if msg.HostIfType == lcp.LCP_API_ITF_HOST_TUN {
+			hostIfType = "tun"
+		}
+
+		interfaces = append(interfaces, &LCPInterface{
+			VPPSwIfIndex: uint32(msg.PhySwIfIndex),
+			LinuxIfName:  msg.HostIfName,
+			HostIfType:   hostIfType,
+			Netns:        msg.Netns,
+			// JunosName is populated by state manager, not VPP
+		})
+	}
+
+	return interfaces, nil
 }
 
 // Ensure govppClient implements Client interface
