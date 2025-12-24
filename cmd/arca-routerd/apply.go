@@ -11,6 +11,7 @@ import (
 	"github.com/akam1o/arca-router/pkg/config"
 	"github.com/akam1o/arca-router/pkg/device"
 	"github.com/akam1o/arca-router/pkg/errors"
+	"github.com/akam1o/arca-router/pkg/frr"
 	"github.com/akam1o/arca-router/pkg/logger"
 	"github.com/akam1o/arca-router/pkg/vpp"
 )
@@ -164,12 +165,12 @@ func applyConfigWithDeps(
 	}()
 	log.Info("Connected to VPP")
 
-	// Step 6: Apply configuration
+	// Step 6: Apply VPP configuration
 	log.Info("Applying configuration to VPP")
 	result := applyVPPConfig(ctx, hwConfig, cfg, vppClient, log)
 
-	// Report detailed results
-	log.Info("Configuration application completed", slog.String("result", result.String()))
+	// Report detailed VPP results
+	log.Info("VPP configuration application completed", slog.String("result", result.String()))
 
 	if len(result.FailedInterfaces) > 0 {
 		log.Warn("Failed to create interfaces", slog.Any("interfaces", result.FailedInterfaces))
@@ -194,6 +195,20 @@ func applyConfigWithDeps(
 				slog.String("error", fa.Error))
 		}
 	}
+
+	// Step 7: Generate and apply FRR configuration
+	// Always generate FRR config (even if empty) to clear old routing configuration
+	log.Info("Generating FRR configuration")
+	if err := applyFRRConfig(ctx, cfg, log); err != nil {
+		// FRR apply failure is non-fatal - VPP config is already applied
+		log.Error("Failed to apply FRR configuration", slog.Any("error", err))
+		// Add FRR error to result
+		if result.HasErrors() {
+			return fmt.Errorf("configuration applied with %d VPP errors and FRR error: %v", result.ErrorCount(), err)
+		}
+		return fmt.Errorf("VPP configuration applied successfully, but FRR configuration failed: %v", err)
+	}
+	log.Info("FRR configuration applied successfully")
 
 	if result.HasErrors() {
 		return fmt.Errorf("configuration applied with %d errors: %s", result.ErrorCount(), result.String())
@@ -434,4 +449,31 @@ func applyVPPConfig(
 	}
 
 	return result
+}
+
+// applyFRRConfig generates and applies FRR configuration from arca-router config.
+func applyFRRConfig(ctx context.Context, cfg *config.Config, log *logger.Logger) error {
+	// Step 1: Generate FRR configuration
+	frrConfig, err := frr.GenerateFRRConfig(cfg)
+	if err != nil {
+		return fmt.Errorf("failed to generate FRR configuration: %w", err)
+	}
+
+	// Step 2: Generate FRR configuration file content
+	configContent, err := frr.GenerateFRRConfigFile(frrConfig)
+	if err != nil {
+		return fmt.Errorf("failed to generate FRR config file: %w", err)
+	}
+
+	log.Debug("Generated FRR configuration",
+		slog.Int("config_length", len(configContent)))
+
+	// Step 3: Apply configuration using reloader
+	reloader := frr.NewReloader()
+
+	if err := reloader.ApplyConfig(ctx, configContent); err != nil {
+		return fmt.Errorf("failed to apply FRR configuration: %w", err)
+	}
+
+	return nil
 }
