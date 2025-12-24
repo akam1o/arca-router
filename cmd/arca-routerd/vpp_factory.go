@@ -13,8 +13,7 @@ func newVPPClientFactory(useMock bool) vppClientFactory {
 		if useMock {
 			return vpp.NewMockClient()
 		}
-		// TODO Phase 2: Implement real VPP client
-		// For now, panic to make it clear that real VPP is not yet implemented
-		panic("Real VPP client not yet implemented in Phase 1. Use -mock-vpp flag for testing.")
+		// Phase 2: Real VPP client via govpp
+		return vpp.NewGovppClient()
 	}
 }
