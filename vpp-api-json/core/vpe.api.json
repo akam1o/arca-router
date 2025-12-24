@@ -1,0 +1,266 @@
+{
+    "types": [
+        [
+            "version",
+            [
+                "u32",
+                "major"
+            ],
+            [
+                "u32",
+                "minor"
+            ],
+            [
+                "u32",
+                "patch"
+            ],
+            [
+                "u8",
+                "pre_release",
+                17
+            ],
+            [
+                "u8",
+                "build_metadata",
+                17
+            ]
+        ]
+    ],
+    "messages": [
+        [
+            "show_version",
+            [
+                "u16",
+                "_vl_msg_id"
+            ],
+            [
+                "u32",
+                "client_index"
+            ],
+            [
+                "u32",
+                "context"
+            ],
+            {
+                "crc": "0x51077d14",
+                "options": {},
+                "comment": "/** \\brief show version\n    @param client_index - opaque cookie to identify the sender\n    @param context - sender context, to match reply w/ request\n*/"
+            }
+        ],
+        [
+            "show_version_reply",
+            [
+                "u16",
+                "_vl_msg_id"
+            ],
+            [
+                "u32",
+                "context"
+            ],
+            [
+                "i32",
+                "retval"
+            ],
+            [
+                "string",
+                "program",
+                32
+            ],
+            [
+                "string",
+                "version",
+                32
+            ],
+            [
+                "string",
+                "build_date",
+                32
+            ],
+            [
+                "string",
+                "build_directory",
+                256
+            ],
+            {
+                "crc": "0xc919bde1",
+                "options": {},
+                "comment": "/** \\brief show version response\n    @param context - sender context, to match reply w/ request\n    @param retval - return code for the request\n    @param program - name of the program (vpe)\n    @param version  - version of the program\n    @param build_directory - root of the workspace where the program was built\n*/"
+            }
+        ],
+        [
+            "show_vpe_system_time",
+            [
+                "u16",
+                "_vl_msg_id"
+            ],
+            [
+                "u32",
+                "client_index"
+            ],
+            [
+                "u32",
+                "context"
+            ],
+            {
+                "crc": "0x51077d14",
+                "options": {},
+                "comment": "/** \\brief Show the current system timestamp.\n    @param client_index - opaque cookie to identify the sender\n    @param context - sender context, to match reply w/ request\n*/"
+            }
+        ],
+        [
+            "show_vpe_system_time_reply",
+            [
+                "u16",
+                "_vl_msg_id"
+            ],
+            [
+                "u32",
+                "context"
+            ],
+            [
+                "i32",
+                "retval"
+            ],
+            [
+                "vl_api_timestamp_t",
+                "vpe_system_time"
+            ],
+            {
+                "crc": "0x7ffd8193",
+                "options": {},
+                "comment": "/** \\brief Reply for show vpe system time.\n    @param context - sender context which was passed in the request\n    @param retval - return value\n    @param vpe_system_time - the time in seconds since epoch of the host system.\n*/"
+            }
+        ],
+        [
+            "log_dump",
+            [
+                "u16",
+                "_vl_msg_id"
+            ],
+            [
+                "u32",
+                "client_index"
+            ],
+            [
+                "u32",
+                "context"
+            ],
+            [
+                "vl_api_timestamp_t",
+                "start_timestamp"
+            ],
+            {
+                "crc": "0x6ab31753",
+                "options": {}
+            }
+        ],
+        [
+            "log_details",
+            [
+                "u16",
+                "_vl_msg_id"
+            ],
+            [
+                "u32",
+                "context"
+            ],
+            [
+                "vl_api_timestamp_t",
+                "timestamp"
+            ],
+            [
+                "vl_api_log_level_t",
+                "level"
+            ],
+            [
+                "string",
+                "msg_class",
+                32
+            ],
+            [
+                "string",
+                "message",
+                256
+            ],
+            {
+                "crc": "0x03d61cc0",
+                "options": {}
+            }
+        ]
+    ],
+    "unions": [],
+    "enums": [
+        [
+            "log_level",
+            [
+                "VPE_API_LOG_LEVEL_EMERG",
+                0
+            ],
+            [
+                "VPE_API_LOG_LEVEL_ALERT",
+                1
+            ],
+            [
+                "VPE_API_LOG_LEVEL_CRIT",
+                2
+            ],
+            [
+                "VPE_API_LOG_LEVEL_ERR",
+                3
+            ],
+            [
+                "VPE_API_LOG_LEVEL_WARNING",
+                4
+            ],
+            [
+                "VPE_API_LOG_LEVEL_NOTICE",
+                5
+            ],
+            [
+                "VPE_API_LOG_LEVEL_INFO",
+                6
+            ],
+            [
+                "VPE_API_LOG_LEVEL_DEBUG",
+                7
+            ],
+            [
+                "VPE_API_LOG_LEVEL_DISABLED",
+                8
+            ],
+            {
+                "enumtype": "u32"
+            }
+        ]
+    ],
+    "enumflags": [],
+    "services": {
+        "show_version": {
+            "reply": "show_version_reply"
+        },
+        "show_vpe_system_time": {
+            "reply": "show_vpe_system_time_reply"
+        },
+        "log_dump": {
+            "reply": "log_details",
+            "stream": true
+        }
+    },
+    "options": {
+        "version": "1.7.0"
+    },
+    "aliases": {
+        "timestamp": {
+            "type": "f64"
+        },
+        "timedelta": {
+            "type": "f64"
+        }
+    },
+    "vl_api_version": "0xbbfa7484",
+    "imports": [
+        "vpp/api/vpe_types.api"
+    ],
+    "counters": [],
+    "paths": []
+}
