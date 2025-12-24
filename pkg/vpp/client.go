@@ -5,6 +5,25 @@ import (
 	"net"
 )
 
+// LCPInterface represents a Linux Control Plane interface pair
+type LCPInterface struct {
+	// VPPSwIfIndex is the VPP software interface index
+	VPPSwIfIndex uint32
+
+	// LinuxIfName is the Linux kernel interface name
+	LinuxIfName string
+
+	// JunosName is the original Junos configuration name (for reference)
+	// This field is populated by the state manager, not VPP
+	JunosName string
+
+	// HostIfType is the type of host interface (TAP or TUN)
+	HostIfType string
+
+	// Netns is the network namespace (empty for default namespace)
+	Netns string
+}
+
 // Client provides an interface for VPP operations
 type Client interface {
 	// Connect establishes a connection to VPP
@@ -33,6 +52,19 @@ type Client interface {
 
 	// ListInterfaces lists all VPP interfaces
 	ListInterfaces(ctx context.Context) ([]*Interface, error)
+
+	// CreateLCPInterface creates an LCP pair for an existing VPP interface
+	// This makes the VPP interface visible in the Linux kernel
+	CreateLCPInterface(ctx context.Context, ifIndex uint32, linuxIfName string) error
+
+	// DeleteLCPInterface removes an LCP pair
+	DeleteLCPInterface(ctx context.Context, ifIndex uint32) error
+
+	// GetLCPInterface retrieves LCP pair information by VPP interface index
+	GetLCPInterface(ctx context.Context, ifIndex uint32) (*LCPInterface, error)
+
+	// ListLCPInterfaces lists all LCP pairs
+	ListLCPInterfaces(ctx context.Context) ([]*LCPInterface, error)
 }
 
 // CreateInterfaceRequest represents a request to create a VPP interface
