@@ -1,4 +1,4 @@
-.PHONY: help build clean rpm version test fmt vet check install-nfpm integration-test
+.PHONY: help build clean rpm version test fmt vet check install-nfpm integration-test generate-binapi
 
 # Binary name
 BINARY_NAME=arca-routerd
@@ -111,6 +111,14 @@ rpm-verify: rpm ## Verify RPM package reproducibility
 		echo "✗ Build is not reproducible"; \
 		exit 1; \
 	fi
+
+integration-test: build ## Run integration tests
+	@echo "Running integration tests..."
+	@bash test/integration_test.sh
+
+generate-binapi: ## Generate VPP binapi (Go bindings for VPP API)
+	@echo "Generating VPP binapi..."
+	@bash scripts/generate-binapi.sh
 
 all: check build rpm ## Run all checks, build binary and RPM
 

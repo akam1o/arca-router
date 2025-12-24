@@ -1,39 +1,38 @@
 [Unit]
-Description=ARCA Router Daemon - VPP-based Network Router (Phase 1: Mock Mode)
+Description=ARCA Router Daemon - VPP-based Network Router (Phase 2)
 Documentation=https://github.com/akam1o/arca-router
-After=network.target
-# TODO Phase 2: Uncomment when real VPP client is implemented
-# After=network.target vpp.service
-# Requires=vpp.service
-# PartOf=vpp.service
+After=network.target vpp.service frr.service
+Requires=vpp.service frr.service
 
 [Service]
 Type=simple
-# Note: Phase 1 uses mock VPP by default (no -mock-vpp flag needed)
-# TODO Phase 2: Add -mock-vpp=false when real VPP client is implemented
 ExecStart=/usr/sbin/arca-routerd -config /etc/arca-router/arca.conf -hardware /etc/arca-router/hardware.yaml -log-level info
 Restart=on-failure
 RestartSec=5s
 StartLimitIntervalSec=300
 StartLimitBurst=5
 
-# User and permissions
-# Run as root to access VPP socket and sysfs
-User=root
-Group=root
+# User and permissions (Phase 2: dedicated user + capabilities)
+User=arca-router
+Group=arca-router
+SupplementaryGroups=vpp frr frrvty
 
 # Required capabilities for VPP and network operations
-# CAP_NET_ADMIN: Network interface management
-# CAP_NET_RAW: Raw socket access for VPP
-# CAP_SYS_ADMIN: Required for some VPP operations
-AmbientCapabilities=CAP_NET_ADMIN CAP_NET_RAW CAP_SYS_ADMIN
+# CAP_NET_ADMIN: LCP operations, netlink, VPP FIB synchronization
+AmbientCapabilities=CAP_NET_ADMIN
+CapabilityBoundingSet=CAP_NET_ADMIN
 
 # Security hardening
 NoNewPrivileges=true
 PrivateTmp=true
 ProtectSystem=strict
 ProtectHome=true
-ReadWritePaths=/var/lib/arca-router /var/log/arca-router /run/vpp
+ReadWritePaths=/var/lib/arca-router /run/arca-router /var/log/arca-router /etc/frr
+
+# Runtime directories (auto-created by systemd)
+RuntimeDirectory=arca-router
+StateDirectory=arca-router
+LogsDirectory=arca-router
 
 # Logging
 StandardOutput=journal

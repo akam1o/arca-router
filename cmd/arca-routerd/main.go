@@ -78,8 +78,8 @@ func parseFlags() *flags {
 		"Log level (debug, info, warn, error)")
 	flag.BoolVar(&f.version, "version", false,
 		"Print version information and exit")
-	flag.BoolVar(&f.mockVPP, "mock-vpp", true,
-		"Use mock VPP client (default: true for Phase 1)")
+	flag.BoolVar(&f.mockVPP, "mock-vpp", false,
+		"Use mock VPP client (default: false for Phase 2, use real VPP)")
 
 	flag.Parse()
 
