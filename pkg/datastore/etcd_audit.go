@@ -1,0 +1,57 @@
+package datastore
+
+import (
+	"context"
+	"crypto/rand"
+	"encoding/json"
+	"time"
+
+	"github.com/oklog/ulid/v2"
+)
+
+// LogAuditEvent logs an audit event to etcd.
+// For etcd backend, events are stored with ULID keys for sortable, unique identifiers.
+func (ds *etcdDatastore) LogAuditEvent(ctx context.Context, event *AuditEvent) error {
+	ctx, cancel := ds.withTimeout(ctx)
+	defer cancel()
+
+	// Generate ULID for the audit event
+	ulidKey := generateULID()
+
+	// Set Key field in the event (for consistency with schema)
+	event.Key = ulidKey
+	event.ID = 0 // ID is not used in etcd backend
+
+	// Set timestamp if not provided
+	if event.Timestamp.IsZero() {
+		event.Timestamp = time.Now()
+	}
+
+	// Marshal event to JSON
+	eventJSON, err := json.Marshal(event)
+	if err != nil {
+		return NewError(ErrCodeInternal, "failed to marshal audit event", err)
+	}
+
+	// Store in etcd with ULID key
+	auditKey := ds.key("audit", ulidKey)
+	_, err = ds.client.Put(ctx, auditKey, string(eventJSON))
+	if err != nil {
+		return NewError(ErrCodeInternal, "failed to log audit event", err)
+	}
+
+	return nil
+}
+
+// generateULID generates a ULID (Universally Unique Lexicographically Sortable Identifier).
+// ULIDs are 26 characters, timestamp-prefixed, and sortable.
+// Example: 01ARYZ6S41TSV4RRFFQ69G5FAV
+func generateULID() string {
+	// Use crypto/rand for entropy
+	entropy := ulid.Monotonic(rand.Reader, 0)
+
+	// Generate ULID with current timestamp
+	id := ulid.MustNew(ulid.Timestamp(time.Now()), entropy)
+
+	return id.String()
+}
