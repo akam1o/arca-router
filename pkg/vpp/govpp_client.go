@@ -15,6 +15,7 @@ import (
 	"github.com/akam1o/arca-router/pkg/vpp/binapi/ip_types"
 	"github.com/akam1o/arca-router/pkg/vpp/binapi/lcp"
 	"github.com/akam1o/arca-router/pkg/vpp/binapi/rdma"
+	"github.com/akam1o/arca-router/pkg/vpp/binapi/vpe"
 	"go.fd.io/govpp/adapter/socketclient"
 	"go.fd.io/govpp/api"
 	"go.fd.io/govpp/core"
@@ -35,6 +36,10 @@ const (
 
 	// Exponential backoff base duration
 	retryBackoff = 1 * time.Second
+
+	// Expected VPP version (major.minor)
+	expectedVPPMajor = 24
+	expectedVPPMinor = 10
 )
 
 // govppClient is the production VPP client using govpp
@@ -156,7 +161,7 @@ func (c *govppClient) Connect(ctx context.Context) error {
 			if err := c.checkVersionCompatibility(); err != nil {
 				ch.Close()
 				conn.Disconnect()
-				return fmt.Errorf("VPP API version incompatible: %w", err)
+				return err
 			}
 
 			return nil
@@ -181,20 +186,57 @@ func (c *govppClient) Connect(ctx context.Context) error {
 
 // checkVersionCompatibility verifies VPP API version compatibility
 func (c *govppClient) checkVersionCompatibility() error {
-	// Note: Full version check requires binapi (vpe.ShowVersion)
-	// This will be implemented to:
-	// 1. Call vpe.ShowVersion to get VPP version
-	// 2. Parse version string (expected: 24.10.x for Phase 2)
-	// 3. Return error if major/minor version mismatch
-	//
-	// For now, we defer version check to VPP API call failures.
-	// If VPP version is incompatible, subsequent API calls will fail
-	// with clear error messages from govpp.
-	//
-	// This is acceptable for Phase 2 initial implementation because:
-	// - Installation docs specify VPP 24.10 requirement
-	// - Integration tests will catch version mismatches
-	// - govpp will report incompatible API calls explicitly
+	// Call vpe.ShowVersion to get VPP version
+	req := &vpe.ShowVersion{}
+	reply := &vpe.ShowVersionReply{}
+
+	if err := c.ch.SendRequest(req).ReceiveReply(reply); err != nil {
+		return fmt.Errorf("failed to get VPP version (API error): %w", err)
+	}
+
+	if reply.Retval != 0 {
+		return fmt.Errorf("VPP ShowVersion API returned error code: %d", reply.Retval)
+	}
+
+	// Parse version string (expected format: "24.10.x", "v24.10.x", "24.10-rc0", "24.10-rc0~...")
+	version := strings.TrimSpace(reply.Version)
+	if version == "" {
+		return fmt.Errorf("VPP returned empty version string")
+	}
+
+	// Remove 'v' prefix if present
+	version = strings.TrimPrefix(version, "v")
+
+	// Extract major.minor from version string (handle -rc, ~, and other suffixes)
+	// Examples: "24.10.0" -> "24.10", "24.10-rc0" -> "24.10", "24.10-rc0~123-abc" -> "24.10"
+	versionCore := version
+	if idx := strings.IndexAny(version, "-~"); idx != -1 {
+		versionCore = version[:idx]
+	}
+
+	// Split version into components
+	parts := strings.Split(versionCore, ".")
+	if len(parts) < 2 {
+		return fmt.Errorf("invalid VPP version format: %s (expected: major.minor[.patch][-suffix])", version)
+	}
+
+	// Parse major version
+	major, err := strconv.Atoi(parts[0])
+	if err != nil {
+		return fmt.Errorf("invalid VPP major version in '%s': %s", version, parts[0])
+	}
+
+	// Parse minor version
+	minor, err := strconv.Atoi(parts[1])
+	if err != nil {
+		return fmt.Errorf("invalid VPP minor version in '%s': %s", version, parts[1])
+	}
+
+	// Check version compatibility (major.minor must match)
+	if major != expectedVPPMajor || minor != expectedVPPMinor {
+		return fmt.Errorf("VPP version incompatible: got %d.%d, expected %d.%d (full version: %s)",
+			major, minor, expectedVPPMajor, expectedVPPMinor, version)
+	}
 
 	return nil
 }

@@ -7,6 +7,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -16,6 +17,7 @@ import (
 	"github.com/akam1o/arca-router/pkg/vpp/binapi/interface_types"
 	"github.com/akam1o/arca-router/pkg/vpp/binapi/ip_types"
 	"github.com/akam1o/arca-router/pkg/vpp/binapi/rdma"
+	"github.com/akam1o/arca-router/pkg/vpp/binapi/vpe"
 	"go.fd.io/govpp/api"
 )
 
@@ -224,6 +226,11 @@ func (f *fakeRequestCtx) ReceiveReply(msg api.Message) error {
 			return fmt.Errorf("unexpected message type: expected *vppif.SwInterfaceAddDelAddressReply, got %T", msg)
 		}
 		*msg.(*vppif.SwInterfaceAddDelAddressReply) = *r
+	case *vpe.ShowVersionReply:
+		if _, ok := msg.(*vpe.ShowVersionReply); !ok {
+			return fmt.Errorf("unexpected message type: expected *vpe.ShowVersionReply, got %T", msg)
+		}
+		*msg.(*vpe.ShowVersionReply) = *r
 	default:
 		return fmt.Errorf("unsupported reply type in fake: %T", f.reply)
 	}
@@ -926,5 +933,162 @@ func TestGovppClient_NewAddressWithPrefix(t *testing.T) {
 				t.Error("NewAddressWithPrefix() returned zero-length prefix")
 			}
 		})
+	}
+}
+
+// TestCheckVersionCompatibility tests VPP version compatibility checking
+func TestCheckVersionCompatibility(t *testing.T) {
+	tests := []struct {
+		name        string
+		version     string
+		retval      int32
+		wantErr     bool
+		errContains string
+	}{
+		{
+			name:    "valid version 24.10.0",
+			version: "24.10.0",
+			retval:  0,
+			wantErr: false,
+		},
+		{
+			name:    "valid version 24.10.1",
+			version: "24.10.1",
+			retval:  0,
+			wantErr: false,
+		},
+		{
+			name:    "valid version with v prefix",
+			version: "v24.10.0",
+			retval:  0,
+			wantErr: false,
+		},
+		{
+			name:    "valid version with -rc suffix",
+			version: "24.10-rc0",
+			retval:  0,
+			wantErr: false,
+		},
+		{
+			name:    "valid version with -rc and build meta",
+			version: "24.10-rc0~123-gabc",
+			retval:  0,
+			wantErr: false,
+		},
+		{
+			name:    "valid version with ~ build meta",
+			version: "24.10.0~456-gdef",
+			retval:  0,
+			wantErr: false,
+		},
+		{
+			name:        "version mismatch - major",
+			version:     "23.10.0",
+			retval:      0,
+			wantErr:     true,
+			errContains: "incompatible",
+		},
+		{
+			name:        "version mismatch - minor",
+			version:     "24.06.0",
+			retval:      0,
+			wantErr:     true,
+			errContains: "incompatible",
+		},
+		{
+			name:        "empty version string",
+			version:     "",
+			retval:      0,
+			wantErr:     true,
+			errContains: "empty version string",
+		},
+		{
+			name:        "invalid version format",
+			version:     "invalid",
+			retval:      0,
+			wantErr:     true,
+			errContains: "invalid VPP version format",
+		},
+		{
+			name:        "invalid major version",
+			version:     "XX.10.0",
+			retval:      0,
+			wantErr:     true,
+			errContains: "invalid VPP major version",
+		},
+		{
+			name:        "invalid minor version",
+			version:     "24.XX.0",
+			retval:      0,
+			wantErr:     true,
+			errContains: "invalid VPP minor version",
+		},
+		{
+			name:        "API error code",
+			version:     "24.10.0",
+			retval:      -1,
+			wantErr:     true,
+			errContains: "error code",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Create fake channel that returns ShowVersionReply
+			reply := &vpe.ShowVersionReply{
+				Retval:  tt.retval,
+				Version: tt.version,
+				Program: "vpe",
+			}
+
+			ch := &fakeChannel{
+				sendRequestFunc: func(msg api.Message) api.RequestCtx {
+					return &fakeRequestCtx{
+						reply: reply,
+					}
+				},
+			}
+
+			client := &govppClient{
+				ch: ch,
+			}
+
+			err := client.checkVersionCompatibility()
+
+			if (err != nil) != tt.wantErr {
+				t.Errorf("checkVersionCompatibility() error = %v, wantErr %v", err, tt.wantErr)
+				return
+			}
+
+			if tt.wantErr && tt.errContains != "" {
+				if err == nil || !strings.Contains(err.Error(), tt.errContains) {
+					t.Errorf("checkVersionCompatibility() error = %v, want error containing %q", err, tt.errContains)
+				}
+			}
+		})
+	}
+}
+
+// TestCheckVersionCompatibility_APIError tests API call failure
+func TestCheckVersionCompatibility_APIError(t *testing.T) {
+	ch := &fakeChannel{
+		sendRequestFunc: func(msg api.Message) api.RequestCtx {
+			return &fakeRequestCtx{
+				err: errors.New("API call failed"),
+			}
+		},
+	}
+
+	client := &govppClient{
+		ch: ch,
+	}
+
+	err := client.checkVersionCompatibility()
+	if err == nil {
+		t.Error("checkVersionCompatibility() expected error, got nil")
+	}
+
+	if !strings.Contains(err.Error(), "failed to get VPP version") {
+		t.Errorf("checkVersionCompatibility() error = %v, want error containing 'failed to get VPP version'", err)
 	}
 }
