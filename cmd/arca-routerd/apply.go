@@ -165,9 +165,25 @@ func applyConfigWithDeps(
 	}()
 	log.Info("Connected to VPP")
 
+	// Create LCP state manager for tracking Junos name mappings
+	lcpManager := vpp.NewLCPStateManager(vppClient)
+
+	// Sync LCP state from VPP to handle existing LCP pairs (idempotency)
+	if err := lcpManager.Sync(ctx); err != nil {
+		// If context was cancelled, abort immediately
+		if ctx.Err() != nil {
+			return fmt.Errorf("context cancelled during LCP sync: %w", ctx.Err())
+		}
+		// For other errors (VPP not running, LCP plugin not loaded, etc.),
+		// log warning but continue - LCP creation will fail individually
+		log.Warn("Failed to sync LCP state from VPP (continuing with empty cache)", slog.Any("error", err))
+	} else {
+		log.Debug("LCP state synchronized from VPP")
+	}
+
 	// Step 6: Apply VPP configuration
 	log.Info("Applying configuration to VPP")
-	result := applyVPPConfig(ctx, hwConfig, cfg, vppClient, log)
+	result := applyVPPConfig(ctx, hwConfig, cfg, vppClient, lcpManager, log)
 
 	// Report detailed VPP results
 	log.Info("VPP configuration application completed", slog.String("result", result.String()))
@@ -225,6 +241,7 @@ func applyVPPConfig(
 	hwConfig *device.HardwareConfig,
 	cfg *config.Config,
 	vppClient vpp.Client,
+	lcpManager *vpp.LCPStateManager,
 	log *logger.Logger,
 ) *applyResult {
 	result := &applyResult{
@@ -299,9 +316,11 @@ func applyVPPConfig(
 			ifaceLog.Warn("Continuing without LCP pair for this interface")
 		} else {
 			ifaceLog.Info("Creating LCP interface pair",
-				slog.String("linux_name", linuxIfName))
+				slog.String("linux_name", linuxIfName),
+				slog.String("junos_name", iface.Name))
 
-			if err := vppClient.CreateLCPInterface(ctx, vppIface.SwIfIndex, linuxIfName); err != nil {
+			// Use LCPStateManager to create LCP and track Junos name mapping
+			if err := lcpManager.Create(ctx, vppIface.SwIfIndex, linuxIfName, iface.Name); err != nil {
 				ifaceLog.Error("Failed to create LCP interface pair",
 					slog.String("linux_name", linuxIfName),
 					slog.Any("error", err))
@@ -316,7 +335,8 @@ func applyVPPConfig(
 			} else {
 				result.CreatedLCPPairs++
 				ifaceLog.Info("LCP interface pair created",
-					slog.String("linux_name", linuxIfName))
+					slog.String("linux_name", linuxIfName),
+					slog.String("junos_name", iface.Name))
 			}
 		}
 

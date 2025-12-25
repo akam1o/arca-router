@@ -65,6 +65,9 @@ type Client interface {
 
 	// ListLCPInterfaces lists all LCP pairs
 	ListLCPInterfaces(ctx context.Context) ([]*LCPInterface, error)
+
+	// GetVersion retrieves VPP version information
+	GetVersion(ctx context.Context) (string, error)
 }
 
 // CreateInterfaceRequest represents a request to create a VPP interface

@@ -10,18 +10,30 @@ homepage: https://github.com/akam1o/arca-router
 description: |
   ARCA Router - VPP-based Network Router Daemon
 
-  Phase 1 (MVP): Mock VPP mode for testing and development.
-  Provides Junos-style configuration interface for VPP-based routing.
+  Phase 2: Production VPP Integration & Routing Protocols
+  - Real VPP integration via govpp
+  - FRR integration for dynamic routing (BGP, OSPF)
+  - LCP (Linux Control Plane) support
+  - Junos-style configuration interface
 
-# Phase 1: No VPP dependency (mock mode only)
-# Phase 2: Add VPP dependency when real client is implemented
-# depends:
-#   - vpp >= 23.10
+# Phase 2: VPP and FRR dependencies
+depends:
+  - vpp >= 24.10
+  - vpp-plugin-core >= 24.10
+  - frr >= 8.0
 
 contents:
-  # Binary
+  # Daemon binary
   - src: build/bin/arca-routerd
     dst: /usr/sbin/arca-routerd
+    file_info:
+      mode: 0755
+      owner: root
+      group: root
+
+  # CLI binary
+  - src: build/bin/arca-cli
+    dst: /usr/bin/arca-cli
     file_info:
       mode: 0755
       owner: root
@@ -105,3 +117,9 @@ overrides:
   rpm:
     # Use x86_64 for RPM architecture
     arch: x86_64
+  deb:
+    # Use amd64 for DEB architecture
+    arch: amd64
+    # DEB-specific fields
+    priority: optional
+    section: net

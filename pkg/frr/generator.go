@@ -16,8 +16,14 @@ func GenerateFRRConfig(cfg *config.Config) (*Config, error) {
 		return nil, fmt.Errorf("config is nil")
 	}
 
+	// Get hostname from system config (may be empty if system is not configured)
+	hostname := ""
+	if cfg.System != nil {
+		hostname = cfg.System.HostName
+	}
+
 	frrConfig := &Config{
-		Hostname:         cfg.System.HostName,
+		Hostname:         hostname,
 		LogFile:          "/var/log/frr/frr.log",
 		LogTimestamp:     true,
 		InterfaceMapping: make(map[string]string),
@@ -142,6 +148,9 @@ func convertBGPConfig(cfg *config.Config, ifaceMapping map[string]string) (*BGPC
 	}
 
 	// Get AS number from routing-options
+	if cfg.RoutingOptions == nil {
+		return nil, fmt.Errorf("BGP requires routing-options to be configured")
+	}
 	asn := cfg.RoutingOptions.AutonomousSystem
 	if asn == 0 {
 		return nil, fmt.Errorf("BGP requires autonomous-system to be configured in routing-options")
