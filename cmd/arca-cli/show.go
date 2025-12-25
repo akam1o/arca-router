@@ -57,26 +57,10 @@ func cmdShow(ctx context.Context, subcommand string, args []string, f *flags) in
 
 // cmdShowConfiguration is implemented in show_config.go
 
-// cmdShowInterfaces displays interface status (implemented in show_interfaces.go - Task 5.4)
-func cmdShowInterfaces(ctx context.Context, args []string, f *flags) int {
-	fmt.Fprintf(os.Stderr, "Error: 'show interfaces' not yet implemented (Task 5.4)\n")
-	return ExitOperationError
-}
+// cmdShowInterfaces is implemented in show_interfaces.go
 
-// cmdShowBGPSummary displays BGP summary (implemented in show_routing.go - Task 5.5)
-func cmdShowBGPSummary(ctx context.Context, f *flags) int {
-	fmt.Fprintf(os.Stderr, "Error: 'show bgp summary' not yet implemented (Task 5.5)\n")
-	return ExitOperationError
-}
+// cmdShowBGPSummary is implemented in show_routing.go
 
-// cmdShowOSPFNeighbor displays OSPF neighbors (implemented in show_routing.go - Task 5.5)
-func cmdShowOSPFNeighbor(ctx context.Context, f *flags) int {
-	fmt.Fprintf(os.Stderr, "Error: 'show ospf neighbor' not yet implemented (Task 5.5)\n")
-	return ExitOperationError
-}
+// cmdShowOSPFNeighbor is implemented in show_routing.go
 
-// cmdShowRoute displays routing table (implemented in show_routing.go - Task 5.5)
-func cmdShowRoute(ctx context.Context, f *flags) int {
-	fmt.Fprintf(os.Stderr, "Error: 'show route' not yet implemented (Task 5.5)\n")
-	return ExitOperationError
-}
+// cmdShowRoute is implemented in show_routing.go

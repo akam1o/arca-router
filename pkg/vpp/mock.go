@@ -671,3 +671,18 @@ func (m *MockClient) ListLCPInterfaces(ctx context.Context) ([]*LCPInterface, er
 
 	return interfaces, nil
 }
+
+// GetVersion retrieves VPP version information (mock)
+func (m *MockClient) GetVersion(ctx context.Context) (string, error) {
+	if !m.connected {
+		return "", errors.New(
+			errors.ErrCodeVPPConnection,
+			"Not connected to VPP",
+			"VPP connection not established",
+			"Connect to VPP before getting version",
+		)
+	}
+
+	// Return mock VPP version
+	return "24.10-mock (build: 2024-01-01T00:00:00)", nil
+}

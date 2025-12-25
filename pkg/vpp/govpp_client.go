@@ -12,6 +12,7 @@ import (
 	"github.com/akam1o/arca-router/pkg/vpp/binapi/avf"
 	vppif "github.com/akam1o/arca-router/pkg/vpp/binapi/interface"
 	"github.com/akam1o/arca-router/pkg/vpp/binapi/interface_types"
+	vppip "github.com/akam1o/arca-router/pkg/vpp/binapi/ip"
 	"github.com/akam1o/arca-router/pkg/vpp/binapi/ip_types"
 	"github.com/akam1o/arca-router/pkg/vpp/binapi/lcp"
 	"github.com/akam1o/arca-router/pkg/vpp/binapi/rdma"
@@ -599,10 +600,125 @@ func (c *govppClient) ListInterfaces(ctx context.Context) ([]*Interface, error) 
 			break
 		}
 
-		interfaces = append(interfaces, convertToInterface(msg))
+		iface := convertToInterface(msg)
+
+		// Populate IP addresses for this interface
+		addresses, err := c.getInterfaceAddresses(ctx, uint32(msg.SwIfIndex))
+		if err != nil {
+			// Note: We don't fail the entire operation if IP address dump fails
+			// for a single interface. The interface may not have IP addresses,
+			// or the context may have been cancelled.
+			// We leave Addresses as empty slice and continue.
+			// Callers should check context.Err() if they need to detect cancellation.
+		} else {
+			iface.Addresses = addresses
+		}
+
+		interfaces = append(interfaces, iface)
+	}
+
+	// Final check for context cancellation after loop completes
+	if err := ctx.Err(); err != nil {
+		return nil, fmt.Errorf("operation cancelled: %w", err)
 	}
 
 	return interfaces, nil
+}
+
+// getInterfaceAddresses retrieves IP addresses for a specific interface
+func (c *govppClient) getInterfaceAddresses(ctx context.Context, swIfIndex uint32) ([]*net.IPNet, error) {
+	if c.ch == nil {
+		return nil, fmt.Errorf("not connected to VPP")
+	}
+
+	var addresses []*net.IPNet
+
+	// Get IPv4 addresses
+	req4 := &vppip.IPAddressDump{
+		SwIfIndex: interface_types.InterfaceIndex(swIfIndex),
+		IsIPv6:    false,
+	}
+	reqCtx4 := c.ch.SendMultiRequest(req4)
+
+	for {
+		select {
+		case <-ctx.Done():
+			return nil, fmt.Errorf("operation cancelled: %w", ctx.Err())
+		default:
+		}
+
+		msg := &vppip.IPAddressDetails{}
+		stop, err := reqCtx4.ReceiveReply(msg)
+		if err != nil {
+			return nil, fmt.Errorf("failed to receive IPv4 address details: %w", err)
+		}
+		if stop {
+			break
+		}
+
+		// Convert VPP AddressWithPrefix to net.IPNet
+		ipNet := convertVPPAddressToIPNet(msg.Prefix, false)
+		if ipNet != nil {
+			addresses = append(addresses, ipNet)
+		}
+	}
+
+	// Get IPv6 addresses
+	req6 := &vppip.IPAddressDump{
+		SwIfIndex: interface_types.InterfaceIndex(swIfIndex),
+		IsIPv6:    true,
+	}
+	reqCtx6 := c.ch.SendMultiRequest(req6)
+
+	for {
+		select {
+		case <-ctx.Done():
+			return nil, fmt.Errorf("operation cancelled: %w", ctx.Err())
+		default:
+		}
+
+		msg := &vppip.IPAddressDetails{}
+		stop, err := reqCtx6.ReceiveReply(msg)
+		if err != nil {
+			return nil, fmt.Errorf("failed to receive IPv6 address details: %w", err)
+		}
+		if stop {
+			break
+		}
+
+		// Convert VPP AddressWithPrefix to net.IPNet
+		ipNet := convertVPPAddressToIPNet(msg.Prefix, true)
+		if ipNet != nil {
+			addresses = append(addresses, ipNet)
+		}
+	}
+
+	return addresses, nil
+}
+
+// convertVPPAddressToIPNet converts VPP AddressWithPrefix to net.IPNet
+func convertVPPAddressToIPNet(prefix ip_types.AddressWithPrefix, isIPv6 bool) *net.IPNet {
+	var ip net.IP
+	if isIPv6 {
+		ip6 := prefix.Address.Un.GetIP6()
+		ip = net.IP(ip6[:])
+	} else {
+		ipv4 := prefix.Address.Un.GetIP4()
+		ip = net.IPv4(ipv4[0], ipv4[1], ipv4[2], ipv4[3])
+	}
+
+	// Create IPNet with prefix length
+	mask := net.CIDRMask(int(prefix.Len), func() int {
+		if isIPv6 {
+			return 128
+		}
+		return 32
+	}())
+
+	return &net.IPNet{
+		IP:   ip,
+		Mask: mask,
+	}
 }
 
 // convertToInterface converts VPP SwInterfaceDetails to Interface
@@ -616,7 +732,7 @@ func convertToInterface(msg *vppif.SwInterfaceDetails) *Interface {
 		AdminUp:   adminUp,
 		LinkUp:    linkUp,
 		MAC:       net.HardwareAddr(msg.L2Address[:]),
-		Addresses: nil, // IP addresses will be populated by separate API calls if needed
+		Addresses: nil, // IP addresses will be populated by separate API calls
 	}
 }
 
@@ -776,6 +892,34 @@ func (c *govppClient) ListLCPInterfaces(ctx context.Context) ([]*LCPInterface, e
 	}
 
 	return interfaces, nil
+}
+
+// GetVersion retrieves VPP version information
+func (c *govppClient) GetVersion(ctx context.Context) (string, error) {
+	if c.ch == nil {
+		return "", fmt.Errorf("not connected to VPP")
+	}
+
+	req := &vpe.ShowVersion{}
+	reply := &vpe.ShowVersionReply{}
+
+	if err := c.ch.SendRequest(req).ReceiveReply(reply); err != nil {
+		return "", fmt.Errorf("failed to get VPP version: %w", err)
+	}
+
+	// Check return value
+	if reply.Retval != 0 {
+		return "", fmt.Errorf("VPP API returned error code: %d", reply.Retval)
+	}
+
+	// Check for empty version
+	if reply.Version == "" {
+		return "", fmt.Errorf("VPP returned empty version string")
+	}
+
+	// Format version string
+	version := fmt.Sprintf("%s (build: %s)", reply.Version, reply.BuildDate)
+	return version, nil
 }
 
 // Ensure govppClient implements Client interface

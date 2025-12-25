@@ -46,12 +46,13 @@ if command -v systemctl >/dev/null 2>&1; then
     echo ""
     echo "Verifying VPP/FRR installation..."
     if ! systemctl list-unit-files 2>/dev/null | grep -q vpp.service; then
-        echo "WARNING: VPP service not found. Phase 2 requires VPP 23.10+"
-        echo "Install VPP: sudo dnf install vpp vpp-plugins"
+        echo "WARNING: VPP service not found. Phase 2 requires VPP 24.10+"
+        echo "Install VPP (Debian): https://packagecloud.io/fdio/2410"
+        echo "Install VPP (RHEL): sudo dnf install vpp vpp-plugin-core"
     fi
     if ! systemctl list-unit-files 2>/dev/null | grep -q frr.service; then
         echo "WARNING: FRR service not found. Phase 2 requires FRR 8.0+"
-        echo "Install FRR: sudo dnf install frr"
+        echo "Install FRR: sudo apt install frr (Debian) or sudo dnf install frr (RHEL)"
     fi
 fi
 
@@ -72,7 +73,7 @@ if [ "$1" = "1" ]; then
     echo "ARCA Router Phase 2 has been installed."
     echo ""
     echo "Prerequisites:"
-    echo "- VPP 23.10+ with linux-cp plugin enabled"
+    echo "- VPP 24.10+ with linux-cp plugin enabled"
     echo "- FRR 8.0+ (bgpd, ospfd, zebra, staticd)"
     echo ""
     echo "Next steps:"
