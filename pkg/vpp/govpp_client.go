@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -311,7 +312,24 @@ func (c *govppClient) createAVFInterface(ctx context.Context, req *CreateInterfa
 	}
 
 	// Get interface details
-	return c.GetInterface(ctx, uint32(reply.SwIfIndex))
+	iface, err := c.GetInterface(ctx, uint32(reply.SwIfIndex))
+	if err != nil {
+		return nil, err
+	}
+
+	// Set PCI address from request (AVF uses PCI address directly)
+	// Normalize to lowercase for consistent comparison
+	pciAddrStr := strings.ToLower(req.DeviceInstance)
+	iface.PCIAddress = pciAddrStr
+
+	// Store PCI address in interface tag for reconciliation after restart
+	tagErr := c.setInterfaceTag(ctx, uint32(reply.SwIfIndex), fmt.Sprintf("pci=%s", pciAddrStr))
+	if tagErr != nil {
+		// Not fatal - tag is only for reconciliation
+		// Continue with interface creation
+	}
+
+	return iface, nil
 }
 
 // createRDMAInterface creates an RDMA interface
@@ -340,7 +358,82 @@ func (c *govppClient) createRDMAInterface(ctx context.Context, req *CreateInterf
 	}
 
 	// Get interface details
-	return c.GetInterface(ctx, uint32(reply.SwIfIndex))
+	iface, err := c.GetInterface(ctx, uint32(reply.SwIfIndex))
+	if err != nil {
+		return nil, err
+	}
+
+	// Set PCI address from request if provided
+	// For RDMA, the caller should have set this from hardware.yaml
+	var pciAddr string
+	if req.PCIAddress != "" {
+		pciAddr = strings.ToLower(req.PCIAddress)
+		iface.PCIAddress = pciAddr
+	} else {
+		// Fallback: try to get PCI address from sysfs
+		// DeviceInstance contains the Linux interface name (e.g., "eth1")
+		sysfsAddr, err := getPCIAddressFromSysfs(req.DeviceInstance)
+		if err == nil {
+			pciAddr = sysfsAddr
+			iface.PCIAddress = pciAddr
+		}
+		// If both methods fail, PCI address remains empty (not fatal)
+	}
+
+	// Store PCI address in interface tag for reconciliation after restart
+	if pciAddr != "" {
+		tagErr := c.setInterfaceTag(ctx, uint32(reply.SwIfIndex), fmt.Sprintf("pci=%s", pciAddr))
+		if tagErr != nil {
+			// Not fatal - tag is only for reconciliation
+			// Continue with interface creation
+		}
+	}
+
+	return iface, nil
+}
+
+// getPCIAddressFromSysfs retrieves PCI address from Linux sysfs for a network interface
+func getPCIAddressFromSysfs(ifName string) (string, error) {
+	// Read symlink /sys/class/net/<ifname>/device -> ../../../<pci_address>
+	devicePath := fmt.Sprintf("/sys/class/net/%s/device", ifName)
+	target, err := os.Readlink(devicePath)
+	if err != nil {
+		return "", fmt.Errorf("failed to read sysfs device link: %w", err)
+	}
+
+	// Extract PCI address from path (e.g., "../../../0000:5e:00.0" -> "0000:5e:00.0")
+	pciAddr := filepath.Base(target)
+
+	// Normalize PCI address to lowercase for consistent comparison
+	pciAddr = strings.ToLower(pciAddr)
+
+	// Validate PCI address format (DDDD:BB:SS.F)
+	if !strings.Contains(pciAddr, ":") || !strings.Contains(pciAddr, ".") {
+		return "", fmt.Errorf("invalid PCI address format: %s", pciAddr)
+	}
+
+	return pciAddr, nil
+}
+
+// GetLinuxIfNameFromPCI retrieves Linux interface name from PCI address via sysfs
+// This is exported for use in apply.go to resolve RDMA interface names
+func GetLinuxIfNameFromPCI(pciAddr string) (string, error) {
+	// Normalize PCI address to lowercase for consistent sysfs lookup
+	pciAddr = strings.ToLower(pciAddr)
+
+	// List network interfaces in /sys/bus/pci/devices/<pci>/net/
+	netPath := fmt.Sprintf("/sys/bus/pci/devices/%s/net", pciAddr)
+	entries, err := os.ReadDir(netPath)
+	if err != nil {
+		return "", fmt.Errorf("failed to read PCI device net directory: %w", err)
+	}
+
+	if len(entries) == 0 {
+		return "", fmt.Errorf("no network interfaces found for PCI %s", pciAddr)
+	}
+
+	// Return the first interface name (usually there's only one)
+	return entries[0].Name(), nil
 }
 
 // parsePCIAddress converts PCI address string (e.g., "0000:00:06.0") to u32 format
@@ -726,7 +819,7 @@ func convertToInterface(msg *vppif.SwInterfaceDetails) *Interface {
 	adminUp := (msg.Flags & interface_types.IF_STATUS_API_FLAG_ADMIN_UP) != 0
 	linkUp := (msg.Flags & interface_types.IF_STATUS_API_FLAG_LINK_UP) != 0
 
-	return &Interface{
+	iface := &Interface{
 		SwIfIndex: uint32(msg.SwIfIndex),
 		Name:      msg.InterfaceName,
 		AdminUp:   adminUp,
@@ -734,6 +827,37 @@ func convertToInterface(msg *vppif.SwInterfaceDetails) *Interface {
 		MAC:       net.HardwareAddr(msg.L2Address[:]),
 		Addresses: nil, // IP addresses will be populated by separate API calls
 	}
+
+	// Extract PCI address from interface tag if available (format: "pci=0000:03:00.0")
+	if msg.Tag != "" && strings.HasPrefix(msg.Tag, "pci=") {
+		iface.PCIAddress = strings.TrimPrefix(msg.Tag, "pci=")
+	}
+
+	return iface
+}
+
+// setInterfaceTag sets a tag on a VPP interface for metadata storage
+func (c *govppClient) setInterfaceTag(ctx context.Context, ifIndex uint32, tag string) error {
+	if c.ch == nil {
+		return fmt.Errorf("not connected to VPP")
+	}
+
+	req := &vppif.SwInterfaceTagAddDel{
+		IsAdd:     true,
+		SwIfIndex: interface_types.InterfaceIndex(ifIndex),
+		Tag:       tag,
+	}
+
+	reply := &vppif.SwInterfaceTagAddDelReply{}
+	if err := c.ch.SendRequest(req).ReceiveReply(reply); err != nil {
+		return fmt.Errorf("failed to set interface tag: %w", err)
+	}
+
+	if reply.Retval != 0 {
+		return fmt.Errorf("set interface tag returned error code: %d", reply.Retval)
+	}
+
+	return nil
 }
 
 // checkSocketAccess verifies socket accessibility

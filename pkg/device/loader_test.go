@@ -192,6 +192,7 @@ func TestValidateHardwareConfig_InvalidInterfaceName(t *testing.T) {
 	}{
 		{"valid ge", "ge-0/0/0", false},
 		{"valid xe", "xe-1/2/3", false},
+		{"valid et", "et-0/0/0", false},
 		{"invalid prefix", "eth0", true},
 		{"invalid format", "ge-0-0-0", true},
 		{"missing parts", "ge-0/0", true},
@@ -228,6 +229,8 @@ func TestIsValidInterfaceName(t *testing.T) {
 	}{
 		{"valid ge", "ge-0/0/0", true},
 		{"valid xe", "xe-1/2/3", true},
+		{"valid et", "et-0/0/0", true},
+		{"valid et multi-digit", "et-10/20/30", true},
 		{"valid multi-digit", "ge-10/20/30", true},
 		{"invalid prefix", "eth0", false},
 		{"invalid separator", "ge-0-0-0", false},

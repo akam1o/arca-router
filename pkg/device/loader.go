@@ -119,9 +119,9 @@ func ValidateHardwareConfig(config *HardwareConfig) error {
 		}
 		seenPCIs[iface.PCI] = true
 
-		// Validate interface name format (ge-X/Y/Z or xe-X/Y/Z)
+		// Validate interface name format (ge/xe/et-X/Y/Z for physical interfaces)
 		if !isValidInterfaceName(iface.Name) {
-			return fmt.Errorf("interface %d: invalid name format: %s (expected format: ge-X/Y/Z or xe-X/Y/Z)",
+			return fmt.Errorf("interface %d: invalid name format: %s (expected format: ge-X/Y/Z, xe-X/Y/Z, or et-X/Y/Z)",
 				i, iface.Name)
 		}
 	}
@@ -131,7 +131,11 @@ func ValidateHardwareConfig(config *HardwareConfig) error {
 
 // isValidInterfaceName checks if the interface name follows Junos-style naming
 func isValidInterfaceName(name string) bool {
-	// Match patterns like: ge-0/0/0, xe-1/2/3
-	pattern := regexp.MustCompile(`^(ge|xe)-\d+/\d+/\d+$`)
+	// Match patterns like: ge-0/0/0, xe-1/2/3, et-0/0/0
+	// ge: Gigabit Ethernet (1GbE)
+	// xe: 10 Gigabit Ethernet (10GbE)
+	// et: 100 Gigabit Ethernet (100GbE)
+	// Format: <type>-<fpc>/<pic>/<port>
+	pattern := regexp.MustCompile(`^(ge|xe|et)-\d+/\d+/\d+$`)
 	return pattern.MatchString(name)
 }
