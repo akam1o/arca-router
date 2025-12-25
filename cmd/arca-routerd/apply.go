@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"net"
 	"os"
+	"strings"
 
 	"github.com/akam1o/arca-router/pkg/config"
 	"github.com/akam1o/arca-router/pkg/device"
@@ -255,51 +256,133 @@ func applyVPPConfig(
 	// Track created interfaces: interface name -> sw_if_index
 	createdInterfaces := make(map[string]uint32)
 
+	// Step 6.0: List existing VPP interfaces and LCP pairs for reconciliation (idempotency)
+	log.Info("Listing existing VPP interfaces for reconciliation")
+	existingInterfaces, err := vppClient.ListInterfaces(ctx)
+	if err != nil {
+		log.Warn("Failed to list existing interfaces, proceeding without reconciliation",
+			slog.Any("error", err))
+		existingInterfaces = nil
+	}
+
+	// Build maps for reconciliation: PCI -> Interface, Name -> sw_if_index
+	existingByPCI := make(map[string]*vpp.Interface)
+	existingByName := make(map[string]uint32)
+	if existingInterfaces != nil {
+		for _, iface := range existingInterfaces {
+			if iface.PCIAddress != "" {
+				// Normalize PCI address to lowercase for consistent comparison
+				normalizedPCI := strings.ToLower(iface.PCIAddress)
+				existingByPCI[normalizedPCI] = iface
+			}
+			existingByName[iface.Name] = iface.SwIfIndex
+		}
+		log.Info("Interface reconciliation maps built",
+			slog.Int("by_pci", len(existingByPCI)),
+			slog.Int("by_name", len(existingByName)))
+	}
+
+	// List existing LCP pairs for reconciliation
+	log.Info("Listing existing LCP pairs for reconciliation")
+	existingLCPPairs, err := vppClient.ListLCPInterfaces(ctx)
+	if err != nil {
+		log.Warn("Failed to list existing LCP pairs, proceeding without LCP reconciliation",
+			slog.Any("error", err))
+		existingLCPPairs = nil
+	}
+
+	// Build map for LCP reconciliation: sw_if_index -> LCPInterface
+	existingLCPBySwIfIndex := make(map[uint32]*vpp.LCPInterface)
+	if existingLCPPairs != nil {
+		for _, lcp := range existingLCPPairs {
+			existingLCPBySwIfIndex[lcp.VPPSwIfIndex] = lcp
+		}
+		log.Info("LCP reconciliation map built",
+			slog.Int("lcp_pairs", len(existingLCPBySwIfIndex)))
+	}
+
 	// Step 6.1: Create VPP interfaces from hardware.yaml
 	for _, iface := range hwConfig.Interfaces {
 		ifaceLog := log.WithField("interface", iface.Name)
-		ifaceLog.Info("Creating VPP interface",
-			slog.String("pci", iface.PCI),
-			slog.String("driver", iface.Driver))
 
-		// Determine interface type from driver
-		var ifaceType vpp.InterfaceType
-		switch iface.Driver {
-		case "avf":
-			ifaceType = vpp.InterfaceTypeAVF
-		case "rdma":
-			ifaceType = vpp.InterfaceTypeRDMA
-		default:
-			ifaceLog.Error("Unsupported driver type",
+		// Check if interface already exists (reconciliation for idempotency)
+		// Normalize PCI address for consistent comparison
+		normalizedPCI := strings.ToLower(iface.PCI)
+		var vppIface *vpp.Interface
+		if existingIface, exists := existingByPCI[normalizedPCI]; exists {
+			// Found existing interface by PCI address - reuse it
+			ifaceLog.Info("Found existing VPP interface, skipping creation",
+				slog.String("pci", iface.PCI),
+				slog.Uint64("sw_if_index", uint64(existingIface.SwIfIndex)),
+				slog.String("existing_name", existingIface.Name))
+			vppIface = existingIface
+			createdInterfaces[iface.Name] = existingIface.SwIfIndex
+			// Don't increment CreatedInterfaces counter - it already exists
+		} else {
+			// Interface doesn't exist - create it
+			ifaceLog.Info("Creating VPP interface",
+				slog.String("pci", iface.PCI),
 				slog.String("driver", iface.Driver))
-			result.FailedInterfaces = append(result.FailedInterfaces,
-				fmt.Sprintf("%s (unsupported driver: %s)", iface.Name, iface.Driver))
-			continue
+
+			// Determine interface type from driver and prepare DeviceInstance
+			var ifaceType vpp.InterfaceType
+			var deviceInstance string
+
+			switch iface.Driver {
+			case "avf":
+				ifaceType = vpp.InterfaceTypeAVF
+				deviceInstance = iface.PCI // AVF uses PCI address directly
+			case "rdma":
+				ifaceType = vpp.InterfaceTypeRDMA
+				// RDMA requires Linux interface name, not PCI address
+				// Convert PCI to Linux interface name via sysfs
+				linuxIfName, err := vpp.GetLinuxIfNameFromPCI(iface.PCI)
+				if err != nil {
+					ifaceLog.Error("Failed to resolve Linux interface name from PCI for RDMA",
+						slog.String("pci", iface.PCI),
+						slog.Any("error", err))
+					result.FailedInterfaces = append(result.FailedInterfaces,
+						fmt.Sprintf("%s (PCI to Linux IF resolution failed: %v)", iface.Name, err))
+					continue
+				}
+				deviceInstance = linuxIfName
+				ifaceLog.Debug("Resolved RDMA Linux interface name",
+					slog.String("pci", iface.PCI),
+					slog.String("linux_ifname", linuxIfName))
+			default:
+				ifaceLog.Error("Unsupported driver type",
+					slog.String("driver", iface.Driver))
+				result.FailedInterfaces = append(result.FailedInterfaces,
+					fmt.Sprintf("%s (unsupported driver: %s)", iface.Name, iface.Driver))
+				continue
+			}
+
+			// Create interface
+			req := &vpp.CreateInterfaceRequest{
+				Type:           ifaceType,
+				DeviceInstance: deviceInstance,
+				PCIAddress:     iface.PCI, // Store original PCI for reconciliation
+				Name:           iface.Name,
+				NumRxQueues:    1,
+				NumTxQueues:    1,
+			}
+
+			var err error
+			vppIface, err = vppClient.CreateInterface(ctx, req)
+			if err != nil {
+				ifaceLog.Error("Failed to create VPP interface", slog.Any("error", err))
+				result.FailedInterfaces = append(result.FailedInterfaces,
+					fmt.Sprintf("%s (create failed: %v)", iface.Name, err))
+				continue
+			}
+
+			createdInterfaces[iface.Name] = vppIface.SwIfIndex
+			result.CreatedInterfaces++
+			ifaceLog.Info("VPP interface created",
+				slog.Uint64("sw_if_index", uint64(vppIface.SwIfIndex)))
 		}
 
-		// Create interface
-		req := &vpp.CreateInterfaceRequest{
-			Type:           ifaceType,
-			DeviceInstance: iface.PCI,
-			Name:           iface.Name,
-			NumRxQueues:    1,
-			NumTxQueues:    1,
-		}
-
-		vppIface, err := vppClient.CreateInterface(ctx, req)
-		if err != nil {
-			ifaceLog.Error("Failed to create VPP interface", slog.Any("error", err))
-			result.FailedInterfaces = append(result.FailedInterfaces,
-				fmt.Sprintf("%s (create failed: %v)", iface.Name, err))
-			continue
-		}
-
-		createdInterfaces[iface.Name] = vppIface.SwIfIndex
-		result.CreatedInterfaces++
-		ifaceLog.Info("VPP interface created",
-			slog.Uint64("sw_if_index", uint64(vppIface.SwIfIndex)))
-
-		// Step 6.1b: Create LCP interface pair
+		// Step 6.1b: Create LCP interface pair (with reconciliation)
 		// Convert Junos interface name to Linux format
 		linuxIfName, err := vpp.ConvertJunosToLinuxName(iface.Name)
 		if err != nil {
@@ -315,28 +398,51 @@ func applyVPPConfig(
 			// LCP is optional for Phase 2 - continue with interface setup
 			ifaceLog.Warn("Continuing without LCP pair for this interface")
 		} else {
-			ifaceLog.Info("Creating LCP interface pair",
-				slog.String("linux_name", linuxIfName),
-				slog.String("junos_name", iface.Name))
-
-			// Use LCPStateManager to create LCP and track Junos name mapping
-			if err := lcpManager.Create(ctx, vppIface.SwIfIndex, linuxIfName, iface.Name); err != nil {
-				ifaceLog.Error("Failed to create LCP interface pair",
-					slog.String("linux_name", linuxIfName),
-					slog.Any("error", err))
-				result.FailedLCPPairs = append(result.FailedLCPPairs, failedLCPPair{
-					Interface:  iface.Name,
-					LinuxName:  linuxIfName,
-					Error:      err.Error(),
-					RolledBack: false,
-				})
-				// LCP is optional for Phase 2 - continue with interface setup
-				ifaceLog.Warn("Continuing without LCP pair for this interface")
+			// Check if LCP pair already exists for this sw_if_index (reconciliation)
+			if existingLCP, exists := existingLCPBySwIfIndex[vppIface.SwIfIndex]; exists {
+				// Found existing LCP pair - check if it matches expected Linux name
+				if existingLCP.LinuxIfName == linuxIfName {
+					ifaceLog.Info("Found existing LCP pair, skipping creation",
+						slog.Uint64("sw_if_index", uint64(vppIface.SwIfIndex)),
+						slog.String("linux_name", existingLCP.LinuxIfName))
+					// Register in LCPStateManager's cache
+					lcpManager.RegisterExisting(vppIface.SwIfIndex, linuxIfName, iface.Name)
+					// Don't increment CreatedLCPPairs counter - it already exists
+				} else {
+					// Inconsistency: LCP exists but with different Linux name
+					ifaceLog.Warn("LCP pair exists with mismatched Linux name",
+						slog.Uint64("sw_if_index", uint64(vppIface.SwIfIndex)),
+						slog.String("expected_linux_name", linuxIfName),
+						slog.String("existing_linux_name", existingLCP.LinuxIfName))
+					// Register existing LCP with actual Linux name
+					// Note: This accepts the inconsistency. Future enhancement: delete and recreate LCP
+					lcpManager.RegisterExisting(vppIface.SwIfIndex, existingLCP.LinuxIfName, iface.Name)
+				}
 			} else {
-				result.CreatedLCPPairs++
-				ifaceLog.Info("LCP interface pair created",
+				// LCP doesn't exist - create it
+				ifaceLog.Info("Creating LCP interface pair",
 					slog.String("linux_name", linuxIfName),
 					slog.String("junos_name", iface.Name))
+
+				// Use LCPStateManager to create LCP and track Junos name mapping
+				if err := lcpManager.Create(ctx, vppIface.SwIfIndex, linuxIfName, iface.Name); err != nil {
+					ifaceLog.Error("Failed to create LCP interface pair",
+						slog.String("linux_name", linuxIfName),
+						slog.Any("error", err))
+					result.FailedLCPPairs = append(result.FailedLCPPairs, failedLCPPair{
+						Interface:  iface.Name,
+						LinuxName:  linuxIfName,
+						Error:      err.Error(),
+						RolledBack: false,
+					})
+					// LCP is optional for Phase 2 - continue with interface setup
+					ifaceLog.Warn("Continuing without LCP pair for this interface")
+				} else {
+					result.CreatedLCPPairs++
+					ifaceLog.Info("LCP interface pair created",
+						slog.String("linux_name", linuxIfName),
+						slog.String("junos_name", iface.Name))
+				}
 			}
 		}
 

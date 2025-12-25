@@ -32,10 +32,21 @@ func (c *Config) Validate() error {
 	}
 
 	// Validate system configuration
-	if c.System != nil {
-		if err := c.System.Validate(); err != nil {
-			return err
+	// If System is not defined, create default with hostname
+	if c.System == nil {
+		c.System = &SystemConfig{
+			HostName: "arca-router", // Default hostname
 		}
+	}
+
+	// If hostname is not set, use default
+	if c.System.HostName == "" {
+		c.System.HostName = "arca-router"
+	}
+
+	// Validate system configuration
+	if err := c.System.Validate(); err != nil {
+		return err
 	}
 
 	// Validate interfaces
@@ -67,12 +78,14 @@ func (c *Config) Validate() error {
 
 // Validate validates system configuration
 func (s *SystemConfig) Validate() error {
+	// Hostname should have been set by Config.Validate() if empty
+	// This is a sanity check
 	if s.HostName == "" {
 		return errors.New(
 			errors.ErrCodeConfigValidation,
-			"System hostname is empty",
-			"The system hostname must be specified",
-			"Set a valid hostname using 'set system host-name <name>'",
+			"System hostname is empty after default assignment",
+			"Internal validation error",
+			"Report this issue to the maintainers",
 		)
 	}
 

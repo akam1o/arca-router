@@ -75,8 +75,15 @@ type CreateInterfaceRequest struct {
 	// Type of interface
 	Type InterfaceType
 
-	// DeviceInstance for AVF/RDMA (PCI address)
+	// DeviceInstance for AVF/RDMA
+	// - AVF: PCI address (e.g., "0000:03:00.0")
+	// - RDMA: Linux interface name (e.g., "eth1")
 	DeviceInstance string
+
+	// PCIAddress is the original PCI address (optional, for reconciliation)
+	// This is used to store the PCI address for RDMA interfaces where
+	// DeviceInstance is a Linux interface name
+	PCIAddress string
 
 	// Name is the interface name (for tap interfaces)
 	Name string
@@ -113,6 +120,10 @@ type Interface struct {
 
 	// Addresses contains the IP addresses assigned to the interface
 	Addresses []*net.IPNet
+
+	// PCIAddress is the PCI address (e.g., "0000:00:06.0") for hardware interfaces
+	// Empty for non-hardware interfaces (e.g., tap, loopback)
+	PCIAddress string
 }
 
 // InterfaceType represents the type of interface
