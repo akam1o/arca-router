@@ -102,17 +102,26 @@ func (ds *etcdDatastore) AcquireLock(ctx context.Context, req *LockRequest) erro
 				return ds.ExtendLock(ctx, req.SessionID, timeout)
 			}
 
-			// Check if lock is expired
-			if now.Before(existingLock.ExpiresAt) {
-				// Lock is still valid and held by another session
-				ds.client.Revoke(ctx, leaseID)
-				return NewError(ErrCodeConflict,
-					fmt.Sprintf("lock already held by session %s (user: %s)", existingLock.SessionID, existingLock.User),
-					nil)
+			// Check if lease is still active (use server-side lease TTL, not client-side ExpiresAt)
+			// This avoids time skew issues between client and server
+			if existingLock.LeaseID > 0 {
+				leaseTTLResp, leaseErr := ds.client.TimeToLive(ctx, clientv3.LeaseID(existingLock.LeaseID))
+				if leaseErr != nil {
+					// Fail closed on TTL check errors (don't allow unsafe takeover on transient etcd issues)
+					ds.client.Revoke(ctx, leaseID)
+					return NewError(ErrCodeConflict, "cannot verify lock status", leaseErr)
+				}
+				if leaseTTLResp.TTL > 0 {
+					// Lease is still active - lock is valid and held by another session
+					ds.client.Revoke(ctx, leaseID)
+					return NewError(ErrCodeConflict,
+						fmt.Sprintf("lock already held by session %s (user: %s)", existingLock.SessionID, existingLock.User),
+						nil)
+				}
 			}
 
-			// Lock is expired - delete it with CAS to prevent race
-			// Revoke old lease first
+			// Lock is expired (lease expired or invalid) - delete it with CAS to prevent race
+			// Revoke old lease if it still exists
 			if existingLock.LeaseID > 0 {
 				ds.client.Revoke(ctx, clientv3.LeaseID(existingLock.LeaseID))
 			}
@@ -297,11 +306,16 @@ func (ds *etcdDatastore) ExtendLock(ctx context.Context, sessionID string, durat
 			nil)
 	}
 
-	// Check if lock is expired
-	now := time.Now()
-	if now.After(currentLock.ExpiresAt) {
-		return NewError(ErrCodeConflict, "lock has expired", nil)
+	// Check if lease is still active (use server-side lease TTL to avoid time skew)
+	if currentLock.LeaseID > 0 {
+		leaseTTLResp, leaseErr := ds.client.TimeToLive(ctx, clientv3.LeaseID(currentLock.LeaseID))
+		if leaseErr != nil || leaseTTLResp.TTL <= 0 {
+			// Lease is expired or invalid
+			return NewError(ErrCodeConflict, "lock has expired", nil)
+		}
 	}
+
+	now := time.Now()
 
 	// Save old lease ID before updating
 	oldLeaseID := currentLock.LeaseID
@@ -367,7 +381,7 @@ func (ds *etcdDatastore) StealLock(ctx context.Context, req *StealLockRequest) e
 
 	lockKey := ds.key("lock")
 
-	// Get current lock
+	// Get current lock with revision for CAS
 	getLockResp, err := ds.client.Get(ctx, lockKey)
 	if err != nil {
 		return NewError(ErrCodeInternal, "failed to get current lock", err)
@@ -376,8 +390,13 @@ func (ds *etcdDatastore) StealLock(ctx context.Context, req *StealLockRequest) e
 	var oldUser string
 	var oldSessionID string
 	var oldLeaseID int64
+	var existingValue string
+	var existingModRevision int64
 
 	if len(getLockResp.Kvs) > 0 {
+		existingValue = string(getLockResp.Kvs[0].Value)
+		existingModRevision = getLockResp.Kvs[0].ModRevision
+
 		var currentLock lockData
 		if err := json.Unmarshal(getLockResp.Kvs[0].Value, &currentLock); err == nil {
 			oldUser = currentLock.User
@@ -393,8 +412,74 @@ func (ds *etcdDatastore) StealLock(ctx context.Context, req *StealLockRequest) e
 		}
 	}
 
-	// Log audit event for stealing
-	stealAuditEvent := &AuditEvent{
+	// Delete old lock using CAS to prevent race conditions
+	// Only delete if the lock hasn't been modified since we read it
+	if len(getLockResp.Kvs) > 0 {
+		deleteTxn, delErr := ds.client.Txn(ctx).
+			If(
+				clientv3.Compare(clientv3.Value(lockKey), "=", existingValue),
+				clientv3.Compare(clientv3.ModRevision(lockKey), "=", existingModRevision),
+			).
+			Then(clientv3.OpDelete(lockKey)).
+			Commit()
+
+		if delErr != nil {
+			// Log failure audit
+			failAuditEvent := &AuditEvent{
+				Timestamp: time.Now(),
+				User:      req.User,
+				SessionID: req.NewSessionID,
+				Action:    "lock_steal",
+				Result:    "failure",
+				Details:   fmt.Sprintf("failed to delete lock from user=%s session=%s: %v", oldUser, oldSessionID, delErr),
+			}
+			ds.LogAuditEvent(ctx, failAuditEvent)
+			return NewError(ErrCodeInternal, "failed to delete old lock", delErr)
+		}
+
+		if !deleteTxn.Succeeded {
+			// Log failure audit
+			failAuditEvent := &AuditEvent{
+				Timestamp: time.Now(),
+				User:      req.User,
+				SessionID: req.NewSessionID,
+				Action:    "lock_steal",
+				Result:    "failure",
+				Details:   fmt.Sprintf("lock was modified during steal attempt from user=%s session=%s", oldUser, oldSessionID),
+			}
+			ds.LogAuditEvent(ctx, failAuditEvent)
+			return NewError(ErrCodeConflict, "lock was modified during steal attempt", nil)
+		}
+	}
+
+	// Revoke old lease after successful CAS delete
+	if oldLeaseID > 0 {
+		ds.client.Revoke(ctx, clientv3.LeaseID(oldLeaseID))
+	}
+
+	// Acquire new lock for the new session
+	acquireErr := ds.AcquireLock(ctx, &LockRequest{
+		SessionID: req.NewSessionID,
+		User:      req.User,
+		Timeout:   30 * time.Minute,
+	})
+
+	if acquireErr != nil {
+		// Log failure audit
+		failAuditEvent := &AuditEvent{
+			Timestamp: time.Now(),
+			User:      req.User,
+			SessionID: req.NewSessionID,
+			Action:    "lock_steal",
+			Result:    "failure",
+			Details:   fmt.Sprintf("deleted old lock from user=%s session=%s but failed to acquire: %v", oldUser, oldSessionID, acquireErr),
+		}
+		ds.LogAuditEvent(ctx, failAuditEvent)
+		return acquireErr
+	}
+
+	// Log success audit only after both delete and acquire succeed
+	successAuditEvent := &AuditEvent{
 		Timestamp: time.Now(),
 		User:      req.User,
 		SessionID: req.NewSessionID,
@@ -403,27 +488,11 @@ func (ds *etcdDatastore) StealLock(ctx context.Context, req *StealLockRequest) e
 		Details:   fmt.Sprintf("stolen from user=%s session=%s reason=%s", oldUser, oldSessionID, req.Reason),
 	}
 
-	if err := ds.LogAuditEvent(ctx, stealAuditEvent); err != nil {
+	if err := ds.LogAuditEvent(ctx, successAuditEvent); err != nil {
 		_ = err // Non-critical
 	}
 
-	// Revoke old lease
-	if oldLeaseID > 0 {
-		ds.client.Revoke(ctx, clientv3.LeaseID(oldLeaseID))
-	}
-
-	// Delete old lock
-	_, err = ds.client.Delete(ctx, lockKey)
-	if err != nil {
-		return NewError(ErrCodeInternal, "failed to delete old lock", err)
-	}
-
-	// Acquire new lock for the new session
-	return ds.AcquireLock(ctx, &LockRequest{
-		SessionID: req.NewSessionID,
-		User:      req.User,
-		Timeout:   30 * time.Minute,
-	})
+	return nil
 }
 
 // GetLockInfo retrieves the current lock state.
@@ -452,13 +521,15 @@ func (ds *etcdDatastore) GetLockInfo(ctx context.Context) (*LockInfo, error) {
 		return nil, NewError(ErrCodeInternal, "failed to parse lock data", err)
 	}
 
-	// Check if lock is expired
-	now := time.Now()
-	if now.After(currentLock.ExpiresAt) {
-		// Lock is expired but not yet cleaned up
-		return &LockInfo{
-			IsLocked: false,
-		}, nil
+	// Check if lease is still active (use server-side lease TTL to avoid time skew)
+	if currentLock.LeaseID > 0 {
+		leaseTTLResp, leaseErr := ds.client.TimeToLive(ctx, clientv3.LeaseID(currentLock.LeaseID))
+		if leaseErr != nil || leaseTTLResp.TTL <= 0 {
+			// Lease is expired or invalid - lock is not active
+			return &LockInfo{
+				IsLocked: false,
+			}, nil
+		}
 	}
 
 	return &LockInfo{

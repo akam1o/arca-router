@@ -127,9 +127,16 @@ func (ds *etcdDatastore) Commit(ctx context.Context, req *CommitRequest) (string
 			nil)
 	}
 
-	// Check lock expiration
-	if time.Now().After(currentLock.ExpiresAt) {
-		return "", NewError(ErrCodeConflict, "lock has expired", nil)
+	// Check lock expiration using server-side lease TTL (avoids time skew)
+	if currentLock.LeaseID > 0 {
+		leaseTTLResp, leaseErr := ds.client.TimeToLive(ctx, clientv3.LeaseID(currentLock.LeaseID))
+		if leaseErr != nil {
+			// Fail closed on TTL check errors
+			return "", NewError(ErrCodeConflict, "lock status cannot be verified", leaseErr)
+		}
+		if leaseTTLResp.TTL <= 0 {
+			return "", NewError(ErrCodeConflict, "lock has expired", nil)
+		}
 	}
 
 	// Atomic commit transaction:
@@ -267,9 +274,25 @@ func (ds *etcdDatastore) ListCommitHistory(ctx context.Context, opts *HistoryOpt
 		opts = &HistoryOptions{}
 	}
 
-	// Get all commits from etcd
+	// Get commits from etcd with server-side pagination
 	commitsPrefix := ds.key("commits") + "/"
-	resp, err := ds.client.Get(ctx, commitsPrefix, clientv3.WithPrefix(), clientv3.WithSort(clientv3.SortByKey, clientv3.SortDescend))
+
+	// Build options for etcd Get request
+	getOpts := []clientv3.OpOption{
+		clientv3.WithPrefix(),
+		clientv3.WithSort(clientv3.SortByKey, clientv3.SortDescend),
+	}
+
+	// Apply server-side limit if specified (more efficient than client-side filtering)
+	// Note: We fetch more than needed to account for filtering, then truncate
+	if opts.Limit > 0 {
+		// Fetch extra entries to account for client-side filtering
+		// Multiply by 2 to handle filtering overhead (conservative estimate)
+		fetchLimit := int64(opts.Limit * 2)
+		getOpts = append(getOpts, clientv3.WithLimit(fetchLimit))
+	}
+
+	resp, err := ds.client.Get(ctx, commitsPrefix, getOpts...)
 	if err != nil {
 		return nil, NewError(ErrCodeInternal, "failed to list commits", err)
 	}
@@ -283,7 +306,7 @@ func (ds *etcdDatastore) ListCommitHistory(ctx context.Context, opts *HistoryOpt
 			continue
 		}
 
-		// Apply filters
+		// Apply filters (client-side for complex predicates)
 		if opts.ExcludeRollbacks && entry.IsRollback {
 			continue
 		}
