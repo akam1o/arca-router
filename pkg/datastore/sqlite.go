@@ -172,15 +172,15 @@ func (ds *sqliteDatastore) logCleanupError(cleanupErr error) error {
 	})
 }
 
-// performLockCleanup removes expired locks from the database.
+// performLockCleanup removes expired locks from the database (for all targets).
 func (ds *sqliteDatastore) performLockCleanup(ctx context.Context) error {
 	return ds.withTx(ctx, false, func(tx *sql.Tx) error {
 		now := time.Now()
 
-		// Delete expired locks
+		// Delete expired locks for all targets (candidate, running)
 		result, err := tx.ExecContext(ctx, `
 			DELETE FROM config_locks
-			WHERE lock_id = 1 AND expires_at < ?
+			WHERE expires_at < ?
 		`, now)
 
 		if err != nil {

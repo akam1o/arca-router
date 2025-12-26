@@ -99,14 +99,19 @@ func (ds *etcdDatastore) Commit(ctx context.Context, req *CommitRequest) (string
 		return "", NewError(ErrCodeInternal, "failed to marshal audit event", err)
 	}
 
-	// Get lock key for transaction
-	lockKey := ds.key("lock")
+	// Get candidate lock key for transaction (only candidate lock is required for commit)
+	lockKey := ds.lockKeyForTarget(LockTargetCandidate)
 	runningMetadataKey := ds.key("running", "current")
 	runningConfigKey := ds.key("running", "config")
 	commitKey := ds.key("commits", commitID)
 	auditKey := ds.key("audit", auditULID)
 
-	// Get current lock to verify ownership
+	// Check for legacy lock (fail-closed)
+	if err := ds.checkLegacyLock(ctx); err != nil {
+		return "", err
+	}
+
+	// Get current candidate lock to verify ownership
 	getLockResp, err := ds.client.Get(ctx, lockKey)
 	if err != nil {
 		return "", NewError(ErrCodeInternal, "failed to get lock", err)
