@@ -25,12 +25,12 @@ func (ds *sqliteDatastore) Commit(ctx context.Context, req *CommitRequest) (stri
 
 	// Execute commit transaction
 	err = ds.withTx(ctx, false, func(tx *sql.Tx) error {
-		// 0. Verify the session holds a valid (non-expired) config lock (enforces exclusive access)
+		// 0. Verify the session holds a valid (non-expired) candidate lock (enforces exclusive access)
 		var lockSessionID string
 		var expiresAt time.Time
 		err := tx.QueryRowContext(ctx, `
-			SELECT session_id, expires_at FROM config_locks WHERE lock_id = 1
-		`).Scan(&lockSessionID, &expiresAt)
+			SELECT session_id, expires_at FROM config_locks WHERE target = ?
+		`, LockTargetCandidate).Scan(&lockSessionID, &expiresAt)
 
 		if err == sql.ErrNoRows {
 			return NewError(ErrCodeConflict,
@@ -85,10 +85,11 @@ func (ds *sqliteDatastore) Commit(ctx context.Context, req *CommitRequest) (stri
 			return NewError(ErrCodeInternal, "failed to delete candidate config", err)
 		}
 
-		// 5. Release lock (if held by this session)
+		// 5. Release candidate lock (if held by this session)
+		// Note: Only release candidate lock, not running lock (if any)
 		_, err = tx.ExecContext(ctx, `
-			DELETE FROM config_locks WHERE session_id = ?
-		`, req.SessionID)
+			DELETE FROM config_locks WHERE target = ? AND session_id = ?
+		`, LockTargetCandidate, req.SessionID)
 		if err != nil {
 			return NewError(ErrCodeInternal, "failed to release lock", err)
 		}

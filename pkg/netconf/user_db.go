@@ -308,6 +308,69 @@ func (udb *UserDatabase) VerifyPassword(username, password string) (*User, error
 	return user, nil
 }
 
+// VerifyPasswordWithReason verifies a user's password and returns a detailed reason for failure
+// Used by SSH authentication callback for audit logging
+// Implements timing attack mitigation by performing dummy hash verification for non-existent users
+func (udb *UserDatabase) VerifyPasswordWithReason(username, password string) (*User, string, error) {
+	// Dummy hash for timing attack mitigation (argon2id with same parameters)
+	// This hash is never valid, but verification takes the same time as real hash
+	const dummyHash = "$argon2id$v=19$m=65536,t=3,p=4$c29tZXNhbHQxMjM0NTY3OA$qwertyuiopasdfghjklzxcvbnm1234567890qwertyuiopasdf"
+
+	// Get user from database
+	user, err := udb.GetUser(username)
+	if err != nil {
+		// Perform dummy verification to maintain constant timing
+		_, _ = VerifyPassword(password, dummyHash)
+		return nil, "user_not_found", fmt.Errorf("authentication failed")
+	}
+
+	// Check if user is enabled (before password verification to maintain timing)
+	userDisabled := !user.Enabled
+	hashToVerify := user.PasswordHash
+	if userDisabled {
+		// Use dummy hash to maintain timing even for disabled users
+		hashToVerify = dummyHash
+	}
+
+	// Verify password (constant-time comparison)
+	valid, err := VerifyPassword(password, hashToVerify)
+	if err != nil {
+		return nil, "password_verification_error", fmt.Errorf("authentication failed")
+	}
+
+	// Check disabled status after verification (timing-safe)
+	if userDisabled {
+		return nil, "user_disabled", fmt.Errorf("authentication failed")
+	}
+
+	if !valid {
+		return nil, "invalid_password", fmt.Errorf("authentication failed")
+	}
+
+	// Success: return user (without password hash for security)
+	user.PasswordHash = ""
+	return user, "", nil
+}
+
+// LogAuthSuccess logs a successful authentication event
+func (udb *UserDatabase) LogAuthSuccess(username, sourceIP string) {
+	udb.log.Info("Authentication successful",
+		"event_type", "auth_success",
+		"username", username,
+		"source_ip", sourceIP,
+		"timestamp", time.Now().Format(time.RFC3339))
+}
+
+// LogAuthFailure logs a failed authentication event
+func (udb *UserDatabase) LogAuthFailure(username, sourceIP, reason string) {
+	udb.log.Warn("Authentication failed",
+		"event_type", "auth_failure",
+		"username", username,
+		"source_ip", sourceIP,
+		"reason", reason,
+		"timestamp", time.Now().Format(time.RFC3339))
+}
+
 // HealthCheck verifies the database connection is healthy
 func (udb *UserDatabase) HealthCheck() error {
 	if udb.db == nil {

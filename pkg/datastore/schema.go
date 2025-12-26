@@ -36,10 +36,10 @@ type Datastore interface {
 
 	// Lock management
 	AcquireLock(ctx context.Context, req *LockRequest) error
-	ReleaseLock(ctx context.Context, sessionID string) error
-	ExtendLock(ctx context.Context, sessionID string, duration time.Duration) error
+	ReleaseLock(ctx context.Context, target string, sessionID string) error
+	ExtendLock(ctx context.Context, target string, sessionID string, duration time.Duration) error
 	StealLock(ctx context.Context, req *StealLockRequest) error
-	GetLockInfo(ctx context.Context) (*LockInfo, error)
+	GetLockInfo(ctx context.Context, target string) (*LockInfo, error)
 
 	// Commit history
 	ListCommitHistory(ctx context.Context, opts *HistoryOptions) ([]*CommitHistoryEntry, error)
@@ -99,8 +99,18 @@ type DiffResult struct {
 	HasChanges bool   // Whether there are any differences
 }
 
+// Lock target constants
+const (
+	// LockTargetCandidate is the candidate configuration datastore.
+	LockTargetCandidate = "candidate"
+
+	// LockTargetRunning is the running configuration datastore.
+	LockTargetRunning = "running"
+)
+
 // LockRequest contains parameters for acquiring a config lock.
 type LockRequest struct {
+	Target    string        // Datastore target: "candidate" or "running"
 	SessionID string        // Session requesting the lock
 	User      string        // Username requesting the lock
 	Timeout   time.Duration // Lock timeout duration (default: 30 minutes)
@@ -108,6 +118,7 @@ type LockRequest struct {
 
 // StealLockRequest contains parameters for stealing a lock (admin only).
 type StealLockRequest struct {
+	Target          string // Datastore target: "candidate" or "running"
 	NewSessionID    string // New session taking the lock
 	User            string // Admin user stealing the lock
 	TargetSessionID string // Session currently holding the lock
@@ -244,4 +255,14 @@ func NewError(code ErrorCode, message string, cause error) *Error {
 		Message: message,
 		Cause:   cause,
 	}
+}
+
+// ValidateLockTarget validates a lock target string.
+// Returns an error if the target is not "candidate" or "running".
+func ValidateLockTarget(target string) error {
+	if target != LockTargetCandidate && target != LockTargetRunning {
+		return NewError(ErrCodeValidation,
+			"invalid lock target: must be 'candidate' or 'running'", nil)
+	}
+	return nil
 }

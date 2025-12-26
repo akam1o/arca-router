@@ -55,36 +55,39 @@ func NewSSHServer(config *SSHConfig) (*SSHServer, error) {
 		return nil, fmt.Errorf("failed to load host key: %w", err)
 	}
 
-	// Create SSH server config
+	// Create session manager
+	sessionMgr := NewSessionManager(config, log)
+
+	// Create user database
+	userDB, err := NewUserDatabase(config.UserDBPath, log)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create user database: %w", err)
+	}
+
+	// Create server instance first to reference in password callback
+	srv := &SSHServer{
+		config:     config,
+		sessionMgr: sessionMgr,
+		userDB:     userDB,
+		sshConfig:  nil, // Will be set below
+		done:       make(chan struct{}),
+		log:        log,
+	}
+
+	// Create SSH server config with password authentication
 	sshConfig := &ssh.ServerConfig{
 		Config: ssh.Config{
 			Ciphers:      config.SSHCiphers,
 			KeyExchanges: config.SSHKeyExchanges,
 			MACs:         config.SSHMACs,
 		},
-		// Phase 1: No authentication required
-		// Phase 2 will add password authentication
-		NoClientAuth: true,
+		// Phase 4: Password authentication via user database
+		PasswordCallback: srv.passwordCallback,
 	}
 	sshConfig.AddHostKey(hostKey)
+	srv.sshConfig = sshConfig
 
-	// Create session manager
-	sessionMgr := NewSessionManager(config, log)
-
-	// Create user database (will be implemented in Phase 2)
-	userDB, err := NewUserDatabase(config.UserDBPath, log)
-	if err != nil {
-		return nil, fmt.Errorf("failed to create user database: %w", err)
-	}
-
-	return &SSHServer{
-		config:     config,
-		sessionMgr: sessionMgr,
-		userDB:     userDB,
-		sshConfig:  sshConfig,
-		done:       make(chan struct{}),
-		log:        log,
-	}, nil
+	return srv, nil
 }
 
 // Start starts the SSH server
@@ -276,9 +279,15 @@ func (s *SSHServer) handleSession(ctx context.Context, sshConn *ssh.ServerConn, 
 				s.log.Info("NETCONF subsystem requested", "user", sshConn.User())
 
 				// Create NETCONF session
-				// Phase 1: role is hardcoded to "admin" (no auth)
-				// Phase 2/3: will use authenticated user's role
-				session := s.sessionMgr.Create(sshConn.User(), "admin", sshConn, channel)
+				// Phase 4: Extract role from authenticated user's permissions
+				// Default fallback is read-only for security (least privilege)
+				role := RoleReadOnly
+				if sshConn.Permissions != nil && sshConn.Permissions.Extensions != nil {
+					if authRole, ok := sshConn.Permissions.Extensions["role"]; ok {
+						role = authRole
+					}
+				}
+				session := s.sessionMgr.Create(sshConn.User(), role, sshConn, channel)
 
 				// NETCONF protocol handling will be implemented in Phase 2
 				// For now, just send a placeholder message
@@ -291,6 +300,45 @@ func (s *SSHServer) handleSession(ctx context.Context, sshConn *ssh.ServerConn, 
 			req.Reply(false, nil)
 		}
 	}
+}
+
+// passwordCallback handles SSH password authentication
+func (s *SSHServer) passwordCallback(meta ssh.ConnMetadata, password []byte) (*ssh.Permissions, error) {
+	username := meta.User()
+	sourceIP := extractIP(meta.RemoteAddr())
+
+	// Verify password using user database
+	user, reason, err := s.userDB.VerifyPasswordWithReason(username, string(password))
+	if err != nil {
+		// Log authentication failure with detailed reason
+		s.userDB.LogAuthFailure(username, sourceIP, reason)
+		return nil, fmt.Errorf("authentication failed")
+	}
+
+	// Log authentication success
+	s.userDB.LogAuthSuccess(username, sourceIP)
+
+	// Return permissions with user context for session creation
+	perms := &ssh.Permissions{
+		Extensions: map[string]string{
+			"username": username,
+			"role":     user.Role,
+		},
+	}
+	return perms, nil
+}
+
+// extractIP extracts the IP address from a net.Addr (format: "host:port")
+func extractIP(addr net.Addr) string {
+	if tcpAddr, ok := addr.(*net.TCPAddr); ok {
+		return tcpAddr.IP.String()
+	}
+	// Fallback: parse string representation
+	host, _, err := net.SplitHostPort(addr.String())
+	if err != nil {
+		return addr.String()
+	}
+	return host
 }
 
 // loadOrGenerateHostKey loads or generates an ED25519 host key
