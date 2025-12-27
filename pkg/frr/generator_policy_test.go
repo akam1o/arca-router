@@ -66,7 +66,7 @@ func TestConvertPrefixLists(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result, err := convertPrefixLists(tt.input)
+			result, _, err := convertPrefixLists(tt.input)
 			if err != nil {
 				t.Fatalf("convertPrefixLists() error = %v", err)
 			}
@@ -177,7 +177,7 @@ func TestConvertPolicyStatements(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result, err := convertPolicyStatements(tt.input)
+			result, _, err := convertPolicyStatements(tt.input)
 			if err != nil {
 				t.Fatalf("convertPolicyStatements() error = %v", err)
 			}
@@ -364,7 +364,7 @@ func TestGenerateRouteMapConfig(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result, err := GenerateRouteMapConfig(tt.input)
+			result, err := GenerateRouteMapConfig(tt.input, nil)
 			if err != nil {
 				t.Fatalf("GenerateRouteMapConfig() error = %v", err)
 			}
@@ -413,7 +413,7 @@ func TestConvertPolicyOptionsIntegration(t *testing.T) {
 		},
 	}
 
-	prefixLists, routeMaps, err := convertPolicyOptions(cfg)
+	prefixLists, routeMaps, _, err := convertPolicyOptions(cfg)
 	if err != nil {
 		t.Fatalf("convertPolicyOptions() error = %v", err)
 	}
@@ -437,7 +437,7 @@ func TestConvertPolicyOptionsIntegration(t *testing.T) {
 	}
 
 	// Test route-map generation
-	rmConfig, err := GenerateRouteMapConfig(routeMaps)
+	rmConfig, err := GenerateRouteMapConfig(routeMaps, prefixLists)
 	if err != nil {
 		t.Fatalf("GenerateRouteMapConfig() error = %v", err)
 	}
@@ -544,7 +544,7 @@ func TestPrefixListWithEmptyPrefixes(t *testing.T) {
 		},
 	}
 
-	result, err := convertPrefixLists(input)
+	result, _, err := convertPrefixLists(input)
 	if err != nil {
 		t.Fatalf("convertPrefixLists() error = %v", err)
 	}
@@ -567,7 +567,7 @@ func TestPolicyStatementWithEmptyTerms(t *testing.T) {
 		},
 	}
 
-	result, err := convertPolicyStatements(input)
+	result, _, err := convertPolicyStatements(input)
 	if err != nil {
 		t.Fatalf("convertPolicyStatements() error = %v", err)
 	}
@@ -602,7 +602,7 @@ func TestRouteMapWithNeighborMatch(t *testing.T) {
 		},
 	}
 
-	result, err := convertPolicyStatements(input)
+	result, _, err := convertPolicyStatements(input)
 	if err != nil {
 		t.Fatalf("convertPolicyStatements() error = %v", err)
 	}
@@ -637,7 +637,7 @@ func TestRouteMapWithProtocolMatch(t *testing.T) {
 				},
 			}
 
-			result, err := convertPolicyStatements(input)
+			result, _, err := convertPolicyStatements(input)
 			if err != nil {
 				t.Fatalf("convertPolicyStatements() error = %v", err)
 			}
@@ -670,13 +670,25 @@ func TestRouteMapWithASPathMatch(t *testing.T) {
 		},
 	}
 
-	result, err := convertPolicyStatements(input)
+	routeMaps, asPathLists, err := convertPolicyStatements(input)
 	if err != nil {
 		t.Fatalf("convertPolicyStatements() error = %v", err)
 	}
 
-	if result[0].Entries[0].MatchASPath != "^65001" {
-		t.Errorf("Expected AS path ^65001, got %s", result[0].Entries[0].MatchASPath)
+	// Check that AS-path access-list was generated
+	if len(asPathLists) != 1 {
+		t.Fatalf("Expected 1 AS-path access-list, got %d", len(asPathLists))
+	}
+
+	// Check AS-path access-list content
+	if asPathLists[0].Entries[0].Regex != "^65001" {
+		t.Errorf("Expected AS path regex ^65001, got %s", asPathLists[0].Entries[0].Regex)
+	}
+
+	// Check route-map references the AS-path list
+	if routeMaps[0].Entries[0].MatchASPath != asPathLists[0].Name {
+		t.Errorf("Expected route-map to reference AS-path list %s, got %s",
+			asPathLists[0].Name, routeMaps[0].Entries[0].MatchASPath)
 	}
 }
 
@@ -697,7 +709,7 @@ func TestMultiplePrefixLists(t *testing.T) {
 		},
 	}
 
-	result, err := convertPrefixLists(input)
+	result, _, err := convertPrefixLists(input)
 	if err != nil {
 		t.Fatalf("convertPrefixLists() error = %v", err)
 	}
@@ -734,7 +746,7 @@ func TestMultiplePolicyStatements(t *testing.T) {
 		},
 	}
 
-	result, err := convertPolicyStatements(input)
+	result, _, err := convertPolicyStatements(input)
 	if err != nil {
 		t.Fatalf("convertPolicyStatements() error = %v", err)
 	}
@@ -765,7 +777,7 @@ func TestLocalPreferenceZero(t *testing.T) {
 		},
 	}
 
-	result, err := convertPolicyStatements(input)
+	result, _, err := convertPolicyStatements(input)
 	if err != nil {
 		t.Fatalf("convertPolicyStatements() error = %v", err)
 	}
@@ -805,7 +817,7 @@ func TestCommunityFormats(t *testing.T) {
 				},
 			}
 
-			result, err := convertPolicyStatements(input)
+			result, _, err := convertPolicyStatements(input)
 			if err != nil {
 				t.Fatalf("convertPolicyStatements() error = %v", err)
 			}
@@ -832,7 +844,7 @@ func TestPrefixListConfigEmpty(t *testing.T) {
 
 // TestRouteMapConfigEmpty tests empty route-map config generation
 func TestRouteMapConfigEmpty(t *testing.T) {
-	result, err := GenerateRouteMapConfig([]RouteMap{})
+	result, err := GenerateRouteMapConfig([]RouteMap{}, nil)
 	if err != nil {
 		t.Fatalf("GenerateRouteMapConfig() error = %v", err)
 	}
@@ -843,11 +855,11 @@ func TestRouteMapConfigEmpty(t *testing.T) {
 
 // TestConvertPolicyOptionsNilConfig tests nil config handling
 func TestConvertPolicyOptionsNilConfig(t *testing.T) {
-	pl, rm, err := convertPolicyOptions(nil)
+	pl, rm, aspath, err := convertPolicyOptions(nil)
 	if err != nil {
 		t.Fatalf("convertPolicyOptions(nil) error = %v", err)
 	}
-	if pl != nil || rm != nil {
+	if pl != nil || rm != nil || aspath != nil {
 		t.Error("Expected nil results for nil config")
 	}
 }
@@ -866,7 +878,7 @@ func TestPrefixListLargeSequence(t *testing.T) {
 		},
 	}
 
-	result, err := convertPrefixLists(input)
+	result, _, err := convertPrefixLists(input)
 	if err != nil {
 		t.Fatalf("convertPrefixLists() error = %v", err)
 	}
@@ -905,7 +917,7 @@ func TestPolicyStatementLargeTerms(t *testing.T) {
 		},
 	}
 
-	result, err := convertPolicyStatements(input)
+	result, _, err := convertPolicyStatements(input)
 	if err != nil {
 		t.Fatalf("convertPolicyStatements() error = %v", err)
 	}
@@ -941,7 +953,7 @@ func TestMultiplePrefixListsInOneTerm(t *testing.T) {
 		},
 	}
 
-	result, err := convertPolicyStatements(input)
+	result, _, err := convertPolicyStatements(input)
 	if err != nil {
 		t.Fatalf("convertPolicyStatements() error = %v", err)
 	}
@@ -966,7 +978,7 @@ func TestGenerateRouteMapWithMultiplePrefixLists(t *testing.T) {
 		},
 	}
 
-	result, err := GenerateRouteMapConfig(input)
+	result, err := GenerateRouteMapConfig(input, nil)
 	if err != nil {
 		t.Fatalf("GenerateRouteMapConfig() error = %v", err)
 	}
@@ -989,7 +1001,7 @@ func TestPrefixListHostRoute(t *testing.T) {
 		},
 	}
 
-	result, err := convertPrefixLists(input)
+	result, _, err := convertPrefixLists(input)
 	if err != nil {
 		t.Fatalf("convertPrefixLists() error = %v", err)
 	}
@@ -1008,7 +1020,7 @@ func TestIPv6HostRoute(t *testing.T) {
 		},
 	}
 
-	result, err := convertPrefixLists(input)
+	result, _, err := convertPrefixLists(input)
 	if err != nil {
 		t.Fatalf("convertPrefixLists() error = %v", err)
 	}
@@ -1047,7 +1059,7 @@ func TestRouteMapMultipleEntries(t *testing.T) {
 		},
 	}
 
-	result, err := GenerateRouteMapConfig(input)
+	result, err := GenerateRouteMapConfig(input, nil)
 	if err != nil {
 		t.Fatalf("GenerateRouteMapConfig() error = %v", err)
 	}
@@ -1087,7 +1099,7 @@ func TestHighLocalPreferenceValue(t *testing.T) {
 		},
 	}
 
-	result, err := convertPolicyStatements(input)
+	result, _, err := convertPolicyStatements(input)
 	if err != nil {
 		t.Fatalf("convertPolicyStatements() error = %v", err)
 	}
