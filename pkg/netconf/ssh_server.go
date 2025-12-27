@@ -16,6 +16,7 @@ import (
 
 	"golang.org/x/crypto/ssh"
 
+	"github.com/akam1o/arca-router/pkg/datastore"
 	"github.com/akam1o/arca-router/pkg/logger"
 )
 
@@ -23,15 +24,17 @@ import (
 // Note: This server is not designed to be restarted after Stop() is called.
 // Create a new instance if restart is needed.
 type SSHServer struct {
-	config     *SSHConfig
-	listener   net.Listener
-	sessionMgr *SessionManager
-	userDB     *UserDatabase
-	sshConfig  *ssh.ServerConfig
-	done       chan struct{}
-	wg         sync.WaitGroup
-	mu         sync.Mutex
-	log        *logger.Logger
+	config        *SSHConfig
+	listener      net.Listener
+	sessionMgr    *SessionManager
+	userDB        *UserDatabase
+	datastore     datastore.Datastore
+	netconfServer *Server
+	sshConfig     *ssh.ServerConfig
+	done          chan struct{}
+	wg            sync.WaitGroup
+	mu            sync.Mutex
+	log           *logger.Logger
 
 	// Metrics (thread-safe via atomic operations)
 	totalConnections      uint64 // Total TCP connections accepted (use atomic)
@@ -55,23 +58,38 @@ func NewSSHServer(config *SSHConfig) (*SSHServer, error) {
 		return nil, fmt.Errorf("failed to load host key: %w", err)
 	}
 
-	// Create session manager
-	sessionMgr := NewSessionManager(config, log)
-
 	// Create user database
 	userDB, err := NewUserDatabase(config.UserDBPath, log)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create user database: %w", err)
 	}
 
+	// Initialize datastore
+	datastoreConfig := &datastore.Config{
+		Backend:    datastore.BackendSQLite,
+		SQLitePath: config.DatastorePath,
+	}
+	ds, err := datastore.NewSQLiteDatastore(datastoreConfig)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create datastore: %w", err)
+	}
+
+	// Create session manager with datastore for lock cleanup
+	sessionMgr := NewSessionManager(config, ds, log)
+
+	// Create NETCONF server
+	netconfServer := NewServer(ds, sessionMgr)
+
 	// Create server instance first to reference in password callback
 	srv := &SSHServer{
-		config:     config,
-		sessionMgr: sessionMgr,
-		userDB:     userDB,
-		sshConfig:  nil, // Will be set below
-		done:       make(chan struct{}),
-		log:        log,
+		config:        config,
+		sessionMgr:    sessionMgr,
+		userDB:        userDB,
+		datastore:     ds,
+		netconfServer: netconfServer,
+		sshConfig:     nil, // Will be set below
+		done:          make(chan struct{}),
+		log:           log,
 	}
 
 	// Create SSH server config with password authentication
@@ -148,6 +166,11 @@ func (s *SSHServer) Stop() error {
 
 	// Wait for goroutines to finish
 	s.wg.Wait()
+
+	// Close datastore
+	if err := s.datastore.Close(); err != nil {
+		s.log.Error("Failed to close datastore", "error", err)
+	}
 
 	// Close user database
 	if err := s.userDB.Close(); err != nil {
@@ -279,7 +302,7 @@ func (s *SSHServer) handleSession(ctx context.Context, sshConn *ssh.ServerConn, 
 				s.log.Info("NETCONF subsystem requested", "user", sshConn.User())
 
 				// Create NETCONF session
-				// Phase 4: Extract role from authenticated user's permissions
+				// Extract role from authenticated user's permissions
 				// Default fallback is read-only for security (least privilege)
 				role := RoleReadOnly
 				if sshConn.Permissions != nil && sshConn.Permissions.Extensions != nil {
@@ -289,9 +312,9 @@ func (s *SSHServer) handleSession(ctx context.Context, sshConn *ssh.ServerConn, 
 				}
 				session := s.sessionMgr.Create(sshConn.User(), role, sshConn, channel)
 
-				// NETCONF protocol handling will be implemented in Phase 2
-				// For now, just send a placeholder message
-				channel.Write([]byte("NETCONF subsystem active (session: " + session.ID + ")\n"))
+				// Start NETCONF protocol handling
+				s.wg.Add(1)
+				go s.handleNETCONF(ctx, session, channel)
 			} else {
 				req.Reply(false, nil)
 				s.log.Warn("Unsupported subsystem", "subsystem", subsystem)
@@ -448,4 +471,142 @@ func (s *SSHServer) HealthCheck() error {
 	}
 
 	return nil
+}
+
+// handleNETCONF handles NETCONF protocol over SSH channel
+func (s *SSHServer) handleNETCONF(ctx context.Context, sess *Session, channel ssh.Channel) {
+	defer s.wg.Done()
+	defer func() {
+		// Clean up session and release any locks held by this session
+		if err := s.sessionMgr.CloseSession(sess.ID); err != nil {
+			s.log.Error("Failed to close session", "error", err)
+		}
+		s.log.Info("NETCONF session closed", "session", sess.ID, "user", sess.Username)
+	}()
+
+	// Phase 1: Send server hello
+	serverHello := ServerHello(sess.NumericID)
+	serverHelloXML, err := MarshalHello(serverHello)
+	if err != nil {
+		s.log.Error("Failed to generate server hello", "error", err)
+		return
+	}
+
+	// Hello exchange MUST use base:1.0 EOM framing (RFC 6241 Section 4.1)
+	// Base version is negotiated after Hello exchange completes
+	// Create reader/writer ONCE to preserve buffered data for pipelined RPCs
+	reader := NewFramingReader(channel, "1.0")
+	writer := NewFramingWriter(channel, "1.0")
+
+	// Send server hello
+	if err := writer.WriteMessage(serverHelloXML); err != nil {
+		s.log.Error("Failed to send server hello", "error", err)
+		return
+	}
+	s.log.Debug("Server hello sent", "session", sess.ID)
+
+	// Phase 2: Receive and validate client hello (still using base:1.0)
+	clientHelloXML, err := reader.ReadMessage()
+	if err != nil {
+		s.log.Error("Failed to read client hello", "error", err)
+		return
+	}
+
+	clientHello, err := UnmarshalHello(clientHelloXML)
+	if err != nil {
+		s.log.Error("Failed to parse client hello", "error", err)
+		return
+	}
+
+	// Validate client hello
+	if err := ValidateClientHello(clientHello); err != nil {
+		s.log.Error("Invalid client hello", "error", err)
+		return
+	}
+
+	// Negotiate base version
+	negotiatedVersion := NegotiateBaseVersion(clientHello)
+	s.log.Info("Client hello received", "session", sess.ID, "base_version", negotiatedVersion)
+
+	// Update session with negotiated base version
+	sess.mu.Lock()
+	sess.BaseVersion = negotiatedVersion
+	sess.mu.Unlock()
+
+	// Switch to negotiated framing for RPC messages (after Hello exchange)
+	// IMPORTANT: Use SetBaseVersion() to preserve buffered data for pipelined RPCs
+	reader.SetBaseVersion(negotiatedVersion)
+	writer.SetBaseVersion(negotiatedVersion)
+
+	// Phase 3: RPC loop
+	s.log.Debug("Starting RPC loop", "session", sess.ID, "base_version", negotiatedVersion)
+
+	for {
+		// Check context cancellation
+		select {
+		case <-ctx.Done():
+			s.log.Info("Context cancelled, closing NETCONF session", "session", sess.ID)
+			return
+		default:
+		}
+
+		// Read RPC message
+		rpcXML, err := reader.ReadMessage()
+		if err != nil {
+			// EOF or connection closed
+			s.log.Debug("RPC read failed, closing session", "session", sess.ID, "error", err)
+			return
+		}
+
+		// Parse RPC
+		rpc, err := ParseRPC(rpcXML)
+		if err != nil {
+			s.log.Error("Failed to parse RPC", "error", err)
+			// Send error reply
+			rpcErr, ok := err.(*RPCError)
+			if !ok {
+				rpcErr = ErrOperationFailed(fmt.Sprintf("RPC parsing failed: %v", err))
+			}
+			errorReply := NewErrorReply("", rpcErr)
+			errorXML, _ := MarshalReply(errorReply)
+			writer.WriteMessage(errorXML)
+			continue
+		}
+
+		s.log.Debug("RPC received", "session", sess.ID, "operation", rpc.GetOperationName(), "message_id", rpc.MessageID)
+
+		// Handle close-session specially (need to send reply before closing)
+		if rpc.GetOperationName() == "close-session" {
+			reply := s.netconfServer.HandleRPC(ctx, sess, rpc)
+			replyXML, err := MarshalReply(reply)
+			if err != nil {
+				s.log.Error("Failed to serialize reply", "error", err)
+			} else {
+				writer.WriteMessage(replyXML)
+			}
+			s.log.Info("Close-session requested, terminating", "session", sess.ID)
+			return
+		}
+
+		// Dispatch RPC to server
+		reply := s.netconfServer.HandleRPC(ctx, sess, rpc)
+
+		// Serialize and send reply
+		replyXML, err := MarshalReply(reply)
+		if err != nil {
+			s.log.Error("Failed to serialize reply", "error", err)
+			// Send generic error
+			errorReply := NewErrorReply(rpc.MessageID, ErrOperationFailed("reply serialization failed"))
+			errorXML, _ := MarshalReply(errorReply)
+			writer.WriteMessage(errorXML)
+			continue
+		}
+
+		if err := writer.WriteMessage(replyXML); err != nil {
+			s.log.Error("Failed to send reply", "error", err)
+			return
+		}
+
+		s.log.Debug("RPC reply sent", "session", sess.ID, "message_id", rpc.MessageID)
+	}
 }

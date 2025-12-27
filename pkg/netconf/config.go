@@ -7,6 +7,7 @@ type SSHConfig struct {
 	ListenAddr      string        // Default: ":830"
 	HostKeyPath     string        // Default: "/var/lib/arca-router/ssh_host_ed25519_key"
 	UserDBPath      string        // Default: "/var/lib/arca-router/users.db"
+	DatastorePath   string        // Default: "/var/lib/arca-router/config.db"
 	IdleTimeout     time.Duration // Default: 30m (idle timeout)
 	AbsoluteTimeout time.Duration // Default: 24h (max session lifetime)
 	MaxSessions     int           // Default: 100
@@ -29,6 +30,7 @@ func DefaultSSHConfig() *SSHConfig {
 		ListenAddr:        ":830",
 		HostKeyPath:       "/var/lib/arca-router/ssh_host_ed25519_key",
 		UserDBPath:        "/var/lib/arca-router/users.db",
+		DatastorePath:     "/var/lib/arca-router/config.db",
 		IdleTimeout:       30 * time.Minute,
 		AbsoluteTimeout:   24 * time.Hour,
 		MaxSessions:       100,

@@ -20,10 +20,11 @@ var (
 func main() {
 	// Command line flags
 	var (
-		listenAddr  = flag.String("listen", ":830", "SSH listen address")
-		hostKeyPath = flag.String("host-key", "/var/lib/arca-router/ssh_host_ed25519_key", "Path to SSH host key")
-		userDBPath  = flag.String("user-db", "/var/lib/arca-router/users.db", "Path to user database")
-		showVersion = flag.Bool("version", false, "Show version information")
+		listenAddr    = flag.String("listen", ":830", "SSH listen address")
+		hostKeyPath   = flag.String("host-key", "/var/lib/arca-router/ssh_host_ed25519_key", "Path to SSH host key")
+		userDBPath    = flag.String("user-db", "/var/lib/arca-router/users.db", "Path to user database")
+		datastorePath = flag.String("datastore", "/var/lib/arca-router/config.db", "Path to config datastore")
+		showVersion   = flag.Bool("version", false, "Show version information")
 	)
 	flag.Parse()
 
@@ -42,6 +43,7 @@ func main() {
 	config.ListenAddr = *listenAddr
 	config.HostKeyPath = *hostKeyPath
 	config.UserDBPath = *userDBPath
+	config.DatastorePath = *datastorePath
 
 	// Create SSH server
 	server, err := netconf.NewSSHServer(config)
