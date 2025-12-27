@@ -64,6 +64,9 @@ func (s *Server) HandleRPC(ctx context.Context, sess *Session, rpc *RPC) *RPCRep
 
 	// Check RBAC after confirming operation exists
 	if err := s.checkRBAC(sess.Role, opName); err != nil {
+		// Log RBAC denial for audit trail
+		log.Printf("[RBAC] Access denied: user=%s role=%s operation=%s session=%s",
+			sess.Username, sess.Role, opName, sess.ID)
 		return NewErrorReply(rpc.MessageID, err)
 	}
 

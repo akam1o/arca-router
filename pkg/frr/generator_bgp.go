@@ -61,6 +61,14 @@ func GenerateBGPConfig(cfg *BGPConfig) (string, error) {
 		for _, n := range neighbors {
 			if !n.IsIPv6 {
 				b.WriteString(fmt.Sprintf("  neighbor %s activate\n", n.IP))
+
+				// Apply route-maps (import/export policies)
+				if n.RouteMapIn != "" {
+					b.WriteString(fmt.Sprintf("  neighbor %s route-map %s in\n", n.IP, n.RouteMapIn))
+				}
+				if n.RouteMapOut != "" {
+					b.WriteString(fmt.Sprintf("  neighbor %s route-map %s out\n", n.IP, n.RouteMapOut))
+				}
 			}
 		}
 
@@ -74,6 +82,14 @@ func GenerateBGPConfig(cfg *BGPConfig) (string, error) {
 		for _, n := range neighbors {
 			if n.IsIPv6 {
 				b.WriteString(fmt.Sprintf("  neighbor %s activate\n", n.IP))
+
+				// Apply route-maps (import/export policies)
+				if n.RouteMapIn != "" {
+					b.WriteString(fmt.Sprintf("  neighbor %s route-map %s in\n", n.IP, n.RouteMapIn))
+				}
+				if n.RouteMapOut != "" {
+					b.WriteString(fmt.Sprintf("  neighbor %s route-map %s out\n", n.IP, n.RouteMapOut))
+				}
 			}
 		}
 
