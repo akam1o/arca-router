@@ -8,6 +8,7 @@ require (
 )
 
 require (
+	github.com/chzyer/readline v1.5.1 // indirect
 	github.com/coreos/go-semver v0.3.1 // indirect
 	github.com/coreos/go-systemd/v22 v22.5.0 // indirect
 	github.com/fsnotify/fsnotify v1.9.0 // indirect

@@ -31,13 +31,14 @@ func main() {
 	// Parse command line flags
 	f := parseFlags()
 
-	// Parse subcommand
+	ctx := context.Background()
+
+	// If no command is provided, start interactive mode
 	if flag.NArg() < 1 {
-		showUsage()
-		os.Exit(ExitUsageError)
+		exitCode := cmdInteractive(ctx, f)
+		os.Exit(exitCode)
 	}
 
-	ctx := context.Background()
 	command := flag.Arg(0)
 
 	// Dispatch command
@@ -90,7 +91,10 @@ func dispatch(ctx context.Context, command string, args []string, f *flags) int 
 }
 
 func showUsage() {
-	fmt.Fprintf(os.Stderr, `Usage: arca-cli [options] <command> [args...]
+	fmt.Fprintf(os.Stderr, `Usage: arca-cli [options] [command] [args...]
+
+Interactive Mode:
+  arca-cli                    Start interactive CLI shell (no command given)
 
 Commands:
   help              Show this help message
@@ -112,14 +116,16 @@ Options:
   -socket <path>      VPP API socket path (default: /run/vpp/api.sock)
   -config <path>      Configuration file path (default: /etc/arca-router/arca.conf)
 
-Phase 2 Limitations:
-  - Interactive mode not available (Phase 3)
-  - 'commit' and 'rollback' commands not available (Phase 3)
-  - Configuration editing not available (Phase 3)
+Phase 3 Features (Interactive mode):
+  - Junos-style configuration commands (set, delete, edit)
+  - Commit/rollback support
+  - Configuration mode with candidate datastore
+  - Tab completion and command history
 
 Examples:
-  arca-cli show configuration
-  arca-cli show interfaces
+  arca-cli                    # Start interactive mode
+  arca-cli show configuration # Show configuration (one-shot)
+  arca-cli show interfaces    # Show interfaces (one-shot)
   arca-cli show bgp summary
   arca-cli version
 
