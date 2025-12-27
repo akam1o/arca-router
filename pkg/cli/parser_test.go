@@ -354,9 +354,9 @@ func TestTokenizeCommandEdgeCases(t *testing.T) {
 		wantErr bool
 	}{
 		{
-			name:    "command with tabs (tabs remain)",
+			name:    "command with tabs (split like spaces)",
 			line:    "set\tsystem\thost-name\trouter1",
-			want:    []string{"set\tsystem\thost-name\trouter1"},
+			want:    []string{"set", "system", "host-name", "router1"},
 			wantErr: false,
 		},
 		{

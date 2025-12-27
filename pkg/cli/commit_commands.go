@@ -37,6 +37,11 @@ func (s *Session) CommitWithOptions(ctx context.Context, opts CommitOptions) err
 		return nil
 	}
 
+	// Verify lock before commit
+	if err := s.verifyLock(ctx); err != nil {
+		return fmt.Errorf("cannot commit: %w", err)
+	}
+
 	// Prepare commit message
 	message := opts.Message
 	if message == "" {
@@ -78,6 +83,11 @@ func (s *Session) RollbackWithNumber(ctx context.Context, rollbackNum int) error
 	// Rollback 0 = discard changes
 	if rollbackNum == 0 {
 		return s.DiscardChangesWithMessage(ctx)
+	}
+
+	// Verify lock before rollback
+	if err := s.verifyLock(ctx); err != nil {
+		return fmt.Errorf("cannot rollback: %w", err)
 	}
 
 	// Get commit history

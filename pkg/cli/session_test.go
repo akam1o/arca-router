@@ -9,7 +9,10 @@ import (
 )
 
 // mockDatastore implements datastore.Datastore for testing
-type mockDatastore struct{}
+type mockDatastore struct {
+	lockSessionID string
+	lockAcquired  bool
+}
 
 func (m *mockDatastore) GetRunning(ctx context.Context) (*datastore.RunningConfig, error) {
 	return &datastore.RunningConfig{
@@ -56,10 +59,14 @@ func (m *mockDatastore) CompareCommits(ctx context.Context, commitID1, commitID2
 }
 
 func (m *mockDatastore) AcquireLock(ctx context.Context, req *datastore.LockRequest) error {
+	m.lockSessionID = req.SessionID
+	m.lockAcquired = true
 	return nil
 }
 
 func (m *mockDatastore) ReleaseLock(ctx context.Context, target string, sessionID string) error {
+	m.lockAcquired = false
+	m.lockSessionID = ""
 	return nil
 }
 
@@ -72,7 +79,18 @@ func (m *mockDatastore) StealLock(ctx context.Context, req *datastore.StealLockR
 }
 
 func (m *mockDatastore) GetLockInfo(ctx context.Context, target string) (*datastore.LockInfo, error) {
-	return &datastore.LockInfo{}, nil
+	if !m.lockAcquired {
+		return &datastore.LockInfo{
+			IsLocked: false,
+		}, nil
+	}
+	return &datastore.LockInfo{
+		IsLocked:   true,
+		SessionID:  m.lockSessionID,
+		User:       "testuser",
+		AcquiredAt: time.Now().Add(-5 * time.Minute),
+		ExpiresAt:  time.Now().Add(25 * time.Minute), // 30 minutes lock, 5 minutes elapsed
+	}, nil
 }
 
 func (m *mockDatastore) ListCommitHistory(ctx context.Context, opts *datastore.HistoryOptions) ([]*datastore.CommitHistoryEntry, error) {
