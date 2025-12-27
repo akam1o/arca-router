@@ -70,6 +70,12 @@ type BGPNeighbor struct {
 
 	// IsIPv6 indicates if this is an IPv6 neighbor
 	IsIPv6 bool
+
+	// RouteMapIn is the route-map applied to incoming routes (import policy)
+	RouteMapIn string
+
+	// RouteMapOut is the route-map applied to outgoing routes (export policy)
+	RouteMapOut string
 }
 
 // OSPFConfig represents FRR OSPF configuration.

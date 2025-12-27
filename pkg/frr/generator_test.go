@@ -325,3 +325,139 @@ func TestHasIPAddress(t *testing.T) {
 		})
 	}
 }
+
+// TestConvertBGPConfigPolicyValidation tests validation of policy references
+func TestConvertBGPConfigPolicyValidation(t *testing.T) {
+	tests := []struct {
+		name    string
+		cfg     *config.Config
+		wantErr bool
+		errMsg  string
+	}{
+		{
+			name: "valid policy references",
+			cfg: &config.Config{
+				RoutingOptions: &config.RoutingOptions{
+					AutonomousSystem: 65001,
+					RouterID:         "10.0.1.1",
+				},
+				PolicyOptions: &config.PolicyOptions{
+					PolicyStatements: map[string]*config.PolicyStatement{
+						"IMPORT-POLICY": {Name: "IMPORT-POLICY"},
+						"EXPORT-POLICY": {Name: "EXPORT-POLICY"},
+					},
+				},
+				Protocols: &config.ProtocolConfig{
+					BGP: &config.BGPConfig{
+						Groups: map[string]*config.BGPGroup{
+							"external": {
+								Import: "IMPORT-POLICY",
+								Export: "EXPORT-POLICY",
+								Neighbors: map[string]*config.BGPNeighbor{
+									"10.0.1.2": {IP: "10.0.1.2", PeerAS: 65002},
+								},
+							},
+						},
+					},
+				},
+			},
+			wantErr: false,
+		},
+		{
+			name: "missing import policy",
+			cfg: &config.Config{
+				RoutingOptions: &config.RoutingOptions{
+					AutonomousSystem: 65001,
+					RouterID:         "10.0.1.1",
+				},
+				PolicyOptions: &config.PolicyOptions{
+					PolicyStatements: map[string]*config.PolicyStatement{
+						"EXPORT-POLICY": {Name: "EXPORT-POLICY"},
+					},
+				},
+				Protocols: &config.ProtocolConfig{
+					BGP: &config.BGPConfig{
+						Groups: map[string]*config.BGPGroup{
+							"external": {
+								Import: "NONEXISTENT-POLICY",
+								Export: "EXPORT-POLICY",
+								Neighbors: map[string]*config.BGPNeighbor{
+									"10.0.1.2": {IP: "10.0.1.2", PeerAS: 65002},
+								},
+							},
+						},
+					},
+				},
+			},
+			wantErr: true,
+			errMsg:  "import policy 'NONEXISTENT-POLICY' but policy-statement does not exist",
+		},
+		{
+			name: "missing export policy",
+			cfg: &config.Config{
+				RoutingOptions: &config.RoutingOptions{
+					AutonomousSystem: 65001,
+					RouterID:         "10.0.1.1",
+				},
+				PolicyOptions: &config.PolicyOptions{
+					PolicyStatements: map[string]*config.PolicyStatement{
+						"IMPORT-POLICY": {Name: "IMPORT-POLICY"},
+					},
+				},
+				Protocols: &config.ProtocolConfig{
+					BGP: &config.BGPConfig{
+						Groups: map[string]*config.BGPGroup{
+							"external": {
+								Import: "IMPORT-POLICY",
+								Export: "NONEXISTENT-EXPORT",
+								Neighbors: map[string]*config.BGPNeighbor{
+									"10.0.1.2": {IP: "10.0.1.2", PeerAS: 65002},
+								},
+							},
+						},
+					},
+				},
+			},
+			wantErr: true,
+			errMsg:  "export policy 'NONEXISTENT-EXPORT' but policy-statement does not exist",
+		},
+		{
+			name: "policy reference with no policy-options configured",
+			cfg: &config.Config{
+				RoutingOptions: &config.RoutingOptions{
+					AutonomousSystem: 65001,
+					RouterID:         "10.0.1.1",
+				},
+				Protocols: &config.ProtocolConfig{
+					BGP: &config.BGPConfig{
+						Groups: map[string]*config.BGPGroup{
+							"external": {
+								Import: "IMPORT-POLICY",
+								Neighbors: map[string]*config.BGPNeighbor{
+									"10.0.1.2": {IP: "10.0.1.2", PeerAS: 65002},
+								},
+							},
+						},
+					},
+				},
+			},
+			wantErr: true,
+			errMsg:  "import policy 'IMPORT-POLICY' but no policy-options are configured",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := convertBGPConfig(tt.cfg, nil)
+			if (err != nil) != tt.wantErr {
+				t.Errorf("convertBGPConfig() error = %v, wantErr %v", err, tt.wantErr)
+				return
+			}
+			if err != nil && tt.errMsg != "" {
+				if !strings.Contains(err.Error(), tt.errMsg) {
+					t.Errorf("convertBGPConfig() error = %v, expected to contain %q", err, tt.errMsg)
+				}
+			}
+		})
+	}
+}

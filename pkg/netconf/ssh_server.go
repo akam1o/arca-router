@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/ed25519"
 	"crypto/rand"
+	"encoding/base64"
 	"encoding/binary"
 	"encoding/pem"
 	"fmt"
@@ -16,6 +17,7 @@ import (
 
 	"golang.org/x/crypto/ssh"
 
+	"github.com/akam1o/arca-router/pkg/auth"
 	"github.com/akam1o/arca-router/pkg/datastore"
 	"github.com/akam1o/arca-router/pkg/logger"
 )
@@ -31,6 +33,7 @@ type SSHServer struct {
 	datastore     datastore.Datastore
 	netconfServer *Server
 	sshConfig     *ssh.ServerConfig
+	rateLimiter   *RateLimiter
 	done          chan struct{}
 	wg            sync.WaitGroup
 	mu            sync.Mutex
@@ -58,6 +61,16 @@ func NewSSHServer(config *SSHConfig) (*SSHServer, error) {
 		return nil, fmt.Errorf("failed to load host key: %w", err)
 	}
 
+	// Validate host key permissions for security
+	// This ensures the key file has 0600 permissions (owner read/write only)
+	if err := auth.ValidateKeyFilePermissions(config.HostKeyPath, 0, 0); err != nil {
+		log.Warn("Host key has insecure permissions - startup allowed but should be fixed",
+			"path", config.HostKeyPath,
+			"error", err)
+		// Note: We warn but don't fail startup to avoid breaking existing deployments
+		// In production, consider making this a hard failure
+	}
+
 	// Create user database
 	userDB, err := NewUserDatabase(config.UserDBPath, log)
 	if err != nil {
@@ -80,6 +93,9 @@ func NewSSHServer(config *SSHConfig) (*SSHServer, error) {
 	// Create NETCONF server
 	netconfServer := NewServer(ds, sessionMgr)
 
+	// Create rate limiter for brute force protection
+	rateLimiter := NewRateLimiter(config)
+
 	// Create server instance first to reference in password callback
 	srv := &SSHServer{
 		config:        config,
@@ -87,12 +103,13 @@ func NewSSHServer(config *SSHConfig) (*SSHServer, error) {
 		userDB:        userDB,
 		datastore:     ds,
 		netconfServer: netconfServer,
+		rateLimiter:   rateLimiter,
 		sshConfig:     nil, // Will be set below
 		done:          make(chan struct{}),
 		log:           log,
 	}
 
-	// Create SSH server config with password authentication
+	// Create SSH server config with password and public key authentication
 	sshConfig := &ssh.ServerConfig{
 		Config: ssh.Config{
 			Ciphers:      config.SSHCiphers,
@@ -101,6 +118,8 @@ func NewSSHServer(config *SSHConfig) (*SSHServer, error) {
 		},
 		// Phase 4: Password authentication via user database
 		PasswordCallback: srv.passwordCallback,
+		// Public key authentication
+		PublicKeyCallback: srv.publicKeyCallback,
 	}
 	sshConfig.AddHostKey(hostKey)
 	srv.sshConfig = sshConfig
@@ -163,6 +182,9 @@ func (s *SSHServer) Stop() error {
 
 	// Close all sessions (this will trigger cleanup goroutine to stop)
 	s.sessionMgr.CloseAll()
+
+	// Stop rate limiter
+	s.rateLimiter.Stop()
 
 	// Wait for goroutines to finish
 	s.wg.Wait()
@@ -330,13 +352,90 @@ func (s *SSHServer) passwordCallback(meta ssh.ConnMetadata, password []byte) (*s
 	username := meta.User()
 	sourceIP := extractIP(meta.RemoteAddr())
 
+	// Check rate limiting - IP lockout
+	if allowed, unlockAt := s.rateLimiter.CheckIP(sourceIP); !allowed {
+		s.log.Warn("Authentication blocked - IP locked out", "ip", sourceIP, "unlock_at", unlockAt)
+		return nil, FormatLockoutError(unlockAt)
+	}
+
+	// Check rate limiting - User lockout
+	if allowed, unlockAt := s.rateLimiter.CheckUser(username); !allowed {
+		s.log.Warn("Authentication blocked - user locked out", "username", username, "unlock_at", unlockAt)
+		return nil, FormatLockoutError(unlockAt)
+	}
+
 	// Verify password using user database
 	user, reason, err := s.userDB.VerifyPasswordWithReason(username, string(password))
 	if err != nil {
+		// Record failure in rate limiter
+		ipLocked, userLocked := s.rateLimiter.RecordFailure(sourceIP, username)
+		if ipLocked {
+			s.log.Warn("IP locked out due to repeated failures", "ip", sourceIP, "failures", s.config.IPFailureLimit)
+		}
+		if userLocked {
+			s.log.Warn("User locked out due to repeated failures", "username", username, "failures", s.config.UserFailureLimit)
+		}
+
 		// Log authentication failure with detailed reason
 		s.userDB.LogAuthFailure(username, sourceIP, reason)
 		return nil, fmt.Errorf("authentication failed")
 	}
+
+	// Record success (clears failure history)
+	s.rateLimiter.RecordSuccess(sourceIP, username)
+
+	// Log authentication success
+	s.userDB.LogAuthSuccess(username, sourceIP)
+
+	// Return permissions with user context for session creation
+	perms := &ssh.Permissions{
+		Extensions: map[string]string{
+			"username": username,
+			"role":     user.Role,
+		},
+	}
+	return perms, nil
+}
+
+// publicKeyCallback handles SSH public key authentication
+func (s *SSHServer) publicKeyCallback(meta ssh.ConnMetadata, key ssh.PublicKey) (*ssh.Permissions, error) {
+	username := meta.User()
+	sourceIP := extractIP(meta.RemoteAddr())
+
+	// Check rate limiting - IP lockout
+	if allowed, unlockAt := s.rateLimiter.CheckIP(sourceIP); !allowed {
+		s.log.Warn("Authentication blocked - IP locked out", "ip", sourceIP, "unlock_at", unlockAt)
+		return nil, FormatLockoutError(unlockAt)
+	}
+
+	// Check rate limiting - User lockout
+	if allowed, unlockAt := s.rateLimiter.CheckUser(username); !allowed {
+		s.log.Warn("Authentication blocked - user locked out", "username", username, "unlock_at", unlockAt)
+		return nil, FormatLockoutError(unlockAt)
+	}
+
+	// Get base64-encoded key data from the provided key
+	keyData := base64.StdEncoding.EncodeToString(key.Marshal())
+
+	// Verify public key using user database
+	user, reason, err := s.userDB.VerifyPublicKeyAuth(username, keyData)
+	if err != nil {
+		// Record failure in rate limiter
+		ipLocked, userLocked := s.rateLimiter.RecordFailure(sourceIP, username)
+		if ipLocked {
+			s.log.Warn("IP locked out due to repeated failures", "ip", sourceIP, "failures", s.config.IPFailureLimit)
+		}
+		if userLocked {
+			s.log.Warn("User locked out due to repeated failures", "username", username, "failures", s.config.UserFailureLimit)
+		}
+
+		// Log authentication failure with detailed reason
+		s.userDB.LogAuthFailure(username, sourceIP, reason)
+		return nil, fmt.Errorf("authentication failed")
+	}
+
+	// Record success (clears failure history)
+	s.rateLimiter.RecordSuccess(sourceIP, username)
 
 	// Log authentication success
 	s.userDB.LogAuthSuccess(username, sourceIP)

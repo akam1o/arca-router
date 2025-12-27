@@ -245,6 +245,27 @@ func convertBGPConfig(cfg *config.Config, ifaceMapping map[string]string) (*BGPC
 				frrNeighbor.UpdateSource = updateSource
 			}
 
+				// Apply route-maps from group's import/export policies
+			// Validate that referenced policies exist
+			if group.Import != "" {
+				if cfg.PolicyOptions == nil || cfg.PolicyOptions.PolicyStatements == nil {
+					return nil, fmt.Errorf("BGP group references import policy '%s' but no policy-options are configured", group.Import)
+				}
+				if _, exists := cfg.PolicyOptions.PolicyStatements[group.Import]; !exists {
+					return nil, fmt.Errorf("BGP group references import policy '%s' but policy-statement does not exist", group.Import)
+				}
+				frrNeighbor.RouteMapIn = group.Import
+			}
+			if group.Export != "" {
+				if cfg.PolicyOptions == nil || cfg.PolicyOptions.PolicyStatements == nil {
+					return nil, fmt.Errorf("BGP group references export policy '%s' but no policy-options are configured", group.Export)
+				}
+				if _, exists := cfg.PolicyOptions.PolicyStatements[group.Export]; !exists {
+					return nil, fmt.Errorf("BGP group references export policy '%s' but policy-statement does not exist", group.Export)
+				}
+				frrNeighbor.RouteMapOut = group.Export
+			}
+
 			frrBGP.Neighbors = append(frrBGP.Neighbors, frrNeighbor)
 		}
 	}

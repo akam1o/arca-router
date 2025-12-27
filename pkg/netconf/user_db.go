@@ -9,6 +9,7 @@ import (
 
 	_ "github.com/mattn/go-sqlite3"
 
+	"github.com/akam1o/arca-router/pkg/auth"
 	"github.com/akam1o/arca-router/pkg/logger"
 )
 
@@ -97,6 +98,22 @@ func (udb *UserDatabase) Initialize() error {
 	);
 
 	CREATE INDEX IF NOT EXISTS idx_users_enabled ON users(enabled);
+
+	CREATE TABLE IF NOT EXISTS user_public_keys (
+		id          INTEGER PRIMARY KEY AUTOINCREMENT,
+		username    TEXT NOT NULL,
+		algorithm   TEXT NOT NULL,
+		key_data    TEXT NOT NULL,
+		fingerprint TEXT NOT NULL UNIQUE,
+		comment     TEXT,
+		enabled     INTEGER NOT NULL DEFAULT 1,
+		created_at  INTEGER NOT NULL,
+		FOREIGN KEY (username) REFERENCES users(username) ON DELETE CASCADE
+	);
+
+	CREATE INDEX IF NOT EXISTS idx_public_keys_username ON user_public_keys(username);
+	CREATE INDEX IF NOT EXISTS idx_public_keys_fingerprint ON user_public_keys(fingerprint);
+	CREATE INDEX IF NOT EXISTS idx_public_keys_enabled ON user_public_keys(enabled);
 	`
 
 	if _, err := udb.db.Exec(schema); err != nil {
@@ -291,7 +308,7 @@ func (udb *UserDatabase) VerifyPassword(username, password string) (*User, error
 	}
 
 	// Verify password (constant-time comparison)
-	valid, err := VerifyPassword(password, user.PasswordHash)
+	valid, err := auth.VerifyPassword(password, user.PasswordHash)
 	if err != nil {
 		udb.log.Warn("Authentication failed", "username", username, "reason", "password_verification_error", "error", err)
 		return nil, fmt.Errorf("authentication failed")
@@ -320,7 +337,7 @@ func (udb *UserDatabase) VerifyPasswordWithReason(username, password string) (*U
 	user, err := udb.GetUser(username)
 	if err != nil {
 		// Perform dummy verification to maintain constant timing
-		_, _ = VerifyPassword(password, dummyHash)
+		_, _ = auth.VerifyPassword(password, dummyHash)
 		return nil, "user_not_found", fmt.Errorf("authentication failed")
 	}
 
@@ -333,7 +350,7 @@ func (udb *UserDatabase) VerifyPasswordWithReason(username, password string) (*U
 	}
 
 	// Verify password (constant-time comparison)
-	valid, err := VerifyPassword(password, hashToVerify)
+	valid, err := auth.VerifyPassword(password, hashToVerify)
 	if err != nil {
 		return nil, "password_verification_error", fmt.Errorf("authentication failed")
 	}
@@ -407,4 +424,170 @@ func boolToInt(b bool) int {
 		return 1
 	}
 	return 0
+}
+
+// AddPublicKey adds a public key for a user
+func (udb *UserDatabase) AddPublicKey(username, algorithm, keyData, fingerprint, comment string) error {
+	if username == "" || algorithm == "" || keyData == "" || fingerprint == "" {
+		return fmt.Errorf("username, algorithm, key_data, and fingerprint are required")
+	}
+
+	// Verify user exists
+	if _, err := udb.GetUser(username); err != nil {
+		return fmt.Errorf("user not found: %s", username)
+	}
+
+	now := time.Now().Unix()
+	query := `INSERT INTO user_public_keys (username, algorithm, key_data, fingerprint, comment, enabled, created_at)
+	          VALUES (?, ?, ?, ?, ?, 1, ?)`
+
+	_, err := udb.db.Exec(query, username, algorithm, keyData, fingerprint, comment, now)
+	if err != nil {
+		return fmt.Errorf("failed to add public key: %w", err)
+	}
+
+	udb.log.Info("Public key added", "username", username, "fingerprint", fingerprint, "algorithm", algorithm)
+	return nil
+}
+
+// GetPublicKey retrieves a specific public key by fingerprint
+func (udb *UserDatabase) GetPublicKey(fingerprint string) (*PublicKeyRecord, error) {
+	query := `SELECT id, username, algorithm, key_data, fingerprint, comment, enabled, created_at
+	          FROM user_public_keys WHERE fingerprint = ?`
+
+	var record PublicKeyRecord
+	var enabled int
+	err := udb.db.QueryRow(query, fingerprint).Scan(
+		&record.ID,
+		&record.Username,
+		&record.Algorithm,
+		&record.KeyData,
+		&record.Fingerprint,
+		&record.Comment,
+		&enabled,
+		&record.CreatedAt,
+	)
+	if err == sql.ErrNoRows {
+		return nil, fmt.Errorf("public key not found: %s", fingerprint)
+	}
+	if err != nil {
+		return nil, fmt.Errorf("failed to get public key: %w", err)
+	}
+
+	record.Enabled = enabled == 1
+	return &record, nil
+}
+
+// ListPublicKeys lists all public keys for a user
+func (udb *UserDatabase) ListPublicKeys(username string) ([]PublicKeyRecord, error) {
+	query := `SELECT id, username, algorithm, key_data, fingerprint, comment, enabled, created_at
+	          FROM user_public_keys WHERE username = ? ORDER BY created_at DESC`
+
+	rows, err := udb.db.Query(query, username)
+	if err != nil {
+		return nil, fmt.Errorf("failed to list public keys: %w", err)
+	}
+	defer rows.Close()
+
+	var keys []PublicKeyRecord
+	for rows.Next() {
+		var record PublicKeyRecord
+		var enabled int
+		if err := rows.Scan(&record.ID, &record.Username, &record.Algorithm, &record.KeyData,
+			&record.Fingerprint, &record.Comment, &enabled, &record.CreatedAt); err != nil {
+			return nil, fmt.Errorf("failed to scan public key: %w", err)
+		}
+		record.Enabled = enabled == 1
+		keys = append(keys, record)
+	}
+
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("failed to iterate public keys: %w", err)
+	}
+
+	return keys, nil
+}
+
+// RemovePublicKey removes a public key by fingerprint
+func (udb *UserDatabase) RemovePublicKey(fingerprint string) error {
+	query := "DELETE FROM user_public_keys WHERE fingerprint = ?"
+	result, err := udb.db.Exec(query, fingerprint)
+	if err != nil {
+		return fmt.Errorf("failed to remove public key: %w", err)
+	}
+
+	rows, err := result.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("failed to check rows affected: %w", err)
+	}
+	if rows == 0 {
+		return fmt.Errorf("public key not found: %s", fingerprint)
+	}
+
+	udb.log.Info("Public key removed", "fingerprint", fingerprint)
+	return nil
+}
+
+// UpdatePublicKeyStatus updates the enabled status of a public key
+func (udb *UserDatabase) UpdatePublicKeyStatus(fingerprint string, enabled bool) error {
+	query := "UPDATE user_public_keys SET enabled = ? WHERE fingerprint = ?"
+	result, err := udb.db.Exec(query, boolToInt(enabled), fingerprint)
+	if err != nil {
+		return fmt.Errorf("failed to update public key status: %w", err)
+	}
+
+	rows, err := result.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("failed to check rows affected: %w", err)
+	}
+	if rows == 0 {
+		return fmt.Errorf("public key not found: %s", fingerprint)
+	}
+
+	udb.log.Info("Public key status updated", "fingerprint", fingerprint, "enabled", enabled)
+	return nil
+}
+
+// VerifyPublicKeyAuth verifies public key authentication for a user
+// Returns the user and reason string (empty if successful)
+func (udb *UserDatabase) VerifyPublicKeyAuth(username, keyData string) (*User, string, error) {
+	// Get user from database
+	user, err := udb.GetUser(username)
+	if err != nil {
+		return nil, "user_not_found", fmt.Errorf("authentication failed")
+	}
+
+	// Check if user is enabled
+	if !user.Enabled {
+		return nil, "user_disabled", fmt.Errorf("authentication failed")
+	}
+
+	// Find matching public key
+	query := `SELECT fingerprint FROM user_public_keys
+	          WHERE username = ? AND key_data = ? AND enabled = 1`
+
+	var fingerprint string
+	err = udb.db.QueryRow(query, username, keyData).Scan(&fingerprint)
+	if err == sql.ErrNoRows {
+		return nil, "key_not_found", fmt.Errorf("authentication failed")
+	}
+	if err != nil {
+		return nil, "key_verification_error", fmt.Errorf("authentication failed")
+	}
+
+	// Success: return user (without password hash for security)
+	user.PasswordHash = ""
+	return user, "", nil
+}
+
+// PublicKeyRecord represents a stored public key record
+type PublicKeyRecord struct {
+	ID          int64
+	Username    string
+	Algorithm   string
+	KeyData     string
+	Fingerprint string
+	Comment     string
+	Enabled     bool
+	CreatedAt   int64
 }
