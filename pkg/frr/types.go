@@ -27,6 +27,9 @@ type Config struct {
 	// RouteMaps holds route-map configurations
 	RouteMaps []RouteMap
 
+	// ASPathAccessLists holds AS-path access-list configurations
+	ASPathAccessLists []ASPathAccessList
+
 	// InterfaceMapping maps Junos interface names to Linux interface names
 	// Key: Junos name (e.g., "ge-0/0/0"), Value: Linux name (e.g., "ge0-0-0")
 	InterfaceMapping map[string]string
@@ -157,6 +160,27 @@ type RouteMap struct {
 
 	// Entries holds route-map entries (terms)
 	Entries []RouteMapEntry
+}
+
+// ASPathAccessList represents an FRR BGP AS-path access-list.
+type ASPathAccessList struct {
+	// Name is the access-list name
+	Name string
+
+	// Entries holds AS-path access-list entries
+	Entries []ASPathAccessListEntry
+}
+
+// ASPathAccessListEntry represents a single entry in an AS-path access-list.
+type ASPathAccessListEntry struct {
+	// Seq is the sequence number
+	Seq int
+
+	// Action is "permit" or "deny"
+	Action string
+
+	// Regex is the AS-path regular expression
+	Regex string
 }
 
 // RouteMapEntry represents a single entry in a route-map.

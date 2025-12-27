@@ -61,14 +61,15 @@ func GenerateFRRConfig(cfg *config.Config) (*Config, error) {
 		frrConfig.StaticRoutes = staticRoutes
 	}
 
-	// Convert policy-options (prefix-lists and route-maps)
+	// Convert policy-options (prefix-lists, route-maps, and AS-path access-lists)
 	if cfg.PolicyOptions != nil {
-		prefixLists, routeMaps, err := convertPolicyOptions(cfg)
+		prefixLists, routeMaps, asPathLists, err := convertPolicyOptions(cfg)
 		if err != nil {
 			return nil, NewGenerateError("failed to convert policy-options", err)
 		}
 		frrConfig.PrefixLists = prefixLists
 		frrConfig.RouteMaps = routeMaps
+		frrConfig.ASPathAccessLists = asPathLists
 	}
 
 	return frrConfig, nil
@@ -120,9 +121,18 @@ func GenerateFRRConfigFile(frrConfig *Config) (string, error) {
 		b.WriteString(prefixListConfig)
 	}
 
+	// AS-path access-lists
+	if len(frrConfig.ASPathAccessLists) > 0 {
+		asPathConfig, err := GenerateASPathAccessListConfig(frrConfig.ASPathAccessLists)
+		if err != nil {
+			return "", err
+		}
+		b.WriteString(asPathConfig)
+	}
+
 	// Route-maps
 	if len(frrConfig.RouteMaps) > 0 {
-		routeMapConfig, err := GenerateRouteMapConfig(frrConfig.RouteMaps)
+		routeMapConfig, err := GenerateRouteMapConfig(frrConfig.RouteMaps, frrConfig.PrefixLists)
 		if err != nil {
 			return "", err
 		}

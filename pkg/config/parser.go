@@ -3,6 +3,7 @@ package config
 import (
 	"fmt"
 	"io"
+	"net"
 	"strconv"
 
 	"github.com/akam1o/arca-router/pkg/errors"
@@ -674,6 +675,12 @@ func (p *Parser) parsePrefixList(config *Config) error {
 		return p.error("expected prefix value")
 	}
 	prefix := p.current.Value
+
+	// Validate CIDR format
+	if err := validateCIDR(prefix); err != nil {
+		return p.error(fmt.Sprintf("invalid prefix %q: %v", prefix, err))
+	}
+
 	p.nextToken()
 
 	// Initialize policy-options if needed
@@ -809,6 +816,12 @@ func (p *Parser) parsePolicyMatchConditions(term *PolicyTerm) error {
 			return p.error("expected protocol name")
 		}
 		protocol := p.current.Value
+
+		// Validate protocol
+		if err := validateProtocol(protocol); err != nil {
+			return p.error(fmt.Sprintf("invalid protocol: %v", err))
+		}
+
 		p.nextToken()
 
 		if term.From == nil {
@@ -823,6 +836,12 @@ func (p *Parser) parsePolicyMatchConditions(term *PolicyTerm) error {
 			return p.error("expected neighbor IP")
 		}
 		neighbor := p.current.Value
+
+		// Validate IP address
+		if err := validateIPAddress(neighbor); err != nil {
+			return p.error(fmt.Sprintf("invalid neighbor IP %q: %v", neighbor, err))
+		}
+
 		p.nextToken()
 
 		if term.From == nil {
@@ -901,6 +920,12 @@ func (p *Parser) parsePolicyActions(term *PolicyTerm) error {
 			return p.error("expected community value")
 		}
 		community := p.current.Value
+
+		// Validate community
+		if err := validateCommunity(community); err != nil {
+			return p.error(fmt.Sprintf("invalid community: %v", err))
+		}
+
 		p.nextToken()
 
 		if term.Then == nil {
@@ -912,4 +937,66 @@ func (p *Parser) parsePolicyActions(term *PolicyTerm) error {
 	default:
 		return p.error(fmt.Sprintf("unsupported action: %s", action))
 	}
+}
+
+// validateCIDR validates a CIDR prefix string
+func validateCIDR(prefix string) error {
+	_, _, err := net.ParseCIDR(prefix)
+	if err != nil {
+		return fmt.Errorf("invalid CIDR format: %w", err)
+	}
+	return nil
+}
+
+// validateProtocol validates a routing protocol name
+func validateProtocol(protocol string) error {
+	validProtocols := map[string]bool{
+		"bgp":       true,
+		"ospf":      true,
+		"ospf3":     true,
+		"static":    true,
+		"connected": true,
+		"direct":    true,
+		"kernel":    true,
+		"rip":       true,
+	}
+	if !validProtocols[protocol] {
+		return fmt.Errorf("unknown protocol %q, valid values: bgp, ospf, ospf3, static, connected, direct, kernel, rip", protocol)
+	}
+	return nil
+}
+
+// validateIPAddress validates an IP address (IPv4 or IPv6)
+func validateIPAddress(ip string) error {
+	if net.ParseIP(ip) == nil {
+		return fmt.Errorf("invalid IP address format")
+	}
+	return nil
+}
+
+// validateCommunity validates a BGP community string
+func validateCommunity(community string) error {
+	// Valid formats:
+	// - "65000:100" (standard community)
+	// - "no-export", "no-advertise", "local-AS", "no-peer" (well-known communities)
+	wellKnown := map[string]bool{
+		"no-export":    true,
+		"no-advertise": true,
+		"local-AS":     true,
+		"no-peer":      true,
+	}
+
+	if wellKnown[community] {
+		return nil
+	}
+
+	// Check standard format: ASN:value (must be exactly this format)
+	var asn, value uint32
+	var remainder string
+	n, err := fmt.Sscanf(community, "%d:%d%s", &asn, &value, &remainder)
+	if err != nil || n != 2 {
+		return fmt.Errorf("invalid community format %q, expected ASN:value or well-known community (no-export, no-advertise, local-AS, no-peer)", community)
+	}
+
+	return nil
 }
