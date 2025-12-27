@@ -164,9 +164,10 @@ func TestMarshalErrorReply(t *testing.T) {
 	}
 
 	xmlStr := string(data)
+	t.Logf("Marshaled XML:\n%s", xmlStr)
 
-	// Check error structure
-	if !strings.Contains(xmlStr, "<rpc-error>") {
+	// Check error structure (namespace may be present)
+	if !strings.Contains(xmlStr, "<rpc-error") {
 		t.Errorf("Missing <rpc-error> element")
 	}
 
