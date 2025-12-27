@@ -1,0 +1,59 @@
+---
+# Test NETCONF Connection to arca-router
+#
+# Usage:
+#   ansible-playbook -i inventory/hosts.ini test_connection.yml
+#
+# This playbook tests:
+# - NETCONF connection establishment
+# - Server capabilities
+# - Basic get-config operation
+
+- name: Test NETCONF Connection
+  hosts: routers
+  gather_facts: false
+
+  tasks:
+    - name: Test connection with get-config
+      ansible.netcommon.netconf_rpc:
+        rpc: get-config
+        content: |
+          <source>
+            <running/>
+          </source>
+          <filter>
+            <system xmlns="urn:arca:router:config:1.0">
+              <host-name/>
+            </system>
+          </filter>
+      register: result
+      ignore_errors: true
+
+    - name: Display connection result
+      ansible.builtin.debug:
+        msg: |
+          Connection: {{ 'SUCCESS' if result is succeeded else 'FAILED' }}
+          Host: {{ ansible_host }}:{{ ansible_port }}
+          User: {{ ansible_user }}
+      when: result is defined
+
+    - name: Display hostname from config
+      ansible.builtin.debug:
+        var: result.stdout
+      when: result is succeeded
+
+    - name: Display error if connection failed
+      ansible.builtin.debug:
+        msg: |
+          ERROR: {{ result.msg }}
+
+          Troubleshooting:
+          - Verify arca-netconfd is running: sudo systemctl status arca-netconfd
+          - Check port is listening: sudo netstat -tlnp | grep {{ ansible_port }}
+          - Test SSH manually: ssh -p {{ ansible_port }} {{ ansible_user }}@{{ ansible_host }} -s netconf
+      when: result is failed
+
+    - name: Fail if connection test failed
+      ansible.builtin.fail:
+        msg: "NETCONF connection test failed"
+      when: result is failed

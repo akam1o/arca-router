@@ -1,0 +1,124 @@
+---
+# Configure Network Interfaces on arca-router via NETCONF
+#
+# Usage:
+#   ansible-playbook -i inventory/hosts.ini configure_interfaces.yml
+#
+# This playbook demonstrates:
+# - Lock/unlock candidate datastore
+# - Configure multiple interfaces
+# - Commit changes
+# - Error handling with rescue/always
+
+- name: Configure Network Interfaces
+  hosts: routers
+  gather_facts: false
+
+  vars:
+    interfaces:
+      - name: ge-0/0/0
+        description: "Uplink to Core"
+        unit_id: 0
+        ip_address: 10.0.1.1
+        prefix_length: 24
+      - name: ge-0/0/1
+        description: "Internal LAN"
+        unit_id: 0
+        ip_address: 192.168.1.1
+        prefix_length: 24
+
+  tasks:
+    - name: Configure interfaces
+      block:
+        - name: Lock candidate datastore
+          ansible.netcommon.netconf_rpc:
+            rpc: lock
+            content: |
+              <target>
+                <candidate/>
+              </target>
+          register: lock_result
+
+        - name: Display lock result
+          ansible.builtin.debug:
+            msg: "Candidate datastore locked"
+
+        - name: Configure interface {{ item.name }}
+          ansible.netcommon.netconf_config:
+            target: candidate
+            content: |
+              <config xmlns="urn:ietf:params:xml:ns:netconf:base:1.0">
+                <interfaces xmlns="urn:ietf:params:netconf:capability:candidate:1.0">
+                  <interface>
+                    <name>{{ item.name }}</name>
+                    <description>{{ item.description }}</description>
+                    <units xmlns="urn:arca:router:config:1.0">
+                      <unit>
+                        <unit-id>{{ item.unit_id }}</unit-id>
+                        <family>
+                          <inet>
+                            <address>
+                              <ip>{{ item.ip_address }}</ip>
+                              <prefix-length>{{ item.prefix_length }}</prefix-length>
+                            </address>
+                          </inet>
+                        </family>
+                      </unit>
+                    </units>
+                  </interface>
+                </interfaces>
+              </config>
+          loop: "{{ interfaces }}"
+          register: edit_result
+
+        - name: Display edit results
+          ansible.builtin.debug:
+            msg: "Configured {{ interfaces | length }} interfaces"
+
+        - name: Commit configuration
+          ansible.netcommon.netconf_rpc:
+            rpc: commit
+          register: commit_result
+
+        - name: Display commit result
+          ansible.builtin.debug:
+            msg: "Configuration committed successfully"
+
+      rescue:
+        - name: Discard changes on error
+          ansible.netcommon.netconf_rpc:
+            rpc: discard-changes
+          ignore_errors: true
+
+        - name: Display error
+          ansible.builtin.debug:
+            msg: "Configuration failed, changes discarded"
+
+        - name: Fail task
+          ansible.builtin.fail:
+            msg: "Interface configuration failed"
+
+      always:
+        - name: Unlock candidate datastore
+          ansible.netcommon.netconf_rpc:
+            rpc: unlock
+            content: |
+              <target>
+                <candidate/>
+              </target>
+          ignore_errors: true
+
+    - name: Verify configuration
+      ansible.netcommon.netconf_get:
+        source: running
+        filter: |
+          <interfaces xmlns="urn:ietf:params:netconf:capability:candidate:1.0">
+            <interface>
+              <name>{{ interfaces[0].name }}</name>
+            </interface>
+          </interfaces>
+      register: running_config
+
+    - name: Display running config
+      ansible.builtin.debug:
+        var: running_config.stdout

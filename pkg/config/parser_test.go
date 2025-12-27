@@ -557,9 +557,9 @@ set routing-options static route 0.0.0.0/0 next-hop 10.0.0.2`,
 // Test Phase 2 sample configuration file
 func TestParser_Phase2SampleFile(t *testing.T) {
 	// Read the sample configuration file
-	file, err := os.Open("../../examples/arca-phase2.conf")
+	file, err := os.Open("../../examples/arca-router.conf")
 	if err != nil {
-		t.Fatalf("Failed to open arca-phase2.conf: %v", err)
+		t.Fatalf("Failed to open arca-router.conf: %v", err)
 	}
 	defer file.Close()
 
