@@ -15,17 +15,37 @@ func cmdShow(ctx context.Context, subcommand string, args []string, f *flags) in
 		return cmdShowInterfaces(ctx, args, f)
 
 	case "bgp":
-		if len(args) < 1 || args[0] != "summary" {
-			fmt.Fprintf(os.Stderr, "Error: 'show bgp' requires 'summary' subcommand\n\n")
+		if len(args) < 1 {
+			fmt.Fprintf(os.Stderr, "Error: 'show bgp' requires a subcommand (summary or neighbor)\n\n")
 			showUsage()
 			return ExitUsageError
 		}
-		if len(args) > 1 {
-			fmt.Fprintf(os.Stderr, "Error: 'show bgp summary' does not accept extra arguments\n\n")
+		subcommand := args[0]
+		switch subcommand {
+		case "summary":
+			if len(args) > 1 {
+				fmt.Fprintf(os.Stderr, "Error: 'show bgp summary' does not accept extra arguments\n\n")
+				showUsage()
+				return ExitUsageError
+			}
+			return cmdShowBGPSummary(ctx, f)
+		case "neighbor":
+			if len(args) < 2 {
+				fmt.Fprintf(os.Stderr, "Error: 'show bgp neighbor' requires an IP address\n\n")
+				showUsage()
+				return ExitUsageError
+			}
+			if len(args) > 2 {
+				fmt.Fprintf(os.Stderr, "Error: 'show bgp neighbor' accepts only one IP address\n\n")
+				showUsage()
+				return ExitUsageError
+			}
+			return cmdShowBGPNeighbor(ctx, args[1], f)
+		default:
+			fmt.Fprintf(os.Stderr, "Error: unknown bgp subcommand '%s' (valid: summary, neighbor)\n\n", subcommand)
 			showUsage()
 			return ExitUsageError
 		}
-		return cmdShowBGPSummary(ctx, f)
 
 	case "ospf":
 		if len(args) < 1 || args[0] != "neighbor" {
@@ -41,12 +61,8 @@ func cmdShow(ctx context.Context, subcommand string, args []string, f *flags) in
 		return cmdShowOSPFNeighbor(ctx, f)
 
 	case "route":
-		if len(args) > 0 {
-			fmt.Fprintf(os.Stderr, "Error: 'show route' does not accept extra arguments\n\n")
-			showUsage()
-			return ExitUsageError
-		}
-		return cmdShowRoute(ctx, f)
+		// 'show route' or 'show route protocol <proto>'
+		return cmdShowRoute(ctx, args, f)
 
 	default:
 		fmt.Fprintf(os.Stderr, "Error: unknown show subcommand '%s'\n\n", subcommand)
