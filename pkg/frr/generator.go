@@ -61,6 +61,16 @@ func GenerateFRRConfig(cfg *config.Config) (*Config, error) {
 		frrConfig.StaticRoutes = staticRoutes
 	}
 
+	// Convert policy-options (prefix-lists and route-maps)
+	if cfg.PolicyOptions != nil {
+		prefixLists, routeMaps, err := convertPolicyOptions(cfg)
+		if err != nil {
+			return nil, NewGenerateError("failed to convert policy-options", err)
+		}
+		frrConfig.PrefixLists = prefixLists
+		frrConfig.RouteMaps = routeMaps
+	}
+
 	return frrConfig, nil
 }
 
@@ -99,6 +109,24 @@ func GenerateFRRConfigFile(frrConfig *Config) (string, error) {
 			return "", err
 		}
 		b.WriteString(staticConfig)
+	}
+
+	// Prefix-lists
+	if len(frrConfig.PrefixLists) > 0 {
+		prefixListConfig, err := GeneratePrefixListConfig(frrConfig.PrefixLists)
+		if err != nil {
+			return "", err
+		}
+		b.WriteString(prefixListConfig)
+	}
+
+	// Route-maps
+	if len(frrConfig.RouteMaps) > 0 {
+		routeMapConfig, err := GenerateRouteMapConfig(frrConfig.RouteMaps)
+		if err != nil {
+			return "", err
+		}
+		b.WriteString(routeMapConfig)
 	}
 
 	// BGP configuration
