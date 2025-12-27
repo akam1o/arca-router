@@ -247,8 +247,9 @@ func TestParseAndValidateRPC(t *testing.T) {
 
 func TestReadRPCFromFraming(t *testing.T) {
 	// Test base:1.1 chunked framing
+	// Format: #<length>\n<data>\n##\n
 	rpcXML := `<rpc message-id="101" xmlns="urn:ietf:params:xml:ns:netconf:base:1.0"><get-config><source><running/></source></get-config></rpc>`
-	chunked := []byte(fmt.Sprintf("\n#%d\n%s\n##\n", len(rpcXML), rpcXML))
+	chunked := []byte(fmt.Sprintf("#%d\n%s##\n", len(rpcXML), rpcXML))
 
 	reader := bytes.NewReader(chunked)
 	rpc, err := ReadRPCFromFraming(reader, "1.1")

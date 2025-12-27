@@ -57,23 +57,23 @@ func NewYANGValidator() (*YANGValidator, error) {
 		hasNonIgnorableError := false
 		for _, err := range errs {
 			errStr := err.Error()
-			// Allow only specific missing IETF modules (Phase 4 dependency)
-			isIETFModuleNotFound := (strings.Contains(errStr, "ietf-interfaces") && strings.Contains(errStr, "not found")) ||
-				(strings.Contains(errStr, "ietf-routing") && strings.Contains(errStr, "not found"))
+			// Allow missing IETF modules (Phase 4 dependency)
+			// Check for "no such module" pattern which indicates missing dependency
+			isModuleNotFound := strings.Contains(errStr, "no such module")
+			isIETFModule := strings.Contains(errStr, "ietf-interfaces") || strings.Contains(errStr, "ietf-routing")
 
-			if !isIETFModuleNotFound {
-				// All other errors are fatal
+			if !isModuleNotFound || !isIETFModule {
+				// Non-IETF errors or other types of errors are fatal
 				hasNonIgnorableError = true
-				// Log for debugging but don't return yet - collect all errors
 			}
 		}
 		if hasNonIgnorableError {
 			// Return first non-ignorable error for clarity
 			for _, err := range errs {
 				errStr := err.Error()
-				isIETFModuleNotFound := (strings.Contains(errStr, "ietf-interfaces") && strings.Contains(errStr, "not found")) ||
-					(strings.Contains(errStr, "ietf-routing") && strings.Contains(errStr, "not found"))
-				if !isIETFModuleNotFound {
+				isModuleNotFound := strings.Contains(errStr, "no such module")
+				isIETFModule := strings.Contains(errStr, "ietf-interfaces") || strings.Contains(errStr, "ietf-routing")
+				if !isModuleNotFound || !isIETFModule {
 					return nil, fmt.Errorf("YANG schema error: %v", err)
 				}
 			}
