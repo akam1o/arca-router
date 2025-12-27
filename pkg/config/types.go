@@ -13,6 +13,9 @@ type Config struct {
 
 	// RoutingOptions holds routing options
 	RoutingOptions *RoutingOptions `json:"routing-options,omitempty"`
+
+	// PolicyOptions holds policy-options configuration
+	PolicyOptions *PolicyOptions `json:"policy-options,omitempty"`
 }
 
 // SystemConfig represents system-level settings
@@ -189,4 +192,71 @@ type OSPFInterface struct {
 
 	// Priority is the OSPF priority for DR election
 	Priority int `json:"priority,omitempty"`
+}
+
+// PolicyOptions represents policy-options configuration
+type PolicyOptions struct {
+	// PrefixLists holds prefix-list configurations
+	PrefixLists map[string]*PrefixList `json:"prefix-lists,omitempty"`
+
+	// PolicyStatements holds policy-statement configurations
+	PolicyStatements map[string]*PolicyStatement `json:"policy-statements,omitempty"`
+}
+
+// PrefixList represents a prefix-list configuration
+type PrefixList struct {
+	// Name is the prefix-list name
+	Name string `json:"name"`
+
+	// Prefixes holds the list of prefixes in CIDR format
+	Prefixes []string `json:"prefixes,omitempty"`
+}
+
+// PolicyStatement represents a policy-statement configuration
+type PolicyStatement struct {
+	// Name is the policy-statement name
+	Name string `json:"name"`
+
+	// Terms holds policy terms
+	Terms []*PolicyTerm `json:"terms,omitempty"`
+}
+
+// PolicyTerm represents a single term in a policy-statement
+type PolicyTerm struct {
+	// Name is the term name
+	Name string `json:"name"`
+
+	// From holds match conditions
+	From *PolicyMatchConditions `json:"from,omitempty"`
+
+	// Then holds actions
+	Then *PolicyActions `json:"then,omitempty"`
+}
+
+// PolicyMatchConditions represents match conditions in a policy term
+type PolicyMatchConditions struct {
+	// PrefixLists holds prefix-list names to match
+	PrefixLists []string `json:"prefix-lists,omitempty"`
+
+	// Protocol is the routing protocol to match (e.g., "bgp", "ospf", "static")
+	Protocol string `json:"protocol,omitempty"`
+
+	// Neighbor is the BGP neighbor IP to match
+	Neighbor string `json:"neighbor,omitempty"`
+
+	// ASPath is the AS path regular expression to match
+	ASPath string `json:"as-path,omitempty"`
+}
+
+// PolicyActions represents actions in a policy term
+type PolicyActions struct {
+	// Accept indicates whether to accept the route (true) or reject (false)
+	// nil means no explicit accept/reject action
+	Accept *bool `json:"accept,omitempty"`
+
+	// LocalPreference is the local-preference value to set
+	LocalPreference *uint32 `json:"local-preference,omitempty"`
+
+	// Community is the BGP community to set
+	Community string `json:"community,omitempty"`
 }

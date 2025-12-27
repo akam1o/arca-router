@@ -21,6 +21,12 @@ type Config struct {
 	// StaticRoutes holds static route configurations
 	StaticRoutes []StaticRoute
 
+	// PrefixLists holds prefix-list configurations
+	PrefixLists []PrefixList
+
+	// RouteMaps holds route-map configurations
+	RouteMaps []RouteMap
+
 	// InterfaceMapping maps Junos interface names to Linux interface names
 	// Key: Junos name (e.g., "ge-0/0/0"), Value: Linux name (e.g., "ge0-0-0")
 	InterfaceMapping map[string]string
@@ -118,4 +124,64 @@ type StaticRoute struct {
 
 	// IsIPv6 indicates if this is an IPv6 route
 	IsIPv6 bool
+}
+
+// PrefixList represents an FRR prefix-list configuration.
+type PrefixList struct {
+	// Name is the prefix-list name
+	Name string
+
+	// IsIPv6 indicates if this is an IPv6 prefix-list
+	IsIPv6 bool
+
+	// Entries holds prefix-list entries
+	Entries []PrefixListEntry
+}
+
+// PrefixListEntry represents a single entry in a prefix-list.
+type PrefixListEntry struct {
+	// Seq is the sequence number
+	Seq int
+
+	// Action is "permit" or "deny"
+	Action string
+
+	// Prefix is the network prefix in CIDR format
+	Prefix string
+}
+
+// RouteMap represents an FRR route-map configuration.
+type RouteMap struct {
+	// Name is the route-map name
+	Name string
+
+	// Entries holds route-map entries (terms)
+	Entries []RouteMapEntry
+}
+
+// RouteMapEntry represents a single entry in a route-map.
+type RouteMapEntry struct {
+	// Seq is the sequence number
+	Seq int
+
+	// Action is "permit" or "deny"
+	Action string
+
+	// MatchPrefixLists holds prefix-list names to match
+	MatchPrefixLists []string
+
+	// MatchProtocol is the routing protocol to match
+	MatchProtocol string
+
+	// MatchNeighbor is the BGP neighbor IP to match
+	MatchNeighbor string
+
+	// MatchASPath is the AS path access-list name to match
+	MatchASPath string
+
+	// SetLocalPreference is the local-preference value to set (nil = not set)
+	SetLocalPreference *uint32
+
+	// SetCommunity is the BGP community to set
+	SetCommunity string
 }
