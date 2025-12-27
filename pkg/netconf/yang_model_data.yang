@@ -1,0 +1,288 @@
+module arca-router {
+  namespace "urn:arca:router:config:1.0";
+  prefix "arca";
+
+  import ietf-interfaces {
+    prefix if;
+  }
+
+  import ietf-routing {
+    prefix rt;
+  }
+
+  organization "Arca Router Project";
+  contact "https://github.com/akam1o/arca-router";
+  description
+    "YANG data model for Arca Router - a Junos-like router implementation
+     using VPP and FRR.
+
+     This module defines the configuration and operational state for:
+     - System settings (hostname)
+     - Interface configuration (uses IETF interfaces model)
+     - Routing configuration (uses IETF routing model with extensions)
+     - BGP and OSPF protocol configuration";
+
+  revision 2025-12-27 {
+    description "Initial revision for Phase 3 Task 2.3";
+    reference "PHASE3.md Task Group 2";
+  }
+
+  // ==================================================================
+  // System Configuration
+  // ==================================================================
+
+  container system {
+    description "System-level configuration";
+
+    leaf host-name {
+      type string {
+        length "1..253";
+        pattern '[a-zA-Z0-9]([a-zA-Z0-9\-]*[a-zA-Z0-9])?';
+      }
+      description "Router hostname (RFC 1123 compliant)";
+    }
+  }
+
+  // ==================================================================
+  // Routing Options
+  // ==================================================================
+
+  container routing-options {
+    description "Global routing configuration options";
+
+    leaf autonomous-system {
+      type uint32 {
+        range "1..4294967295";
+      }
+      description "BGP autonomous system number";
+    }
+
+    leaf router-id {
+      type string {
+        pattern '[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+';
+      }
+      description "Global router ID in dotted decimal notation";
+    }
+
+    container static {
+      description "Static route configuration";
+
+      list route {
+        key "prefix";
+        description "Static route entry";
+
+        leaf prefix {
+          type string;
+          description "Destination network in CIDR format (e.g., 192.168.1.0/24)";
+        }
+
+        leaf next-hop {
+          type string;
+          description "Next-hop IP address";
+        }
+
+        leaf distance {
+          type uint8 {
+            range "1..255";
+          }
+          default 1;
+          description "Administrative distance (metric)";
+        }
+      }
+    }
+  }
+
+  // ==================================================================
+  // Protocols Configuration
+  // ==================================================================
+
+  container protocols {
+    description "Routing protocol configuration";
+
+    container bgp {
+      description "BGP protocol configuration";
+
+      list group {
+        key "name";
+        description "BGP peer group";
+
+        leaf name {
+          type string;
+          description "Group name";
+        }
+
+        leaf type {
+          type enumeration {
+            enum internal {
+              description "iBGP peering (same AS)";
+            }
+            enum external {
+              description "eBGP peering (different AS)";
+            }
+          }
+          mandatory true;
+          description "BGP group type";
+        }
+
+        leaf import {
+          type string;
+          description "Import policy name (Phase 4: reference to policy-statement)";
+        }
+
+        leaf export {
+          type string;
+          description "Export policy name (Phase 4: reference to policy-statement)";
+        }
+
+        list neighbor {
+          key "ip";
+          description "BGP neighbor configuration";
+
+          leaf ip {
+            type string;
+            mandatory true;
+            description "Neighbor IP address";
+          }
+
+          leaf peer-as {
+            type uint32 {
+              range "1..4294967295";
+            }
+            mandatory true;
+            description "Peer AS number";
+          }
+
+          leaf description {
+            type string;
+            description "Neighbor description";
+          }
+
+          leaf local-address {
+            type string;
+            description "Local address for BGP peering";
+          }
+        }
+      }
+    }
+
+    container ospf {
+      description "OSPF protocol configuration";
+
+      leaf router-id {
+        type string {
+          pattern '[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+';
+        }
+        description "OSPF router ID (overrides global router-id)";
+      }
+
+      list area {
+        key "area-id";
+        description "OSPF area configuration";
+
+        leaf area-id {
+          type string;
+          description "OSPF area ID (e.g., 0.0.0.0 or 0)";
+        }
+
+        list interface {
+          key "name";
+          description "Interface in this OSPF area";
+
+          leaf name {
+            type string;
+            description "Interface name";
+          }
+
+          leaf passive {
+            type boolean;
+            default false;
+            description "Passive interface flag";
+          }
+
+          leaf metric {
+            type uint16 {
+              range "1..65535";
+            }
+            description "OSPF metric for this interface";
+          }
+
+          leaf priority {
+            type uint8 {
+              range "0..255";
+            }
+            default 1;
+            description "OSPF priority for DR election";
+          }
+        }
+      }
+    }
+  }
+
+  // ==================================================================
+  // IETF Interfaces Extension (Augmentation)
+  // ==================================================================
+
+  augment "/if:interfaces/if:interface" {
+    description "Extend IETF interfaces with Arca-specific attributes";
+
+    leaf description {
+      type string;
+      description "Interface description";
+    }
+
+    container units {
+      description "Logical units (sub-interfaces) for this interface";
+
+      list unit {
+        key "unit-id";
+        description "Logical unit configuration";
+
+        leaf unit-id {
+          type uint32;
+          description "Unit number (e.g., 0 for ge-0/0/0.0)";
+        }
+
+        container family {
+          description "Address family configuration";
+
+          container inet {
+            description "IPv4 address family";
+
+            leaf-list address {
+              type string;
+              description "IPv4 address in CIDR format";
+            }
+          }
+
+          container inet6 {
+            description "IPv6 address family";
+
+            leaf-list address {
+              type string;
+              description "IPv6 address in CIDR format";
+            }
+          }
+        }
+      }
+    }
+  }
+
+  // ==================================================================
+  // Operational State (Future: Phase 4)
+  // ==================================================================
+
+  container state {
+    config false;
+    description "Operational state data (read-only)";
+
+    container interfaces {
+      description "Interface operational state";
+      // TODO: Phase 4 - VPP interface state retrieval
+    }
+
+    container protocols {
+      description "Protocol operational state";
+      // TODO: Phase 4 - FRR state retrieval (BGP/OSPF)
+    }
+  }
+}

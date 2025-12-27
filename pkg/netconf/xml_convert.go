@@ -398,17 +398,8 @@ func writeOSPFXML(buf *bytes.Buffer, ospf *config.OSPFConfig) error {
 	return nil
 }
 
-// filterMatches checks if a top-level element matches the filter
-// Phase 4 TODO: Implement proper subtree filtering with namespace support
-func filterMatches(filter *Filter, element string) bool {
-	if filter == nil || len(filter.Content) == 0 {
-		return true
-	}
-
-	// Simple substring matching for now (Phase 4 will implement full subtree filtering)
-	// This ignores namespaces and uses simple element name matching
-	return bytes.Contains(filter.Content, []byte("<"+element))
-}
+// filterMatches is now implemented in xpath_filter.go
+// This placeholder is kept for reference only
 
 // XMLToConfig converts NETCONF XML to internal config structure
 // This implements Phase 2 Step 3 with allowlist validation
