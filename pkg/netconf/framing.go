@@ -42,6 +42,13 @@ func NewFramingReader(r io.Reader, baseVersion string) *FramingReader {
 	}
 }
 
+// SetBaseVersion updates the base version without recreating the reader
+// This preserves any buffered data when switching from base:1.0 to base:1.1
+// after hello negotiation, which is critical for handling pipelined RPCs.
+func (fr *FramingReader) SetBaseVersion(baseVersion string) {
+	fr.baseVersion = baseVersion
+}
+
 // ReadMessage reads a complete NETCONF message using the appropriate framing protocol
 func (fr *FramingReader) ReadMessage() ([]byte, error) {
 	if fr.baseVersion == "1.1" {
@@ -171,6 +178,12 @@ func NewFramingWriter(w io.Writer, baseVersion string) *FramingWriter {
 		writer:      w,
 		baseVersion: baseVersion,
 	}
+}
+
+// SetBaseVersion updates the base version without recreating the writer
+// This allows switching framing modes after hello negotiation.
+func (fw *FramingWriter) SetBaseVersion(baseVersion string) {
+	fw.baseVersion = baseVersion
 }
 
 // WriteMessage writes a NETCONF message using the appropriate framing protocol

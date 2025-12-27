@@ -24,11 +24,11 @@ type Hello struct {
 	Capabilities struct {
 		Capability []string `xml:"capability"`
 	} `xml:"capabilities"`
-	SessionID int `xml:"session-id,omitempty"`
+	SessionID uint32 `xml:"session-id,omitempty"` // RFC 6241: session-id is an integer (uint32)
 }
 
 // ServerHello creates a server <hello> message with the given session ID
-func ServerHello(sessionID int) *Hello {
+func ServerHello(sessionID uint32) *Hello {
 	hello := &Hello{
 		SessionID: sessionID,
 	}
