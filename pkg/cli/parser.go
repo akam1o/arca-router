@@ -68,6 +68,7 @@ func NormalizeConfigPath(path []string) string {
 // TokenizeCommand splits a command line into tokens, respecting quotes
 // Example: `set description "test interface"` -> ["set", "description", "test interface"], nil
 // Returns error if quotes are unmatched
+// Treats both spaces and tabs as whitespace delimiters
 func TokenizeCommand(line string) ([]string, error) {
 	var tokens []string
 	var current strings.Builder
@@ -79,7 +80,7 @@ func TokenizeCommand(line string) ([]string, error) {
 		switch char {
 		case '"':
 			inQuote = !inQuote
-		case ' ':
+		case ' ', '\t': // Treat both space and tab as whitespace
 			if inQuote {
 				current.WriteByte(char)
 			} else if current.Len() > 0 {

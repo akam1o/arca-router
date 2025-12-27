@@ -3,6 +3,7 @@ package cli
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -61,6 +62,34 @@ func (s *Session) Username() string        { return s.username }
 func (s *Session) Mode() Mode              { return s.mode }
 func (s *Session) ConfigPath() []string    { return s.configPath }
 
+// verifyLock checks if the session still owns the candidate lock
+// Returns error if lock is expired or owned by another session
+func (s *Session) verifyLock(ctx context.Context) error {
+	if !s.lockAcquired {
+		return fmt.Errorf("session does not hold lock")
+	}
+
+	lockInfo, err := s.ds.GetLockInfo(ctx, datastore.LockTargetCandidate)
+	if err != nil {
+		return fmt.Errorf("failed to get lock info: %w", err)
+	}
+
+	if !lockInfo.IsLocked {
+		return fmt.Errorf("lock has been released")
+	}
+
+	if lockInfo.SessionID != s.id {
+		return fmt.Errorf("lock is held by another session: %s", lockInfo.SessionID)
+	}
+
+	// Check if lock has expired
+	if time.Now().After(lockInfo.ExpiresAt) {
+		return fmt.Errorf("lock has expired at %s", lockInfo.ExpiresAt.Format(time.RFC3339))
+	}
+
+	return nil
+}
+
 // EnterConfigurationMode enters configuration mode
 func (s *Session) EnterConfigurationMode(ctx context.Context) error {
 	if s.mode == ModeConfiguration {
@@ -83,6 +112,15 @@ func (s *Session) EnterConfigurationMode(ctx context.Context) error {
 	// Initialize candidate from running if needed
 	_, err := s.ds.GetCandidate(ctx, s.id)
 	if err != nil {
+		// Only initialize from running if candidate not found
+		// Distinguish NOT_FOUND from other errors
+		var dsErr *datastore.Error
+		if err != nil && (!errors.As(err, &dsErr) || dsErr.Code != datastore.ErrCodeNotFound) {
+			// This is not a "not found" error - it's a real failure
+			return fmt.Errorf("failed to get candidate: %w", err)
+		}
+
+		// Candidate not found - initialize from running
 		running, err := s.ds.GetRunning(ctx)
 		if err != nil {
 			return fmt.Errorf("failed to get running config: %w", err)
@@ -114,6 +152,7 @@ func (s *Session) ExitConfigurationMode(ctx context.Context) error {
 }
 
 // SetCommand executes a 'set' command
+// Deprecated: Use SetCommandWithPath instead for better hierarchy support
 func (s *Session) SetCommand(ctx context.Context, args []string) error {
 	if s.mode != ModeConfiguration {
 		return fmt.Errorf("not in configuration mode")
@@ -140,6 +179,7 @@ func (s *Session) SetCommand(ctx context.Context, args []string) error {
 }
 
 // DeleteCommand executes a 'delete' command
+// Deprecated: Use DeleteCommandWithPath instead for proper token-boundary checking
 func (s *Session) DeleteCommand(ctx context.Context, args []string) error {
 	if s.mode != ModeConfiguration {
 		return fmt.Errorf("not in configuration mode")
@@ -201,9 +241,15 @@ func (s *Session) CompareCommand(ctx context.Context) (string, error) {
 }
 
 // CommitCommand commits candidate to running
+// Deprecated: Use CommitWithOptions instead for better control and consistency
 func (s *Session) CommitCommand(ctx context.Context) error {
 	if s.mode != ModeConfiguration {
 		return fmt.Errorf("not in configuration mode")
+	}
+
+	// Verify lock before commit
+	if err := s.verifyLock(ctx); err != nil {
+		return fmt.Errorf("cannot commit: %w", err)
 	}
 
 	req := &datastore.CommitRequest{
@@ -242,6 +288,7 @@ func (s *Session) CommitCheckCommand(ctx context.Context) error {
 }
 
 // RollbackCommand rolls back to a previous commit
+// Deprecated: Use RollbackWithNumber instead for better consistency
 func (s *Session) RollbackCommand(ctx context.Context, rollbackNum int) error {
 	if s.mode != ModeConfiguration {
 		return fmt.Errorf("not in configuration mode")
@@ -253,6 +300,11 @@ func (s *Session) RollbackCommand(ctx context.Context, rollbackNum int) error {
 
 	if rollbackNum == 0 {
 		return s.DiscardChanges(ctx)
+	}
+
+	// Verify lock before rollback
+	if err := s.verifyLock(ctx); err != nil {
+		return fmt.Errorf("cannot rollback: %w", err)
 	}
 
 	opts := &datastore.HistoryOptions{
