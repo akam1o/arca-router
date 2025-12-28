@@ -78,7 +78,7 @@ func TestCmdShowRoute(t *testing.T) {
 
 			f := &flags{
 				vppSocket:  "/run/vpp/api.sock",
-				configPath: "/etc/arca-router/arca.conf",
+				configPath: "/etc/arca-router/arca-router.conf",
 				debug:      false,
 			}
 
@@ -166,7 +166,7 @@ func TestCmdShowBGPNeighbor(t *testing.T) {
 
 			f := &flags{
 				vppSocket:  "/run/vpp/api.sock",
-				configPath: "/etc/arca-router/arca.conf",
+				configPath: "/etc/arca-router/arca-router.conf",
 				debug:      false,
 			}
 
@@ -201,7 +201,7 @@ func TestShowRouteProtocolValidation(t *testing.T) {
 
 	f := &flags{
 		vppSocket:  "/run/vpp/api.sock",
-		configPath: "/etc/arca-router/arca.conf",
+		configPath: "/etc/arca-router/arca-router.conf",
 		debug:      false,
 	}
 
