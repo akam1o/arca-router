@@ -3,20 +3,20 @@ version: ${VERSION}
 release: 1
 epoch: 0
 arch: x86_64
-license: MIT
+license: Apache-2.0
 vendor: akam1o
 maintainer: akam1o <akam1o@ark-networks.net>
 homepage: https://github.com/akam1o/arca-router
 description: |
   ARCA Router - VPP-based Network Router Daemon
 
-  Phase 2: Production VPP Integration & Routing Protocols
   - Real VPP integration via govpp
   - FRR integration for dynamic routing (BGP, OSPF)
   - LCP (Linux Control Plane) support
   - Junos-style configuration interface
+  - NETCONF support for remote management
 
-# Phase 2: VPP and FRR dependencies
+# VPP and FRR dependencies
 depends:
   - vpp >= 24.10
   - vpp-plugin-core >= 24.10
