@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"time"
 
+	clientv3 "go.etcd.io/etcd/client/v3"
 	"github.com/oklog/ulid/v2"
 )
 
@@ -54,4 +55,45 @@ func generateULID() string {
 	id := ulid.MustNew(ulid.Timestamp(time.Now()), entropy)
 
 	return id.String()
+}
+
+// CleanupAuditLog deletes audit log entries older than the specified cutoff time
+// For etcd backend, this requires listing all audit keys and deleting those with old timestamps
+func (ds *etcdDatastore) CleanupAuditLog(ctx context.Context, cutoff time.Time) (int64, error) {
+	ctx, cancel := ds.withTimeout(ctx)
+	defer cancel()
+
+	// List all audit events
+	prefix := ds.key("audit", "")
+	resp, err := ds.client.Get(ctx, prefix, clientv3.WithPrefix())
+	if err != nil {
+		return 0, NewError(ErrCodeInternal, "failed to list audit events", err)
+	}
+
+	// Parse and filter events older than cutoff
+	var keysToDelete []string
+	for _, kv := range resp.Kvs {
+		var event AuditEvent
+		if err := json.Unmarshal(kv.Value, &event); err != nil {
+			// Skip malformed entries
+			continue
+		}
+
+		if event.Timestamp.Before(cutoff) {
+			keysToDelete = append(keysToDelete, string(kv.Key))
+		}
+	}
+
+	// Delete old audit events
+	deletedCount := int64(0)
+	for _, key := range keysToDelete {
+		_, err := ds.client.Delete(ctx, key)
+		if err != nil {
+			// Log error but continue deletion
+			continue
+		}
+		deletedCount++
+	}
+
+	return deletedCount, nil
 }

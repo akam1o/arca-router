@@ -20,11 +20,12 @@ var (
 )
 
 type flags struct {
-	configPath   string
-	hardwarePath string
-	logLevel     string
-	version      bool
-	mockVPP      bool // Use mock VPP client for testing
+	configPath    string
+	hardwarePath  string
+	datastorePath string
+	logLevel      string
+	version       bool
+	mockVPP       bool // Use mock VPP client for testing
 }
 
 func main() {
@@ -70,10 +71,12 @@ func main() {
 func parseFlags() *flags {
 	f := &flags{}
 
-	flag.StringVar(&f.configPath, "config", "/etc/arca-router/arca.conf",
-		"Path to configuration file")
+	flag.StringVar(&f.configPath, "config", "/etc/arca-router/arca-router.conf",
+		"Path to configuration file (fallback if datastore empty)")
 	flag.StringVar(&f.hardwarePath, "hardware", "/etc/arca-router/hardware.yaml",
 		"Path to hardware configuration file")
+	flag.StringVar(&f.datastorePath, "datastore", "/var/lib/arca-router/config.db",
+		"Path to configuration datastore (SQLite)")
 	flag.StringVar(&f.logLevel, "log-level", "info",
 		"Log level (debug, info, warn, error)")
 	flag.BoolVar(&f.version, "version", false,

@@ -6,13 +6,13 @@ Requires=vpp.service frr.service
 
 [Service]
 Type=simple
-ExecStart=/usr/sbin/arca-routerd -config /etc/arca-router/arca.conf -hardware /etc/arca-router/hardware.yaml -log-level info
+ExecStart=/usr/sbin/arca-routerd -config /etc/arca-router/arca-router.conf -hardware /etc/arca-router/hardware.yaml -datastore /var/lib/arca-router/config.db -log-level info
 Restart=on-failure
 RestartSec=5s
 StartLimitIntervalSec=300
 StartLimitBurst=5
 
-# User and permissions (Phase 2: dedicated user + capabilities)
+# User and permissions
 User=arca-router
 Group=arca-router
 SupplementaryGroups=vpp frr frrvty

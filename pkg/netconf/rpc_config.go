@@ -92,7 +92,7 @@ func (s *Server) handleGetConfig(ctx context.Context, sess *Session, rpc *RPC) *
 		}
 		textCfg = candidateCfg.ConfigText
 	case DatastoreStartup:
-		// Startup datastore not implemented (reads from /etc/arca-router/arca.conf at boot)
+		// Startup datastore not implemented (reads from /etc/arca-router/arca-router.conf at boot)
 		return NewErrorReply(rpc.MessageID, ErrInvalidTarget("get-config", "startup"))
 	default:
 		return NewErrorReply(rpc.MessageID, ErrInvalidTarget("get-config", datastore))

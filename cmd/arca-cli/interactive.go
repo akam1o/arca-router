@@ -225,7 +225,7 @@ func (sh *InteractiveShell) cmdShow(ctx context.Context, args []string) error {
 		// Create default flags for VPP/FRR access
 		f := &flags{
 			vppSocket:  "/run/vpp/api.sock",
-			configPath: "/etc/arca-router/arca.conf",
+			configPath: "/etc/arca-router/arca-router.conf",
 			debug:      false,
 		}
 		exitCode := cmdShowInterfaces(ctx, args[1:], f)
@@ -243,7 +243,7 @@ func (sh *InteractiveShell) cmdShow(ctx context.Context, args []string) error {
 		}
 		f := &flags{
 			vppSocket:  "/run/vpp/api.sock",
-			configPath: "/etc/arca-router/arca.conf",
+			configPath: "/etc/arca-router/arca-router.conf",
 			debug:      false,
 		}
 		bgpSubcmd := args[1]
@@ -285,7 +285,7 @@ func (sh *InteractiveShell) cmdShow(ctx context.Context, args []string) error {
 		}
 		f := &flags{
 			vppSocket:  "/run/vpp/api.sock",
-			configPath: "/etc/arca-router/arca.conf",
+			configPath: "/etc/arca-router/arca-router.conf",
 			debug:      false,
 		}
 		exitCode := cmdShowOSPFNeighbor(ctx, f)
@@ -301,7 +301,7 @@ func (sh *InteractiveShell) cmdShow(ctx context.Context, args []string) error {
 		}
 		f := &flags{
 			vppSocket:  "/run/vpp/api.sock",
-			configPath: "/etc/arca-router/arca.conf",
+			configPath: "/etc/arca-router/arca-router.conf",
 			debug:      false,
 		}
 		exitCode := cmdShowRoute(ctx, args[1:], f)

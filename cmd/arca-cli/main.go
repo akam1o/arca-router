@@ -53,7 +53,7 @@ func parseFlags() *flags {
 		"Enable debug output to stderr")
 	flag.StringVar(&f.vppSocket, "socket", "/run/vpp/api.sock",
 		"Path to VPP API socket")
-	flag.StringVar(&f.configPath, "config", "/etc/arca-router/arca.conf",
+	flag.StringVar(&f.configPath, "config", "/etc/arca-router/arca-router.conf",
 		"Path to configuration file")
 
 	flag.Usage = showUsage
@@ -114,7 +114,7 @@ Show subcommands:
 Options:
   -debug              Enable debug output to stderr
   -socket <path>      VPP API socket path (default: /run/vpp/api.sock)
-  -config <path>      Configuration file path (default: /etc/arca-router/arca.conf)
+  -config <path>      Configuration file path (default: /etc/arca-router/arca-router.conf)
 
 Phase 3 Features (Interactive mode):
   - Junos-style configuration commands (set, delete, edit)

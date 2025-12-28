@@ -5,7 +5,7 @@ epoch: 0
 arch: x86_64
 license: MIT
 vendor: akam1o
-maintainer: akam1o <akam1o@users.noreply.github.com>
+maintainer: akam1o <akam1o@ark-networks.net>
 homepage: https://github.com/akam1o/arca-router
 description: |
   ARCA Router - VPP-based Network Router Daemon
@@ -39,6 +39,14 @@ contents:
       owner: root
       group: root
 
+  # NETCONF daemon binary
+  - src: build/bin/arca-netconfd
+    dst: /usr/sbin/arca-netconfd
+    file_info:
+      mode: 0755
+      owner: root
+      group: root
+
   # Configuration directory
   - dst: /etc/arca-router
     type: dir
@@ -48,8 +56,8 @@ contents:
       group: root
 
   # Example configurations (installed as .example, not active configs)
-  - src: examples/arca.conf
-    dst: /etc/arca-router/arca.conf.example
+  - src: examples/arca-router.conf
+    dst: /etc/arca-router/arca-router.conf.example
     type: config
     file_info:
       mode: 0644
@@ -64,9 +72,16 @@ contents:
       owner: root
       group: root
 
-  # systemd unit file
+  # systemd unit files
   - src: build/systemd/arca-routerd.service
     dst: /usr/lib/systemd/system/arca-routerd.service
+    file_info:
+      mode: 0644
+      owner: root
+      group: root
+
+  - src: build/systemd/arca-netconfd.service
+    dst: /usr/lib/systemd/system/arca-netconfd.service
     file_info:
       mode: 0644
       owner: root

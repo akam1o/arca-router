@@ -78,7 +78,7 @@ if [ "$1" = "1" ]; then
     echo ""
     echo "Next steps:"
     echo "1. Copy example configs:"
-    echo "   cp /etc/arca-router/arca.conf.example /etc/arca-router/arca.conf"
+    echo "   cp /etc/arca-router/arca-router.conf.example /etc/arca-router/arca-router.conf"
     echo "   cp /etc/arca-router/hardware.yaml.example /etc/arca-router/hardware.yaml"
     echo ""
     echo "2. Edit the configuration files"

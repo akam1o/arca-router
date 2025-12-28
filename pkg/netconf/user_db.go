@@ -1,6 +1,7 @@
 package netconf
 
 import (
+	"context"
 	"database/sql"
 	"fmt"
 	"os"
@@ -9,6 +10,7 @@ import (
 
 	_ "github.com/mattn/go-sqlite3"
 
+	"github.com/akam1o/arca-router/pkg/audit"
 	"github.com/akam1o/arca-router/pkg/auth"
 	"github.com/akam1o/arca-router/pkg/logger"
 )
@@ -22,9 +24,10 @@ const (
 
 // UserDatabase manages user authentication data
 type UserDatabase struct {
-	db   *sql.DB
-	path string
-	log  *logger.Logger
+	db          *sql.DB
+	path        string
+	log         *logger.Logger
+	auditLogger *audit.Logger // Optional: for audit trail to datastore
 }
 
 // User represents a user account
@@ -369,23 +372,62 @@ func (udb *UserDatabase) VerifyPasswordWithReason(username, password string) (*U
 	return user, "", nil
 }
 
+// SetAuditLogger sets the audit logger for persistent audit trail
+func (udb *UserDatabase) SetAuditLogger(logger *audit.Logger) {
+	udb.auditLogger = logger
+}
+
 // LogAuthSuccess logs a successful authentication event
 func (udb *UserDatabase) LogAuthSuccess(username, sourceIP string) {
+	udb.LogAuthSuccessWithMethod(username, sourceIP, "password")
+}
+
+// LogAuthSuccessWithMethod logs a successful authentication event with specified method
+func (udb *UserDatabase) LogAuthSuccessWithMethod(username, sourceIP, method string) {
+	// Log to structured logger (real-time monitoring)
 	udb.log.Info("Authentication successful",
 		"event_type", "auth_success",
 		"username", username,
 		"source_ip", sourceIP,
+		"method", method,
 		"timestamp", time.Now().Format(time.RFC3339))
+
+	// Log to audit datastore (persistent audit trail)
+	if udb.auditLogger != nil {
+		ctx := context.Background()
+		if err := udb.auditLogger.LogAuthSuccess(ctx, username, sourceIP, method); err != nil {
+			udb.log.Warn("Failed to log auth success to audit datastore",
+				"username", username,
+				"error", err)
+		}
+	}
 }
 
 // LogAuthFailure logs a failed authentication event
 func (udb *UserDatabase) LogAuthFailure(username, sourceIP, reason string) {
+	udb.LogAuthFailureWithMethod(username, sourceIP, "password", reason)
+}
+
+// LogAuthFailureWithMethod logs a failed authentication event with specified method
+func (udb *UserDatabase) LogAuthFailureWithMethod(username, sourceIP, method, reason string) {
+	// Log to structured logger (real-time monitoring)
 	udb.log.Warn("Authentication failed",
 		"event_type", "auth_failure",
 		"username", username,
 		"source_ip", sourceIP,
+		"method", method,
 		"reason", reason,
 		"timestamp", time.Now().Format(time.RFC3339))
+
+	// Log to audit datastore (persistent audit trail)
+	if udb.auditLogger != nil {
+		ctx := context.Background()
+		if err := udb.auditLogger.LogAuthFailure(ctx, username, sourceIP, method, reason); err != nil {
+			udb.log.Warn("Failed to log auth failure to audit datastore",
+				"username", username,
+				"error", err)
+		}
+	}
 }
 
 // HealthCheck verifies the database connection is healthy
