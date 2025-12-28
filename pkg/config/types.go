@@ -16,6 +16,9 @@ type Config struct {
 
 	// PolicyOptions holds policy-options configuration
 	PolicyOptions *PolicyOptions `json:"policy-options,omitempty"`
+
+	// Security holds security configuration (Phase 3)
+	Security *SecurityConfig `json:"security,omitempty"`
 }
 
 // SystemConfig represents system-level settings
@@ -259,4 +262,52 @@ type PolicyActions struct {
 
 	// Community is the BGP community to set
 	Community string `json:"community,omitempty"`
+}
+
+// SecurityConfig represents security configuration (Phase 3)
+type SecurityConfig struct {
+	// NETCONF holds NETCONF server configuration
+	NETCONF *NETCONFConfig `json:"netconf,omitempty"`
+
+	// Users holds user configurations
+	Users map[string]*UserConfig `json:"users,omitempty"`
+
+	// RateLimit holds rate limiting configuration
+	RateLimit *RateLimitConfig `json:"rate-limit,omitempty"`
+}
+
+// NETCONFConfig represents NETCONF server configuration
+type NETCONFConfig struct {
+	// SSH holds SSH configuration
+	SSH *NETCONFSSHConfig `json:"ssh,omitempty"`
+}
+
+// NETCONFSSHConfig represents NETCONF SSH configuration
+type NETCONFSSHConfig struct {
+	// Port is the TCP port for NETCONF/SSH (default: 830)
+	Port int `json:"port,omitempty"`
+}
+
+// UserConfig represents a user configuration
+type UserConfig struct {
+	// Username is the username
+	Username string `json:"username"`
+
+	// Password is the user's password (will be hashed)
+	Password string `json:"password,omitempty"`
+
+	// Role is the user's role (admin, operator, read-only)
+	Role string `json:"role,omitempty"`
+
+	// SSHKey is the user's SSH public key
+	SSHKey string `json:"ssh-key,omitempty"`
+}
+
+// RateLimitConfig represents rate limiting configuration
+type RateLimitConfig struct {
+	// PerIP is the per-IP rate limit (requests per second)
+	PerIP int `json:"per-ip,omitempty"`
+
+	// PerUser is the per-user rate limit (requests per second)
+	PerUser int `json:"per-user,omitempty"`
 }

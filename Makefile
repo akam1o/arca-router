@@ -3,6 +3,7 @@
 # Binary names
 BINARY_NAME=arca-routerd
 CLI_BINARY_NAME=arca-cli
+NETCONFD_BINARY_NAME=arca-netconfd
 BUILD_DIR=build/bin
 DIST_DIR=dist
 
@@ -38,12 +39,13 @@ version: ## Display version information
 	@echo "Build Date: $(BUILD_DATE)"
 	@echo "EPOCH:      $(SOURCE_DATE_EPOCH)"
 
-build: ## Build both binaries (arca-routerd and arca-cli)
-	@echo "Building $(BINARY_NAME) and $(CLI_BINARY_NAME)..."
+build: ## Build all binaries (arca-routerd, arca-cli, arca-netconfd)
+	@echo "Building $(BINARY_NAME), $(CLI_BINARY_NAME), and $(NETCONFD_BINARY_NAME)..."
 	@mkdir -p $(BUILD_DIR)
-	CGO_ENABLED=0 SOURCE_DATE_EPOCH=$(SOURCE_DATE_EPOCH) go build $(BUILD_FLAGS) -o $(BUILD_DIR)/$(BINARY_NAME) ./cmd/arca-routerd
+	CGO_ENABLED=1 SOURCE_DATE_EPOCH=$(SOURCE_DATE_EPOCH) go build $(BUILD_FLAGS) -o $(BUILD_DIR)/$(BINARY_NAME) ./cmd/arca-routerd
 	CGO_ENABLED=0 SOURCE_DATE_EPOCH=$(SOURCE_DATE_EPOCH) go build $(BUILD_FLAGS) -o $(BUILD_DIR)/$(CLI_BINARY_NAME) ./cmd/arca-cli
-	@echo "Build complete: $(BUILD_DIR)/$(BINARY_NAME), $(BUILD_DIR)/$(CLI_BINARY_NAME)"
+	CGO_ENABLED=1 SOURCE_DATE_EPOCH=$(SOURCE_DATE_EPOCH) go build $(BUILD_FLAGS) -o $(BUILD_DIR)/$(NETCONFD_BINARY_NAME) ./cmd/arca-netconfd
+	@echo "Build complete: $(BUILD_DIR)/$(BINARY_NAME), $(BUILD_DIR)/$(CLI_BINARY_NAME), $(BUILD_DIR)/$(NETCONFD_BINARY_NAME)"
 
 build-cli: ## Build only arca-cli binary
 	@echo "Building $(CLI_BINARY_NAME)..."

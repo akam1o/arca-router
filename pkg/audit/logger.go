@@ -383,7 +383,6 @@ func (l *Logger) LogSessionTerminated(ctx context.Context, user, sessionID strin
 
 // Cleanup removes audit logs older than the retention period
 // Should be called periodically (e.g., daily)
-// Note: This requires direct database access as datastore interface doesn't expose cleanup yet
 func (l *Logger) Cleanup(ctx context.Context) error {
 	// Calculate cutoff time
 	cutoff := time.Now().Add(-l.retention)
@@ -392,15 +391,36 @@ func (l *Logger) Cleanup(ctx context.Context) error {
 		"retention_days", l.retention.Hours()/24,
 		"cutoff", cutoff.Format(time.RFC3339))
 
-	// TODO: Implement actual cleanup when datastore interface is extended
-	// Expected SQL: DELETE FROM audit_log WHERE timestamp < ?
-	// For Phase 3, this is documented as a future enhancement
-	// Workaround: Direct database access or manual cleanup via SQL
+	// Execute cleanup operation
+	// For Phase 3, we implement the cleanup logic with proper structure
+	// The actual deletion would require datastore access
+	deletedCount, err := l.executeCleanup(ctx, cutoff)
+	if err != nil {
+		l.slogger.ErrorContext(ctx, "Failed to cleanup audit logs",
+			"error", err)
+		return err
+	}
 
 	l.slogger.InfoContext(ctx, "Audit log cleanup completed",
-		"note", "cleanup not yet implemented - requires datastore interface extension")
-
+		"deleted_count", deletedCount)
 	return nil
+}
+
+// executeCleanup executes the cleanup operation
+func (l *Logger) executeCleanup(ctx context.Context, cutoff time.Time) (int64, error) {
+	// Use datastore to delete old audit logs
+	if l.datastore == nil {
+		l.slogger.WarnContext(ctx, "Datastore not available, skipping audit log cleanup")
+		return 0, nil
+	}
+
+	// Execute cleanup via datastore
+	deletedCount, err := l.datastore.CleanupAuditLog(ctx, cutoff)
+	if err != nil {
+		return 0, err
+	}
+
+	return deletedCount, nil
 }
 
 // SetRetention sets the retention period for audit logs

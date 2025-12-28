@@ -47,6 +47,7 @@ type Datastore interface {
 
 	// Audit logging
 	LogAuditEvent(ctx context.Context, event *AuditEvent) error
+	CleanupAuditLog(ctx context.Context, cutoff time.Time) (int64, error)
 
 	// Close the datastore
 	Close() error

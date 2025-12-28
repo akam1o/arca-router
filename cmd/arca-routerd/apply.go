@@ -97,7 +97,9 @@ func (r *applyResult) String() string {
 // with remaining operations where possible.
 func applyConfig(ctx context.Context, f *flags, log *logger.Logger) error {
 	factory := newVPPClientFactory(f.mockVPP)
-	loader := &defaultConfigLoader{}
+	// Use datastore loader which falls back to file if datastore is empty
+	fileLoader := &defaultConfigLoader{}
+	loader := newDatastoreConfigLoader(fileLoader, f.datastorePath)
 	return applyConfigWithDeps(ctx, f, log, factory, loader)
 }
 
@@ -132,7 +134,7 @@ func applyConfigWithDeps(
 	}
 	log.Info("All PCI devices verified", slog.Int("device_count", len(pciDevices)))
 
-	// Step 3: Parse arca.conf
+	// Step 3: Parse arca-router.conf
 	log.Info("Parsing configuration", slog.String("path", f.configPath))
 	cfg, err := loader.LoadConfig(f.configPath)
 	if err != nil {
@@ -145,11 +147,11 @@ func applyConfigWithDeps(
 	if err := cfg.Validate(); err != nil {
 		log.ErrorWithCause("Configuration validation failed", err,
 			"Configuration contains invalid values",
-			"Review arca.conf for errors")
+			"Review arca-router.conf for errors")
 		return errors.Wrap(err, errors.ErrCodeConfigValidation,
 			"Configuration validation failed",
 			"Configuration contains invalid values",
-			"Review arca.conf for errors")
+			"Review arca-router.conf for errors")
 	}
 	log.Info("Configuration validated successfully")
 
@@ -456,7 +458,7 @@ func applyVPPConfig(
 		}
 	}
 
-	// Step 6.2: Apply IP addresses from arca.conf
+	// Step 6.2: Apply IP addresses from arca-router.conf
 	for ifaceName, ifaceCfg := range cfg.Interfaces {
 		ifaceLog := log.WithField("interface", ifaceName)
 

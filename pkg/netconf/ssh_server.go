@@ -17,6 +17,7 @@ import (
 
 	"golang.org/x/crypto/ssh"
 
+	"github.com/akam1o/arca-router/pkg/audit"
 	"github.com/akam1o/arca-router/pkg/auth"
 	"github.com/akam1o/arca-router/pkg/datastore"
 	"github.com/akam1o/arca-router/pkg/logger"
@@ -86,6 +87,13 @@ func NewSSHServer(config *SSHConfig) (*SSHServer, error) {
 	if err != nil {
 		return nil, fmt.Errorf("failed to create datastore: %w", err)
 	}
+
+	// Create audit logger with datastore for persistent audit trail
+	// Use nil for slog - audit.NewLogger will use slog.Default() internally
+	auditLogger := audit.NewLogger(ds, nil)
+
+	// Set audit logger in user database for authentication audit
+	userDB.SetAuditLogger(auditLogger)
 
 	// Create session manager with datastore for lock cleanup
 	sessionMgr := NewSessionManager(config, ds, log)
@@ -429,16 +437,16 @@ func (s *SSHServer) publicKeyCallback(meta ssh.ConnMetadata, key ssh.PublicKey) 
 			s.log.Warn("User locked out due to repeated failures", "username", username, "failures", s.config.UserFailureLimit)
 		}
 
-		// Log authentication failure with detailed reason
-		s.userDB.LogAuthFailure(username, sourceIP, reason)
+		// Log authentication failure with public-key method
+		s.userDB.LogAuthFailureWithMethod(username, sourceIP, "publickey", reason)
 		return nil, fmt.Errorf("authentication failed")
 	}
 
 	// Record success (clears failure history)
 	s.rateLimiter.RecordSuccess(sourceIP, username)
 
-	// Log authentication success
-	s.userDB.LogAuthSuccess(username, sourceIP)
+	// Log authentication success with public-key method
+	s.userDB.LogAuthSuccessWithMethod(username, sourceIP, "publickey")
 
 	// Return permissions with user context for session creation
 	perms := &ssh.Permissions{

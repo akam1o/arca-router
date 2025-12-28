@@ -99,6 +99,8 @@ func (p *Parser) parseStatement(config *Config) error {
 		return p.parseProtocols(config)
 	case "policy-options":
 		return p.parsePolicyOptions(config)
+	case "security":
+		return p.parseSecurity(config)
 	default:
 		return p.error(fmt.Sprintf("unsupported keyword: %s", keyword))
 	}
@@ -998,5 +1000,193 @@ func validateCommunity(community string) error {
 		return fmt.Errorf("invalid community format %q, expected ASN:value or well-known community (no-export, no-advertise, local-AS, no-peer)", community)
 	}
 
+	return nil
+}
+
+// parseSecurity parses security configuration (Phase 3)
+// Syntax:
+//   set security netconf ssh port <port>
+//   set security users user <username> password <password>
+//   set security users user <username> role <role>
+//   set security users user <username> ssh-key "<key>"
+//   set security rate-limit per-ip <limit>
+//   set security rate-limit per-user <limit>
+func (p *Parser) parseSecurity(config *Config) error {
+	if p.current.Type != TokenWord {
+		return p.error("expected security parameter")
+	}
+
+	param := p.current.Value
+	p.nextToken()
+
+	switch param {
+	case "netconf":
+		return p.parseSecurityNETCONF(config)
+	case "users":
+		return p.parseSecurityUsers(config)
+	case "rate-limit":
+		return p.parseSecurityRateLimit(config)
+	default:
+		return p.error(fmt.Sprintf("unsupported security parameter: %s", param))
+	}
+}
+
+// parseSecurityNETCONF parses NETCONF configuration
+// Syntax: set security netconf ssh port <port>
+func (p *Parser) parseSecurityNETCONF(config *Config) error {
+	if config.Security == nil {
+		config.Security = &SecurityConfig{}
+	}
+
+	if p.current.Type != TokenWord || p.current.Value != "ssh" {
+		return p.error("expected 'ssh' after 'netconf'")
+	}
+	p.nextToken()
+
+	if p.current.Type != TokenWord || p.current.Value != "port" {
+		return p.error("expected 'port' after 'ssh'")
+	}
+	p.nextToken()
+
+	if p.current.Type != TokenWord && p.current.Type != TokenNumber {
+		return p.error("expected port number")
+	}
+
+	port, err := strconv.Atoi(p.current.Value)
+	if err != nil {
+		return p.error(fmt.Sprintf("invalid port number: %s", p.current.Value))
+	}
+
+	if port < 1 || port > 65535 {
+		return p.error(fmt.Sprintf("port number out of range: %d", port))
+	}
+
+	if config.Security.NETCONF == nil {
+		config.Security.NETCONF = &NETCONFConfig{}
+	}
+	if config.Security.NETCONF.SSH == nil {
+		config.Security.NETCONF.SSH = &NETCONFSSHConfig{}
+	}
+	config.Security.NETCONF.SSH.Port = port
+
+	p.nextToken()
+	return nil
+}
+
+// parseSecurityUsers parses user configuration
+// Syntax:
+//   set security users user <username> password <password>
+//   set security users user <username> role <role>
+//   set security users user <username> ssh-key "<key>"
+func (p *Parser) parseSecurityUsers(config *Config) error {
+	if config.Security == nil {
+		config.Security = &SecurityConfig{}
+	}
+	if config.Security.Users == nil {
+		config.Security.Users = make(map[string]*UserConfig)
+	}
+
+	if p.current.Type != TokenWord || p.current.Value != "user" {
+		return p.error("expected 'user' after 'users'")
+	}
+	p.nextToken()
+
+	if p.current.Type != TokenWord {
+		return p.error("expected username")
+	}
+
+	username := p.current.Value
+	p.nextToken()
+
+	// Get or create user
+	if config.Security.Users[username] == nil {
+		config.Security.Users[username] = &UserConfig{
+			Username: username,
+		}
+	}
+	user := config.Security.Users[username]
+
+	if p.current.Type != TokenWord {
+		return p.error("expected user parameter (password, role, ssh-key)")
+	}
+
+	param := p.current.Value
+	p.nextToken()
+
+	switch param {
+	case "password":
+		if p.current.Type != TokenWord {
+			return p.error("expected password value")
+		}
+		user.Password = p.current.Value
+		p.nextToken()
+
+	case "role":
+		if p.current.Type != TokenWord {
+			return p.error("expected role value")
+		}
+		role := p.current.Value
+		if role != "admin" && role != "operator" && role != "read-only" {
+			return p.error(fmt.Sprintf("invalid role: %s (must be admin, operator, or read-only)", role))
+		}
+		user.Role = role
+		p.nextToken()
+
+	case "ssh-key":
+		if p.current.Type != TokenString {
+			return p.error("expected SSH key string")
+		}
+		user.SSHKey = p.current.Value
+		p.nextToken()
+
+	default:
+		return p.error(fmt.Sprintf("unsupported user parameter: %s", param))
+	}
+
+	return nil
+}
+
+// parseSecurityRateLimit parses rate limit configuration
+// Syntax:
+//   set security rate-limit per-ip <limit>
+//   set security rate-limit per-user <limit>
+func (p *Parser) parseSecurityRateLimit(config *Config) error {
+	if config.Security == nil {
+		config.Security = &SecurityConfig{}
+	}
+	if config.Security.RateLimit == nil {
+		config.Security.RateLimit = &RateLimitConfig{}
+	}
+
+	if p.current.Type != TokenWord {
+		return p.error("expected rate-limit parameter")
+	}
+
+	param := p.current.Value
+	p.nextToken()
+
+	if p.current.Type != TokenWord && p.current.Type != TokenNumber {
+		return p.error("expected rate limit value")
+	}
+
+	limit, err := strconv.Atoi(p.current.Value)
+	if err != nil {
+		return p.error(fmt.Sprintf("invalid rate limit: %s", p.current.Value))
+	}
+
+	if limit < 1 || limit > 1000 {
+		return p.error(fmt.Sprintf("rate limit out of range: %d (must be 1-1000)", limit))
+	}
+
+	switch param {
+	case "per-ip":
+		config.Security.RateLimit.PerIP = limit
+	case "per-user":
+		config.Security.RateLimit.PerUser = limit
+	default:
+		return p.error(fmt.Sprintf("unsupported rate-limit parameter: %s", param))
+	}
+
+	p.nextToken()
 	return nil
 }

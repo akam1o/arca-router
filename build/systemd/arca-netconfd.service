@@ -1,0 +1,47 @@
+[Unit]
+Description=ARCA Router NETCONF Server
+Documentation=https://github.com/akam1o/arca-router
+After=network.target arca-routerd.service
+Wants=arca-routerd.service
+
+[Service]
+Type=simple
+ExecStart=/usr/sbin/arca-netconfd -listen :830 -host-key /var/lib/arca-router/ssh_host_ed25519_key -user-db /var/lib/arca-router/users.db -datastore /var/lib/arca-router/config.db
+Restart=on-failure
+RestartSec=5s
+StartLimitIntervalSec=300
+StartLimitBurst=5
+
+# User and permissions
+User=arca-router
+Group=arca-router
+
+# Network capability for binding to port 830
+# CAP_NET_BIND_SERVICE: Bind to privileged ports (< 1024)
+AmbientCapabilities=CAP_NET_BIND_SERVICE
+CapabilityBoundingSet=CAP_NET_BIND_SERVICE
+
+# Security hardening
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/arca-router
+
+# Runtime directories (auto-created by systemd)
+RuntimeDirectory=arca-router
+StateDirectory=arca-router
+LogsDirectory=arca-router
+
+# Logging
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=arca-netconfd
+
+# Process management
+KillMode=mixed
+KillSignal=SIGTERM
+TimeoutStopSec=30s
+
+[Install]
+WantedBy=multi-user.target
