@@ -55,7 +55,7 @@ interfaces:
     description: "Test Interface 2"
 EOF
 
-cat > "$TEST_DIR/arca.conf" <<EOF
+cat > "$TEST_DIR/arca-router.conf" <<EOF
 set system host-name test-router
 set interfaces ge-0/0/0 description "WAN"
 set interfaces ge-0/0/0 unit 0 family inet address 192.0.2.1/24
@@ -65,7 +65,7 @@ EOF
 
 # Note: This test will fail because PCI devices don't exist
 # But we can verify that parsing works
-if "$BINARY" -config "$TEST_DIR/arca.conf" -hardware "$TEST_DIR/hardware.yaml" -mock-vpp 2>&1 | grep -q "Hardware configuration loaded successfully\|PCI device verification failed"; then
+if "$BINARY" -config "$TEST_DIR/arca-router.conf" -hardware "$TEST_DIR/hardware.yaml" -mock-vpp 2>&1 | grep -q "Hardware configuration loaded successfully\|PCI device verification failed"; then
     echo -e "${GREEN}PASS${NC}"
 else
     echo -e "${RED}FAIL${NC}"
@@ -84,7 +84,7 @@ interfaces:
     driver: "avf"
 EOF
 
-if "$BINARY" -config "$TEST_DIR/arca.conf" -hardware "$TEST_DIR/hardware_invalid.yaml" -mock-vpp 2>&1 | grep -q "duplicate PCI address"; then
+if "$BINARY" -config "$TEST_DIR/arca-router.conf" -hardware "$TEST_DIR/hardware_invalid.yaml" -mock-vpp 2>&1 | grep -q "duplicate PCI address"; then
     echo -e "${GREEN}PASS${NC}"
 else
     echo -e "${RED}FAIL${NC}"
@@ -94,13 +94,13 @@ fi
 
 # Test 4: Invalid arca.conf (syntax error)
 echo -n "Test 4: Invalid arca.conf detection... "
-cat > "$TEST_DIR/arca_invalid.conf" <<EOF
+cat > "$TEST_DIR/arca-router_invalid.conf" <<EOF
 set system host-name test-router
 set interfaces ge-0/0/0 description
 # Missing description value - should fail
 EOF
 
-if ! "$BINARY" -config "$TEST_DIR/arca_invalid.conf" -hardware "$TEST_DIR/hardware.yaml" -mock-vpp >/dev/null 2>&1; then
+if ! "$BINARY" -config "$TEST_DIR/arca-router_invalid.conf" -hardware "$TEST_DIR/hardware.yaml" -mock-vpp >/dev/null 2>&1; then
     echo -e "${GREEN}PASS${NC}"
 else
     echo -e "${RED}FAIL${NC}"
@@ -109,12 +109,12 @@ fi
 
 # Test 5: Invalid CIDR format
 echo -n "Test 5: Invalid CIDR detection... "
-cat > "$TEST_DIR/arca_invalid_cidr.conf" <<EOF
+cat > "$TEST_DIR/arca-router_invalid_cidr.conf" <<EOF
 set system host-name test-router
 set interfaces ge-0/0/0 unit 0 family inet address 192.0.2.1/33
 EOF
 
-if ! "$BINARY" -config "$TEST_DIR/arca_invalid_cidr.conf" -hardware "$TEST_DIR/hardware.yaml" -mock-vpp >/dev/null 2>&1; then
+if ! "$BINARY" -config "$TEST_DIR/arca-router_invalid_cidr.conf" -hardware "$TEST_DIR/hardware.yaml" -mock-vpp >/dev/null 2>&1; then
     echo -e "${GREEN}PASS${NC}"
 else
     echo -e "${RED}FAIL${NC}"

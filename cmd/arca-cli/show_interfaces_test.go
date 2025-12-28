@@ -280,7 +280,7 @@ func TestCmdShowInterfaces_WithMockClient(t *testing.T) {
 
 	f := &flags{
 		vppSocket:  "/run/vpp/api.sock",
-		configPath: "/etc/arca-router/arca.conf",
+		configPath: "/etc/arca-router/arca-router.conf",
 		debug:      false,
 	}
 
@@ -309,7 +309,7 @@ func TestCmdShowInterfaces_ConnectError(t *testing.T) {
 
 	f := &flags{
 		vppSocket:  "/run/vpp/api.sock",
-		configPath: "/etc/arca-router/arca.conf",
+		configPath: "/etc/arca-router/arca-router.conf",
 		debug:      false,
 	}
 
@@ -334,7 +334,7 @@ func TestCmdShowInterfaces_ListError(t *testing.T) {
 
 	f := &flags{
 		vppSocket:  "/run/vpp/api.sock",
-		configPath: "/etc/arca-router/arca.conf",
+		configPath: "/etc/arca-router/arca-router.conf",
 		debug:      false,
 	}
 
@@ -371,7 +371,7 @@ func TestCmdShowInterfaces_LCPError(t *testing.T) {
 
 	f := &flags{
 		vppSocket:  "/run/vpp/api.sock",
-		configPath: "/etc/arca-router/arca.conf",
+		configPath: "/etc/arca-router/arca-router.conf",
 		debug:      false,
 	}
 
