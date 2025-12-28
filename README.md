@@ -27,10 +27,24 @@ Previous releases are documented in [`CHANGELOG.md`](CHANGELOG.md).
 
 ### v0.4.x - Advanced VPP Features 🔲
 
-- 🔲 **Advanced VPP PBR**: VPP-native policy-based routing
-- 🔲 **Web UI**: Browser-based monitoring and configuration
-- 🔲 **Telemetry**: Prometheus metrics, SNMP support
-- 🔲 **High Availability**: VRRP, BFD support
+- 🔲 **Multi-chassis/Clustering**
+  - Control plane HA (FRR + VRRP)
+  - Config sync (etcd)
+- 🔲 **MPLS/VPN**
+  - MPLS label switching (VPP)
+  - L3VPN (FRR + VPP)
+- 🔲 **QoS/Traffic Engineering**
+  - VPP QoS policy
+  - Traffic shaping
+- 🔲 **Advanced VPP Policy**
+  - VPP ACL
+  - Policy-based routing (VPP-native)
+- 🔲 **Monitoring/Observability**
+  - Prometheus exporter
+  - Grafana dashboard
+  - SNMP (optional)
+- 🔲 **Web UI**
+  - Browser-based monitoring and configuration
 
 ---
 
