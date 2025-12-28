@@ -29,10 +29,24 @@ arca-router は、VPP（Vector Packet Processing）と FRR（Free Range Routing�
 
 ### v0.4.x - Advanced VPP Features 🔲
 
-- 🔲 **Advanced VPP PBR**: VPP ネイティブのポリシーベースルーティング
-- 🔲 **Web UI**: ブラウザでの監視・設定
-- 🔲 **テレメトリ**: Prometheus メトリクス、SNMP 対応
-- 🔲 **高可用性**: VRRP、BFD 対応
+- 🔲 **マルチシャーシ/クラスタリング**
+  - Control plane HA (FRR + VRRP)
+  - Config sync (etcd)
+- 🔲 **MPLS/VPN**
+  - MPLS ラベルスイッチング (VPP)
+  - L3VPN (FRR + VPP)
+- 🔲 **QoS/トラフィックエンジニアリング**
+  - VPP QoS ポリシー
+  - トラフィックシェーピング
+- 🔲 **高度な VPP ポリシー**
+  - VPP ACL
+  - ポリシーベースルーティング（VPP ネイティブ）
+- 🔲 **監視/オブザーバビリティ**
+  - Prometheus exporter
+  - Grafana dashboard
+  - SNMP（任意）
+- 🔲 **Web UI**
+  - ブラウザでの監視・設定
 
 ---
 
