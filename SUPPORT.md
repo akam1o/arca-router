@@ -17,4 +17,6 @@ For security issues, do not open a public issue. See [`SECURITY.md`](SECURITY.md
 
 ## Commercial / official support
 
-If you need commercial support, contact: `arca-project@ark-networks.net`
+If you need commercial support, please use the private contact form:
+
+- `https://forms.gle/CMf8qvKF7rJ6kntw9`
