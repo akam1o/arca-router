@@ -20,5 +20,4 @@ Only services offered by the maintainers (or explicitly authorized partners) may
 
 ## Contact
 
-For trademark permissions, contact: `arca-project@ark-networks.net`
-
+Trademark permission requests are not accepted at this time.

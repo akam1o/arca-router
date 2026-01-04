@@ -12,8 +12,8 @@ If you are running an older version, please upgrade first.
 
 Please report security vulnerabilities **privately**.
 
-- Email: `arca-project@ark-networks.net`
-- If you prefer GitHub, you can use Security Advisories (if enabled for this repository).
+- Preferred: Use GitHub Security Advisories to report the issue privately: https://github.com/akam1o/arca-router/security/advisories/new
+- Please do not open a public GitHub Issue/Discussion for security reports.
 
 Please include:
 
@@ -30,4 +30,3 @@ Please include:
 ## Disclosure
 
 We will publish an advisory when a fix is available, including upgrade guidance and CVE information (if applicable).
-
