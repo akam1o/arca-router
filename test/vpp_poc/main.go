@@ -14,17 +14,17 @@ import (
 
 // PoC: Minimal VPP connection test
 //
-// This program verifies govpp compatibility with VPP 23.10 by:
+// This program verifies govpp compatibility with VPP 24.10 by:
 // 1. Connecting to VPP via socket
 // 2. Executing ShowVersion API call
 // 3. Verifying VPP responds correctly
 //
 // Prerequisites:
-// - VPP 23.10 installed and running
+// - VPP 24.10 installed and running
 // - /run/vpp/api.sock accessible (requires root or vpp group membership)
 //
 // Note: This PoC uses govpp's built-in binapi/vpe (no custom binapi generation required).
-// Full binapi generation for VPP 23.10 is deferred to Task 1.1.
+// Full binapi generation for VPP 24.10 is deferred to Task 1.1.
 
 const (
 	defaultSocketPath = "/run/vpp/api.sock"
@@ -35,7 +35,7 @@ func main() {
 	socketPath := getSocketPath()
 
 	fmt.Println("==================================================")
-	fmt.Println("  VPP Connection PoC - govpp v0.13.0 + VPP 23.10")
+	fmt.Println("  VPP Connection PoC - govpp v0.13.0 + VPP 24.10")
 	fmt.Println("==================================================")
 	fmt.Printf("Socket: %s\n", socketPath)
 	fmt.Println("")
@@ -87,7 +87,7 @@ func main() {
 	fmt.Println("==================================================")
 	fmt.Println("")
 	fmt.Println("govpp v0.13.0 successfully connected to VPP")
-	fmt.Println("Verify the VPP version above matches 23.10.x")
+	fmt.Println("Verify the VPP version above matches 24.10.x")
 	fmt.Println("")
 	fmt.Println("Next: Update docs/govpp-compatibility.md with findings")
 }
