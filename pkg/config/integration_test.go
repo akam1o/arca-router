@@ -7,9 +7,9 @@ import (
 
 func TestIntegration_ParseExampleConfig(t *testing.T) {
 	// Parse the example configuration file
-	f, err := os.Open("../../examples/arca.conf")
+	f, err := os.Open("../../examples/arca-router.conf")
 	if err != nil {
-		t.Fatalf("Failed to open examples/arca.conf: %v", err)
+		t.Fatalf("Failed to open examples/arca-router.conf: %v", err)
 	}
 	defer f.Close()
 
@@ -28,8 +28,8 @@ func TestIntegration_ParseExampleConfig(t *testing.T) {
 	if config.System == nil {
 		t.Fatal("System config is nil")
 	}
-	if config.System.HostName != "arca-router-01" {
-		t.Errorf("HostName = %q, want %q", config.System.HostName, "arca-router-01")
+	if config.System.HostName != "router1" {
+		t.Errorf("HostName = %q, want %q", config.System.HostName, "router1")
 	}
 
 	// Check interface ge-0/0/0
@@ -37,8 +37,8 @@ func TestIntegration_ParseExampleConfig(t *testing.T) {
 	if !ok {
 		t.Fatal("Interface ge-0/0/0 not found")
 	}
-	if iface0.Description != "WAN Uplink to ISP" {
-		t.Errorf("ge-0/0/0 description = %q, want %q", iface0.Description, "WAN Uplink to ISP")
+	if iface0.Description != "Uplink to Core" {
+		t.Errorf("ge-0/0/0 description = %q, want %q", iface0.Description, "Uplink to Core")
 	}
 
 	unit0, ok := iface0.Units[0]
@@ -52,8 +52,8 @@ func TestIntegration_ParseExampleConfig(t *testing.T) {
 	if len(family0.Addresses) != 1 {
 		t.Fatalf("Expected 1 address on ge-0/0/0, got %d", len(family0.Addresses))
 	}
-	if family0.Addresses[0] != "198.51.100.1/30" {
-		t.Errorf("ge-0/0/0 address = %q, want %q", family0.Addresses[0], "198.51.100.1/30")
+	if family0.Addresses[0] != "10.0.1.1/24" {
+		t.Errorf("ge-0/0/0 address = %q, want %q", family0.Addresses[0], "10.0.1.1/24")
 	}
 
 	// Check interface ge-0/0/1
@@ -61,8 +61,8 @@ func TestIntegration_ParseExampleConfig(t *testing.T) {
 	if !ok {
 		t.Fatal("Interface ge-0/0/1 not found")
 	}
-	if iface1.Description != "LAN Interface" {
-		t.Errorf("ge-0/0/1 description = %q, want %q", iface1.Description, "LAN Interface")
+	if iface1.Description != "Internal LAN" {
+		t.Errorf("ge-0/0/1 description = %q, want %q", iface1.Description, "Internal LAN")
 	}
 
 	unit1, ok := iface1.Units[0]

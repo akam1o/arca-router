@@ -5,6 +5,7 @@ import (
 	"io"
 	"net"
 	"strconv"
+	"strings"
 
 	"github.com/akam1o/arca-router/pkg/errors"
 )
@@ -993,10 +994,18 @@ func validateCommunity(community string) error {
 	}
 
 	// Check standard format: ASN:value (must be exactly this format)
-	var asn, value uint32
-	var remainder string
-	n, err := fmt.Sscanf(community, "%d:%d%s", &asn, &value, &remainder)
-	if err != nil || n != 2 {
+	parts := strings.Split(community, ":")
+	if len(parts) != 2 || parts[0] == "" || parts[1] == "" {
+		return fmt.Errorf("invalid community format %q, expected ASN:value or well-known community (no-export, no-advertise, local-AS, no-peer)", community)
+	}
+
+	asn, err := strconv.ParseUint(parts[0], 10, 32)
+	if err != nil || asn > 65535 {
+		return fmt.Errorf("invalid community format %q, expected ASN:value or well-known community (no-export, no-advertise, local-AS, no-peer)", community)
+	}
+
+	value, err := strconv.ParseUint(parts[1], 10, 32)
+	if err != nil || value > 65535 {
 		return fmt.Errorf("invalid community format %q, expected ASN:value or well-known community (no-export, no-advertise, local-AS, no-peer)", community)
 	}
 

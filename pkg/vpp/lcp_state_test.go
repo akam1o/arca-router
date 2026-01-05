@@ -2,8 +2,22 @@ package vpp
 
 import (
 	"context"
+	"os"
+	"path/filepath"
 	"testing"
 )
+
+func newTestLCPStateManager(t *testing.T, client Client) *LCPStateManager {
+	t.Helper()
+
+	tmpDir, err := os.MkdirTemp(".", "lcp-state-test-*")
+	if err != nil {
+		t.Fatalf("Failed to create temp dir: %v", err)
+	}
+	t.Cleanup(func() { _ = os.RemoveAll(tmpDir) })
+
+	return NewLCPStateManagerWithPersistence(client, filepath.Join(tmpDir, "lcp_mapping.json"))
+}
 
 func TestLCPStateManager_Create(t *testing.T) {
 	ctx := context.Background()
@@ -13,7 +27,7 @@ func TestLCPStateManager_Create(t *testing.T) {
 	}
 	defer client.Close()
 
-	manager := NewLCPStateManager(client)
+	manager := newTestLCPStateManager(t, client)
 
 	// Create a VPP interface first
 	iface, err := client.CreateInterface(ctx, &CreateInterfaceRequest{
@@ -56,7 +70,7 @@ func TestLCPStateManager_Delete(t *testing.T) {
 	}
 	defer client.Close()
 
-	manager := NewLCPStateManager(client)
+	manager := newTestLCPStateManager(t, client)
 
 	// Create VPP interface and LCP pair
 	iface, err := client.CreateInterface(ctx, &CreateInterfaceRequest{
@@ -91,7 +105,7 @@ func TestLCPStateManager_Sync(t *testing.T) {
 	}
 	defer client.Close()
 
-	manager := NewLCPStateManager(client)
+	manager := newTestLCPStateManager(t, client)
 
 	// Create VPP interfaces and LCP pairs directly via client
 	iface1, _ := client.CreateInterface(ctx, &CreateInterfaceRequest{
@@ -143,7 +157,7 @@ func TestLCPStateManager_GetByJunosName(t *testing.T) {
 	}
 	defer client.Close()
 
-	manager := NewLCPStateManager(client)
+	manager := newTestLCPStateManager(t, client)
 
 	// Create VPP interface and LCP pair
 	iface, err := client.CreateInterface(ctx, &CreateInterfaceRequest{
@@ -187,7 +201,7 @@ func TestLCPStateManager_GetByLinuxName(t *testing.T) {
 	}
 	defer client.Close()
 
-	manager := NewLCPStateManager(client)
+	manager := newTestLCPStateManager(t, client)
 
 	// Create VPP interface and LCP pair
 	iface, err := client.CreateInterface(ctx, &CreateInterfaceRequest{
@@ -231,7 +245,7 @@ func TestLCPStateManager_CheckConsistency(t *testing.T) {
 	}
 	defer client.Close()
 
-	manager := NewLCPStateManager(client)
+	manager := newTestLCPStateManager(t, client)
 
 	// Create VPP interface and LCP pair
 	iface, err := client.CreateInterface(ctx, &CreateInterfaceRequest{
@@ -293,7 +307,7 @@ func TestLCPStateManager_List(t *testing.T) {
 	}
 	defer client.Close()
 
-	manager := NewLCPStateManager(client)
+	manager := newTestLCPStateManager(t, client)
 
 	// Initially empty
 	lcps := manager.List()
@@ -325,7 +339,7 @@ func TestLCPStateManager_Clear(t *testing.T) {
 	}
 	defer client.Close()
 
-	manager := NewLCPStateManager(client)
+	manager := newTestLCPStateManager(t, client)
 
 	// Create LCP pair
 	iface, err := client.CreateInterface(ctx, &CreateInterfaceRequest{
