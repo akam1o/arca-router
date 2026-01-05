@@ -373,6 +373,7 @@ arca-router/
 
 ## Documentation
 
+- [Documentation Index](docs/README.md) - All docs in one place
 - [VPP Setup Guide for Debian](docs/vpp-setup-debian.md) - VPP installation for Debian
 - [VPP Setup Guide for RHEL9](docs/vpp-setup-rhel9.md) - VPP installation for RHEL9
 - [FRR Setup Guide for Debian](docs/frr-setup-debian.md) - FRR installation for Debian

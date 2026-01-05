@@ -990,13 +990,13 @@ func TestCheckVersionCompatibility(t *testing.T) {
 			retval:  0,
 			wantErr: false,
 		},
-		{
-			name:        "version mismatch - major",
-			version:     "23.10.0",
-			retval:      0,
-			wantErr:     true,
-			errContains: "incompatible",
-		},
+			{
+				name:        "version mismatch - major",
+				version:     "25.10.0",
+				retval:      0,
+				wantErr:     true,
+				errContains: "incompatible",
+			},
 		{
 			name:        "version mismatch - minor",
 			version:     "24.06.0",

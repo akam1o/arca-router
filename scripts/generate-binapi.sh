@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
 #
-# generate-binapi.sh - Generate govpp binapi for VPP 23.10
+# generate-binapi.sh - Generate govpp binapi for VPP 24.10
 #
 # This script generates Go bindings for VPP Binary API from .api.json files.
 # Generated bindings are placed in pkg/vpp/binapi/ for reproducible builds.
 #
 # Prerequisites:
-# - VPP 23.10 installed (for .api.json files) OR .api.json files manually placed
+# - VPP 24.10 installed (for .api.json files) OR .api.json files manually placed
 # - govpp binapi-generator installed: go install go.fd.io/govpp/cmd/binapi-generator@v0.13.0
 # - Go 1.22+
 #
@@ -61,7 +61,7 @@ while [[ $# -gt 0 ]]; do
 done
 
 echo "=================================================="
-echo "  govpp binapi Generator for VPP 23.10"
+echo "  govpp binapi Generator for VPP 24.10"
 echo "=================================================="
 echo ""
 
@@ -84,7 +84,7 @@ if [[ ! -d "$API_DIR" ]]; then
     echo -e "${RED}Error: API directory not found: $API_DIR${NC}" >&2
     echo ""
     echo "Possible solutions:"
-    echo "1. Install VPP 23.10: sudo dnf install vpp"
+    echo "1. Install VPP 24.10: sudo dnf install vpp"
     echo "2. Specify custom path: --api-dir /path/to/api"
     echo "3. See docs/vpp-setup-rhel9.md for setup instructions"
     exit 1
