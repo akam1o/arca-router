@@ -17,15 +17,18 @@ type mockDatastore struct {
 	events []*datastore.AuditEvent
 }
 
-func (m *mockDatastore) LogAuditEvent(ctx context.Context, event *datastore.AuditEvent) error {
-	m.events = append(m.events, event)
-	return nil
-}
+	func (m *mockDatastore) LogAuditEvent(ctx context.Context, event *datastore.AuditEvent) error {
+		m.events = append(m.events, event)
+		return nil
+	}
+	func (m *mockDatastore) CleanupAuditLog(ctx context.Context, cutoff time.Time) (int64, error) {
+		return 0, nil
+	}
 
-// Implement other required interface methods as no-ops
-func (m *mockDatastore) GetRunning(ctx context.Context) (*datastore.RunningConfig, error) {
-	return nil, nil
-}
+	// Implement other required interface methods as no-ops
+	func (m *mockDatastore) GetRunning(ctx context.Context) (*datastore.RunningConfig, error) {
+		return nil, nil
+	}
 func (m *mockDatastore) GetCandidate(ctx context.Context, sessionID string) (*datastore.CandidateConfig, error) {
 	return nil, nil
 }
