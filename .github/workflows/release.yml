@@ -148,19 +148,18 @@ jobs:
           bash -lc '
             set -euo pipefail
 
-            dnf -y install ca-certificates curl gcc git make tar gzip xz findutils
+            dnf -y --setopt=install_weak_deps=False --setopt=tsflags=nodocs install \
+              ca-certificates curl-minimal gcc git make tar gzip xz findutils >/dev/null
 
-            GO_VERSION="1.25.5"
-            curl -fsSL "https://go.dev/dl/go${GO_VERSION}.linux-amd64.tar.gz" -o /tmp/go.tgz
+            curl -fsSL "https://go.dev/dl/go1.25.5.linux-amd64.tar.gz" -o /tmp/go.tgz
             rm -rf /usr/local/go
             tar -C /usr/local -xzf /tmp/go.tgz
-            export PATH="/usr/local/go/bin:${PATH}"
+            mkdir -p /usr/local/bin
+            curl -fsSL "https://github.com/goreleaser/nfpm/releases/download/v2.35.0/nfpm_2.35.0_Linux_x86_64.tar.gz" -o /tmp/nfpm.tgz
+            tar -C /usr/local/bin -xzf /tmp/nfpm.tgz nfpm
+            chmod +x /usr/local/bin/nfpm
 
-            export GOBIN="/work/.tools/bin"
-            mkdir -p "${GOBIN}"
-            go install github.com/goreleaser/nfpm/v2/cmd/nfpm@v2.35.0
-
-            export PATH="/work/.tools/bin:${PATH}"
+            export PATH="/usr/local/go/bin:/usr/local/bin:${PATH}"
             VERSION=${{ needs.prepare.outputs.version }} RPM_RELEASE=${{ matrix.rpm_release }} make build
             VERSION=${{ needs.prepare.outputs.version }} RPM_RELEASE=${{ matrix.rpm_release }} make rpm-package
           '
