@@ -1,12 +1,15 @@
 # arca-router
 
+[![Build and Test](https://github.com/akam1o/arca-router/actions/workflows/build.yml/badge.svg?branch=main)](https://github.com/akam1o/arca-router/actions/workflows/build.yml)
+[![Release](https://github.com/akam1o/arca-router/actions/workflows/release.yml/badge.svg)](https://github.com/akam1o/arca-router/actions/workflows/release.yml)
+
+[English](README.md) | 日本語
+
 **Junos 互換の設定構文を備えた高性能ソフトウェアルータ**
 
 arca-router は、VPP（Vector Packet Processing）と FRR（Free Range Routing）を基盤に、Junos 互換の設定構文で運用できるソフトウェアルータです。動的ルーティングプロトコルにも対応します。
 
 **現在のステータス**: v0.3.x - **NETCONF 管理 & セキュリティ**
-
-[English](README.md)
 
 ---
 

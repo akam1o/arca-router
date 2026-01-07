@@ -1,0 +1,234 @@
+name: Release
+
+on:
+  workflow_dispatch:
+  release:
+    types: [published]
+
+permissions:
+  contents: write
+  actions: read
+
+jobs:
+  prepare:
+    name: Prepare Release
+    # Avoid infinite loop: tag-push run publishes a release which emits a `release` event by github-actions[bot].
+    if: github.event_name != 'release' || github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      tag: ${{ steps.version.outputs.tag }}
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
+
+    - name: Set up Go
+      uses: actions/setup-go@v5
+      with:
+        go-version: '1.25.5'
+        cache: true
+
+    - name: Get version from tag
+      id: version
+      run: |
+        if [[ "${GITHUB_EVENT_NAME}" == "release" ]]; then
+          TAG="${{ github.event.release.tag_name }}"
+          VERSION="${TAG#v}"
+        elif [[ "${GITHUB_REF}" == refs/tags/v* ]]; then
+          VERSION=${GITHUB_REF#refs/tags/v}
+          TAG=${GITHUB_REF#refs/tags/}
+        else
+          VERSION="$(git describe --tags --abbrev=0 2>/dev/null | sed 's/^v//')"
+          if [[ -z "${VERSION}" ]]; then
+            VERSION="0.1.0"
+          fi
+          TAG="dev-${GITHUB_SHA::7}"
+        fi
+
+        echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+        echo "tag=${TAG}" >> "$GITHUB_OUTPUT"
+
+  build-deb:
+    name: Build DEB (Ubuntu)
+    needs: prepare
+    runs-on: ${{ matrix.runner }}
+
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: ubuntu-22.04
+            deb_release: 1~ubuntu22.04
+            artifact_name: deb-ubuntu22.04
+          - runner: ubuntu-24.04
+            deb_release: 1~ubuntu24.04
+            artifact_name: deb-ubuntu24.04
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
+
+    - name: Set up Go
+      uses: actions/setup-go@v5
+      with:
+        go-version: '1.25.5'
+        cache: true
+
+    - name: Install NFPM
+      run: make install-nfpm
+
+    - name: Build binaries
+      run: VERSION=${{ needs.prepare.outputs.version }} make build
+
+    - name: Build DEB package
+      run: |
+        VERSION=${{ needs.prepare.outputs.version }} \
+        DEB_RELEASE=${{ matrix.deb_release }} \
+        make deb-package
+
+    - name: Upload DEB package
+      uses: actions/upload-artifact@v4
+      with:
+        name: ${{ matrix.artifact_name }}
+        path: dist/*.deb
+        retention-days: 30
+
+  build-rpm:
+    name: Build RPM
+    needs: prepare
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
+
+    - name: Set up Go
+      uses: actions/setup-go@v5
+      with:
+        go-version: '1.25.5'
+        cache: true
+
+    - name: Install NFPM
+      run: make install-nfpm
+
+    - name: Build binaries
+      run: VERSION=${{ needs.prepare.outputs.version }} make build
+
+    - name: Build RPM package
+      run: VERSION=${{ needs.prepare.outputs.version }} make rpm-package
+
+    - name: Upload RPM artifacts
+      uses: actions/upload-artifact@v4
+      with:
+        name: rpm
+        path: |
+          dist/*.rpm
+        retention-days: 30
+
+  bundle-artifacts:
+    name: Bundle Artifacts
+    runs-on: ubuntu-latest
+    needs:
+      - prepare
+      - build-deb
+      - build-rpm
+
+    steps:
+    - name: Download packages
+      uses: actions/download-artifact@v4
+      with:
+        path: dist
+        merge-multiple: true
+
+    - name: Generate checksums
+      run: |
+        cd dist
+        sha256sum *.deb *.rpm > SHA256SUMS
+        cat SHA256SUMS
+
+    - name: Upload bundled artifacts
+      uses: actions/upload-artifact@v4
+      with:
+        name: bundle-${{ needs.prepare.outputs.version }}
+        path: |
+          dist/*.deb
+          dist/*.rpm
+          dist/SHA256SUMS
+        retention-days: 30
+
+  attach-assets:
+    name: Attach Assets to Published Release
+    if: github.event_name == 'release'
+    runs-on: ubuntu-latest
+    needs:
+      - prepare
+      - bundle-artifacts
+
+    steps:
+    - name: Download bundled artifacts
+      uses: actions/download-artifact@v4
+      with:
+        name: bundle-${{ needs.prepare.outputs.version }}
+        path: dist
+
+    - name: Upload assets to GitHub Release
+      uses: softprops/action-gh-release@v2
+      with:
+        tag_name: ${{ needs.prepare.outputs.tag }}
+        files: |
+          dist/*.deb
+          dist/*.rpm
+          dist/SHA256SUMS
+        token: ${{ secrets.GITHUB_TOKEN }}
+
+  verify-packages:
+    name: Verify Packages
+    runs-on: ubuntu-latest
+    needs:
+      - prepare
+      - bundle-artifacts
+
+    strategy:
+      matrix:
+        os:
+          - image: ubuntu:22.04
+            type: deb
+            deb_suffix: ubuntu22.04
+          - image: ubuntu:24.04
+            type: deb
+            deb_suffix: ubuntu24.04
+          - image: rockylinux:9
+            type: rpm
+
+    container:
+      image: ${{ matrix.os.image }}
+
+    steps:
+    - name: Download release artifacts
+      uses: actions/download-artifact@v4
+      with:
+        name: bundle-${{ needs.prepare.outputs.version }}
+        path: ./packages
+
+    - name: Install package (DEB)
+      if: matrix.os.type == 'deb'
+      run: |
+        DEB_PKG="$(ls -1 packages/*${{ matrix.os.deb_suffix }}*.deb | head -n 1)"
+        echo "Inspecting: ${DEB_PKG}"
+        dpkg-deb -I "${DEB_PKG}" >/dev/null
+        dpkg-deb -c "${DEB_PKG}" | awk '{print $NF}' | grep -E "^/usr/sbin/arca-routerd$|^/usr/bin/arca-cli$|^/usr/sbin/arca-netconfd$|^/usr/lib/systemd/system/arca-routerd\\.service$|^/usr/lib/systemd/system/arca-netconfd\\.service$|^/etc/arca-router/hardware\\.yaml\\.example$"
+
+    - name: Install package (RPM)
+      if: matrix.os.type == 'rpm'
+      run: |
+        RPM_PKG="$(ls -1 packages/*.rpm | head -n 1)"
+        echo "Inspecting: ${RPM_PKG}"
+        rpm -qip "${RPM_PKG}" >/dev/null
+        rpm -qpl "${RPM_PKG}" | grep -E "^/usr/sbin/arca-routerd$|^/usr/bin/arca-cli$|^/usr/sbin/arca-netconfd$|^/usr/lib/systemd/system/arca-routerd\\.service$|^/usr/lib/systemd/system/arca-netconfd\\.service$|^/etc/arca-router/hardware\\.yaml\\.example$"

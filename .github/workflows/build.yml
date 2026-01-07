@@ -1,0 +1,138 @@
+name: Build and Test
+
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main, develop ]
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Build and Test
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      with:
+        fetch-depth: 0  # Full history for version detection
+
+    - name: Set up Go
+      uses: actions/setup-go@v5
+      with:
+        go-version: '1.25.5'
+        cache: true
+
+    - name: Install dependencies
+      run: |
+        go mod download
+        go mod verify
+
+    - name: Run go fmt
+      run: |
+        if [ "$(gofmt -s -l . | wc -l)" -gt 0 ]; then
+          echo "Code is not formatted. Please run 'make fmt'"
+          gofmt -s -l .
+          exit 1
+        fi
+
+    - name: Run go vet
+      run: make vet
+
+    - name: Run tests
+      run: make test
+
+    - name: Generate coverage report
+      run: |
+        go test -coverprofile=coverage.out ./...
+        go tool cover -func=coverage.out
+
+    - name: Upload coverage to artifacts
+      uses: actions/upload-artifact@v4
+      with:
+        name: coverage-report
+        path: coverage.out
+        retention-days: 30
+
+    - name: Build binaries
+      run: make build
+
+    - name: Verify binaries
+      run: |
+        ./build/bin/arca-routerd --version
+        ./build/bin/arca-cli --version
+
+    - name: Upload binaries
+      uses: actions/upload-artifact@v4
+      with:
+        name: binaries
+        path: |
+          build/bin/arca-routerd
+          build/bin/arca-cli
+        retention-days: 30
+
+  build-packages:
+    name: Build DEB/RPM Packages
+    runs-on: ubuntu-latest
+    needs: build
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
+
+    - name: Set up Go
+      uses: actions/setup-go@v5
+      with:
+        go-version: '1.25.5'
+        cache: true
+
+    - name: Install NFPM
+      run: make install-nfpm
+
+    - name: Build DEB package
+      run: make deb
+
+    - name: Build RPM package
+      run: make rpm
+
+    - name: List packages
+      run: |
+        ls -lh dist/
+        echo "=== DEB Package Info ==="
+        dpkg-deb --info dist/*.deb || true
+        echo "=== RPM Package Info ==="
+        rpm -qip dist/*.rpm || true
+
+    - name: Upload packages
+      uses: actions/upload-artifact@v4
+      with:
+        name: packages
+        path: |
+          dist/*.deb
+          dist/*.rpm
+        retention-days: 30
+
+  lint:
+    name: Lint Code
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Set up Go
+      uses: actions/setup-go@v5
+      with:
+        go-version: '1.25.5'
+        cache: true
+
+    - name: Run golangci-lint
+      uses: golangci/golangci-lint-action@v6
+      with:
+        version: latest
+        args: --timeout=5m
