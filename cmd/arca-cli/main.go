@@ -22,16 +22,27 @@ const (
 )
 
 type flags struct {
-	debug      bool
-	vppSocket  string
-	configPath string
+	debug       bool
+	vppSocket   string
+	configPath  string
+	showHelp    bool
+	showVersion bool
 }
 
 func main() {
+	ctx := context.Background()
+
 	// Parse command line flags
 	f := parseFlags()
 
-	ctx := context.Background()
+	if f.showHelp {
+		showHelp()
+		os.Exit(ExitSuccess)
+	}
+
+	if f.showVersion {
+		os.Exit(cmdVersion(ctx, f))
+	}
 
 	// If no command is provided, start interactive mode
 	if flag.NArg() < 1 {
@@ -51,10 +62,18 @@ func parseFlags() *flags {
 
 	flag.BoolVar(&f.debug, "debug", false,
 		"Enable debug output to stderr")
+	flag.BoolVar(&f.showHelp, "help", false,
+		"Show help message")
+	flag.BoolVar(&f.showHelp, "h", false,
+		"Show help message (shorthand)")
 	flag.StringVar(&f.vppSocket, "socket", "/run/vpp/api.sock",
 		"Path to VPP API socket")
 	flag.StringVar(&f.configPath, "config", "/etc/arca-router/arca-router.conf",
 		"Path to configuration file")
+	flag.BoolVar(&f.showVersion, "version", false,
+		"Show version information")
+	flag.BoolVar(&f.showVersion, "v", false,
+		"Show version information (shorthand)")
 
 	flag.Usage = showUsage
 	flag.Parse()
@@ -113,8 +132,10 @@ Show subcommands:
 
 Options:
   -debug              Enable debug output to stderr
+  -help, -h           Show this help message
   -socket <path>      VPP API socket path (default: /run/vpp/api.sock)
   -config <path>      Configuration file path (default: /etc/arca-router/arca-router.conf)
+  -version, -v        Show version information
 
 Phase 3 Features (Interactive mode):
   - Junos-style configuration commands (set, delete, edit)
