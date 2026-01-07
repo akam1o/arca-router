@@ -1,9 +1,6 @@
 run:
   timeout: 5m
   tests: true
-  skip-dirs:
-    - test/vpp_poc
-    - vendor
 
 linters-settings:
   govet:
@@ -41,6 +38,9 @@ linters:
     - revive
 
 issues:
+  exclude-dirs:
+    - test/vpp_poc
+    - vendor
   exclude-rules:
     - path: _test\.go
       linters:
@@ -55,6 +55,7 @@ issues:
   max-same-issues: 0
 
 output:
-  format: colored-line-number
+  formats:
+    - format: colored-line-number
   print-issued-lines: true
   print-linter-name: true
