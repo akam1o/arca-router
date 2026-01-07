@@ -176,7 +176,10 @@ func (ds *etcdDatastore) Commit(ctx context.Context, req *CommitRequest) (string
 
 	// Revoke lease
 	if currentLock.LeaseID > 0 {
-		ds.client.Revoke(ctx, clientv3.LeaseID(currentLock.LeaseID))
+		if _, err := ds.client.Revoke(ctx, clientv3.LeaseID(currentLock.LeaseID)); err != nil {
+			// Best-effort cleanup; the commit already succeeded.
+			_ = err
+		}
 	}
 
 	return commitID, nil

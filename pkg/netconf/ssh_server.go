@@ -234,7 +234,9 @@ func (s *SSHServer) acceptConnections(ctx context.Context) {
 		}
 
 		// Set accept deadline to allow checking done channel
-		listener.(*net.TCPListener).SetDeadline(time.Now().Add(1 * time.Second))
+		if err := listener.(*net.TCPListener).SetDeadline(time.Now().Add(1 * time.Second)); err != nil {
+			s.log.Warn("Failed to set accept deadline", "error", err)
+		}
 
 		conn, err := listener.Accept()
 		if err != nil {
@@ -259,7 +261,11 @@ func (s *SSHServer) acceptConnections(ctx context.Context) {
 // handleConnection handles a single SSH connection
 func (s *SSHServer) handleConnection(ctx context.Context, conn net.Conn) {
 	defer s.wg.Done()
-	defer conn.Close()
+	defer func() {
+		if err := conn.Close(); err != nil {
+			_ = err
+		}
+	}()
 
 	// Update metrics
 	atomic.AddUint64(&s.totalConnections, 1)
@@ -279,7 +285,11 @@ func (s *SSHServer) handleConnection(ctx context.Context, conn net.Conn) {
 		s.log.Error("SSH handshake failed", "remote", conn.RemoteAddr(), "error", err)
 		return
 	}
-	defer sshConn.Close()
+	defer func() {
+		if err := sshConn.Close(); err != nil {
+			_ = err
+		}
+	}()
 
 	atomic.AddUint64(&s.successfulHandshakes, 1)
 	s.log.Info("SSH connection established", "remote", conn.RemoteAddr(), "user", sshConn.User())
@@ -290,7 +300,9 @@ func (s *SSHServer) handleConnection(ctx context.Context, conn net.Conn) {
 	// Handle channels
 	for newChannel := range chans {
 		if newChannel.ChannelType() != "session" {
-			newChannel.Reject(ssh.UnknownChannelType, "unknown channel type")
+			if err := newChannel.Reject(ssh.UnknownChannelType, "unknown channel type"); err != nil {
+				s.log.Warn("Failed to reject unknown channel", "error", err)
+			}
 			continue
 		}
 
@@ -309,26 +321,36 @@ func (s *SSHServer) handleConnection(ctx context.Context, conn net.Conn) {
 // handleSession handles a single SSH session
 func (s *SSHServer) handleSession(ctx context.Context, sshConn *ssh.ServerConn, channel ssh.Channel, requests <-chan *ssh.Request) {
 	defer s.wg.Done()
-	defer channel.Close()
+	defer func() {
+		if err := channel.Close(); err != nil {
+			_ = err
+		}
+	}()
 
 	// Wait for subsystem request
 	for req := range requests {
 		switch req.Type {
 		case "subsystem":
 			if len(req.Payload) < 4 {
-				req.Reply(false, nil)
+				if err := req.Reply(false, nil); err != nil {
+					s.log.Warn("Failed to reply to request", "error", err)
+				}
 				continue
 			}
 			// Parse subsystem name (SSH string format: uint32 BE length + data)
 			subsystemLen := binary.BigEndian.Uint32(req.Payload[0:4])
 			if len(req.Payload) < int(4+subsystemLen) {
-				req.Reply(false, nil)
+				if err := req.Reply(false, nil); err != nil {
+					s.log.Warn("Failed to reply to request", "error", err)
+				}
 				continue
 			}
 			subsystem := string(req.Payload[4 : 4+subsystemLen])
 
 			if subsystem == "netconf" {
-				req.Reply(true, nil)
+				if err := req.Reply(true, nil); err != nil {
+					s.log.Warn("Failed to reply to request", "error", err)
+				}
 				s.log.Info("NETCONF subsystem requested", "user", sshConn.User())
 
 				// Create NETCONF session
@@ -346,11 +368,15 @@ func (s *SSHServer) handleSession(ctx context.Context, sshConn *ssh.ServerConn, 
 				s.wg.Add(1)
 				go s.handleNETCONF(ctx, session, channel)
 			} else {
-				req.Reply(false, nil)
+				if err := req.Reply(false, nil); err != nil {
+					s.log.Warn("Failed to reply to request", "error", err)
+				}
 				s.log.Warn("Unsupported subsystem", "subsystem", subsystem)
 			}
 		default:
-			req.Reply(false, nil)
+			if err := req.Reply(false, nil); err != nil {
+				s.log.Warn("Failed to reply to request", "error", err)
+			}
 		}
 	}
 }
@@ -676,7 +702,10 @@ func (s *SSHServer) handleNETCONF(ctx context.Context, sess *Session, channel ss
 			}
 			errorReply := NewErrorReply("", rpcErr)
 			errorXML, _ := MarshalReply(errorReply)
-			writer.WriteMessage(errorXML)
+			if err := writer.WriteMessage(errorXML); err != nil {
+				s.log.Error("Failed to send error reply", "error", err)
+				return
+			}
 			continue
 		}
 
@@ -689,7 +718,10 @@ func (s *SSHServer) handleNETCONF(ctx context.Context, sess *Session, channel ss
 			if err != nil {
 				s.log.Error("Failed to serialize reply", "error", err)
 			} else {
-				writer.WriteMessage(replyXML)
+				if err := writer.WriteMessage(replyXML); err != nil {
+					s.log.Error("Failed to send reply", "error", err)
+					return
+				}
 			}
 			s.log.Info("Close-session requested, terminating", "session", sess.ID)
 			return
@@ -705,7 +737,10 @@ func (s *SSHServer) handleNETCONF(ctx context.Context, sess *Session, channel ss
 			// Send generic error
 			errorReply := NewErrorReply(rpc.MessageID, ErrOperationFailed("reply serialization failed"))
 			errorXML, _ := MarshalReply(errorReply)
-			writer.WriteMessage(errorXML)
+			if err := writer.WriteMessage(errorXML); err != nil {
+				s.log.Error("Failed to send error reply", "error", err)
+				return
+			}
 			continue
 		}
 

@@ -3,6 +3,7 @@ package datastore
 import (
 	"database/sql"
 	"embed"
+	"errors"
 	"fmt"
 	"io/fs"
 	"os"
@@ -221,7 +222,11 @@ func (m *sqliteMigrationManager) applyMigration(mig migration) error {
 	if err != nil {
 		return fmt.Errorf("failed to begin transaction: %w", err)
 	}
-	defer tx.Rollback() // Rollback if not committed
+	defer func() {
+		if err := tx.Rollback(); err != nil && !errors.Is(err, sql.ErrTxDone) {
+			_ = err
+		}
+	}() // Rollback if not committed
 
 	// Execute migration SQL
 	if _, err := tx.Exec(mig.content); err != nil {

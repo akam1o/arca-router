@@ -229,7 +229,9 @@ func BenchmarkChunkedFramingWrite(b *testing.B) {
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		buf.Reset()
-		writer.WriteMessage(message)
+		if err := writer.WriteMessage(message); err != nil {
+			b.Fatalf("WriteMessage failed: %v", err)
+		}
 	}
 }
 
@@ -237,13 +239,17 @@ func BenchmarkChunkedFramingRead(b *testing.B) {
 	message := []byte(strings.Repeat("x", 1000))
 	var buf bytes.Buffer
 	writer := NewFramingWriter(&buf, "1.1")
-	writer.WriteMessage(message)
+	if err := writer.WriteMessage(message); err != nil {
+		b.Fatalf("WriteMessage failed: %v", err)
+	}
 	data := buf.Bytes()
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		reader := NewFramingReader(bytes.NewReader(data), "1.1")
-		reader.ReadMessage()
+		if _, err := reader.ReadMessage(); err != nil {
+			b.Fatalf("ReadMessage failed: %v", err)
+		}
 	}
 }
 
@@ -255,7 +261,9 @@ func BenchmarkEOMFramingWrite(b *testing.B) {
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		buf.Reset()
-		writer.WriteMessage(message)
+		if err := writer.WriteMessage(message); err != nil {
+			b.Fatalf("WriteMessage failed: %v", err)
+		}
 	}
 }
 
@@ -263,13 +271,17 @@ func BenchmarkEOMFramingRead(b *testing.B) {
 	message := []byte(strings.Repeat("x", 1000))
 	var buf bytes.Buffer
 	writer := NewFramingWriter(&buf, "1.0")
-	writer.WriteMessage(message)
+	if err := writer.WriteMessage(message); err != nil {
+		b.Fatalf("WriteMessage failed: %v", err)
+	}
 	data := buf.Bytes()
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		reader := NewFramingReader(bytes.NewReader(data), "1.0")
-		reader.ReadMessage()
+		if _, err := reader.ReadMessage(); err != nil {
+			b.Fatalf("ReadMessage failed: %v", err)
+		}
 	}
 }
 

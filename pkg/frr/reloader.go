@@ -166,8 +166,12 @@ func (r *Reloader) writeConfigAtomic(data []byte) error {
 	// Clean up temp file on error
 	defer func() {
 		if tmpFile != nil {
-			tmpFile.Close()
-			os.Remove(tmpPath)
+			if err := tmpFile.Close(); err != nil {
+				_ = err
+			}
+			if err := os.Remove(tmpPath); err != nil {
+				_ = err
+			}
 		}
 	}()
 
@@ -238,7 +242,11 @@ func syncDir(path string) error {
 	if err != nil {
 		return err
 	}
-	defer dir.Close()
+	defer func() {
+		if err := dir.Close(); err != nil {
+			_ = err
+		}
+	}()
 	return dir.Sync()
 }
 

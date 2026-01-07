@@ -12,18 +12,24 @@ func FormatTable(w io.Writer, headers []string, rows [][]string) error {
 	tw := tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)
 
 	// Print headers
-	fmt.Fprintln(tw, strings.Join(headers, "\t"))
+	if _, err := fmt.Fprintln(tw, strings.Join(headers, "\t")); err != nil {
+		return err
+	}
 
 	// Print separator
 	sep := make([]string, len(headers))
 	for i := range headers {
 		sep[i] = strings.Repeat("-", len(headers[i]))
 	}
-	fmt.Fprintln(tw, strings.Join(sep, "\t"))
+	if _, err := fmt.Fprintln(tw, strings.Join(sep, "\t")); err != nil {
+		return err
+	}
 
 	// Print rows
 	for _, row := range rows {
-		fmt.Fprintln(tw, strings.Join(row, "\t"))
+		if _, err := fmt.Fprintln(tw, strings.Join(row, "\t")); err != nil {
+			return err
+		}
 	}
 
 	// Return flush error
@@ -34,7 +40,9 @@ func FormatTable(w io.Writer, headers []string, rows [][]string) error {
 // This is a pass-through for displaying configuration as-is
 func FormatSetConfig(w io.Writer, lines []string) error {
 	for _, line := range lines {
-		fmt.Fprintln(w, line)
+		if _, err := fmt.Fprintln(w, line); err != nil {
+			return err
+		}
 	}
 	return nil
 }

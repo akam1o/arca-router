@@ -83,10 +83,18 @@ func (p *LCPPersistence) SaveMapping(mappings []*LCPMapping) error {
 	}
 	tempPath := tempFile.Name()
 
+	cleanupTemp := func() {
+		if err := tempFile.Close(); err != nil {
+			_ = err
+		}
+		if err := os.Remove(tempPath); err != nil && !os.IsNotExist(err) {
+			_ = err
+		}
+	}
+
 	// Set correct permissions before writing
 	if err := tempFile.Chmod(lcpMappingFileMode); err != nil {
-		tempFile.Close()
-		os.Remove(tempPath)
+		cleanupTemp()
 		return errors.Wrap(err, errors.ErrCodeSystemError,
 			"Failed to set LCP mapping file permissions",
 			fmt.Sprintf("Could not chmod %s", tempPath),
@@ -95,8 +103,7 @@ func (p *LCPPersistence) SaveMapping(mappings []*LCPMapping) error {
 
 	// Write data to temp file
 	if _, err := tempFile.Write(data); err != nil {
-		tempFile.Close()
-		os.Remove(tempPath)
+		cleanupTemp()
 		return errors.Wrap(err, errors.ErrCodeSystemError,
 			"Failed to write LCP mapping temporary file",
 			fmt.Sprintf("Could not write to: %s", tempPath),
@@ -105,8 +112,7 @@ func (p *LCPPersistence) SaveMapping(mappings []*LCPMapping) error {
 
 	// Fsync file to ensure data is persisted to disk
 	if err := tempFile.Sync(); err != nil {
-		tempFile.Close()
-		os.Remove(tempPath)
+		cleanupTemp()
 		return errors.Wrap(err, errors.ErrCodeSystemError,
 			"Failed to sync LCP mapping file to disk",
 			fmt.Sprintf("Could not fsync %s", tempPath),
@@ -115,7 +121,9 @@ func (p *LCPPersistence) SaveMapping(mappings []*LCPMapping) error {
 
 	// Close file before rename
 	if err := tempFile.Close(); err != nil {
-		os.Remove(tempPath)
+		if err := os.Remove(tempPath); err != nil && !os.IsNotExist(err) {
+			_ = err
+		}
 		return errors.Wrap(err, errors.ErrCodeSystemError,
 			"Failed to close LCP mapping temporary file",
 			fmt.Sprintf("Could not close %s", tempPath),
@@ -125,7 +133,9 @@ func (p *LCPPersistence) SaveMapping(mappings []*LCPMapping) error {
 	// Atomic rename from temp to target path
 	if err := os.Rename(tempPath, p.path); err != nil {
 		// Clean up temp file on failure
-		os.Remove(tempPath)
+		if err := os.Remove(tempPath); err != nil && !os.IsNotExist(err) {
+			_ = err
+		}
 		return errors.Wrap(err, errors.ErrCodeSystemError,
 			"Failed to rename LCP mapping file",
 			fmt.Sprintf("Could not rename %s to %s", tempPath, p.path),
@@ -140,7 +150,11 @@ func (p *LCPPersistence) SaveMapping(mappings []*LCPMapping) error {
 			fmt.Sprintf("Could not open directory: %s", dir),
 			"Check directory permissions and filesystem health")
 	}
-	defer dirFile.Close()
+	defer func() {
+		if err := dirFile.Close(); err != nil {
+			_ = err
+		}
+	}()
 
 	if err := dirFile.Sync(); err != nil {
 		return errors.Wrap(err, errors.ErrCodeSystemError,
@@ -218,7 +232,11 @@ func (p *LCPPersistence) DeleteMapping() error {
 			fmt.Sprintf("Could not open directory: %s", dir),
 			"Check directory permissions and filesystem health")
 	}
-	defer dirFile.Close()
+	defer func() {
+		if err := dirFile.Close(); err != nil {
+			_ = err
+		}
+	}()
 
 	if err := dirFile.Sync(); err != nil {
 		return errors.Wrap(err, errors.ErrCodeSystemError,

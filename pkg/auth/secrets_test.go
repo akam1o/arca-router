@@ -247,8 +247,14 @@ func TestGetSecretFromEnv(t *testing.T) {
 	// Test direct environment variable
 	envVar := "TEST_SECRET_VALUE"
 	expectedValue := "my-secret-value"
-	os.Setenv(envVar, expectedValue)
-	defer os.Unsetenv(envVar)
+	if err := os.Setenv(envVar, expectedValue); err != nil {
+		t.Fatalf("Setenv failed: %v", err)
+	}
+	t.Cleanup(func() {
+		if err := os.Unsetenv(envVar); err != nil {
+			t.Fatalf("Unsetenv failed: %v", err)
+		}
+	})
 
 	value, err := GetSecretFromEnv(envVar)
 	if err != nil {
@@ -267,8 +273,14 @@ func TestGetSecretFromEnv(t *testing.T) {
 	}
 
 	fileEnvVar := "TEST_SECRET_FILE"
-	os.Setenv(fileEnvVar+"_FILE", secretFilePath)
-	defer os.Unsetenv(fileEnvVar + "_FILE")
+	if err := os.Setenv(fileEnvVar+"_FILE", secretFilePath); err != nil {
+		t.Fatalf("Setenv failed: %v", err)
+	}
+	t.Cleanup(func() {
+		if err := os.Unsetenv(fileEnvVar + "_FILE"); err != nil {
+			t.Fatalf("Unsetenv failed: %v", err)
+		}
+	})
 
 	value, err = GetSecretFromEnv(fileEnvVar)
 	if err != nil {

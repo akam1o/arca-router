@@ -115,7 +115,10 @@ func TestPasswordTimingAttackResistance(t *testing.T) {
 	correctTimes := make([]time.Duration, 10)
 	for i := 0; i < 10; i++ {
 		start := time.Now()
-		VerifyPassword(password, hash)
+		_, err := VerifyPassword(password, hash)
+		if err != nil {
+			t.Fatalf("VerifyPassword failed: %v", err)
+		}
 		correctTimes[i] = time.Since(start)
 	}
 
@@ -123,7 +126,10 @@ func TestPasswordTimingAttackResistance(t *testing.T) {
 	wrongTimes := make([]time.Duration, 10)
 	for i := 0; i < 10; i++ {
 		start := time.Now()
-		VerifyPassword("wrong", hash)
+		_, err := VerifyPassword("wrong", hash)
+		if err != nil {
+			t.Fatalf("VerifyPassword failed: %v", err)
+		}
 		wrongTimes[i] = time.Since(start)
 	}
 

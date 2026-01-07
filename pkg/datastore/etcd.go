@@ -76,7 +76,9 @@ func NewEtcdDatastore(cfg *Config) (Datastore, error) {
 
 	_, err = client.Get(ctx, prefix, clientv3.WithPrefix(), clientv3.WithLimit(1))
 	if err != nil {
-		client.Close()
+		if closeErr := client.Close(); closeErr != nil {
+			_ = closeErr
+		}
 		return nil, fmt.Errorf("failed to connect to etcd: %w", err)
 	}
 

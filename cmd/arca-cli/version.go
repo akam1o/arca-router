@@ -35,7 +35,11 @@ func getVPPVersion(ctx context.Context, f *flags) string {
 		debugLog(f, "Failed to create VPP client: %v", err)
 		return "N/A (client creation failed)"
 	}
-	defer client.Close()
+	defer func() {
+		if err := client.Close(); err != nil {
+			_ = err
+		}
+	}()
 
 	// Connect to VPP
 	if err := client.Connect(ctx); err != nil {

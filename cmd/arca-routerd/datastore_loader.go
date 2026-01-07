@@ -43,7 +43,7 @@ func (d *datastoreConfigLoader) LoadConfig(path string) (*config.Config, error) 
 		slog.Warn("Failed to open datastore, falling back to file", slog.Any("error", err))
 		return d.fileLoader.LoadConfig(path)
 	}
-	defer ds.Close()
+	defer func() { _ = ds.Close() }()
 
 	ctx := context.Background()
 	running, err := ds.GetRunning(ctx)
@@ -120,7 +120,7 @@ func (d *datastoreConfigLoader) bootstrapDatastore(ds datastore.Datastore, cfg *
 		slog.Warn("Failed to acquire lock for bootstrap commit", slog.Any("error", err))
 	} else {
 		// Release lock after commit
-		defer ds.ReleaseLock(ctx, "candidate", sessionID)
+		defer func() { _ = ds.ReleaseLock(ctx, "candidate", sessionID) }()
 	}
 
 	// Commit to running

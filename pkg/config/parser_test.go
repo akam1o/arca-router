@@ -561,7 +561,7 @@ func TestParser_Phase2SampleFile(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to open arca-router.conf: %v", err)
 	}
-	defer file.Close()
+	defer func() { _ = file.Close() }()
 
 	parser := NewParser(file)
 	config, err := parser.Parse()

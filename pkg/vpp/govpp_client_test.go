@@ -181,7 +181,11 @@ func TestCheckSocketAccess(t *testing.T) {
 		}
 		t.Fatalf("Failed to create test socket: %v", err)
 	}
-	defer listener.Close()
+	defer func() {
+		if err := listener.Close(); err != nil {
+			_ = err
+		}
+	}()
 
 	// Test valid socket
 	err = checkSocketAccess(socketPath)

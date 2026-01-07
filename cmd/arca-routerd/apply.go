@@ -35,7 +35,7 @@ func (d *defaultConfigLoader) LoadConfig(path string) (*config.Config, error) {
 	if err != nil {
 		return nil, errors.ConfigNotFound(path)
 	}
-	defer file.Close()
+	defer func() { _ = file.Close() }()
 
 	return parseConfig(file, path)
 }

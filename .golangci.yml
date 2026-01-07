@@ -3,46 +3,38 @@ version: "2"
 run:
   timeout: 5m
   tests: true
-
-linters-settings:
-  govet:
-    enable-all: true
-  misspell:
-    locale: US
-  gocritic:
-    enabled-tags:
-      - diagnostic
-      - experimental
-      - opinionated
-      - performance
-      - style
+  go: "1.25"
 
 linters:
-  disable-all: true
+  default: none
   enable:
+    - errcheck
     - govet
-    - staticcheck
-    - unused
     - ineffassign
     - misspell
-  disable:
-    - errcheck
+    - staticcheck
+    - unused
+  settings:
+    gocritic:
+      enabled-tags:
+        - diagnostic
+        - experimental
+        - opinionated
+        - performance
+        - style
+  exclusions:
+    paths:
+      - test/vpp_poc
+      - vendor
 
 issues:
-  exclude-dirs:
-    - test/vpp_poc
-    - vendor
-  exclude-rules:
-    - path: _test\.go
-      linters:
-        - dupl
-        - gosec
   max-issues-per-linter: 0
   max-same-issues: 0
 
 output:
   formats:
-    colored-line-number:
+    text:
       path: stdout
-  print-issued-lines: true
-  print-linter-name: true
+      print-issued-lines: true
+      print-linter-name: true
+      colors: true

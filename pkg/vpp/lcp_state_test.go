@@ -25,7 +25,11 @@ func TestLCPStateManager_Create(t *testing.T) {
 	if err := client.Connect(ctx); err != nil {
 		t.Fatalf("Connect failed: %v", err)
 	}
-	defer client.Close()
+	t.Cleanup(func() {
+		if err := client.Close(); err != nil {
+			t.Fatalf("Close failed: %v", err)
+		}
+	})
 
 	manager := newTestLCPStateManager(t, client)
 
@@ -68,7 +72,11 @@ func TestLCPStateManager_Delete(t *testing.T) {
 	if err := client.Connect(ctx); err != nil {
 		t.Fatalf("Connect failed: %v", err)
 	}
-	defer client.Close()
+	t.Cleanup(func() {
+		if err := client.Close(); err != nil {
+			t.Fatalf("Close failed: %v", err)
+		}
+	})
 
 	manager := newTestLCPStateManager(t, client)
 
@@ -103,22 +111,36 @@ func TestLCPStateManager_Sync(t *testing.T) {
 	if err := client.Connect(ctx); err != nil {
 		t.Fatalf("Connect failed: %v", err)
 	}
-	defer client.Close()
+	t.Cleanup(func() {
+		if err := client.Close(); err != nil {
+			t.Fatalf("Close failed: %v", err)
+		}
+	})
 
 	manager := newTestLCPStateManager(t, client)
 
 	// Create VPP interfaces and LCP pairs directly via client
-	iface1, _ := client.CreateInterface(ctx, &CreateInterfaceRequest{
+	iface1, err := client.CreateInterface(ctx, &CreateInterfaceRequest{
 		Type: InterfaceTypeAVF,
 		Name: "test0",
 	})
-	client.CreateLCPInterface(ctx, iface1.SwIfIndex, "ge000")
+	if err != nil {
+		t.Fatalf("CreateInterface failed: %v", err)
+	}
+	if err := client.CreateLCPInterface(ctx, iface1.SwIfIndex, "ge000"); err != nil {
+		t.Fatalf("CreateLCPInterface failed: %v", err)
+	}
 
-	iface2, _ := client.CreateInterface(ctx, &CreateInterfaceRequest{
+	iface2, err := client.CreateInterface(ctx, &CreateInterfaceRequest{
 		Type: InterfaceTypeAVF,
 		Name: "test1",
 	})
-	client.CreateLCPInterface(ctx, iface2.SwIfIndex, "ge001")
+	if err != nil {
+		t.Fatalf("CreateInterface failed: %v", err)
+	}
+	if err := client.CreateLCPInterface(ctx, iface2.SwIfIndex, "ge001"); err != nil {
+		t.Fatalf("CreateLCPInterface failed: %v", err)
+	}
 
 	// Sync should populate cache
 	if err := manager.Sync(ctx); err != nil {
@@ -155,7 +177,11 @@ func TestLCPStateManager_GetByJunosName(t *testing.T) {
 	if err := client.Connect(ctx); err != nil {
 		t.Fatalf("Connect failed: %v", err)
 	}
-	defer client.Close()
+	t.Cleanup(func() {
+		if err := client.Close(); err != nil {
+			t.Fatalf("Close failed: %v", err)
+		}
+	})
 
 	manager := newTestLCPStateManager(t, client)
 
@@ -199,7 +225,11 @@ func TestLCPStateManager_GetByLinuxName(t *testing.T) {
 	if err := client.Connect(ctx); err != nil {
 		t.Fatalf("Connect failed: %v", err)
 	}
-	defer client.Close()
+	t.Cleanup(func() {
+		if err := client.Close(); err != nil {
+			t.Fatalf("Close failed: %v", err)
+		}
+	})
 
 	manager := newTestLCPStateManager(t, client)
 
@@ -243,7 +273,11 @@ func TestLCPStateManager_CheckConsistency(t *testing.T) {
 	if err := client.Connect(ctx); err != nil {
 		t.Fatalf("Connect failed: %v", err)
 	}
-	defer client.Close()
+	t.Cleanup(func() {
+		if err := client.Close(); err != nil {
+			t.Fatalf("Close failed: %v", err)
+		}
+	})
 
 	manager := newTestLCPStateManager(t, client)
 
@@ -270,11 +304,16 @@ func TestLCPStateManager_CheckConsistency(t *testing.T) {
 	}
 
 	// Create inconsistency by directly modifying VPP state
-	iface2, _ := client.CreateInterface(ctx, &CreateInterfaceRequest{
+	iface2, err := client.CreateInterface(ctx, &CreateInterfaceRequest{
 		Type: InterfaceTypeAVF,
 		Name: "test1",
 	})
-	client.CreateLCPInterface(ctx, iface2.SwIfIndex, "ge001")
+	if err != nil {
+		t.Fatalf("CreateInterface failed: %v", err)
+	}
+	if err := client.CreateLCPInterface(ctx, iface2.SwIfIndex, "ge001"); err != nil {
+		t.Fatalf("CreateLCPInterface failed: %v", err)
+	}
 
 	// Check consistency - should find inconsistency
 	inconsistencies, err = manager.CheckConsistency(ctx)
@@ -305,7 +344,11 @@ func TestLCPStateManager_List(t *testing.T) {
 	if err := client.Connect(ctx); err != nil {
 		t.Fatalf("Connect failed: %v", err)
 	}
-	defer client.Close()
+	t.Cleanup(func() {
+		if err := client.Close(); err != nil {
+			t.Fatalf("Close failed: %v", err)
+		}
+	})
 
 	manager := newTestLCPStateManager(t, client)
 
@@ -317,11 +360,16 @@ func TestLCPStateManager_List(t *testing.T) {
 
 	// Create multiple LCP pairs
 	for i := 0; i < 3; i++ {
-		iface, _ := client.CreateInterface(ctx, &CreateInterfaceRequest{
+		iface, err := client.CreateInterface(ctx, &CreateInterfaceRequest{
 			Type: InterfaceTypeAVF,
 			Name: "test",
 		})
-		manager.Create(ctx, iface.SwIfIndex, "ge000", "ge-0/0/0")
+		if err != nil {
+			t.Fatalf("CreateInterface failed: %v", err)
+		}
+		if err := manager.Create(ctx, iface.SwIfIndex, "ge000", "ge-0/0/0"); err != nil {
+			t.Fatalf("Create LCP failed: %v", err)
+		}
 	}
 
 	// Verify list contains all pairs
@@ -337,7 +385,11 @@ func TestLCPStateManager_Clear(t *testing.T) {
 	if err := client.Connect(ctx); err != nil {
 		t.Fatalf("Connect failed: %v", err)
 	}
-	defer client.Close()
+	t.Cleanup(func() {
+		if err := client.Close(); err != nil {
+			t.Fatalf("Close failed: %v", err)
+		}
+	})
 
 	manager := newTestLCPStateManager(t, client)
 

@@ -202,9 +202,13 @@ func TestReadConfigFile_LargeFile(t *testing.T) {
 
 	// Write 1000 lines
 	for i := 0; i < 1000; i++ {
-		f.WriteString("set system host-name router1\n")
+		if _, err := f.WriteString("set system host-name router1\n"); err != nil {
+			t.Fatalf("WriteString failed: %v", err)
+		}
 	}
-	f.Close()
+	if err := f.Close(); err != nil {
+		t.Fatalf("Close failed: %v", err)
+	}
 
 	got, err := readConfigFile(tmpFile)
 	if err != nil {
