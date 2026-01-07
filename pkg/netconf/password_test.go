@@ -179,10 +179,10 @@ func TestPasswordTimingAttackResistance(t *testing.T) {
 	// Verify with progressively different passwords
 	// All should fail in roughly constant time
 	testCases := []string{
-		"x",                    // 1 char different
-		"correctPasswor",       // Last char missing
-		"correctPassworx",      // Last char different
-		"wrongPassword",        // Completely different
+		"x",                      // 1 char different
+		"correctPasswor",         // Last char missing
+		"correctPassworx",        // Last char different
+		"wrongPassword",          // Completely different
 		strings.Repeat("a", 100), // Very different
 	}
 

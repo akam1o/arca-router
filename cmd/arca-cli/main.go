@@ -16,15 +16,15 @@ var (
 
 // Exit codes
 const (
-	ExitSuccess       = 0
+	ExitSuccess        = 0
 	ExitOperationError = 1
-	ExitUsageError    = 2
+	ExitUsageError     = 2
 )
 
 type flags struct {
-	debug       bool
-	vppSocket   string
-	configPath  string
+	debug      bool
+	vppSocket  string
+	configPath string
 }
 
 func main() {

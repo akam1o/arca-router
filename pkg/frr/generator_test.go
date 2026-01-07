@@ -46,8 +46,8 @@ func TestGenerateFRRConfig(t *testing.T) {
 							"IBGP": {
 								Neighbors: map[string]*config.BGPNeighbor{
 									"10.0.1.2": {
-										IP:       "10.0.1.2",
-										PeerAS:   65001,
+										IP:          "10.0.1.2",
+										PeerAS:      65001,
 										Description: "Internal Peer",
 									},
 								},
@@ -117,8 +117,8 @@ func TestGenerateFRRConfig(t *testing.T) {
 							"EBGP": {
 								Neighbors: map[string]*config.BGPNeighbor{
 									"10.0.2.2": {
-										IP:       "10.0.2.2",
-										PeerAS:   65002,
+										IP:     "10.0.2.2",
+										PeerAS: 65002,
 									},
 								},
 							},
@@ -150,7 +150,7 @@ func TestGenerateFRRConfig(t *testing.T) {
 				System: &config.SystemConfig{
 					HostName: "router",
 				},
-				Interfaces: map[string]*config.Interface{},
+				Interfaces:     map[string]*config.Interface{},
 				RoutingOptions: &config.RoutingOptions{
 					// Missing AutonomousSystem
 				},

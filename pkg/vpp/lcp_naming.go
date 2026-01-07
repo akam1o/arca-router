@@ -23,11 +23,12 @@ var (
 
 // ConvertJunosToLinuxName converts a Junos interface name to Linux format.
 // Examples:
-//   ge-0/0/0     → ge0-0-0
-//   xe-1/2/3     → xe1-2-3
-//   et-0/1/2     → et0-1-2
-//   ge-0/0/0.10  → ge0-0-0v10
-//   ge-0/0/10    → ge0-0-10
+//
+//	ge-0/0/0     → ge0-0-0
+//	xe-1/2/3     → xe1-2-3
+//	et-0/1/2     → et0-1-2
+//	ge-0/0/0.10  → ge0-0-0v10
+//	ge-0/0/10    → ge0-0-10
 //
 // For names that would exceed 15 characters or have potential collisions,
 // a deterministic hash suffix is appended.
@@ -42,11 +43,11 @@ func ConvertJunosToLinuxName(junosName string) (string, error) {
 		return "", fmt.Errorf("invalid Junos interface name format: %s (expected format: ge-0/0/0 or ge-0/0/0.10)", junosName)
 	}
 
-	ifType := matches[1]   // ge, xe, et, etc.
-	fpc := matches[2]      // FPC (Flexible PIC Concentrator)
-	pic := matches[3]      // PIC (Physical Interface Card)
-	port := matches[4]     // Port number
-	vlan := matches[5]     // VLAN (optional, from .N)
+	ifType := matches[1] // ge, xe, et, etc.
+	fpc := matches[2]    // FPC (Flexible PIC Concentrator)
+	pic := matches[3]    // PIC (Physical Interface Card)
+	port := matches[4]   // Port number
+	vlan := matches[5]   // VLAN (optional, from .N)
 
 	// Basic conversion with separators to avoid ambiguity
 	// ge-0/0/0 → ge0-0-0 (prevents ge-1/11/1 vs ge-11/1/1 collision)

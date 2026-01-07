@@ -194,17 +194,17 @@ const (
 type TestOption string
 
 const (
-	TestSet       TestOption = "set"
+	TestSet         TestOption = "set"
 	TestTestThenSet TestOption = "test-then-set"
-	TestTestOnly  TestOption = "test-only"
+	TestTestOnly    TestOption = "test-only"
 )
 
 // ErrorOption for edit-config
 type ErrorOption string
 
 const (
-	ErrorStop          ErrorOption = "stop-on-error"
-	ErrorContinue      ErrorOption = "continue-on-error"
+	ErrorStop            ErrorOption = "stop-on-error"
+	ErrorContinue        ErrorOption = "continue-on-error"
 	ErrorRollbackOnError ErrorOption = "rollback-on-error"
 )
 

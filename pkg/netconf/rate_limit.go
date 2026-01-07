@@ -258,11 +258,11 @@ func (rl *RateLimiter) GetStats() RateLimiterStats {
 
 // RateLimiterStats contains rate limiter statistics
 type RateLimiterStats struct {
-	IPsTracked     int
-	IPsLocked      int
-	UsersTracked   int
-	UsersLocked    int
-	LockoutWindow  time.Duration
+	IPsTracked    int
+	IPsLocked     int
+	UsersTracked  int
+	UsersLocked   int
+	LockoutWindow time.Duration
 }
 
 // FormatLockoutError returns a user-friendly lockout error message

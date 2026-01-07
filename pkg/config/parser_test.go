@@ -525,7 +525,7 @@ func TestParser_RoutingErrors(t *testing.T) {
 		input string
 	}{
 		{
-			name:  "duplicate static route",
+			name: "duplicate static route",
 			input: `set routing-options static route 0.0.0.0/0 next-hop 10.0.0.1
 set routing-options static route 0.0.0.0/0 next-hop 10.0.0.2`,
 		},

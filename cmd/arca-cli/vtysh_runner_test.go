@@ -231,9 +231,9 @@ func TestRunVtyshCommandWithExecutor_MultipleCommands(t *testing.T) {
 	}
 
 	expectedOutputs := map[string]string{
-		"show bgp summary":    "BGP summary output",
-		"show ospf neighbor":  "OSPF neighbor output",
-		"show ip route":       "IP route output",
+		"show bgp summary":   "BGP summary output",
+		"show ospf neighbor": "OSPF neighbor output",
+		"show ip route":      "IP route output",
 	}
 
 	mockExecutor := func(ctx context.Context, command string) (string, error) {

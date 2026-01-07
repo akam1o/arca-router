@@ -55,9 +55,9 @@ func NewUserDatabase(path string, log *logger.Logger) (*UserDatabase, error) {
 	}
 
 	// Configure connection pooling
-	db.SetMaxOpenConns(10)               // Maximum number of open connections
-	db.SetMaxIdleConns(5)                // Maximum number of idle connections
-	db.SetConnMaxLifetime(time.Hour)     // Maximum connection lifetime
+	db.SetMaxOpenConns(10)           // Maximum number of open connections
+	db.SetMaxIdleConns(5)            // Maximum number of idle connections
+	db.SetConnMaxLifetime(time.Hour) // Maximum connection lifetime
 
 	// Set SQLite pragmas
 	pragmas := []string{

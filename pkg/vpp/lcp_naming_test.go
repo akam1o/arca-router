@@ -179,7 +179,7 @@ func TestConvertJunosToLinuxName_UniqueHashes(t *testing.T) {
 		"ge-100/100/101.4094",
 		"ge-100/101/100.4094",
 		"ge-101/100/100.4094",
-		"ge-1/11/1",  // Ambiguous cases that should be distinct
+		"ge-1/11/1", // Ambiguous cases that should be distinct
 		"ge-11/1/1",
 	}
 
@@ -268,9 +268,9 @@ func TestValidateLinuxIfName(t *testing.T) {
 
 func TestIsJunosInterfaceName(t *testing.T) {
 	tests := []struct {
-		name string
+		name  string
 		input string
-		want bool
+		want  bool
 	}{
 		{
 			name:  "valid ge interface",

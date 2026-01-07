@@ -19,26 +19,26 @@ var sessionIDCounter uint32
 
 // NETCONFSession represents a NETCONF session
 type NETCONFSession struct {
-	ID              string               // UUID v4 (internal identifier)
-	NumericID       uint32               // RFC 6241 session-id (integer for NETCONF protocol)
+	ID              string // UUID v4 (internal identifier)
+	NumericID       uint32 // RFC 6241 session-id (integer for NETCONF protocol)
 	Username        string
-	Role            string               // admin, operator, read-only
+	Role            string // admin, operator, read-only
 	CreatedAt       time.Time
 	LastUsed        time.Time
-	IdleTimeout     time.Duration        // Idle timeout (e.g., 30m)
-	AbsoluteTimeout time.Duration        // Absolute max lifetime (e.g., 24h)
-	BaseVersion     string               // "1.0" or "1.1" (NETCONF protocol version)
+	IdleTimeout     time.Duration // Idle timeout (e.g., 30m)
+	AbsoluteTimeout time.Duration // Absolute max lifetime (e.g., 24h)
+	BaseVersion     string        // "1.0" or "1.1" (NETCONF protocol version)
 	conn            ssh.Conn
 	channel         ssh.Channel
 	ctx             context.Context
 	cancel          context.CancelFunc
-	datastoreLocks  map[string]struct{}  // Set of locked datastores ("candidate", "running")
-	mu              sync.RWMutex         // Protects datastoreLocks and LastUsed
+	datastoreLocks  map[string]struct{} // Set of locked datastores ("candidate", "running")
+	mu              sync.RWMutex        // Protects datastoreLocks and LastUsed
 }
 
 // SessionManager manages NETCONF sessions
 type SessionManager struct {
-	sessions       map[string]*NETCONFSession  // UUID -> Session
+	sessions       map[string]*NETCONFSession // UUID -> Session
 	numericIDIndex map[uint32]*NETCONFSession // NumericID -> Session (for RFC 6241 operations)
 	config         *SSHConfig
 	datastore      DatastoreLockReleaser // For lock cleanup on session close

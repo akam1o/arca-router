@@ -1014,12 +1014,13 @@ func validateCommunity(community string) error {
 
 // parseSecurity parses security configuration (Phase 3)
 // Syntax:
-//   set security netconf ssh port <port>
-//   set security users user <username> password <password>
-//   set security users user <username> role <role>
-//   set security users user <username> ssh-key "<key>"
-//   set security rate-limit per-ip <limit>
-//   set security rate-limit per-user <limit>
+//
+//	set security netconf ssh port <port>
+//	set security users user <username> password <password>
+//	set security users user <username> role <role>
+//	set security users user <username> ssh-key "<key>"
+//	set security rate-limit per-ip <limit>
+//	set security rate-limit per-user <limit>
 func (p *Parser) parseSecurity(config *Config) error {
 	if p.current.Type != TokenWord {
 		return p.error("expected security parameter")
@@ -1084,9 +1085,10 @@ func (p *Parser) parseSecurityNETCONF(config *Config) error {
 
 // parseSecurityUsers parses user configuration
 // Syntax:
-//   set security users user <username> password <password>
-//   set security users user <username> role <role>
-//   set security users user <username> ssh-key "<key>"
+//
+//	set security users user <username> password <password>
+//	set security users user <username> role <role>
+//	set security users user <username> ssh-key "<key>"
 func (p *Parser) parseSecurityUsers(config *Config) error {
 	if config.Security == nil {
 		config.Security = &SecurityConfig{}
@@ -1157,8 +1159,9 @@ func (p *Parser) parseSecurityUsers(config *Config) error {
 
 // parseSecurityRateLimit parses rate limit configuration
 // Syntax:
-//   set security rate-limit per-ip <limit>
-//   set security rate-limit per-user <limit>
+//
+//	set security rate-limit per-ip <limit>
+//	set security rate-limit per-user <limit>
 func (p *Parser) parseSecurityRateLimit(config *Config) error {
 	if config.Security == nil {
 		config.Security = &SecurityConfig{}

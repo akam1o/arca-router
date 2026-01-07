@@ -245,7 +245,7 @@ func convertBGPConfig(cfg *config.Config, ifaceMapping map[string]string) (*BGPC
 				frrNeighbor.UpdateSource = updateSource
 			}
 
-				// Apply route-maps from group's import/export policies
+			// Apply route-maps from group's import/export policies
 			// Validate that referenced policies exist
 			if group.Import != "" {
 				if cfg.PolicyOptions == nil || cfg.PolicyOptions.PolicyStatements == nil {

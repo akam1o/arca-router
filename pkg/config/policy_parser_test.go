@@ -40,8 +40,8 @@ set policy-options prefix-list LIST2 192.168.0.0/16
 			expectedCount: 1,
 		},
 		{
-			name: "IPv6 prefix",
-			input: "set policy-options prefix-list IPV6LIST 2001:db8::/32\n",
+			name:          "IPv6 prefix",
+			input:         "set policy-options prefix-list IPV6LIST 2001:db8::/32\n",
 			wantErr:       false,
 			expectedList:  "IPV6LIST",
 			expectedCount: 1,

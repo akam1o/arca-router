@@ -111,17 +111,17 @@ func (m *mockDatastore) GetCommit(ctx context.Context, commitID string) (*datast
 	return &datastore.CommitHistoryEntry{}, nil
 }
 
-	func (m *mockDatastore) LogAuditEvent(ctx context.Context, event *datastore.AuditEvent) error {
-		return nil
-	}
+func (m *mockDatastore) LogAuditEvent(ctx context.Context, event *datastore.AuditEvent) error {
+	return nil
+}
 
-	func (m *mockDatastore) CleanupAuditLog(ctx context.Context, cutoff time.Time) (int64, error) {
-		return 0, nil
-	}
+func (m *mockDatastore) CleanupAuditLog(ctx context.Context, cutoff time.Time) (int64, error) {
+	return 0, nil
+}
 
-	func (m *mockDatastore) Close() error {
-		return nil
-	}
+func (m *mockDatastore) Close() error {
+	return nil
+}
 
 func TestNewSession(t *testing.T) {
 	ds := &mockDatastore{}

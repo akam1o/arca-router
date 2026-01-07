@@ -154,7 +154,7 @@ func (ds *etcdDatastore) Commit(ctx context.Context, req *CommitRequest) (string
 	txnResp, err := ds.client.Txn(ctx).
 		If(
 			clientv3.Compare(clientv3.Value(lockKey), "=", lockValue),
-			clientv3.Compare(clientv3.Value(candidateKey), "=", candidateValue), // Candidate unchanged
+			clientv3.Compare(clientv3.Value(candidateKey), "=", candidateValue),             // Candidate unchanged
 			clientv3.Compare(clientv3.ModRevision(candidateKey), "=", candidateModRevision), // No concurrent modification
 		).
 		Then(

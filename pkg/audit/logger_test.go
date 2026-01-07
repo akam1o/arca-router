@@ -17,18 +17,18 @@ type mockDatastore struct {
 	events []*datastore.AuditEvent
 }
 
-	func (m *mockDatastore) LogAuditEvent(ctx context.Context, event *datastore.AuditEvent) error {
-		m.events = append(m.events, event)
-		return nil
-	}
-	func (m *mockDatastore) CleanupAuditLog(ctx context.Context, cutoff time.Time) (int64, error) {
-		return 0, nil
-	}
+func (m *mockDatastore) LogAuditEvent(ctx context.Context, event *datastore.AuditEvent) error {
+	m.events = append(m.events, event)
+	return nil
+}
+func (m *mockDatastore) CleanupAuditLog(ctx context.Context, cutoff time.Time) (int64, error) {
+	return 0, nil
+}
 
-	// Implement other required interface methods as no-ops
-	func (m *mockDatastore) GetRunning(ctx context.Context) (*datastore.RunningConfig, error) {
-		return nil, nil
-	}
+// Implement other required interface methods as no-ops
+func (m *mockDatastore) GetRunning(ctx context.Context) (*datastore.RunningConfig, error) {
+	return nil, nil
+}
 func (m *mockDatastore) GetCandidate(ctx context.Context, sessionID string) (*datastore.CandidateConfig, error) {
 	return nil, nil
 }
@@ -55,7 +55,9 @@ func (m *mockDatastore) ReleaseLock(ctx context.Context, target, sessionID strin
 func (m *mockDatastore) ExtendLock(ctx context.Context, target, sessionID string, duration time.Duration) error {
 	return nil
 }
-func (m *mockDatastore) StealLock(ctx context.Context, req *datastore.StealLockRequest) error { return nil }
+func (m *mockDatastore) StealLock(ctx context.Context, req *datastore.StealLockRequest) error {
+	return nil
+}
 func (m *mockDatastore) GetLockInfo(ctx context.Context, target string) (*datastore.LockInfo, error) {
 	return nil, nil
 }
@@ -534,7 +536,7 @@ func TestRollbackFailure(t *testing.T) {
 	if event.Result != string(ResultFailure) {
 		t.Errorf("Expected result '%s', got '%s'", ResultFailure, event.Result)
 	}
-	
+
 	// Verify error message is persisted in details
 	if !strings.Contains(event.Details, "rollback failed") {
 		t.Error("Details should contain error message")
@@ -546,7 +548,7 @@ func TestErrorMessagePersistence(t *testing.T) {
 	logger := NewLogger(ds, slog.New(slog.NewTextHandler(os.Stdout, nil)))
 
 	ctx := context.Background()
-	
+
 	// Test with existing details and error message
 	err := logger.LogCommit(ctx, "alice", "session-123", "commit-abc", false, "validation failed: missing required field")
 	if err != nil {
@@ -558,7 +560,7 @@ func TestErrorMessagePersistence(t *testing.T) {
 	}
 
 	event := ds.events[0]
-	
+
 	// Verify error message is in details JSON
 	var details map[string]interface{}
 	if err := json.Unmarshal([]byte(event.Details), &details); err != nil {
@@ -579,7 +581,7 @@ func TestAttemptedActionPersistence(t *testing.T) {
 	logger := NewLogger(ds, slog.New(slog.NewTextHandler(os.Stdout, nil)))
 
 	ctx := context.Background()
-	
+
 	// Test access denied with attempted action
 	err := logger.LogAccessDenied(ctx, "bob", "session-456", "kill-session", "operator", "insufficient privileges")
 	if err != nil {
@@ -591,7 +593,7 @@ func TestAttemptedActionPersistence(t *testing.T) {
 	}
 
 	event := ds.events[0]
-	
+
 	// Verify attempted action is in details JSON
 	var details map[string]interface{}
 	if err := json.Unmarshal([]byte(event.Details), &details); err != nil {

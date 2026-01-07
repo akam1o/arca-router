@@ -15,10 +15,10 @@ import (
 
 // etcdDatastore implements the Datastore interface using etcd.
 type etcdDatastore struct {
-	client     *clientv3.Client
-	prefix     string        // Key prefix for all arca-router data (e.g., "/arca-router/")
-	timeout    time.Duration // Default operation timeout
-	closeOnce  sync.Once
+	client    *clientv3.Client
+	prefix    string        // Key prefix for all arca-router data (e.g., "/arca-router/")
+	timeout   time.Duration // Default operation timeout
+	closeOnce sync.Once
 }
 
 // NewEtcdDatastore creates a new etcd-backed datastore.
