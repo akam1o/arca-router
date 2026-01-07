@@ -41,11 +41,11 @@ type SSHServer struct {
 	log           *logger.Logger
 
 	// Metrics (thread-safe via atomic operations)
-	totalConnections      uint64 // Total TCP connections accepted (use atomic)
-	successfulHandshakes  uint64 // Successful SSH handshakes (use atomic)
-	failedHandshakes      uint64 // Failed SSH handshakes (use atomic)
-	activeConnections     int32  // Currently active SSH connections (use atomic)
-	isListening           int32  // Whether server is actively accepting (use atomic: 0=no, 1=yes)
+	totalConnections     uint64 // Total TCP connections accepted (use atomic)
+	successfulHandshakes uint64 // Successful SSH handshakes (use atomic)
+	failedHandshakes     uint64 // Failed SSH handshakes (use atomic)
+	activeConnections    int32  // Currently active SSH connections (use atomic)
+	isListening          int32  // Whether server is actively accepting (use atomic: 0=no, 1=yes)
 }
 
 // NewSSHServer creates a new SSH server instance

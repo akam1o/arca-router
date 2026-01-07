@@ -106,11 +106,14 @@ func TokenizeCommand(line string) ([]string, error) {
 // MatchesPrefix checks if a config line matches a delete prefix
 // with token boundary checking to avoid over-deletion
 // Example: line="set interfaces ge-0/0/0 unit 0 family inet"
-//          prefix="set interfaces ge-0/0/0"
-//          returns: true
+//
+//	prefix="set interfaces ge-0/0/0"
+//	returns: true
+//
 // Example: line="set system host-name2"
-//          prefix="set system host-name"
-//          returns: false (boundary check)
+//
+//	prefix="set system host-name"
+//	returns: false (boundary check)
 func MatchesPrefix(line, prefix string) bool {
 	// Empty prefix matches everything
 	if prefix == "" {

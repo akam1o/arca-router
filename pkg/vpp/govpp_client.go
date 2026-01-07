@@ -102,7 +102,7 @@ func (c *govppClient) Connect(ctx context.Context) error {
 
 		// Connect to VPP with timeout (disable internal retries, handle externally)
 		connCh := make(chan *core.Connection, 1) // Buffered to prevent goroutine leak
-		errCh := make(chan error, 1)              // Buffered to prevent goroutine leak
+		errCh := make(chan error, 1)             // Buffered to prevent goroutine leak
 
 		go func() {
 			// Disable AsyncConnect internal retries (we handle retries externally)
@@ -629,7 +629,7 @@ func (c *govppClient) GetInterface(ctx context.Context, ifIndex uint32) (*Interf
 
 	// Dump interface with specific index
 	req := &vppif.SwInterfaceDump{
-		SwIfIndex: interface_types.InterfaceIndex(ifIndex),
+		SwIfIndex:  interface_types.InterfaceIndex(ifIndex),
 		NameFilter: "",
 	}
 
@@ -669,7 +669,7 @@ func (c *govppClient) ListInterfaces(ctx context.Context) ([]*Interface, error) 
 
 	// Dump all interfaces (SwIfIndex ^uint32(0) means all)
 	req := &vppif.SwInterfaceDump{
-		SwIfIndex: interface_types.InterfaceIndex(^uint32(0)),
+		SwIfIndex:  interface_types.InterfaceIndex(^uint32(0)),
 		NameFilter: "",
 	}
 

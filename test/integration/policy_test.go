@@ -285,7 +285,7 @@ set protocols bgp group external neighbor 10.0.1.2 peer-as 65002
 
 	// Check for error message about missing policy
 	if !strings.Contains(err.Error(), "NONEXISTENT-POLICY") ||
-	   !strings.Contains(err.Error(), "policy") {
+		!strings.Contains(err.Error(), "policy") {
 		t.Errorf("Expected error message about missing policy, got: %v", err)
 	}
 }

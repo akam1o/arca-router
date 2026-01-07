@@ -10,10 +10,10 @@ const (
 
 // RPCReply represents a NETCONF <rpc-reply> envelope
 type RPCReply struct {
-	XMLName   xml.Name `xml:"urn:ietf:params:xml:ns:netconf:base:1.0 rpc-reply"`
-	MessageID string   `xml:"message-id,attr"`
-	OK        *struct{} `xml:"ok,omitempty"`
-	Data      *DataReply `xml:"data,omitempty"`
+	XMLName   xml.Name    `xml:"urn:ietf:params:xml:ns:netconf:base:1.0 rpc-reply"`
+	MessageID string      `xml:"message-id,attr"`
+	OK        *struct{}   `xml:"ok,omitempty"`
+	Data      *DataReply  `xml:"data,omitempty"`
 	Errors    []*RPCError `xml:"rpc-error,omitempty"`
 }
 

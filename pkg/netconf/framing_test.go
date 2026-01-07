@@ -112,7 +112,7 @@ func TestChunkedFramingMultipleChunks(t *testing.T) {
 	// Verify multiple chunk headers are present
 	output := buf.String()
 	chunkCount := strings.Count(output, "#") - strings.Count(output, "##") // Count chunk headers, excluding end marker
-	if chunkCount < 3 { // At least 3 chunks for MaxChunkSize*2+100
+	if chunkCount < 3 {                                                    // At least 3 chunks for MaxChunkSize*2+100
 		t.Errorf("Expected at least 3 chunks, but got %d", chunkCount)
 	}
 

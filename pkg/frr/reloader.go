@@ -21,7 +21,6 @@ const (
 	// FRRReloadScript is the path to frr-reload.py
 	FRRReloadScript = "/usr/lib/frr/frr-reload.py"
 
-
 	// BackupExtension is the extension for backup files
 	BackupExtension = ".bak"
 )

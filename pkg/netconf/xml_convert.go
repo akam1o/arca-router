@@ -12,19 +12,19 @@ import (
 
 // XML Namespace constants per Phase 2 plan
 const (
-	NetconfBaseNS     = "urn:ietf:params:xml:ns:netconf:base:1.0"
-	IETFInterfacesNS  = "urn:ietf:params:xml:ns:yang:ietf-interfaces"
-	IETFRoutingNS     = "urn:ietf:params:xml:ns:yang:ietf-routing"
-	ArcaConfigNS      = "urn:arca:router:config:1.0"
-	ArcaStateNS       = "urn:arca:router:state:1.0"
+	NetconfBaseNS    = "urn:ietf:params:xml:ns:netconf:base:1.0"
+	IETFInterfacesNS = "urn:ietf:params:xml:ns:yang:ietf-interfaces"
+	IETFRoutingNS    = "urn:ietf:params:xml:ns:yang:ietf-routing"
+	ArcaConfigNS     = "urn:arca:router:config:1.0"
+	ArcaStateNS      = "urn:arca:router:state:1.0"
 )
 
 // XML size and depth limits per Phase 2 plan Section 10.1
 const (
-	MaxXMLDepth        = 50
-	MaxXMLElements     = 10000
-	MaxXMLAttributes   = 20
-	MaxXMLSize         = 10 * 1024 * 1024 // 10MB
+	MaxXMLDepth      = 50
+	MaxXMLElements   = 10000
+	MaxXMLAttributes = 20
+	MaxXMLSize       = 10 * 1024 * 1024 // 10MB
 )
 
 // ConfigToXML converts internal config to NETCONF XML format with optional filtering
@@ -880,7 +880,7 @@ func countConfigElements(cfg *config.Config) int {
 					count += 2 // <unit> + <name>
 					if unit.Family != nil {
 						for _, family := range unit.Family {
-							count += 2 // <family> + <name>
+							count += 2                     // <family> + <name>
 							count += len(family.Addresses) // <address> elements
 						}
 					}

@@ -12,11 +12,11 @@ import (
 
 // Argon2id parameters (recommended by OWASP)
 const (
-	argon2Time      = 3        // iterations
-	argon2Memory    = 64 * 1024 // 64 MB
-	argon2Threads   = 4        // parallelism
-	argon2KeyLength = 32       // 32 bytes
-	argon2SaltLength = 16       // 16 bytes
+	argon2Time       = 3         // iterations
+	argon2Memory     = 64 * 1024 // 64 MB
+	argon2Threads    = 4         // parallelism
+	argon2KeyLength  = 32        // 32 bytes
+	argon2SaltLength = 16        // 16 bytes
 )
 
 // HashPassword generates an argon2id hash for the given password

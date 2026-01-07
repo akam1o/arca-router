@@ -52,13 +52,13 @@ func NewSQLiteDatastore(cfg *Config) (Datastore, error) {
 
 	// Configure SQLite for production use
 	pragmas := []string{
-		"PRAGMA journal_mode=WAL",              // Write-Ahead Logging for better concurrency
-		"PRAGMA synchronous=NORMAL",            // Balance between safety and performance
-		"PRAGMA foreign_keys=ON",               // Enable foreign key constraints
-		"PRAGMA busy_timeout=5000",             // Wait up to 5 seconds on lock contention
-		"PRAGMA cache_size=-64000",             // Use 64MB cache
-		"PRAGMA temp_store=MEMORY",             // Store temp tables in memory
-		"PRAGMA mmap_size=268435456",           // Memory-map I/O (256MB)
+		"PRAGMA journal_mode=WAL",    // Write-Ahead Logging for better concurrency
+		"PRAGMA synchronous=NORMAL",  // Balance between safety and performance
+		"PRAGMA foreign_keys=ON",     // Enable foreign key constraints
+		"PRAGMA busy_timeout=5000",   // Wait up to 5 seconds on lock contention
+		"PRAGMA cache_size=-64000",   // Use 64MB cache
+		"PRAGMA temp_store=MEMORY",   // Store temp tables in memory
+		"PRAGMA mmap_size=268435456", // Memory-map I/O (256MB)
 	}
 
 	for _, pragma := range pragmas {

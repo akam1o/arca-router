@@ -57,10 +57,10 @@ func NewSession(username string, ds datastore.Datastore) *Session {
 	}
 }
 
-func (s *Session) ID() string              { return s.id }
-func (s *Session) Username() string        { return s.username }
-func (s *Session) Mode() Mode              { return s.mode }
-func (s *Session) ConfigPath() []string    { return s.configPath }
+func (s *Session) ID() string           { return s.id }
+func (s *Session) Username() string     { return s.username }
+func (s *Session) Mode() Mode           { return s.mode }
+func (s *Session) ConfigPath() []string { return s.configPath }
 
 // verifyLock checks if the session still owns the candidate lock
 // Returns error if lock is expired or owned by another session

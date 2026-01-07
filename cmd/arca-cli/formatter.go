@@ -2,9 +2,9 @@ package main
 
 import (
 	"fmt"
+	"io"
 	"strings"
 	"text/tabwriter"
-	"io"
 )
 
 // FormatTable formats data as a table with aligned columns

@@ -8,11 +8,11 @@ import (
 
 const (
 	// NETCONF capabilities
-	CapabilityBase10        = "urn:ietf:params:xml:ns:netconf:base:1.0"
-	CapabilityBase11        = "urn:ietf:params:xml:ns:netconf:base:1.1"
-	CapabilityCandidate     = "urn:ietf:params:xml:ns:netconf:capability:candidate:1.0"
-	CapabilityValidate      = "urn:ietf:params:xml:ns:netconf:capability:validate:1.1"
-	CapabilityArcaRouter    = "http://github.com/akam1o/arca-router?module=arca-router&revision=2025-12-26"
+	CapabilityBase10     = "urn:ietf:params:xml:ns:netconf:base:1.0"
+	CapabilityBase11     = "urn:ietf:params:xml:ns:netconf:base:1.1"
+	CapabilityCandidate  = "urn:ietf:params:xml:ns:netconf:capability:candidate:1.0"
+	CapabilityValidate   = "urn:ietf:params:xml:ns:netconf:capability:validate:1.1"
+	CapabilityArcaRouter = "http://github.com/akam1o/arca-router?module=arca-router&revision=2025-12-26"
 
 	// NETCONF namespace
 	NetconfNamespace = "urn:ietf:params:xml:ns:netconf:base:1.0"

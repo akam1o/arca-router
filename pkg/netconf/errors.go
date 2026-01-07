@@ -19,15 +19,15 @@ const (
 type ErrorTag string
 
 const (
-	ErrorTagInvalidValue        ErrorTag = "invalid-value"
-	ErrorTagMalformedMessage    ErrorTag = "malformed-message"
+	ErrorTagInvalidValue          ErrorTag = "invalid-value"
+	ErrorTagMalformedMessage      ErrorTag = "malformed-message"
 	ErrorTagOperationNotSupported ErrorTag = "operation-not-supported"
-	ErrorTagAccessDenied        ErrorTag = "access-denied"
-	ErrorTagLockDenied          ErrorTag = "lock-denied"
-	ErrorTagInUse               ErrorTag = "in-use"
-	ErrorTagOperationFailed     ErrorTag = "operation-failed"
-	ErrorTagMissingElement      ErrorTag = "missing-element"
-	ErrorTagUnknownElement      ErrorTag = "unknown-element"
+	ErrorTagAccessDenied          ErrorTag = "access-denied"
+	ErrorTagLockDenied            ErrorTag = "lock-denied"
+	ErrorTagInUse                 ErrorTag = "in-use"
+	ErrorTagOperationFailed       ErrorTag = "operation-failed"
+	ErrorTagMissingElement        ErrorTag = "missing-element"
+	ErrorTagUnknownElement        ErrorTag = "unknown-element"
 )
 
 // ErrorSeverity represents NETCONF error-severity values per RFC 6241

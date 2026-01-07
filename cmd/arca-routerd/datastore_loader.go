@@ -17,13 +17,13 @@ import (
 // datastoreConfigLoader loads configuration from the datastore (running config)
 // Falls back to file-based loading if datastore is not available or empty
 type datastoreConfigLoader struct {
-	fileLoader  configLoader
+	fileLoader    configLoader
 	datastorePath string
 }
 
 func newDatastoreConfigLoader(fileLoader configLoader, datastorePath string) *datastoreConfigLoader {
 	return &datastoreConfigLoader{
-		fileLoader:  fileLoader,
+		fileLoader:    fileLoader,
 		datastorePath: datastorePath,
 	}
 }

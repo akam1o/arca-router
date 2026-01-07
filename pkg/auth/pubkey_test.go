@@ -237,9 +237,9 @@ func TestValidateKeyAlgorithm(t *testing.T) {
 		{"ecdsa-sha2-nistp256", false},
 		{"ecdsa-sha2-nistp384", false},
 		{"ecdsa-sha2-nistp521", false},
-		{"ssh-dss", true},           // Not supported
-		{"unknown-algo", true},      // Not supported
-		{"", true},                  // Empty
+		{"ssh-dss", true},      // Not supported
+		{"unknown-algo", true}, // Not supported
+		{"", true},             // Empty
 	}
 
 	for _, tt := range tests {

@@ -128,9 +128,9 @@ type StealLockRequest struct {
 
 // LockInfo describes the current lock state.
 type LockInfo struct {
-	IsLocked  bool      // Whether the config is currently locked
-	SessionID string    // Session holding the lock (empty if not locked)
-	User      string    // User holding the lock (empty if not locked)
+	IsLocked   bool      // Whether the config is currently locked
+	SessionID  string    // Session holding the lock (empty if not locked)
+	User       string    // User holding the lock (empty if not locked)
 	AcquiredAt time.Time // When the lock was acquired (zero if not locked)
 	ExpiresAt  time.Time // When the lock will expire (zero if not locked)
 }
@@ -193,12 +193,12 @@ type Config struct {
 	SQLitePath string // Path to SQLite database file (default: /var/lib/arca-router/config.db)
 
 	// etcd-specific configuration
-	EtcdEndpoints []string // etcd cluster endpoints (e.g., ["localhost:2379"])
-	EtcdPrefix    string   // Key prefix for arca-router data (default: /arca-router/)
+	EtcdEndpoints []string      // etcd cluster endpoints (e.g., ["localhost:2379"])
+	EtcdPrefix    string        // Key prefix for arca-router data (default: /arca-router/)
 	EtcdTimeout   time.Duration // Connection timeout (default: 5s)
-	EtcdUsername  string   // Optional username for authentication
-	EtcdPassword  string   // Optional password for authentication
-	EtcdTLS       *TLSConfig // Optional TLS configuration
+	EtcdUsername  string        // Optional username for authentication
+	EtcdPassword  string        // Optional password for authentication
+	EtcdTLS       *TLSConfig    // Optional TLS configuration
 }
 
 // TLSConfig contains TLS configuration for etcd connections.

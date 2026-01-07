@@ -18,13 +18,13 @@ const (
 
 // KeyPermissionError represents a key file permission violation
 type KeyPermissionError struct {
-	Path           string
-	CurrentPerms   os.FileMode
-	ExpectedPerms  os.FileMode
-	Owner          uint32
-	Group          uint32
-	ExpectedOwner  uint32
-	ExpectedGroup  uint32
+	Path            string
+	CurrentPerms    os.FileMode
+	ExpectedPerms   os.FileMode
+	Owner           uint32
+	Group           uint32
+	ExpectedOwner   uint32
+	ExpectedGroup   uint32
 	IsWorldReadable bool
 	IsGroupWritable bool
 }
@@ -278,7 +278,8 @@ func SecurelyRemoveFile(path string) error {
 // GetSecretFromEnv retrieves a secret from environment variable with fallback
 // This supports both direct value and file path (ending with _FILE)
 // Example:
-//   DB_PASSWORD=secret123 or DB_PASSWORD_FILE=/run/secrets/db_password
+//
+//	DB_PASSWORD=secret123 or DB_PASSWORD_FILE=/run/secrets/db_password
 func GetSecretFromEnv(envVar string) (string, error) {
 	// Try direct value first
 	if val := os.Getenv(envVar); val != "" {

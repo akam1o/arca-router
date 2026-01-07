@@ -6,78 +6,78 @@ import (
 
 func TestParseXPathFilter(t *testing.T) {
 	tests := []struct {
-		name        string
-		path        string
-		wantErr     bool
-		wantSegments []string
+		name           string
+		path           string
+		wantErr        bool
+		wantSegments   []string
 		wantPredicates map[int]map[string]string
 	}{
 		{
-			name:        "empty path",
-			path:        "",
-			wantErr:     false,
+			name:         "empty path",
+			path:         "",
+			wantErr:      false,
 			wantSegments: nil,
 		},
 		{
-			name:        "root only",
-			path:        "/",
-			wantErr:     false,
+			name:         "root only",
+			path:         "/",
+			wantErr:      false,
 			wantSegments: nil,
 		},
 		{
-			name:        "simple path",
-			path:        "/interfaces",
-			wantErr:     false,
-			wantSegments: []string{"interfaces"},
+			name:           "simple path",
+			path:           "/interfaces",
+			wantErr:        false,
+			wantSegments:   []string{"interfaces"},
 			wantPredicates: map[int]map[string]string{},
 		},
 		{
-			name:        "nested path",
-			path:        "/interfaces/interface",
-			wantErr:     false,
-			wantSegments: []string{"interfaces", "interface"},
+			name:           "nested path",
+			path:           "/interfaces/interface",
+			wantErr:        false,
+			wantSegments:   []string{"interfaces", "interface"},
 			wantPredicates: map[int]map[string]string{},
 		},
 		{
-			name:        "path with predicate (single quotes)",
-			path:        "/interfaces/interface[name='ge-0/0/0']",
-			wantErr:     false,
-			wantSegments: []string{"interfaces", "interface"},
+			name:           "path with predicate (single quotes)",
+			path:           "/interfaces/interface[name='ge-0/0/0']",
+			wantErr:        false,
+			wantSegments:   []string{"interfaces", "interface"},
 			wantPredicates: map[int]map[string]string{1: {"name": "ge-0/0/0"}},
 		},
 		{
-			name:        "path with predicate (double quotes)",
-			path:        `/interfaces/interface[name="ge-0/0/0"]`,
-			wantErr:     false,
-			wantSegments: []string{"interfaces", "interface"},
+			name:           "path with predicate (double quotes)",
+			path:           `/interfaces/interface[name="ge-0/0/0"]`,
+			wantErr:        false,
+			wantSegments:   []string{"interfaces", "interface"},
 			wantPredicates: map[int]map[string]string{1: {"name": "ge-0/0/0"}},
 		},
 		{
-			name:        "routing-options with predicate",
-			path:        "/routing-options/static/route[prefix='10.0.0.0/24']",
-			wantErr:     false,
-			wantSegments: []string{"routing-options", "static", "route"},
+			name:           "routing-options with predicate",
+			path:           "/routing-options/static/route[prefix='10.0.0.0/24']",
+			wantErr:        false,
+			wantSegments:   []string{"routing-options", "static", "route"},
 			wantPredicates: map[int]map[string]string{2: {"prefix": "10.0.0.0/24"}},
 		},
 		{
-			name:        "invalid: no leading slash",
-			path:        "interfaces",
-			wantErr:     true,
+			name:    "invalid: no leading slash",
+			path:    "interfaces",
+			wantErr: true,
 		},
 		{
-			name:        "invalid: unclosed predicate",
-			path:        "/interfaces/interface[name='value'",
-			wantErr:     true,
+			name:    "invalid: unclosed predicate",
+			path:    "/interfaces/interface[name='value'",
+			wantErr: true,
 		},
 		{
-			name:        "invalid: predicate without quotes",
-			path:        "/interfaces/interface[name=value]",
-			wantErr:     true,
+			name:    "invalid: predicate without quotes",
+			path:    "/interfaces/interface[name=value]",
+			wantErr: true,
 		},
 		{
-			name:        "invalid: multiple predicates not supported in Phase 3",
-			path:        "/interfaces/interface[name='ge-0/0/0'][foo='bar']",
-			wantErr:     true,
+			name:    "invalid: multiple predicates not supported in Phase 3",
+			path:    "/interfaces/interface[name='ge-0/0/0'][foo='bar']",
+			wantErr: true,
 		},
 	}
 

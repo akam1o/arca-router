@@ -6,8 +6,8 @@ import (
 	"encoding/json"
 	"time"
 
-	clientv3 "go.etcd.io/etcd/client/v3"
 	"github.com/oklog/ulid/v2"
+	clientv3 "go.etcd.io/etcd/client/v3"
 )
 
 // LogAuditEvent logs an audit event to etcd.
