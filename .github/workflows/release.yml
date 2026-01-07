@@ -52,7 +52,7 @@ jobs:
         echo "tag=${TAG}" >> "$GITHUB_OUTPUT"
 
   build-deb:
-    name: Build DEB (Ubuntu)
+    name: Build DEB
     needs: prepare
     runs-on: ${{ matrix.runner }}
 
@@ -61,11 +61,17 @@ jobs:
       matrix:
         include:
           - runner: ubuntu-22.04
-            deb_release: 1~ubuntu22.04
+            release: 1~ubuntu22.04
             artifact_name: deb-ubuntu22.04
           - runner: ubuntu-24.04
-            deb_release: 1~ubuntu24.04
+            release: 1~ubuntu24.04
             artifact_name: deb-ubuntu24.04
+          - runner: ubuntu-latest
+            release: 1~debian12
+            artifact_name: deb-debian12
+          - runner: ubuntu-latest
+            release: 1~debian13
+            artifact_name: deb-debian13
 
     steps:
     - name: Checkout code
@@ -88,7 +94,7 @@ jobs:
     - name: Build DEB package
       run: |
         VERSION=${{ needs.prepare.outputs.version }} \
-        DEB_RELEASE=${{ matrix.deb_release }} \
+        RELEASE=${{ matrix.release }} \
         make deb-package
 
     - name: Upload DEB package
@@ -204,6 +210,12 @@ jobs:
           - image: ubuntu:24.04
             type: deb
             deb_suffix: ubuntu24.04
+          - image: debian:bookworm
+            type: deb
+            deb_suffix: debian12
+          - image: debian:trixie
+            type: deb
+            deb_suffix: debian13
           - image: rockylinux:9
             type: rpm
 
@@ -223,7 +235,20 @@ jobs:
         DEB_PKG="$(ls -1 packages/*${{ matrix.os.deb_suffix }}*.deb | head -n 1)"
         echo "Inspecting: ${DEB_PKG}"
         dpkg-deb -I "${DEB_PKG}" >/dev/null
-        dpkg-deb -c "${DEB_PKG}" | awk '{print $NF}' | grep -E "^/usr/sbin/arca-routerd$|^/usr/bin/arca-cli$|^/usr/sbin/arca-netconfd$|^/usr/lib/systemd/system/arca-routerd\\.service$|^/usr/lib/systemd/system/arca-netconfd\\.service$|^/etc/arca-router/hardware\\.yaml\\.example$"
+        FILES="$(dpkg-deb -c "${DEB_PKG}" | awk '{print $NF}' | sed -E 's#^\\./#/#')"
+        for expected in \
+          /usr/sbin/arca-routerd \
+          /usr/bin/arca-cli \
+          /usr/sbin/arca-netconfd \
+          /usr/lib/systemd/system/arca-routerd.service \
+          /usr/lib/systemd/system/arca-netconfd.service \
+          /etc/arca-router/hardware.yaml.example \
+        ; do
+          if ! printf '%s\n' "${FILES}" | grep -qx "${expected}"; then
+            echo "Missing file in DEB: ${expected}"
+            exit 1
+          fi
+        done
 
     - name: Install package (RPM)
       if: matrix.os.type == 'rpm'
@@ -231,4 +256,17 @@ jobs:
         RPM_PKG="$(ls -1 packages/*.rpm | head -n 1)"
         echo "Inspecting: ${RPM_PKG}"
         rpm -qip "${RPM_PKG}" >/dev/null
-        rpm -qpl "${RPM_PKG}" | grep -E "^/usr/sbin/arca-routerd$|^/usr/bin/arca-cli$|^/usr/sbin/arca-netconfd$|^/usr/lib/systemd/system/arca-routerd\\.service$|^/usr/lib/systemd/system/arca-netconfd\\.service$|^/etc/arca-router/hardware\\.yaml\\.example$"
+        FILES="$(rpm -qpl "${RPM_PKG}")"
+        for expected in \
+          /usr/sbin/arca-routerd \
+          /usr/bin/arca-cli \
+          /usr/sbin/arca-netconfd \
+          /usr/lib/systemd/system/arca-routerd.service \
+          /usr/lib/systemd/system/arca-netconfd.service \
+          /etc/arca-router/hardware.yaml.example \
+        ; do
+          if ! printf '%s\n' "${FILES}" | grep -qx "${expected}"; then
+            echo "Missing file in RPM: ${expected}"
+            exit 1
+          fi
+        done
