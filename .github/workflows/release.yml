@@ -235,7 +235,7 @@ jobs:
         DEB_PKG="$(ls -1 packages/*${{ matrix.os.deb_suffix }}*.deb | head -n 1)"
         echo "Inspecting: ${DEB_PKG}"
         dpkg-deb -I "${DEB_PKG}" >/dev/null
-        FILES="$(dpkg-deb -c "${DEB_PKG}" | awk '{p=$NF; sub(/^\\.\\//, \"\", p); if (p !~ /^\\//) p=\"/\"p; print p}')"
+        FILES="$(dpkg-deb -c "${DEB_PKG}" | awk '{p=$NF; sub(/^\.\//, "", p); if (p !~ /^\//) p="/" p; print p}')"
         for expected in \
           /usr/sbin/arca-routerd \
           /usr/bin/arca-cli \
