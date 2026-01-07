@@ -61,16 +61,16 @@ jobs:
       matrix:
         include:
           - runner: ubuntu-22.04
-            release: 1~ubuntu22.04
+            deb_release: 1~ubuntu22.04
             artifact_name: deb-ubuntu22.04
           - runner: ubuntu-24.04
-            release: 1~ubuntu24.04
+            deb_release: 1~ubuntu24.04
             artifact_name: deb-ubuntu24.04
           - runner: ubuntu-latest
-            release: 1~debian12
+            deb_release: 1~debian12
             artifact_name: deb-debian12
           - runner: ubuntu-latest
-            release: 1~debian13
+            deb_release: 1~debian13
             artifact_name: deb-debian13
 
     steps:
@@ -94,7 +94,7 @@ jobs:
     - name: Build DEB package
       run: |
         VERSION=${{ needs.prepare.outputs.version }} \
-        RELEASE=${{ matrix.release }} \
+        DEB_RELEASE=${{ matrix.deb_release }} \
         make deb-package
 
     - name: Upload DEB package
@@ -105,9 +105,22 @@ jobs:
         retention-days: 30
 
   build-rpm:
-    name: Build RPM
+    name: Build RPM (EL)
     needs: prepare
     runs-on: ubuntu-latest
+
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - rpm_release: 1.el9
+            artifact_name: rpm-el9
+            preferred_image: rockylinux:9
+            fallback_image: almalinux:9
+          - rpm_release: 1.el10
+            artifact_name: rpm-el10
+            preferred_image: rockylinux:10
+            fallback_image: almalinux:10
 
     steps:
     - name: Checkout code
@@ -115,25 +128,47 @@ jobs:
       with:
         fetch-depth: 0
 
-    - name: Set up Go
-      uses: actions/setup-go@v5
-      with:
-        go-version: '1.25.5'
-        cache: true
+    - name: Build RPM package (in container)
+      run: |
+        set -euo pipefail
 
-    - name: Install NFPM
-      run: make install-nfpm
+        rm -rf dist
+        mkdir -p dist
 
-    - name: Build binaries
-      run: VERSION=${{ needs.prepare.outputs.version }} make build
+        IMAGE="${{ matrix.preferred_image }}"
+        if ! docker pull "${IMAGE}"; then
+          IMAGE="${{ matrix.fallback_image }}"
+          docker pull "${IMAGE}"
+        fi
 
-    - name: Build RPM package
-      run: VERSION=${{ needs.prepare.outputs.version }} make rpm-package
+        docker run --rm \
+          -v "${PWD}:/work" \
+          -w /work \
+          "${IMAGE}" \
+          bash -lc '
+            set -euo pipefail
+
+            dnf -y install ca-certificates curl gcc git make tar gzip xz findutils
+
+            GO_VERSION="1.25.5"
+            curl -fsSL "https://go.dev/dl/go${GO_VERSION}.linux-amd64.tar.gz" -o /tmp/go.tgz
+            rm -rf /usr/local/go
+            tar -C /usr/local -xzf /tmp/go.tgz
+            export PATH="/usr/local/go/bin:${PATH}"
+
+            export GOBIN="/work/.tools/bin"
+            mkdir -p "${GOBIN}"
+            go install github.com/goreleaser/nfpm/v2/cmd/nfpm@v2.35.0
+
+            export PATH="/work/.tools/bin:${PATH}"
+            VERSION=${{ needs.prepare.outputs.version }} RPM_RELEASE=${{ matrix.rpm_release }} make build
+            VERSION=${{ needs.prepare.outputs.version }} RPM_RELEASE=${{ matrix.rpm_release }} make rpm-package
+          '
 
     - name: Upload RPM artifacts
       uses: actions/upload-artifact@v4
       with:
-        name: rpm
+        name: ${{ matrix.artifact_name }}
         path: |
           dist/*.rpm
         retention-days: 30
@@ -253,20 +288,30 @@ jobs:
     - name: Install package (RPM)
       if: matrix.os.type == 'rpm'
       run: |
-        RPM_PKG="$(ls -1 packages/*.rpm | head -n 1)"
-        echo "Inspecting: ${RPM_PKG}"
-        rpm -qip "${RPM_PKG}" >/dev/null
-        FILES="$(rpm -qpl "${RPM_PKG}")"
-        for expected in \
-          /usr/sbin/arca-routerd \
-          /usr/bin/arca-cli \
-          /usr/sbin/arca-netconfd \
-          /usr/lib/systemd/system/arca-routerd.service \
-          /usr/lib/systemd/system/arca-netconfd.service \
-          /etc/arca-router/hardware.yaml.example \
-        ; do
-          if ! printf '%s\n' "${FILES}" | grep -qx "${expected}"; then
-            echo "Missing file in RPM: ${expected}"
+        ls -la packages
+
+        for suffix in el9 el10; do
+          if ! ls -1 "packages/"*"${suffix}"*.rpm >/dev/null 2>&1; then
+            echo "Missing RPM artifact for ${suffix}"
             exit 1
           fi
+        done
+
+        for RPM_PKG in packages/*.rpm; do
+          echo "Inspecting: ${RPM_PKG}"
+          rpm -qip "${RPM_PKG}" >/dev/null
+          FILES="$(rpm -qpl "${RPM_PKG}")"
+          for expected in \
+            /usr/sbin/arca-routerd \
+            /usr/bin/arca-cli \
+            /usr/sbin/arca-netconfd \
+            /usr/lib/systemd/system/arca-routerd.service \
+            /usr/lib/systemd/system/arca-netconfd.service \
+            /etc/arca-router/hardware.yaml.example \
+          ; do
+            if ! printf '%s\n' "${FILES}" | grep -qx "${expected}"; then
+              echo "Missing file in RPM (${RPM_PKG}): ${expected}"
+              exit 1
+            fi
+          done
         done
