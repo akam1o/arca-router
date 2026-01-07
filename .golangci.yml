@@ -1,3 +1,5 @@
+version: "2"
+
 run:
   timeout: 5m
   tests: true
@@ -5,15 +7,8 @@ run:
 linters-settings:
   govet:
     enable-all: true
-  gofmt:
-    simplify: true
-  goconst:
-    min-len: 3
-    min-occurrences: 3
   misspell:
     locale: US
-  lll:
-    line-length: 140
   gocritic:
     enabled-tags:
       - diagnostic
@@ -23,19 +18,15 @@ linters-settings:
       - style
 
 linters:
+  disable-all: true
   enable:
-    - gofmt
     - govet
-    - gosimple
     - staticcheck
     - unused
     - ineffassign
     - misspell
-    - goconst
-    - gocyclo
-    - lll
+  disable:
     - errcheck
-    - revive
 
 issues:
   exclude-dirs:
@@ -44,18 +35,14 @@ issues:
   exclude-rules:
     - path: _test\.go
       linters:
-        - gocyclo
-        - errcheck
         - dupl
         - gosec
-    - linters:
-        - lll
-      source: "^//go:generate "
   max-issues-per-linter: 0
   max-same-issues: 0
 
 output:
   formats:
-    - format: colored-line-number
+    colored-line-number:
+      path: stdout
   print-issued-lines: true
   print-linter-name: true

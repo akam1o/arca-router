@@ -72,8 +72,11 @@ func isValidIP(ip string) bool {
 
 	// Basic character check for IPv4/IPv6
 	for _, ch := range ip {
-		if !((ch >= '0' && ch <= '9') || (ch >= 'a' && ch <= 'f') ||
-			(ch >= 'A' && ch <= 'F') || ch == '.' || ch == ':') {
+		isDigit := ch >= '0' && ch <= '9'
+		isLowerHex := ch >= 'a' && ch <= 'f'
+		isUpperHex := ch >= 'A' && ch <= 'F'
+		isSeparator := ch == '.' || ch == ':'
+		if !isDigit && !isLowerHex && !isUpperHex && !isSeparator {
 			return false
 		}
 	}

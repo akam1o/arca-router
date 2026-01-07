@@ -285,11 +285,8 @@ func validateAddress(addr, familyName, ifaceName string, unitNum int) error {
 		}
 	}
 
-	// Validate that the address is the network address (optional, but good practice)
-	if !ip.Equal(ipnet.IP) {
-		// This is just a warning case, we'll allow it but could add logging in the future
-		// For now, we'll accept it as valid
-	}
+	// ParseCIDR validation is enough here (network-address enforcement is optional).
+	_ = ipnet
 
 	return nil
 }
@@ -332,7 +329,8 @@ func (ro *RoutingOptions) Validate() error {
 
 	// Validate autonomous system number
 	if ro.AutonomousSystem != 0 {
-		if ro.AutonomousSystem < 1 || ro.AutonomousSystem > 4294967295 {
+		// ro.AutonomousSystem is uint32; upper bound is implied by the type.
+		if ro.AutonomousSystem < 1 {
 			return errors.New(
 				errors.ErrCodeConfigValidation,
 				fmt.Sprintf("AS number out of range: %d", ro.AutonomousSystem),
@@ -553,7 +551,8 @@ func validateBGPNeighbor(groupName, neighborIP string, neighbor *BGPNeighbor) er
 		)
 	}
 
-	if neighbor.PeerAS < 1 || neighbor.PeerAS > 4294967295 {
+	// neighbor.PeerAS is uint32; upper bound is implied by the type.
+	if neighbor.PeerAS < 1 {
 		return errors.New(
 			errors.ErrCodeConfigValidation,
 			fmt.Sprintf("Invalid peer AS for neighbor %s in group %s: %d", neighborIP, groupName, neighbor.PeerAS),

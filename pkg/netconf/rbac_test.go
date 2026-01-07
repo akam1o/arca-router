@@ -1,6 +1,7 @@
 package netconf
 
 import (
+	"strings"
 	"testing"
 )
 
@@ -80,6 +81,7 @@ func TestRBACMatrix(t *testing.T) {
 				if err == nil {
 					t.Errorf("Expected %s role to be denied %s operation, but was allowed",
 						tt.role, tt.operation)
+					return
 				}
 				// Verify error is access-denied type
 				if err.ErrorTag != ErrorTagAccessDenied {
@@ -266,11 +268,8 @@ func TestRBACErrorMessages(t *testing.T) {
 				t.Errorf("Expected error message, got empty string")
 			}
 
-			// Check if error message contains expected substring
-			// (we're flexible about exact wording as long as it's helpful)
-			if err.ErrorMessage != "" && tt.expectMessage != "" {
-				// Just verify the error message is non-empty
-				// The exact message may vary, but should be descriptive
+			if tt.expectMessage != "" && !strings.Contains(err.ErrorMessage, tt.expectMessage) {
+				t.Errorf("Expected error message to contain %q, got %q", tt.expectMessage, err.ErrorMessage)
 			}
 		})
 	}

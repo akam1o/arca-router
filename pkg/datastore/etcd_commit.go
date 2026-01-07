@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"sort"
-	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -389,29 +388,4 @@ func (ds *etcdDatastore) GetCommit(ctx context.Context, commitID string) (*Commi
 		IsRollback: entry.IsRollback,
 		SourceIP:   entry.SourceIP,
 	}, nil
-}
-
-// generateCommitKey generates a sortable key for commit history.
-// Format: <timestamp-unix-nano>_<commit-id>
-// This ensures commits are naturally sorted by time in etcd.
-func generateCommitKey(timestamp time.Time, commitID string) string {
-	return fmt.Sprintf("%020d_%s", timestamp.UnixNano(), commitID)
-}
-
-// parseCommitKey extracts commit ID from a commit key.
-func parseCommitKey(key string) string {
-	// Key format: /arca-router/commits/<timestamp>_<commit-id>
-	parts := strings.Split(key, "/")
-	if len(parts) == 0 {
-		return ""
-	}
-
-	lastPart := parts[len(parts)-1]
-	// Split by underscore to get commit ID
-	idParts := strings.SplitN(lastPart, "_", 2)
-	if len(idParts) != 2 {
-		return lastPart // Fallback to whole part
-	}
-
-	return idParts[1]
 }

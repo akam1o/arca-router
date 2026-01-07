@@ -203,6 +203,7 @@ func (r *Reloader) writeConfigAtomic(data []byte) error {
 			// Ownership preservation is best-effort - continue on failure
 			// This is acceptable because arca-routerd runs as root in production
 			// where chown will succeed
+			_ = err
 		}
 	}
 
@@ -215,6 +216,7 @@ func (r *Reloader) writeConfigAtomic(data []byte) error {
 	if err := syncDir(dir); err != nil {
 		// Directory fsync is best-effort - continue on failure
 		// The rename already succeeded; this is an optimization for crash consistency
+		_ = err
 	}
 
 	return nil

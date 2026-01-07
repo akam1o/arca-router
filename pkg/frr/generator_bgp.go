@@ -117,7 +117,8 @@ func validateBGPNeighbor(n *BGPNeighbor) error {
 	}
 
 	// Validate AS number range (1-4294967295)
-	if n.RemoteAS > 4294967295 {
+	// RemoteAS is uint32; upper bound is implied by the type.
+	if n.RemoteAS < 1 {
 		return NewInvalidConfigError(fmt.Sprintf("BGP neighbor %s: invalid AS number %d (must be 1-4294967295)", n.IP, n.RemoteAS))
 	}
 

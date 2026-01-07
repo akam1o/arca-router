@@ -327,6 +327,7 @@ func (c *govppClient) createAVFInterface(ctx context.Context, req *CreateInterfa
 	if tagErr != nil {
 		// Not fatal - tag is only for reconciliation
 		// Continue with interface creation
+		_ = tagErr
 	}
 
 	return iface, nil
@@ -386,6 +387,7 @@ func (c *govppClient) createRDMAInterface(ctx context.Context, req *CreateInterf
 		if tagErr != nil {
 			// Not fatal - tag is only for reconciliation
 			// Continue with interface creation
+			_ = tagErr
 		}
 	}
 
