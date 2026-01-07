@@ -20,7 +20,7 @@ BUILD_DATE=$(shell date -u -d "@$(SOURCE_DATE_EPOCH)" +"%Y-%m-%dT%H:%M:%SZ" 2>/d
 
 # Build flags
 LDFLAGS=-X main.Version=$(VERSION) -X main.Commit=$(GIT_COMMIT) -X main.BuildDate=$(BUILD_DATE)
-BUILD_FLAGS=-ldflags "$(LDFLAGS)" -trimpath
+BUILD_FLAGS=-ldflags "$(LDFLAGS)" -trimpath -buildvcs=false
 
 # NFPM settings
 NFPM_CONFIG=build/package/nfpm.yaml

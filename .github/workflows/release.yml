@@ -115,11 +115,11 @@ jobs:
         include:
           - rpm_release: 1.el9
             artifact_name: rpm-el9
-            preferred_image: rockylinux:9
+            preferred_image: rocky:9
             fallback_image: almalinux:9
           - rpm_release: 1.el10
             artifact_name: rpm-el10
-            preferred_image: rockylinux:10
+            preferred_image: rocky:10
             fallback_image: almalinux:10
 
     steps:
@@ -150,6 +150,7 @@ jobs:
 
             dnf -y --setopt=install_weak_deps=False --setopt=tsflags=nodocs install \
               ca-certificates curl-minimal gcc git make tar gzip xz findutils >/dev/null
+            git config --global --add safe.directory /work
 
             curl -fsSL "https://go.dev/dl/go1.25.5.linux-amd64.tar.gz" -o /tmp/go.tgz
             rm -rf /usr/local/go
