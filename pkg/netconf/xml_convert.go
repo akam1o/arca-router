@@ -93,7 +93,9 @@ func writeSystemXML(buf *bytes.Buffer, sys *config.SystemConfig) error {
 
 	if sys.HostName != "" {
 		buf.WriteString(`    <host-name>`)
-		xml.EscapeText(buf, []byte(sys.HostName))
+		if err := xml.EscapeText(buf, []byte(sys.HostName)); err != nil {
+			return err
+		}
 		buf.WriteString(`</host-name>`)
 		buf.WriteString("\n")
 	}
@@ -113,13 +115,17 @@ func writeInterfacesXML(buf *bytes.Buffer, interfaces map[string]*config.Interfa
 		buf.WriteString("\n")
 
 		buf.WriteString(`      <name>`)
-		xml.EscapeText(buf, []byte(name))
+		if err := xml.EscapeText(buf, []byte(name)); err != nil {
+			return err
+		}
 		buf.WriteString(`</name>`)
 		buf.WriteString("\n")
 
 		if iface.Description != "" {
 			buf.WriteString(`      <description>`)
-			xml.EscapeText(buf, []byte(iface.Description))
+			if err := xml.EscapeText(buf, []byte(iface.Description)); err != nil {
+				return err
+			}
 			buf.WriteString(`</description>`)
 			buf.WriteString("\n")
 		}
@@ -139,7 +145,9 @@ func writeInterfacesXML(buf *bytes.Buffer, interfaces map[string]*config.Interfa
 						buf.WriteString("\n")
 
 						buf.WriteString(`          <name>`)
-						xml.EscapeText(buf, []byte(familyName))
+						if err := xml.EscapeText(buf, []byte(familyName)); err != nil {
+							return err
+						}
 						buf.WriteString(`</name>`)
 						buf.WriteString("\n")
 
@@ -147,7 +155,9 @@ func writeInterfacesXML(buf *bytes.Buffer, interfaces map[string]*config.Interfa
 						if len(family.Addresses) > 0 {
 							for _, addr := range family.Addresses {
 								buf.WriteString(`          <address>`)
-								xml.EscapeText(buf, []byte(addr))
+								if err := xml.EscapeText(buf, []byte(addr)); err != nil {
+									return err
+								}
 								buf.WriteString(`</address>`)
 								buf.WriteString("\n")
 							}
@@ -179,7 +189,9 @@ func writeRoutingOptionsXML(buf *bytes.Buffer, ro *config.RoutingOptions) error 
 
 	if ro.RouterID != "" {
 		buf.WriteString(`    <router-id>`)
-		xml.EscapeText(buf, []byte(ro.RouterID))
+		if err := xml.EscapeText(buf, []byte(ro.RouterID)); err != nil {
+			return err
+		}
 		buf.WriteString(`</router-id>`)
 		buf.WriteString("\n")
 	}
@@ -198,12 +210,16 @@ func writeRoutingOptionsXML(buf *bytes.Buffer, ro *config.RoutingOptions) error 
 			buf.WriteString("\n")
 
 			buf.WriteString(`        <prefix>`)
-			xml.EscapeText(buf, []byte(route.Prefix))
+			if err := xml.EscapeText(buf, []byte(route.Prefix)); err != nil {
+				return err
+			}
 			buf.WriteString(`</prefix>`)
 			buf.WriteString("\n")
 
 			buf.WriteString(`        <next-hop>`)
-			xml.EscapeText(buf, []byte(route.NextHop))
+			if err := xml.EscapeText(buf, []byte(route.NextHop)); err != nil {
+				return err
+			}
 			buf.WriteString(`</next-hop>`)
 			buf.WriteString("\n")
 
@@ -259,27 +275,35 @@ func writeBGPXML(buf *bytes.Buffer, bgp *config.BGPConfig) error {
 			buf.WriteString("\n")
 
 			buf.WriteString(`        <name>`)
-			xml.EscapeText(buf, []byte(groupName))
+			if err := xml.EscapeText(buf, []byte(groupName)); err != nil {
+				return err
+			}
 			buf.WriteString(`</name>`)
 			buf.WriteString("\n")
 
 			if group.Type != "" {
 				buf.WriteString(`        <type>`)
-				xml.EscapeText(buf, []byte(group.Type))
+				if err := xml.EscapeText(buf, []byte(group.Type)); err != nil {
+					return err
+				}
 				buf.WriteString(`</type>`)
 				buf.WriteString("\n")
 			}
 
 			if group.Import != "" {
 				buf.WriteString(`        <import>`)
-				xml.EscapeText(buf, []byte(group.Import))
+				if err := xml.EscapeText(buf, []byte(group.Import)); err != nil {
+					return err
+				}
 				buf.WriteString(`</import>`)
 				buf.WriteString("\n")
 			}
 
 			if group.Export != "" {
 				buf.WriteString(`        <export>`)
-				xml.EscapeText(buf, []byte(group.Export))
+				if err := xml.EscapeText(buf, []byte(group.Export)); err != nil {
+					return err
+				}
 				buf.WriteString(`</export>`)
 				buf.WriteString("\n")
 			}
@@ -291,7 +315,9 @@ func writeBGPXML(buf *bytes.Buffer, bgp *config.BGPConfig) error {
 					buf.WriteString("\n")
 
 					buf.WriteString(`          <ip>`)
-					xml.EscapeText(buf, []byte(neighbor.IP))
+					if err := xml.EscapeText(buf, []byte(neighbor.IP)); err != nil {
+						return err
+					}
 					buf.WriteString(`</ip>`)
 					buf.WriteString("\n")
 
@@ -299,14 +325,18 @@ func writeBGPXML(buf *bytes.Buffer, bgp *config.BGPConfig) error {
 
 					if neighbor.Description != "" {
 						buf.WriteString(`          <description>`)
-						xml.EscapeText(buf, []byte(neighbor.Description))
+						if err := xml.EscapeText(buf, []byte(neighbor.Description)); err != nil {
+							return err
+						}
 						buf.WriteString(`</description>`)
 						buf.WriteString("\n")
 					}
 
 					if neighbor.LocalAddress != "" {
 						buf.WriteString(`          <local-address>`)
-						xml.EscapeText(buf, []byte(neighbor.LocalAddress))
+						if err := xml.EscapeText(buf, []byte(neighbor.LocalAddress)); err != nil {
+							return err
+						}
 						buf.WriteString(`</local-address>`)
 						buf.WriteString("\n")
 					}
@@ -333,7 +363,9 @@ func writeOSPFXML(buf *bytes.Buffer, ospf *config.OSPFConfig) error {
 
 	if ospf.RouterID != "" {
 		buf.WriteString(`      <router-id>`)
-		xml.EscapeText(buf, []byte(ospf.RouterID))
+		if err := xml.EscapeText(buf, []byte(ospf.RouterID)); err != nil {
+			return err
+		}
 		buf.WriteString(`</router-id>`)
 		buf.WriteString("\n")
 	}
@@ -344,12 +376,16 @@ func writeOSPFXML(buf *bytes.Buffer, ospf *config.OSPFConfig) error {
 			buf.WriteString("\n")
 
 			buf.WriteString(`        <name>`)
-			xml.EscapeText(buf, []byte(areaName))
+			if err := xml.EscapeText(buf, []byte(areaName)); err != nil {
+				return err
+			}
 			buf.WriteString(`</name>`)
 			buf.WriteString("\n")
 
 			buf.WriteString(`        <area-id>`)
-			xml.EscapeText(buf, []byte(area.AreaID))
+			if err := xml.EscapeText(buf, []byte(area.AreaID)); err != nil {
+				return err
+			}
 			buf.WriteString(`</area-id>`)
 			buf.WriteString("\n")
 
@@ -360,7 +396,9 @@ func writeOSPFXML(buf *bytes.Buffer, ospf *config.OSPFConfig) error {
 					buf.WriteString("\n")
 
 					buf.WriteString(`          <name>`)
-					xml.EscapeText(buf, []byte(ospfIface.Name))
+					if err := xml.EscapeText(buf, []byte(ospfIface.Name)); err != nil {
+						return err
+					}
 					buf.WriteString(`</name>`)
 					buf.WriteString("\n")
 

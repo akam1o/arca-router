@@ -230,7 +230,11 @@ func (ds *sqliteDatastore) ListCommitHistory(ctx context.Context, opts *HistoryO
 	if err != nil {
 		return nil, NewError(ErrCodeInternal, "failed to query commit history", err)
 	}
-	defer rows.Close()
+	defer func() {
+		if err := rows.Close(); err != nil {
+			_ = err
+		}
+	}()
 
 	// Scan results
 	var entries []*CommitHistoryEntry

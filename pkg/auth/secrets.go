@@ -237,7 +237,11 @@ func SecurelyRemoveFile(path string) error {
 	if err != nil {
 		return fmt.Errorf("failed to open file: %w", err)
 	}
-	defer file.Close()
+	defer func() {
+		if file != nil {
+			_ = file.Close()
+		}
+	}()
 
 	// Overwrite with zeros in chunks to avoid large allocations
 	const chunkSize = 4096
@@ -266,6 +270,7 @@ func SecurelyRemoveFile(path string) error {
 	if err := file.Close(); err != nil {
 		return fmt.Errorf("failed to close file: %w", err)
 	}
+	file = nil
 
 	// Remove file
 	if err := os.Remove(path); err != nil {

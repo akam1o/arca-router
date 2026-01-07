@@ -49,8 +49,16 @@ func NewInteractiveShell(username string, ds datastore.Datastore, hostname strin
 
 // Run starts the interactive shell
 func (sh *InteractiveShell) Run(ctx context.Context) error {
-	defer sh.rl.Close()
-	defer sh.session.Close(ctx)
+	defer func() {
+		if err := sh.rl.Close(); err != nil {
+			_ = err
+		}
+	}()
+	defer func() {
+		if err := sh.session.Close(ctx); err != nil {
+			_ = err
+		}
+	}()
 
 	// Handle Ctrl+C gracefully
 	sigCh := make(chan os.Signal, 1)
@@ -667,7 +675,11 @@ func cmdInteractive(ctx context.Context, f *flags) int {
 		fmt.Fprintf(os.Stderr, "Error: failed to initialize datastore: %v\n", err)
 		return ExitOperationError
 	}
-	defer ds.Close()
+	defer func() {
+		if err := ds.Close(); err != nil {
+			_ = err
+		}
+	}()
 
 	// Get hostname (use default if not set)
 	hostname := "arca-router"

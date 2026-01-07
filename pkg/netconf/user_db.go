@@ -68,7 +68,9 @@ func NewUserDatabase(path string, log *logger.Logger) (*UserDatabase, error) {
 	}
 	for _, pragma := range pragmas {
 		if _, err := db.Exec(pragma); err != nil {
-			db.Close()
+			if closeErr := db.Close(); closeErr != nil {
+				_ = closeErr
+			}
 			return nil, fmt.Errorf("failed to set pragma: %w", err)
 		}
 	}
@@ -81,7 +83,9 @@ func NewUserDatabase(path string, log *logger.Logger) (*UserDatabase, error) {
 
 	// Initialize schema
 	if err := udb.Initialize(); err != nil {
-		db.Close()
+		if closeErr := db.Close(); closeErr != nil {
+			_ = closeErr
+		}
 		return nil, fmt.Errorf("failed to initialize schema: %w", err)
 	}
 
@@ -261,7 +265,11 @@ func (udb *UserDatabase) ListUsersPaginated(limit, offset int) ([]User, error) {
 	if err != nil {
 		return nil, fmt.Errorf("failed to list users: %w", err)
 	}
-	defer rows.Close()
+	defer func() {
+		if err := rows.Close(); err != nil {
+			_ = err
+		}
+	}()
 
 	var users []User
 	for rows.Next() {
@@ -529,7 +537,11 @@ func (udb *UserDatabase) ListPublicKeys(username string) ([]PublicKeyRecord, err
 	if err != nil {
 		return nil, fmt.Errorf("failed to list public keys: %w", err)
 	}
-	defer rows.Close()
+	defer func() {
+		if err := rows.Close(); err != nil {
+			_ = err
+		}
+	}()
 
 	var keys []PublicKeyRecord
 	for rows.Next() {

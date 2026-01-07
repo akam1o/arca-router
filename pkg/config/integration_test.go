@@ -11,7 +11,7 @@ func TestIntegration_ParseExampleConfig(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to open examples/arca-router.conf: %v", err)
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 
 	parser := NewParser(f)
 	config, err := parser.Parse()
@@ -100,10 +100,12 @@ set interfaces et-2/0/0 unit 0 family inet address 192.168.100.1/24
 	r, w, _ := os.Pipe()
 	oldStdin := os.Stdin
 	os.Stdin = r
-	go func() {
-		w.Write([]byte(input))
-		w.Close()
-	}()
+	if _, err := w.Write([]byte(input)); err != nil {
+		t.Fatalf("Pipe write failed: %v", err)
+	}
+	if err := w.Close(); err != nil {
+		t.Fatalf("Pipe close failed: %v", err)
+	}
 
 	parser := NewParser(r)
 	config, err := parser.Parse()
@@ -150,10 +152,12 @@ set interfaces ge-0/0/1 unit 0 family inet address 10.0.0.1/8
 
 	for i := 0; i < b.N; i++ {
 		r, w, _ := os.Pipe()
-		go func() {
-			w.Write([]byte(input))
-			w.Close()
-		}()
+		if _, err := w.Write([]byte(input)); err != nil {
+			b.Fatalf("Pipe write failed: %v", err)
+		}
+		if err := w.Close(); err != nil {
+			b.Fatalf("Pipe close failed: %v", err)
+		}
 		parser := NewParser(r)
 		_, _ = parser.Parse()
 	}

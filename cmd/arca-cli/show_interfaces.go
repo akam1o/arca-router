@@ -18,7 +18,11 @@ func cmdShowInterfaces(ctx context.Context, args []string, f *flags) int {
 		fmt.Fprintf(os.Stderr, "Error: failed to create VPP client: %v\n", err)
 		return ExitOperationError
 	}
-	defer client.Close()
+	defer func() {
+		if err := client.Close(); err != nil {
+			_ = err
+		}
+	}()
 
 	// Connect to VPP
 	debugLog(f, "Connecting to VPP at %s", f.vppSocket)
@@ -210,7 +214,9 @@ func createVPPClientReal(f *flags) (vpp.Client, error) {
 	if f.vppSocket != "" {
 		// govppClient reads VPP_API_SOCKET_PATH during Connect()
 		// We must set it before creating the client
-		os.Setenv("VPP_API_SOCKET_PATH", f.vppSocket)
+		if err := os.Setenv("VPP_API_SOCKET_PATH", f.vppSocket); err != nil {
+			return nil, err
+		}
 	}
 
 	// Create govpp client

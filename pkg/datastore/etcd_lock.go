@@ -94,14 +94,18 @@ func (ds *etcdDatastore) AcquireLock(ctx context.Context, req *LockRequest) erro
 
 	lockJSON, err := json.Marshal(lock)
 	if err != nil {
-		ds.client.Revoke(ctx, leaseID)
+		if _, revokeErr := ds.client.Revoke(ctx, leaseID); revokeErr != nil {
+			_ = revokeErr
+		}
 		return NewError(ErrCodeInternal, fmt.Sprintf("failed to marshal %s lock data", req.Target), err)
 	}
 
 	// Check current lock state
 	getLockResp, err := ds.client.Get(ctx, lockKey)
 	if err != nil {
-		ds.client.Revoke(ctx, leaseID)
+		if _, revokeErr := ds.client.Revoke(ctx, leaseID); revokeErr != nil {
+			_ = revokeErr
+		}
 		return NewError(ErrCodeInternal, fmt.Sprintf("failed to check existing %s lock", req.Target), err)
 	}
 
@@ -119,13 +123,17 @@ func (ds *etcdDatastore) AcquireLock(ctx context.Context, req *LockRequest) erro
 				Commit()
 
 			if delErr != nil || !deleteTxn.Succeeded {
-				ds.client.Revoke(ctx, leaseID)
+				if _, revokeErr := ds.client.Revoke(ctx, leaseID); revokeErr != nil {
+					_ = revokeErr
+				}
 				return NewError(ErrCodeConflict, fmt.Sprintf("failed to delete malformed %s lock", req.Target), delErr)
 			}
 		} else {
 			// Check if lock is held by this session (allow re-acquire)
 			if existingLock.SessionID == req.SessionID {
-				ds.client.Revoke(ctx, leaseID)
+				if _, revokeErr := ds.client.Revoke(ctx, leaseID); revokeErr != nil {
+					_ = revokeErr
+				}
 				return ds.ExtendLock(ctx, req.Target, req.SessionID, timeout)
 			}
 
@@ -133,11 +141,15 @@ func (ds *etcdDatastore) AcquireLock(ctx context.Context, req *LockRequest) erro
 			if existingLock.LeaseID > 0 {
 				leaseTTLResp, leaseErr := ds.client.TimeToLive(ctx, clientv3.LeaseID(existingLock.LeaseID))
 				if leaseErr != nil {
-					ds.client.Revoke(ctx, leaseID)
+					if _, revokeErr := ds.client.Revoke(ctx, leaseID); revokeErr != nil {
+						_ = revokeErr
+					}
 					return NewError(ErrCodeConflict, "cannot verify lock status", leaseErr)
 				}
 				if leaseTTLResp.TTL > 0 {
-					ds.client.Revoke(ctx, leaseID)
+					if _, revokeErr := ds.client.Revoke(ctx, leaseID); revokeErr != nil {
+						_ = revokeErr
+					}
 					return NewError(ErrCodeConflict,
 						fmt.Sprintf("%s lock already held by session %s (user: %s)", req.Target, existingLock.SessionID, existingLock.User),
 						nil)
@@ -146,7 +158,9 @@ func (ds *etcdDatastore) AcquireLock(ctx context.Context, req *LockRequest) erro
 
 			// Lock is expired - delete with CAS
 			if existingLock.LeaseID > 0 {
-				ds.client.Revoke(ctx, clientv3.LeaseID(existingLock.LeaseID))
+				if _, revokeErr := ds.client.Revoke(ctx, clientv3.LeaseID(existingLock.LeaseID)); revokeErr != nil {
+					_ = revokeErr
+				}
 			}
 
 			deleteTxn, delErr := ds.client.Txn(ctx).
@@ -158,7 +172,9 @@ func (ds *etcdDatastore) AcquireLock(ctx context.Context, req *LockRequest) erro
 				Commit()
 
 			if delErr != nil || !deleteTxn.Succeeded {
-				ds.client.Revoke(ctx, leaseID)
+				if _, revokeErr := ds.client.Revoke(ctx, leaseID); revokeErr != nil {
+					_ = revokeErr
+				}
 				return NewError(ErrCodeConflict, fmt.Sprintf("%s lock was modified during expiration check", req.Target), delErr)
 			}
 		}
@@ -172,12 +188,16 @@ func (ds *etcdDatastore) AcquireLock(ctx context.Context, req *LockRequest) erro
 		Commit()
 
 	if err != nil {
-		ds.client.Revoke(ctx, leaseID)
+		if _, revokeErr := ds.client.Revoke(ctx, leaseID); revokeErr != nil {
+			_ = revokeErr
+		}
 		return NewError(ErrCodeInternal, fmt.Sprintf("failed to acquire %s lock transaction", req.Target), err)
 	}
 
 	if !txnResp.Succeeded {
-		ds.client.Revoke(ctx, leaseID)
+		if _, revokeErr := ds.client.Revoke(ctx, leaseID); revokeErr != nil {
+			_ = revokeErr
+		}
 		if len(txnResp.Responses) > 0 && len(txnResp.Responses[0].GetResponseRange().Kvs) > 0 {
 			var currentLock lockData
 			if err := json.Unmarshal(txnResp.Responses[0].GetResponseRange().Kvs[0].Value, &currentLock); err == nil {
@@ -238,7 +258,9 @@ func (ds *etcdDatastore) ReleaseLock(ctx context.Context, target string, session
 	var currentLock lockData
 	if err := json.Unmarshal(getLockResp.Kvs[0].Value, &currentLock); err != nil {
 		// Malformed lock data - delete it anyway
-		ds.client.Delete(ctx, lockKey)
+		if _, delErr := ds.client.Delete(ctx, lockKey); delErr != nil {
+			_ = delErr
+		}
 		return nil
 	}
 
@@ -265,7 +287,9 @@ func (ds *etcdDatastore) ReleaseLock(ctx context.Context, target string, session
 
 	// Revoke lease
 	if currentLock.LeaseID > 0 {
-		ds.client.Revoke(ctx, clientv3.LeaseID(currentLock.LeaseID))
+		if _, revokeErr := ds.client.Revoke(ctx, clientv3.LeaseID(currentLock.LeaseID)); revokeErr != nil {
+			_ = revokeErr
+		}
 	}
 
 	// Log audit event with target
@@ -364,7 +388,9 @@ func (ds *etcdDatastore) ExtendLock(ctx context.Context, target string, sessionI
 
 	newLockJSON, err := json.Marshal(currentLock)
 	if err != nil {
-		ds.client.Revoke(ctx, newLeaseID)
+		if _, revokeErr := ds.client.Revoke(ctx, newLeaseID); revokeErr != nil {
+			_ = revokeErr
+		}
 		return NewError(ErrCodeInternal, fmt.Sprintf("failed to marshal updated %s lock data", target), err)
 	}
 
@@ -378,18 +404,24 @@ func (ds *etcdDatastore) ExtendLock(ctx context.Context, target string, sessionI
 		Commit()
 
 	if err != nil {
-		ds.client.Revoke(ctx, newLeaseID)
+		if _, revokeErr := ds.client.Revoke(ctx, newLeaseID); revokeErr != nil {
+			_ = revokeErr
+		}
 		return NewError(ErrCodeInternal, fmt.Sprintf("failed to extend %s lock transaction", target), err)
 	}
 
 	if !txnResp.Succeeded {
-		ds.client.Revoke(ctx, newLeaseID)
+		if _, revokeErr := ds.client.Revoke(ctx, newLeaseID); revokeErr != nil {
+			_ = revokeErr
+		}
 		return NewError(ErrCodeConflict, fmt.Sprintf("%s lock was modified during extension attempt", target), nil)
 	}
 
 	// Revoke old lease
 	if oldLeaseID > 0 && int64(newLeaseID) != oldLeaseID {
-		ds.client.Revoke(ctx, clientv3.LeaseID(oldLeaseID))
+		if _, revokeErr := ds.client.Revoke(ctx, clientv3.LeaseID(oldLeaseID)); revokeErr != nil {
+			_ = revokeErr
+		}
 	}
 
 	// Log audit event for lock extension
@@ -475,7 +507,9 @@ func (ds *etcdDatastore) StealLock(ctx context.Context, req *StealLockRequest) e
 				Result:    "failure",
 				Details:   fmt.Sprintf("target=%s, failed to delete lock from user=%s session=%s", req.Target, oldUser, oldSessionID),
 			}
-			ds.LogAuditEvent(ctx, failAuditEvent)
+			if err := ds.LogAuditEvent(ctx, failAuditEvent); err != nil {
+				_ = err
+			}
 			if delErr != nil {
 				return NewError(ErrCodeInternal, fmt.Sprintf("failed to delete old %s lock", req.Target), delErr)
 			}
@@ -485,7 +519,9 @@ func (ds *etcdDatastore) StealLock(ctx context.Context, req *StealLockRequest) e
 
 	// Revoke old lease
 	if oldLeaseID > 0 {
-		ds.client.Revoke(ctx, clientv3.LeaseID(oldLeaseID))
+		if _, revokeErr := ds.client.Revoke(ctx, clientv3.LeaseID(oldLeaseID)); revokeErr != nil {
+			_ = revokeErr
+		}
 	}
 
 	// Acquire new lock
@@ -505,7 +541,9 @@ func (ds *etcdDatastore) StealLock(ctx context.Context, req *StealLockRequest) e
 			Result:    "failure",
 			Details:   fmt.Sprintf("target=%s, deleted old lock from user=%s session=%s but failed to acquire: %v", req.Target, oldUser, oldSessionID, acquireErr),
 		}
-		ds.LogAuditEvent(ctx, failAuditEvent)
+		if err := ds.LogAuditEvent(ctx, failAuditEvent); err != nil {
+			_ = err
+		}
 		return acquireErr
 	}
 

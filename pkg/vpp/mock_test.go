@@ -415,7 +415,9 @@ func TestMockClient_ErrorInjection(t *testing.T) {
 			name: "CreateInterfaceError",
 			setup: func() {
 				client.Reset()
-				client.Connect(ctx)
+				if err := client.Connect(ctx); err != nil {
+					t.Fatalf("Connect failed: %v", err)
+				}
 				client.CreateInterfaceError = testErr
 			},
 			operation: func() error {
@@ -427,8 +429,13 @@ func TestMockClient_ErrorInjection(t *testing.T) {
 			name: "SetInterfaceUpError",
 			setup: func() {
 				client.Reset()
-				client.Connect(ctx)
-				iface, _ := client.CreateInterface(ctx, &CreateInterfaceRequest{Type: InterfaceTypeAVF})
+				if err := client.Connect(ctx); err != nil {
+					t.Fatalf("Connect failed: %v", err)
+				}
+				iface, err := client.CreateInterface(ctx, &CreateInterfaceRequest{Type: InterfaceTypeAVF})
+				if err != nil {
+					t.Fatalf("CreateInterface failed: %v", err)
+				}
 				client.SetInterfaceUpError = testErr
 				client.mu.Lock()
 				client.interfaces[iface.SwIfIndex] = iface

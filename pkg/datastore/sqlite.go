@@ -3,6 +3,7 @@ package datastore
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -63,7 +64,9 @@ func NewSQLiteDatastore(cfg *Config) (Datastore, error) {
 
 	for _, pragma := range pragmas {
 		if _, err := db.Exec(pragma); err != nil {
-			db.Close()
+			if closeErr := db.Close(); closeErr != nil {
+				_ = closeErr
+			}
 			return nil, fmt.Errorf("failed to set pragma %q: %w", pragma, err)
 		}
 	}
@@ -84,7 +87,9 @@ func NewSQLiteDatastore(cfg *Config) (Datastore, error) {
 	// Run migrations
 	migrator := NewSQLiteMigrationManager(db, dbPath)
 	if err := migrator.ApplyMigrations(); err != nil {
-		db.Close()
+		if closeErr := db.Close(); closeErr != nil {
+			_ = closeErr
+		}
 		return nil, fmt.Errorf("failed to apply migrations: %w", err)
 	}
 
@@ -235,13 +240,17 @@ func (ds *sqliteDatastore) withTx(ctx context.Context, readOnly bool, fn func(*s
 
 	defer func() {
 		if p := recover(); p != nil {
-			tx.Rollback()
+			if rollbackErr := tx.Rollback(); rollbackErr != nil && !errors.Is(rollbackErr, sql.ErrTxDone) {
+				_ = rollbackErr
+			}
 			panic(p) // Re-throw panic after rollback
 		}
 	}()
 
 	if err := fn(tx); err != nil {
-		tx.Rollback()
+		if rollbackErr := tx.Rollback(); rollbackErr != nil && !errors.Is(rollbackErr, sql.ErrTxDone) {
+			_ = rollbackErr
+		}
 		return err
 	}
 

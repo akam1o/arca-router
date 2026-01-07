@@ -26,7 +26,11 @@ func TestPasswordAuthentication(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to create user database: %v", err)
 	}
-	defer userDB.Close()
+	t.Cleanup(func() {
+		if err := userDB.Close(); err != nil {
+			t.Fatalf("Close failed: %v", err)
+		}
+	})
 
 	// Create test user with password
 	password := "test-password-123"
@@ -99,7 +103,11 @@ func TestPublicKeyAuthentication(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to create user database: %v", err)
 	}
-	defer userDB.Close()
+	t.Cleanup(func() {
+		if err := userDB.Close(); err != nil {
+			t.Fatalf("Close failed: %v", err)
+		}
+	})
 
 	// Create test user (password required but won't be used for pubkey auth)
 	passwordHash, err := auth.HashPassword("dummy-password")
@@ -226,7 +234,11 @@ func TestPublicKeyManagement(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to create user database: %v", err)
 	}
-	defer userDB.Close()
+	t.Cleanup(func() {
+		if err := userDB.Close(); err != nil {
+			t.Fatalf("Close failed: %v", err)
+		}
+	})
 
 	// Create test user
 	passwordHash, err := auth.HashPassword("test-password")
@@ -328,19 +340,32 @@ func TestAuthAuditLogging(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to create user database: %v", err)
 	}
-	defer userDB.Close()
+	t.Cleanup(func() {
+		if err := userDB.Close(); err != nil {
+			t.Fatalf("Close failed: %v", err)
+		}
+	})
 
 	// Create test user
 	password := "test-password"
-	passwordHash, _ := auth.HashPassword(password)
-	userDB.CreateUser("testuser", passwordHash, netconf.RoleAdmin)
+	passwordHash, err := auth.HashPassword(password)
+	if err != nil {
+		t.Fatalf("Failed to hash password: %v", err)
+	}
+	if err := userDB.CreateUser("testuser", passwordHash, netconf.RoleAdmin); err != nil {
+		t.Fatalf("Failed to create user: %v", err)
+	}
 
 	// Test password auth logging (success)
-	userDB.VerifyPasswordWithReason("testuser", password)
+	if _, _, err := userDB.VerifyPasswordWithReason("testuser", password); err != nil {
+		t.Fatalf("VerifyPasswordWithReason should succeed: %v", err)
+	}
 	// Verify log was called (in real implementation, check log output)
 
 	// Test password auth logging (failure)
-	userDB.VerifyPasswordWithReason("testuser", "wrong-password")
+	if _, _, err := userDB.VerifyPasswordWithReason("testuser", "wrong-password"); err == nil {
+		t.Fatalf("VerifyPasswordWithReason should fail for wrong password")
+	}
 	// Verify log was called with failure reason
 
 	// Test explicit logging methods
@@ -364,21 +389,35 @@ func TestCascadeDeletion(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to create user database: %v", err)
 	}
-	defer userDB.Close()
+	t.Cleanup(func() {
+		if err := userDB.Close(); err != nil {
+			t.Fatalf("Close failed: %v", err)
+		}
+	})
 
 	// Create user
-	passwordHash, _ := auth.HashPassword("test-password")
-	userDB.CreateUser("testuser", passwordHash, netconf.RoleAdmin)
+	passwordHash, err := auth.HashPassword("test-password")
+	if err != nil {
+		t.Fatalf("Failed to hash password: %v", err)
+	}
+	if err := userDB.CreateUser("testuser", passwordHash, netconf.RoleAdmin); err != nil {
+		t.Fatalf("Failed to create user: %v", err)
+	}
 
 	// Add public key
 	_, privateKey, _ := ed25519.GenerateKey(rand.Reader)
 	sshPublicKey, _ := ssh.NewPublicKey(privateKey.Public())
 	authorizedKey := string(ssh.MarshalAuthorizedKey(sshPublicKey))
 	parsedKey, _ := auth.ParsePublicKey(authorizedKey)
-	userDB.AddPublicKey("testuser", parsedKey.Algorithm, parsedKey.KeyData, parsedKey.Fingerprint, "")
+	if err := userDB.AddPublicKey("testuser", parsedKey.Algorithm, parsedKey.KeyData, parsedKey.Fingerprint, ""); err != nil {
+		t.Fatalf("Failed to add public key: %v", err)
+	}
 
 	// Verify key exists
-	keys, _ := userDB.ListPublicKeys("testuser")
+	keys, err := userDB.ListPublicKeys("testuser")
+	if err != nil {
+		t.Fatalf("Failed to list public keys: %v", err)
+	}
 	if len(keys) != 1 {
 		t.Errorf("Expected 1 key before deletion, got %d", len(keys))
 	}
