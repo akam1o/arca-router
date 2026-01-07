@@ -50,7 +50,7 @@ func ConfigToXML(cfg *config.Config, filter *Filter) ([]byte, error) {
 	}
 
 	// Interfaces configuration - use IETF interfaces namespace
-	if cfg.Interfaces != nil && len(cfg.Interfaces) > 0 && (filter == nil || filterMatches(filter, "interfaces")) {
+	if len(cfg.Interfaces) > 0 && (filter == nil || filterMatches(filter, "interfaces")) {
 		if err := writeInterfacesXML(&buf, cfg.Interfaces); err != nil {
 			return nil, fmt.Errorf("failed to serialize interfaces: %w", err)
 		}
@@ -125,16 +125,15 @@ func writeInterfacesXML(buf *bytes.Buffer, interfaces map[string]*config.Interfa
 		}
 
 		// Units (sub-interfaces)
-		if iface.Units != nil && len(iface.Units) > 0 {
+		if len(iface.Units) > 0 {
 			for unitNum, unit := range iface.Units {
 				buf.WriteString(`      <unit>`)
 				buf.WriteString("\n")
 
-				buf.WriteString(fmt.Sprintf(`        <name>%d</name>`, unitNum))
-				buf.WriteString("\n")
+				fmt.Fprintf(buf, "        <name>%d</name>\n", unitNum)
 
 				// Address families
-				if unit.Family != nil && len(unit.Family) > 0 {
+				if len(unit.Family) > 0 {
 					for familyName, family := range unit.Family {
 						buf.WriteString(`        <family>`)
 						buf.WriteString("\n")
@@ -186,8 +185,7 @@ func writeRoutingOptionsXML(buf *bytes.Buffer, ro *config.RoutingOptions) error 
 	}
 
 	if ro.AutonomousSystem != 0 {
-		buf.WriteString(fmt.Sprintf(`    <autonomous-system>%d</autonomous-system>`, ro.AutonomousSystem))
-		buf.WriteString("\n")
+		fmt.Fprintf(buf, "    <autonomous-system>%d</autonomous-system>\n", ro.AutonomousSystem)
 	}
 
 	// Static routes
@@ -210,8 +208,7 @@ func writeRoutingOptionsXML(buf *bytes.Buffer, ro *config.RoutingOptions) error 
 			buf.WriteString("\n")
 
 			if route.Distance > 0 {
-				buf.WriteString(fmt.Sprintf(`        <distance>%d</distance>`, route.Distance))
-				buf.WriteString("\n")
+				fmt.Fprintf(buf, "        <distance>%d</distance>\n", route.Distance)
 			}
 
 			buf.WriteString(`      </route>`)
@@ -256,7 +253,7 @@ func writeBGPXML(buf *bytes.Buffer, bgp *config.BGPConfig) error {
 	buf.WriteString(`    <bgp>`)
 	buf.WriteString("\n")
 
-	if bgp.Groups != nil && len(bgp.Groups) > 0 {
+	if len(bgp.Groups) > 0 {
 		for groupName, group := range bgp.Groups {
 			buf.WriteString(`      <group>`)
 			buf.WriteString("\n")
@@ -288,7 +285,7 @@ func writeBGPXML(buf *bytes.Buffer, bgp *config.BGPConfig) error {
 			}
 
 			// Neighbors
-			if group.Neighbors != nil && len(group.Neighbors) > 0 {
+			if len(group.Neighbors) > 0 {
 				for _, neighbor := range group.Neighbors {
 					buf.WriteString(`        <neighbor>`)
 					buf.WriteString("\n")
@@ -298,8 +295,7 @@ func writeBGPXML(buf *bytes.Buffer, bgp *config.BGPConfig) error {
 					buf.WriteString(`</ip>`)
 					buf.WriteString("\n")
 
-					buf.WriteString(fmt.Sprintf(`          <peer-as>%d</peer-as>`, neighbor.PeerAS))
-					buf.WriteString("\n")
+					fmt.Fprintf(buf, "          <peer-as>%d</peer-as>\n", neighbor.PeerAS)
 
 					if neighbor.Description != "" {
 						buf.WriteString(`          <description>`)
@@ -342,7 +338,7 @@ func writeOSPFXML(buf *bytes.Buffer, ospf *config.OSPFConfig) error {
 		buf.WriteString("\n")
 	}
 
-	if ospf.Areas != nil && len(ospf.Areas) > 0 {
+	if len(ospf.Areas) > 0 {
 		for areaName, area := range ospf.Areas {
 			buf.WriteString(`      <area>`)
 			buf.WriteString("\n")
@@ -358,7 +354,7 @@ func writeOSPFXML(buf *bytes.Buffer, ospf *config.OSPFConfig) error {
 			buf.WriteString("\n")
 
 			// Interfaces
-			if area.Interfaces != nil && len(area.Interfaces) > 0 {
+			if len(area.Interfaces) > 0 {
 				for _, ospfIface := range area.Interfaces {
 					buf.WriteString(`        <interface>`)
 					buf.WriteString("\n")
@@ -374,13 +370,11 @@ func writeOSPFXML(buf *bytes.Buffer, ospf *config.OSPFConfig) error {
 					}
 
 					if ospfIface.Metric > 0 {
-						buf.WriteString(fmt.Sprintf(`          <metric>%d</metric>`, ospfIface.Metric))
-						buf.WriteString("\n")
+						fmt.Fprintf(buf, "          <metric>%d</metric>\n", ospfIface.Metric)
 					}
 
 					if ospfIface.Priority > 0 {
-						buf.WriteString(fmt.Sprintf(`          <priority>%d</priority>`, ospfIface.Priority))
-						buf.WriteString("\n")
+						fmt.Fprintf(buf, "          <priority>%d</priority>\n", ospfIface.Priority)
 					}
 
 					buf.WriteString(`        </interface>`)

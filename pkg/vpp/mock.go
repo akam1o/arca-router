@@ -90,9 +90,7 @@ func deepCopyIPNet(ipnet *net.IPNet) *net.IPNet {
 
 // copyBytes copies bytes from src to dst
 func copyBytes(dst, src []byte) {
-	for i := range src {
-		dst[i] = src[i]
-	}
+	copy(dst, src)
 }
 
 // ipNetEqual compares two net.IPNet values for equality

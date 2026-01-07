@@ -96,7 +96,6 @@ set interfaces xe-1/0/0 unit 100 family inet address 172.16.0.1/16
 set interfaces et-2/0/0 unit 0 family inet address 192.168.100.1/24
 `
 
-	parser := NewParser(os.Stdin)
 	// Replace stdin with our test input
 	r, w, _ := os.Pipe()
 	oldStdin := os.Stdin
@@ -106,7 +105,7 @@ set interfaces et-2/0/0 unit 0 family inet address 192.168.100.1/24
 		w.Close()
 	}()
 
-	parser = NewParser(r)
+	parser := NewParser(r)
 	config, err := parser.Parse()
 	os.Stdin = oldStdin
 

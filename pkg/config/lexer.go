@@ -79,16 +79,6 @@ func (l *Lexer) readChar() {
 	}
 }
 
-// peekChar returns the next character without consuming it
-func (l *Lexer) peekChar() rune {
-	ch, _, err := l.reader.ReadRune()
-	if err != nil {
-		return 0
-	}
-	l.reader.UnreadRune()
-	return ch
-}
-
 // skipWhitespace skips whitespace except newlines
 func (l *Lexer) skipWhitespace() {
 	for !l.eof && unicode.IsSpace(l.ch) && l.ch != '\n' {

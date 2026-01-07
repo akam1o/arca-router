@@ -60,7 +60,7 @@ func New(component string, cfg *Config) *Logger {
 // WithField adds a field to the logger context
 func (l *Logger) WithField(key string, value interface{}) *Logger {
 	return &Logger{
-		Logger:    l.Logger.With(slog.Any(key, value)),
+		Logger:    l.With(slog.Any(key, value)),
 		component: l.component,
 	}
 }

@@ -1,6 +1,7 @@
 # Binaries (root level only)
 /arca-routerd
 /arca-cli
+/arca-netconfd
 *.exe
 *.dll
 *.so
@@ -24,6 +25,13 @@ build/output/
 *.rpm
 *.deb
 *.tar.gz
+
+# Local caches / tools (do not commit)
+.gocache/
+.gomodcache/
+.gopath/
+.golangci-cache/
+.tools/
 
 # IDE
 .vscode/

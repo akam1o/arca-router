@@ -93,7 +93,7 @@ func generateHashedName(junosName, prefix string) (string, error) {
 	linuxName := prefix + hashSuffix
 
 	if len(linuxName) > MaxLinuxIfNameLen {
-		return "", fmt.Errorf("generated Linux name too long: %s (%d chars, max %d)", linuxName, len(linuxName), MaxLinuxIfNameLen)
+		return "", fmt.Errorf("generated linux name too long: %s (%d chars, max %d)", linuxName, len(linuxName), MaxLinuxIfNameLen)
 	}
 
 	return linuxName, nil
@@ -106,13 +106,13 @@ func ValidateLinuxIfName(name string) error {
 	}
 
 	if len(name) > MaxLinuxIfNameLen {
-		return fmt.Errorf("Linux interface name too long: %s (%d chars, max %d)", name, len(name), MaxLinuxIfNameLen)
+		return fmt.Errorf("linux interface name too long: %s (%d chars, max %d)", name, len(name), MaxLinuxIfNameLen)
 	}
 
 	// Check for invalid characters (allow alphanumeric, dash, underscore, dot)
 	validNamePattern := regexp.MustCompile(`^[a-zA-Z0-9._-]+$`)
 	if !validNamePattern.MatchString(name) {
-		return fmt.Errorf("Linux interface name contains invalid characters: %s", name)
+		return fmt.Errorf("linux interface name contains invalid characters: %s", name)
 	}
 
 	return nil
