@@ -1,8 +1,8 @@
 name: arca-router
 version: ${VERSION}
-release: 1
+release: ${RELEASE}
 epoch: 0
-arch: x86_64
+arch: amd64
 license: Apache-2.0
 vendor: akam1o
 maintainer: akam1o <akam1o@ark-networks.net>
@@ -116,28 +116,22 @@ contents:
 scripts:
   preinstall: build/package/scripts/preinstall.sh
   postinstall: build/package/scripts/postinstall.sh
-  preuninstall: build/package/scripts/preuninstall.sh
-  postuninstall: build/package/scripts/postuninstall.sh
-  posttrans: build/package/scripts/posttrans.sh
+  preremove: build/package/scripts/preuninstall.sh
+  postremove: build/package/scripts/postuninstall.sh
 
 # RPM-specific settings
 rpm:
+  arch: x86_64
+  scripts:
+    posttrans: build/package/scripts/posttrans.sh
   group: System Environment/Daemons
   compression: xz
   signature:
     key_file: ""
     key_id: ""
 
-overrides:
-  rpm:
-    # Use x86_64 for RPM architecture
-    arch: x86_64
-  deb:
-    # Use amd64 for DEB architecture
-    arch: amd64
-    # Allow building Ubuntu-flavored DEBs via `DEB_RELEASE` (e.g. `1~ubuntu22.04`).
-    # Defaults to `1` when unset.
-    release: '{{ if .Env.DEB_RELEASE }}{{ .Env.DEB_RELEASE }}{{ else }}1{{ end }}'
-    # DEB-specific fields
-    priority: optional
-    section: net
+deb:
+  arch: amd64
+  fields:
+    Priority: optional
+    Section: net

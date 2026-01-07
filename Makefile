@@ -9,6 +9,7 @@ DIST_DIR=dist
 
 # Version information
 VERSION ?= $(shell git describe --tags --abbrev=0 2>/dev/null || echo "0.1.0")
+RELEASE ?= 1
 GIT_COMMIT=$(shell git rev-parse --short HEAD 2>/dev/null || echo "unknown")
 
 # Reproducible builds
@@ -95,7 +96,7 @@ rpm-package: ## Build RPM package (assumes binaries already built)
 	@find build/systemd -type f -exec touch -d "@$(SOURCE_DATE_EPOCH)" {} + 2>/dev/null || true
 	@find build/package -type f -exec touch -d "@$(SOURCE_DATE_EPOCH)" {} + 2>/dev/null || true
 	@find examples -type f -exec touch -d "@$(SOURCE_DATE_EPOCH)" {} + 2>/dev/null || true
-	VERSION=$(VERSION) SOURCE_DATE_EPOCH=$(SOURCE_DATE_EPOCH) nfpm package -p rpm -f $(NFPM_CONFIG) -t $(DIST_DIR)/
+	VERSION=$(VERSION) RELEASE=$(RELEASE) SOURCE_DATE_EPOCH=$(SOURCE_DATE_EPOCH) nfpm package -p rpm -f $(NFPM_CONFIG) -t $(DIST_DIR)/
 	@echo ""
 	@echo "RPM package created:"
 	@ls -lh $(DIST_DIR)/*.rpm
@@ -114,7 +115,7 @@ deb-package: ## Build DEB package (assumes binaries already built)
 	@find build/systemd -type f -exec touch -d "@$(SOURCE_DATE_EPOCH)" {} + 2>/dev/null || true
 	@find build/package -type f -exec touch -d "@$(SOURCE_DATE_EPOCH)" {} + 2>/dev/null || true
 	@find examples -type f -exec touch -d "@$(SOURCE_DATE_EPOCH)" {} + 2>/dev/null || true
-	VERSION=$(VERSION) SOURCE_DATE_EPOCH=$(SOURCE_DATE_EPOCH) nfpm package -p deb -f $(NFPM_CONFIG) -t $(DIST_DIR)/
+	VERSION=$(VERSION) RELEASE=$(RELEASE) SOURCE_DATE_EPOCH=$(SOURCE_DATE_EPOCH) nfpm package -p deb -f $(NFPM_CONFIG) -t $(DIST_DIR)/
 	@echo ""
 	@echo "DEB package created:"
 	@ls -lh $(DIST_DIR)/*.deb
