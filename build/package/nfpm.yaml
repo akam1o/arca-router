@@ -135,6 +135,9 @@ overrides:
   deb:
     # Use amd64 for DEB architecture
     arch: amd64
+    # Allow building Ubuntu-flavored DEBs via `DEB_RELEASE` (e.g. `1~ubuntu22.04`).
+    # Defaults to `1` when unset.
+    release: '{{ if .Env.DEB_RELEASE }}{{ .Env.DEB_RELEASE }}{{ else }}1{{ end }}'
     # DEB-specific fields
     priority: optional
     section: net

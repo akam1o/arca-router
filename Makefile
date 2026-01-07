@@ -1,4 +1,4 @@
-.PHONY: help build build-cli clean rpm deb version test fmt vet check install-nfpm integration-test generate-binapi
+.PHONY: help build build-cli clean rpm rpm-package deb deb-package version test fmt vet check install-nfpm integration-test generate-binapi
 
 # Binary names
 BINARY_NAME=arca-routerd
@@ -81,7 +81,9 @@ install-nfpm: ## Install NFPM tool
 	go install github.com/goreleaser/nfpm/v2/cmd/nfpm@$(NFPM_VERSION)
 	@echo "NFPM installed. Verify with: nfpm --version"
 
-rpm: build ## Build RPM package
+rpm: build rpm-package ## Build RPM package
+
+rpm-package: ## Build RPM package (assumes binaries already built)
 	@echo "Building RPM package..."
 	@mkdir -p $(DIST_DIR)
 	@if ! command -v nfpm >/dev/null 2>&1; then \
@@ -98,7 +100,9 @@ rpm: build ## Build RPM package
 	@echo "RPM package created:"
 	@ls -lh $(DIST_DIR)/*.rpm
 
-deb: build ## Build DEB package (for Debian Bookworm)
+deb: build deb-package ## Build DEB package (for Debian Bookworm)
+
+deb-package: ## Build DEB package (assumes binaries already built)
 	@echo "Building DEB package..."
 	@mkdir -p $(DIST_DIR)
 	@if ! command -v nfpm >/dev/null 2>&1; then \
