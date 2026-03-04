@@ -2,6 +2,18 @@
 
 This directory contains user guides, design notes, and internal drafts for `arca-router`.
 
+## Architecture (v0.4.x)
+- `SPEC.md` / `SPEC.ja.md` - Configuration specification
+- `docs/datastore-design.md` - Datastore design (SQLite/etcd)
+- `api/v1/router.proto` - gRPC API definitions
+- `internal/` - Core v0.4.x packages:
+  - `model/` - Canonical config & state types
+  - `engine/` - Diff-based config engine with 2-phase commit
+  - `southbound/vpp/` / `southbound/frr/` - Plugin implementations
+  - `northbound/grpc/` - gRPC server & client
+  - `store/` - Persistence abstraction
+  - `auth/` - Authentication/RBAC/audit
+
 ## Setup (VPP / FRR)
 - `docs/vpp-setup-debian.md`
 - `docs/vpp-setup-rhel9.md`

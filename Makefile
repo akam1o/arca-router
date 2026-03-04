@@ -1,9 +1,11 @@
-.PHONY: help build build-cli clean rpm rpm-package deb deb-package version test fmt vet check install-nfpm integration-test generate-binapi
+.PHONY: help build build-cli build-v2 build-v2-cli clean rpm rpm-package deb deb-package version test fmt vet check install-nfpm integration-test generate-binapi
 
 # Binary names
 BINARY_NAME=arca-routerd
 CLI_BINARY_NAME=arca-cli
 NETCONFD_BINARY_NAME=arca-netconfd
+V2_BINARY_NAME=arca-routerd-v2
+V2_CLI_BINARY_NAME=arca-cli-v2
 BUILD_DIR=build/bin
 DIST_DIR=dist
 
@@ -54,6 +56,19 @@ build-cli: ## Build only arca-cli binary
 	@mkdir -p $(BUILD_DIR)
 	CGO_ENABLED=0 SOURCE_DATE_EPOCH=$(SOURCE_DATE_EPOCH) go build $(BUILD_FLAGS) -o $(BUILD_DIR)/$(CLI_BINARY_NAME) ./cmd/arca-cli
 	@echo "Build complete: $(BUILD_DIR)/$(CLI_BINARY_NAME)"
+
+build-v2: ## Build v2 unified daemon (arca-routerd-v2)
+	@echo "Building $(V2_BINARY_NAME) and $(V2_CLI_BINARY_NAME)..."
+	@mkdir -p $(BUILD_DIR)
+	CGO_ENABLED=1 SOURCE_DATE_EPOCH=$(SOURCE_DATE_EPOCH) go build $(BUILD_FLAGS) -o $(BUILD_DIR)/$(V2_BINARY_NAME) ./cmd/arca-routerd-v2
+	CGO_ENABLED=0 SOURCE_DATE_EPOCH=$(SOURCE_DATE_EPOCH) go build $(BUILD_FLAGS) -o $(BUILD_DIR)/$(V2_CLI_BINARY_NAME) ./cmd/arca-cli-v2
+	@echo "Build complete: $(BUILD_DIR)/$(V2_BINARY_NAME), $(BUILD_DIR)/$(V2_CLI_BINARY_NAME)"
+
+build-v2-cli: ## Build only arca-cli-v2 binary
+	@echo "Building $(V2_CLI_BINARY_NAME)..."
+	@mkdir -p $(BUILD_DIR)
+	CGO_ENABLED=0 SOURCE_DATE_EPOCH=$(SOURCE_DATE_EPOCH) go build $(BUILD_FLAGS) -o $(BUILD_DIR)/$(V2_CLI_BINARY_NAME) ./cmd/arca-cli-v2
+	@echo "Build complete: $(BUILD_DIR)/$(V2_CLI_BINARY_NAME)"
 
 test: ## Run tests
 	@echo "Running tests..."

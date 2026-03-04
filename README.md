@@ -9,7 +9,7 @@ English | [日本語](README.ja.md)
 
 arca-router is a software router with Junos-compatible configuration syntax, powered by VPP (Vector Packet Processing) and FRR (Free Range Routing) for dynamic routing protocols.
 
-**Current Status**: v0.3.x - **NETCONF Management & Security**
+**Current Status**: v0.4.x - **Unified Architecture (v2)**
 
 ---
 
@@ -17,7 +17,18 @@ arca-router is a software router with Junos-compatible configuration syntax, pow
 
 Previous releases are documented in [`CHANGELOG.md`](CHANGELOG.md).
 
-### v0.3.x - **Current Release** ✅
+### v0.4.x - **Current Release** ✅
+
+- ✅ **Unified Daemon Architecture**: Single `arca-routerd` process (VPP + FRR + NETCONF + gRPC API)
+- ✅ **Struct-First Config Model**: Canonical Go types replace text-primary configuration
+- ✅ **Diff-Based Config Engine**: Computes minimal diffs; applies only what changed
+- ✅ **Plugin-Based Southbound**: VPP and FRR as hot-swappable `engine.Plugin` implementations
+- ✅ **gRPC Internal API**: CLI ↔ daemon communication via Unix socket (proto-defined)
+- ✅ **Thin CLI Client**: `arca-cli` delegates all state to the daemon via gRPC
+- ✅ **2-Phase Commit with Rollback**: Atomic validate → apply → rollback on failure
+- ✅ **Backward Compatible**: All v0.3.x `pkg/` code and tests preserved
+
+### v0.3.x - **Previous Release**
 
 - ✅ **NETCONF/SSH Subsystem**: Remote management via NETCONF protocol (RFC 6241)
 - ✅ **Interactive CLI**: Real-time configuration and commit/rollback
@@ -30,7 +41,18 @@ Previous releases are documented in [`CHANGELOG.md`](CHANGELOG.md).
 
 ## Roadmap
 
-### v0.4.x - Advanced VPP Features 🔲
+### v0.5.x - Production Hardening 🔲
+
+- 🔲 **Proto Compilation & Full gRPC Wiring**: Compile `api/v1/router.proto` and wire typed stubs
+- 🔲 **FRR MGMT API**: Incremental FRR config via mgmtd (replace full-file regeneration)
+- 🔲 **Comprehensive v2 Tests**: Unit tests for engine, diff, plugins, gRPC server/client
+- 🔲 **Migration Tooling**: Auto-migrate v0.3.x deployments to unified daemon
+- 🔲 **Monitoring/Observability**
+  - Prometheus exporter
+  - Grafana dashboard
+  - SNMP (optional)
+
+### v0.6.x - Advanced Features 🔲
 
 - 🔲 **Multi-chassis/Clustering**
   - Control plane HA (FRR + VRRP)
@@ -41,13 +63,6 @@ Previous releases are documented in [`CHANGELOG.md`](CHANGELOG.md).
 - 🔲 **QoS/Traffic Engineering**
   - VPP QoS policy
   - Traffic shaping
-- 🔲 **Advanced VPP Policy**
-  - VPP ACL
-  - Policy-based routing (VPP-native)
-- 🔲 **Monitoring/Observability**
-  - Prometheus exporter
-  - Grafana dashboard
-  - SNMP (optional)
 - 🔲 **Web UI**
   - Browser-based monitoring and configuration
 
@@ -226,17 +241,13 @@ set security rate-limit per-ip 10
 set security rate-limit per-user 20
 ```
 
-**Start NETCONF daemon**:
+> **v0.4.x (Unified Daemon)**: NETCONF is built into `arca-routerd` — no separate `arca-netconfd` daemon is needed. The daemon listens on port 830 automatically when security/netconf is configured.
+
+**Legacy mode (v0.3.x)**:
 
 ```bash
-# Start arca-netconfd
+# Start arca-netconfd (standalone, deprecated in v0.4.x)
 sudo systemctl start arca-netconfd
-
-# Enable at boot
-sudo systemctl enable arca-netconfd
-
-# Check status
-sudo systemctl status arca-netconfd
 ```
 
 **Test NETCONF connection**:
@@ -332,7 +343,9 @@ ls -lh dist/
 ```bash
 make help             # Show all available targets
 make version          # Display version information
-make build            # Build binary
+make build            # Build legacy binaries (v0.3.x)
+make build-v2         # Build v0.4.x unified daemon + CLI
+make build-v2-cli     # Build only arca-cli-v2
 make test             # Run unit tests
 make integration-test # Run integration tests
 make fmt              # Format code
@@ -355,23 +368,56 @@ make packages         # Build both RPM and DEB packages
 
 ```
 arca-router/
+├── api/
+│   └── v1/
+│       └── router.proto        # gRPC API definitions (Config/Session/State)
 ├── cmd/
-│   └── arca-routerd/       # Main daemon
-│       ├── main.go         # Entry point
-│       ├── apply.go        # Configuration application
-│       └── vpp_factory.go  # VPP client factory (mock/real)
-├── pkg/
-│   ├── config/             # Configuration parser (set syntax)
-│   ├── device/             # Hardware abstraction (PCI/sysfs)
-│   ├── vpp/                # VPP client interface
-│   ├── logger/             # Structured logging
-│   └── errors/             # Error handling
+│   ├── arca-routerd-v2/        # Unified daemon (v0.4.x)
+│   │   └── main.go             # Single process: VPP + FRR + NETCONF + gRPC
+│   ├── arca-cli-v2/            # Thin gRPC CLI client (v0.4.x)
+│   │   └── main.go             # Communicates via Unix socket
+│   ├── arca-routerd/           # Legacy daemon (v0.3.x)
+│   ├── arca-cli/               # Legacy CLI (v0.3.x)
+│   └── arca-netconfd/          # Legacy NETCONF daemon (v0.3.x)
+├── internal/                   # v0.4.x core packages
+│   ├── model/                  # Canonical config & state types
+│   │   ├── config.go           # RouterConfig (struct-first model)
+│   │   ├── state.go            # OperationalState
+│   │   ├── validate.go         # Validation logic
+│   │   └── convert.go          # Legacy ↔ new model conversion
+│   ├── engine/                 # Config engine
+│   │   ├── engine.go           # 2-phase commit, atomic apply
+│   │   ├── diff.go             # Minimal diff computation
+│   │   └── plugin.go           # Southbound plugin interface
+│   ├── southbound/
+│   │   ├── vpp/plugin.go       # VPP plugin (govpp)
+│   │   └── frr/plugin.go       # FRR plugin (config gen + reload)
+│   ├── northbound/
+│   │   └── grpc/               # gRPC server + client
+│   │       ├── server.go       # Session mgmt, config ops
+│   │       └── client.go       # Thin client for CLI
+│   ├── store/                  # Persistence abstraction
+│   │   ├── store.go            # ConfigStore interface
+│   │   └── sqlite/sqlite.go    # SQLite backend
+│   └── auth/auth.go            # Auth/RBAC/audit wrapper
+├── pkg/                        # Legacy packages (v0.3.x, still used)
+│   ├── config/                 # Set-command parser
+│   ├── vpp/                    # VPP client interface
+│   ├── frr/                    # FRR config generator
+│   ├── datastore/              # SQLite/etcd datastore
+│   ├── netconf/                # NETCONF/SSH server
+│   ├── cli/                    # CLI session management
+│   ├── auth/                   # Password/SSH key auth
+│   ├── audit/                  # Audit logging
+│   ├── device/                 # Hardware abstraction
+│   ├── logger/                 # Structured logging
+│   └── errors/                 # Error handling
 ├── build/
-│   ├── systemd/            # systemd unit files
-│   └── package/            # nfpm packaging config and scripts
-├── docs/                   # Documentation
-├── examples/               # Sample configurations
-└── Makefile                # Build automation
+│   ├── systemd/                # systemd unit files
+│   └── package/                # nfpm config and scripts
+├── docs/                       # Documentation
+├── examples/                   # Sample configurations
+└── Makefile                    # Build automation
 ```
 
 ---

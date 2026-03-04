@@ -1,14 +1,27 @@
-# arca-router Configuration Specification (v0.3.x)
+# arca-router Configuration Specification (v0.4.x)
 
-This document specifies the configuration syntax and semantics for arca-router v0.3.x.
+This document specifies the configuration syntax and semantics for arca-router.
 
 ## Overview
 
 arca-router uses Junos-like configuration syntax via `set` commands. Configuration is managed through:
 
-1. **NETCONF/SSH**: Remote configuration via NETCONF protocol (RFC 6241)
-2. **Interactive CLI**: Real-time configuration with commit/rollback (`arca-cli`)
-3. **File-based**: Static configuration files (`/etc/arca-router/arca-router.conf`)
+1. **Unified Daemon (`arca-routerd`)**: Single process handling VPP, FRR, NETCONF, and gRPC API (v0.4.x)
+2. **Interactive CLI (`arca-cli`)**: Thin gRPC client for real-time configuration with commit/rollback (v0.4.x)
+3. **NETCONF/SSH**: Remote configuration via NETCONF protocol (RFC 6241), built into the daemon
+4. **File-based**: Static configuration files (`/etc/arca-router/arca-router.conf`) for initial bootstrap
+
+### v0.4.x Architecture
+
+The v0.4.x release introduces a **unified daemon architecture**:
+
+- **Struct-first config model**: Configuration is represented as Go structs (`internal/model.RouterConfig`), not text. Text format is just one serialization.
+- **Diff-based engine**: The config engine (`internal/engine`) computes minimal diffs between old and new configs, applying only what changed.
+- **Plugin-based southbound**: VPP and FRR are `engine.Plugin` implementations, each receiving only the relevant diff.
+- **gRPC internal API**: CLI communicates with the daemon via Unix socket gRPC (`api/v1/router.proto`).
+- **2-phase commit**: Validate all plugins → apply all plugins → rollback on any failure.
+
+> **Backward compatibility**: The `set` command syntax and NETCONF protocol remain identical. Only the internal architecture has changed.
 
 ---
 

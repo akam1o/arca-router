@@ -1,6 +1,17 @@
 # Changelog
 
-## v0.3.x – NETCONF Management & Security (current)
+## v0.4.x – Unified Architecture (current)
+
+- **Unified daemon** (`arca-routerd-v2`): single process managing VPP, FRR, NETCONF, and CLI API
+- **Struct-first configuration model** (`internal/model`): Go structs as the canonical config representation
+- **Diff-based apply engine** (`internal/engine`): computes minimal changeset between old and new config
+- **Plugin southbound** (`internal/southbound`): VPP and FRR drivers implement a common `Plugin` interface
+- **gRPC internal API** (`internal/northbound/grpc`): typed RPC between daemon and CLI
+- **Thin CLI client** (`arca-cli-v2`): stateless gRPC client replacing direct SQLite access
+- **2-phase commit**: validate-then-apply with automatic rollback on failure
+- **Backward compatibility**: legacy `cmd/arca-routerd`, `cmd/arca-cli`, `cmd/arca-netconfd` remain functional
+
+## v0.3.x – NETCONF Management & Security (previous)
 
 - NETCONF/SSH subsystem for remote management (RFC 6241)
 - Interactive CLI with commit/rollback

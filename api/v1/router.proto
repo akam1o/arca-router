@@ -1,0 +1,237 @@
+syntax = "proto3";
+
+package arca.router.v1;
+
+option go_package = "github.com/akam1o/arca-router/api/v1;apiv1";
+
+// ConfigService provides configuration management operations.
+// This is the internal API used by arca-cli and the NETCONF subsystem
+// to interact with the arca-routerd engine.
+service ConfigService {
+  // GetRunning returns the current running configuration.
+  rpc GetRunning(GetRunningRequest) returns (GetRunningResponse);
+
+  // GetCandidate returns the candidate configuration for a session.
+  rpc GetCandidate(GetCandidateRequest) returns (GetCandidateResponse);
+
+  // EditCandidate modifies the candidate configuration.
+  rpc EditCandidate(EditCandidateRequest) returns (EditCandidateResponse);
+
+  // Commit promotes the candidate to running, applying changes.
+  rpc Commit(CommitRequest) returns (CommitResponse);
+
+  // Discard discards candidate changes.
+  rpc Discard(DiscardRequest) returns (DiscardResponse);
+
+  // Rollback reverts to a previous commit.
+  rpc Rollback(RollbackRequest) returns (RollbackResponse);
+
+  // Diff returns the differences between candidate and running.
+  rpc Diff(DiffRequest) returns (DiffResponse);
+
+  // ListHistory returns commit history.
+  rpc ListHistory(ListHistoryRequest) returns (ListHistoryResponse);
+}
+
+// SessionService manages configuration sessions with lock semantics.
+service SessionService {
+  // CreateSession creates a new configuration session.
+  rpc CreateSession(CreateSessionRequest) returns (CreateSessionResponse);
+
+  // CloseSession closes a configuration session.
+  rpc CloseSession(CloseSessionRequest) returns (CloseSessionResponse);
+
+  // AcquireLock acquires the candidate lock for a session.
+  rpc AcquireLock(AcquireLockRequest) returns (AcquireLockResponse);
+
+  // ReleaseLock releases the candidate lock.
+  rpc ReleaseLock(ReleaseLockRequest) returns (ReleaseLockResponse);
+}
+
+// StateService provides operational state queries.
+service StateService {
+  // GetInterfaces returns interface operational state.
+  rpc GetInterfaces(GetInterfacesRequest) returns (GetInterfacesResponse);
+
+  // GetRoutes returns the routing table.
+  rpc GetRoutes(GetRoutesRequest) returns (GetRoutesResponse);
+
+  // GetBGPNeighbors returns BGP neighbor state.
+  rpc GetBGPNeighbors(GetBGPNeighborsRequest) returns (GetBGPNeighborsResponse);
+
+  // GetSystemInfo returns system information.
+  rpc GetSystemInfo(GetSystemInfoRequest) returns (GetSystemInfoResponse);
+}
+
+// --- Config messages ---
+
+message GetRunningRequest {}
+
+message GetRunningResponse {
+  string config_text = 1;  // set-command format
+  uint64 version = 2;
+  string commit_id = 3;
+}
+
+message GetCandidateRequest {
+  string session_id = 1;
+}
+
+message GetCandidateResponse {
+  string config_text = 1;
+}
+
+message EditCandidateRequest {
+  string session_id = 1;
+  string config_text = 2;  // set-command format to append/replace
+}
+
+message EditCandidateResponse {}
+
+message CommitRequest {
+  string session_id = 1;
+  string user = 2;
+  string message = 3;
+}
+
+message CommitResponse {
+  string commit_id = 1;
+  uint64 version = 2;
+}
+
+message DiscardRequest {
+  string session_id = 1;
+}
+
+message DiscardResponse {}
+
+message RollbackRequest {
+  string commit_id = 1;
+  string user = 2;
+  string message = 3;
+}
+
+message RollbackResponse {
+  string new_commit_id = 1;
+}
+
+message DiffRequest {
+  string session_id = 1;
+}
+
+message DiffResponse {
+  string diff_text = 1;
+  bool has_changes = 2;
+}
+
+message ListHistoryRequest {
+  int32 limit = 1;
+  int32 offset = 2;
+}
+
+message ListHistoryResponse {
+  repeated CommitEntry entries = 1;
+}
+
+message CommitEntry {
+  string commit_id = 1;
+  string user = 2;
+  string timestamp = 3;
+  string message = 4;
+  bool is_rollback = 5;
+}
+
+// --- Session messages ---
+
+message CreateSessionRequest {
+  string user = 1;
+}
+
+message CreateSessionResponse {
+  string session_id = 1;
+}
+
+message CloseSessionRequest {
+  string session_id = 1;
+}
+
+message CloseSessionResponse {}
+
+message AcquireLockRequest {
+  string session_id = 1;
+  string user = 2;
+}
+
+message AcquireLockResponse {}
+
+message ReleaseLockRequest {
+  string session_id = 1;
+}
+
+message ReleaseLockResponse {}
+
+// --- State messages ---
+
+message GetInterfacesRequest {
+  string name_filter = 1;  // optional: filter by interface name
+}
+
+message GetInterfacesResponse {
+  repeated InterfaceState interfaces = 1;
+}
+
+message InterfaceState {
+  string name = 1;
+  string admin_status = 2;
+  string oper_status = 3;
+  uint64 speed = 4;
+  uint32 mtu = 5;
+  string mac = 6;
+  uint64 rx_packets = 7;
+  uint64 tx_packets = 8;
+  uint64 rx_bytes = 9;
+  uint64 tx_bytes = 10;
+  uint64 rx_errors = 11;
+  uint64 tx_errors = 12;
+}
+
+message GetRoutesRequest {
+  string prefix_filter = 1;
+  string protocol_filter = 2;
+}
+
+message GetRoutesResponse {
+  repeated RouteEntry routes = 1;
+}
+
+message RouteEntry {
+  string prefix = 1;
+  string next_hop = 2;
+  string protocol = 3;
+  uint32 metric = 4;
+  string interface = 5;
+  bool active = 6;
+}
+
+message GetBGPNeighborsRequest {}
+
+message GetBGPNeighborsResponse {
+  repeated BGPNeighborState neighbors = 1;
+}
+
+message BGPNeighborState {
+  string peer_address = 1;
+  uint32 peer_as = 2;
+  string state = 3;
+  uint64 uptime_secs = 4;
+  uint32 prefix_received = 5;
+  uint32 prefix_sent = 6;
+}
+
+message GetSystemInfoRequest {}
+
+message GetSystemInfoResponse {
+  string hostname = 1;
+  string version = 2;
+  uint64 uptime_secs = 3;
+}

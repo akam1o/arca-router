@@ -1,6 +1,6 @@
-# arca-router 設定仕様（v0.3.x）
+# arca-router 設定仕様（v0.4.x）
 
-このドキュメントは arca-router v0.3.x の設定構文とセマンティクスを定義します。
+このドキュメントは arca-router の設定構文とセマンティクスを定義します。
 
 [English](SPEC.md)
 
@@ -8,9 +8,22 @@
 
 arca-router は Junos 風の `set` コマンド構文を採用しています。設定は以下の方法で管理します。
 
-1. **NETCONF/SSH**: NETCONF（RFC 6241）によるリモート設定
-2. **対話型 CLI**: `arca-cli` によるリアルタイム設定（commit/rollback）
-3. **ファイルベース**: 静的設定ファイル（`/etc/arca-router/arca-router.conf`）
+1. **統合デーモン (`arca-routerd`)**: VPP、FRR、NETCONF、gRPC API を単一プロセスで処理（v0.4.x）
+2. **対話型 CLI (`arca-cli`)**: gRPC シンクライアントによるリアルタイム設定（commit/rollback）（v0.4.x）
+3. **NETCONF/SSH**: NETCONF（RFC 6241）によるリモート設定、デーモンに内蔵
+4. **ファイルベース**: 初回ブートストラップ用の静的設定ファイル（`/etc/arca-router/arca-router.conf`）
+
+### v0.4.x アーキテクチャ
+
+v0.4.x では**統合デーモンアーキテクチャ**を導入しました：
+
+- **構造体ファースト設定モデル**: 設定は Go 構造体（`internal/model.RouterConfig`）で表現。テキストはシリアライズの一形式。
+- **差分ベースエンジン**: 設定エンジン（`internal/engine`）が新旧設定の最小差分を計算し、変更箇所のみ適用。
+- **プラグインベース サウスバウンド**: VPP / FRR は `engine.Plugin` 実装として、それぞれ関連する差分のみを受け取る。
+- **gRPC 内部 API**: CLI は Unix ソケット gRPC（`api/v1/router.proto`）経由でデーモンと通信。
+- **2 フェーズコミット**: 全プラグイン検証 → 全プラグイン適用 → 障害時ロールバック。
+
+> **後方互換**: `set` コマンド構文と NETCONF プロトコルはそのままです。内部アーキテクチャのみ変更されています。
 
 ---
 

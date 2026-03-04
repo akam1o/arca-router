@@ -77,8 +77,12 @@ git checkout -b feature/my-new-feature
 ### 2. Make Changes
 
 Edit code in your favorite editor. Key directories:
-- `cmd/` - Main applications (arca-routerd, arca-cli)
-- `pkg/` - Reusable packages
+- `cmd/arca-routerd-v2/` - Unified daemon (v0.4.x)
+- `cmd/arca-cli-v2/` - Thin gRPC CLI client (v0.4.x)
+- `internal/` - v0.4.x core packages (model, engine, southbound, northbound, store, auth)
+- `api/v1/` - gRPC proto definitions
+- `cmd/` - Legacy applications (arca-routerd, arca-cli, arca-netconfd)
+- `pkg/` - Reusable packages (still used by both legacy and v2)
 - `test/` - Integration tests
 - `examples/` - Configuration examples
 
@@ -101,15 +105,21 @@ make check
 ### 4. Build Locally
 
 ```bash
-# Build both binaries
+# Build legacy binaries (v0.3.x)
 make build
 
-# Verify binaries
-./build/bin/arca-routerd --version
-./build/bin/arca-cli --version
+# Build v0.4.x unified daemon + CLI
+make build-v2
 
-# Build specific binary
+# Verify binaries
+./build/bin/arca-routerd-v2 --version
+./build/bin/arca-cli-v2 --version
+
+# Build legacy CLI only
 make build-cli
+
+# Build v2 CLI only
+make build-v2-cli
 ```
 
 ### 5. Test Your Changes
@@ -137,8 +147,18 @@ make build
 ```
 
 This creates binaries in `build/bin/`:
-- `arca-routerd` - Main daemon
-- `arca-cli` - CLI tool
+- `arca-routerd` - Legacy daemon (v0.3.x)
+- `arca-cli` - Legacy CLI tool (v0.3.x)
+- `arca-netconfd` - Legacy NETCONF daemon (v0.3.x)
+
+For the v0.4.x unified architecture:
+```bash
+make build-v2
+```
+
+This creates:
+- `arca-routerd-v2` - Unified daemon (VPP + FRR + NETCONF + gRPC)
+- `arca-cli-v2` - Thin gRPC CLI client
 
 ### Version Information
 
