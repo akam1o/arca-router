@@ -16,8 +16,8 @@ type ConfigStore interface {
 	// GetLatestSnapshot returns the most recent committed configuration.
 	GetLatestSnapshot(ctx context.Context) (*model.ConfigSnapshot, error)
 
-	// SaveCommit persists a new configuration commit.
-	SaveCommit(ctx context.Context, commitID string, snap *model.ConfigSnapshot) error
+	// SaveCommit persists a new configuration commit and returns its ID.
+	SaveCommit(ctx context.Context, snap *model.ConfigSnapshot) (string, error)
 
 	// GetCommit retrieves a specific commit by ID.
 	GetCommit(ctx context.Context, commitID string) (*CommitRecord, error)
@@ -34,13 +34,13 @@ type ConfigStore interface {
 
 // CommitRecord represents a persisted commit entry.
 type CommitRecord struct {
-	CommitID   string               `json:"commit_id"`
-	Version    uint64               `json:"version"`
-	Config     *model.RouterConfig  `json:"config"`
-	Author     string               `json:"author"`
-	Message    string               `json:"message,omitempty"`
-	Timestamp  time.Time            `json:"timestamp"`
-	IsRollback bool                 `json:"is_rollback,omitempty"`
+	CommitID   string              `json:"commit_id"`
+	Version    uint64              `json:"version"`
+	Config     *model.RouterConfig `json:"config"`
+	Author     string              `json:"author"`
+	Message    string              `json:"message,omitempty"`
+	Timestamp  time.Time           `json:"timestamp"`
+	IsRollback bool                `json:"is_rollback,omitempty"`
 }
 
 // ListOptions controls pagination and filtering for commit history.

@@ -58,28 +58,47 @@ func (s *Store) GetLatestSnapshot(ctx context.Context) (*model.ConfigSnapshot, e
 	}, nil
 }
 
-func (s *Store) SaveCommit(ctx context.Context, commitID string, snap *model.ConfigSnapshot) error {
+func (s *Store) SaveCommit(ctx context.Context, snap *model.ConfigSnapshot) (string, error) {
+	if snap == nil || snap.Config == nil {
+		return "", fmt.Errorf("snapshot is nil")
+	}
+
 	// Serialize config to JSON for storage
 	configJSON, err := json.Marshal(snap.Config)
 	if err != nil {
-		return fmt.Errorf("marshal config: %w", err)
+		return "", fmt.Errorf("marshal config: %w", err)
 	}
 
 	// Use the legacy commit mechanism
 	// We store JSON in the config text field for the new model
+	sessionID := "engine"
 	req := &datastore.CommitRequest{
-		SessionID: "engine",
+		SessionID: sessionID,
 		User:      snap.Author,
 		Message:   snap.Message,
 	}
 
-	// First save as candidate, then commit
-	if err := s.ds.SaveCandidate(ctx, "engine", string(configJSON)); err != nil {
-		return fmt.Errorf("save candidate: %w", err)
+	if err := s.ds.AcquireLock(ctx, &datastore.LockRequest{
+		Target:    datastore.LockTargetCandidate,
+		SessionID: sessionID,
+		User:      snap.Author,
+		Timeout:   30 * time.Minute,
+	}); err != nil {
+		return "", fmt.Errorf("acquire commit lock: %w", err)
+	}
+	defer func() {
+		_ = s.ds.ReleaseLock(context.Background(), datastore.LockTargetCandidate, sessionID)
+	}()
+
+	if err := s.ds.SaveCandidate(ctx, sessionID, string(configJSON)); err != nil {
+		return "", fmt.Errorf("save candidate: %w", err)
 	}
 
-	_, err = s.ds.Commit(ctx, req)
-	return err
+	commitID, err := s.ds.Commit(ctx, req)
+	if err != nil {
+		return "", err
+	}
+	return commitID, nil
 }
 
 func (s *Store) GetCommit(ctx context.Context, commitID string) (*store.CommitRecord, error) {

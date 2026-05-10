@@ -248,7 +248,7 @@ type interactiveShell struct {
 type cliMode int
 
 const (
-	modeOperational   cliMode = iota
+	modeOperational cliMode = iota
 	modeConfiguration
 )
 
@@ -447,7 +447,7 @@ func (sh *interactiveShell) cmdShow(ctx context.Context, args []string) error {
 	if len(args) == 0 {
 		if sh.mode == modeConfiguration {
 			// Show candidate config
-			text, _, err := sh.client.GetRunning(ctx)
+			text, err := sh.client.GetCandidate(ctx, sh.sessionID)
 			if err != nil {
 				return err
 			}
@@ -466,7 +466,13 @@ func (sh *interactiveShell) cmdShow(ctx context.Context, args []string) error {
 	subcmd := args[0]
 	switch subcmd {
 	case "configuration":
-		text, _, err := sh.client.GetRunning(ctx)
+		var text string
+		var err error
+		if sh.mode == modeConfiguration {
+			text, err = sh.client.GetCandidate(ctx, sh.sessionID)
+		} else {
+			text, _, err = sh.client.GetRunning(ctx)
+		}
 		if err != nil {
 			return err
 		}
@@ -644,7 +650,11 @@ func (sh *interactiveShell) cmdCommit(ctx context.Context, args []string) error 
 	if err != nil {
 		return fmt.Errorf("commit failed: %w", err)
 	}
-	fmt.Printf("commit complete (id: %s, version: %d)\n", commitID[:8], version)
+	shortID := commitID
+	if len(shortID) > 8 {
+		shortID = shortID[:8]
+	}
+	fmt.Printf("commit complete (id: %s, version: %d)\n", shortID, version)
 
 	if andQuit {
 		_ = sh.client.ReleaseLock(ctx, sh.sessionID)

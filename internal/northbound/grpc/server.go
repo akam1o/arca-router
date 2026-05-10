@@ -7,14 +7,18 @@ import (
 	"fmt"
 	"log/slog"
 	"net"
+	"sort"
+	"strings"
 	"sync"
 	"time"
 
 	"github.com/akam1o/arca-router/internal/engine"
 	"github.com/akam1o/arca-router/internal/model"
 	"github.com/akam1o/arca-router/internal/store"
+	"github.com/akam1o/arca-router/pkg/cli"
+	pkgconfig "github.com/akam1o/arca-router/pkg/config"
 	"github.com/google/uuid"
-	"google.golang.org/grpc"
+	googlegrpc "google.golang.org/grpc"
 )
 
 // Server is the internal gRPC server that exposes configuration,
@@ -24,7 +28,7 @@ type Server struct {
 	store    store.ConfigStore
 	sessions *SessionManager
 	log      *slog.Logger
-	server   *grpc.Server
+	server   *googlegrpc.Server
 }
 
 // NewServer creates a new gRPC server.
@@ -39,11 +43,10 @@ func NewServer(eng *engine.Engine, st store.ConfigStore, log *slog.Logger) *Serv
 
 // Serve starts the gRPC server on the given listener.
 func (s *Server) Serve(lis net.Listener) error {
-	s.server = grpc.NewServer()
-	// Register services would go here once proto is compiled:
-	// apiv1.RegisterConfigServiceServer(s.server, s)
-	// apiv1.RegisterSessionServiceServer(s.server, s)
-	// apiv1.RegisterStateServiceServer(s.server, s)
+	s.server = googlegrpc.NewServer(googlegrpc.ForceServerCodec(jsonCodec{}))
+	registerConfigServiceServer(s.server, s)
+	registerSessionServiceServer(s.server, s)
+	registerStateServiceServer(s.server, s)
 	s.log.Info("gRPC server starting", slog.String("address", lis.Addr().String()))
 	return s.server.Serve(lis)
 }
@@ -59,13 +62,19 @@ func (s *Server) Stop() {
 
 // GetRunning returns the current running configuration.
 func (s *Server) GetRunning(ctx context.Context) (configText string, version uint64, err error) {
-	snap := s.engine.RunningSnapshot()
-	if snap == nil {
-		return "", 0, nil
+	text, version := s.runningText()
+	return text, version, nil
+}
+
+// GetCandidate returns the session candidate configuration.
+func (s *Server) GetCandidate(ctx context.Context, sessionID string) (string, error) {
+	session, err := s.sessions.Get(sessionID)
+	if err != nil {
+		return "", err
 	}
-	// Serialize config to set-command text format for backward compat
-	// For now, return JSON; text serialization can be added later
-	return fmt.Sprintf("version: %d", snap.Version), snap.Version, nil
+	session.mu.RLock()
+	defer session.mu.RUnlock()
+	return session.CandidateText, nil
 }
 
 // EditCandidate applies set-command text to a session's candidate config.
@@ -78,14 +87,13 @@ func (s *Server) EditCandidate(ctx context.Context, sessionID, configText string
 		return fmt.Errorf("session %s does not hold the candidate lock", sessionID)
 	}
 
-	// Append to candidate text
 	session.mu.Lock()
-	if session.CandidateText != "" {
-		session.CandidateText += "\n"
+	defer session.mu.Unlock()
+	updated, err := applyCandidateCommand(session.CandidateText, configText)
+	if err != nil {
+		return err
 	}
-	session.CandidateText += configText
-	session.mu.Unlock()
-
+	session.CandidateText = updated
 	return nil
 }
 
@@ -119,15 +127,14 @@ func (s *Server) Commit(ctx context.Context, sessionID, user, message string) (s
 		return "", 0, err
 	}
 
-	// Persist to store
 	snap := s.engine.RunningSnapshot()
-	commitID := uuid.New().String()
-	if err := s.store.SaveCommit(ctx, commitID, snap); err != nil {
-		s.log.Error("Failed to persist commit (config applied but not persisted)",
-			slog.String("commit_id", commitID),
-			slog.Any("error", err))
+	commitID := ""
+	if s.store != nil {
+		commitID, err = s.store.SaveCommit(ctx, snap)
+		if err != nil {
+			return "", 0, fmt.Errorf("persist commit after apply: %w", err)
+		}
 	}
-
 	return commitID, snap.Version, nil
 }
 
@@ -138,9 +145,45 @@ func (s *Server) Discard(ctx context.Context, sessionID string) error {
 		return err
 	}
 	session.mu.Lock()
-	session.CandidateText = ""
+	session.CandidateText, _ = s.runningText()
 	session.mu.Unlock()
 	return nil
+}
+
+// Diff returns a simple line-oriented diff between running and candidate config.
+func (s *Server) Diff(ctx context.Context, sessionID string) (string, bool, error) {
+	session, err := s.sessions.Get(sessionID)
+	if err != nil {
+		return "", false, err
+	}
+	running, _ := s.runningText()
+	session.mu.RLock()
+	candidate := session.CandidateText
+	session.mu.RUnlock()
+	diff := lineDiff(running, candidate)
+	return diff, diff != "", nil
+}
+
+// ListHistory returns persisted commit history.
+func (s *Server) ListHistory(ctx context.Context, limit, offset int) ([]CommitInfo, error) {
+	if s.store == nil {
+		return nil, nil
+	}
+	records, err := s.store.ListCommits(ctx, &store.ListOptions{Limit: limit, Offset: offset})
+	if err != nil {
+		return nil, err
+	}
+	entries := make([]CommitInfo, 0, len(records))
+	for _, r := range records {
+		entries = append(entries, CommitInfo{
+			CommitID:   r.CommitID,
+			User:       r.Author,
+			Timestamp:  r.Timestamp,
+			Message:    r.Message,
+			IsRollback: r.IsRollback,
+		})
+	}
+	return entries, nil
 }
 
 // --- SessionService implementation ---
@@ -157,12 +200,208 @@ func (s *Server) CloseSession(ctx context.Context, sessionID string) error {
 
 // AcquireLock acquires the exclusive candidate lock for a session.
 func (s *Server) AcquireLock(ctx context.Context, sessionID, user string) error {
-	return s.sessions.AcquireLock(sessionID)
+	if err := s.sessions.AcquireLock(sessionID); err != nil {
+		return err
+	}
+	session, err := s.sessions.Get(sessionID)
+	if err != nil {
+		return err
+	}
+	session.mu.Lock()
+	if session.CandidateText == "" {
+		session.CandidateText, _ = s.runningText()
+	}
+	session.mu.Unlock()
+	return nil
 }
 
 // ReleaseLock releases the candidate lock.
 func (s *Server) ReleaseLock(ctx context.Context, sessionID string) error {
 	return s.sessions.ReleaseLock(sessionID)
+}
+
+// GetInterfaces returns configured interfaces with basic status placeholders.
+func (s *Server) GetInterfaces(ctx context.Context, nameFilter string) ([]InterfaceInfo, error) {
+	cfg := s.engine.Running()
+	names := make([]string, 0, len(cfg.Interfaces))
+	for name := range cfg.Interfaces {
+		if nameFilter == "" || name == nameFilter {
+			names = append(names, name)
+		}
+	}
+	sort.Strings(names)
+
+	result := make([]InterfaceInfo, 0, len(names))
+	for _, name := range names {
+		result = append(result, InterfaceInfo{
+			Name:        name,
+			AdminStatus: "configured",
+			OperStatus:  "unknown",
+		})
+	}
+	return result, nil
+}
+
+// GetRoutes returns configured static routes.
+func (s *Server) GetRoutes(ctx context.Context, prefixFilter, protoFilter string) ([]RouteInfo, error) {
+	if protoFilter != "" && protoFilter != "static" {
+		return nil, nil
+	}
+	cfg := s.engine.Running()
+	if cfg.Routing == nil {
+		return nil, nil
+	}
+	routes := make([]RouteInfo, 0, len(cfg.Routing.StaticRoutes))
+	for _, route := range cfg.Routing.StaticRoutes {
+		if route == nil {
+			continue
+		}
+		if prefixFilter != "" && route.Prefix != prefixFilter {
+			continue
+		}
+		routes = append(routes, RouteInfo{
+			Prefix:   route.Prefix,
+			NextHop:  route.NextHop,
+			Protocol: "static",
+			Metric:   uint32(route.Distance),
+			Active:   true,
+		})
+	}
+	sort.Slice(routes, func(i, j int) bool {
+		return routes[i].Prefix < routes[j].Prefix
+	})
+	return routes, nil
+}
+
+// GetBGPNeighbors returns configured BGP neighbors.
+func (s *Server) GetBGPNeighbors(ctx context.Context) ([]BGPNeighborInfo, error) {
+	cfg := s.engine.Running()
+	if cfg.Protocols == nil || cfg.Protocols.BGP == nil {
+		return nil, nil
+	}
+	var neighbors []BGPNeighborInfo
+	for _, groupName := range sortedMapKeys(cfg.Protocols.BGP.Groups) {
+		group := cfg.Protocols.BGP.Groups[groupName]
+		if group == nil {
+			continue
+		}
+		for _, peer := range sortedMapKeys(group.Neighbors) {
+			neighbor := group.Neighbors[peer]
+			if neighbor == nil {
+				continue
+			}
+			neighbors = append(neighbors, BGPNeighborInfo{
+				PeerAddress: peer,
+				PeerAS:      neighbor.PeerAS,
+				State:       "configured",
+			})
+		}
+	}
+	return neighbors, nil
+}
+
+// GetSystemInfo returns basic system information.
+func (s *Server) GetSystemInfo(ctx context.Context) (*SystemInfo, error) {
+	cfg := s.engine.Running()
+	info := &SystemInfo{Version: "unknown"}
+	if cfg.System != nil {
+		info.Hostname = cfg.System.HostName
+	}
+	return info, nil
+}
+
+func (s *Server) runningText() (string, uint64) {
+	snap := s.engine.RunningSnapshot()
+	if snap == nil || snap.Config == nil {
+		return "", 0
+	}
+	return pkgconfig.ToSetCommands(snap.Config.ToLegacyConfig()), snap.Version
+}
+
+func applyCandidateCommand(candidate, commandText string) (string, error) {
+	lines := normalizeConfigLines(candidate)
+	commands := strings.Split(commandText, "\n")
+	for _, command := range commands {
+		command = strings.TrimSpace(command)
+		if command == "" {
+			continue
+		}
+		parts, err := cli.TokenizeCommand(command)
+		if err != nil {
+			return "", err
+		}
+		if len(parts) == 0 {
+			continue
+		}
+		switch parts[0] {
+		case "set":
+			if len(parts) < 2 {
+				return "", fmt.Errorf("'set' requires arguments")
+			}
+			line := "set " + cli.NormalizeConfigPath(parts[1:])
+			lines = append(lines, line)
+		case "delete":
+			prefix, err := cli.ParseDeleteCommand(parts[1:], nil)
+			if err != nil {
+				return "", err
+			}
+			filtered := lines[:0]
+			for _, line := range lines {
+				if !cli.MatchesPrefix(line, prefix) {
+					filtered = append(filtered, line)
+				}
+			}
+			lines = filtered
+		default:
+			return "", fmt.Errorf("unsupported candidate command: %s", parts[0])
+		}
+	}
+	return strings.Join(lines, "\n"), nil
+}
+
+func normalizeConfigLines(text string) []string {
+	var lines []string
+	for _, line := range strings.Split(text, "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		lines = append(lines, line)
+	}
+	return lines
+}
+
+func lineDiff(oldText, newText string) string {
+	oldSet := make(map[string]struct{})
+	for _, line := range normalizeConfigLines(oldText) {
+		oldSet[line] = struct{}{}
+	}
+	newSet := make(map[string]struct{})
+	for _, line := range normalizeConfigLines(newText) {
+		newSet[line] = struct{}{}
+	}
+	var out []string
+	for line := range oldSet {
+		if _, ok := newSet[line]; !ok {
+			out = append(out, "- "+line)
+		}
+	}
+	for line := range newSet {
+		if _, ok := oldSet[line]; !ok {
+			out = append(out, "+ "+line)
+		}
+	}
+	sort.Strings(out)
+	return strings.Join(out, "\n")
+}
+
+func sortedMapKeys[V any](m map[string]V) []string {
+	keys := make([]string, 0, len(m))
+	for key := range m {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	return keys
 }
 
 // ConfigTextParser is a hook for parsing set-command text into legacy config.
