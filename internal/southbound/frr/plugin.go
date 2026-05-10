@@ -6,6 +6,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"os"
 	"sync"
 
 	"github.com/akam1o/arca-router/internal/engine"
@@ -19,8 +20,8 @@ type FRRPlugin struct {
 	reloader *pkgfrr.Reloader
 	log      *slog.Logger
 
-	// lastConfig tracks the last applied FRR config for rollback
-	lastConfig string
+	currentConfig  string
+	rollbackConfig string
 }
 
 // NewFRRPlugin creates a new FRR plugin.
@@ -88,13 +89,20 @@ func (p *FRRPlugin) ApplyChanges(ctx context.Context, diff *engine.ConfigDiff) e
 		return fmt.Errorf("generate FRR config file: %w", err)
 	}
 
+	previousConfig := p.currentConfig
+	if previousConfig == "" {
+		if data, readErr := os.ReadFile(p.reloader.ConfigPath); readErr == nil {
+			previousConfig = string(data)
+		}
+	}
+
 	// Apply via reloader (atomic write + validation + reload)
 	if err := p.reloader.ApplyConfig(ctx, configContent); err != nil {
 		return fmt.Errorf("apply FRR config: %w", err)
 	}
 
-	// Store for rollback
-	p.lastConfig = configContent
+	p.rollbackConfig = previousConfig
+	p.currentConfig = configContent
 
 	p.log.Info("FRR configuration applied",
 		slog.Int("config_length", len(configContent)),
@@ -110,14 +118,15 @@ func (p *FRRPlugin) RollbackChanges(ctx context.Context, diff *engine.ConfigDiff
 	p.mu.Lock()
 	defer p.mu.Unlock()
 
-	if p.lastConfig == "" {
+	if p.rollbackConfig == "" {
 		p.log.Warn("No previous FRR config for rollback")
 		return nil
 	}
 
-	if err := p.reloader.ApplyConfig(ctx, p.lastConfig); err != nil {
+	if err := p.reloader.ApplyConfig(ctx, p.rollbackConfig); err != nil {
 		return fmt.Errorf("rollback FRR config: %w", err)
 	}
+	p.currentConfig = p.rollbackConfig
 
 	p.log.Info("FRR configuration rolled back")
 	return nil
@@ -126,6 +135,10 @@ func (p *FRRPlugin) RollbackChanges(ctx context.Context, diff *engine.ConfigDiff
 // buildFullConfig reconstructs the complete RouterConfig from the diff's new state.
 // This is needed because FRR generates the entire config file, not incremental changes.
 func (p *FRRPlugin) buildFullConfig(diff *engine.ConfigDiff) *model.RouterConfig {
+	if diff.NewConfig != nil {
+		return diff.NewConfig
+	}
+
 	cfg := model.NewRouterConfig()
 
 	// System
