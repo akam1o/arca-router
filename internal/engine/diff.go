@@ -10,6 +10,9 @@ import (
 // Instead of re-applying the entire configuration, southbound plugins use this
 // to apply only what changed.
 type ConfigDiff struct {
+	OldConfig *model.RouterConfig
+	NewConfig *model.RouterConfig
+
 	// Interface changes
 	InterfacesAdded   map[string]*model.InterfaceConfig
 	InterfacesRemoved []string
@@ -59,9 +62,9 @@ type InterfaceChange struct {
 
 // UnitAddress identifies an address on a specific unit/family.
 type UnitAddress struct {
-	UnitNum    int
-	Family     string
-	Address    string
+	UnitNum int
+	Family  string
+	Address string
 }
 
 // HasChanges returns true if any changes exist.
@@ -91,6 +94,8 @@ func ComputeDiff(old, new *model.RouterConfig) *ConfigDiff {
 	if new == nil {
 		new = model.NewRouterConfig()
 	}
+	diff.OldConfig = old
+	diff.NewConfig = new
 
 	computeInterfaceDiff(old, new, diff)
 	computeProtocolDiff(old, new, diff)
