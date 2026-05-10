@@ -13,8 +13,9 @@ import (
 )
 
 var (
-	version = "dev"
-	commit  = "unknown"
+	Version   = "dev"
+	Commit    = "unknown"
+	BuildDate = "unknown"
 )
 
 func main() {
@@ -29,14 +30,16 @@ func main() {
 	flag.Parse()
 
 	if *showVersion {
-		fmt.Printf("arca-netconfd version %s (commit: %s)\n", version, commit)
+		fmt.Printf("arca-netconfd version %s\n", Version)
+		fmt.Printf("  Commit: %s\n", Commit)
+		fmt.Printf("  Built:  %s\n", BuildDate)
 		os.Exit(0)
 	}
 
 	// Create logger
 	log := logger.New("arca-netconfd", logger.DefaultConfig())
 
-	log.Info("Starting arca-netconfd", "version", version, "commit", commit)
+	log.Info("Starting arca-netconfd", "version", Version, "commit", Commit, "build_date", BuildDate)
 
 	// Create SSH config
 	config := netconf.DefaultSSHConfig()
