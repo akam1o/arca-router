@@ -12,14 +12,16 @@ import (
 	"net"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"strings"
 	"syscall"
 
 	"github.com/akam1o/arca-router/internal/engine"
 	"github.com/akam1o/arca-router/internal/model"
+	nbgrpc "github.com/akam1o/arca-router/internal/northbound/grpc"
 	sbfrr "github.com/akam1o/arca-router/internal/southbound/frr"
 	sbvpp "github.com/akam1o/arca-router/internal/southbound/vpp"
-	"github.com/akam1o/arca-router/internal/store/sqlite"
+	storesqlite "github.com/akam1o/arca-router/internal/store/sqlite"
 	"github.com/akam1o/arca-router/pkg/config"
 	"github.com/akam1o/arca-router/pkg/device"
 	"github.com/akam1o/arca-router/pkg/logger"
@@ -42,10 +44,10 @@ type daemonFlags struct {
 	mockVPP       bool
 
 	// NETCONF settings (merged from arca-netconfd)
-	netconfListen  string
-	hostKeyPath    string
-	userDBPath     string
-	grpcSocket     string
+	netconfListen string
+	hostKeyPath   string
+	userDBPath    string
+	grpcSocket    string
 }
 
 func main() {
@@ -107,7 +109,7 @@ func parseFlags() *daemonFlags {
 		"Path to SSH host key")
 	flag.StringVar(&f.userDBPath, "user-db", "/var/lib/arca-router/users.db",
 		"Path to user database")
-	flag.StringVar(&f.grpcSocket, "grpc-socket", "/var/run/arca-router/api.sock",
+	flag.StringVar(&f.grpcSocket, "grpc-socket", "/run/arca-router/routerd.sock",
 		"Path to internal gRPC Unix socket")
 
 	flag.Parse()
@@ -128,6 +130,8 @@ func parseLogLevel(level string) slog.Level {
 }
 
 func run(ctx context.Context, f *daemonFlags, log *logger.Logger) error {
+	installParserHooks()
+
 	log.Info("Configuration",
 		slog.String("config_path", f.configPath),
 		slog.String("hardware_path", f.hardwarePath),
@@ -188,12 +192,11 @@ func run(ctx context.Context, f *daemonFlags, log *logger.Logger) error {
 	log.Info("Initial configuration applied")
 
 	// --- Step 7: Open config store ---
-	store, err := sqlite.NewFromPath(f.datastorePath)
+	store, err := storesqlite.NewFromPath(f.datastorePath)
 	if err != nil {
-		log.Warn("Failed to open config store (continuing without persistence)", slog.Any("error", err))
-	} else {
-		defer store.Close()
+		return fmt.Errorf("open config store: %w", err)
 	}
+	defer store.Close()
 
 	// --- Step 8: Start NETCONF server ---
 	if f.hostKeyPath != "" {
@@ -217,35 +220,36 @@ func run(ctx context.Context, f *daemonFlags, log *logger.Logger) error {
 	}
 
 	// --- Step 9: Start gRPC API (for CLI) ---
+	log.Info("Starting gRPC API", slog.String("socket", f.grpcSocket))
+	socketDir := filepath.Dir(f.grpcSocket)
+	if err := os.MkdirAll(socketDir, 0750); err != nil {
+		return fmt.Errorf("create socket directory: %w", err)
+	}
+	if err := os.Remove(f.grpcSocket); err != nil && !os.IsNotExist(err) {
+		return fmt.Errorf("remove stale socket: %w", err)
+	}
+
+	lis, err := net.Listen("unix", f.grpcSocket)
+	if err != nil {
+		return fmt.Errorf("listen on gRPC socket: %w", err)
+	}
+	defer lis.Close()
+
+	grpcServer := nbgrpc.NewServer(eng, store, slog.Default())
+	grpcErr := make(chan error, 1)
 	go func() {
-		log.Info("Starting gRPC API", slog.String("socket", f.grpcSocket))
-		// Ensure socket directory exists
-		socketDir := f.grpcSocket[:strings.LastIndex(f.grpcSocket, "/")]
-		if err := os.MkdirAll(socketDir, 0750); err != nil {
-			log.Error("Failed to create socket directory", slog.Any("error", err))
-			return
-		}
-		// Remove stale socket
-		os.Remove(f.grpcSocket)
-
-		lis, err := net.Listen("unix", f.grpcSocket)
-		if err != nil {
-			log.Error("Failed to listen on gRPC socket", slog.Any("error", err))
-			return
-		}
-		defer lis.Close()
-
-		_ = eng  // gRPC server would use eng for config operations
-		_ = store // and store for persistence
-
-		// For now, just keep the listener alive until shutdown
-		<-ctx.Done()
+		grpcErr <- grpcServer.Serve(lis)
 	}()
 
 	// --- Wait for shutdown ---
 	log.Info("Daemon running, waiting for shutdown signal")
-	<-ctx.Done()
-	log.Info("Shutdown signal received, stopping")
+	select {
+	case <-ctx.Done():
+		log.Info("Shutdown signal received, stopping")
+	case err := <-grpcErr:
+		return fmt.Errorf("gRPC API stopped: %w", err)
+	}
+	grpcServer.Stop()
 
 	return nil
 }
@@ -276,4 +280,16 @@ func loadInitialConfig(f *daemonFlags, log *logger.Logger) (*model.RouterConfig,
 func parseLegacyConfig(r io.Reader) (*config.Config, error) {
 	parser := config.NewParser(r)
 	return parser.Parse()
+}
+
+func installParserHooks() {
+	parse := func(text string) (*model.RouterConfig, error) {
+		legacyCfg, err := parseLegacyConfig(strings.NewReader(text))
+		if err != nil {
+			return nil, err
+		}
+		return model.FromLegacyConfig(legacyCfg), nil
+	}
+	nbgrpc.ConfigTextParser = parse
+	storesqlite.LegacyTextParser = parse
 }
