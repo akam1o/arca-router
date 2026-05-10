@@ -89,22 +89,16 @@ func (d *datastoreConfigLoader) LoadConfig(path string) (*config.Config, error) 
 func (d *datastoreConfigLoader) bootstrapDatastore(ds datastore.Datastore, cfg *config.Config) error {
 	ctx := context.Background()
 
-	// Convert config to set commands (full config serialization would be needed for production)
-	// For Phase 3, we'll use a simplified approach that notes the bootstrap
-	// Phase 4 should implement full config-to-text serialization
-	var configText strings.Builder
-	configText.WriteString("# Bootstrapped from file at startup\n")
-	configText.WriteString("# Note: This is a minimal bootstrap marker\n")
-	configText.WriteString("# Full config is loaded from file on this boot\n")
-	if cfg.System != nil && cfg.System.HostName != "" {
-		configText.WriteString(fmt.Sprintf("set system host-name %s\n", cfg.System.HostName))
+	configText := config.ToSetCommands(cfg)
+	if strings.TrimSpace(configText) == "" {
+		return fmt.Errorf("cannot bootstrap datastore with empty configuration")
 	}
 
 	// Generate a session ID for bootstrap
 	sessionID := "bootstrap-session"
 
 	// Save as candidate
-	if err := ds.SaveCandidate(ctx, sessionID, configText.String()); err != nil {
+	if err := ds.SaveCandidate(ctx, sessionID, configText); err != nil {
 		return fmt.Errorf("failed to save candidate: %w", err)
 	}
 
