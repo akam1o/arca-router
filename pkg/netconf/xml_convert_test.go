@@ -66,3 +66,43 @@ func TestXMLToConfigPreservesExplicitOSPFPriorityZero(t *testing.T) {
 		t.Fatalf("ToSetCommands() = %q, want %q", setCommands, want)
 	}
 }
+
+func TestCountConfigElementsIncludesExplicitOSPFPriorityZero(t *testing.T) {
+	cfg := &config.Config{
+		Interfaces: map[string]*config.Interface{},
+		Protocols: &config.ProtocolConfig{
+			OSPF: &config.OSPFConfig{
+				Areas: map[string]*config.OSPFArea{
+					"0.0.0.0": {
+						AreaID: "0.0.0.0",
+						Interfaces: map[string]*config.OSPFInterface{
+							"ge-0/0/0": {Name: "ge-0/0/0", Priority: 0, PrioritySet: true},
+						},
+					},
+				},
+			},
+		},
+	}
+
+	withoutPriority := &config.Config{
+		Interfaces: map[string]*config.Interface{},
+		Protocols: &config.ProtocolConfig{
+			OSPF: &config.OSPFConfig{
+				Areas: map[string]*config.OSPFArea{
+					"0.0.0.0": {
+						AreaID: "0.0.0.0",
+						Interfaces: map[string]*config.OSPFInterface{
+							"ge-0/0/0": {Name: "ge-0/0/0"},
+						},
+					},
+				},
+			},
+		},
+	}
+
+	got := countConfigElements(cfg)
+	want := countConfigElements(withoutPriority) + 1
+	if got != want {
+		t.Fatalf("countConfigElements() = %d, want %d", got, want)
+	}
+}

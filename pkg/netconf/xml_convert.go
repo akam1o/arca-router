@@ -988,7 +988,7 @@ func countConfigElements(cfg *config.Config) int {
 					if ospfIface.Metric > 0 {
 						count++
 					}
-					if ospfIface.Priority > 0 {
+					if ospfIface.PrioritySet || ospfIface.Priority > 0 {
 						count++
 					}
 				}
