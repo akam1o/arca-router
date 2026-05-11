@@ -95,12 +95,11 @@ func TestParseRPC(t *testing.T) {
 			errType: "unknown-attribute",
 		},
 		{
-			name: "rpc root attribute rejected",
+			name: "rpc root additional attribute accepted",
 			xml: `<rpc message-id="101" foo="bar" xmlns="urn:ietf:params:xml:ns:netconf:base:1.0">
-					<get-config><source><running/></source></get-config>
-				</rpc>`,
-			wantErr: true,
-			errType: "unknown-attribute",
+						<get-config><source><running/></source></get-config>
+					</rpc>`,
+			wantErr: false,
 		},
 		{
 			name: "operation empty namespace rejected",
@@ -231,6 +230,74 @@ func TestParseRPCContentIsOperationInnerXML(t *testing.T) {
 	}
 	if req.Source.Running == nil {
 		t.Fatalf("UnmarshalOperation() source = %#v, want running", req.Source)
+	}
+}
+
+func TestParseRPCPreservesReplyAttributes(t *testing.T) {
+	xmlData := `<rpc message-id="101"
+		xmlns="urn:ietf:params:xml:ns:netconf:base:1.0"
+		xmlns:ex="http://example.net/content/1.0"
+		ex:user-id="fred"
+		trace-id="abc">
+		<get/>
+	</rpc>`
+
+	rpc, err := ParseRPC([]byte(xmlData))
+	if err != nil {
+		t.Fatalf("ParseRPC() error = %v", err)
+	}
+
+	reply := NewOKReply(rpc.MessageID).WithAttributes(rpc.ReplyAttrs)
+	data, err := MarshalReply(reply)
+	if err != nil {
+		t.Fatalf("MarshalReply() error = %v", err)
+	}
+
+	xmlStr := string(data)
+	for _, want := range []string{
+		`xmlns:ex="http://example.net/content/1.0"`,
+		`ex:user-id="fred"`,
+		`trace-id="abc"`,
+	} {
+		if !strings.Contains(xmlStr, want) {
+			t.Fatalf("MarshalReply() missing %s in %s", want, xmlStr)
+		}
+	}
+}
+
+func TestExtractRPCReplyContextFromMalformedRPC(t *testing.T) {
+	xmlData := `<rpc message-id="101"
+		xmlns="urn:ietf:params:xml:ns:netconf:base:1.0"
+		xmlns:ex="http://example.net/content/1.0"
+		ex:user-id="fred">
+		<get/>
+		trailing text
+	</rpc>`
+
+	if _, err := ParseRPC([]byte(xmlData)); err == nil {
+		t.Fatal("ParseRPC() error = nil, want malformed RPC error")
+	}
+
+	messageID, attrs := extractRPCReplyContext([]byte(xmlData))
+	if messageID != "101" {
+		t.Fatalf("messageID = %q, want 101", messageID)
+	}
+
+	reply := NewErrorReply(messageID, ErrMalformedMessage("bad rpc")).WithAttributes(attrs)
+	data, err := MarshalReply(reply)
+	if err != nil {
+		t.Fatalf("MarshalReply() error = %v", err)
+	}
+
+	xmlStr := string(data)
+	for _, want := range []string{
+		`message-id="101"`,
+		`xmlns:ex="http://example.net/content/1.0"`,
+		`ex:user-id="fred"`,
+	} {
+		if !strings.Contains(xmlStr, want) {
+			t.Fatalf("MarshalReply() missing %s in %s", want, xmlStr)
+		}
 	}
 }
 

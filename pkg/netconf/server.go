@@ -79,7 +79,7 @@ func (s *Server) HandleRPC(ctx context.Context, sess *Session, rpc *RPC) *RPCRep
 		handler = s.handleKillSession
 	default:
 		// Unknown operation -> operation-not-supported (not access-denied)
-		return NewErrorReply(rpc.MessageID, ErrUnknownRPC(opName))
+		return NewErrorReply(rpc.MessageID, ErrUnknownRPC(opName)).WithAttributes(rpc.ReplyAttrs)
 	}
 
 	// Check RBAC after confirming operation exists
@@ -87,11 +87,11 @@ func (s *Server) HandleRPC(ctx context.Context, sess *Session, rpc *RPC) *RPCRep
 		// Log RBAC denial for audit trail
 		log.Printf("[RBAC] Access denied: user=%s role=%s operation=%s session=%s",
 			sess.Username, sess.Role, opName, sess.ID)
-		return NewErrorReply(rpc.MessageID, err)
+		return NewErrorReply(rpc.MessageID, err).WithAttributes(rpc.ReplyAttrs)
 	}
 
 	// Execute handler
-	return handler(ctx, sess, rpc)
+	return handler(ctx, sess, rpc).WithAttributes(rpc.ReplyAttrs)
 }
 
 // checkRBAC enforces role-based access control per design document Section 4
