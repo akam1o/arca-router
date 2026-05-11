@@ -95,6 +95,38 @@ func TestXMLToConfigRejectsUnknownElement(t *testing.T) {
 	}
 }
 
+func TestXMLToConfigRejectsUnexpectedConfigRootText(t *testing.T) {
+	xmlData := []byte(`<config>junk<system><host-name>router1</host-name></system></config>`)
+
+	_, err := XMLToConfig(xmlData, DefaultOpMerge)
+	if err == nil {
+		t.Fatal("XMLToConfig() error = nil, want malformed-message")
+	}
+	rpcErr, ok := err.(*RPCError)
+	if !ok {
+		t.Fatalf("XMLToConfig() error = %T, want *RPCError", err)
+	}
+	if rpcErr.ErrorTag != ErrorTagMalformedMessage {
+		t.Fatalf("XMLToConfig() error = %#v, want malformed-message", rpcErr)
+	}
+}
+
+func TestXMLToConfigRejectsUnexpectedContainerText(t *testing.T) {
+	xmlData := []byte(`<config><system>junk<host-name>router1</host-name></system></config>`)
+
+	_, err := XMLToConfig(xmlData, DefaultOpMerge)
+	if err == nil {
+		t.Fatal("XMLToConfig() error = nil, want malformed-message")
+	}
+	rpcErr, ok := err.(*RPCError)
+	if !ok {
+		t.Fatalf("XMLToConfig() error = %T, want *RPCError", err)
+	}
+	if rpcErr.ErrorTag != ErrorTagMalformedMessage {
+		t.Fatalf("XMLToConfig() error = %#v, want malformed-message", rpcErr)
+	}
+}
+
 func TestXMLToConfigRejectsUnknownNamespace(t *testing.T) {
 	xmlData := []byte(`<config><system xmlns="urn:example:unknown"><host-name>router1</host-name></system></config>`)
 
