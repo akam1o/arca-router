@@ -7,8 +7,9 @@ import (
 	"strings"
 )
 
-// junosIfacePattern matches Junos-style interface names: ge-0/0/0, xe-0/0/1, et-0/0/0
-var junosIfacePattern = regexp.MustCompile(`^(ge|xe|et)-\d+/\d+/\d+$`)
+// junosIfacePattern matches the legacy config parser's supported Junos-style
+// interface names.
+var junosIfacePattern = regexp.MustCompile(`^([a-z]{2}-\d+/\d+/\d+|ae\d+|lo\d+|irb|fxp\d+)$`)
 
 // Validate checks the RouterConfig for semantic correctness.
 func (c *RouterConfig) Validate() error {
@@ -34,7 +35,7 @@ func (c *RouterConfig) Validate() error {
 func (c *RouterConfig) validateInterfaces() error {
 	for name, iface := range c.Interfaces {
 		if !junosIfacePattern.MatchString(name) {
-			return fmt.Errorf("invalid interface name %q: must be Junos format (e.g. ge-0/0/0)", name)
+			return fmt.Errorf("invalid interface name %q: must be Junos format (e.g. ge-0/0/0, ae0, lo0, irb, fxp0)", name)
 		}
 		for unitNum, unit := range iface.Units {
 			if unitNum < 0 {
