@@ -491,6 +491,24 @@ func TestFilterValidate(t *testing.T) {
 			rpcName: "get-config",
 			wantErr: false,
 		},
+		{
+			name:    "subtree filter text rejected",
+			filter:  &Filter{Type: "subtree", Content: []byte("junk")},
+			rpcName: "get-config",
+			wantErr: true,
+		},
+		{
+			name:    "default subtree xpath text rejected",
+			filter:  &Filter{Content: []byte("/interfaces")},
+			rpcName: "get-config",
+			wantErr: true,
+		},
+		{
+			name:    "comment only filter rejected",
+			filter:  &Filter{Content: []byte("<!-- no element -->")},
+			rpcName: "get-config",
+			wantErr: true,
+		},
 	}
 
 	for _, tt := range tests {

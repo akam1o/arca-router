@@ -237,6 +237,18 @@ func TestFilterMatches(t *testing.T) {
 			element: "interfaces",
 			want:    false,
 		},
+		{
+			name:    "text filter does not match all",
+			filter:  &Filter{Content: []byte("junk")},
+			element: "interfaces",
+			want:    false,
+		},
+		{
+			name:    "bare xpath text does not match subtree",
+			filter:  &Filter{Content: []byte("/interfaces")},
+			element: "interfaces",
+			want:    false,
+		},
 	}
 
 	for _, tt := range tests {

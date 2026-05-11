@@ -735,8 +735,67 @@ func (f *Filter) Validate(rpcName string) error {
 		if bytes.Contains(f.Content, []byte("[")) {
 			return ErrInvalidFilter(rpcName, "filter contains unsupported predicates")
 		}
+		if err := f.validateSubtreeContent(rpcName); err != nil {
+			return err
+		}
 	}
 
+	return nil
+}
+
+func (f *Filter) validateSubtreeContent(rpcName string) error {
+	trimmed := bytes.TrimSpace(f.Content)
+	if len(trimmed) == 0 {
+		return nil
+	}
+	if trimmed[0] == '/' {
+		return ErrInvalidFilter(rpcName, "subtree filter content must be XML elements")
+	}
+
+	var wrapped bytes.Buffer
+	wrapped.WriteString("<filter")
+	writeNamespaceDeclarationAttrs(&wrapped, collectNamespaceAttrs(f.InheritedAttrs, f.Attrs), map[string]string{})
+	wrapped.WriteByte('>')
+	wrapped.Write(f.Content)
+	wrapped.WriteString("</filter>")
+
+	decoder := xml.NewDecoder(bytes.NewReader(wrapped.Bytes()))
+	decoder.Strict = true
+	decoder.Entity = nil
+
+	depth := 0
+	topLevelElements := 0
+	for {
+		token, err := decoder.Token()
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			return NewRPCError(ErrorTypeProtocol, ErrorTagMalformedMessage,
+				fmt.Sprintf("invalid subtree filter XML: %v", err)).
+				WithPath(fmt.Sprintf("/rpc/%s/filter", rpcName)).
+				WithBadElement("filter")
+		}
+
+		switch t := token.(type) {
+		case xml.StartElement:
+			depth++
+			if depth == 2 {
+				topLevelElements++
+			}
+		case xml.EndElement:
+			if depth > 0 {
+				depth--
+			}
+		case xml.CharData:
+			if depth == 1 && len(bytes.TrimSpace(t)) > 0 {
+				return ErrInvalidFilter(rpcName, "subtree filter content must be XML elements")
+			}
+		}
+	}
+	if topLevelElements == 0 {
+		return ErrInvalidFilter(rpcName, "subtree filter must contain at least one element")
+	}
 	return nil
 }
 
