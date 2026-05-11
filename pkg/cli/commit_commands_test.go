@@ -164,6 +164,36 @@ func TestCommitWithOptionsRefreshFailureLeavesOperational(t *testing.T) {
 	}
 }
 
+func TestCommitWithOptionsRefreshCleanupFailureLeavesRetryableLock(t *testing.T) {
+	ctx := context.Background()
+	ds := &mockDatastore{}
+	session := NewSession("testuser", ds)
+	if err := session.EnterConfigurationMode(ctx); err != nil {
+		t.Fatalf("EnterConfigurationMode() error = %v", err)
+	}
+
+	ds.saveCandidateErr = errors.New("candidate write failed")
+	ds.releaseLockErr = errors.New("release failed")
+	if err := session.CommitWithOptions(ctx, CommitOptions{}); err != nil {
+		t.Fatalf("CommitWithOptions() error = %v, want nil after commit success", err)
+	}
+
+	if session.Mode() != ModeOperational {
+		t.Fatalf("mode = %v, want operational after refresh cleanup failure", session.Mode())
+	}
+	if !session.lockAcquired || !ds.lockAcquired {
+		t.Fatal("lock state was not preserved for retry after release failure")
+	}
+
+	ds.releaseLockErr = nil
+	if err := session.Close(ctx); err != nil {
+		t.Fatalf("Close() error = %v", err)
+	}
+	if session.lockAcquired || ds.lockAcquired {
+		t.Fatal("Close() did not release retryable lock")
+	}
+}
+
 func TestCommitWithOptionsAndQuitLeavesOperational(t *testing.T) {
 	ctx := context.Background()
 	ds := &mockDatastore{}
@@ -288,6 +318,41 @@ func TestRollbackWithNumberRefreshFailureLeavesOperational(t *testing.T) {
 	}
 	if ds.acquireLockCount != initialLocks+1 {
 		t.Fatalf("AcquireLock count = %d, want %d", ds.acquireLockCount, initialLocks+1)
+	}
+}
+
+func TestRollbackWithNumberRefreshCleanupFailureLeavesRetryableLock(t *testing.T) {
+	ctx := context.Background()
+	ds := &mockDatastore{
+		history: []*datastore.CommitHistoryEntry{
+			{CommitID: "commit-new", ConfigText: "set system host-name new"},
+			{CommitID: "commit-old", ConfigText: "set system host-name old"},
+		},
+	}
+	session := NewSession("testuser", ds)
+	if err := session.EnterConfigurationMode(ctx); err != nil {
+		t.Fatalf("EnterConfigurationMode() error = %v", err)
+	}
+
+	ds.saveCandidateErr = errors.New("candidate write failed")
+	ds.releaseLockErr = errors.New("release failed")
+	if err := session.RollbackWithNumber(ctx, 1); err != nil {
+		t.Fatalf("RollbackWithNumber() error = %v, want nil after rollback success", err)
+	}
+
+	if session.Mode() != ModeOperational {
+		t.Fatalf("mode = %v, want operational after refresh cleanup failure", session.Mode())
+	}
+	if !session.lockAcquired || !ds.lockAcquired {
+		t.Fatal("lock state was not preserved for retry after release failure")
+	}
+
+	ds.releaseLockErr = nil
+	if err := session.Close(ctx); err != nil {
+		t.Fatalf("Close() error = %v", err)
+	}
+	if session.lockAcquired || ds.lockAcquired {
+		t.Fatal("Close() did not release retryable lock")
 	}
 }
 

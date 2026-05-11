@@ -93,11 +93,30 @@ func (s *Session) resumeConfigurationLock(ctx context.Context) error {
 		return err
 	}
 	if err := s.syncCandidateFromRunning(ctx); err != nil {
-		_ = s.ds.ReleaseLock(context.Background(), datastore.LockTargetCandidate, s.id)
+		if releaseErr := s.ds.ReleaseLock(context.Background(), datastore.LockTargetCandidate, s.id); releaseErr != nil {
+			s.lockAcquired = true
+			return &configurationRefreshError{refreshErr: err, releaseErr: releaseErr}
+		}
 		s.lockAcquired = false
-		return err
+		return &configurationRefreshError{refreshErr: err}
 	}
 	return nil
+}
+
+type configurationRefreshError struct {
+	refreshErr error
+	releaseErr error
+}
+
+func (e *configurationRefreshError) Error() string {
+	if e.releaseErr != nil {
+		return fmt.Sprintf("%v; additionally failed to release refreshed lock: %v", e.refreshErr, e.releaseErr)
+	}
+	return e.refreshErr.Error()
+}
+
+func (e *configurationRefreshError) Unwrap() error {
+	return e.refreshErr
 }
 
 func (s *Session) leaveConfigurationMode() {
@@ -113,7 +132,12 @@ func (s *Session) finishConfigurationTransaction(ctx context.Context, action str
 		return
 	}
 	if err := s.resumeConfigurationLock(ctx); err != nil {
+		var refreshErr *configurationRefreshError
+		lockMayRemain := errors.As(err, &refreshErr) && refreshErr.releaseErr != nil
 		s.leaveConfigurationMode()
+		if lockMayRemain {
+			s.lockAcquired = true
+		}
 		fmt.Printf("warning: %s complete but failed to refresh configuration session; left configuration mode: %v\n", action, err)
 	}
 }
@@ -429,8 +453,13 @@ func (s *Session) TopHierarchy() {
 
 // Close closes the session
 func (s *Session) Close(ctx context.Context) error {
-	if s.mode == ModeConfiguration {
-		return s.ExitConfigurationMode(ctx)
+	if s.lockAcquired {
+		if err := s.ds.ReleaseLock(ctx, datastore.LockTargetCandidate, s.id); err != nil {
+			return fmt.Errorf("failed to release lock: %w", err)
+		}
+		s.lockAcquired = false
 	}
+	s.mode = ModeOperational
+	s.configPath = []string{}
 	return nil
 }

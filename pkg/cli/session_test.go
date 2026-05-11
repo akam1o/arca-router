@@ -14,7 +14,9 @@ type mockDatastore struct {
 	lockAcquired      bool
 	acquireLockCount  int
 	acquireLockErr    error
+	releaseLockErr    error
 	saveCandidateText string
+	saveCandidateErr  error
 	history           []*datastore.CommitHistoryEntry
 }
 
@@ -36,6 +38,9 @@ func (m *mockDatastore) GetCandidate(ctx context.Context, sessionID string) (*da
 }
 
 func (m *mockDatastore) SaveCandidate(ctx context.Context, sessionID string, configText string) error {
+	if m.saveCandidateErr != nil {
+		return m.saveCandidateErr
+	}
 	m.saveCandidateText = configText
 	return nil
 }
@@ -78,6 +83,9 @@ func (m *mockDatastore) AcquireLock(ctx context.Context, req *datastore.LockRequ
 }
 
 func (m *mockDatastore) ReleaseLock(ctx context.Context, target string, sessionID string) error {
+	if m.releaseLockErr != nil {
+		return m.releaseLockErr
+	}
 	m.lockAcquired = false
 	m.lockSessionID = ""
 	return nil
