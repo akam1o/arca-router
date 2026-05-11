@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"log/slog"
+	"net"
 	"os"
 	"path/filepath"
 	"testing"
@@ -89,6 +90,66 @@ func TestLoadInitialConfigFallsBackToFile(t *testing.T) {
 	}
 	if cfg.System.HostName != "file-router" {
 		t.Fatalf("hostname = %q, want file-router", cfg.System.HostName)
+	}
+}
+
+func TestPrepareGRPCSocketPathRejectsInsecureDirectory(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "open")
+	if err := os.Mkdir(dir, 0777); err != nil {
+		t.Fatalf("Mkdir() error = %v", err)
+	}
+	if err := os.Chmod(dir, 0777); err != nil {
+		t.Fatalf("Chmod() error = %v", err)
+	}
+
+	err := prepareGRPCSocketPath(filepath.Join(dir, "routerd.sock"))
+	if err == nil {
+		t.Fatal("prepareGRPCSocketPath() error = nil, want insecure directory error")
+	}
+}
+
+func TestPrepareGRPCSocketPathRejectsNonSocketPath(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "routerd.sock")
+	if err := os.WriteFile(path, []byte("not a socket"), 0600); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+
+	err := prepareGRPCSocketPath(path)
+	if err == nil {
+		t.Fatal("prepareGRPCSocketPath() error = nil, want non-socket error")
+	}
+	if _, statErr := os.Stat(path); statErr != nil {
+		t.Fatalf("non-socket path was removed: %v", statErr)
+	}
+}
+
+func TestRestrictGRPCSocketPermissions(t *testing.T) {
+	dir, err := os.MkdirTemp("/tmp", "arca-routerd-")
+	if err != nil {
+		t.Fatalf("MkdirTemp() error = %v", err)
+	}
+	t.Cleanup(func() { _ = os.RemoveAll(dir) })
+
+	path := filepath.Join(dir, "routerd.sock")
+	listener, err := net.Listen("unix", path)
+	if err != nil {
+		t.Fatalf("Listen() error = %v", err)
+	}
+	t.Cleanup(func() {
+		_ = listener.Close()
+		_ = os.Remove(path)
+	})
+
+	if err := restrictGRPCSocketPermissions(path); err != nil {
+		t.Fatalf("restrictGRPCSocketPermissions() error = %v", err)
+	}
+	info, err := os.Stat(path)
+	if err != nil {
+		t.Fatalf("Stat() error = %v", err)
+	}
+	if got := info.Mode().Perm(); got != secureGRPCSocketFilePerms {
+		t.Fatalf("socket mode = %04o, want %04o", got, secureGRPCSocketFilePerms)
 	}
 }
 

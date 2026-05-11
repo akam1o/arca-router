@@ -36,6 +36,11 @@ var (
 	BuildDate = "unknown"
 )
 
+const (
+	secureGRPCSocketDirPerms  os.FileMode = 0750
+	secureGRPCSocketFilePerms os.FileMode = 0600
+)
+
 type daemonFlags struct {
 	configPath    string
 	hardwarePath  string
@@ -215,12 +220,8 @@ func run(ctx context.Context, f *daemonFlags, log *logger.Logger) error {
 
 	// --- Step 9: Start gRPC API (for CLI) ---
 	log.Info("Starting gRPC API", slog.String("socket", f.grpcSocket))
-	socketDir := filepath.Dir(f.grpcSocket)
-	if err := os.MkdirAll(socketDir, 0750); err != nil {
-		return fmt.Errorf("create socket directory: %w", err)
-	}
-	if err := os.Remove(f.grpcSocket); err != nil && !os.IsNotExist(err) {
-		return fmt.Errorf("remove stale socket: %w", err)
+	if err := prepareGRPCSocketPath(f.grpcSocket); err != nil {
+		return err
 	}
 
 	lis, err := net.Listen("unix", f.grpcSocket)
@@ -228,6 +229,9 @@ func run(ctx context.Context, f *daemonFlags, log *logger.Logger) error {
 		return fmt.Errorf("listen on gRPC socket: %w", err)
 	}
 	defer lis.Close()
+	if err := restrictGRPCSocketPermissions(f.grpcSocket); err != nil {
+		return err
+	}
 
 	grpcServer := nbgrpc.NewServer(eng, configStore, slog.Default())
 	grpcErr := make(chan error, 1)
@@ -265,6 +269,58 @@ func startNETCONFServer(ctx context.Context, f *daemonFlags, eng *engine.Engine,
 		return nil, fmt.Errorf("start NETCONF server: %w", err)
 	}
 	return server, nil
+}
+
+func prepareGRPCSocketPath(socketPath string) error {
+	socketDir := filepath.Dir(socketPath)
+	if err := os.MkdirAll(socketDir, secureGRPCSocketDirPerms); err != nil {
+		return fmt.Errorf("create socket directory: %w", err)
+	}
+	if err := validateGRPCSocketDirectory(socketDir); err != nil {
+		return err
+	}
+	if err := removeStaleGRPCSocket(socketPath); err != nil {
+		return err
+	}
+	return nil
+}
+
+func validateGRPCSocketDirectory(socketDir string) error {
+	info, err := os.Stat(socketDir)
+	if err != nil {
+		return fmt.Errorf("stat gRPC socket directory: %w", err)
+	}
+	if !info.IsDir() {
+		return fmt.Errorf("gRPC socket parent path is not a directory: %s", socketDir)
+	}
+	if perms := info.Mode().Perm(); perms&0022 != 0 {
+		return fmt.Errorf("insecure permissions on gRPC socket directory %s: mode=%04o", socketDir, perms)
+	}
+	return nil
+}
+
+func removeStaleGRPCSocket(socketPath string) error {
+	info, err := os.Lstat(socketPath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return fmt.Errorf("stat stale gRPC socket: %w", err)
+	}
+	if info.Mode()&os.ModeSocket == 0 {
+		return fmt.Errorf("refusing to remove non-socket gRPC path: %s", socketPath)
+	}
+	if err := os.Remove(socketPath); err != nil {
+		return fmt.Errorf("remove stale socket: %w", err)
+	}
+	return nil
+}
+
+func restrictGRPCSocketPermissions(socketPath string) error {
+	if err := os.Chmod(socketPath, secureGRPCSocketFilePerms); err != nil {
+		return fmt.Errorf("restrict gRPC socket permissions: %w", err)
+	}
+	return nil
 }
 
 // loadInitialConfig loads the startup config from file and converts to new model.
