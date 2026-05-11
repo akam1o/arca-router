@@ -200,23 +200,15 @@ func run(ctx context.Context, f *daemonFlags, log *logger.Logger) error {
 	log.Info("Initial configuration applied", slog.String("source", initialSource))
 
 	// --- Step 8: Start NETCONF server ---
+	var netconfServer *netconf.SSHServer
 	if f.hostKeyPath != "" {
-		go func() {
-			log.Info("Starting NETCONF server", slog.String("listen", f.netconfListen))
-			ncConfig := netconf.DefaultSSHConfig()
-			ncConfig.ListenAddr = f.netconfListen
-			ncConfig.HostKeyPath = f.hostKeyPath
-			ncConfig.UserDBPath = f.userDBPath
-			ncConfig.DatastorePath = f.datastorePath
-
-			server, err := netconf.NewSSHServer(ncConfig)
-			if err != nil {
-				log.Error("Failed to create NETCONF server", slog.Any("error", err))
-				return
-			}
-			server.SetCommitHook(newNETCONFCommitHook(eng))
-			if err := server.Start(ctx); err != nil {
-				log.Error("NETCONF server failed", slog.Any("error", err))
+		netconfServer, err = startNETCONFServer(ctx, f, eng, log)
+		if err != nil {
+			return err
+		}
+		defer func() {
+			if err := netconfServer.Stop(); err != nil {
+				log.Error("Failed to stop NETCONF server", slog.Any("error", err))
 			}
 		}()
 	}
@@ -254,6 +246,25 @@ func run(ctx context.Context, f *daemonFlags, log *logger.Logger) error {
 	grpcServer.Stop()
 
 	return nil
+}
+
+func startNETCONFServer(ctx context.Context, f *daemonFlags, eng *engine.Engine, log *logger.Logger) (*netconf.SSHServer, error) {
+	log.Info("Starting NETCONF server", slog.String("listen", f.netconfListen))
+	ncConfig := netconf.DefaultSSHConfig()
+	ncConfig.ListenAddr = f.netconfListen
+	ncConfig.HostKeyPath = f.hostKeyPath
+	ncConfig.UserDBPath = f.userDBPath
+	ncConfig.DatastorePath = f.datastorePath
+
+	server, err := netconf.NewSSHServer(ncConfig)
+	if err != nil {
+		return nil, fmt.Errorf("create NETCONF server: %w", err)
+	}
+	server.SetCommitHook(newNETCONFCommitHook(eng))
+	if err := server.Start(ctx); err != nil {
+		return nil, fmt.Errorf("start NETCONF server: %w", err)
+	}
+	return server, nil
 }
 
 // loadInitialConfig loads the startup config from file and converts to new model.
