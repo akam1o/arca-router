@@ -106,8 +106,8 @@ func TestXMLToConfigRejectsTextOnlyFragment(t *testing.T) {
 	if !ok {
 		t.Fatalf("XMLToConfig() error = %T, want *RPCError", err)
 	}
-	if rpcErr.ErrorTag != ErrorTagMalformedMessage {
-		t.Fatalf("XMLToConfig() error = %#v, want malformed-message", rpcErr)
+	if rpcErr.ErrorType != ErrorTypeRPC || rpcErr.ErrorTag != ErrorTagMalformedMessage {
+		t.Fatalf("XMLToConfig() error = %#v, want rpc/malformed-message", rpcErr)
 	}
 }
 
@@ -122,8 +122,8 @@ func TestXMLToConfigRejectsUnexpectedConfigRootText(t *testing.T) {
 	if !ok {
 		t.Fatalf("XMLToConfig() error = %T, want *RPCError", err)
 	}
-	if rpcErr.ErrorTag != ErrorTagMalformedMessage {
-		t.Fatalf("XMLToConfig() error = %#v, want malformed-message", rpcErr)
+	if rpcErr.ErrorType != ErrorTypeRPC || rpcErr.ErrorTag != ErrorTagMalformedMessage {
+		t.Fatalf("XMLToConfig() error = %#v, want rpc/malformed-message", rpcErr)
 	}
 }
 
@@ -138,8 +138,8 @@ func TestXMLToConfigRejectsUnexpectedContainerText(t *testing.T) {
 	if !ok {
 		t.Fatalf("XMLToConfig() error = %T, want *RPCError", err)
 	}
-	if rpcErr.ErrorTag != ErrorTagMalformedMessage {
-		t.Fatalf("XMLToConfig() error = %#v, want malformed-message", rpcErr)
+	if rpcErr.ErrorType != ErrorTypeRPC || rpcErr.ErrorTag != ErrorTagMalformedMessage {
+		t.Fatalf("XMLToConfig() error = %#v, want rpc/malformed-message", rpcErr)
 	}
 }
 

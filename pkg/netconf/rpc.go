@@ -815,7 +815,7 @@ func (f *Filter) validateSubtreeContent(rpcName string) error {
 			break
 		}
 		if err != nil {
-			return NewRPCError(ErrorTypeProtocol, ErrorTagMalformedMessage,
+			return NewRPCError(ErrorTypeRPC, ErrorTagMalformedMessage,
 				fmt.Sprintf("invalid subtree filter XML: %v", err)).
 				WithPath(fmt.Sprintf("/rpc/%s/filter", rpcName)).
 				WithBadElement("filter")

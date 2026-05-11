@@ -131,7 +131,7 @@ func (e *RPCError) Error() string {
 
 // ErrMalformedMessage returns XML parse error
 func ErrMalformedMessage(message string) *RPCError {
-	return NewRPCError(ErrorTypeProtocol, ErrorTagMalformedMessage, message).
+	return NewRPCError(ErrorTypeRPC, ErrorTagMalformedMessage, message).
 		WithPath("/rpc")
 }
 
@@ -142,7 +142,7 @@ func ErrMalformedMessageWithElement(message, element string) *RPCError {
 
 // ErrDTDNotAllowed returns error for DTD/DOCTYPE in XML
 func ErrDTDNotAllowed() *RPCError {
-	return NewRPCError(ErrorTypeProtocol, ErrorTagMalformedMessage, "DTD declarations are not allowed").
+	return NewRPCError(ErrorTypeRPC, ErrorTagMalformedMessage, "DTD declarations are not allowed").
 		WithPath("/rpc").
 		WithBadElement("DOCTYPE")
 }

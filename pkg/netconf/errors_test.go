@@ -70,8 +70,8 @@ func TestRPCErrorChaining(t *testing.T) {
 func TestErrMalformedMessage(t *testing.T) {
 	err := ErrMalformedMessage("invalid XML")
 
-	if err.ErrorType != ErrorTypeProtocol {
-		t.Errorf("Expected protocol error type")
+	if err.ErrorType != ErrorTypeRPC {
+		t.Errorf("Expected rpc error type")
 	}
 
 	if err.ErrorTag != ErrorTagMalformedMessage {
@@ -86,8 +86,8 @@ func TestErrMalformedMessage(t *testing.T) {
 func TestErrDTDNotAllowed(t *testing.T) {
 	err := ErrDTDNotAllowed()
 
-	if err.ErrorType != ErrorTypeProtocol {
-		t.Errorf("Expected protocol error type")
+	if err.ErrorType != ErrorTypeRPC {
+		t.Errorf("Expected rpc error type")
 	}
 
 	if err.ErrorInfo == nil || err.ErrorInfo.BadElement != "DOCTYPE" {

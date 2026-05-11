@@ -519,7 +519,7 @@ func XMLToConfig(xmlData []byte, defaultOp DefaultOperation) (*config.Config, er
 	decoder.Entity = nil
 
 	if err := decoder.Decode(&root); err != nil {
-		return nil, NewRPCError(ErrorTypeProtocol, ErrorTagMalformedMessage,
+		return nil, NewRPCError(ErrorTypeRPC, ErrorTagMalformedMessage,
 			fmt.Sprintf("failed to parse config XML: %v", err)).
 			WithPath("/rpc/edit-config/config")
 	}
@@ -742,7 +742,7 @@ func normalizeConfigXML(xmlData []byte) ([]byte, error) {
 			return []byte("<config/>"), nil
 		}
 		if err != nil {
-			return nil, NewRPCError(ErrorTypeProtocol, ErrorTagMalformedMessage,
+			return nil, NewRPCError(ErrorTypeRPC, ErrorTagMalformedMessage,
 				fmt.Sprintf("failed to parse config XML: %v", err)).
 				WithPath("/rpc/edit-config/config")
 		}
@@ -759,7 +759,7 @@ func normalizeConfigXML(xmlData []byte) ([]byte, error) {
 				return trimmed, nil
 			}
 			if sawProcInst {
-				return nil, NewRPCError(ErrorTypeProtocol, ErrorTagMalformedMessage,
+				return nil, NewRPCError(ErrorTypeRPC, ErrorTagMalformedMessage,
 					"XML declaration requires a config root element").
 					WithPath("/rpc/edit-config/config")
 			}
@@ -785,7 +785,7 @@ func validateConfigXMLAllowlist(xmlData []byte) error {
 			return nil
 		}
 		if err != nil {
-			return NewRPCError(ErrorTypeProtocol, ErrorTagMalformedMessage,
+			return NewRPCError(ErrorTypeRPC, ErrorTagMalformedMessage,
 				fmt.Sprintf("invalid XML: %v", err)).
 				WithPath("/rpc/edit-config/config")
 		}
@@ -809,7 +809,7 @@ func validateConfigXMLAllowlist(xmlData []byte) error {
 			stack = append(stack, t.Name.Local)
 		case xml.EndElement:
 			if len(stack) == 0 {
-				return NewRPCError(ErrorTypeProtocol, ErrorTagMalformedMessage,
+				return NewRPCError(ErrorTypeRPC, ErrorTagMalformedMessage,
 					fmt.Sprintf("unexpected closing element: %s", t.Name.Local)).
 					WithPath("/rpc/edit-config/config")
 			}
@@ -1291,7 +1291,7 @@ func ValidateXMLSecurity(data []byte) error {
 			break
 		}
 		if err != nil {
-			return NewRPCError(ErrorTypeProtocol, ErrorTagMalformedMessage,
+			return NewRPCError(ErrorTypeRPC, ErrorTagMalformedMessage,
 				fmt.Sprintf("invalid XML: %v", err)).
 				WithPath("/rpc")
 		}
@@ -1301,13 +1301,13 @@ func ValidateXMLSecurity(data []byte) error {
 			// Reject DOCTYPE, ENTITY directives (case-insensitive)
 			directive := strings.ToUpper(string(t))
 			if strings.HasPrefix(directive, "DOCTYPE") {
-				return NewRPCError(ErrorTypeProtocol, ErrorTagMalformedMessage,
+				return NewRPCError(ErrorTypeRPC, ErrorTagMalformedMessage,
 					"DTD declarations are not allowed").
 					WithPath("/rpc").
 					WithBadElement("DOCTYPE")
 			}
 			if strings.HasPrefix(directive, "ENTITY") {
-				return NewRPCError(ErrorTypeProtocol, ErrorTagMalformedMessage,
+				return NewRPCError(ErrorTypeRPC, ErrorTagMalformedMessage,
 					"ENTITY declarations are not allowed").
 					WithPath("/rpc").
 					WithBadElement("ENTITY")

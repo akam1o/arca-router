@@ -612,8 +612,8 @@ func TestParseSizeLimit(t *testing.T) {
 		return
 	}
 
-	if rpcErr.ErrorTag != ErrorTagMalformedMessage {
-		t.Errorf("Expected malformed-message error for size limit")
+	if rpcErr.ErrorType != ErrorTypeRPC || rpcErr.ErrorTag != ErrorTagMalformedMessage {
+		t.Errorf("Expected rpc/malformed-message error for size limit, got %s/%s", rpcErr.ErrorType, rpcErr.ErrorTag)
 	}
 }
 
