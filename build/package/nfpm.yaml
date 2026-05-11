@@ -8,13 +8,13 @@ vendor: akam1o
 maintainer: akam1o <akam1o@ark-networks.net>
 homepage: https://github.com/akam1o/arca-router
 description: |
-  ARCA Router - VPP-based Network Router Daemon
+  ARCA Router - Unified VPP-based Network Router Daemon
 
   - Real VPP integration via govpp
   - FRR integration for dynamic routing (BGP, OSPF)
   - LCP (Linux Control Plane) support
   - Junos-style configuration interface
-  - NETCONF support for remote management
+  - Integrated NETCONF and gRPC management APIs
 
 # VPP and FRR dependencies
 depends:
@@ -34,14 +34,6 @@ contents:
   # CLI binary
   - src: build/bin/arca-cli
     dst: /usr/bin/arca-cli
-    file_info:
-      mode: 0755
-      owner: root
-      group: root
-
-  # NETCONF daemon binary
-  - src: build/bin/arca-netconfd
-    dst: /usr/sbin/arca-netconfd
     file_info:
       mode: 0755
       owner: root
@@ -75,13 +67,6 @@ contents:
   # systemd unit files
   - src: build/systemd/arca-routerd.service
     dst: /usr/lib/systemd/system/arca-routerd.service
-    file_info:
-      mode: 0644
-      owner: root
-      group: root
-
-  - src: build/systemd/arca-netconfd.service
-    dst: /usr/lib/systemd/system/arca-netconfd.service
     file_info:
       mode: 0644
       owner: root

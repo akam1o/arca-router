@@ -21,6 +21,11 @@ usermod -aG frrvty arca-router 2>/dev/null || echo "Warning: frrvty group not fo
 # Reload systemd to recognize new service
 systemctl daemon-reload >/dev/null 2>&1 || true
 
+# v0.4 runs NETCONF inside arca-routerd. Stop the legacy standalone service if
+# it exists from an older package so it does not contend for port 830.
+systemctl stop arca-netconfd >/dev/null 2>&1 || true
+systemctl disable arca-netconfd >/dev/null 2>&1 || true
+
 # Ensure directory permissions
 mkdir -p /var/lib/arca-router /var/log/arca-router
 chown arca-router:arca-router /var/lib/arca-router || true
@@ -46,12 +51,12 @@ if command -v systemctl >/dev/null 2>&1; then
     echo ""
     echo "Verifying VPP/FRR installation..."
     if ! systemctl list-unit-files 2>/dev/null | grep -q vpp.service; then
-        echo "WARNING: VPP service not found. Phase 2 requires VPP 24.10+"
+        echo "WARNING: VPP service not found. arca-router requires VPP 24.10+"
         echo "Install VPP (Debian): https://packagecloud.io/fdio/2410"
         echo "Install VPP (RHEL): sudo dnf install vpp vpp-plugin-core"
     fi
     if ! systemctl list-unit-files 2>/dev/null | grep -q frr.service; then
-        echo "WARNING: FRR service not found. Phase 2 requires FRR 8.0+"
+        echo "WARNING: FRR service not found. arca-router requires FRR 8.0+"
         echo "Install FRR: sudo apt install frr (Debian) or sudo dnf install frr (RHEL)"
     fi
 fi
@@ -70,7 +75,7 @@ if [ "$1" = "1" ]; then
     # Initial installation
     echo ""
     echo "=========================================="
-    echo "ARCA Router Phase 2 has been installed."
+    echo "ARCA Router v0.4 unified daemon has been installed."
     echo ""
     echo "Prerequisites:"
     echo "- VPP 24.10+ with linux-cp plugin enabled"

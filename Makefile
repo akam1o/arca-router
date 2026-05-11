@@ -3,7 +3,6 @@
 # Binary names
 BINARY_NAME=arca-routerd
 CLI_BINARY_NAME=arca-cli
-NETCONFD_BINARY_NAME=arca-netconfd
 V2_BINARY_NAME=arca-routerd-v2
 V2_CLI_BINARY_NAME=arca-cli-v2
 BUILD_DIR=build/bin
@@ -43,21 +42,20 @@ version: ## Display version information
 	@echo "Build Date: $(BUILD_DATE)"
 	@echo "EPOCH:      $(SOURCE_DATE_EPOCH)"
 
-build: ## Build all binaries (arca-routerd, arca-cli, arca-netconfd)
-	@echo "Building $(BINARY_NAME), $(CLI_BINARY_NAME), and $(NETCONFD_BINARY_NAME)..."
+build: ## Build current v0.4 binaries (unified arca-routerd and arca-cli)
+	@echo "Building $(BINARY_NAME) and $(CLI_BINARY_NAME)..."
 	@mkdir -p $(BUILD_DIR)
-	CGO_ENABLED=1 SOURCE_DATE_EPOCH=$(SOURCE_DATE_EPOCH) go build $(BUILD_FLAGS) -o $(BUILD_DIR)/$(BINARY_NAME) ./cmd/arca-routerd
-	CGO_ENABLED=0 SOURCE_DATE_EPOCH=$(SOURCE_DATE_EPOCH) go build $(BUILD_FLAGS) -o $(BUILD_DIR)/$(CLI_BINARY_NAME) ./cmd/arca-cli
-	CGO_ENABLED=1 SOURCE_DATE_EPOCH=$(SOURCE_DATE_EPOCH) go build $(BUILD_FLAGS) -o $(BUILD_DIR)/$(NETCONFD_BINARY_NAME) ./cmd/arca-netconfd
-	@echo "Build complete: $(BUILD_DIR)/$(BINARY_NAME), $(BUILD_DIR)/$(CLI_BINARY_NAME), $(BUILD_DIR)/$(NETCONFD_BINARY_NAME)"
+	CGO_ENABLED=1 SOURCE_DATE_EPOCH=$(SOURCE_DATE_EPOCH) go build $(BUILD_FLAGS) -o $(BUILD_DIR)/$(BINARY_NAME) ./cmd/arca-routerd-v2
+	CGO_ENABLED=0 SOURCE_DATE_EPOCH=$(SOURCE_DATE_EPOCH) go build $(BUILD_FLAGS) -o $(BUILD_DIR)/$(CLI_BINARY_NAME) ./cmd/arca-cli-v2
+	@echo "Build complete: $(BUILD_DIR)/$(BINARY_NAME), $(BUILD_DIR)/$(CLI_BINARY_NAME)"
 
-build-cli: ## Build only arca-cli binary
+build-cli: ## Build only current arca-cli binary
 	@echo "Building $(CLI_BINARY_NAME)..."
 	@mkdir -p $(BUILD_DIR)
-	CGO_ENABLED=0 SOURCE_DATE_EPOCH=$(SOURCE_DATE_EPOCH) go build $(BUILD_FLAGS) -o $(BUILD_DIR)/$(CLI_BINARY_NAME) ./cmd/arca-cli
+	CGO_ENABLED=0 SOURCE_DATE_EPOCH=$(SOURCE_DATE_EPOCH) go build $(BUILD_FLAGS) -o $(BUILD_DIR)/$(CLI_BINARY_NAME) ./cmd/arca-cli-v2
 	@echo "Build complete: $(BUILD_DIR)/$(CLI_BINARY_NAME)"
 
-build-v2: ## Build v2 unified daemon (arca-routerd-v2)
+build-v2: ## Build v2 unified daemon and CLI with explicit v2 names
 	@echo "Building $(V2_BINARY_NAME) and $(V2_CLI_BINARY_NAME)..."
 	@mkdir -p $(BUILD_DIR)
 	CGO_ENABLED=1 SOURCE_DATE_EPOCH=$(SOURCE_DATE_EPOCH) go build $(BUILD_FLAGS) -o $(BUILD_DIR)/$(V2_BINARY_NAME) ./cmd/arca-routerd-v2

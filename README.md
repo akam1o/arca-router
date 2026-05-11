@@ -89,9 +89,9 @@ Previous releases are documented in [`CHANGELOG.md`](CHANGELOG.md).
 
 ---
 
-## Quick Start (v0.3.x)
+## Quick Start (v0.4.x)
 
-✅ **Current Release (v0.3.x)**: Requires VPP 24.10+ and FRR 8.0+
+✅ **Current Release (v0.4.x)**: Requires VPP 24.10+ and FRR 8.0+
 
 ### 1. Install Prerequisites
 
@@ -343,8 +343,9 @@ ls -lh dist/
 ```bash
 make help             # Show all available targets
 make version          # Display version information
-make build            # Build legacy binaries (v0.3.x)
-make build-v2         # Build v0.4.x unified daemon + CLI
+make build            # Build v0.4.x unified daemon + CLI
+make build-cli        # Build only current arca-cli
+make build-v2         # Build v0.4.x binaries with explicit -v2 names
 make build-v2-cli     # Build only arca-cli-v2
 make test             # Run unit tests
 make integration-test # Run integration tests

@@ -105,17 +105,17 @@ make check
 ### 4. Build Locally
 
 ```bash
-# Build legacy binaries (v0.3.x)
+# Build current v0.4.x unified daemon + CLI
 make build
 
-# Build v0.4.x unified daemon + CLI
+# Build v0.4.x unified daemon + CLI with explicit -v2 names
 make build-v2
 
 # Verify binaries
-./build/bin/arca-routerd-v2 --version
-./build/bin/arca-cli-v2 --version
+./build/bin/arca-routerd --version
+./build/bin/arca-cli --version
 
-# Build legacy CLI only
+# Build current CLI only
 make build-cli
 
 # Build v2 CLI only
