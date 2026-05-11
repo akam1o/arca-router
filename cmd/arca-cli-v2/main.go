@@ -15,7 +15,6 @@ import (
 	"os/signal"
 	"strconv"
 	"strings"
-	"syscall"
 
 	grpcclient "github.com/akam1o/arca-router/internal/northbound/grpc"
 	"github.com/chzyer/readline"
@@ -359,7 +358,7 @@ func runInteractive(ctx context.Context, f *cliFlags) int {
 
 	// Handle Ctrl+C
 	sigCh := make(chan os.Signal, 1)
-	signal.Notify(sigCh, os.Interrupt, syscall.SIGTERM)
+	signal.Notify(sigCh, os.Interrupt)
 	go func() {
 		<-sigCh
 		fmt.Println("\nInterrupted. Use 'exit' or 'quit' to leave the shell.")
