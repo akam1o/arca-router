@@ -126,11 +126,16 @@ type EditConfigRequest struct {
 	Config           ConfigElement     `xml:"config"`
 }
 
+func (r *EditConfigRequest) SetInheritedNamespaceAttrs(attrs []xml.Attr) {
+	r.Config.InheritedAttrs = cloneXMLAttrs(attrs)
+}
+
 // ConfigElement represents <config> element in edit-config
 type ConfigElement struct {
-	XMLName xml.Name   `xml:"config"`
-	Attrs   []xml.Attr `xml:",any,attr"`
-	Content []byte     `xml:",innerxml"`
+	XMLName        xml.Name   `xml:"config"`
+	Attrs          []xml.Attr `xml:",any,attr"`
+	InheritedAttrs []xml.Attr `xml:"-"`
+	Content        []byte     `xml:",innerxml"`
 }
 
 func (c ConfigElement) XML() ([]byte, error) {
@@ -141,27 +146,25 @@ func (c ConfigElement) XML() ([]byte, error) {
 	var buf bytes.Buffer
 	buf.WriteString("<config")
 
-	defaultNamespaceWritten := false
+	writtenNamespaces := map[string]string{}
 	if c.XMLName.Space != "" {
 		writeXMLAttribute(&buf, "xmlns", c.XMLName.Space)
-		defaultNamespaceWritten = true
+		writtenNamespaces["xmlns"] = c.XMLName.Space
 	}
+
+	namespaceAttrs := collectNamespaceAttrs(c.InheritedAttrs, c.Attrs)
+	writeNamespaceDeclarationAttrs(&buf, namespaceAttrs, writtenNamespaces)
+
 	namespacePrefixes := make(map[string]string)
-	for _, attr := range c.Attrs {
+	for _, attr := range namespaceAttrs {
 		if attr.Name.Space == "xmlns" {
 			namespacePrefixes[attr.Value] = attr.Name.Local
 		}
 	}
 	for _, attr := range c.Attrs {
 		switch {
-		case attr.Name.Space == "" && attr.Name.Local == "xmlns":
-			if defaultNamespaceWritten && attr.Value == c.XMLName.Space {
-				continue
-			}
-			writeXMLAttribute(&buf, "xmlns", attr.Value)
-			defaultNamespaceWritten = true
-		case attr.Name.Space == "xmlns":
-			writeXMLAttribute(&buf, "xmlns:"+attr.Name.Local, attr.Value)
+		case isNamespaceDeclarationAttribute(attr):
+			continue
 		case attr.Name.Space == "":
 			writeXMLAttribute(&buf, attr.Name.Local, attr.Value)
 		default:
