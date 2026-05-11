@@ -214,6 +214,7 @@ func run(ctx context.Context, f *daemonFlags, log *logger.Logger) error {
 				log.Error("Failed to create NETCONF server", slog.Any("error", err))
 				return
 			}
+			server.SetCommitHook(newNETCONFCommitHook(eng))
 			if err := server.Start(ctx); err != nil {
 				log.Error("NETCONF server failed", slog.Any("error", err))
 			}
@@ -304,4 +305,45 @@ func installParserHooks() {
 	}
 	nbgrpc.ConfigTextParser = parse
 	storesqlite.LegacyTextParser = parse
+}
+
+func newNETCONFCommitHook(eng *engine.Engine) netconf.CommitHook {
+	return func(ctx context.Context, req *netconf.CommitHookRequest, persist func(context.Context) (string, error)) (string, error) {
+		if req == nil {
+			return "", fmt.Errorf("commit request is nil")
+		}
+		legacyCfg, err := parseLegacyConfig(strings.NewReader(req.ConfigText))
+		if err != nil {
+			return "", fmt.Errorf("parse candidate config: %w", err)
+		}
+		if err := legacyCfg.Validate(); err != nil {
+			return "", fmt.Errorf("validate candidate config: %w", err)
+		}
+		newCfg := model.FromLegacyConfig(legacyCfg)
+		if err := eng.Validate(ctx, newCfg); err != nil {
+			return "", err
+		}
+
+		beforeSnap := eng.RunningSnapshot()
+		if err := eng.Apply(ctx, newCfg, req.User, req.Message); err != nil {
+			return "", err
+		}
+
+		commitID, err := persist(ctx)
+		if err != nil {
+			if rollbackErr := rollbackEngineToSnapshot(context.Background(), eng, beforeSnap, req.User, "rollback failed NETCONF commit persistence"); rollbackErr != nil {
+				return "", fmt.Errorf("persist NETCONF commit after apply: %w (rollback failed: %v)", err, rollbackErr)
+			}
+			return "", fmt.Errorf("persist NETCONF commit after apply: %w", err)
+		}
+		return commitID, nil
+	}
+}
+
+func rollbackEngineToSnapshot(ctx context.Context, eng *engine.Engine, snap *model.ConfigSnapshot, user, message string) error {
+	cfg := model.NewRouterConfig()
+	if snap != nil && snap.Config != nil {
+		cfg = snap.Config
+	}
+	return eng.Apply(ctx, cfg, user, message)
 }

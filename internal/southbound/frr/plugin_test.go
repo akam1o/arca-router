@@ -42,3 +42,23 @@ func TestBuildFullConfigUsesDiffNewConfig(t *testing.T) {
 		t.Fatalf("buildFullConfig() dropped protocols: %#v", got.Protocols)
 	}
 }
+
+func TestFRRRelevantInterfaceChangesIncludesAddressChanges(t *testing.T) {
+	oldCfg := model.NewRouterConfig()
+	oldCfg.Interfaces["ge-0/0/0"] = &model.InterfaceConfig{
+		Units: map[int]*model.Unit{
+			0: {Family: map[string]*model.AddressFamily{"inet": {Addresses: []string{"192.0.2.1/24"}}}},
+		},
+	}
+	newCfg := model.NewRouterConfig()
+	newCfg.Interfaces["ge-0/0/0"] = &model.InterfaceConfig{
+		Units: map[int]*model.Unit{
+			0: {Family: map[string]*model.AddressFamily{"inet": {Addresses: []string{"198.51.100.1/24"}}}},
+		},
+	}
+
+	diff := engine.ComputeDiff(oldCfg, newCfg)
+	if !hasFRRRelevantInterfaceChanges(diff) {
+		t.Fatal("hasFRRRelevantInterfaceChanges() did not detect address change")
+	}
+}

@@ -671,17 +671,42 @@ func (sh *interactiveShell) cmdRollback(ctx context.Context, args []string) erro
 	if sh.mode != modeConfiguration {
 		return fmt.Errorf("'rollback' command only available in configuration mode")
 	}
+	rollbackNum := 0
 	if len(args) > 0 {
-		rollbackNum := 0
 		if _, err := fmt.Sscanf(args[0], "%d", &rollbackNum); err != nil {
 			return fmt.Errorf("invalid rollback number: %s", args[0])
 		}
-		if rollbackNum == 0 {
-			return sh.cmdDiscardChanges(ctx)
-		}
 	}
-	// Full rollback via the engine (discard candidate)
-	return sh.client.Discard(ctx, sh.sessionID)
+	if rollbackNum == 0 {
+		return sh.cmdDiscardChanges(ctx)
+	}
+
+	history, err := sh.client.ListHistory(ctx, rollbackNum+1, 0)
+	if err != nil {
+		return fmt.Errorf("failed to load commit history: %w", err)
+	}
+	if len(history) <= rollbackNum {
+		availableCommits := len(history) - 1
+		if availableCommits < 0 {
+			availableCommits = 0
+		}
+		return fmt.Errorf("not enough history for rollback %d (only %d commits available)", rollbackNum, availableCommits)
+	}
+	target := history[rollbackNum]
+	user := os.Getenv("USER")
+	if user == "" {
+		user = "admin"
+	}
+	newCommitID, version, err := sh.client.Rollback(ctx, sh.sessionID, target.CommitID, user, fmt.Sprintf("CLI rollback %d", rollbackNum))
+	if err != nil {
+		return fmt.Errorf("rollback failed: %w", err)
+	}
+	shortID := newCommitID
+	if len(shortID) > 8 {
+		shortID = shortID[:8]
+	}
+	fmt.Printf("rollback complete (id: %s, version: %d)\n", shortID, version)
+	return nil
 }
 
 func (sh *interactiveShell) cmdDiscardChanges(ctx context.Context) error {

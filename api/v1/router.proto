@@ -109,10 +109,12 @@ message RollbackRequest {
   string commit_id = 1;
   string user = 2;
   string message = 3;
+  string session_id = 4;
 }
 
 message RollbackResponse {
   string new_commit_id = 1;
+  uint64 version = 2;
 }
 
 message DiffRequest {

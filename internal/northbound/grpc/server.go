@@ -31,6 +31,10 @@ type Server struct {
 	server   *googlegrpc.Server
 }
 
+type rollbackCapableStore interface {
+	RollbackCommit(ctx context.Context, commitID, user, message string) (string, error)
+}
+
 // NewServer creates a new gRPC server.
 func NewServer(eng *engine.Engine, st store.ConfigStore, log *slog.Logger) *Server {
 	return &Server{
@@ -193,6 +197,77 @@ func (s *Server) Discard(ctx context.Context, sessionID string) error {
 	}
 	s.resetSessionCandidate(session)
 	return nil
+}
+
+// Rollback reverts running configuration to a previous commit.
+func (s *Server) Rollback(ctx context.Context, sessionID, commitID, user, message string) (string, uint64, error) {
+	if s.store == nil {
+		return "", 0, fmt.Errorf("commit history is unavailable")
+	}
+	if commitID == "" {
+		return "", 0, fmt.Errorf("commit ID is required")
+	}
+	session, err := s.sessions.Get(sessionID)
+	if err != nil {
+		return "", 0, err
+	}
+	if !session.HasLock {
+		return "", 0, fmt.Errorf("session %s does not hold the candidate lock", sessionID)
+	}
+	if user == "" {
+		user = session.User
+	}
+	if message == "" {
+		message = fmt.Sprintf("rollback to commit %s", commitID)
+	}
+
+	record, err := s.store.GetCommit(ctx, commitID)
+	if err != nil {
+		return "", 0, fmt.Errorf("load rollback commit: %w", err)
+	}
+	if record == nil || record.Config == nil {
+		return "", 0, fmt.Errorf("commit %s has no configuration", commitID)
+	}
+	newCfg := record.Config
+	if err := s.engine.Validate(ctx, newCfg); err != nil {
+		return "", 0, err
+	}
+
+	version := uint64(1)
+	if current := s.engine.RunningSnapshot(); current != nil {
+		version = current.Version + 1
+	}
+	beforeSnap := s.engine.RunningSnapshot()
+	if err := s.engine.Apply(ctx, newCfg, user, message); err != nil {
+		return "", 0, err
+	}
+
+	newCommitID := ""
+	if rollbackStore, ok := s.store.(rollbackCapableStore); ok {
+		newCommitID, err = rollbackStore.RollbackCommit(ctx, commitID, user, message)
+	} else {
+		var prepared store.PreparedCommit
+		prepared, err = s.store.PrepareCommit(ctx, model.NewSnapshot(newCfg, version, user, message))
+		if err == nil {
+			newCommitID, err = prepared.Commit(ctx)
+			if err != nil {
+				_ = prepared.Abort(context.Background())
+			}
+		}
+	}
+	if err != nil {
+		if rollbackErr := s.rollbackToSnapshot(context.Background(), beforeSnap, user); rollbackErr != nil {
+			return "", 0, fmt.Errorf("persist rollback after apply: %w (engine rollback failed: %v)", err, rollbackErr)
+		}
+		return "", 0, fmt.Errorf("persist rollback after apply: %w", err)
+	}
+
+	snap := s.engine.RunningSnapshot()
+	s.resetSessionCandidate(session)
+	if snap == nil {
+		return newCommitID, 0, nil
+	}
+	return newCommitID, snap.Version, nil
 }
 
 // Diff returns a simple line-oriented diff between running and candidate config.

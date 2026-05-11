@@ -65,7 +65,7 @@ func (p *FRRPlugin) ApplyChanges(ctx context.Context, diff *engine.ConfigDiff) e
 	// Only regenerate FRR config if routing-related changes occurred
 	if !diff.BGPChanged && !diff.OSPFChanged && !diff.StaticRoutesChanged &&
 		!diff.PolicyChanged && !diff.RoutingChanged && !diff.SystemChanged &&
-		len(diff.InterfacesAdded) == 0 && len(diff.InterfacesRemoved) == 0 {
+		!hasFRRRelevantInterfaceChanges(diff) {
 		p.log.Debug("No routing-related changes, skipping FRR reload")
 		return nil
 	}
@@ -189,4 +189,16 @@ func (p *FRRPlugin) buildFullConfig(diff *engine.ConfigDiff) *model.RouterConfig
 	}
 
 	return cfg
+}
+
+func hasFRRRelevantInterfaceChanges(diff *engine.ConfigDiff) bool {
+	if len(diff.InterfacesAdded) > 0 || len(diff.InterfacesRemoved) > 0 {
+		return true
+	}
+	for _, change := range diff.InterfacesChanged {
+		if len(change.AddressesAdded) > 0 || len(change.AddressesRemoved) > 0 {
+			return true
+		}
+	}
+	return false
 }

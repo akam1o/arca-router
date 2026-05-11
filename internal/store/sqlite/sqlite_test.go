@@ -64,6 +64,14 @@ func TestSaveCommitStoresSetCommands(t *testing.T) {
 	if latest == nil || latest.Config == nil || latest.Config.System == nil || latest.Config.System.HostName != "router1" {
 		t.Fatalf("latest snapshot = %#v, want router1 config", latest)
 	}
+
+	commit, err := st.GetCommit(context.Background(), running.CommitID)
+	if err != nil {
+		t.Fatalf("GetCommit() error = %v", err)
+	}
+	if commit == nil || commit.Config == nil || commit.Config.System == nil || commit.Config.System.HostName != "router1" {
+		t.Fatalf("commit = %#v, want parsed router1 config", commit)
+	}
 }
 
 func TestSaveCommitPreservesOSPFPriorityZero(t *testing.T) {
