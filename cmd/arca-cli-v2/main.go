@@ -705,6 +705,9 @@ func (sh *interactiveShell) cmdCommit(ctx context.Context, args []string) error 
 	if check && andQuit {
 		return fmt.Errorf("'check' and 'and-quit' cannot be used together")
 	}
+	if check && message != "" {
+		return fmt.Errorf("'check' and 'comment' cannot be used together")
+	}
 
 	if check {
 		if err := sh.client.ValidateCandidate(ctx, sh.sessionID); err != nil {

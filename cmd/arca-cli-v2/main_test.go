@@ -21,6 +21,7 @@ type fakeInteractiveClient struct {
 	commitCalls      int
 	listHistoryCalls int
 	rollbackCalls    int
+	validateCalls    int
 }
 
 func (f *fakeInteractiveClient) GetRunning(ctx context.Context) (string, uint64, error) {
@@ -41,6 +42,7 @@ func (f *fakeInteractiveClient) Commit(ctx context.Context, sessionID, user, mes
 }
 
 func (f *fakeInteractiveClient) ValidateCandidate(ctx context.Context, sessionID string) error {
+	f.validateCalls++
 	return nil
 }
 
@@ -195,6 +197,26 @@ func TestCommitAndQuitKeepsConfigurationModeOnReleaseFailure(t *testing.T) {
 	}
 	if sh.mode != modeConfiguration || !sh.hasLock || len(sh.editPath) == 0 {
 		t.Fatal("configuration state changed after commit and-quit release failure")
+	}
+}
+
+func TestCommitCheckRejectsComment(t *testing.T) {
+	ctx := context.Background()
+	client := &fakeInteractiveClient{}
+	sh := &interactiveShell{
+		client:    client,
+		hostname:  "router",
+		mode:      modeConfiguration,
+		sessionID: "session-1",
+		hasLock:   true,
+	}
+
+	err := sh.cmdCommit(ctx, []string{"check", "comment", "dry run"})
+	if err == nil || !strings.Contains(err.Error(), "'check' and 'comment' cannot be used together") {
+		t.Fatalf("cmdCommit(check comment) error = %v, want invalid option combination", err)
+	}
+	if client.validateCalls != 0 || client.commitCalls != 0 {
+		t.Fatalf("validate/commit calls = %d/%d, want 0/0", client.validateCalls, client.commitCalls)
 	}
 }
 
