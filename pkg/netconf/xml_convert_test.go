@@ -154,7 +154,7 @@ func TestXMLToConfigRejectsUnknownNamespace(t *testing.T) {
 	if !ok {
 		t.Fatalf("XMLToConfig() error = %T, want *RPCError", err)
 	}
-	if rpcErr.ErrorTag != "unknown-namespace" || rpcErr.ErrorInfo == nil || rpcErr.ErrorInfo.BadNamespace != "urn:example:unknown" {
+	if rpcErr.ErrorTag != ErrorTagUnknownNamespace || rpcErr.ErrorInfo == nil || rpcErr.ErrorInfo.BadNamespace != "urn:example:unknown" {
 		t.Fatalf("XMLToConfig() error = %#v, want unknown namespace error", rpcErr)
 	}
 }

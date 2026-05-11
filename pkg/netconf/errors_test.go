@@ -95,6 +95,34 @@ func TestErrDTDNotAllowed(t *testing.T) {
 	}
 }
 
+func TestErrInvalidNamespace(t *testing.T) {
+	err := ErrInvalidNamespace("urn:example:invalid")
+
+	if err.ErrorTag != ErrorTagUnknownNamespace {
+		t.Errorf("Expected unknown-namespace tag, got %s", err.ErrorTag)
+	}
+
+	if err.ErrorInfo == nil || err.ErrorInfo.BadElement != "rpc" || err.ErrorInfo.BadNamespace != "urn:example:invalid" {
+		t.Errorf("Expected bad-element rpc and bad-namespace, got %v", err.ErrorInfo)
+	}
+}
+
+func TestErrMissingAttribute(t *testing.T) {
+	err := ErrMissingAttribute("rpc", "message-id")
+
+	if err.ErrorType != ErrorTypeRPC {
+		t.Errorf("Expected rpc error type, got %s", err.ErrorType)
+	}
+
+	if err.ErrorTag != ErrorTagMissingAttribute {
+		t.Errorf("Expected missing-attribute tag, got %s", err.ErrorTag)
+	}
+
+	if err.ErrorInfo == nil || err.ErrorInfo.BadElement != "rpc" || err.ErrorInfo.BadAttribute != "message-id" {
+		t.Errorf("Expected bad-element rpc and bad-attribute message-id, got %v", err.ErrorInfo)
+	}
+}
+
 func TestErrLockDenied(t *testing.T) {
 	// Test ErrLockDenied (lock not acquired) - with target element
 	err := ErrLockDenied("candidate", "edit-config", true)

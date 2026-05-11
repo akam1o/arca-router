@@ -27,8 +27,10 @@ const (
 	ErrorTagInUse                 ErrorTag = "in-use"
 	ErrorTagOperationFailed       ErrorTag = "operation-failed"
 	ErrorTagMissingElement        ErrorTag = "missing-element"
+	ErrorTagMissingAttribute      ErrorTag = "missing-attribute"
 	ErrorTagUnknownElement        ErrorTag = "unknown-element"
 	ErrorTagUnknownAttribute      ErrorTag = "unknown-attribute"
+	ErrorTagUnknownNamespace      ErrorTag = "unknown-namespace"
 )
 
 // ErrorSeverity represents NETCONF error-severity values per RFC 6241
@@ -180,9 +182,18 @@ func ErrInvalidFilter(rpcName, message string) *RPCError {
 
 // ErrInvalidNamespace returns error for XML namespace mismatch
 func ErrInvalidNamespace(namespace string) *RPCError {
-	return NewRPCError(ErrorTypeProtocol, ErrorTagMalformedMessage, fmt.Sprintf("invalid namespace: %s", namespace)).
+	return NewRPCError(ErrorTypeProtocol, ErrorTagUnknownNamespace, fmt.Sprintf("invalid namespace: %s", namespace)).
 		WithPath("/rpc").
+		WithBadElement("rpc").
 		WithBadNamespace(namespace)
+}
+
+// ErrMissingAttribute returns error for missing required attribute
+func ErrMissingAttribute(element, attribute string) *RPCError {
+	return NewRPCError(ErrorTypeRPC, ErrorTagMissingAttribute, fmt.Sprintf("missing required attribute: %s", attribute)).
+		WithPath(fmt.Sprintf("/rpc/%s", element)).
+		WithBadElement(element).
+		WithBadAttribute(attribute)
 }
 
 // ErrMissingElement returns error for missing required element
