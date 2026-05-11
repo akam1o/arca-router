@@ -114,6 +114,14 @@ func debugLog(f *cliFlags, format string, args ...interface{}) {
 	}
 }
 
+func currentUsername() string {
+	username := os.Getenv("USER")
+	if username == "" {
+		return "admin"
+	}
+	return username
+}
+
 // --- One-shot command ---
 
 func runOneShotCommand(ctx context.Context, f *cliFlags, args []string) int {
@@ -235,7 +243,7 @@ func oneShotShow(ctx context.Context, client *grpcclient.Client, args []string, 
 // --- Interactive mode ---
 
 type interactiveShell struct {
-	client    *grpcclient.Client
+	client    interactiveClient
 	rl        *readline.Instance
 	hostname  string
 	mode      cliMode
@@ -243,6 +251,23 @@ type interactiveShell struct {
 	hasLock   bool
 	editPath  []string
 	flags     *cliFlags
+}
+
+type interactiveClient interface {
+	GetRunning(context.Context) (string, uint64, error)
+	GetCandidate(context.Context, string) (string, error)
+	EditCandidate(context.Context, string, string) error
+	Commit(context.Context, string, string, string) (string, uint64, error)
+	ValidateCandidate(context.Context, string) error
+	Discard(context.Context, string) error
+	Rollback(context.Context, string, string, string, string) (string, uint64, error)
+	Diff(context.Context, string) (string, bool, error)
+	ListHistory(context.Context, int, int) ([]grpcclient.CommitInfo, error)
+	AcquireLock(context.Context, string, string) error
+	ReleaseLock(context.Context, string) error
+	GetInterfaces(context.Context, string) ([]grpcclient.InterfaceInfo, error)
+	GetRoutes(context.Context, string, string) ([]grpcclient.RouteInfo, error)
+	GetBGPNeighbors(context.Context) ([]grpcclient.BGPNeighborInfo, error)
 }
 
 type cliMode int
@@ -267,10 +292,7 @@ func runInteractive(ctx context.Context, f *cliFlags) int {
 		hostname = info.Hostname
 	}
 
-	username := os.Getenv("USER")
-	if username == "" {
-		username = "admin"
-	}
+	username := currentUsername()
 
 	sh := &interactiveShell{
 		client:   client,
@@ -299,13 +321,17 @@ func runInteractive(ctx context.Context, f *cliFlags) int {
 	// Create a session with the daemon
 	sessionID, err := client.CreateSession(ctx, username)
 	if err != nil {
-		debugLog(f, "Warning: could not create session: %v", err)
-	} else {
-		sh.sessionID = sessionID
-		defer func() {
-			_ = client.CloseSession(ctx, sh.sessionID)
-		}()
+		fmt.Fprintf(os.Stderr, "Error: failed to create configuration session: %v\n", err)
+		return ExitOperationError
 	}
+	if sessionID == "" {
+		fmt.Fprintln(os.Stderr, "Error: daemon returned empty configuration session ID")
+		return ExitOperationError
+	}
+	sh.sessionID = sessionID
+	defer func() {
+		_ = client.CloseSession(ctx, sh.sessionID)
+	}()
 
 	// Handle Ctrl+C
 	sigCh := make(chan os.Signal, 1)
@@ -384,14 +410,9 @@ func (sh *interactiveShell) processCommand(ctx context.Context, line string) err
 			if response != "yes" && response != "y" {
 				return nil
 			}
-			// Discard and release lock
-			if sh.sessionID != "" {
-				_ = sh.client.Discard(ctx, sh.sessionID)
-				_ = sh.client.ReleaseLock(ctx, sh.sessionID)
+			if err := sh.exitConfigurationMode(ctx); err != nil {
+				return fmt.Errorf("exit configuration mode: %w", err)
 			}
-			sh.mode = modeOperational
-			sh.editPath = nil
-			sh.hasLock = false
 			return nil
 		}
 		return fmt.Errorf("exit")
@@ -429,17 +450,41 @@ func (sh *interactiveShell) cmdConfigure(ctx context.Context) error {
 		fmt.Println("Already in configuration mode")
 		return nil
 	}
+	if sh.sessionID == "" {
+		return fmt.Errorf("configuration session is not available")
+	}
 
 	// Acquire candidate lock via gRPC
-	if sh.sessionID != "" {
-		if err := sh.client.AcquireLock(ctx, sh.sessionID, os.Getenv("USER")); err != nil {
-			return fmt.Errorf("failed to acquire candidate lock: %w", err)
-		}
-		sh.hasLock = true
+	if err := sh.client.AcquireLock(ctx, sh.sessionID, currentUsername()); err != nil {
+		return fmt.Errorf("failed to acquire candidate lock: %w", err)
 	}
+	sh.hasLock = true
 
 	sh.mode = modeConfiguration
 	fmt.Println("Entering configuration mode")
+	return nil
+}
+
+func (sh *interactiveShell) exitConfigurationMode(ctx context.Context) error {
+	if sh.sessionID == "" {
+		return fmt.Errorf("configuration session is not available")
+	}
+	if err := sh.client.Discard(ctx, sh.sessionID); err != nil {
+		return fmt.Errorf("discard changes: %w", err)
+	}
+	return sh.releaseConfigurationLock(ctx)
+}
+
+func (sh *interactiveShell) releaseConfigurationLock(ctx context.Context) error {
+	if sh.sessionID == "" {
+		return fmt.Errorf("configuration session is not available")
+	}
+	if err := sh.client.ReleaseLock(ctx, sh.sessionID); err != nil {
+		return fmt.Errorf("release candidate lock: %w", err)
+	}
+	sh.mode = modeOperational
+	sh.editPath = nil
+	sh.hasLock = false
 	return nil
 }
 
@@ -643,10 +688,7 @@ func (sh *interactiveShell) cmdCommit(ctx context.Context, args []string) error 
 		return nil
 	}
 
-	user := os.Getenv("USER")
-	if user == "" {
-		user = "admin"
-	}
+	user := currentUsername()
 
 	commitID, version, err := sh.client.Commit(ctx, sh.sessionID, user, message)
 	if err != nil {
@@ -659,10 +701,9 @@ func (sh *interactiveShell) cmdCommit(ctx context.Context, args []string) error 
 	fmt.Printf("commit complete (id: %s, version: %d)\n", shortID, version)
 
 	if andQuit {
-		_ = sh.client.ReleaseLock(ctx, sh.sessionID)
-		sh.mode = modeOperational
-		sh.editPath = nil
-		sh.hasLock = false
+		if err := sh.releaseConfigurationLock(ctx); err != nil {
+			return fmt.Errorf("commit complete but failed to exit configuration mode: %w", err)
+		}
 	}
 	return nil
 }
@@ -693,10 +734,7 @@ func (sh *interactiveShell) cmdRollback(ctx context.Context, args []string) erro
 		return fmt.Errorf("not enough history for rollback %d (only %d commits available)", rollbackNum, availableCommits)
 	}
 	target := history[rollbackNum]
-	user := os.Getenv("USER")
-	if user == "" {
-		user = "admin"
-	}
+	user := currentUsername()
 	newCommitID, version, err := sh.client.Rollback(ctx, sh.sessionID, target.CommitID, user, fmt.Sprintf("CLI rollback %d", rollbackNum))
 	if err != nil {
 		return fmt.Errorf("rollback failed: %w", err)
