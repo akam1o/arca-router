@@ -8,7 +8,6 @@ import (
 	"os/signal"
 	"strconv"
 	"strings"
-	"syscall"
 
 	"github.com/akam1o/arca-router/pkg/cli"
 	"github.com/akam1o/arca-router/pkg/datastore"
@@ -79,7 +78,7 @@ func (sh *InteractiveShell) Run(ctx context.Context) error {
 
 	// Handle Ctrl+C gracefully
 	sigCh := make(chan os.Signal, 1)
-	signal.Notify(sigCh, os.Interrupt, syscall.SIGTERM)
+	signal.Notify(sigCh, os.Interrupt)
 	go func() {
 		<-sigCh
 		fmt.Println("\nInterrupted. Use 'exit' or 'quit' to leave the shell.")
