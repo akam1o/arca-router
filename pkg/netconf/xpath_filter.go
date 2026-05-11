@@ -253,6 +253,8 @@ func parseFilterElementsWithContext(filterXML []byte, namespaceAttrs []xml.Attr)
 	wrapped.WriteString("</filter>")
 
 	decoder := xml.NewDecoder(bytes.NewReader(wrapped.Bytes()))
+	decoder.Strict = true
+	decoder.Entity = nil
 	elements := make([]string, 0)
 	depth := 0
 
@@ -318,20 +320,12 @@ func filterMatchesEnhanced(filter *Filter, elementPath []string) bool {
 		return true
 	}
 
-	// Try to parse as XPath first (if it looks like a path)
-	if content[0] == '/' {
-		xpath, err := ParseXPathFilter(string(content))
-		if err == nil && xpath != nil {
-			return xpath.MatchesElement(elementPath)
-		}
-	}
-
 	filterElements, err := filter.parseTopLevelElements()
 	if err != nil {
 		return false
 	}
 	if len(filterElements) == 0 {
-		return true
+		return false
 	}
 	for _, elem := range filterElements {
 		if len(elementPath) > 0 && elem == elementPath[0] {
