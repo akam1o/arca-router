@@ -10,8 +10,11 @@ import (
 
 // mockDatastore implements datastore.Datastore for testing
 type mockDatastore struct {
-	lockSessionID string
-	lockAcquired  bool
+	lockSessionID     string
+	lockAcquired      bool
+	acquireLockCount  int
+	saveCandidateText string
+	history           []*datastore.CommitHistoryEntry
 }
 
 func (m *mockDatastore) GetRunning(ctx context.Context) (*datastore.RunningConfig, error) {
@@ -32,6 +35,7 @@ func (m *mockDatastore) GetCandidate(ctx context.Context, sessionID string) (*da
 }
 
 func (m *mockDatastore) SaveCandidate(ctx context.Context, sessionID string, configText string) error {
+	m.saveCandidateText = configText
 	return nil
 }
 
@@ -40,10 +44,14 @@ func (m *mockDatastore) DeleteCandidate(ctx context.Context, sessionID string) e
 }
 
 func (m *mockDatastore) Commit(ctx context.Context, req *datastore.CommitRequest) (string, error) {
+	m.lockAcquired = false
+	m.lockSessionID = ""
 	return "new-commit-id", nil
 }
 
 func (m *mockDatastore) Rollback(ctx context.Context, req *datastore.RollbackRequest) (string, error) {
+	m.lockAcquired = false
+	m.lockSessionID = ""
 	return "rollback-commit-id", nil
 }
 
@@ -59,6 +67,7 @@ func (m *mockDatastore) CompareCommits(ctx context.Context, commitID1, commitID2
 }
 
 func (m *mockDatastore) AcquireLock(ctx context.Context, req *datastore.LockRequest) error {
+	m.acquireLockCount++
 	m.lockSessionID = req.SessionID
 	m.lockAcquired = true
 	return nil
@@ -94,6 +103,9 @@ func (m *mockDatastore) GetLockInfo(ctx context.Context, target string) (*datast
 }
 
 func (m *mockDatastore) ListCommitHistory(ctx context.Context, opts *datastore.HistoryOptions) ([]*datastore.CommitHistoryEntry, error) {
+	if m.history != nil {
+		return m.history, nil
+	}
 	return []*datastore.CommitHistoryEntry{
 		{
 			CommitID:   "commit-1",
@@ -254,6 +266,25 @@ func TestSetCommandRequiresConfigMode(t *testing.T) {
 	err := session.SetCommand(ctx, []string{"system", "host-name", "router1"})
 	if err == nil {
 		t.Error("Expected error when calling SetCommand in operational mode")
+	}
+}
+
+func TestSetCommandRequiresActiveLock(t *testing.T) {
+	ctx := context.Background()
+	ds := &mockDatastore{}
+	session := NewSession("testuser", ds)
+	if err := session.EnterConfigurationMode(ctx); err != nil {
+		t.Fatalf("EnterConfigurationMode() error = %v", err)
+	}
+	if err := ds.ReleaseLock(ctx, datastore.LockTargetCandidate, session.ID()); err != nil {
+		t.Fatalf("ReleaseLock() error = %v", err)
+	}
+
+	if err := session.SetCommand(ctx, []string{"system", "host-name", "router1"}); err == nil {
+		t.Fatal("SetCommand() expected lock error")
+	}
+	if err := session.SetCommandWithPath(ctx, []string{"system", "host-name", "router1"}); err == nil {
+		t.Fatal("SetCommandWithPath() expected lock error")
 	}
 }
 

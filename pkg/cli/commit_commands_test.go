@@ -3,6 +3,8 @@ package cli
 import (
 	"context"
 	"testing"
+
+	"github.com/akam1o/arca-router/pkg/datastore"
 )
 
 func TestCommitOptions(t *testing.T) {
@@ -106,6 +108,59 @@ func TestCommitWithOptions(t *testing.T) {
 	}
 }
 
+func TestCommitWithOptionsRefreshesConfigurationSession(t *testing.T) {
+	ctx := context.Background()
+	ds := &mockDatastore{}
+	session := NewSession("testuser", ds)
+	if err := session.EnterConfigurationMode(ctx); err != nil {
+		t.Fatalf("EnterConfigurationMode() error = %v", err)
+	}
+
+	initialLocks := ds.acquireLockCount
+	if err := session.CommitWithOptions(ctx, CommitOptions{}); err != nil {
+		t.Fatalf("CommitWithOptions() error = %v", err)
+	}
+
+	if session.Mode() != ModeConfiguration {
+		t.Fatalf("mode = %v, want configuration", session.Mode())
+	}
+	if !ds.lockAcquired || ds.lockSessionID != session.ID() {
+		t.Fatalf("lock was not reacquired for session %s", session.ID())
+	}
+	if ds.acquireLockCount != initialLocks+1 {
+		t.Fatalf("AcquireLock count = %d, want %d", ds.acquireLockCount, initialLocks+1)
+	}
+	if ds.saveCandidateText == "" {
+		t.Fatal("candidate was not refreshed from running after commit")
+	}
+	if err := session.SetCommand(ctx, []string{"system", "host-name", "router2"}); err != nil {
+		t.Fatalf("SetCommand() after commit error = %v", err)
+	}
+}
+
+func TestCommitWithOptionsAndQuitLeavesOperational(t *testing.T) {
+	ctx := context.Background()
+	ds := &mockDatastore{}
+	session := NewSession("testuser", ds)
+	if err := session.EnterConfigurationMode(ctx); err != nil {
+		t.Fatalf("EnterConfigurationMode() error = %v", err)
+	}
+
+	if err := session.CommitWithOptions(ctx, CommitOptions{AndQuit: true}); err != nil {
+		t.Fatalf("CommitWithOptions(and-quit) error = %v", err)
+	}
+
+	if session.Mode() != ModeOperational {
+		t.Fatalf("mode = %v, want operational", session.Mode())
+	}
+	if session.lockAcquired {
+		t.Fatal("session still believes it holds a lock after commit and-quit")
+	}
+	if ds.acquireLockCount != 1 {
+		t.Fatalf("AcquireLock count = %d, want no reacquire after and-quit", ds.acquireLockCount)
+	}
+}
+
 func TestRollbackWithNumber(t *testing.T) {
 	ctx := context.Background()
 	ds := &mockDatastore{}
@@ -145,6 +200,38 @@ func TestRollbackWithNumber(t *testing.T) {
 				t.Errorf("RollbackWithNumber() error = %v, wantErr %v", err, tt.wantErr)
 			}
 		})
+	}
+}
+
+func TestRollbackWithNumberRefreshesConfigurationSession(t *testing.T) {
+	ctx := context.Background()
+	ds := &mockDatastore{
+		history: []*datastore.CommitHistoryEntry{
+			{CommitID: "commit-new", ConfigText: "set system host-name new"},
+			{CommitID: "commit-old", ConfigText: "set system host-name old"},
+		},
+	}
+	session := NewSession("testuser", ds)
+	if err := session.EnterConfigurationMode(ctx); err != nil {
+		t.Fatalf("EnterConfigurationMode() error = %v", err)
+	}
+
+	initialLocks := ds.acquireLockCount
+	if err := session.RollbackWithNumber(ctx, 1); err != nil {
+		t.Fatalf("RollbackWithNumber() error = %v", err)
+	}
+
+	if session.Mode() != ModeConfiguration {
+		t.Fatalf("mode = %v, want configuration", session.Mode())
+	}
+	if !ds.lockAcquired || ds.lockSessionID != session.ID() {
+		t.Fatalf("lock was not reacquired for session %s", session.ID())
+	}
+	if ds.acquireLockCount != initialLocks+1 {
+		t.Fatalf("AcquireLock count = %d, want %d", ds.acquireLockCount, initialLocks+1)
+	}
+	if err := session.SetCommand(ctx, []string{"system", "host-name", "router2"}); err != nil {
+		t.Fatalf("SetCommand() after rollback error = %v", err)
 	}
 }
 

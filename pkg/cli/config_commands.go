@@ -12,6 +12,9 @@ func (s *Session) SetCommandWithPath(ctx context.Context, args []string) error {
 	if s.mode != ModeConfiguration {
 		return fmt.Errorf("not in configuration mode")
 	}
+	if err := s.verifyLock(ctx); err != nil {
+		return fmt.Errorf("cannot edit candidate: %w", err)
+	}
 
 	// Parse with current configPath
 	setLine, err := ParseSetCommand(args, s.configPath)
@@ -40,6 +43,9 @@ func (s *Session) SetCommandWithPath(ctx context.Context, args []string) error {
 func (s *Session) DeleteCommandWithPath(ctx context.Context, args []string) error {
 	if s.mode != ModeConfiguration {
 		return fmt.Errorf("not in configuration mode")
+	}
+	if err := s.verifyLock(ctx); err != nil {
+		return fmt.Errorf("cannot edit candidate: %w", err)
 	}
 
 	// Parse with current configPath

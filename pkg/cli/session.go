@@ -62,6 +62,44 @@ func (s *Session) Username() string     { return s.username }
 func (s *Session) Mode() Mode           { return s.mode }
 func (s *Session) ConfigPath() []string { return s.configPath }
 
+func (s *Session) acquireCandidateLock(ctx context.Context) error {
+	lockReq := &datastore.LockRequest{
+		Target:    datastore.LockTargetCandidate,
+		SessionID: s.id,
+		User:      s.username,
+		Timeout:   s.timeout,
+	}
+	if err := s.ds.AcquireLock(ctx, lockReq); err != nil {
+		return fmt.Errorf("failed to acquire lock: %w", err)
+	}
+	s.lockAcquired = true
+	return nil
+}
+
+func (s *Session) syncCandidateFromRunning(ctx context.Context) error {
+	running, err := s.ds.GetRunning(ctx)
+	if err != nil {
+		return fmt.Errorf("failed to get running config: %w", err)
+	}
+	if err := s.ds.SaveCandidate(ctx, s.id, running.ConfigText); err != nil {
+		return fmt.Errorf("failed to sync candidate: %w", err)
+	}
+	return nil
+}
+
+func (s *Session) resumeConfigurationLock(ctx context.Context) error {
+	s.lockAcquired = false
+	if err := s.acquireCandidateLock(ctx); err != nil {
+		return err
+	}
+	if err := s.syncCandidateFromRunning(ctx); err != nil {
+		_ = s.ds.ReleaseLock(context.Background(), datastore.LockTargetCandidate, s.id)
+		s.lockAcquired = false
+		return err
+	}
+	return nil
+}
+
 // verifyLock checks if the session still owns the candidate lock
 // Returns error if lock is expired or owned by another session
 func (s *Session) verifyLock(ctx context.Context) error {
@@ -96,17 +134,10 @@ func (s *Session) EnterConfigurationMode(ctx context.Context) error {
 		return fmt.Errorf("already in configuration mode")
 	}
 
-	lockReq := &datastore.LockRequest{
-		Target:    datastore.LockTargetCandidate,
-		SessionID: s.id,
-		User:      s.username,
-		Timeout:   s.timeout,
-	}
-	if err := s.ds.AcquireLock(ctx, lockReq); err != nil {
-		return fmt.Errorf("failed to acquire lock: %w", err)
+	if err := s.acquireCandidateLock(ctx); err != nil {
+		return err
 	}
 
-	s.lockAcquired = true
 	s.mode = ModeConfiguration
 
 	// Initialize candidate from running if needed
@@ -117,15 +148,17 @@ func (s *Session) EnterConfigurationMode(ctx context.Context) error {
 		var dsErr *datastore.Error
 		if err != nil && (!errors.As(err, &dsErr) || dsErr.Code != datastore.ErrCodeNotFound) {
 			// This is not a "not found" error - it's a real failure
+			_ = s.ds.ReleaseLock(context.Background(), datastore.LockTargetCandidate, s.id)
+			s.lockAcquired = false
+			s.mode = ModeOperational
 			return fmt.Errorf("failed to get candidate: %w", err)
 		}
 
 		// Candidate not found - initialize from running
-		running, err := s.ds.GetRunning(ctx)
-		if err != nil {
-			return fmt.Errorf("failed to get running config: %w", err)
-		}
-		if err := s.ds.SaveCandidate(ctx, s.id, running.ConfigText); err != nil {
+		if err := s.syncCandidateFromRunning(ctx); err != nil {
+			_ = s.ds.ReleaseLock(context.Background(), datastore.LockTargetCandidate, s.id)
+			s.lockAcquired = false
+			s.mode = ModeOperational
 			return fmt.Errorf("failed to initialize candidate: %w", err)
 		}
 	}
@@ -157,6 +190,9 @@ func (s *Session) SetCommand(ctx context.Context, args []string) error {
 	if s.mode != ModeConfiguration {
 		return fmt.Errorf("not in configuration mode")
 	}
+	if err := s.verifyLock(ctx); err != nil {
+		return fmt.Errorf("cannot edit candidate: %w", err)
+	}
 	if len(args) == 0 {
 		return fmt.Errorf("'set' requires arguments")
 	}
@@ -183,6 +219,9 @@ func (s *Session) SetCommand(ctx context.Context, args []string) error {
 func (s *Session) DeleteCommand(ctx context.Context, args []string) error {
 	if s.mode != ModeConfiguration {
 		return fmt.Errorf("not in configuration mode")
+	}
+	if err := s.verifyLock(ctx); err != nil {
+		return fmt.Errorf("cannot edit candidate: %w", err)
 	}
 	if len(args) == 0 {
 		return fmt.Errorf("'delete' requires arguments")
@@ -262,6 +301,10 @@ func (s *Session) CommitCommand(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("commit failed: %w", err)
 	}
+	s.lockAcquired = false
+	if err := s.resumeConfigurationLock(ctx); err != nil {
+		return fmt.Errorf("commit complete but failed to refresh configuration session: %w", err)
+	}
 
 	fmt.Printf("commit complete (commit ID: %s)\n", commitID)
 	return nil
@@ -331,14 +374,9 @@ func (s *Session) RollbackCommand(ctx context.Context, rollbackNum int) error {
 	if err != nil {
 		return fmt.Errorf("rollback failed: %w", err)
 	}
-
-	// Sync candidate with rolled-back running
-	running, err := s.ds.GetRunning(ctx)
-	if err != nil {
-		return fmt.Errorf("failed to get running after rollback: %w", err)
-	}
-	if err := s.ds.SaveCandidate(ctx, s.id, running.ConfigText); err != nil {
-		return fmt.Errorf("failed to sync candidate: %w", err)
+	s.lockAcquired = false
+	if err := s.resumeConfigurationLock(ctx); err != nil {
+		return fmt.Errorf("rollback complete but failed to refresh configuration session: %w", err)
 	}
 
 	fmt.Printf("rollback complete (new commit ID: %s)\n", newCommitID)
@@ -350,13 +388,11 @@ func (s *Session) DiscardChanges(ctx context.Context) error {
 	if s.mode != ModeConfiguration {
 		return fmt.Errorf("not in configuration mode")
 	}
-
-	running, err := s.ds.GetRunning(ctx)
-	if err != nil {
-		return fmt.Errorf("failed to get running: %w", err)
+	if err := s.verifyLock(ctx); err != nil {
+		return fmt.Errorf("cannot discard changes: %w", err)
 	}
 
-	if err := s.ds.SaveCandidate(ctx, s.id, running.ConfigText); err != nil {
+	if err := s.syncCandidateFromRunning(ctx); err != nil {
 		return fmt.Errorf("failed to discard changes: %w", err)
 	}
 
