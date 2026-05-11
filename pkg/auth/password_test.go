@@ -78,6 +78,32 @@ func TestVerifyPasswordInvalidHash(t *testing.T) {
 	}
 }
 
+func TestVerifyPasswordRejectsUnsafeParameters(t *testing.T) {
+	hash, err := HashPassword("password")
+	if err != nil {
+		t.Fatalf("HashPassword failed: %v", err)
+	}
+
+	tests := []struct {
+		name string
+		hash string
+	}{
+		{"missing parallelism", strings.Replace(hash, ",p=4", "", 1)},
+		{"zero time", strings.Replace(hash, "t=3", "t=0", 1)},
+		{"zero parallelism", strings.Replace(hash, "p=4", "p=0", 1)},
+		{"excess memory", strings.Replace(hash, "m=65536", "m=65537", 1)},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := VerifyPassword("password", tt.hash)
+			if err == nil || !strings.Contains(err.Error(), "invalid parameters") {
+				t.Fatalf("VerifyPassword() error = %v, want invalid parameters", err)
+			}
+		})
+	}
+}
+
 func TestPasswordWithSpecialCharacters(t *testing.T) {
 	passwords := []string{
 		"password with spaces",

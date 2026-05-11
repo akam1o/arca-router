@@ -5,6 +5,7 @@ import (
 	"crypto/subtle"
 	"encoding/base64"
 	"fmt"
+	"strconv"
 	"strings"
 
 	"golang.org/x/crypto/argon2"
@@ -63,10 +64,7 @@ func VerifyPassword(password, encodedHash string) (bool, error) {
 		return false, fmt.Errorf("unsupported argon2 version: %s", parts[2])
 	}
 
-	// Parse parameters
-	var memory, time uint32
-	var threads uint8
-	_, err := fmt.Sscanf(parts[3], "m=%d,t=%d,p=%d", &memory, &time, &threads)
+	memory, time, threads, err := parseArgon2Params(parts[3])
 	if err != nil {
 		return false, fmt.Errorf("invalid parameters: %w", err)
 	}
@@ -95,4 +93,48 @@ func VerifyPassword(password, encodedHash string) (bool, error) {
 
 	// Constant-time comparison
 	return subtle.ConstantTimeCompare(expectedHash, actualHash) == 1, nil
+}
+
+func parseArgon2Params(encoded string) (uint32, uint32, uint8, error) {
+	fields := strings.Split(encoded, ",")
+	if len(fields) != 3 {
+		return 0, 0, 0, fmt.Errorf("expected m, t, and p parameters")
+	}
+
+	memory, err := parseArgon2Param(fields[0], "m", 32)
+	if err != nil {
+		return 0, 0, 0, err
+	}
+	timeCost, err := parseArgon2Param(fields[1], "t", 32)
+	if err != nil {
+		return 0, 0, 0, err
+	}
+	threads, err := parseArgon2Param(fields[2], "p", 8)
+	if err != nil {
+		return 0, 0, 0, err
+	}
+
+	if memory == 0 || memory > argon2Memory {
+		return 0, 0, 0, fmt.Errorf("memory cost out of range")
+	}
+	if timeCost == 0 || timeCost > argon2Time {
+		return 0, 0, 0, fmt.Errorf("time cost out of range")
+	}
+	if threads == 0 || threads > argon2Threads {
+		return 0, 0, 0, fmt.Errorf("parallelism out of range")
+	}
+
+	return uint32(memory), uint32(timeCost), uint8(threads), nil
+}
+
+func parseArgon2Param(field, name string, bitSize int) (uint64, error) {
+	key, value, ok := strings.Cut(field, "=")
+	if !ok || key != name || value == "" {
+		return 0, fmt.Errorf("missing %s parameter", name)
+	}
+	parsed, err := strconv.ParseUint(value, 10, bitSize)
+	if err != nil {
+		return 0, fmt.Errorf("invalid %s parameter: %w", name, err)
+	}
+	return parsed, nil
 }
