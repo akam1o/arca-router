@@ -27,10 +27,10 @@ func (ds *sqliteDatastore) Commit(ctx context.Context, req *CommitRequest) (stri
 	err = ds.withTx(ctx, false, func(tx *sql.Tx) error {
 		// 0. Verify the session holds a valid (non-expired) candidate lock (enforces exclusive access)
 		var lockSessionID string
-		var expiresAtUnix int64
+		var expiresAt sqliteUnixTime
 		err := tx.QueryRowContext(ctx, `
-				SELECT session_id, expires_at FROM config_locks WHERE target = ?
-			`, LockTargetCandidate).Scan(&lockSessionID, &expiresAtUnix)
+					SELECT session_id, expires_at FROM config_locks WHERE target = ?
+				`, LockTargetCandidate).Scan(&lockSessionID, &expiresAt)
 
 		if err == sql.ErrNoRows {
 			return NewError(ErrCodeConflict,
@@ -41,7 +41,7 @@ func (ds *sqliteDatastore) Commit(ctx context.Context, req *CommitRequest) (stri
 		}
 
 		// Check if lock has expired
-		if now.Unix() > expiresAtUnix {
+		if now.Unix() > expiresAt.Unix() {
 			return NewError(ErrCodeConflict,
 				"cannot commit: config lock has expired (re-acquire lock before commit)", nil)
 		}
