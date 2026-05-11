@@ -2,6 +2,7 @@ package cli
 
 import (
 	"context"
+	"errors"
 	"testing"
 
 	"github.com/akam1o/arca-router/pkg/datastore"
@@ -138,6 +139,31 @@ func TestCommitWithOptionsRefreshesConfigurationSession(t *testing.T) {
 	}
 }
 
+func TestCommitWithOptionsRefreshFailureLeavesOperational(t *testing.T) {
+	ctx := context.Background()
+	ds := &mockDatastore{}
+	session := NewSession("testuser", ds)
+	if err := session.EnterConfigurationMode(ctx); err != nil {
+		t.Fatalf("EnterConfigurationMode() error = %v", err)
+	}
+
+	initialLocks := ds.acquireLockCount
+	ds.acquireLockErr = errors.New("lock busy")
+	if err := session.CommitWithOptions(ctx, CommitOptions{}); err != nil {
+		t.Fatalf("CommitWithOptions() error = %v, want nil after commit success", err)
+	}
+
+	if session.Mode() != ModeOperational {
+		t.Fatalf("mode = %v, want operational after refresh failure", session.Mode())
+	}
+	if session.lockAcquired || ds.lockAcquired {
+		t.Fatal("session still holds or believes it holds a lock after refresh failure")
+	}
+	if ds.acquireLockCount != initialLocks+1 {
+		t.Fatalf("AcquireLock count = %d, want %d", ds.acquireLockCount, initialLocks+1)
+	}
+}
+
 func TestCommitWithOptionsAndQuitLeavesOperational(t *testing.T) {
 	ctx := context.Background()
 	ds := &mockDatastore{}
@@ -232,6 +258,36 @@ func TestRollbackWithNumberRefreshesConfigurationSession(t *testing.T) {
 	}
 	if err := session.SetCommand(ctx, []string{"system", "host-name", "router2"}); err != nil {
 		t.Fatalf("SetCommand() after rollback error = %v", err)
+	}
+}
+
+func TestRollbackWithNumberRefreshFailureLeavesOperational(t *testing.T) {
+	ctx := context.Background()
+	ds := &mockDatastore{
+		history: []*datastore.CommitHistoryEntry{
+			{CommitID: "commit-new", ConfigText: "set system host-name new"},
+			{CommitID: "commit-old", ConfigText: "set system host-name old"},
+		},
+	}
+	session := NewSession("testuser", ds)
+	if err := session.EnterConfigurationMode(ctx); err != nil {
+		t.Fatalf("EnterConfigurationMode() error = %v", err)
+	}
+
+	initialLocks := ds.acquireLockCount
+	ds.acquireLockErr = errors.New("lock busy")
+	if err := session.RollbackWithNumber(ctx, 1); err != nil {
+		t.Fatalf("RollbackWithNumber() error = %v, want nil after rollback success", err)
+	}
+
+	if session.Mode() != ModeOperational {
+		t.Fatalf("mode = %v, want operational after refresh failure", session.Mode())
+	}
+	if session.lockAcquired || ds.lockAcquired {
+		t.Fatal("session still holds or believes it holds a lock after refresh failure")
+	}
+	if ds.acquireLockCount != initialLocks+1 {
+		t.Fatalf("AcquireLock count = %d, want %d", ds.acquireLockCount, initialLocks+1)
 	}
 }
 
