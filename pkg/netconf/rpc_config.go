@@ -15,6 +15,12 @@ type GetConfigRequest struct {
 	Filter  *Filter  `xml:"filter"`
 }
 
+func (r *GetConfigRequest) SetInheritedNamespaceAttrs(attrs []xml.Attr) {
+	if r.Filter != nil {
+		r.Filter.InheritedAttrs = cloneXMLAttrs(attrs)
+	}
+}
+
 // checkLockOwnership verifies if the session holds the lock for the target datastore.
 // Write operations (edit-config, copy-config, delete-config, commit, discard-changes)
 // require the session to hold the lock. Returns an RPCError if:

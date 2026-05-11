@@ -76,6 +76,38 @@ func TestParseRPC(t *testing.T) {
 			wantErr: true,
 			errType: "unknown-attribute",
 		},
+		{
+			name: "operation empty namespace rejected",
+			xml: `<rpc message-id="101" xmlns="urn:ietf:params:xml:ns:netconf:base:1.0">
+					<get-config xmlns=""><source><running/></source></get-config>
+				</rpc>`,
+			wantErr: true,
+			errType: "unknown-namespace",
+		},
+		{
+			name: "unknown operation child rejected",
+			xml: `<rpc message-id="101" xmlns="urn:ietf:params:xml:ns:netconf:base:1.0">
+					<get-config><source><running/></source><unexpected/></get-config>
+				</rpc>`,
+			wantErr: true,
+			errType: "unknown-element",
+		},
+		{
+			name: "filter attribute rejected",
+			xml: `<rpc message-id="101" xmlns="urn:ietf:params:xml:ns:netconf:base:1.0">
+					<get-config><source><running/></source><filter foo="bar"><interfaces/></filter></get-config>
+				</rpc>`,
+			wantErr: true,
+			errType: "unknown-attribute",
+		},
+		{
+			name: "filter empty namespace rejected",
+			xml: `<rpc message-id="101" xmlns="urn:ietf:params:xml:ns:netconf:base:1.0">
+					<get-config><source><running/></source><filter xmlns=""><interfaces/></filter></get-config>
+				</rpc>`,
+			wantErr: true,
+			errType: "unknown-namespace",
+		},
 	}
 
 	for _, tt := range tests {
@@ -180,6 +212,52 @@ func TestUnmarshalOperationPreservesAncestorNamespaceDeclarations(t *testing.T) 
 			}
 			if cfg.System == nil || cfg.System.HostName != "router1" {
 				t.Fatalf("XMLToConfig() system = %#v, want host-name router1", cfg.System)
+			}
+		})
+	}
+}
+
+func TestUnmarshalOperationPreservesFilterNamespaceDeclarations(t *testing.T) {
+	tests := []struct {
+		name string
+		xml  string
+	}{
+		{
+			name: "rpc namespace declaration",
+			xml: `<rpc message-id="101" xmlns="urn:ietf:params:xml:ns:netconf:base:1.0" xmlns:if="urn:ietf:params:xml:ns:yang:ietf-interfaces">
+				<get-config>
+					<source><running/></source>
+					<filter><if:interfaces/></filter>
+				</get-config>
+			</rpc>`,
+		},
+		{
+			name: "filter namespace declaration",
+			xml: `<rpc message-id="101" xmlns="urn:ietf:params:xml:ns:netconf:base:1.0">
+				<get-config>
+					<source><running/></source>
+					<filter xmlns:if="urn:ietf:params:xml:ns:yang:ietf-interfaces"><if:interfaces/></filter>
+				</get-config>
+			</rpc>`,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			rpc, err := ParseRPC([]byte(tt.xml))
+			if err != nil {
+				t.Fatalf("ParseRPC() error = %v", err)
+			}
+
+			var req GetConfigRequest
+			if err := rpc.UnmarshalOperation(&req); err != nil {
+				t.Fatalf("UnmarshalOperation() error = %v", err)
+			}
+			if req.Filter == nil {
+				t.Fatal("UnmarshalOperation() filter = nil")
+			}
+			if !filterMatches(req.Filter, "interfaces") {
+				t.Fatalf("filterMatches() = false, want true for namespace-prefixed interfaces filter")
 			}
 		})
 	}

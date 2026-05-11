@@ -198,7 +198,7 @@ func ApplySubtreeFilter(xmlData []byte, filter *Filter) ([]byte, error) {
 	}
 
 	// Parse filter as XML to extract element structure
-	filterElements, err := parseFilterElements(filter.Content)
+	filterElements, err := filter.parseTopLevelElements()
 	if err != nil {
 		return nil, fmt.Errorf("invalid subtree filter: %w", err)
 	}
@@ -233,9 +233,28 @@ func ApplySubtreeFilter(xmlData []byte, filter *Filter) ([]byte, error) {
 
 // parseFilterElements extracts top-level element names from filter XML
 func parseFilterElements(filterXML []byte) ([]string, error) {
-	decoder := xml.NewDecoder(bytes.NewReader(filterXML))
+	return parseFilterElementsWithContext(filterXML, nil)
+}
+
+func (f *Filter) parseTopLevelElements() ([]string, error) {
+	if f == nil {
+		return nil, nil
+	}
+	namespaceAttrs := collectNamespaceAttrs(f.InheritedAttrs, f.Attrs)
+	return parseFilterElementsWithContext(f.Content, namespaceAttrs)
+}
+
+func parseFilterElementsWithContext(filterXML []byte, namespaceAttrs []xml.Attr) ([]string, error) {
+	var wrapped bytes.Buffer
+	wrapped.WriteString("<filter")
+	writeNamespaceDeclarationAttrs(&wrapped, namespaceAttrs, map[string]string{})
+	wrapped.WriteByte('>')
+	wrapped.Write(filterXML)
+	wrapped.WriteString("</filter>")
+
+	decoder := xml.NewDecoder(bytes.NewReader(wrapped.Bytes()))
 	elements := make([]string, 0)
-	inElement := false
+	depth := 0
 
 	for {
 		token, err := decoder.Token()
@@ -248,16 +267,14 @@ func parseFilterElements(filterXML []byte) ([]string, error) {
 
 		switch t := token.(type) {
 		case xml.StartElement:
-			if !inElement {
+			depth++
+			if depth == 2 {
 				// Top-level element
 				elements = append(elements, t.Name.Local)
-				inElement = true
 			}
 		case xml.EndElement:
-			if inElement && len(elements) > 0 {
-				// Check if we're closing a top-level element
-				// For simplicity, we assume one-level nesting for Phase 3
-				inElement = false
+			if depth > 0 {
+				depth--
 			}
 		}
 	}
@@ -296,20 +313,33 @@ func filterMatchesEnhanced(filter *Filter, elementPath []string) bool {
 		return true
 	}
 
+	content := bytes.TrimSpace(filter.Content)
+	if len(content) == 0 {
+		return true
+	}
+
 	// Try to parse as XPath first (if it looks like a path)
-	if len(filter.Content) > 0 && filter.Content[0] == '/' {
-		xpath, err := ParseXPathFilter(string(filter.Content))
+	if content[0] == '/' {
+		xpath, err := ParseXPathFilter(string(content))
 		if err == nil && xpath != nil {
 			return xpath.MatchesElement(elementPath)
 		}
 	}
 
-	// Fallback to simple substring matching (backward compatibility)
-	if len(elementPath) > 0 {
-		return bytes.Contains(filter.Content, []byte("<"+elementPath[0]))
+	filterElements, err := filter.parseTopLevelElements()
+	if err != nil {
+		return false
+	}
+	if len(filterElements) == 0 {
+		return true
+	}
+	for _, elem := range filterElements {
+		if len(elementPath) > 0 && elem == elementPath[0] {
+			return true
+		}
 	}
 
-	return true
+	return false
 }
 
 // filterMatches is the legacy function for backward compatibility

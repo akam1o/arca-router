@@ -5,6 +5,7 @@ import (
 	"encoding/xml"
 	"fmt"
 	"io"
+	"strings"
 )
 
 // RPC represents a NETCONF <rpc> request envelope
@@ -86,6 +87,9 @@ func ParseRPC(data []byte) (*RPC, error) {
 		NamespaceAttrs: collectNamespaceAttrs(envelope.Attrs, operation.Attrs),
 	}
 	if err := ValidateProtocolNamespace(rpc.Operation); err != nil {
+		return nil, err
+	}
+	if err := rpc.validateOperationPayload(); err != nil {
 		return nil, err
 	}
 
@@ -176,6 +180,89 @@ func validateRPCOperationAttributes(operation rpcOperation) error {
 	return nil
 }
 
+func (r *RPC) validateOperationPayload() error {
+	if _, ok := rpcOperationElementPaths[r.Operation.Local]; !ok {
+		return nil
+	}
+
+	decoder := xml.NewDecoder(bytes.NewReader(r.operationXML()))
+	decoder.Strict = true
+	decoder.Entity = nil
+
+	stack := []string{}
+	openContentDepth := 0
+	for {
+		token, err := decoder.Token()
+		if err == io.EOF {
+			if len(stack) != 0 || openContentDepth != 0 {
+				return ErrMalformedMessage("unexpected end of operation payload")
+			}
+			return nil
+		}
+		if err != nil {
+			return ErrMalformedMessage(fmt.Sprintf("operation parse error: %v", err))
+		}
+
+		switch t := token.(type) {
+		case xml.StartElement:
+			if openContentDepth > 0 {
+				openContentDepth++
+				continue
+			}
+			path := append(append([]string{}, stack...), t.Name.Local)
+			if err := r.validateOperationElement(t, path); err != nil {
+				return err
+			}
+			stack = append(stack, t.Name.Local)
+			if isOpenRPCContentPath(path) {
+				openContentDepth = 1
+			}
+		case xml.EndElement:
+			if openContentDepth > 0 {
+				openContentDepth--
+				if openContentDepth == 0 {
+					stack = stack[:len(stack)-1]
+				}
+				continue
+			}
+			if len(stack) == 0 {
+				return ErrMalformedMessage(fmt.Sprintf("unexpected closing element: %s", t.Name.Local))
+			}
+			stack = stack[:len(stack)-1]
+		}
+	}
+}
+
+func (r *RPC) validateOperationElement(start xml.StartElement, path []string) error {
+	pathKey := rpcPathKey(path)
+	if _, ok := rpcOperationElementPaths[r.Operation.Local][pathKey]; !ok {
+		return ErrUnknownElement(rpcElementRPCPath(path), start.Name.Local)
+	}
+
+	if !allowsAnyElementNamespace(path) && start.Name.Space != netconfNamespace {
+		return NewRPCError(ErrorTypeProtocol, "unknown-namespace",
+			fmt.Sprintf("invalid namespace for RPC element %s", start.Name.Local)).
+			WithPath(rpcElementRPCPath(path)).
+			WithBadNamespace(start.Name.Space)
+	}
+
+	allowedAttrs := rpcElementAllowedAttrs(pathKey)
+	for _, attr := range start.Attr {
+		if isNamespaceDeclarationAttribute(attr) {
+			continue
+		}
+		if attr.Name.Space == "" && allowedAttrs[attr.Name.Local] {
+			continue
+		}
+		rpcErr := ErrUnknownAttribute(rpcElementRPCPath(path), attr.Name.Local)
+		if attr.Name.Space != "" {
+			rpcErr = rpcErr.WithBadNamespace(attr.Name.Space)
+		}
+		return rpcErr
+	}
+	return nil
+}
+
 func collectNamespaceAttrs(attrGroups ...[]xml.Attr) []xml.Attr {
 	var attrs []xml.Attr
 	seen := map[string]int{}
@@ -235,13 +322,121 @@ func namespaceDeclarationAttrName(attr xml.Attr) (string, bool) {
 	return "", false
 }
 
-// ValidateOperationNamespace checks if operation is in NETCONF namespace
-func (r *RPC) ValidateOperationNamespace() error {
-	// Allow both NETCONF base:1.0 namespace and empty namespace (default)
-	if r.Operation.Space != "" && r.Operation.Space != netconfNamespace {
-		return ErrInvalidNamespace(r.Operation.Space)
+var rpcOperationElementPaths = map[string]map[string]struct{}{
+	"get-config": {
+		"get-config":                  {},
+		"get-config/source":           {},
+		"get-config/source/running":   {},
+		"get-config/source/candidate": {},
+		"get-config/source/startup":   {},
+		"get-config/filter":           {},
+	},
+	"edit-config": {
+		"edit-config":                   {},
+		"edit-config/target":            {},
+		"edit-config/target/running":    {},
+		"edit-config/target/candidate":  {},
+		"edit-config/target/startup":    {},
+		"edit-config/default-operation": {},
+		"edit-config/test-option":       {},
+		"edit-config/error-option":      {},
+		"edit-config/config":            {},
+	},
+	"copy-config": {
+		"copy-config":                  {},
+		"copy-config/target":           {},
+		"copy-config/target/running":   {},
+		"copy-config/target/candidate": {},
+		"copy-config/target/startup":   {},
+		"copy-config/source":           {},
+		"copy-config/source/running":   {},
+		"copy-config/source/candidate": {},
+		"copy-config/source/startup":   {},
+	},
+	"delete-config": {
+		"delete-config":                  {},
+		"delete-config/target":           {},
+		"delete-config/target/running":   {},
+		"delete-config/target/candidate": {},
+		"delete-config/target/startup":   {},
+	},
+	"lock": {
+		"lock":                  {},
+		"lock/target":           {},
+		"lock/target/running":   {},
+		"lock/target/candidate": {},
+		"lock/target/startup":   {},
+	},
+	"unlock": {
+		"unlock":                  {},
+		"unlock/target":           {},
+		"unlock/target/running":   {},
+		"unlock/target/candidate": {},
+		"unlock/target/startup":   {},
+	},
+	"commit": {
+		"commit": {},
+	},
+	"discard-changes": {
+		"discard-changes": {},
+	},
+	"validate": {
+		"validate":                  {},
+		"validate/source":           {},
+		"validate/source/running":   {},
+		"validate/source/candidate": {},
+		"validate/source/startup":   {},
+	},
+	"get": {
+		"get":        {},
+		"get/filter": {},
+	},
+	"close-session": {
+		"close-session": {},
+	},
+	"kill-session": {
+		"kill-session":            {},
+		"kill-session/session-id": {},
+	},
+}
+
+var rpcFilterAttrs = map[string]bool{
+	"type":   true,
+	"select": true,
+}
+
+func rpcElementAllowedAttrs(path string) map[string]bool {
+	if strings.HasSuffix(path, "/filter") {
+		return rpcFilterAttrs
 	}
 	return nil
+}
+
+func isOpenRPCContentPath(path []string) bool {
+	key := rpcPathKey(path)
+	return key == "edit-config/config" ||
+		key == "get-config/filter" ||
+		key == "get/filter"
+}
+
+func allowsAnyElementNamespace(path []string) bool {
+	return rpcPathKey(path) == "edit-config/config"
+}
+
+func rpcPathKey(path []string) string {
+	return strings.Join(path, "/")
+}
+
+func rpcElementRPCPath(path []string) string {
+	if len(path) == 0 {
+		return "/rpc"
+	}
+	return "/rpc/" + strings.Join(path, "/")
+}
+
+// ValidateOperationNamespace checks if operation is in NETCONF namespace
+func (r *RPC) ValidateOperationNamespace() error {
+	return ValidateProtocolNamespace(r.Operation)
 }
 
 // Datastore target constants
@@ -295,15 +490,27 @@ func (t *Target) GetDatastore() (string, error) {
 
 // Filter represents optional <filter> element in get-config/get
 type Filter struct {
-	Type    string `xml:"type,attr,omitempty"`
-	Select  string `xml:"select,attr,omitempty"` // For xpath (not supported)
-	Content []byte `xml:",innerxml"`
+	Type           string     `xml:"type,attr,omitempty"`
+	Select         string     `xml:"select,attr,omitempty"` // For xpath (not supported)
+	Attrs          []xml.Attr `xml:",any,attr"`
+	InheritedAttrs []xml.Attr `xml:"-"`
+	Content        []byte     `xml:",innerxml"`
 }
 
 // Validate validates filter constraints per design document
 func (f *Filter) Validate(rpcName string) error {
 	if f == nil {
 		return nil // Filter is optional
+	}
+	for _, attr := range f.Attrs {
+		if isNamespaceDeclarationAttribute(attr) {
+			continue
+		}
+		rpcErr := ErrUnknownAttribute("/rpc/"+rpcName+"/filter", attr.Name.Local)
+		if attr.Name.Space != "" {
+			rpcErr = rpcErr.WithBadNamespace(attr.Name.Space)
+		}
+		return rpcErr
 	}
 
 	// Check filter type

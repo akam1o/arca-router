@@ -1333,9 +1333,7 @@ func max(a, b int) int {
 
 // ValidateProtocolNamespace validates protocol element namespace per Phase 2 Step 2
 func ValidateProtocolNamespace(elem xml.Name) error {
-	// Empty namespace is allowed (default namespace inheritance)
-	// Only reject if non-base namespace is explicitly specified
-	if elem.Space != NetconfBaseNS && elem.Space != "" {
+	if elem.Space != NetconfBaseNS {
 		return NewRPCError(ErrorTypeProtocol, "unknown-namespace",
 			"invalid namespace for protocol element").
 			WithPath("/rpc/" + elem.Local).

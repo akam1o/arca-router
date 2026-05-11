@@ -13,6 +13,12 @@ type GetRequest struct {
 	Filter  *Filter  `xml:"filter"`
 }
 
+func (r *GetRequest) SetInheritedNamespaceAttrs(attrs []xml.Attr) {
+	if r.Filter != nil {
+		r.Filter.InheritedAttrs = cloneXMLAttrs(attrs)
+	}
+}
+
 // handleGet handles <get> RPC - retrieves operational data
 func (s *Server) handleGet(ctx context.Context, sess *Session, rpc *RPC) *RPCReply {
 	var req GetRequest
