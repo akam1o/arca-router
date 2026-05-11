@@ -111,6 +111,43 @@ func TestXMLToConfigRejectsUnknownNamespace(t *testing.T) {
 	}
 }
 
+func TestXMLToConfigRejectsUnsupportedOperationAttribute(t *testing.T) {
+	xmlData := []byte(`<config xmlns:nc="urn:ietf:params:xml:ns:netconf:base:1.0"><system nc:operation="replace"><host-name>router1</host-name></system></config>`)
+
+	_, err := XMLToConfig(xmlData, DefaultOpMerge)
+	if err == nil {
+		t.Fatal("XMLToConfig() error = nil, want unsupported operation attribute")
+	}
+	rpcErr, ok := err.(*RPCError)
+	if !ok {
+		t.Fatalf("XMLToConfig() error = %T, want *RPCError", err)
+	}
+	if rpcErr.ErrorTag != ErrorTagOperationNotSupported || rpcErr.ErrorInfo == nil || rpcErr.ErrorInfo.BadAttribute != "operation" {
+		t.Fatalf("XMLToConfig() error = %#v, want operation-not-supported for operation attribute", rpcErr)
+	}
+}
+
+func TestXMLToConfigRejectsTooManyRawElements(t *testing.T) {
+	var b strings.Builder
+	b.WriteString("<config><system>")
+	for i := 0; i < MaxXMLElements; i++ {
+		b.WriteString("<host-name>router1</host-name>")
+	}
+	b.WriteString("</system></config>")
+
+	_, err := XMLToConfig([]byte(b.String()), DefaultOpMerge)
+	if err == nil {
+		t.Fatal("XMLToConfig() error = nil, want raw element limit error")
+	}
+	rpcErr, ok := err.(*RPCError)
+	if !ok {
+		t.Fatalf("XMLToConfig() error = %T, want *RPCError", err)
+	}
+	if rpcErr.ErrorTag != ErrorTagInvalidValue || rpcErr.ErrorAppTag != "size-limit" {
+		t.Fatalf("XMLToConfig() error = %#v, want invalid-value size-limit", rpcErr)
+	}
+}
+
 func TestCountConfigElementsIncludesExplicitOSPFPriorityZero(t *testing.T) {
 	cfg := &config.Config{
 		Interfaces: map[string]*config.Interface{},

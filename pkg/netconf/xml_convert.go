@@ -734,6 +734,7 @@ func validateConfigXMLAllowlist(xmlData []byte) error {
 	decoder.Strict = true
 	decoder.Entity = nil
 	stack := []string{}
+	elementCount := 0
 
 	for {
 		token, err := decoder.Token()
@@ -748,8 +749,18 @@ func validateConfigXMLAllowlist(xmlData []byte) error {
 
 		switch t := token.(type) {
 		case xml.StartElement:
+			elementCount++
+			if elementCount > MaxXMLElements {
+				return NewRPCError(ErrorTypeProtocol, ErrorTagInvalidValue,
+					fmt.Sprintf("config XML exceeds maximum element limit (%d)", MaxXMLElements)).
+					WithPath("/rpc/edit-config/config").
+					WithAppTag("size-limit")
+			}
 			path := append(append([]string{}, stack...), t.Name.Local)
 			if err := validateConfigElement(t.Name, path); err != nil {
+				return err
+			}
+			if err := validateConfigAttributes(t, path); err != nil {
 				return err
 			}
 			stack = append(stack, t.Name.Local)
@@ -762,6 +773,24 @@ func validateConfigXMLAllowlist(xmlData []byte) error {
 			stack = stack[:len(stack)-1]
 		}
 	}
+}
+
+func validateConfigAttributes(start xml.StartElement, path []string) error {
+	if len(start.Attr) > MaxXMLAttributes {
+		return NewRPCError(ErrorTypeProtocol, ErrorTagInvalidValue,
+			fmt.Sprintf("config element %s exceeds maximum attribute limit (%d)", start.Name.Local, MaxXMLAttributes)).
+			WithPath(configElementRPCPath(path)).
+			WithAppTag("attribute-limit")
+	}
+	for _, attr := range start.Attr {
+		if attr.Name.Local == "operation" && (attr.Name.Space == "" || attr.Name.Space == NetconfBaseNS) {
+			return NewRPCError(ErrorTypeProtocol, ErrorTagOperationNotSupported,
+				"per-element operation attributes are not supported").
+				WithPath(configElementRPCPath(path)).
+				WithBadAttribute(attr.Name.Local)
+		}
+	}
+	return nil
 }
 
 func validateConfigElement(name xml.Name, path []string) error {
