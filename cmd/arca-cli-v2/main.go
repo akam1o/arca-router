@@ -122,6 +122,13 @@ func currentUsername() string {
 	return username
 }
 
+func shortCommitID(commitID string) string {
+	if len(commitID) > 8 {
+		return commitID[:8]
+	}
+	return commitID
+}
+
 // --- One-shot command ---
 
 func runOneShotCommand(ctx context.Context, f *cliFlags, args []string) int {
@@ -543,7 +550,7 @@ func (sh *interactiveShell) cmdShow(ctx context.Context, args []string) error {
 			if e.IsRollback {
 				rb = " (rollback)"
 			}
-			fmt.Printf("  %s  %s  by %s%s  %s\n", e.CommitID[:8], e.Timestamp, e.User, rb, e.Message)
+			fmt.Printf("  %s  %s  by %s%s  %s\n", shortCommitID(e.CommitID), e.Timestamp, e.User, rb, e.Message)
 		}
 		return nil
 
@@ -694,11 +701,7 @@ func (sh *interactiveShell) cmdCommit(ctx context.Context, args []string) error 
 	if err != nil {
 		return fmt.Errorf("commit failed: %w", err)
 	}
-	shortID := commitID
-	if len(shortID) > 8 {
-		shortID = shortID[:8]
-	}
-	fmt.Printf("commit complete (id: %s, version: %d)\n", shortID, version)
+	fmt.Printf("commit complete (id: %s, version: %d)\n", shortCommitID(commitID), version)
 
 	if andQuit {
 		if err := sh.releaseConfigurationLock(ctx); err != nil {
@@ -717,6 +720,9 @@ func (sh *interactiveShell) cmdRollback(ctx context.Context, args []string) erro
 		if _, err := fmt.Sscanf(args[0], "%d", &rollbackNum); err != nil {
 			return fmt.Errorf("invalid rollback number: %s", args[0])
 		}
+	}
+	if rollbackNum < 0 {
+		return fmt.Errorf("invalid rollback number: %d", rollbackNum)
 	}
 	if rollbackNum == 0 {
 		return sh.cmdDiscardChanges(ctx)
@@ -739,11 +745,7 @@ func (sh *interactiveShell) cmdRollback(ctx context.Context, args []string) erro
 	if err != nil {
 		return fmt.Errorf("rollback failed: %w", err)
 	}
-	shortID := newCommitID
-	if len(shortID) > 8 {
-		shortID = shortID[:8]
-	}
-	fmt.Printf("rollback complete (id: %s, version: %d)\n", shortID, version)
+	fmt.Printf("rollback complete (id: %s, version: %d)\n", shortCommitID(newCommitID), version)
 	return nil
 }
 

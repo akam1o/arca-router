@@ -13,11 +13,14 @@ type fakeInteractiveClient struct {
 	acquireLockErr error
 	discardErr     error
 	releaseLockErr error
+	history        []grpcclient.CommitInfo
 
 	acquireLockCalls int
 	discardCalls     int
 	releaseLockCalls int
 	commitCalls      int
+	listHistoryCalls int
+	rollbackCalls    int
 }
 
 func (f *fakeInteractiveClient) GetRunning(ctx context.Context) (string, uint64, error) {
@@ -47,6 +50,7 @@ func (f *fakeInteractiveClient) Discard(ctx context.Context, sessionID string) e
 }
 
 func (f *fakeInteractiveClient) Rollback(ctx context.Context, sessionID, commitID, user, message string) (string, uint64, error) {
+	f.rollbackCalls++
 	return "rollback-1234567890", 3, nil
 }
 
@@ -55,7 +59,8 @@ func (f *fakeInteractiveClient) Diff(ctx context.Context, sessionID string) (str
 }
 
 func (f *fakeInteractiveClient) ListHistory(ctx context.Context, limit, offset int) ([]grpcclient.CommitInfo, error) {
-	return nil, nil
+	f.listHistoryCalls++
+	return f.history, nil
 }
 
 func (f *fakeInteractiveClient) AcquireLock(ctx context.Context, sessionID, user string) error {
@@ -190,5 +195,47 @@ func TestCommitAndQuitKeepsConfigurationModeOnReleaseFailure(t *testing.T) {
 	}
 	if sh.mode != modeConfiguration || !sh.hasLock || len(sh.editPath) == 0 {
 		t.Fatal("configuration state changed after commit and-quit release failure")
+	}
+}
+
+func TestShowHistoryHandlesShortCommitIDs(t *testing.T) {
+	ctx := context.Background()
+	client := &fakeInteractiveClient{
+		history: []grpcclient.CommitInfo{
+			{CommitID: "abc", User: "alice", Message: "short id"},
+		},
+	}
+	sh := &interactiveShell{
+		client:    client,
+		hostname:  "router",
+		mode:      modeOperational,
+		sessionID: "session-1",
+	}
+
+	if err := sh.cmdShow(ctx, []string{"history"}); err != nil {
+		t.Fatalf("cmdShow(history) error = %v", err)
+	}
+	if client.listHistoryCalls != 1 {
+		t.Fatalf("ListHistory calls = %d, want 1", client.listHistoryCalls)
+	}
+}
+
+func TestRollbackRejectsNegativeNumber(t *testing.T) {
+	ctx := context.Background()
+	client := &fakeInteractiveClient{}
+	sh := &interactiveShell{
+		client:    client,
+		hostname:  "router",
+		mode:      modeConfiguration,
+		sessionID: "session-1",
+		hasLock:   true,
+	}
+
+	err := sh.cmdRollback(ctx, []string{"-1"})
+	if err == nil || !strings.Contains(err.Error(), "invalid rollback number") {
+		t.Fatalf("cmdRollback(-1) error = %v, want invalid rollback number", err)
+	}
+	if client.listHistoryCalls != 0 || client.rollbackCalls != 0 {
+		t.Fatalf("list/rollback calls = %d/%d, want 0/0", client.listHistoryCalls, client.rollbackCalls)
 	}
 }
