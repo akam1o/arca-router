@@ -12,6 +12,7 @@ import (
 
 	"github.com/akam1o/arca-router/internal/model"
 	"github.com/akam1o/arca-router/internal/store"
+	pkgconfig "github.com/akam1o/arca-router/pkg/config"
 	"github.com/akam1o/arca-router/pkg/datastore"
 	"github.com/google/uuid"
 )
@@ -69,14 +70,11 @@ func (s *Store) PrepareCommit(ctx context.Context, snap *model.ConfigSnapshot) (
 		return nil, fmt.Errorf("snapshot is nil")
 	}
 
-	// Serialize config to JSON for storage
-	configJSON, err := json.Marshal(snap.Config)
-	if err != nil {
-		return nil, fmt.Errorf("marshal config: %w", err)
-	}
+	// Store set-command text so the legacy datastore users, including NETCONF,
+	// can continue to read the same running_config rows.
+	configText := pkgconfig.ToSetCommands(snap.Config.ToLegacyConfig())
 
 	// Use the legacy commit mechanism
-	// We store JSON in the config text field for the new model
 	sessionID := "engine-" + uuid.NewString()
 	req := &datastore.CommitRequest{
 		SessionID: sessionID,
@@ -93,7 +91,7 @@ func (s *Store) PrepareCommit(ctx context.Context, snap *model.ConfigSnapshot) (
 		return nil, fmt.Errorf("acquire commit lock: %w", err)
 	}
 
-	if err := s.ds.SaveCandidate(ctx, sessionID, string(configJSON)); err != nil {
+	if err := s.ds.SaveCandidate(ctx, sessionID, configText); err != nil {
 		_ = s.ds.ReleaseLock(context.Background(), datastore.LockTargetCandidate, sessionID)
 		return nil, fmt.Errorf("save candidate: %w", err)
 	}
