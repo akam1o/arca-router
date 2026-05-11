@@ -118,8 +118,28 @@ func TestErrMissingAttribute(t *testing.T) {
 		t.Errorf("Expected missing-attribute tag, got %s", err.ErrorTag)
 	}
 
+	if err.ErrorPath != "/rpc" {
+		t.Errorf("Expected /rpc path, got %s", err.ErrorPath)
+	}
+
 	if err.ErrorInfo == nil || err.ErrorInfo.BadElement != "rpc" || err.ErrorInfo.BadAttribute != "message-id" {
 		t.Errorf("Expected bad-element rpc and bad-attribute message-id, got %v", err.ErrorInfo)
+	}
+}
+
+func TestErrMissingElementAtRPCRoot(t *testing.T) {
+	err := ErrMissingElement("rpc", "operation")
+
+	if err.ErrorTag != ErrorTagMissingElement {
+		t.Errorf("Expected missing-element tag, got %s", err.ErrorTag)
+	}
+
+	if err.ErrorPath != "/rpc" {
+		t.Errorf("Expected /rpc path, got %s", err.ErrorPath)
+	}
+
+	if err.ErrorInfo == nil || err.ErrorInfo.BadElement != "operation" {
+		t.Errorf("Expected bad-element operation, got %v", err.ErrorInfo)
 	}
 }
 

@@ -191,7 +191,7 @@ func ErrInvalidNamespace(namespace string) *RPCError {
 // ErrMissingAttribute returns error for missing required attribute
 func ErrMissingAttribute(element, attribute string) *RPCError {
 	return NewRPCError(ErrorTypeRPC, ErrorTagMissingAttribute, fmt.Sprintf("missing required attribute: %s", attribute)).
-		WithPath(fmt.Sprintf("/rpc/%s", element)).
+		WithPath(rpcErrorPath(element)).
 		WithBadElement(element).
 		WithBadAttribute(attribute)
 }
@@ -199,8 +199,15 @@ func ErrMissingAttribute(element, attribute string) *RPCError {
 // ErrMissingElement returns error for missing required element
 func ErrMissingElement(rpcName, element string) *RPCError {
 	return NewRPCError(ErrorTypeProtocol, ErrorTagMissingElement, fmt.Sprintf("missing required element: %s", element)).
-		WithPath(fmt.Sprintf("/rpc/%s", rpcName)).
+		WithPath(rpcErrorPath(rpcName)).
 		WithBadElement(element)
+}
+
+func rpcErrorPath(element string) string {
+	if element == "" || element == "rpc" {
+		return "/rpc"
+	}
+	return fmt.Sprintf("/rpc/%s", element)
 }
 
 // ErrUnknownElement returns error for unknown/unsupported element
