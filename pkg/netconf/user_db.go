@@ -15,6 +15,11 @@ import (
 	"github.com/akam1o/arca-router/pkg/logger"
 )
 
+const (
+	userDBFilePerms os.FileMode = 0600
+	userDBDirPerms  os.FileMode = 0750
+)
+
 // Role constants for user authorization
 const (
 	RoleAdmin    = "admin"
@@ -42,10 +47,8 @@ type User struct {
 
 // NewUserDatabase creates a new user database connection
 func NewUserDatabase(path string, log *logger.Logger) (*UserDatabase, error) {
-	// Create directory if needed
-	dir := filepath.Dir(path)
-	if err := os.MkdirAll(dir, 0750); err != nil {
-		return nil, fmt.Errorf("failed to create directory: %w", err)
+	if err := prepareSecureUserDatabaseFile(path); err != nil {
+		return nil, err
 	}
 
 	// Open database
@@ -88,8 +91,65 @@ func NewUserDatabase(path string, log *logger.Logger) (*UserDatabase, error) {
 		}
 		return nil, fmt.Errorf("failed to initialize schema: %w", err)
 	}
+	if err := restrictUserDatabaseFiles(path); err != nil {
+		if closeErr := db.Close(); closeErr != nil {
+			_ = closeErr
+		}
+		return nil, err
+	}
 
 	return udb, nil
+}
+
+func prepareSecureUserDatabaseFile(path string) error {
+	dir := filepath.Dir(path)
+	if err := os.MkdirAll(dir, userDBDirPerms); err != nil {
+		return fmt.Errorf("failed to create directory: %w", err)
+	}
+	if err := validateUserDatabaseDirectoryPermissions(dir); err != nil {
+		return err
+	}
+	file, err := os.OpenFile(path, os.O_RDWR|os.O_CREATE, userDBFilePerms)
+	if err != nil {
+		return fmt.Errorf("failed to create user database file: %w", err)
+	}
+	if closeErr := file.Close(); closeErr != nil {
+		return fmt.Errorf("failed to close user database file: %w", closeErr)
+	}
+	if err := os.Chmod(path, userDBFilePerms); err != nil {
+		return fmt.Errorf("failed to restrict user database file permissions: %w", err)
+	}
+	return nil
+}
+
+func validateUserDatabaseDirectoryPermissions(dir string) error {
+	info, err := os.Stat(dir)
+	if err != nil {
+		return fmt.Errorf("failed to stat user database directory: %w", err)
+	}
+	if !info.IsDir() {
+		return fmt.Errorf("user database parent path is not a directory: %s", dir)
+	}
+	perms := info.Mode().Perm()
+	if perms&0022 != 0 {
+		return fmt.Errorf("insecure permissions on user database directory %s: mode=%04o", dir, perms)
+	}
+	return nil
+}
+
+func restrictUserDatabaseFiles(path string) error {
+	for _, filePath := range []string{path, path + "-wal", path + "-shm"} {
+		if _, err := os.Stat(filePath); err != nil {
+			if os.IsNotExist(err) {
+				continue
+			}
+			return fmt.Errorf("failed to stat user database file %s: %w", filePath, err)
+		}
+		if err := os.Chmod(filePath, userDBFilePerms); err != nil {
+			return fmt.Errorf("failed to restrict user database file permissions for %s: %w", filePath, err)
+		}
+	}
+	return nil
 }
 
 // Initialize initializes the database schema

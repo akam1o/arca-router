@@ -13,6 +13,11 @@ import (
 	_ "github.com/mattn/go-sqlite3" // SQLite driver
 )
 
+const (
+	secureSQLiteFilePerms os.FileMode = 0600
+	secureSQLiteDirPerms  os.FileMode = 0750
+)
+
 // sqliteDatastore implements the Datastore interface using SQLite.
 type sqliteDatastore struct {
 	db              *sql.DB
@@ -35,9 +40,8 @@ func NewSQLiteDatastore(cfg *Config) (Datastore, error) {
 
 	// Create directory if it doesn't exist
 	if dbPath != ":memory:" {
-		dir := filepath.Dir(dbPath)
-		if err := os.MkdirAll(dir, 0750); err != nil {
-			return nil, fmt.Errorf("failed to create database directory: %w", err)
+		if err := prepareSecureSQLiteFile(dbPath); err != nil {
+			return nil, err
 		}
 	}
 
@@ -92,11 +96,71 @@ func NewSQLiteDatastore(cfg *Config) (Datastore, error) {
 		}
 		return nil, fmt.Errorf("failed to apply migrations: %w", err)
 	}
+	if err := restrictSQLiteFilePermissions(dbPath); err != nil {
+		if closeErr := db.Close(); closeErr != nil {
+			_ = closeErr
+		}
+		return nil, err
+	}
 
 	// Start background cleanup goroutine for expired locks
 	go ds.cleanupExpiredLocks()
 
 	return ds, nil
+}
+
+func prepareSecureSQLiteFile(dbPath string) error {
+	dir := filepath.Dir(dbPath)
+	if err := os.MkdirAll(dir, secureSQLiteDirPerms); err != nil {
+		return fmt.Errorf("failed to create database directory: %w", err)
+	}
+	if err := validateSQLiteDirectoryPermissions(dir); err != nil {
+		return err
+	}
+	file, err := os.OpenFile(dbPath, os.O_RDWR|os.O_CREATE, secureSQLiteFilePerms)
+	if err != nil {
+		return fmt.Errorf("failed to create database file: %w", err)
+	}
+	if closeErr := file.Close(); closeErr != nil {
+		return fmt.Errorf("failed to close database file: %w", closeErr)
+	}
+	if err := os.Chmod(dbPath, secureSQLiteFilePerms); err != nil {
+		return fmt.Errorf("failed to restrict database file permissions: %w", err)
+	}
+	return nil
+}
+
+func validateSQLiteDirectoryPermissions(dir string) error {
+	info, err := os.Stat(dir)
+	if err != nil {
+		return fmt.Errorf("failed to stat database directory: %w", err)
+	}
+	if !info.IsDir() {
+		return fmt.Errorf("database parent path is not a directory: %s", dir)
+	}
+	perms := info.Mode().Perm()
+	if perms&0022 != 0 {
+		return fmt.Errorf("insecure permissions on database directory %s: mode=%04o", dir, perms)
+	}
+	return nil
+}
+
+func restrictSQLiteFilePermissions(dbPath string) error {
+	if dbPath == "" || dbPath == ":memory:" {
+		return nil
+	}
+	for _, path := range []string{dbPath, dbPath + "-wal", dbPath + "-shm"} {
+		if _, err := os.Stat(path); err != nil {
+			if os.IsNotExist(err) {
+				continue
+			}
+			return fmt.Errorf("failed to stat database file %s: %w", path, err)
+		}
+		if err := os.Chmod(path, secureSQLiteFilePerms); err != nil {
+			return fmt.Errorf("failed to restrict database file permissions for %s: %w", path, err)
+		}
+	}
+	return nil
 }
 
 // Close closes the datastore connection.
