@@ -33,6 +33,31 @@ func TestConfigToXMLWritesExplicitOSPFPriorityZero(t *testing.T) {
 	}
 }
 
+func TestConfigToXMLMarshalsAsSingleDataReply(t *testing.T) {
+	cfg := &config.Config{
+		System:     &config.SystemConfig{HostName: "router1"},
+		Interfaces: map[string]*config.Interface{},
+	}
+
+	xmlData, err := ConfigToXML(cfg, nil)
+	if err != nil {
+		t.Fatalf("ConfigToXML() error = %v", err)
+	}
+	xmlStr := string(xmlData)
+	if strings.Contains(xmlStr, "<?xml") || strings.Contains(xmlStr, "<data") {
+		t.Fatalf("ConfigToXML() = %q, want data child XML only", xmlStr)
+	}
+
+	replyXML, err := MarshalReply(NewDataReply("102", xmlData))
+	if err != nil {
+		t.Fatalf("MarshalReply() error = %v", err)
+	}
+	assertSingleDataElement(t, replyXML)
+	if !strings.Contains(string(replyXML), "<host-name>router1</host-name>") {
+		t.Fatalf("MarshalReply() missing config content:\n%s", replyXML)
+	}
+}
+
 func TestXMLToConfigPreservesExplicitOSPFPriorityZero(t *testing.T) {
 	xmlData := []byte(`
 <config>

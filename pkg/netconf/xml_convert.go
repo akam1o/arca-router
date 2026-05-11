@@ -27,7 +27,7 @@ const (
 	MaxXMLSize       = 10 * 1024 * 1024 // 10MB
 )
 
-// ConfigToXML converts internal config to NETCONF XML format with optional filtering
+// ConfigToXML converts internal config to NETCONF <data> content with optional filtering
 // This implements Phase 2 Step 3: XML↔Config Conversion
 func ConfigToXML(cfg *config.Config, filter *Filter) ([]byte, error) {
 	if cfg == nil {
@@ -35,12 +35,6 @@ func ConfigToXML(cfg *config.Config, filter *Filter) ([]byte, error) {
 	}
 
 	var buf bytes.Buffer
-
-	// Write XML declaration and data root with NETCONF base namespace
-	buf.WriteString(`<?xml version="1.0" encoding="UTF-8"?>`)
-	buf.WriteString("\n")
-	buf.WriteString(`<data xmlns="` + NetconfBaseNS + `">`)
-	buf.WriteString("\n")
 
 	// System configuration
 	if cfg.System != nil && (filter == nil || filterMatches(filter, "system")) {
@@ -70,8 +64,6 @@ func ConfigToXML(cfg *config.Config, filter *Filter) ([]byte, error) {
 			return nil, fmt.Errorf("failed to serialize protocols: %w", err)
 		}
 	}
-
-	buf.WriteString("</data>\n")
 
 	result := buf.Bytes()
 

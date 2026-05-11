@@ -76,13 +76,12 @@ func GetOperationalData(ctx context.Context, filter *Filter) ([]byte, error) {
 	return []byte(xmlData), nil
 }
 
-// buildAllOperationalData builds complete operational data XML
+// buildAllOperationalData builds operational data XML for the inside of <data>
 func buildAllOperationalData() string {
 	// Build operational data from multiple sources
 	// This provides a minimal but functional implementation
 
-	return `<data xmlns="urn:ietf:params:xml:ns:netconf:base:1.0">
-  <interfaces xmlns="urn:ietf:params:xml:ns:yang:ietf-interfaces">
+	return `<interfaces xmlns="urn:ietf:params:xml:ns:yang:ietf-interfaces">
     <interface>
       <name>GigabitEthernet0/0/0</name>
       <type xmlns:ianaift="urn:ietf:params:xml:ns:yang:iana-if-type">ianaift:ethernetCsmacd</type>
@@ -123,8 +122,7 @@ func buildAllOperationalData() string {
         </routing-protocol>
       </routing-protocols>
     </routing-state>
-  </routing>
-</data>`
+  </routing>`
 }
 
 // buildFilteredOperationalData builds filtered operational data based on subtree filter

@@ -1,7 +1,9 @@
 package netconf
 
 import (
+	"bytes"
 	"encoding/xml"
+	"io"
 	"strings"
 	"testing"
 )
@@ -187,6 +189,18 @@ func TestMarshalDataReply(t *testing.T) {
 	if !strings.Contains(xmlStr, "xe-0/0/0") {
 		t.Errorf("Missing data content")
 	}
+	assertSingleDataElement(t, xmlData)
+}
+
+func TestMarshalOperationalDataReply(t *testing.T) {
+	reply := NewDataReply("105", []byte(buildAllOperationalData()))
+
+	xmlData, err := MarshalReply(reply)
+	if err != nil {
+		t.Fatalf("Failed to marshal reply: %v", err)
+	}
+
+	assertSingleDataElement(t, xmlData)
 }
 
 func TestMarshalErrorReply(t *testing.T) {
@@ -260,5 +274,40 @@ func TestDataReplyNamespace(t *testing.T) {
 	// Both rpc-reply and data should have NETCONF namespace
 	if !strings.Contains(xmlStr, `xmlns="urn:ietf:params:xml:ns:netconf:base:1.0"`) {
 		t.Errorf("Missing NETCONF namespace on rpc-reply")
+	}
+}
+
+func assertSingleDataElement(t *testing.T, xmlData []byte) {
+	t.Helper()
+
+	decoder := xml.NewDecoder(bytes.NewReader(xmlData))
+	depth := 0
+	directDataElements := 0
+	allDataElements := 0
+	for {
+		token, err := decoder.Token()
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			t.Fatalf("reply is not valid XML: %v\n%s", err, xmlData)
+		}
+
+		switch t := token.(type) {
+		case xml.StartElement:
+			depth++
+			if t.Name.Local == "data" {
+				allDataElements++
+				if depth == 2 {
+					directDataElements++
+				}
+			}
+		case xml.EndElement:
+			depth--
+		}
+	}
+
+	if directDataElements != 1 || allDataElements != 1 {
+		t.Fatalf("reply has direct/all data elements = %d/%d, want 1/1:\n%s", directDataElements, allDataElements, xmlData)
 	}
 }
