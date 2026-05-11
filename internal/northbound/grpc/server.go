@@ -478,7 +478,10 @@ func replacementPrefixes(path []string) []string {
 				return prefix(3)
 			}
 			if len(path) >= 7 && path[2] == "area" && path[4] == "interface" {
-				return prefix(6)
+				switch path[6] {
+				case "passive", "metric", "priority":
+					return prefix(7)
+				}
 			}
 		case "bgp":
 			if len(path) >= 5 && path[2] == "group" {

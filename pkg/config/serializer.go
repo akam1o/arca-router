@@ -193,17 +193,23 @@ func writeOSPF(b *strings.Builder, ospf *OSPFConfig) {
 			if ospfIface == nil {
 				continue
 			}
-			line := fmt.Sprintf("set protocols ospf area %s interface %s", areaName, ifaceName)
+			base := fmt.Sprintf("set protocols ospf area %s interface %s", areaName, ifaceName)
+			wrote := false
 			if ospfIface.Passive {
-				line += " passive"
+				writeLine(b, "%s passive", base)
+				wrote = true
 			}
 			if ospfIface.Metric > 0 {
-				line += fmt.Sprintf(" metric %d", ospfIface.Metric)
+				writeLine(b, "%s metric %d", base, ospfIface.Metric)
+				wrote = true
 			}
 			if ospfIface.Priority > 0 {
-				line += fmt.Sprintf(" priority %d", ospfIface.Priority)
+				writeLine(b, "%s priority %d", base, ospfIface.Priority)
+				wrote = true
 			}
-			writeLine(b, "%s", line)
+			if !wrote {
+				writeLine(b, "%s", base)
+			}
 		}
 	}
 }

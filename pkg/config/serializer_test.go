@@ -114,3 +114,31 @@ func TestEscapeValue(t *testing.T) {
 		t.Fatalf("EscapeValue() = %q, want %q", got, want)
 	}
 }
+
+func TestToSetCommandsWritesOSPFAttributesSeparately(t *testing.T) {
+	cfg := &Config{
+		Interfaces: map[string]*Interface{},
+		Protocols: &ProtocolConfig{
+			OSPF: &OSPFConfig{
+				Areas: map[string]*OSPFArea{
+					"0.0.0.0": {
+						Interfaces: map[string]*OSPFInterface{
+							"ge-0/0/0": {Name: "ge-0/0/0", Passive: true, Metric: 20, Priority: 10},
+						},
+					},
+				},
+			},
+		},
+	}
+
+	text := ToSetCommands(cfg)
+	for _, want := range []string{
+		"set protocols ospf area 0.0.0.0 interface ge-0/0/0 passive\n",
+		"set protocols ospf area 0.0.0.0 interface ge-0/0/0 metric 20\n",
+		"set protocols ospf area 0.0.0.0 interface ge-0/0/0 priority 10\n",
+	} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("ToSetCommands() missing %q in:\n%s", want, text)
+		}
+	}
+}

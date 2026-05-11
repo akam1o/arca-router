@@ -241,3 +241,24 @@ func TestCommitRollsBackEngineWhenPersistenceFails(t *testing.T) {
 		t.Fatalf("engine running hostname = %q, want rollback to router1", got)
 	}
 }
+
+func TestApplyCandidateCommandPreservesOSPFInterfaceAttributes(t *testing.T) {
+	candidate := strings.Join([]string{
+		"set protocols ospf area 0.0.0.0 interface ge-0/0/0 passive",
+		"set protocols ospf area 0.0.0.0 interface ge-0/0/0 priority 10",
+	}, "\n")
+
+	updated, err := applyCandidateCommand(candidate, "set protocols ospf area 0.0.0.0 interface ge-0/0/0 metric 20")
+	if err != nil {
+		t.Fatalf("applyCandidateCommand() error = %v", err)
+	}
+	for _, want := range []string{
+		"set protocols ospf area 0.0.0.0 interface ge-0/0/0 passive",
+		"set protocols ospf area 0.0.0.0 interface ge-0/0/0 priority 10",
+		"set protocols ospf area 0.0.0.0 interface ge-0/0/0 metric 20",
+	} {
+		if !strings.Contains(updated, want) {
+			t.Fatalf("updated candidate missing %q:\n%s", want, updated)
+		}
+	}
+}
