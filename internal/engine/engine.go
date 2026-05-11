@@ -65,12 +65,12 @@ func (e *Engine) Validate(ctx context.Context, candidate *model.RouterConfig) er
 	e.mu.RLock()
 	var oldCfg *model.RouterConfig
 	if e.running != nil {
-		oldCfg = e.running.Config
+		oldCfg = e.running.Config.Clone()
 	}
 	plugins := append([]Plugin(nil), e.plugins...)
 	e.mu.RUnlock()
 
-	diff := ComputeDiff(oldCfg, candidate)
+	diff := ComputeDiff(oldCfg, candidate.Clone())
 	for _, p := range plugins {
 		if err := p.ValidateChanges(ctx, diff); err != nil {
 			return fmt.Errorf("plugin %s validation failed: %w", p.Name(), err)
@@ -99,9 +99,9 @@ func (e *Engine) Apply(ctx context.Context, candidate *model.RouterConfig, autho
 	// Compute diff from running → candidate
 	var oldCfg *model.RouterConfig
 	if e.running != nil {
-		oldCfg = e.running.Config
+		oldCfg = e.running.Config.Clone()
 	}
-	diff := ComputeDiff(oldCfg, candidate)
+	diff := ComputeDiff(oldCfg, candidate.Clone())
 
 	if !diff.HasChanges() {
 		e.log.Info("No configuration changes detected")
