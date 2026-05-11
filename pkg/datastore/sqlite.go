@@ -184,9 +184,18 @@ func (ds *sqliteDatastore) performLockCleanup(ctx context.Context) error {
 
 		// Delete expired locks for all targets (candidate, running)
 		result, err := tx.ExecContext(ctx, `
-			DELETE FROM config_locks
-			WHERE expires_at < ?
-		`, now)
+				DELETE FROM config_locks
+				WHERE COALESCE(
+					CASE
+						WHEN typeof(expires_at) IN ('integer', 'real') THEN CAST(expires_at AS INTEGER)
+					END,
+					CASE
+						WHEN typeof(expires_at) = 'text' AND expires_at NOT GLOB '*[^0-9]*' THEN CAST(expires_at AS INTEGER)
+					END,
+					CAST(strftime('%s', expires_at) AS INTEGER),
+					0
+				) < ?
+			`, now)
 
 		if err != nil {
 			return NewError(ErrCodeInternal, "failed to cleanup expired locks", err)

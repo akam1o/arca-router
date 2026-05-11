@@ -27,12 +27,12 @@ func (ds *sqliteDatastore) AcquireLock(ctx context.Context, req *LockRequest) er
 
 		// Check existing lock in the same transaction
 		var existingSessionID, existingUser string
-		var existingExpiresAtUnix int64
+		var existingExpiresAt sqliteUnixTime
 		err := tx.QueryRowContext(ctx, `
 				SELECT session_id, user, expires_at
 				FROM config_locks
 				WHERE target = ?
-			`, req.Target).Scan(&existingSessionID, &existingUser, &existingExpiresAtUnix)
+			`, req.Target).Scan(&existingSessionID, &existingUser, &existingExpiresAt)
 
 		if err != nil && err != sql.ErrNoRows {
 			return NewError(ErrCodeInternal, fmt.Sprintf("failed to check %s lock", req.Target), err)
@@ -40,7 +40,7 @@ func (ds *sqliteDatastore) AcquireLock(ctx context.Context, req *LockRequest) er
 
 		if err == nil {
 			// Lock exists: decide based on session and expiration
-			if nowUnix > existingExpiresAtUnix {
+			if nowUnix > existingExpiresAt.Unix() {
 				_, err = tx.ExecContext(ctx, `
 						DELETE FROM config_locks WHERE target = ?
 					`, req.Target)
@@ -113,10 +113,10 @@ func (ds *sqliteDatastore) ReleaseLock(ctx context.Context, target string, sessi
 		// Verify the lock is held by this session
 		var lockSessionID string
 		var lockUser string
-		var expiresAtUnix int64
+		var expiresAt sqliteUnixTime
 		err := tx.QueryRowContext(ctx, `
 				SELECT session_id, user, expires_at FROM config_locks WHERE target = ?
-			`, target).Scan(&lockSessionID, &lockUser, &expiresAtUnix)
+			`, target).Scan(&lockSessionID, &lockUser, &expiresAt)
 
 		if err == sql.ErrNoRows {
 			// No lock exists, nothing to release (idempotent)
@@ -127,7 +127,7 @@ func (ds *sqliteDatastore) ReleaseLock(ctx context.Context, target string, sessi
 		}
 
 		// Check if lock has expired (treat as if no lock exists)
-		if time.Now().Unix() > expiresAtUnix {
+		if time.Now().Unix() > expiresAt.Unix() {
 			// Lock is expired - delete it and return success
 			_, _ = tx.ExecContext(ctx, `DELETE FROM config_locks WHERE target = ?`, target)
 			return nil
@@ -176,10 +176,10 @@ func (ds *sqliteDatastore) ExtendLock(ctx context.Context, target string, sessio
 		// Verify lock is held by this session and not expired
 		var lockSessionID string
 		var lockUser string
-		var expiresAtUnix int64
+		var expiresAt sqliteUnixTime
 		err := tx.QueryRowContext(ctx, `
 				SELECT session_id, user, expires_at FROM config_locks WHERE target = ?
-			`, target).Scan(&lockSessionID, &lockUser, &expiresAtUnix)
+			`, target).Scan(&lockSessionID, &lockUser, &expiresAt)
 
 		if err == sql.ErrNoRows {
 			return NewError(ErrCodeNotFound, fmt.Sprintf("no %s lock to extend", target), nil)
@@ -190,7 +190,7 @@ func (ds *sqliteDatastore) ExtendLock(ctx context.Context, target string, sessio
 
 		// Check if lock has expired
 		now := time.Now()
-		if now.Unix() > expiresAtUnix {
+		if now.Unix() > expiresAt.Unix() {
 			return NewError(ErrCodeConflict,
 				fmt.Sprintf("%s lock has expired, cannot extend (re-acquire lock instead)", target), nil)
 		}
@@ -289,13 +289,13 @@ func (ds *sqliteDatastore) GetLockInfo(ctx context.Context, target string) (*Loc
 	}
 
 	var sessionID, user string
-	var acquiredAtUnix, expiresAtUnix int64
+	var acquiredAt, expiresAt sqliteUnixTime
 
 	err := ds.db.QueryRowContext(ctx, `
 		SELECT session_id, user, acquired_at, expires_at
 		FROM config_locks
 		WHERE target = ?
-	`, target).Scan(&sessionID, &user, &acquiredAtUnix, &expiresAtUnix)
+	`, target).Scan(&sessionID, &user, &acquiredAt, &expiresAt)
 
 	if err == sql.ErrNoRows {
 		// No lock exists
@@ -308,8 +308,8 @@ func (ds *sqliteDatastore) GetLockInfo(ctx context.Context, target string) (*Loc
 	}
 
 	// Check if lock is expired
-	expiresAt := time.Unix(expiresAtUnix, 0)
-	if time.Now().After(expiresAt) {
+	expiresAtTime := expiresAt.Time()
+	if time.Now().After(expiresAtTime) {
 		// Lock expired but not yet cleaned up
 		return &LockInfo{
 			IsLocked: false,
@@ -320,7 +320,7 @@ func (ds *sqliteDatastore) GetLockInfo(ctx context.Context, target string) (*Loc
 		IsLocked:   true,
 		SessionID:  sessionID,
 		User:       user,
-		AcquiredAt: time.Unix(acquiredAtUnix, 0),
-		ExpiresAt:  expiresAt,
+		AcquiredAt: acquiredAt.Time(),
+		ExpiresAt:  expiresAtTime,
 	}, nil
 }

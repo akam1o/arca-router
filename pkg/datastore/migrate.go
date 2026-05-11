@@ -67,6 +67,14 @@ func (m *sqliteMigrationManager) ApplyMigrations() error {
 	if err != nil {
 		return fmt.Errorf("failed to get current version: %w", err)
 	}
+	if repaired, err := m.repairTargetLockMigrationVersion(currentVersion); err != nil {
+		return fmt.Errorf("failed to repair target lock migration version: %w", err)
+	} else if repaired {
+		currentVersion, err = m.GetCurrentVersion()
+		if err != nil {
+			return fmt.Errorf("failed to get current version after repair: %w", err)
+		}
+	}
 
 	// Get list of migration files
 	migrations, err := m.getMigrationFiles()
@@ -110,6 +118,56 @@ func (m *sqliteMigrationManager) ApplyMigrations() error {
 	}
 
 	return nil
+}
+
+func (m *sqliteMigrationManager) repairTargetLockMigrationVersion(currentVersion int) (bool, error) {
+	if currentVersion == 0 || currentVersion >= 2 {
+		return false, nil
+	}
+
+	columns, err := m.configLockColumns()
+	if err != nil {
+		return false, err
+	}
+	if !columns["target"] || columns["lock_id"] {
+		return false, nil
+	}
+
+	_, err = m.db.Exec(`INSERT OR IGNORE INTO schema_version (version) VALUES (2)`)
+	if err != nil {
+		return false, fmt.Errorf("failed to record repaired migration version: %w", err)
+	}
+	return true, nil
+}
+
+func (m *sqliteMigrationManager) configLockColumns() (map[string]bool, error) {
+	rows, err := m.db.Query(`PRAGMA table_info(config_locks)`)
+	if err != nil {
+		return nil, fmt.Errorf("failed to inspect config_locks table: %w", err)
+	}
+	defer func() {
+		if err := rows.Close(); err != nil {
+			_ = err
+		}
+	}()
+
+	columns := make(map[string]bool)
+	for rows.Next() {
+		var cid int
+		var name string
+		var typ string
+		var notNull int
+		var defaultValue sql.NullString
+		var pk int
+		if err := rows.Scan(&cid, &name, &typ, &notNull, &defaultValue, &pk); err != nil {
+			return nil, fmt.Errorf("failed to read config_locks column info: %w", err)
+		}
+		columns[name] = true
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("failed to inspect config_locks columns: %w", err)
+	}
+	return columns, nil
 }
 
 // CreateBackup creates a database backup before migrations.
