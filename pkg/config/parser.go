@@ -634,6 +634,7 @@ func (p *Parser) parseOSPFArea(ospf *OSPFConfig) error {
 				return p.error(fmt.Sprintf("invalid priority value: %s", p.current.Value))
 			}
 			ospfIf.Priority = priority
+			ospfIf.PrioritySet = true
 			p.nextToken()
 		default:
 			// Not an OSPF interface parameter, break the loop

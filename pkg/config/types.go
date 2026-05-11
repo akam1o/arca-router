@@ -195,6 +195,9 @@ type OSPFInterface struct {
 
 	// Priority is the OSPF priority for DR election
 	Priority int `json:"priority,omitempty"`
+
+	// PrioritySet records whether priority was explicitly configured.
+	PrioritySet bool `json:"-"`
 }
 
 // PolicyOptions represents policy-options configuration
