@@ -429,11 +429,6 @@ func (sh *InteractiveShell) cmdCommit(ctx context.Context, args []string) error 
 		return err
 	}
 
-	// Exit configuration mode if and-quit
-	if opts.AndQuit {
-		return sh.session.ExitConfigurationMode(ctx)
-	}
-
 	return nil
 }
 
