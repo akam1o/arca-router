@@ -180,7 +180,7 @@ func (ds *sqliteDatastore) logCleanupError(cleanupErr error) error {
 // performLockCleanup removes expired locks from the database (for all targets).
 func (ds *sqliteDatastore) performLockCleanup(ctx context.Context) error {
 	return ds.withTx(ctx, false, func(tx *sql.Tx) error {
-		now := time.Now()
+		now := time.Now().Unix()
 
 		// Delete expired locks for all targets (candidate, running)
 		result, err := tx.ExecContext(ctx, `
