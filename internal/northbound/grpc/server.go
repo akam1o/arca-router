@@ -31,10 +31,6 @@ type Server struct {
 	server   *googlegrpc.Server
 }
 
-type rollbackCapableStore interface {
-	RollbackCommit(ctx context.Context, commitID, user, message string) (string, error)
-}
-
 // NewServer creates a new gRPC server.
 func NewServer(eng *engine.Engine, st store.ConfigStore, log *slog.Logger) *Server {
 	return &Server{
@@ -237,25 +233,26 @@ func (s *Server) Rollback(ctx context.Context, sessionID, commitID, user, messag
 	if current := s.engine.RunningSnapshot(); current != nil {
 		version = current.Version + 1
 	}
+	rollbackSnap := model.NewSnapshot(newCfg, version, user, message)
+	var prepared store.PreparedCommit
+	if rollbackStore, ok := s.store.(store.RollbackPreparer); ok {
+		prepared, err = rollbackStore.PrepareRollback(ctx, rollbackSnap, commitID)
+	} else {
+		prepared, err = s.store.PrepareCommit(ctx, rollbackSnap)
+	}
+	if err != nil {
+		return "", 0, fmt.Errorf("prepare rollback persistence: %w", err)
+	}
+
 	beforeSnap := s.engine.RunningSnapshot()
 	if err := s.engine.Apply(ctx, newCfg, user, message); err != nil {
+		_ = prepared.Abort(context.Background())
 		return "", 0, err
 	}
 
-	newCommitID := ""
-	if rollbackStore, ok := s.store.(rollbackCapableStore); ok {
-		newCommitID, err = rollbackStore.RollbackCommit(ctx, commitID, user, message)
-	} else {
-		var prepared store.PreparedCommit
-		prepared, err = s.store.PrepareCommit(ctx, model.NewSnapshot(newCfg, version, user, message))
-		if err == nil {
-			newCommitID, err = prepared.Commit(ctx)
-			if err != nil {
-				_ = prepared.Abort(context.Background())
-			}
-		}
-	}
+	newCommitID, err := prepared.Commit(ctx)
 	if err != nil {
+		_ = prepared.Abort(context.Background())
 		if rollbackErr := s.rollbackToSnapshot(context.Background(), beforeSnap, user); rollbackErr != nil {
 			return "", 0, fmt.Errorf("persist rollback after apply: %w (engine rollback failed: %v)", err, rollbackErr)
 		}

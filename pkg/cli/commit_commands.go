@@ -111,10 +111,11 @@ func (s *Session) RollbackWithNumber(ctx context.Context, rollbackNum int) error
 	// Perform rollback
 	targetCommit := history[rollbackNum]
 	req := &datastore.RollbackRequest{
-		CommitID: targetCommit.CommitID,
-		User:     s.username,
-		Message:  fmt.Sprintf("CLI rollback %d", rollbackNum),
-		SourceIP: "local",
+		SessionID: s.id,
+		CommitID:  targetCommit.CommitID,
+		User:      s.username,
+		Message:   fmt.Sprintf("CLI rollback %d", rollbackNum),
+		SourceIP:  "local",
 	}
 	newCommitID, err := s.ds.Rollback(ctx, req)
 	if err != nil {

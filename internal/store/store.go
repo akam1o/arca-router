@@ -44,6 +44,11 @@ type PreparedCommit interface {
 	Abort(ctx context.Context) error
 }
 
+// RollbackPreparer prepares rollback commits with rollback history metadata.
+type RollbackPreparer interface {
+	PrepareRollback(ctx context.Context, snap *model.ConfigSnapshot, targetCommitID string) (PreparedCommit, error)
+}
+
 // CommitRecord represents a persisted commit entry.
 type CommitRecord struct {
 	CommitID   string              `json:"commit_id"`

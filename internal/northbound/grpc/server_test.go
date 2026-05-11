@@ -25,11 +25,12 @@ func listenUnix(path string) (net.Listener, error) {
 }
 
 type fakeStore struct {
-	commitID  string
-	commitErr error
-	saved     *model.ConfigSnapshot
-	aborted   bool
-	commits   map[string]*store.CommitRecord
+	commitID   string
+	prepareErr error
+	commitErr  error
+	saved      *model.ConfigSnapshot
+	aborted    bool
+	commits    map[string]*store.CommitRecord
 }
 
 func (f *fakeStore) GetLatestSnapshot(ctx context.Context) (*model.ConfigSnapshot, error) {
@@ -45,6 +46,9 @@ func (f *fakeStore) SaveCommit(ctx context.Context, snap *model.ConfigSnapshot) 
 }
 
 func (f *fakeStore) PrepareCommit(ctx context.Context, snap *model.ConfigSnapshot) (store.PreparedCommit, error) {
+	if f.prepareErr != nil {
+		return nil, f.prepareErr
+	}
 	f.saved = snap
 	return &fakePreparedCommit{store: f}, nil
 }
@@ -295,6 +299,40 @@ func TestRollbackAppliesCommitConfig(t *testing.T) {
 	}
 	if !strings.Contains(candidate, "set system host-name router1") {
 		t.Fatalf("candidate was not reset to rolled back config: %q", candidate)
+	}
+}
+
+func TestRollbackDoesNotApplyEngineWhenPersistencePrepareFails(t *testing.T) {
+	eng := engine.NewEngine(nil, testLogger())
+	eng.InitializeRunning(&model.RouterConfig{
+		System:     &model.SystemConfig{HostName: "router2"},
+		Interfaces: map[string]*model.InterfaceConfig{},
+	}, 2)
+	targetCfg := &model.RouterConfig{
+		System:     &model.SystemConfig{HostName: "router1"},
+		Interfaces: map[string]*model.InterfaceConfig{},
+	}
+	st := &fakeStore{
+		prepareErr: errors.New("lock held"),
+		commits: map[string]*store.CommitRecord{
+			"commit-old": {CommitID: "commit-old", Config: targetCfg},
+		},
+	}
+	srv := NewServer(eng, st, testLogger())
+	ctx := context.Background()
+	sessionID, err := srv.CreateSession(ctx, "alice")
+	if err != nil {
+		t.Fatalf("CreateSession() error = %v", err)
+	}
+	if err := srv.AcquireLock(ctx, sessionID, "alice"); err != nil {
+		t.Fatalf("AcquireLock() error = %v", err)
+	}
+
+	if _, _, err := srv.Rollback(ctx, sessionID, "commit-old", "alice", ""); err == nil {
+		t.Fatal("Rollback() expected prepare error")
+	}
+	if got := eng.Running().System.HostName; got != "router2" {
+		t.Fatalf("engine running hostname = %q, want unchanged router2", got)
 	}
 }
 

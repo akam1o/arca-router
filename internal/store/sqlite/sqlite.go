@@ -116,6 +116,39 @@ func (s *Store) SaveCommit(ctx context.Context, snap *model.ConfigSnapshot) (str
 	return commitID, nil
 }
 
+func (s *Store) PrepareRollback(ctx context.Context, snap *model.ConfigSnapshot, targetCommitID string) (store.PreparedCommit, error) {
+	if snap == nil || snap.Config == nil {
+		return nil, fmt.Errorf("snapshot is nil")
+	}
+	if targetCommitID == "" {
+		return nil, fmt.Errorf("target commit ID is required")
+	}
+	if _, err := s.ds.GetCommit(ctx, targetCommitID); err != nil {
+		return nil, fmt.Errorf("load rollback target: %w", err)
+	}
+
+	sessionID := "engine-" + uuid.NewString()
+	if err := s.ds.AcquireLock(ctx, &datastore.LockRequest{
+		Target:    datastore.LockTargetCandidate,
+		SessionID: sessionID,
+		User:      snap.Author,
+		Timeout:   30 * time.Minute,
+	}); err != nil {
+		return nil, fmt.Errorf("acquire rollback lock: %w", err)
+	}
+
+	return &preparedRollback{
+		ds:        s.ds,
+		sessionID: sessionID,
+		req: &datastore.RollbackRequest{
+			SessionID: sessionID,
+			CommitID:  targetCommitID,
+			User:      snap.Author,
+			Message:   snap.Message,
+		},
+	}, nil
+}
+
 func (s *Store) GetCommit(ctx context.Context, commitID string) (*store.CommitRecord, error) {
 	entry, err := s.ds.GetCommit(ctx, commitID)
 	if err != nil {
@@ -180,14 +213,6 @@ func (s *Store) AuditLog(ctx context.Context, event *store.AuditEvent) error {
 	})
 }
 
-func (s *Store) RollbackCommit(ctx context.Context, commitID, user, message string) (string, error) {
-	return s.ds.Rollback(ctx, &datastore.RollbackRequest{
-		CommitID: commitID,
-		User:     user,
-		Message:  message,
-	})
-}
-
 func (s *Store) Close() error {
 	return s.ds.Close()
 }
@@ -220,6 +245,7 @@ func parseLegacyText(text string) (*model.RouterConfig, error) {
 
 // Verify interface compliance at compile time.
 var _ store.ConfigStore = (*Store)(nil)
+var _ store.RollbackPreparer = (*Store)(nil)
 
 // Legacy returns the underlying legacy datastore for components that
 // still need it during the migration period.
@@ -247,4 +273,18 @@ func (p *preparedCommit) Abort(ctx context.Context) error {
 		return deleteErr
 	}
 	return releaseErr
+}
+
+type preparedRollback struct {
+	ds        datastore.Datastore
+	sessionID string
+	req       *datastore.RollbackRequest
+}
+
+func (p *preparedRollback) Commit(ctx context.Context) (string, error) {
+	return p.ds.Rollback(ctx, p.req)
+}
+
+func (p *preparedRollback) Abort(ctx context.Context) error {
+	return p.ds.ReleaseLock(ctx, datastore.LockTargetCandidate, p.sessionID)
 }

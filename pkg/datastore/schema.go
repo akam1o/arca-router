@@ -78,10 +78,11 @@ type CommitRequest struct {
 
 // RollbackRequest contains parameters for a rollback operation.
 type RollbackRequest struct {
-	CommitID string // Target commit ID to rollback to
-	User     string // Username performing the rollback
-	Message  string // Optional rollback reason
-	SourceIP string // Source IP address of the user (for audit)
+	SessionID string // Session holding the candidate config lock
+	CommitID  string // Target commit ID to rollback to
+	User      string // Username performing the rollback
+	Message   string // Optional rollback reason
+	SourceIP  string // Source IP address of the user (for audit)
 }
 
 // HistoryOptions contains filtering options for commit history queries.

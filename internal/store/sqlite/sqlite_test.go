@@ -8,6 +8,7 @@ import (
 
 	"github.com/akam1o/arca-router/internal/model"
 	pkgconfig "github.com/akam1o/arca-router/pkg/config"
+	"github.com/akam1o/arca-router/pkg/datastore"
 )
 
 func TestGetLatestSnapshotReturnsNilWhenRunningConfigMissing(t *testing.T) {
@@ -118,6 +119,106 @@ func TestSaveCommitPreservesOSPFPriorityZero(t *testing.T) {
 	got := latest.Config.Protocols.OSPF.Areas["0.0.0.0"].Interfaces["ge-0/0/0"].Priority
 	if got == nil || *got != 0 {
 		t.Fatalf("latest OSPF priority = %v, want explicit 0", got)
+	}
+}
+
+func TestPrepareRollbackConflictsWithExistingDatastoreLock(t *testing.T) {
+	installLegacyTextParser(t)
+
+	st, err := NewFromPath(filepath.Join(t.TempDir(), "config.db"))
+	if err != nil {
+		t.Fatalf("NewFromPath() error = %v", err)
+	}
+	t.Cleanup(func() { _ = st.Close() })
+
+	first := model.NewSnapshot(&model.RouterConfig{
+		System:     &model.SystemConfig{HostName: "router1"},
+		Interfaces: map[string]*model.InterfaceConfig{},
+	}, 1, "alice", "first")
+	firstID, err := st.SaveCommit(context.Background(), first)
+	if err != nil {
+		t.Fatalf("SaveCommit(first) error = %v", err)
+	}
+
+	second := model.NewSnapshot(&model.RouterConfig{
+		System:     &model.SystemConfig{HostName: "router2"},
+		Interfaces: map[string]*model.InterfaceConfig{},
+	}, 2, "alice", "second")
+	if _, err := st.SaveCommit(context.Background(), second); err != nil {
+		t.Fatalf("SaveCommit(second) error = %v", err)
+	}
+
+	if err := st.Legacy().AcquireLock(context.Background(), &datastore.LockRequest{
+		Target:    datastore.LockTargetCandidate,
+		SessionID: "netconf-session",
+		User:      "bob",
+	}); err != nil {
+		t.Fatalf("AcquireLock() error = %v", err)
+	}
+
+	_, err = st.PrepareRollback(context.Background(), first, firstID)
+	if err == nil {
+		t.Fatal("PrepareRollback() expected lock conflict")
+	}
+}
+
+func TestPrepareRollbackPersistsRollbackHistory(t *testing.T) {
+	installLegacyTextParser(t)
+
+	st, err := NewFromPath(filepath.Join(t.TempDir(), "config.db"))
+	if err != nil {
+		t.Fatalf("NewFromPath() error = %v", err)
+	}
+	t.Cleanup(func() { _ = st.Close() })
+
+	first := model.NewSnapshot(&model.RouterConfig{
+		System:     &model.SystemConfig{HostName: "router1"},
+		Interfaces: map[string]*model.InterfaceConfig{},
+	}, 1, "alice", "first")
+	firstID, err := st.SaveCommit(context.Background(), first)
+	if err != nil {
+		t.Fatalf("SaveCommit(first) error = %v", err)
+	}
+
+	second := model.NewSnapshot(&model.RouterConfig{
+		System:     &model.SystemConfig{HostName: "router2"},
+		Interfaces: map[string]*model.InterfaceConfig{},
+	}, 2, "alice", "second")
+	if _, err := st.SaveCommit(context.Background(), second); err != nil {
+		t.Fatalf("SaveCommit(second) error = %v", err)
+	}
+
+	prepared, err := st.PrepareRollback(context.Background(), first, firstID)
+	if err != nil {
+		t.Fatalf("PrepareRollback() error = %v", err)
+	}
+	rollbackID, err := prepared.Commit(context.Background())
+	if err != nil {
+		t.Fatalf("prepared rollback Commit() error = %v", err)
+	}
+
+	running, err := st.Legacy().GetRunning(context.Background())
+	if err != nil {
+		t.Fatalf("GetRunning() error = %v", err)
+	}
+	if !strings.Contains(running.ConfigText, "set system host-name router1") {
+		t.Fatalf("running config = %q, want rolled back router1", running.ConfigText)
+	}
+
+	rollback, err := st.Legacy().GetCommit(context.Background(), rollbackID)
+	if err != nil {
+		t.Fatalf("GetCommit(rollback) error = %v", err)
+	}
+	if !rollback.IsRollback {
+		t.Fatalf("rollback commit IsRollback = false, want true")
+	}
+
+	lockInfo, err := st.Legacy().GetLockInfo(context.Background(), datastore.LockTargetCandidate)
+	if err != nil {
+		t.Fatalf("GetLockInfo() error = %v", err)
+	}
+	if lockInfo.IsLocked {
+		t.Fatalf("candidate lock is still held by %q", lockInfo.SessionID)
 	}
 }
 
