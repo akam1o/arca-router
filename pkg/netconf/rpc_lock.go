@@ -52,7 +52,7 @@ func (s *Server) handleLock(ctx context.Context, sess *Session, rpc *RPC) *RPCRe
 
 		// Check if lock is held by another session
 		existingLock, getErr := s.datastore.GetLockInfo(ctx, target)
-		if getErr == nil && existingLock != nil && existingLock.SessionID != sess.ID {
+		if getErr == nil && existingLock != nil && existingLock.IsLocked && existingLock.SessionID != sess.ID {
 			// Convert UUID to NumericID for RFC 6241 compliant error
 			ownerNumericID := s.sessionIDToNumeric(existingLock.SessionID)
 			return NewErrorReply(rpc.MessageID, ErrLockDeniedForLock(target, ownerNumericID))
