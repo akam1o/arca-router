@@ -16,6 +16,7 @@ type RPC struct {
 	Content   []byte   `xml:",innerxml"`
 
 	NamespaceAttrs []xml.Attr `xml:"-"`
+	ReplyAttrs     []xml.Attr `xml:"-"`
 }
 
 type rpcEnvelope struct {
@@ -92,6 +93,7 @@ func ParseRPC(data []byte) (*RPC, error) {
 		Operation:      operation.XMLName,
 		Content:        operation.Content,
 		NamespaceAttrs: collectNamespaceAttrs(envelope.Attrs, operation.Attrs),
+		ReplyAttrs:     rpcReplyAttrsFromRootAttrs(envelope.Attrs),
 	}
 	if err := ValidateProtocolNamespace(rpc.Operation); err != nil {
 		return nil, err
@@ -187,21 +189,63 @@ func validateRPCOperationAttributes(operation rpcOperation) error {
 	return nil
 }
 
-func validateRPCRootAttributes(attrs []xml.Attr) error {
-	for _, attr := range attrs {
-		if isNamespaceDeclarationAttribute(attr) {
-			continue
-		}
-		if attr.Name.Space == "" && attr.Name.Local == "message-id" {
-			continue
-		}
-		rpcErr := ErrUnknownAttribute("/rpc", attr.Name.Local)
-		if attr.Name.Space != "" {
-			rpcErr = rpcErr.WithBadNamespace(attr.Name.Space)
-		}
-		return rpcErr
-	}
+func validateRPCRootAttributes(_ []xml.Attr) error {
+	// RFC 6241 requires peers to accept additional <rpc> attributes and return
+	// them unmodified in <rpc-reply>.
 	return nil
+}
+
+func extractRPCReplyContext(data []byte) (string, []xml.Attr) {
+	decoder := xml.NewDecoder(bytes.NewReader(data))
+	decoder.Strict = true
+	decoder.Entity = nil
+
+	for {
+		token, err := decoder.Token()
+		if err != nil {
+			return "", nil
+		}
+
+		switch t := token.(type) {
+		case xml.StartElement:
+			if t.Name.Local != "rpc" {
+				return "", nil
+			}
+
+			messageID := ""
+			for _, attr := range t.Attr {
+				if isMessageIDAttribute(attr) {
+					messageID = attr.Value
+					break
+				}
+			}
+			return messageID, rpcReplyAttrsFromRootAttrs(t.Attr)
+		case xml.CharData:
+			if len(bytes.TrimSpace(t)) == 0 {
+				continue
+			}
+			return "", nil
+		}
+	}
+}
+
+func rpcReplyAttrsFromRootAttrs(attrs []xml.Attr) []xml.Attr {
+	if len(attrs) == 0 {
+		return nil
+	}
+
+	replyAttrs := make([]xml.Attr, 0, len(attrs))
+	for _, attr := range attrs {
+		if isMessageIDAttribute(attr) {
+			continue
+		}
+		replyAttrs = append(replyAttrs, attr)
+	}
+	return replyAttrs
+}
+
+func isMessageIDAttribute(attr xml.Attr) bool {
+	return attr.Name.Space == "" && attr.Name.Local == "message-id"
 }
 
 func validateRPCRootContent(content []byte, attrs []xml.Attr) error {

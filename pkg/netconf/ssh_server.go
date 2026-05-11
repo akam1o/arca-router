@@ -707,7 +707,8 @@ func (s *SSHServer) handleNETCONF(ctx context.Context, sess *Session, channel ss
 			if !ok {
 				rpcErr = ErrOperationFailed(fmt.Sprintf("RPC parsing failed: %v", err))
 			}
-			errorReply := NewErrorReply("", rpcErr)
+			messageID, replyAttrs := extractRPCReplyContext(rpcXML)
+			errorReply := NewErrorReply(messageID, rpcErr).WithAttributes(replyAttrs)
 			errorXML, _ := MarshalReply(errorReply)
 			if err := writer.WriteMessage(errorXML); err != nil {
 				s.log.Error("Failed to send error reply", "error", err)
@@ -742,7 +743,7 @@ func (s *SSHServer) handleNETCONF(ctx context.Context, sess *Session, channel ss
 		if err != nil {
 			s.log.Error("Failed to serialize reply", "error", err)
 			// Send generic error
-			errorReply := NewErrorReply(rpc.MessageID, ErrOperationFailed("reply serialization failed"))
+			errorReply := NewErrorReply(rpc.MessageID, ErrOperationFailed("reply serialization failed")).WithAttributes(rpc.ReplyAttrs)
 			errorXML, _ := MarshalReply(errorReply)
 			if err := writer.WriteMessage(errorXML); err != nil {
 				s.log.Error("Failed to send error reply", "error", err)

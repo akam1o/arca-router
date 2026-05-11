@@ -127,6 +127,44 @@ func TestMarshalOKReply(t *testing.T) {
 	}
 }
 
+func TestMarshalReplyPreservesAttributes(t *testing.T) {
+	reply := NewOKReply("101").WithAttributes([]xml.Attr{
+		{Name: xml.Name{Space: "xmlns", Local: "ex"}, Value: "http://example.net/content/1.0"},
+		{Name: xml.Name{Space: "http://example.net/content/1.0", Local: "user-id"}, Value: "fred"},
+		{Name: xml.Name{Local: "trace-id"}, Value: "abc"},
+	})
+
+	data, err := MarshalReply(reply)
+	if err != nil {
+		t.Fatalf("Failed to marshal reply: %v", err)
+	}
+
+	xmlStr := string(data)
+	for _, want := range []string{
+		`xmlns:ex="http://example.net/content/1.0"`,
+		`ex:user-id="fred"`,
+		`trace-id="abc"`,
+	} {
+		if !strings.Contains(xmlStr, want) {
+			t.Errorf("Missing preserved attribute %s in %s", want, xmlStr)
+		}
+	}
+}
+
+func TestMarshalReplyOmitsEmptyMessageID(t *testing.T) {
+	reply := NewErrorReply("", ErrMissingElement("rpc", "message-id"))
+
+	data, err := MarshalReply(reply)
+	if err != nil {
+		t.Fatalf("Failed to marshal reply: %v", err)
+	}
+
+	xmlStr := string(data)
+	if strings.Contains(xmlStr, `message-id=""`) || strings.Contains(xmlStr, `message-id=`) {
+		t.Fatalf("Expected message-id to be omitted, got %s", xmlStr)
+	}
+}
+
 func TestMarshalDataReply(t *testing.T) {
 	data := []byte("<interfaces><interface>xe-0/0/0</interface></interfaces>")
 	reply := NewDataReply("102", data)

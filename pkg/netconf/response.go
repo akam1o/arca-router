@@ -1,11 +1,14 @@
 package netconf
 
 import (
+	"bytes"
 	"encoding/xml"
+	"fmt"
 )
 
 const (
 	netconfNamespace = "urn:ietf:params:xml:ns:netconf:base:1.0"
+	xmlNamespace     = "http://www.w3.org/XML/1998/namespace"
 )
 
 // RPCReply represents a NETCONF <rpc-reply> envelope
@@ -15,6 +18,7 @@ type RPCReply struct {
 	OK        *struct{}   `xml:"ok,omitempty"`
 	Data      *DataReply  `xml:"data,omitempty"`
 	Errors    []*RPCError `xml:"rpc-error,omitempty"`
+	Attrs     []xml.Attr  `xml:"-"`
 }
 
 // DataReply represents <data> element in response
@@ -57,11 +61,95 @@ func NewMultiErrorReply(messageID string, errors []*RPCError) *RPCReply {
 	}
 }
 
+func (r *RPCReply) WithAttributes(attrs []xml.Attr) *RPCReply {
+	if r == nil {
+		return nil
+	}
+	r.Attrs = cloneXMLAttrs(attrs)
+	return r
+}
+
 // MarshalReply serializes RPCReply to XML bytes
 func MarshalReply(reply *RPCReply) ([]byte, error) {
-	data, err := xml.Marshal(reply)
-	if err != nil {
+	if reply == nil {
+		return nil, fmt.Errorf("nil RPC reply")
+	}
+
+	var buf bytes.Buffer
+	buf.WriteString("<rpc-reply")
+	writeXMLAttribute(&buf, "xmlns", netconfNamespace)
+	if reply.MessageID != "" {
+		writeXMLAttribute(&buf, "message-id", reply.MessageID)
+	}
+	if err := writeReplyAttributes(&buf, reply.Attrs); err != nil {
 		return nil, err
 	}
-	return data, nil
+	buf.WriteByte('>')
+
+	if reply.OK != nil {
+		buf.WriteString("<ok/>")
+	}
+	if reply.Data != nil {
+		buf.WriteString("<data>")
+		buf.Write(reply.Data.Content)
+		buf.WriteString("</data>")
+	}
+	for _, rpcErr := range reply.Errors {
+		data, err := xml.Marshal(rpcErr)
+		if err != nil {
+			return nil, err
+		}
+		buf.Write(data)
+	}
+
+	buf.WriteString("</rpc-reply>")
+	return buf.Bytes(), nil
+}
+
+func writeReplyAttributes(buf *bytes.Buffer, attrs []xml.Attr) error {
+	namespacePrefixes := map[string]string{
+		xmlNamespace: "xml",
+	}
+	written := map[string]string{
+		"xmlns": netconfNamespace,
+	}
+
+	for _, attr := range attrs {
+		name, ok := namespaceDeclarationAttrName(attr)
+		if !ok {
+			continue
+		}
+		if name == "xmlns" && attr.Value == netconfNamespace {
+			continue
+		}
+		if _, exists := written[name]; exists {
+			continue
+		}
+		writeXMLAttribute(buf, name, attr.Value)
+		written[name] = attr.Value
+
+		if attr.Name.Space == "xmlns" && attr.Name.Local != "" {
+			if _, exists := namespacePrefixes[attr.Value]; !exists {
+				namespacePrefixes[attr.Value] = attr.Name.Local
+			}
+		}
+	}
+
+	for _, attr := range attrs {
+		if isNamespaceDeclarationAttribute(attr) || isMessageIDAttribute(attr) {
+			continue
+		}
+
+		name := attr.Name.Local
+		if attr.Name.Space != "" {
+			prefix, ok := namespacePrefixes[attr.Name.Space]
+			if !ok || prefix == "" {
+				return fmt.Errorf("missing namespace declaration for reply attribute %s", attr.Name.Local)
+			}
+			name = prefix + ":" + attr.Name.Local
+		}
+		writeXMLAttribute(buf, name, attr.Value)
+	}
+
+	return nil
 }
