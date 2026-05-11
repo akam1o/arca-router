@@ -13,6 +13,7 @@ type interactiveTestDatastore struct {
 	lockSessionID    string
 	lockAcquired     bool
 	acquireLockCount int
+	listHistoryCalls int
 	history          []*datastore.CommitHistoryEntry
 }
 
@@ -96,6 +97,7 @@ func (d *interactiveTestDatastore) GetLockInfo(ctx context.Context, target strin
 }
 
 func (d *interactiveTestDatastore) ListCommitHistory(ctx context.Context, opts *datastore.HistoryOptions) ([]*datastore.CommitHistoryEntry, error) {
+	d.listHistoryCalls++
 	if d.history != nil {
 		return d.history, nil
 	}
@@ -137,5 +139,22 @@ func TestInteractiveCommitAndQuitLeavesOperational(t *testing.T) {
 	}
 	if ds.lockAcquired {
 		t.Fatal("datastore lock was not released")
+	}
+}
+
+func TestInteractiveShowHistoryRejectsInvalidLimit(t *testing.T) {
+	ctx := context.Background()
+
+	for _, arg := range []string{"-1", "0", "1abc"} {
+		ds := &interactiveTestDatastore{}
+		session := cli.NewSession("testuser", ds)
+		sh := &InteractiveShell{session: session, hostname: "router"}
+
+		if err := sh.cmdShow(ctx, []string{"history", arg}); err == nil {
+			t.Fatalf("cmdShow(history %s) error = nil, want invalid limit", arg)
+		}
+		if ds.listHistoryCalls != 0 {
+			t.Fatalf("ListCommitHistory calls for %q = %d, want 0", arg, ds.listHistoryCalls)
+		}
 	}
 }

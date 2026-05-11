@@ -13,6 +13,7 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
+	"strconv"
 	"strings"
 	"syscall"
 
@@ -127,6 +128,14 @@ func shortCommitID(commitID string) string {
 		return commitID[:8]
 	}
 	return commitID
+}
+
+func parseHistoryLimit(raw string) (int, error) {
+	limit, err := strconv.Atoi(raw)
+	if err != nil || limit <= 0 {
+		return 0, fmt.Errorf("invalid limit: %s", raw)
+	}
+	return limit, nil
 }
 
 // --- One-shot command ---
@@ -537,8 +546,10 @@ func (sh *interactiveShell) cmdShow(ctx context.Context, args []string) error {
 	case "history":
 		limit := 10
 		if len(args) > 1 {
-			if _, err := fmt.Sscanf(args[1], "%d", &limit); err != nil {
-				return fmt.Errorf("invalid limit: %s", args[1])
+			var err error
+			limit, err = parseHistoryLimit(args[1])
+			if err != nil {
+				return err
 			}
 		}
 		entries, err := sh.client.ListHistory(ctx, limit, 0)
