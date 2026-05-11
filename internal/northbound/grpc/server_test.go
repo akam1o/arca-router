@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"net"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -171,6 +172,80 @@ func TestClientServerConfigFlow(t *testing.T) {
 	}
 	if hasChanges {
 		t.Fatalf("Diff() has changes after commit: %q", diffText)
+	}
+}
+
+func TestReleaseLockWaitsForInFlightCommit(t *testing.T) {
+	parserEntered := make(chan struct{})
+	unblockParser := make(chan struct{})
+	var enteredOnce sync.Once
+	var unblockOnce sync.Once
+	t.Cleanup(func() {
+		unblockOnce.Do(func() { close(unblockParser) })
+	})
+
+	oldParser := ConfigTextParser
+	ConfigTextParser = func(text string) (*model.RouterConfig, error) {
+		enteredOnce.Do(func() { close(parserEntered) })
+		<-unblockParser
+		cfg, err := pkgconfig.NewParser(strings.NewReader(text)).Parse()
+		if err != nil {
+			return nil, err
+		}
+		return model.FromLegacyConfig(cfg), nil
+	}
+	t.Cleanup(func() {
+		ConfigTextParser = oldParser
+	})
+
+	eng := engine.NewEngine(nil, testLogger())
+	eng.InitializeRunning(&model.RouterConfig{
+		System:     &model.SystemConfig{HostName: "router1"},
+		Interfaces: map[string]*model.InterfaceConfig{},
+	}, 1)
+	srv := NewServer(eng, &fakeStore{commitID: "commit-1"}, testLogger())
+	ctx := context.Background()
+
+	sessionID, err := srv.CreateSession(ctx, "alice")
+	if err != nil {
+		t.Fatalf("CreateSession() error = %v", err)
+	}
+	if err := srv.AcquireLock(ctx, sessionID, "alice"); err != nil {
+		t.Fatalf("AcquireLock() error = %v", err)
+	}
+	if err := srv.EditCandidate(ctx, sessionID, "set system host-name router2"); err != nil {
+		t.Fatalf("EditCandidate() error = %v", err)
+	}
+
+	commitErrCh := make(chan error, 1)
+	go func() {
+		_, _, err := srv.Commit(ctx, sessionID, "alice", "test")
+		commitErrCh <- err
+	}()
+
+	select {
+	case <-parserEntered:
+	case <-time.After(time.Second):
+		t.Fatal("Commit() did not enter parser")
+	}
+
+	releaseErrCh := make(chan error, 1)
+	go func() {
+		releaseErrCh <- srv.ReleaseLock(ctx, sessionID)
+	}()
+
+	select {
+	case err := <-releaseErrCh:
+		t.Fatalf("ReleaseLock() returned before in-flight commit finished: %v", err)
+	case <-time.After(50 * time.Millisecond):
+	}
+
+	unblockOnce.Do(func() { close(unblockParser) })
+	if err := <-commitErrCh; err != nil {
+		t.Fatalf("Commit() error = %v", err)
+	}
+	if err := <-releaseErrCh; err != nil {
+		t.Fatalf("ReleaseLock() error = %v", err)
 	}
 }
 

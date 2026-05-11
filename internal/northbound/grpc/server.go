@@ -83,12 +83,13 @@ func (s *Server) EditCandidate(ctx context.Context, sessionID, configText string
 	if err != nil {
 		return err
 	}
+
+	session.mu.Lock()
+	defer session.mu.Unlock()
 	if !session.HasLock {
 		return fmt.Errorf("session %s does not hold the candidate lock", sessionID)
 	}
 
-	session.mu.Lock()
-	defer session.mu.Unlock()
 	updated, err := applyCandidateCommand(session.CandidateText, configText)
 	if err != nil {
 		return err
@@ -103,14 +104,15 @@ func (s *Server) Commit(ctx context.Context, sessionID, user, message string) (s
 	if err != nil {
 		return "", 0, err
 	}
+
+	session.mu.Lock()
+	defer session.mu.Unlock()
 	if !session.HasLock {
 		return "", 0, fmt.Errorf("session %s does not hold the candidate lock", sessionID)
 	}
 
 	// Parse the candidate config text using the existing pkg/config parser
-	session.mu.RLock()
 	candidateText := session.CandidateText
-	session.mu.RUnlock()
 
 	if candidateText == "" {
 		return "", 0, fmt.Errorf("no candidate configuration to commit")
@@ -162,7 +164,7 @@ func (s *Server) Commit(ctx context.Context, sessionID, user, message string) (s
 			return "", 0, fmt.Errorf("persist commit after apply: %w", err)
 		}
 	}
-	s.resetSessionCandidate(session)
+	s.resetSessionCandidateLocked(session)
 	return commitID, snap.Version, nil
 }
 
@@ -207,6 +209,9 @@ func (s *Server) Rollback(ctx context.Context, sessionID, commitID, user, messag
 	if err != nil {
 		return "", 0, err
 	}
+
+	session.mu.Lock()
+	defer session.mu.Unlock()
 	if !session.HasLock {
 		return "", 0, fmt.Errorf("session %s does not hold the candidate lock", sessionID)
 	}
@@ -260,7 +265,7 @@ func (s *Server) Rollback(ctx context.Context, sessionID, commitID, user, messag
 	}
 
 	snap := s.engine.RunningSnapshot()
-	s.resetSessionCandidate(session)
+	s.resetSessionCandidateLocked(session)
 	if snap == nil {
 		return newCommitID, 0, nil
 	}
@@ -436,10 +441,14 @@ func (s *Server) runningText() (string, uint64) {
 }
 
 func (s *Server) resetSessionCandidate(session *Session) {
-	text, _ := s.runningText()
 	session.mu.Lock()
-	session.CandidateText = text
+	s.resetSessionCandidateLocked(session)
 	session.mu.Unlock()
+}
+
+func (s *Server) resetSessionCandidateLocked(session *Session) {
+	text, _ := s.runningText()
+	session.CandidateText = text
 }
 
 func (s *Server) rollbackToSnapshot(ctx context.Context, snap *model.ConfigSnapshot, user string) error {
@@ -728,6 +737,8 @@ func (m *SessionManager) Close(id string) error {
 	if !ok {
 		return fmt.Errorf("session %s not found", id)
 	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	if s.HasLock {
 		s.HasLock = false
 		m.lockHeld = ""
@@ -748,6 +759,8 @@ func (m *SessionManager) AcquireLock(id string) error {
 	if m.lockHeld != "" && m.lockHeld != id {
 		return fmt.Errorf("candidate lock held by session %s", m.lockHeld)
 	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	s.HasLock = true
 	m.lockHeld = id
 	return nil
@@ -762,6 +775,8 @@ func (m *SessionManager) ReleaseLock(id string) error {
 	if !ok {
 		return fmt.Errorf("session %s not found", id)
 	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	if !s.HasLock {
 		return fmt.Errorf("session %s does not hold the candidate lock", id)
 	}
