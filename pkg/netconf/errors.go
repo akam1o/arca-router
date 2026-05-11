@@ -28,6 +28,7 @@ const (
 	ErrorTagOperationFailed       ErrorTag = "operation-failed"
 	ErrorTagMissingElement        ErrorTag = "missing-element"
 	ErrorTagUnknownElement        ErrorTag = "unknown-element"
+	ErrorTagUnknownAttribute      ErrorTag = "unknown-attribute"
 )
 
 // ErrorSeverity represents NETCONF error-severity values per RFC 6241
@@ -196,6 +197,13 @@ func ErrUnknownElement(path, element string) *RPCError {
 	return NewRPCError(ErrorTypeProtocol, ErrorTagUnknownElement, fmt.Sprintf("unknown element: %s", element)).
 		WithPath(path).
 		WithBadElement(element)
+}
+
+// ErrUnknownAttribute returns error for unknown/unsupported attribute
+func ErrUnknownAttribute(path, attribute string) *RPCError {
+	return NewRPCError(ErrorTypeProtocol, ErrorTagUnknownAttribute, fmt.Sprintf("unknown attribute: %s", attribute)).
+		WithPath(path).
+		WithBadAttribute(attribute)
 }
 
 // ErrAccessDenied returns error for RBAC denial

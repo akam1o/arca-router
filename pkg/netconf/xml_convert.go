@@ -783,14 +783,40 @@ func validateConfigAttributes(start xml.StartElement, path []string) error {
 			WithAppTag("attribute-limit")
 	}
 	for _, attr := range start.Attr {
+		if isNamespaceDeclarationAttribute(attr) {
+			if !isAllowedConfigNamespaceDeclaration(attr.Value) {
+				return NewRPCError(ErrorTypeProtocol, "unknown-namespace",
+					fmt.Sprintf("invalid namespace declaration for config element %s", start.Name.Local)).
+					WithPath(configElementRPCPath(path)).
+					WithBadNamespace(attr.Value)
+			}
+			continue
+		}
 		if attr.Name.Local == "operation" && (attr.Name.Space == "" || attr.Name.Space == NetconfBaseNS) {
 			return NewRPCError(ErrorTypeProtocol, ErrorTagOperationNotSupported,
 				"per-element operation attributes are not supported").
 				WithPath(configElementRPCPath(path)).
 				WithBadAttribute(attr.Name.Local)
 		}
+		err := ErrUnknownAttribute(configElementRPCPath(path), attr.Name.Local)
+		if attr.Name.Space != "" {
+			err = err.WithBadNamespace(attr.Name.Space)
+		}
+		return err
 	}
 	return nil
+}
+
+func isNamespaceDeclarationAttribute(attr xml.Attr) bool {
+	return attr.Name.Space == "xmlns" || (attr.Name.Space == "" && attr.Name.Local == "xmlns")
+}
+
+func isAllowedConfigNamespaceDeclaration(namespace string) bool {
+	return namespace == "" ||
+		namespace == NetconfBaseNS ||
+		namespace == ArcaConfigNS ||
+		namespace == IETFInterfacesNS ||
+		namespace == IETFRoutingNS
 }
 
 func validateConfigElement(name xml.Name, path []string) error {
