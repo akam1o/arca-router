@@ -749,6 +749,11 @@ func normalizeConfigXML(xmlData []byte) ([]byte, error) {
 		switch t := token.(type) {
 		case xml.ProcInst:
 			sawProcInst = true
+		case xml.CharData:
+			if len(bytes.TrimSpace(t)) > 0 {
+				return nil, ErrMalformedMessage("unexpected text in /rpc/edit-config/config").
+					WithPath("/rpc/edit-config/config")
+			}
 		case xml.StartElement:
 			if t.Name.Local == "config" {
 				return trimmed, nil
