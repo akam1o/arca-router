@@ -433,13 +433,7 @@ func writeOSPFXML(buf *bytes.Buffer, ospf *config.OSPFConfig) error {
 // filterMatches is now implemented in xpath_filter.go
 // This placeholder is kept for reference only
 
-// XMLToConfig converts NETCONF XML to internal config structure
-// This implements Phase 2 Step 3 with allowlist validation
-//
-// Phase 4 TODO:
-// - Parse per-element nc:operation attributes (create/delete/replace/merge)
-// - Strict namespace validation (reject unknown namespaces)
-// - Unknown element detection (reject elements not in allowlist)
+// XMLToConfig converts NETCONF XML to internal config structure.
 func XMLToConfig(xmlData []byte, defaultOp DefaultOperation) (*config.Config, error) {
 	// Security: Validate size
 	if len(xmlData) > MaxXMLSize {
@@ -449,8 +443,16 @@ func XMLToConfig(xmlData []byte, defaultOp DefaultOperation) (*config.Config, er
 			WithAppTag("size-limit")
 	}
 
-	// Security: DTD/ENTITY check
+	// Security: DTD/ENTITY check before normalizing fragments.
 	if err := ValidateXMLSecurity(xmlData); err != nil {
+		return nil, err
+	}
+
+	normalizedXML, err := normalizeConfigXML(xmlData)
+	if err != nil {
+		return nil, err
+	}
+	if err := validateConfigXMLAllowlist(normalizedXML); err != nil {
 		return nil, err
 	}
 
@@ -512,7 +514,7 @@ func XMLToConfig(xmlData []byte, defaultOp DefaultOperation) (*config.Config, er
 	}
 
 	// Parse with strict settings
-	decoder := xml.NewDecoder(bytes.NewReader(xmlData))
+	decoder := xml.NewDecoder(bytes.NewReader(normalizedXML))
 	decoder.Strict = true
 	decoder.Entity = nil
 
@@ -635,6 +637,171 @@ func XMLToConfig(xmlData []byte, defaultOp DefaultOperation) (*config.Config, er
 	}
 
 	return cfg, nil
+}
+
+var allowedConfigElementPaths = map[string]struct{}{
+	"config": {},
+
+	"config/system":           {},
+	"config/system/host-name": {},
+
+	"config/interfaces":                               {},
+	"config/interfaces/interface":                     {},
+	"config/interfaces/interface/name":                {},
+	"config/interfaces/interface/description":         {},
+	"config/interfaces/interface/unit":                {},
+	"config/interfaces/interface/unit/name":           {},
+	"config/interfaces/interface/unit/family":         {},
+	"config/interfaces/interface/unit/family/name":    {},
+	"config/interfaces/interface/unit/family/address": {},
+
+	"config/routing":                              {},
+	"config/routing/router-id":                    {},
+	"config/routing/autonomous-system":            {},
+	"config/routing/static-routes":                {},
+	"config/routing/static-routes/route":          {},
+	"config/routing/static-routes/route/prefix":   {},
+	"config/routing/static-routes/route/next-hop": {},
+	"config/routing/static-routes/route/distance": {},
+
+	"config/protocols":                                  {},
+	"config/protocols/bgp":                              {},
+	"config/protocols/bgp/group":                        {},
+	"config/protocols/bgp/group/name":                   {},
+	"config/protocols/bgp/group/type":                   {},
+	"config/protocols/bgp/group/import":                 {},
+	"config/protocols/bgp/group/export":                 {},
+	"config/protocols/bgp/group/neighbor":               {},
+	"config/protocols/bgp/group/neighbor/ip":            {},
+	"config/protocols/bgp/group/neighbor/peer-as":       {},
+	"config/protocols/bgp/group/neighbor/description":   {},
+	"config/protocols/bgp/group/neighbor/local-address": {},
+	"config/protocols/ospf":                             {},
+	"config/protocols/ospf/router-id":                   {},
+	"config/protocols/ospf/area":                        {},
+	"config/protocols/ospf/area/name":                   {},
+	"config/protocols/ospf/area/area-id":                {},
+	"config/protocols/ospf/area/interface":              {},
+	"config/protocols/ospf/area/interface/name":         {},
+	"config/protocols/ospf/area/interface/passive":      {},
+	"config/protocols/ospf/area/interface/metric":       {},
+	"config/protocols/ospf/area/interface/priority":     {},
+}
+
+func normalizeConfigXML(xmlData []byte) ([]byte, error) {
+	trimmed := bytes.TrimSpace(xmlData)
+	if len(trimmed) == 0 {
+		return []byte("<config/>"), nil
+	}
+
+	decoder := xml.NewDecoder(bytes.NewReader(trimmed))
+	decoder.Strict = true
+	decoder.Entity = nil
+	sawProcInst := false
+	for {
+		token, err := decoder.Token()
+		if err == io.EOF {
+			return []byte("<config/>"), nil
+		}
+		if err != nil {
+			return nil, NewRPCError(ErrorTypeProtocol, ErrorTagMalformedMessage,
+				fmt.Sprintf("failed to parse config XML: %v", err)).
+				WithPath("/rpc/edit-config/config")
+		}
+		switch t := token.(type) {
+		case xml.ProcInst:
+			sawProcInst = true
+		case xml.StartElement:
+			if t.Name.Local == "config" {
+				return trimmed, nil
+			}
+			if sawProcInst {
+				return nil, NewRPCError(ErrorTypeProtocol, ErrorTagMalformedMessage,
+					"XML declaration requires a config root element").
+					WithPath("/rpc/edit-config/config")
+			}
+			normalized := make([]byte, 0, len(trimmed)+len("<config></config>"))
+			normalized = append(normalized, "<config>"...)
+			normalized = append(normalized, trimmed...)
+			normalized = append(normalized, "</config>"...)
+			return normalized, nil
+		}
+	}
+}
+
+func validateConfigXMLAllowlist(xmlData []byte) error {
+	decoder := xml.NewDecoder(bytes.NewReader(xmlData))
+	decoder.Strict = true
+	decoder.Entity = nil
+	stack := []string{}
+
+	for {
+		token, err := decoder.Token()
+		if err == io.EOF {
+			return nil
+		}
+		if err != nil {
+			return NewRPCError(ErrorTypeProtocol, ErrorTagMalformedMessage,
+				fmt.Sprintf("invalid XML: %v", err)).
+				WithPath("/rpc/edit-config/config")
+		}
+
+		switch t := token.(type) {
+		case xml.StartElement:
+			path := append(append([]string{}, stack...), t.Name.Local)
+			if err := validateConfigElement(t.Name, path); err != nil {
+				return err
+			}
+			stack = append(stack, t.Name.Local)
+		case xml.EndElement:
+			if len(stack) == 0 {
+				return NewRPCError(ErrorTypeProtocol, ErrorTagMalformedMessage,
+					fmt.Sprintf("unexpected closing element: %s", t.Name.Local)).
+					WithPath("/rpc/edit-config/config")
+			}
+			stack = stack[:len(stack)-1]
+		}
+	}
+}
+
+func validateConfigElement(name xml.Name, path []string) error {
+	key := strings.Join(path, "/")
+	if _, ok := allowedConfigElementPaths[key]; !ok {
+		return ErrUnsupportedConfigElement(name.Local)
+	}
+	if !isAllowedConfigNamespace(path, name.Space) {
+		return NewRPCError(ErrorTypeProtocol, "unknown-namespace",
+			fmt.Sprintf("invalid namespace for config element %s", name.Local)).
+			WithPath(configElementRPCPath(path)).
+			WithBadNamespace(name.Space)
+	}
+	return nil
+}
+
+func isAllowedConfigNamespace(path []string, namespace string) bool {
+	if namespace == "" || namespace == NetconfBaseNS {
+		return true
+	}
+	if len(path) == 1 {
+		return namespace == ArcaConfigNS || namespace == IETFInterfacesNS || namespace == IETFRoutingNS
+	}
+	switch path[1] {
+	case "system", "protocols":
+		return namespace == ArcaConfigNS
+	case "interfaces":
+		return namespace == IETFInterfacesNS
+	case "routing":
+		return namespace == IETFRoutingNS
+	default:
+		return false
+	}
+}
+
+func configElementRPCPath(path []string) string {
+	if len(path) <= 1 {
+		return "/rpc/edit-config/config"
+	}
+	return "/rpc/edit-config/config/" + strings.Join(path[1:], "/")
 }
 
 // ApplyConfigEdit applies edit-config changes to existing config based on default-operation

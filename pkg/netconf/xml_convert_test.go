@@ -67,6 +67,50 @@ func TestXMLToConfigPreservesExplicitOSPFPriorityZero(t *testing.T) {
 	}
 }
 
+func TestXMLToConfigAcceptsConfigFragments(t *testing.T) {
+	xmlData := []byte(`<system><host-name>router1</host-name></system>`)
+
+	cfg, err := XMLToConfig(xmlData, DefaultOpMerge)
+	if err != nil {
+		t.Fatalf("XMLToConfig() error = %v", err)
+	}
+	if cfg.System == nil || cfg.System.HostName != "router1" {
+		t.Fatalf("XMLToConfig() system = %#v, want router1", cfg.System)
+	}
+}
+
+func TestXMLToConfigRejectsUnknownElement(t *testing.T) {
+	xmlData := []byte(`<config><security><user>alice</user></security></config>`)
+
+	_, err := XMLToConfig(xmlData, DefaultOpMerge)
+	if err == nil {
+		t.Fatal("XMLToConfig() error = nil, want unsupported element")
+	}
+	rpcErr, ok := err.(*RPCError)
+	if !ok {
+		t.Fatalf("XMLToConfig() error = %T, want *RPCError", err)
+	}
+	if rpcErr.ErrorTag != ErrorTagInvalidValue || rpcErr.ErrorInfo == nil || rpcErr.ErrorInfo.BadElement != "security" {
+		t.Fatalf("XMLToConfig() error = %#v, want invalid-value for security", rpcErr)
+	}
+}
+
+func TestXMLToConfigRejectsUnknownNamespace(t *testing.T) {
+	xmlData := []byte(`<config><system xmlns="urn:example:unknown"><host-name>router1</host-name></system></config>`)
+
+	_, err := XMLToConfig(xmlData, DefaultOpMerge)
+	if err == nil {
+		t.Fatal("XMLToConfig() error = nil, want unknown namespace")
+	}
+	rpcErr, ok := err.(*RPCError)
+	if !ok {
+		t.Fatalf("XMLToConfig() error = %T, want *RPCError", err)
+	}
+	if rpcErr.ErrorTag != "unknown-namespace" || rpcErr.ErrorInfo == nil || rpcErr.ErrorInfo.BadNamespace != "urn:example:unknown" {
+		t.Fatalf("XMLToConfig() error = %#v, want unknown namespace error", rpcErr)
+	}
+}
+
 func TestCountConfigElementsIncludesExplicitOSPFPriorityZero(t *testing.T) {
 	cfg := &config.Config{
 		Interfaces: map[string]*config.Interface{},
