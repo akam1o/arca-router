@@ -688,6 +688,44 @@ var allowedConfigElementPaths = map[string]struct{}{
 	"config/protocols/ospf/area/interface/priority":     {},
 }
 
+var configTextContentPaths = map[string]struct{}{
+	"config/system/host-name": {},
+
+	"config/interfaces/interface/name":                {},
+	"config/interfaces/interface/description":         {},
+	"config/interfaces/interface/unit/name":           {},
+	"config/interfaces/interface/unit/family/name":    {},
+	"config/interfaces/interface/unit/family/address": {},
+
+	"config/routing/router-id":                    {},
+	"config/routing/autonomous-system":            {},
+	"config/routing/static-routes/route/prefix":   {},
+	"config/routing/static-routes/route/next-hop": {},
+	"config/routing/static-routes/route/distance": {},
+
+	"config/protocols/bgp/group/name":                   {},
+	"config/protocols/bgp/group/type":                   {},
+	"config/protocols/bgp/group/import":                 {},
+	"config/protocols/bgp/group/export":                 {},
+	"config/protocols/bgp/group/neighbor/ip":            {},
+	"config/protocols/bgp/group/neighbor/peer-as":       {},
+	"config/protocols/bgp/group/neighbor/description":   {},
+	"config/protocols/bgp/group/neighbor/local-address": {},
+
+	"config/protocols/ospf/router-id":               {},
+	"config/protocols/ospf/area/name":               {},
+	"config/protocols/ospf/area/area-id":            {},
+	"config/protocols/ospf/area/interface/name":     {},
+	"config/protocols/ospf/area/interface/passive":  {},
+	"config/protocols/ospf/area/interface/metric":   {},
+	"config/protocols/ospf/area/interface/priority": {},
+}
+
+func isConfigTextContentPath(path []string) bool {
+	_, ok := configTextContentPaths[strings.Join(path, "/")]
+	return ok
+}
+
 func normalizeConfigXML(xmlData []byte) ([]byte, error) {
 	trimmed := bytes.TrimSpace(xmlData)
 	if len(trimmed) == 0 {
@@ -771,8 +809,23 @@ func validateConfigXMLAllowlist(xmlData []byte) error {
 					WithPath("/rpc/edit-config/config")
 			}
 			stack = stack[:len(stack)-1]
+		case xml.CharData:
+			if err := validateConfigTextContent(stack, t); err != nil {
+				return err
+			}
 		}
 	}
+}
+
+func validateConfigTextContent(path []string, text xml.CharData) error {
+	if len(bytes.TrimSpace(text)) == 0 {
+		return nil
+	}
+	if isConfigTextContentPath(path) {
+		return nil
+	}
+	return ErrMalformedMessage(fmt.Sprintf("unexpected text in %s", configElementRPCPath(path))).
+		WithPath(configElementRPCPath(path))
 }
 
 func validateConfigAttributes(start xml.StartElement, path []string) error {
