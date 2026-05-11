@@ -53,6 +53,21 @@ func TestChunkedFramingRoundtrip(t *testing.T) {
 	}
 }
 
+func TestChunkedFramingWritesRFC6242Markers(t *testing.T) {
+	message := "hello"
+
+	var buf bytes.Buffer
+	writer := NewFramingWriter(&buf, "1.1")
+	if err := writer.WriteMessage([]byte(message)); err != nil {
+		t.Fatalf("WriteMessage failed: %v", err)
+	}
+
+	want := fmt.Sprintf("\n#%d\n%s\n##\n", len(message), message)
+	if got := buf.String(); got != want {
+		t.Fatalf("WriteMessage() = %q, want %q", got, want)
+	}
+}
+
 func TestEOMFramingRoundtrip(t *testing.T) {
 	tests := []struct {
 		name    string
@@ -140,23 +155,23 @@ func TestChunkedFramingInvalidHeader(t *testing.T) {
 	}{
 		{
 			name:  "missing hash",
-			input: "123\ndata##\n",
+			input: "\n123\ndata\n##\n",
 		},
 		{
 			name:  "missing newline",
-			input: "#123data##\n",
+			input: "\n#123data\n##\n",
 		},
 		{
 			name:  "invalid size",
-			input: "#abc\ndata##\n",
+			input: "\n#abc\ndata\n##\n",
 		},
 		{
 			name:  "negative size",
-			input: "#-1\ndata##\n",
+			input: "\n#-1\ndata\n##\n",
 		},
 		{
 			name:  "oversized chunk",
-			input: "#99999\ndata##\n",
+			input: "\n#99999\ndata\n##\n",
 		},
 	}
 
@@ -287,8 +302,8 @@ func BenchmarkEOMFramingRead(b *testing.B) {
 
 func TestChunkedFramingOversizedHeader(t *testing.T) {
 	// Create a header that exceeds MaxChunkHeaderLength
-	oversizedHeader := "#" + strings.Repeat("9", MaxChunkHeaderLength) + "\n"
-	input := oversizedHeader + "data##\n"
+	oversizedHeader := "\n#" + strings.Repeat("9", MaxChunkHeaderLength) + "\n"
+	input := oversizedHeader + "data\n##\n"
 
 	reader := NewFramingReader(strings.NewReader(input), "1.1")
 	_, err := reader.ReadMessage()
@@ -302,7 +317,7 @@ func TestChunkedFramingOversizedHeader(t *testing.T) {
 
 func TestChunkedFramingTruncatedChunkData(t *testing.T) {
 	// Chunk header says 10 bytes, but only 5 bytes provided
-	input := "#10\nabcde"
+	input := "\n#10\nabcde"
 
 	reader := NewFramingReader(strings.NewReader(input), "1.1")
 	_, err := reader.ReadMessage()
@@ -330,7 +345,7 @@ func TestEOMFramingWithEOMMarkerInPayload(t *testing.T) {
 
 func TestChunkedFramingMissingNewline(t *testing.T) {
 	// Chunk header without newline (will hit max length)
-	input := "#123456789"
+	input := "\n#123456789"
 
 	reader := NewFramingReader(strings.NewReader(input), "1.1")
 	_, err := reader.ReadMessage()
@@ -342,7 +357,7 @@ func TestChunkedFramingMissingNewline(t *testing.T) {
 func TestChunkedFramingHugeChunkSize(t *testing.T) {
 	// Chunk size exceeds MaxMessageSize
 	hugeSize := int64(MaxMessageSize) + 1
-	input := fmt.Sprintf("#%d\n", hugeSize)
+	input := fmt.Sprintf("\n#%d\n", hugeSize)
 
 	reader := NewFramingReader(strings.NewReader(input), "1.1")
 	_, err := reader.ReadMessage()
@@ -357,7 +372,7 @@ func TestChunkedFramingHugeChunkSize(t *testing.T) {
 func TestChunkedFramingOverflowProtection(t *testing.T) {
 	// Two chunks that together exceed MaxMessageSize
 	chunkSize := MaxMessageSize/2 + 1
-	input := fmt.Sprintf("#%d\n%s#%d\n%s##\n",
+	input := fmt.Sprintf("\n#%d\n%s\n#%d\n%s\n##\n",
 		chunkSize, strings.Repeat("x", chunkSize),
 		chunkSize, strings.Repeat("y", chunkSize))
 
