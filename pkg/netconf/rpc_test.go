@@ -60,6 +60,24 @@ func TestParseRPC(t *testing.T) {
 			errType: "malformed-message",
 		},
 		{
+			name: "rpc root text before operation rejected",
+			xml: `<rpc message-id="101" xmlns="urn:ietf:params:xml:ns:netconf:base:1.0">
+					junk
+					<get-config><source><running/></source></get-config>
+				</rpc>`,
+			wantErr: true,
+			errType: "malformed-message",
+		},
+		{
+			name: "rpc root text after operation rejected",
+			xml: `<rpc message-id="101" xmlns="urn:ietf:params:xml:ns:netconf:base:1.0">
+					<get-config><source><running/></source></get-config>
+					junk
+				</rpc>`,
+			wantErr: true,
+			errType: "malformed-message",
+		},
+		{
 			name: "multiple operations not allowed",
 			xml: `<rpc message-id="101" xmlns="urn:ietf:params:xml:ns:netconf:base:1.0">
 					<get-config><source><running/></source></get-config>

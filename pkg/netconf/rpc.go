@@ -22,6 +22,7 @@ type rpcEnvelope struct {
 	XMLName    xml.Name       `xml:"urn:ietf:params:xml:ns:netconf:base:1.0 rpc"`
 	MessageID  string         `xml:"message-id,attr"`
 	Attrs      []xml.Attr     `xml:",any,attr"`
+	Content    []byte         `xml:",innerxml"`
 	Operations []rpcOperation `xml:",any"`
 }
 
@@ -62,6 +63,9 @@ func ParseRPC(data []byte) (*RPC, error) {
 		return nil, ErrInvalidNamespace(envelope.XMLName.Space)
 	}
 	if err := validateRPCRootAttributes(envelope.Attrs); err != nil {
+		return nil, err
+	}
+	if err := validateRPCRootContent(envelope.Content, envelope.Attrs); err != nil {
 		return nil, err
 	}
 
@@ -198,6 +202,43 @@ func validateRPCRootAttributes(attrs []xml.Attr) error {
 		return rpcErr
 	}
 	return nil
+}
+
+func validateRPCRootContent(content []byte, attrs []xml.Attr) error {
+	var wrapped bytes.Buffer
+	wrapped.WriteString("<rpc")
+	writeNamespaceDeclarationAttrs(&wrapped, collectNamespaceAttrs(attrs), map[string]string{})
+	wrapped.WriteByte('>')
+	wrapped.Write(content)
+	wrapped.WriteString("</rpc>")
+
+	decoder := xml.NewDecoder(bytes.NewReader(wrapped.Bytes()))
+	decoder.Strict = true
+	decoder.Entity = nil
+
+	depth := 0
+	for {
+		token, err := decoder.Token()
+		if err == io.EOF {
+			return nil
+		}
+		if err != nil {
+			return ErrMalformedMessage(fmt.Sprintf("XML parse error: %v", err))
+		}
+
+		switch t := token.(type) {
+		case xml.StartElement:
+			depth++
+		case xml.EndElement:
+			if depth > 0 {
+				depth--
+			}
+		case xml.CharData:
+			if depth == 1 && len(bytes.TrimSpace(t)) > 0 {
+				return ErrMalformedMessage("unexpected text in /rpc").WithPath("/rpc")
+			}
+		}
+	}
 }
 
 func (r *RPC) validateOperationPayload() error {
