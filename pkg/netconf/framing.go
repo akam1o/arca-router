@@ -81,6 +81,7 @@ func (fr *FramingReader) readBoundedLine(maxLen int) (string, error) {
 func (fr *FramingReader) readChunkedMessage() ([]byte, error) {
 	fr.buffer.Reset()
 	var totalSize int64 // Use int64 to prevent overflow
+	chunksRead := 0
 
 	for {
 		if err := fr.readChunkSeparator(); err != nil {
@@ -95,6 +96,9 @@ func (fr *FramingReader) readChunkedMessage() ([]byte, error) {
 
 		// Check for end-of-chunks marker
 		if line == chunkEndLine {
+			if chunksRead == 0 {
+				return nil, fmt.Errorf("chunked message must contain at least one chunk")
+			}
 			break
 		}
 
@@ -104,13 +108,9 @@ func (fr *FramingReader) readChunkedMessage() ([]byte, error) {
 		}
 
 		chunkSizeStr := line[1 : len(line)-1]
-		chunkSize, err := strconv.ParseInt(chunkSizeStr, 10, 64)
+		chunkSize, err := parseChunkSize(chunkSizeStr)
 		if err != nil {
-			return nil, fmt.Errorf("parse chunk size: %w", err)
-		}
-
-		if chunkSize < 0 {
-			return nil, fmt.Errorf("chunk size %d must be non-negative", chunkSize)
+			return nil, err
 		}
 
 		// Check individual chunk size limit (prevents single huge allocation)
@@ -131,12 +131,35 @@ func (fr *FramingReader) readChunkedMessage() ([]byte, error) {
 		}
 
 		fr.buffer.Write(chunkData)
+		chunksRead++
 	}
 
 	// Return a copy to prevent mutation if caller retains the slice
 	result := make([]byte, fr.buffer.Len())
 	copy(result, fr.buffer.Bytes())
 	return result, nil
+}
+
+func parseChunkSize(value string) (int64, error) {
+	if len(value) == 0 {
+		return 0, fmt.Errorf("chunk size is empty")
+	}
+
+	if value[0] < '1' || value[0] > '9' {
+		return 0, fmt.Errorf("invalid chunk size %q", value)
+	}
+
+	for i := 1; i < len(value); i++ {
+		if value[i] < '0' || value[i] > '9' {
+			return 0, fmt.Errorf("invalid chunk size %q", value)
+		}
+	}
+
+	chunkSize, err := strconv.ParseInt(value, 10, 64)
+	if err != nil {
+		return 0, fmt.Errorf("parse chunk size: %w", err)
+	}
+	return chunkSize, nil
 }
 
 func (fr *FramingReader) readChunkSeparator() error {
@@ -215,6 +238,10 @@ func (fw *FramingWriter) WriteMessage(data []byte) error {
 // writeChunkedMessage writes a base:1.1 chunked message.
 // Format: \n#<len>\n<chunk>[\n#<len>\n<chunk>]...\n##\n
 func (fw *FramingWriter) writeChunkedMessage(data []byte) error {
+	if len(data) == 0 {
+		return fmt.Errorf("chunked message must contain at least one chunk")
+	}
+
 	remaining := len(data)
 	offset := 0
 

@@ -21,10 +21,6 @@ func TestChunkedFramingRoundtrip(t *testing.T) {
 			message: strings.Repeat("x", 10000),
 		},
 		{
-			name:    "empty message",
-			message: "",
-		},
-		{
 			name:    "message with special chars",
 			message: `<rpc>]]>]]><hello>##\n</hello></rpc>`,
 		},
@@ -166,6 +162,18 @@ func TestChunkedFramingInvalidHeader(t *testing.T) {
 			input: "\n#abc\ndata\n##\n",
 		},
 		{
+			name:  "zero size",
+			input: "\n#0\n\n##\n",
+		},
+		{
+			name:  "leading zero size",
+			input: "\n#01\nx\n##\n",
+		},
+		{
+			name:  "explicit plus sign",
+			input: "\n#+1\nx\n##\n",
+		},
+		{
 			name:  "negative size",
 			input: "\n#-1\ndata\n##\n",
 		},
@@ -201,6 +209,19 @@ func TestChunkedFramingMaxMessageSize(t *testing.T) {
 	_, err := reader.ReadMessage()
 	if err == nil {
 		t.Errorf("Expected error for oversized message, but got nil")
+	}
+}
+
+func TestChunkedFramingRejectsEmptyMessage(t *testing.T) {
+	var buf bytes.Buffer
+	writer := NewFramingWriter(&buf, "1.1")
+	if err := writer.WriteMessage([]byte("")); err == nil {
+		t.Fatal("Expected error when writing empty chunked message, but got nil")
+	}
+
+	reader := NewFramingReader(strings.NewReader(ChunkEnd), "1.1")
+	if _, err := reader.ReadMessage(); err == nil {
+		t.Fatal("Expected error when reading empty chunked message, but got nil")
 	}
 }
 
