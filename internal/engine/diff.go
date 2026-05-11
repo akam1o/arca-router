@@ -82,6 +82,14 @@ func (d *ConfigDiff) HasChanges() bool {
 		d.SecurityChanged
 }
 
+// Clone returns an independent diff with cloned old and new configuration trees.
+func (d *ConfigDiff) Clone() *ConfigDiff {
+	if d == nil {
+		return nil
+	}
+	return ComputeDiff(d.OldConfig.Clone(), d.NewConfig.Clone())
+}
+
 // ComputeDiff computes the minimal diff between two RouterConfig snapshots.
 func ComputeDiff(old, new *model.RouterConfig) *ConfigDiff {
 	diff := &ConfigDiff{
