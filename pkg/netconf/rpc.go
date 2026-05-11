@@ -13,17 +13,21 @@ type RPC struct {
 	MessageID string   `xml:"message-id,attr"`
 	Operation xml.Name `xml:",any"`
 	Content   []byte   `xml:",innerxml"`
+
+	NamespaceAttrs []xml.Attr `xml:"-"`
 }
 
 type rpcEnvelope struct {
 	XMLName    xml.Name       `xml:"urn:ietf:params:xml:ns:netconf:base:1.0 rpc"`
 	MessageID  string         `xml:"message-id,attr"`
+	Attrs      []xml.Attr     `xml:",any,attr"`
 	Operations []rpcOperation `xml:",any"`
 }
 
 type rpcOperation struct {
 	XMLName xml.Name
-	Content []byte `xml:",innerxml"`
+	Attrs   []xml.Attr `xml:",any,attr"`
+	Content []byte     `xml:",innerxml"`
 }
 
 // ParseRPC parses NETCONF RPC from XML bytes with security checks
@@ -68,12 +72,18 @@ func ParseRPC(data []byte) (*RPC, error) {
 		return nil, ErrMalformedMessage("rpc must contain exactly one operation")
 	}
 
+	operation := envelope.Operations[0]
+	if err := validateRPCOperationAttributes(operation); err != nil {
+		return nil, err
+	}
+
 	// Validate protocol namespace for operation element
 	rpc := &RPC{
-		XMLName:   envelope.XMLName,
-		MessageID: envelope.MessageID,
-		Operation: envelope.Operations[0].XMLName,
-		Content:   envelope.Operations[0].Content,
+		XMLName:        envelope.XMLName,
+		MessageID:      envelope.MessageID,
+		Operation:      operation.XMLName,
+		Content:        operation.Content,
+		NamespaceAttrs: collectNamespaceAttrs(envelope.Attrs, operation.Attrs),
 	}
 	if err := ValidateProtocolNamespace(rpc.Operation); err != nil {
 		return nil, err
@@ -111,18 +121,118 @@ func (r *RPC) GetOperationNamespace() string {
 // UnmarshalOperation unmarshals the RPC operation content into a specific struct
 func (r *RPC) UnmarshalOperation(v interface{}) error {
 	// Wrap content in operation tag for proper unmarshaling
-	wrapped := fmt.Sprintf("<%s xmlns=\"%s\">%s</%s>",
-		r.Operation.Local, netconfNamespace, string(r.Content), r.Operation.Local)
+	wrapped := r.operationXML()
 
-	decoder := xml.NewDecoder(bytes.NewReader([]byte(wrapped)))
+	decoder := xml.NewDecoder(bytes.NewReader(wrapped))
 	decoder.Strict = true
 	decoder.Entity = nil
 
 	if err := decoder.Decode(v); err != nil {
 		return ErrMalformedMessage(fmt.Sprintf("operation parse error: %v", err))
 	}
+	if receiver, ok := v.(inheritedNamespaceReceiver); ok {
+		receiver.SetInheritedNamespaceAttrs(r.NamespaceAttrs)
+	}
 
 	return nil
+}
+
+type inheritedNamespaceReceiver interface {
+	SetInheritedNamespaceAttrs([]xml.Attr)
+}
+
+func (r *RPC) operationXML() []byte {
+	var buf bytes.Buffer
+	buf.WriteByte('<')
+	buf.WriteString(r.Operation.Local)
+
+	defaultNamespace := r.Operation.Space
+	if defaultNamespace == "" {
+		defaultNamespace = netconfNamespace
+	}
+	written := map[string]string{"xmlns": defaultNamespace}
+	writeXMLAttribute(&buf, "xmlns", defaultNamespace)
+	writeNamespaceDeclarationAttrs(&buf, r.NamespaceAttrs, written)
+
+	buf.WriteByte('>')
+	buf.Write(r.Content)
+	buf.WriteString("</")
+	buf.WriteString(r.Operation.Local)
+	buf.WriteByte('>')
+	return buf.Bytes()
+}
+
+func validateRPCOperationAttributes(operation rpcOperation) error {
+	for _, attr := range operation.Attrs {
+		if isNamespaceDeclarationAttribute(attr) {
+			continue
+		}
+		rpcErr := ErrUnknownAttribute("/rpc/"+operation.XMLName.Local, attr.Name.Local)
+		if attr.Name.Space != "" {
+			rpcErr = rpcErr.WithBadNamespace(attr.Name.Space)
+		}
+		return rpcErr
+	}
+	return nil
+}
+
+func collectNamespaceAttrs(attrGroups ...[]xml.Attr) []xml.Attr {
+	var attrs []xml.Attr
+	seen := map[string]int{}
+	for _, group := range attrGroups {
+		for _, attr := range group {
+			if !isNamespaceDeclarationAttribute(attr) {
+				continue
+			}
+			name, ok := namespaceDeclarationAttrName(attr)
+			if !ok {
+				continue
+			}
+			if idx, exists := seen[name]; exists {
+				attrs[idx] = attr
+				continue
+			}
+			seen[name] = len(attrs)
+			attrs = append(attrs, attr)
+		}
+	}
+	return attrs
+}
+
+func cloneXMLAttrs(attrs []xml.Attr) []xml.Attr {
+	if len(attrs) == 0 {
+		return nil
+	}
+	clone := make([]xml.Attr, len(attrs))
+	copy(clone, attrs)
+	return clone
+}
+
+func writeNamespaceDeclarationAttrs(buf *bytes.Buffer, attrs []xml.Attr, written map[string]string) {
+	for _, attr := range attrs {
+		name, ok := namespaceDeclarationAttrName(attr)
+		if !ok {
+			continue
+		}
+		if value, exists := written[name]; exists && value == attr.Value {
+			continue
+		}
+		if _, exists := written[name]; exists {
+			continue
+		}
+		writeXMLAttribute(buf, name, attr.Value)
+		written[name] = attr.Value
+	}
+}
+
+func namespaceDeclarationAttrName(attr xml.Attr) (string, bool) {
+	if attr.Name.Space == "" && attr.Name.Local == "xmlns" {
+		return "xmlns", true
+	}
+	if attr.Name.Space == "xmlns" {
+		return "xmlns:" + attr.Name.Local, true
+	}
+	return "", false
 }
 
 // ValidateOperationNamespace checks if operation is in NETCONF namespace

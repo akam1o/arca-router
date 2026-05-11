@@ -68,6 +68,14 @@ func TestParseRPC(t *testing.T) {
 			wantErr: true,
 			errType: "malformed-message",
 		},
+		{
+			name: "operation attribute rejected",
+			xml: `<rpc message-id="101" xmlns="urn:ietf:params:xml:ns:netconf:base:1.0">
+					<get-config foo="bar"><source><running/></source></get-config>
+				</rpc>`,
+			wantErr: true,
+			errType: "unknown-attribute",
+		},
 	}
 
 	for _, tt := range tests {
@@ -118,6 +126,62 @@ func TestParseRPCContentIsOperationInnerXML(t *testing.T) {
 	}
 	if req.Source.Running == nil {
 		t.Fatalf("UnmarshalOperation() source = %#v, want running", req.Source)
+	}
+}
+
+func TestUnmarshalOperationPreservesAncestorNamespaceDeclarations(t *testing.T) {
+	tests := []struct {
+		name string
+		xml  string
+	}{
+		{
+			name: "rpc namespace declaration",
+			xml: `<rpc message-id="101" xmlns="urn:ietf:params:xml:ns:netconf:base:1.0" xmlns:arca="urn:arca:router:config:1.0">
+				<edit-config>
+					<target><candidate/></target>
+					<config>
+						<arca:system><arca:host-name>router1</arca:host-name></arca:system>
+					</config>
+				</edit-config>
+			</rpc>`,
+		},
+		{
+			name: "operation namespace declaration",
+			xml: `<rpc message-id="101" xmlns="urn:ietf:params:xml:ns:netconf:base:1.0">
+				<edit-config xmlns:arca="urn:arca:router:config:1.0">
+					<target><candidate/></target>
+					<config>
+						<arca:system><arca:host-name>router1</arca:host-name></arca:system>
+					</config>
+				</edit-config>
+			</rpc>`,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			rpc, err := ParseRPC([]byte(tt.xml))
+			if err != nil {
+				t.Fatalf("ParseRPC() error = %v", err)
+			}
+
+			var req EditConfigRequest
+			if err := rpc.UnmarshalOperation(&req); err != nil {
+				t.Fatalf("UnmarshalOperation() error = %v", err)
+			}
+
+			configXML, err := req.Config.XML()
+			if err != nil {
+				t.Fatalf("Config.XML() error = %v", err)
+			}
+			cfg, err := XMLToConfig(configXML, DefaultOpMerge)
+			if err != nil {
+				t.Fatalf("XMLToConfig() error = %v\nXML:\n%s", err, configXML)
+			}
+			if cfg.System == nil || cfg.System.HostName != "router1" {
+				t.Fatalf("XMLToConfig() system = %#v, want host-name router1", cfg.System)
+			}
+		})
 	}
 }
 
