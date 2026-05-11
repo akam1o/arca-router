@@ -96,6 +96,9 @@ func TestToSetCommandsRoundTrip(t *testing.T) {
 	}
 
 	text := ToSetCommands(cfg)
+	if strings.Contains(text, " secret") {
+		t.Fatalf("ToSetCommands() leaked plain password:\n%s", text)
+	}
 	parsed, err := NewParser(strings.NewReader(text)).Parse()
 	if err != nil {
 		t.Fatalf("round-trip parse failed:\n%s\nerror: %v", text, err)

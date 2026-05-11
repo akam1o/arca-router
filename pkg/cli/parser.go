@@ -4,6 +4,8 @@ package cli
 import (
 	"fmt"
 	"strings"
+
+	pkgconfig "github.com/akam1o/arca-router/pkg/config"
 )
 
 // ParseSetCommand parses a set command with hierarchy context
@@ -22,7 +24,7 @@ func ParseSetCommand(args []string, basePath []string) (string, error) {
 	// Normalize the path
 	normalized := NormalizeConfigPath(fullPath)
 
-	return "set " + normalized, nil
+	return pkgconfig.ProtectSecretsInSetCommand("set " + normalized)
 }
 
 // ParseDeleteCommand parses a delete command with hierarchy context

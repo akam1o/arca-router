@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	pkgconfig "github.com/akam1o/arca-router/pkg/config"
 	"github.com/akam1o/arca-router/pkg/datastore"
 	"github.com/google/uuid"
 )
@@ -249,7 +250,10 @@ func (s *Session) SetCommand(ctx context.Context, args []string) error {
 	}
 
 	// Simple append for Phase 3
-	newLine := "set " + strings.Join(args, " ")
+	newLine, err := pkgconfig.ProtectSecretsInSetCommand("set " + strings.Join(args, " "))
+	if err != nil {
+		return err
+	}
 	updatedText := candidate.ConfigText
 	if updatedText == "" {
 		updatedText = newLine
