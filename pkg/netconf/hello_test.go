@@ -19,13 +19,15 @@ func TestServerHello(t *testing.T) {
 		CapabilityBase11,
 		CapabilityCandidate,
 		CapabilityValidate,
-		CapabilityArcaRouter,
 	}
 
 	for _, cap := range requiredCaps {
 		if !hello.HasCapability(cap) {
 			t.Errorf("Missing required capability: %s", cap)
 		}
+	}
+	if hello.HasCapability(CapabilityArcaRouter) {
+		t.Errorf("ServerHello() advertised stale arca-router YANG capability")
 	}
 }
 
