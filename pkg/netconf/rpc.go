@@ -15,6 +15,17 @@ type RPC struct {
 	Content   []byte   `xml:",innerxml"`
 }
 
+type rpcEnvelope struct {
+	XMLName    xml.Name       `xml:"urn:ietf:params:xml:ns:netconf:base:1.0 rpc"`
+	MessageID  string         `xml:"message-id,attr"`
+	Operations []rpcOperation `xml:",any"`
+}
+
+type rpcOperation struct {
+	XMLName xml.Name
+	Content []byte `xml:",innerxml"`
+}
+
 // ParseRPC parses NETCONF RPC from XML bytes with security checks
 func ParseRPC(data []byte) (*RPC, error) {
 	// Security check: reject DTD/DOCTYPE
@@ -33,27 +44,58 @@ func ParseRPC(data []byte) (*RPC, error) {
 	decoder.Strict = true // Enable strict well-formedness checking
 	decoder.Entity = nil  // Disable entity expansion
 
-	var rpc RPC
-	if err := decoder.Decode(&rpc); err != nil {
+	var envelope rpcEnvelope
+	if err := decoder.Decode(&envelope); err != nil {
 		return nil, ErrMalformedMessage(fmt.Sprintf("XML parse error: %v", err))
+	}
+	if err := ensureNoTrailingXML(decoder); err != nil {
+		return nil, err
 	}
 
 	// Validate NETCONF base namespace
-	if rpc.XMLName.Space != netconfNamespace {
-		return nil, ErrInvalidNamespace(rpc.XMLName.Space)
+	if envelope.XMLName.Space != netconfNamespace {
+		return nil, ErrInvalidNamespace(envelope.XMLName.Space)
 	}
 
 	// Validate message-id presence
-	if rpc.MessageID == "" {
+	if envelope.MessageID == "" {
 		return nil, ErrMissingElement("rpc", "message-id")
+	}
+	if len(envelope.Operations) == 0 {
+		return nil, ErrMissingElement("rpc", "operation")
+	}
+	if len(envelope.Operations) > 1 {
+		return nil, ErrMalformedMessage("rpc must contain exactly one operation")
 	}
 
 	// Validate protocol namespace for operation element
+	rpc := &RPC{
+		XMLName:   envelope.XMLName,
+		MessageID: envelope.MessageID,
+		Operation: envelope.Operations[0].XMLName,
+		Content:   envelope.Operations[0].Content,
+	}
 	if err := ValidateProtocolNamespace(rpc.Operation); err != nil {
 		return nil, err
 	}
 
-	return &rpc, nil
+	return rpc, nil
+}
+
+func ensureNoTrailingXML(decoder *xml.Decoder) error {
+	for {
+		token, err := decoder.Token()
+		if err == io.EOF {
+			return nil
+		}
+		if err != nil {
+			return ErrMalformedMessage(fmt.Sprintf("XML parse error: %v", err))
+		}
+		if charData, ok := token.(xml.CharData); ok && len(bytes.TrimSpace(charData)) == 0 {
+			continue
+		}
+		return ErrMalformedMessage("trailing content after rpc element")
+	}
 }
 
 // GetOperationName returns the RPC operation name (e.g., "get-config", "edit-config")
