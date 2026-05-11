@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net"
+	"strings"
 	"sync"
 
 	"github.com/akam1o/arca-router/internal/engine"
@@ -386,13 +387,34 @@ func (p *VPPPlugin) removeInterface(ctx context.Context, name string, rollback *
 		return nil
 	})
 
-	// Remove LCP pair
-	if err := p.client.DeleteLCPInterface(ctx, swIfIndex); err != nil {
+	// Remove LCP pair if it exists. LCP creation is currently best-effort, so
+	// absence must not block deleting the owning interface config.
+	if err := p.deleteLCPIfPresent(ctx, swIfIndex); err != nil {
 		return fmt.Errorf("delete LCP interface: %w", err)
 	}
 
 	delete(p.ifaceIndex, name)
 	return nil
+}
+
+func (p *VPPPlugin) deleteLCPIfPresent(ctx context.Context, swIfIndex uint32) error {
+	if _, err := p.lcpManager.Get(ctx, swIfIndex); err != nil {
+		if isLCPNotFound(err) {
+			return nil
+		}
+		return err
+	}
+	if err := p.lcpManager.Delete(ctx, swIfIndex); err != nil {
+		if isLCPNotFound(err) {
+			return nil
+		}
+		return err
+	}
+	return nil
+}
+
+func isLCPNotFound(err error) bool {
+	return err != nil && strings.Contains(err.Error(), "LCP pair not found")
 }
 
 func (p *VPPPlugin) applyAddresses(ctx context.Context, swIfIndex uint32, ifaceCfg *model.InterfaceConfig, rollback *[]func(context.Context) error) error {
