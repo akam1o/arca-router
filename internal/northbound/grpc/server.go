@@ -288,6 +288,12 @@ func (s *Server) Diff(ctx context.Context, sessionID string) (string, bool, erro
 
 // ListHistory returns persisted commit history.
 func (s *Server) ListHistory(ctx context.Context, limit, offset int) ([]CommitInfo, error) {
+	if limit < 0 {
+		return nil, fmt.Errorf("invalid history limit: %d", limit)
+	}
+	if offset < 0 {
+		return nil, fmt.Errorf("invalid history offset: %d", offset)
+	}
 	if s.store == nil {
 		return nil, nil
 	}

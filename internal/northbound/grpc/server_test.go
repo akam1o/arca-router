@@ -32,6 +32,7 @@ type fakeStore struct {
 	saved      *model.ConfigSnapshot
 	aborted    bool
 	commits    map[string]*store.CommitRecord
+	listCalls  int
 }
 
 func (f *fakeStore) GetLatestSnapshot(ctx context.Context) (*model.ConfigSnapshot, error) {
@@ -59,6 +60,7 @@ func (f *fakeStore) GetCommit(ctx context.Context, commitID string) (*store.Comm
 }
 
 func (f *fakeStore) ListCommits(ctx context.Context, opts *store.ListOptions) ([]*store.CommitRecord, error) {
+	f.listCalls++
 	return nil, nil
 }
 
@@ -246,6 +248,34 @@ func TestReleaseLockWaitsForInFlightCommit(t *testing.T) {
 	}
 	if err := <-releaseErrCh; err != nil {
 		t.Fatalf("ReleaseLock() error = %v", err)
+	}
+}
+
+func TestListHistoryRejectsNegativePagination(t *testing.T) {
+	eng := engine.NewEngine(nil, testLogger())
+	st := &fakeStore{}
+	srv := NewServer(eng, st, testLogger())
+	ctx := context.Background()
+
+	tests := []struct {
+		name   string
+		limit  int
+		offset int
+	}{
+		{name: "negative limit", limit: -1, offset: 0},
+		{name: "negative offset", limit: 10, offset: -1},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			st.listCalls = 0
+			if _, err := srv.ListHistory(ctx, tt.limit, tt.offset); err == nil {
+				t.Fatal("ListHistory() error = nil, want invalid pagination")
+			}
+			if st.listCalls != 0 {
+				t.Fatalf("ListCommits calls = %d, want 0", st.listCalls)
+			}
+		})
 	}
 }
 
