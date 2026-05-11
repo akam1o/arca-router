@@ -14,12 +14,12 @@ import (
 // This is the primary data structure — not text. Diff, merge, and validate
 // operations work directly on this struct.
 type RouterConfig struct {
-	System       *SystemConfig              `json:"system,omitempty"`
-	Interfaces   map[string]*InterfaceConfig `json:"interfaces,omitempty"`
-	Protocols    *ProtocolsConfig           `json:"protocols,omitempty"`
-	Routing      *RoutingConfig             `json:"routing-options,omitempty"`
-	Policy       *PolicyConfig              `json:"policy-options,omitempty"`
-	Security     *SecurityConfig            `json:"security,omitempty"`
+	System     *SystemConfig               `json:"system,omitempty"`
+	Interfaces map[string]*InterfaceConfig `json:"interfaces,omitempty"`
+	Protocols  *ProtocolsConfig            `json:"protocols,omitempty"`
+	Routing    *RoutingConfig              `json:"routing-options,omitempty"`
+	Policy     *PolicyConfig               `json:"policy-options,omitempty"`
+	Security   *SecurityConfig             `json:"security,omitempty"`
 }
 
 // SystemConfig holds system-level settings.
@@ -29,8 +29,8 @@ type SystemConfig struct {
 
 // InterfaceConfig represents a physical or logical interface.
 type InterfaceConfig struct {
-	Description string          `json:"description,omitempty"`
-	Units       map[int]*Unit   `json:"units,omitempty"`
+	Description string        `json:"description,omitempty"`
+	Units       map[int]*Unit `json:"units,omitempty"`
 }
 
 // Unit represents a logical sub-interface.
@@ -71,8 +71,8 @@ type BGPNeighbor struct {
 
 // OSPFConfig represents OSPF configuration.
 type OSPFConfig struct {
-	RouterID string                `json:"router-id,omitempty"`
-	Areas    map[string]*OSPFArea  `json:"areas,omitempty"`
+	RouterID string               `json:"router-id,omitempty"`
+	Areas    map[string]*OSPFArea `json:"areas,omitempty"`
 }
 
 // OSPFArea represents an OSPF area.
@@ -104,7 +104,7 @@ type StaticRoute struct {
 // PolicyConfig holds policy-options.
 type PolicyConfig struct {
 	PrefixLists      map[string]*PrefixList      `json:"prefix-lists,omitempty"`
-	PolicyStatements map[string]*PolicyStatement  `json:"policy-statements,omitempty"`
+	PolicyStatements map[string]*PolicyStatement `json:"policy-statements,omitempty"`
 }
 
 // PrefixList represents a named prefix-list.
@@ -119,7 +119,7 @@ type PolicyStatement struct {
 
 // PolicyTerm represents a single term in a policy-statement.
 type PolicyTerm struct {
-	Name string               `json:"name"`
+	Name string                 `json:"name"`
 	From *PolicyMatchConditions `json:"from,omitempty"`
 	Then *PolicyActions         `json:"then,omitempty"`
 }
@@ -188,10 +188,11 @@ type ConfigSnapshot struct {
 
 // NewSnapshot creates a new ConfigSnapshot from a RouterConfig.
 func NewSnapshot(cfg *RouterConfig, version uint64, author, message string) *ConfigSnapshot {
-	data, _ := json.Marshal(cfg)
+	snapshotCfg := cfg.Clone()
+	data, _ := json.Marshal(snapshotCfg)
 	return &ConfigSnapshot{
 		Version:   version,
-		Config:    cfg,
+		Config:    snapshotCfg,
 		Hash:      sha256.Sum256(data),
 		Author:    author,
 		Message:   message,
