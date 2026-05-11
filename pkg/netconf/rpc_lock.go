@@ -94,7 +94,7 @@ func (s *Server) handleUnlock(ctx context.Context, sess *Session, rpc *RPC) *RPC
 		return NewErrorReply(rpc.MessageID, ErrDatastoreError(fmt.Sprintf("failed to check lock status: %v", err)))
 	}
 
-	if lockInfo == nil {
+	if lockInfo == nil || !lockInfo.IsLocked {
 		// Lock doesn't exist (already released or timeout)
 		return NewErrorReply(rpc.MessageID, ErrLockTimeout(target))
 	}
