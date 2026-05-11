@@ -72,7 +72,7 @@ func (e *Engine) Validate(ctx context.Context, candidate *model.RouterConfig) er
 
 	diff := ComputeDiff(oldCfg, candidate.Clone())
 	for _, p := range plugins {
-		if err := p.ValidateChanges(ctx, diff); err != nil {
+		if err := p.ValidateChanges(ctx, diff.Clone()); err != nil {
 			return fmt.Errorf("plugin %s validation failed: %w", p.Name(), err)
 		}
 	}
@@ -120,27 +120,31 @@ func (e *Engine) Apply(ctx context.Context, candidate *model.RouterConfig, autho
 
 	// Phase 1: Validate across all plugins (dry-run)
 	for _, p := range e.plugins {
-		if err := p.ValidateChanges(ctx, diff); err != nil {
+		if err := p.ValidateChanges(ctx, diff.Clone()); err != nil {
 			return fmt.Errorf("plugin %s validation failed: %w", p.Name(), err)
 		}
 	}
 
 	// Phase 2: Apply with rollback-on-failure
 	tx := &transaction{
-		applied: make([]Plugin, 0, len(e.plugins)),
-		diff:    diff,
+		applied: make([]appliedPlugin, 0, len(e.plugins)),
 		log:     e.log,
 	}
 
 	for _, p := range e.plugins {
-		if err := p.ApplyChanges(ctx, diff); err != nil {
+		applyDiff := diff.Clone()
+		rollbackDiff := diff.Clone()
+		if err := p.ApplyChanges(ctx, applyDiff); err != nil {
 			e.log.Error("Plugin apply failed, initiating rollback",
 				slog.String("plugin", p.Name()),
 				slog.Any("error", err))
 			tx.rollback(ctx)
 			return fmt.Errorf("plugin %s apply failed (rolled back): %w", p.Name(), err)
 		}
-		tx.applied = append(tx.applied, p)
+		tx.applied = append(tx.applied, appliedPlugin{
+			plugin: p,
+			diff:   rollbackDiff,
+		})
 	}
 
 	// Phase 3: Commit — update running config
@@ -166,16 +170,21 @@ func (e *Engine) InitializeRunning(cfg *model.RouterConfig, version uint64) {
 
 // transaction tracks which plugins have been applied so we can rollback on failure.
 type transaction struct {
-	applied []Plugin
-	diff    *ConfigDiff
+	applied []appliedPlugin
 	log     *slog.Logger
+}
+
+type appliedPlugin struct {
+	plugin Plugin
+	diff   *ConfigDiff
 }
 
 func (t *transaction) rollback(ctx context.Context) {
 	// Rollback in reverse order
 	for i := len(t.applied) - 1; i >= 0; i-- {
-		p := t.applied[i]
-		if err := p.RollbackChanges(ctx, t.diff); err != nil {
+		applied := t.applied[i]
+		p := applied.plugin
+		if err := p.RollbackChanges(ctx, applied.diff); err != nil {
 			t.log.Error("Plugin rollback failed (manual intervention may be required)",
 				slog.String("plugin", p.Name()),
 				slog.Any("error", err))
