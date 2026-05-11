@@ -254,6 +254,8 @@ func (ds *sqliteDatastore) ListCommitHistory(ctx context.Context, opts *HistoryO
 	if opts.Limit > 0 {
 		query += " LIMIT ?"
 		args = append(args, opts.Limit)
+	} else if opts.Offset > 0 {
+		query += " LIMIT -1"
 	}
 
 	if opts.Offset > 0 {
