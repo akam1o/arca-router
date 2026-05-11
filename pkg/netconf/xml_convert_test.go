@@ -127,6 +127,74 @@ func TestXMLToConfigRejectsUnsupportedOperationAttribute(t *testing.T) {
 	}
 }
 
+func TestXMLToConfigRejectsUnknownAttribute(t *testing.T) {
+	xmlData := []byte(`<config><system foo="bar"><host-name>router1</host-name></system></config>`)
+
+	_, err := XMLToConfig(xmlData, DefaultOpMerge)
+	if err == nil {
+		t.Fatal("XMLToConfig() error = nil, want unknown attribute")
+	}
+	rpcErr, ok := err.(*RPCError)
+	if !ok {
+		t.Fatalf("XMLToConfig() error = %T, want *RPCError", err)
+	}
+	if rpcErr.ErrorTag != ErrorTagUnknownAttribute || rpcErr.ErrorInfo == nil || rpcErr.ErrorInfo.BadAttribute != "foo" {
+		t.Fatalf("XMLToConfig() error = %#v, want unknown-attribute for foo", rpcErr)
+	}
+}
+
+func TestXMLToConfigRejectsUnknownAttributeNamespace(t *testing.T) {
+	xmlData := []byte(`<config><system xmlns:x="urn:example:unknown" x:operation="delete"><host-name>router1</host-name></system></config>`)
+
+	_, err := XMLToConfig(xmlData, DefaultOpMerge)
+	if err == nil {
+		t.Fatal("XMLToConfig() error = nil, want unknown attribute namespace")
+	}
+	rpcErr, ok := err.(*RPCError)
+	if !ok {
+		t.Fatalf("XMLToConfig() error = %T, want *RPCError", err)
+	}
+	if rpcErr.ErrorInfo == nil || rpcErr.ErrorInfo.BadNamespace != "urn:example:unknown" {
+		t.Fatalf("XMLToConfig() error = %#v, want bad namespace urn:example:unknown", rpcErr)
+	}
+}
+
+func TestEditConfigRejectsUnknownConfigRootNamespace(t *testing.T) {
+	rpcXML := []byte(`<rpc message-id="101" xmlns="urn:ietf:params:xml:ns:netconf:base:1.0">
+		<edit-config>
+			<target><candidate/></target>
+			<config xmlns="urn:example:unknown">
+				<system><host-name>router1</host-name></system>
+			</config>
+		</edit-config>
+	</rpc>`)
+
+	rpc, err := ParseRPC(rpcXML)
+	if err != nil {
+		t.Fatalf("ParseRPC() error = %v", err)
+	}
+	var req EditConfigRequest
+	if err := rpc.UnmarshalOperation(&req); err != nil {
+		t.Fatalf("UnmarshalOperation() error = %v", err)
+	}
+	configXML, err := req.Config.XML()
+	if err != nil {
+		t.Fatalf("Config.XML() error = %v", err)
+	}
+
+	_, err = XMLToConfig(configXML, DefaultOpMerge)
+	if err == nil {
+		t.Fatal("XMLToConfig() error = nil, want unknown config root namespace")
+	}
+	rpcErr, ok := err.(*RPCError)
+	if !ok {
+		t.Fatalf("XMLToConfig() error = %T, want *RPCError", err)
+	}
+	if rpcErr.ErrorInfo == nil || rpcErr.ErrorInfo.BadNamespace != "urn:example:unknown" {
+		t.Fatalf("XMLToConfig() error = %#v, want bad namespace urn:example:unknown", rpcErr)
+	}
+}
+
 func TestXMLToConfigRejectsTooManyRawElements(t *testing.T) {
 	var b strings.Builder
 	b.WriteString("<config><system>")
