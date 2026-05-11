@@ -13,7 +13,7 @@ arca-router supports NETCONF over SSH (RFC 6241/6242), enabling Infrastructure a
 
 ## Compatibility Notes (arca-netconfd)
 
-- NETCONF base:1.1 (chunked framing `#<len>\n` ... `##\n`)
+- NETCONF base:1.1 (RFC 6242 chunked framing `\n#<len>\n` ... `\n##\n`)
 - Candidate datastore only: `target: running` returns `operation-not-supported`
 - Commit required: edits are staged in candidate until a commit is issued
 - Lock strongly recommended: use `lock: always` or explicit lock/unlock to avoid contention
