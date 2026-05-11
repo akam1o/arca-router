@@ -152,7 +152,7 @@ func TestMarshalReplyPreservesAttributes(t *testing.T) {
 }
 
 func TestMarshalReplyOmitsEmptyMessageID(t *testing.T) {
-	reply := NewErrorReply("", ErrMissingElement("rpc", "message-id"))
+	reply := NewErrorReply("", ErrMissingAttribute("rpc", "message-id"))
 
 	data, err := MarshalReply(reply)
 	if err != nil {

@@ -843,7 +843,7 @@ func validateConfigAttributes(start xml.StartElement, path []string) error {
 	for _, attr := range start.Attr {
 		if isNamespaceDeclarationAttribute(attr) {
 			if !isAllowedConfigNamespaceDeclaration(attr.Value) {
-				return NewRPCError(ErrorTypeProtocol, "unknown-namespace",
+				return NewRPCError(ErrorTypeProtocol, ErrorTagUnknownNamespace,
 					fmt.Sprintf("invalid namespace declaration for config element %s", start.Name.Local)).
 					WithPath(configElementRPCPath(path)).
 					WithBadNamespace(attr.Value)
@@ -883,7 +883,7 @@ func validateConfigElement(name xml.Name, path []string) error {
 		return ErrUnsupportedConfigElement(name.Local)
 	}
 	if !isAllowedConfigNamespace(path, name.Space) {
-		return NewRPCError(ErrorTypeProtocol, "unknown-namespace",
+		return NewRPCError(ErrorTypeProtocol, ErrorTagUnknownNamespace,
 			fmt.Sprintf("invalid namespace for config element %s", name.Local)).
 			WithPath(configElementRPCPath(path)).
 			WithBadNamespace(name.Space)
@@ -1392,7 +1392,7 @@ func max(a, b int) int {
 // ValidateProtocolNamespace validates protocol element namespace per Phase 2 Step 2
 func ValidateProtocolNamespace(elem xml.Name) error {
 	if elem.Space != NetconfBaseNS {
-		return NewRPCError(ErrorTypeProtocol, "unknown-namespace",
+		return NewRPCError(ErrorTypeProtocol, ErrorTagUnknownNamespace,
 			"invalid namespace for protocol element").
 			WithPath("/rpc/" + elem.Local).
 			WithBadNamespace(elem.Space)

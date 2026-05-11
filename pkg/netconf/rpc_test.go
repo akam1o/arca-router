@@ -26,18 +26,18 @@ func TestParseRPC(t *testing.T) {
 		{
 			name: "missing message-id",
 			xml: `<rpc xmlns="urn:ietf:params:xml:ns:netconf:base:1.0">
-				<get-config><source><running/></source></get-config>
-			</rpc>`,
+					<get-config><source><running/></source></get-config>
+				</rpc>`,
 			wantErr: true,
-			errType: "missing-element",
+			errType: "missing-attribute",
 		},
 		{
 			name: "invalid namespace",
 			xml: `<rpc message-id="101" xmlns="http://example.com/invalid">
-				<get-config><source><running/></source></get-config>
-			</rpc>`,
+					<get-config><source><running/></source></get-config>
+				</rpc>`,
 			wantErr: true,
-			errType: "malformed-message",
+			errType: "unknown-namespace",
 		},
 		{
 			name:    "DTD not allowed",

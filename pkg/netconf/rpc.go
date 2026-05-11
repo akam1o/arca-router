@@ -20,7 +20,7 @@ type RPC struct {
 }
 
 type rpcEnvelope struct {
-	XMLName    xml.Name       `xml:"urn:ietf:params:xml:ns:netconf:base:1.0 rpc"`
+	XMLName    xml.Name       `xml:"rpc"`
 	MessageID  string         `xml:"message-id,attr"`
 	Attrs      []xml.Attr     `xml:",any,attr"`
 	Content    []byte         `xml:",innerxml"`
@@ -72,7 +72,7 @@ func ParseRPC(data []byte) (*RPC, error) {
 
 	// Validate message-id presence
 	if envelope.MessageID == "" {
-		return nil, ErrMissingElement("rpc", "message-id")
+		return nil, ErrMissingAttribute("rpc", "message-id")
 	}
 	if len(envelope.Operations) == 0 {
 		return nil, ErrMissingElement("rpc", "operation")
@@ -356,7 +356,7 @@ func (r *RPC) validateOperationElement(start xml.StartElement, path []string) er
 	}
 
 	if !allowsAnyElementNamespace(path) && start.Name.Space != netconfNamespace {
-		return NewRPCError(ErrorTypeProtocol, "unknown-namespace",
+		return NewRPCError(ErrorTypeProtocol, ErrorTagUnknownNamespace,
 			fmt.Sprintf("invalid namespace for RPC element %s", start.Name.Local)).
 			WithPath(rpcElementRPCPath(path)).
 			WithBadNamespace(start.Name.Space)
