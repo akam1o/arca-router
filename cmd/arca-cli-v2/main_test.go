@@ -242,22 +242,25 @@ func TestShowHistoryRejectsInvalidLimit(t *testing.T) {
 	}
 }
 
-func TestRollbackRejectsNegativeNumber(t *testing.T) {
+func TestRollbackRejectsInvalidNumber(t *testing.T) {
 	ctx := context.Background()
-	client := &fakeInteractiveClient{}
-	sh := &interactiveShell{
-		client:    client,
-		hostname:  "router",
-		mode:      modeConfiguration,
-		sessionID: "session-1",
-		hasLock:   true,
-	}
 
-	err := sh.cmdRollback(ctx, []string{"-1"})
-	if err == nil || !strings.Contains(err.Error(), "invalid rollback number") {
-		t.Fatalf("cmdRollback(-1) error = %v, want invalid rollback number", err)
-	}
-	if client.listHistoryCalls != 0 || client.rollbackCalls != 0 {
-		t.Fatalf("list/rollback calls = %d/%d, want 0/0", client.listHistoryCalls, client.rollbackCalls)
+	for _, arg := range []string{"-1", "1abc"} {
+		client := &fakeInteractiveClient{}
+		sh := &interactiveShell{
+			client:    client,
+			hostname:  "router",
+			mode:      modeConfiguration,
+			sessionID: "session-1",
+			hasLock:   true,
+		}
+
+		err := sh.cmdRollback(ctx, []string{arg})
+		if err == nil || !strings.Contains(err.Error(), "invalid rollback number") {
+			t.Fatalf("cmdRollback(%s) error = %v, want invalid rollback number", arg, err)
+		}
+		if client.listHistoryCalls != 0 || client.rollbackCalls != 0 {
+			t.Fatalf("list/rollback calls for %q = %d/%d, want 0/0", arg, client.listHistoryCalls, client.rollbackCalls)
+		}
 	}
 }

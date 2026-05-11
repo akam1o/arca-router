@@ -138,6 +138,14 @@ func parseHistoryLimit(raw string) (int, error) {
 	return limit, nil
 }
 
+func parseRollbackNumber(raw string) (int, error) {
+	rollbackNum, err := strconv.Atoi(raw)
+	if err != nil || rollbackNum < 0 {
+		return 0, fmt.Errorf("invalid rollback number: %s", raw)
+	}
+	return rollbackNum, nil
+}
+
 // --- One-shot command ---
 
 func runOneShotCommand(ctx context.Context, f *cliFlags, args []string) int {
@@ -728,12 +736,11 @@ func (sh *interactiveShell) cmdRollback(ctx context.Context, args []string) erro
 	}
 	rollbackNum := 0
 	if len(args) > 0 {
-		if _, err := fmt.Sscanf(args[0], "%d", &rollbackNum); err != nil {
-			return fmt.Errorf("invalid rollback number: %s", args[0])
+		var err error
+		rollbackNum, err = parseRollbackNumber(args[0])
+		if err != nil {
+			return err
 		}
-	}
-	if rollbackNum < 0 {
-		return fmt.Errorf("invalid rollback number: %d", rollbackNum)
 	}
 	if rollbackNum == 0 {
 		return sh.cmdDiscardChanges(ctx)
