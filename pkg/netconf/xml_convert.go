@@ -411,7 +411,7 @@ func writeOSPFXML(buf *bytes.Buffer, ospf *config.OSPFConfig) error {
 						fmt.Fprintf(buf, "          <metric>%d</metric>\n", ospfIface.Metric)
 					}
 
-					if ospfIface.Priority > 0 {
+					if ospfIface.PrioritySet || ospfIface.Priority > 0 {
 						fmt.Fprintf(buf, "          <priority>%d</priority>\n", ospfIface.Priority)
 					}
 
@@ -504,7 +504,7 @@ func XMLToConfig(xmlData []byte, defaultOp DefaultOperation) (*config.Config, er
 						Name     string `xml:"name"`
 						Passive  bool   `xml:"passive"`
 						Metric   int    `xml:"metric"`
-						Priority int    `xml:"priority"`
+						Priority *int   `xml:"priority"`
 					} `xml:"interface"`
 				} `xml:"area"`
 			} `xml:"ospf"`
@@ -609,11 +609,18 @@ func XMLToConfig(xmlData []byte, defaultOp DefaultOperation) (*config.Config, er
 				}
 
 				for _, ospfIface := range area.Interfaces {
+					priority := 0
+					prioritySet := false
+					if ospfIface.Priority != nil {
+						priority = *ospfIface.Priority
+						prioritySet = true
+					}
 					cfgArea.Interfaces[ospfIface.Name] = &config.OSPFInterface{
-						Name:     ospfIface.Name,
-						Passive:  ospfIface.Passive,
-						Metric:   ospfIface.Metric,
-						Priority: ospfIface.Priority,
+						Name:        ospfIface.Name,
+						Passive:     ospfIface.Passive,
+						Metric:      ospfIface.Metric,
+						Priority:    priority,
+						PrioritySet: prioritySet,
 					}
 				}
 
