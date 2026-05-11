@@ -14,6 +14,7 @@ type interactiveTestDatastore struct {
 	lockAcquired     bool
 	acquireLockCount int
 	listHistoryCalls int
+	rollbackCalls    int
 	history          []*datastore.CommitHistoryEntry
 }
 
@@ -49,6 +50,7 @@ func (d *interactiveTestDatastore) Commit(ctx context.Context, req *datastore.Co
 }
 
 func (d *interactiveTestDatastore) Rollback(ctx context.Context, req *datastore.RollbackRequest) (string, error) {
+	d.rollbackCalls++
 	d.lockAcquired = false
 	d.lockSessionID = ""
 	return "rollback-1234567890", nil
@@ -155,6 +157,27 @@ func TestInteractiveShowHistoryRejectsInvalidLimit(t *testing.T) {
 		}
 		if ds.listHistoryCalls != 0 {
 			t.Fatalf("ListCommitHistory calls for %q = %d, want 0", arg, ds.listHistoryCalls)
+		}
+	}
+}
+
+func TestInteractiveRollbackRejectsInvalidNumber(t *testing.T) {
+	ctx := context.Background()
+
+	for _, arg := range []string{"-1", "1abc"} {
+		ds := &interactiveTestDatastore{}
+		session := cli.NewSession("testuser", ds)
+		sh := &InteractiveShell{session: session, hostname: "router"}
+		if err := session.EnterConfigurationMode(ctx); err != nil {
+			t.Fatalf("EnterConfigurationMode() error = %v", err)
+		}
+
+		err := sh.cmdRollback(ctx, []string{arg})
+		if err == nil {
+			t.Fatalf("cmdRollback(%s) error = nil, want invalid rollback number", arg)
+		}
+		if ds.listHistoryCalls != 0 || ds.rollbackCalls != 0 {
+			t.Fatalf("history/rollback calls for %q = %d/%d, want 0/0", arg, ds.listHistoryCalls, ds.rollbackCalls)
 		}
 	}
 }

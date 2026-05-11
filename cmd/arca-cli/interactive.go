@@ -30,6 +30,14 @@ func parseHistoryLimit(raw string) (int, error) {
 	return limit, nil
 }
 
+func parseRollbackNumber(raw string) (int, error) {
+	rollbackNum, err := strconv.Atoi(raw)
+	if err != nil || rollbackNum < 0 {
+		return 0, fmt.Errorf("invalid rollback number: %s", raw)
+	}
+	return rollbackNum, nil
+}
+
 // NewInteractiveShell creates a new interactive shell
 func NewInteractiveShell(username string, ds datastore.Datastore, hostname string) (*InteractiveShell, error) {
 	session := cli.NewSession(username, ds)
@@ -449,9 +457,10 @@ func (sh *InteractiveShell) cmdRollback(ctx context.Context, args []string) erro
 
 	rollbackNum := 0
 	if len(args) > 0 {
-		_, err := fmt.Sscanf(args[0], "%d", &rollbackNum)
+		var err error
+		rollbackNum, err = parseRollbackNumber(args[0])
 		if err != nil {
-			return fmt.Errorf("invalid rollback number: %s", args[0])
+			return err
 		}
 	}
 
