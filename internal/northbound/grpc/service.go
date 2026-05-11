@@ -19,6 +19,7 @@ type configServiceServer interface {
 	Commit(context.Context, string, string, string) (string, uint64, error)
 	ValidateCandidate(context.Context, string) error
 	Discard(context.Context, string) error
+	Rollback(context.Context, string, string, string, string) (string, uint64, error)
 	Diff(context.Context, string) (string, bool, error)
 	ListHistory(context.Context, int, int) ([]CommitInfo, error)
 }
@@ -48,6 +49,7 @@ func registerConfigServiceServer(s *googlegrpc.Server, srv configServiceServer) 
 			{MethodName: "Commit", Handler: configCommitHandler},
 			{MethodName: "ValidateCandidate", Handler: configValidateCandidateHandler},
 			{MethodName: "Discard", Handler: configDiscardHandler},
+			{MethodName: "Rollback", Handler: configRollbackHandler},
 			{MethodName: "Diff", Handler: configDiffHandler},
 			{MethodName: "ListHistory", Handler: configListHistoryHandler},
 		},
@@ -147,6 +149,14 @@ func configDiscardHandler(srv interface{}, ctx context.Context, dec func(interfa
 	return unaryHandler[discardRequest](srv, ctx, dec, interceptor, "/"+configServiceName+"/Discard",
 		func(ctx context.Context, req *discardRequest) (interface{}, error) {
 			return &discardResponse{}, srv.(configServiceServer).Discard(ctx, req.SessionID)
+		})
+}
+
+func configRollbackHandler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor googlegrpc.UnaryServerInterceptor) (interface{}, error) {
+	return unaryHandler[rollbackRequest](srv, ctx, dec, interceptor, "/"+configServiceName+"/Rollback",
+		func(ctx context.Context, req *rollbackRequest) (interface{}, error) {
+			commitID, version, err := srv.(configServiceServer).Rollback(ctx, req.SessionID, req.CommitID, req.User, req.Message)
+			return &rollbackResponse{NewCommitID: commitID, Version: version}, err
 		})
 }
 

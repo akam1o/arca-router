@@ -40,12 +40,28 @@ func (s *Server) handleCommit(ctx context.Context, sess *Session, rpc *RPC) *RPC
 		Message:   fmt.Sprintf("NETCONF commit by %s", sess.Username),
 	}
 
-	commitID, err := s.datastore.Commit(ctx, commitReq)
+	persist := func(ctx context.Context) (string, error) {
+		return s.datastore.Commit(ctx, commitReq)
+	}
+
+	var commitID string
+	if s.commitHook != nil {
+		commitID, err = s.commitHook(ctx, &CommitHookRequest{
+			SessionID:  sess.ID,
+			User:       sess.Username,
+			SourceIP:   sess.RemoteAddr(),
+			Message:    commitReq.Message,
+			ConfigText: candidate.ConfigText,
+		}, persist)
+	} else {
+		commitID, err = persist(ctx)
+	}
 	if err != nil {
 		log.Printf("[NETCONF] Commit failed for session %s: %v", sess.ID, err)
 		// Check if it's a backend validation error
 		return NewErrorReply(rpc.MessageID, ErrBackendValidationFailed(fmt.Sprintf("commit failed: %v", err)))
 	}
+	sess.RemoveLock(DatastoreCandidate)
 
 	log.Printf("[NETCONF] Commit successful: %s (session: %s, user: %s)", commitID, sess.ID, sess.Username)
 

@@ -125,8 +125,14 @@ func (s *Store) GetCommit(ctx context.Context, commitID string) (*store.CommitRe
 		return nil, nil
 	}
 
+	cfg, err := parseStoredConfig(entry.ConfigText)
+	if err != nil {
+		return nil, fmt.Errorf("parse commit config: %w", err)
+	}
+
 	return &store.CommitRecord{
 		CommitID:   entry.CommitID,
+		Config:     cfg,
 		Author:     entry.User,
 		Message:    entry.Message,
 		Timestamp:  entry.Timestamp,
@@ -171,6 +177,14 @@ func (s *Store) AuditLog(ctx context.Context, event *store.AuditEvent) error {
 		Action:    event.Action,
 		Result:    event.Result,
 		Details:   string(detailsJSON),
+	})
+}
+
+func (s *Store) RollbackCommit(ctx context.Context, commitID, user, message string) (string, error) {
+	return s.ds.Rollback(ctx, &datastore.RollbackRequest{
+		CommitID: commitID,
+		User:     user,
+		Message:  message,
 	})
 }
 

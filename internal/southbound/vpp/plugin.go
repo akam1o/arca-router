@@ -152,11 +152,12 @@ func (p *VPPPlugin) RollbackChanges(ctx context.Context, diff *engine.ConfigDiff
 	defer p.mu.Unlock()
 
 	// Reverse of ApplyChanges: remove added addresses, re-add removed addresses
-	for name := range diff.InterfacesAdded {
+	for name, ifaceCfg := range diff.InterfacesAdded {
 		swIfIndex, ok := p.ifaceIndex[name]
 		if !ok {
 			continue
 		}
+		p.deleteConfiguredAddresses(ctx, swIfIndex, ifaceCfg)
 		_ = p.client.DeleteLCPInterface(ctx, swIfIndex)
 		_ = p.client.SetInterfaceDown(ctx, swIfIndex)
 		delete(p.ifaceIndex, name)
@@ -436,6 +437,34 @@ func (p *VPPPlugin) applyAddresses(ctx context.Context, swIfIndex uint32, ifaceC
 		}
 	}
 	return nil
+}
+
+func (p *VPPPlugin) deleteConfiguredAddresses(ctx context.Context, swIfIndex uint32, ifaceCfg *model.InterfaceConfig) {
+	if ifaceCfg == nil {
+		return
+	}
+	for _, unit := range ifaceCfg.Units {
+		if unit == nil {
+			continue
+		}
+		for _, family := range unit.Family {
+			if family == nil {
+				continue
+			}
+			for _, addrStr := range family.Addresses {
+				_, ipNet, err := net.ParseCIDR(addrStr)
+				if err != nil {
+					continue
+				}
+				if err := p.client.DeleteInterfaceAddress(ctx, swIfIndex, ipNet); err != nil {
+					p.log.Warn("Failed to remove address during rollback",
+						slog.Uint64("sw_if_index", uint64(swIfIndex)),
+						slog.String("address", addrStr),
+						slog.Any("error", err))
+				}
+			}
+		}
+	}
 }
 
 func cloneIPNet(ipNet *net.IPNet) *net.IPNet {

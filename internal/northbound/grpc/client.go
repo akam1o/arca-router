@@ -113,6 +113,20 @@ func (c *Client) Discard(ctx context.Context, sessionID string) error {
 	return c.invoke(ctx, "/"+configServiceName+"/Discard", &discardRequest{SessionID: sessionID}, &resp)
 }
 
+// Rollback rolls back running configuration to a previous commit.
+func (c *Client) Rollback(ctx context.Context, sessionID, commitID, user, message string) (newCommitID string, version uint64, err error) {
+	var resp rollbackResponse
+	if err := c.invoke(ctx, "/"+configServiceName+"/Rollback", &rollbackRequest{
+		SessionID: sessionID,
+		CommitID:  commitID,
+		User:      user,
+		Message:   message,
+	}, &resp); err != nil {
+		return "", 0, err
+	}
+	return resp.NewCommitID, resp.Version, nil
+}
+
 // Diff returns the diff between candidate and running.
 func (c *Client) Diff(ctx context.Context, sessionID string) (diffText string, hasChanges bool, err error) {
 	var resp diffResponse

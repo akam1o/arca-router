@@ -29,6 +29,7 @@ type fakeStore struct {
 	commitErr error
 	saved     *model.ConfigSnapshot
 	aborted   bool
+	commits   map[string]*store.CommitRecord
 }
 
 func (f *fakeStore) GetLatestSnapshot(ctx context.Context) (*model.ConfigSnapshot, error) {
@@ -49,7 +50,7 @@ func (f *fakeStore) PrepareCommit(ctx context.Context, snap *model.ConfigSnapsho
 }
 
 func (f *fakeStore) GetCommit(ctx context.Context, commitID string) (*store.CommitRecord, error) {
-	return nil, nil
+	return f.commits[commitID], nil
 }
 
 func (f *fakeStore) ListCommits(ctx context.Context, opts *store.ListOptions) ([]*store.CommitRecord, error) {
@@ -239,6 +240,61 @@ func TestCommitRollsBackEngineWhenPersistenceFails(t *testing.T) {
 	}
 	if got := eng.Running().System.HostName; got != "router1" {
 		t.Fatalf("engine running hostname = %q, want rollback to router1", got)
+	}
+}
+
+func TestRollbackAppliesCommitConfig(t *testing.T) {
+	oldParser := ConfigTextParser
+	ConfigTextParser = func(text string) (*model.RouterConfig, error) {
+		cfg, err := pkgconfig.NewParser(strings.NewReader(text)).Parse()
+		if err != nil {
+			return nil, err
+		}
+		return model.FromLegacyConfig(cfg), nil
+	}
+	t.Cleanup(func() { ConfigTextParser = oldParser })
+
+	eng := engine.NewEngine(nil, testLogger())
+	eng.InitializeRunning(&model.RouterConfig{
+		System:     &model.SystemConfig{HostName: "router2"},
+		Interfaces: map[string]*model.InterfaceConfig{},
+	}, 2)
+	targetCfg := &model.RouterConfig{
+		System:     &model.SystemConfig{HostName: "router1"},
+		Interfaces: map[string]*model.InterfaceConfig{},
+	}
+	st := &fakeStore{
+		commitID: "rollback-1",
+		commits: map[string]*store.CommitRecord{
+			"commit-old": {CommitID: "commit-old", Config: targetCfg},
+		},
+	}
+	srv := NewServer(eng, st, testLogger())
+	ctx := context.Background()
+	sessionID, err := srv.CreateSession(ctx, "alice")
+	if err != nil {
+		t.Fatalf("CreateSession() error = %v", err)
+	}
+	if err := srv.AcquireLock(ctx, sessionID, "alice"); err != nil {
+		t.Fatalf("AcquireLock() error = %v", err)
+	}
+
+	commitID, version, err := srv.Rollback(ctx, sessionID, "commit-old", "alice", "")
+	if err != nil {
+		t.Fatalf("Rollback() error = %v", err)
+	}
+	if commitID != "rollback-1" || version != 3 {
+		t.Fatalf("Rollback() = (%q, %d), want rollback-1 version 3", commitID, version)
+	}
+	if got := eng.Running().System.HostName; got != "router1" {
+		t.Fatalf("engine running hostname = %q, want router1", got)
+	}
+	candidate, err := srv.GetCandidate(ctx, sessionID)
+	if err != nil {
+		t.Fatalf("GetCandidate() error = %v", err)
+	}
+	if !strings.Contains(candidate, "set system host-name router1") {
+		t.Fatalf("candidate was not reset to rolled back config: %q", candidate)
 	}
 }
 

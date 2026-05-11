@@ -2,14 +2,17 @@ package main
 
 import (
 	"context"
+	"errors"
 	"log/slog"
 	"os"
 	"path/filepath"
 	"testing"
 
+	"github.com/akam1o/arca-router/internal/engine"
 	"github.com/akam1o/arca-router/internal/model"
 	"github.com/akam1o/arca-router/internal/store"
 	"github.com/akam1o/arca-router/pkg/logger"
+	"github.com/akam1o/arca-router/pkg/netconf"
 )
 
 type initialConfigStore struct {
@@ -86,5 +89,59 @@ func TestLoadInitialConfigFallsBackToFile(t *testing.T) {
 	}
 	if cfg.System.HostName != "file-router" {
 		t.Fatalf("hostname = %q, want file-router", cfg.System.HostName)
+	}
+}
+
+func TestNETCONFCommitHookAppliesEngineBeforePersist(t *testing.T) {
+	eng := engine.NewEngine(nil, slog.Default())
+	eng.InitializeRunning(&model.RouterConfig{
+		System:     &model.SystemConfig{HostName: "router1"},
+		Interfaces: map[string]*model.InterfaceConfig{},
+	}, 1)
+
+	hook := newNETCONFCommitHook(eng)
+	persistCalled := false
+	commitID, err := hook(context.Background(), &netconf.CommitHookRequest{
+		User:       "alice",
+		Message:    "NETCONF commit by alice",
+		ConfigText: "set system host-name router2\n",
+	}, func(ctx context.Context) (string, error) {
+		persistCalled = true
+		if got := eng.Running().System.HostName; got != "router2" {
+			t.Fatalf("engine hostname before persist = %q, want router2", got)
+		}
+		return "commit-1", nil
+	})
+	if err != nil {
+		t.Fatalf("commit hook error = %v", err)
+	}
+	if !persistCalled {
+		t.Fatal("persist callback was not called")
+	}
+	if commitID != "commit-1" {
+		t.Fatalf("commit ID = %q, want commit-1", commitID)
+	}
+}
+
+func TestNETCONFCommitHookRollsBackEngineWhenPersistFails(t *testing.T) {
+	eng := engine.NewEngine(nil, slog.Default())
+	eng.InitializeRunning(&model.RouterConfig{
+		System:     &model.SystemConfig{HostName: "router1"},
+		Interfaces: map[string]*model.InterfaceConfig{},
+	}, 1)
+
+	hook := newNETCONFCommitHook(eng)
+	_, err := hook(context.Background(), &netconf.CommitHookRequest{
+		User:       "alice",
+		Message:    "NETCONF commit by alice",
+		ConfigText: "set system host-name router2\n",
+	}, func(ctx context.Context) (string, error) {
+		return "", errors.New("persist failed")
+	})
+	if err == nil {
+		t.Fatal("commit hook expected persistence error")
+	}
+	if got := eng.Running().System.HostName; got != "router1" {
+		t.Fatalf("engine hostname after failed persist = %q, want router1", got)
 	}
 }

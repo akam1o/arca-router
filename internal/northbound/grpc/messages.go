@@ -46,6 +46,18 @@ type discardRequest struct {
 
 type discardResponse struct{}
 
+type rollbackRequest struct {
+	SessionID string `json:"session_id"`
+	CommitID  string `json:"commit_id"`
+	User      string `json:"user"`
+	Message   string `json:"message"`
+}
+
+type rollbackResponse struct {
+	NewCommitID string `json:"new_commit_id"`
+	Version     uint64 `json:"version"`
+}
+
 type diffRequest struct {
 	SessionID string `json:"session_id"`
 }

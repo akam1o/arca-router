@@ -135,6 +135,13 @@ func NewSSHServer(config *SSHConfig) (*SSHServer, error) {
 	return srv, nil
 }
 
+// SetCommitHook installs a commit coordinator for NETCONF commits.
+func (s *SSHServer) SetCommitHook(h CommitHook) {
+	if s.netconfServer != nil {
+		s.netconfServer.SetCommitHook(h)
+	}
+}
+
 // Start starts the SSH server
 func (s *SSHServer) Start(ctx context.Context) error {
 	s.mu.Lock()
