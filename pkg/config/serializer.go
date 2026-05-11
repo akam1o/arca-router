@@ -203,7 +203,7 @@ func writeOSPF(b *strings.Builder, ospf *OSPFConfig) {
 				writeLine(b, "%s metric %d", base, ospfIface.Metric)
 				wrote = true
 			}
-			if ospfIface.Priority > 0 {
+			if ospfIface.PrioritySet || ospfIface.Priority > 0 {
 				writeLine(b, "%s priority %d", base, ospfIface.Priority)
 				wrote = true
 			}

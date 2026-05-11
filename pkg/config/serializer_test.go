@@ -142,3 +142,35 @@ func TestToSetCommandsWritesOSPFAttributesSeparately(t *testing.T) {
 		}
 	}
 }
+
+func TestToSetCommandsWritesExplicitOSPFPriorityZero(t *testing.T) {
+	cfg := &Config{
+		Interfaces: map[string]*Interface{},
+		Protocols: &ProtocolConfig{
+			OSPF: &OSPFConfig{
+				Areas: map[string]*OSPFArea{
+					"0.0.0.0": {
+						Interfaces: map[string]*OSPFInterface{
+							"ge-0/0/0": {Name: "ge-0/0/0", Priority: 0, PrioritySet: true},
+						},
+					},
+				},
+			},
+		},
+	}
+
+	text := ToSetCommands(cfg)
+	want := "set protocols ospf area 0.0.0.0 interface ge-0/0/0 priority 0\n"
+	if !strings.Contains(text, want) {
+		t.Fatalf("ToSetCommands() missing %q in:\n%s", want, text)
+	}
+
+	parsed, err := NewParser(strings.NewReader(text)).Parse()
+	if err != nil {
+		t.Fatalf("Parse() error = %v", err)
+	}
+	iface := parsed.Protocols.OSPF.Areas["0.0.0.0"].Interfaces["ge-0/0/0"]
+	if !iface.PrioritySet || iface.Priority != 0 {
+		t.Fatalf("parsed OSPF interface = %#v, want explicit priority 0", iface)
+	}
+}
