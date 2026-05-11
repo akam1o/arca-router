@@ -95,6 +95,22 @@ func TestXMLToConfigRejectsUnknownElement(t *testing.T) {
 	}
 }
 
+func TestXMLToConfigRejectsTextOnlyFragment(t *testing.T) {
+	xmlData := []byte(`junk`)
+
+	_, err := XMLToConfig(xmlData, DefaultOpMerge)
+	if err == nil {
+		t.Fatal("XMLToConfig() error = nil, want malformed-message")
+	}
+	rpcErr, ok := err.(*RPCError)
+	if !ok {
+		t.Fatalf("XMLToConfig() error = %T, want *RPCError", err)
+	}
+	if rpcErr.ErrorTag != ErrorTagMalformedMessage {
+		t.Fatalf("XMLToConfig() error = %#v, want malformed-message", rpcErr)
+	}
+}
+
 func TestXMLToConfigRejectsUnexpectedConfigRootText(t *testing.T) {
 	xmlData := []byte(`<config>junk<system><host-name>router1</host-name></system></config>`)
 
