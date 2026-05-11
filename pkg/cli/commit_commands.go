@@ -59,19 +59,12 @@ func (s *Session) CommitWithOptions(ctx context.Context, opts CommitOptions) err
 	if err != nil {
 		return fmt.Errorf("commit failed: %w", err)
 	}
-	s.lockAcquired = false
-
-	if opts.AndQuit {
-		s.mode = ModeOperational
-		s.configPath = []string{}
-	} else if err := s.resumeConfigurationLock(ctx); err != nil {
-		return fmt.Errorf("commit complete but failed to refresh configuration session: %w", err)
-	}
 
 	fmt.Printf("commit complete\n")
 	if commitID != "" {
 		fmt.Printf("  Commit ID: %s\n", commitID)
 	}
+	s.finishConfigurationTransaction(ctx, "commit", !opts.AndQuit)
 
 	return nil
 }
@@ -129,10 +122,6 @@ func (s *Session) RollbackWithNumber(ctx context.Context, rollbackNum int) error
 	if err != nil {
 		return fmt.Errorf("rollback failed: %w", err)
 	}
-	s.lockAcquired = false
-	if err := s.resumeConfigurationLock(ctx); err != nil {
-		return fmt.Errorf("rollback complete but failed to refresh configuration session: %w", err)
-	}
 
 	fmt.Printf("rollback complete\n")
 	if len(targetCommit.CommitID) >= 8 {
@@ -145,6 +134,7 @@ func (s *Session) RollbackWithNumber(ctx context.Context, rollbackNum int) error
 	} else if newCommitID != "" {
 		fmt.Printf("  New commit ID: %s\n", newCommitID)
 	}
+	s.finishConfigurationTransaction(ctx, "rollback", true)
 
 	return nil
 }

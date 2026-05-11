@@ -100,6 +100,24 @@ func (s *Session) resumeConfigurationLock(ctx context.Context) error {
 	return nil
 }
 
+func (s *Session) leaveConfigurationMode() {
+	s.lockAcquired = false
+	s.mode = ModeOperational
+	s.configPath = []string{}
+}
+
+func (s *Session) finishConfigurationTransaction(ctx context.Context, action string, stayInConfig bool) {
+	s.lockAcquired = false
+	if !stayInConfig {
+		s.leaveConfigurationMode()
+		return
+	}
+	if err := s.resumeConfigurationLock(ctx); err != nil {
+		s.leaveConfigurationMode()
+		fmt.Printf("warning: %s complete but failed to refresh configuration session; left configuration mode: %v\n", action, err)
+	}
+}
+
 // verifyLock checks if the session still owns the candidate lock
 // Returns error if lock is expired or owned by another session
 func (s *Session) verifyLock(ctx context.Context) error {
@@ -149,16 +167,14 @@ func (s *Session) EnterConfigurationMode(ctx context.Context) error {
 		if err != nil && (!errors.As(err, &dsErr) || dsErr.Code != datastore.ErrCodeNotFound) {
 			// This is not a "not found" error - it's a real failure
 			_ = s.ds.ReleaseLock(context.Background(), datastore.LockTargetCandidate, s.id)
-			s.lockAcquired = false
-			s.mode = ModeOperational
+			s.leaveConfigurationMode()
 			return fmt.Errorf("failed to get candidate: %w", err)
 		}
 
 		// Candidate not found - initialize from running
 		if err := s.syncCandidateFromRunning(ctx); err != nil {
 			_ = s.ds.ReleaseLock(context.Background(), datastore.LockTargetCandidate, s.id)
-			s.lockAcquired = false
-			s.mode = ModeOperational
+			s.leaveConfigurationMode()
 			return fmt.Errorf("failed to initialize candidate: %w", err)
 		}
 	}
@@ -301,12 +317,9 @@ func (s *Session) CommitCommand(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("commit failed: %w", err)
 	}
-	s.lockAcquired = false
-	if err := s.resumeConfigurationLock(ctx); err != nil {
-		return fmt.Errorf("commit complete but failed to refresh configuration session: %w", err)
-	}
 
 	fmt.Printf("commit complete (commit ID: %s)\n", commitID)
+	s.finishConfigurationTransaction(ctx, "commit", true)
 	return nil
 }
 
@@ -374,12 +387,9 @@ func (s *Session) RollbackCommand(ctx context.Context, rollbackNum int) error {
 	if err != nil {
 		return fmt.Errorf("rollback failed: %w", err)
 	}
-	s.lockAcquired = false
-	if err := s.resumeConfigurationLock(ctx); err != nil {
-		return fmt.Errorf("rollback complete but failed to refresh configuration session: %w", err)
-	}
 
 	fmt.Printf("rollback complete (new commit ID: %s)\n", newCommitID)
+	s.finishConfigurationTransaction(ctx, "rollback", true)
 	return nil
 }
 

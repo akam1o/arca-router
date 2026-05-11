@@ -13,6 +13,7 @@ type mockDatastore struct {
 	lockSessionID     string
 	lockAcquired      bool
 	acquireLockCount  int
+	acquireLockErr    error
 	saveCandidateText string
 	history           []*datastore.CommitHistoryEntry
 }
@@ -68,6 +69,9 @@ func (m *mockDatastore) CompareCommits(ctx context.Context, commitID1, commitID2
 
 func (m *mockDatastore) AcquireLock(ctx context.Context, req *datastore.LockRequest) error {
 	m.acquireLockCount++
+	if m.acquireLockErr != nil {
+		return m.acquireLockErr
+	}
 	m.lockSessionID = req.SessionID
 	m.lockAcquired = true
 	return nil
