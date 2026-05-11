@@ -6,12 +6,14 @@ package sqlite
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"time"
 
 	"github.com/akam1o/arca-router/internal/model"
 	"github.com/akam1o/arca-router/internal/store"
 	"github.com/akam1o/arca-router/pkg/datastore"
+	"github.com/google/uuid"
 )
 
 // Store implements store.ConfigStore using the legacy datastore.
@@ -39,6 +41,10 @@ func NewFromPath(path string) (*Store, error) {
 func (s *Store) GetLatestSnapshot(ctx context.Context) (*model.ConfigSnapshot, error) {
 	running, err := s.ds.GetRunning(ctx)
 	if err != nil {
+		var dsErr *datastore.Error
+		if errors.As(err, &dsErr) && dsErr.Code == datastore.ErrCodeNotFound {
+			return nil, nil
+		}
 		return nil, err
 	}
 	if running == nil {
@@ -58,20 +64,20 @@ func (s *Store) GetLatestSnapshot(ctx context.Context) (*model.ConfigSnapshot, e
 	}, nil
 }
 
-func (s *Store) SaveCommit(ctx context.Context, snap *model.ConfigSnapshot) (string, error) {
+func (s *Store) PrepareCommit(ctx context.Context, snap *model.ConfigSnapshot) (store.PreparedCommit, error) {
 	if snap == nil || snap.Config == nil {
-		return "", fmt.Errorf("snapshot is nil")
+		return nil, fmt.Errorf("snapshot is nil")
 	}
 
 	// Serialize config to JSON for storage
 	configJSON, err := json.Marshal(snap.Config)
 	if err != nil {
-		return "", fmt.Errorf("marshal config: %w", err)
+		return nil, fmt.Errorf("marshal config: %w", err)
 	}
 
 	// Use the legacy commit mechanism
 	// We store JSON in the config text field for the new model
-	sessionID := "engine"
+	sessionID := "engine-" + uuid.NewString()
 	req := &datastore.CommitRequest{
 		SessionID: sessionID,
 		User:      snap.Author,
@@ -84,18 +90,29 @@ func (s *Store) SaveCommit(ctx context.Context, snap *model.ConfigSnapshot) (str
 		User:      snap.Author,
 		Timeout:   30 * time.Minute,
 	}); err != nil {
-		return "", fmt.Errorf("acquire commit lock: %w", err)
+		return nil, fmt.Errorf("acquire commit lock: %w", err)
 	}
-	defer func() {
-		_ = s.ds.ReleaseLock(context.Background(), datastore.LockTargetCandidate, sessionID)
-	}()
 
 	if err := s.ds.SaveCandidate(ctx, sessionID, string(configJSON)); err != nil {
-		return "", fmt.Errorf("save candidate: %w", err)
+		_ = s.ds.ReleaseLock(context.Background(), datastore.LockTargetCandidate, sessionID)
+		return nil, fmt.Errorf("save candidate: %w", err)
 	}
 
-	commitID, err := s.ds.Commit(ctx, req)
+	return &preparedCommit{
+		ds:        s.ds,
+		sessionID: sessionID,
+		req:       req,
+	}, nil
+}
+
+func (s *Store) SaveCommit(ctx context.Context, snap *model.ConfigSnapshot) (string, error) {
+	prepared, err := s.PrepareCommit(ctx, snap)
 	if err != nil {
+		return "", err
+	}
+	commitID, err := prepared.Commit(ctx)
+	if err != nil {
+		_ = prepared.Abort(context.Background())
 		return "", err
 	}
 	return commitID, nil
@@ -200,3 +217,22 @@ func (s *Store) Legacy() datastore.Datastore {
 
 // TimeNow is used for testing. In production it returns time.Now().
 var TimeNow = time.Now
+
+type preparedCommit struct {
+	ds        datastore.Datastore
+	sessionID string
+	req       *datastore.CommitRequest
+}
+
+func (p *preparedCommit) Commit(ctx context.Context) (string, error) {
+	return p.ds.Commit(ctx, p.req)
+}
+
+func (p *preparedCommit) Abort(ctx context.Context) error {
+	deleteErr := p.ds.DeleteCandidate(ctx, p.sessionID)
+	releaseErr := p.ds.ReleaseLock(ctx, datastore.LockTargetCandidate, p.sessionID)
+	if deleteErr != nil {
+		return deleteErr
+	}
+	return releaseErr
+}

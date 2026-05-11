@@ -121,21 +121,68 @@ func (s *Server) Commit(ctx context.Context, sessionID, user, message string) (s
 	if err != nil {
 		return "", 0, fmt.Errorf("parse candidate config: %w", err)
 	}
+	if err := s.engine.Validate(ctx, newCfg); err != nil {
+		return "", 0, err
+	}
+
+	var prepared store.PreparedCommit
+	if s.store != nil {
+		version := uint64(1)
+		if current := s.engine.RunningSnapshot(); current != nil {
+			version = current.Version + 1
+		}
+		prepared, err = s.store.PrepareCommit(ctx, model.NewSnapshot(newCfg, version, user, message))
+		if err != nil {
+			return "", 0, fmt.Errorf("prepare commit persistence: %w", err)
+		}
+	}
+
+	beforeSnap := s.engine.RunningSnapshot()
 
 	// Apply via engine (diff + validate + apply atomically)
 	if err := s.engine.Apply(ctx, newCfg, user, message); err != nil {
+		if prepared != nil {
+			_ = prepared.Abort(context.Background())
+		}
 		return "", 0, err
 	}
 
 	snap := s.engine.RunningSnapshot()
 	commitID := ""
-	if s.store != nil {
-		commitID, err = s.store.SaveCommit(ctx, snap)
+	if prepared != nil {
+		commitID, err = prepared.Commit(ctx)
 		if err != nil {
+			abortErr := prepared.Abort(context.Background())
+			if rollbackErr := s.rollbackToSnapshot(context.Background(), beforeSnap, user); rollbackErr != nil {
+				return "", 0, fmt.Errorf("persist commit after apply: %w (rollback failed: %v)", err, rollbackErr)
+			}
+			if abortErr != nil {
+				return "", 0, fmt.Errorf("persist commit after apply: %w (abort failed: %v)", err, abortErr)
+			}
 			return "", 0, fmt.Errorf("persist commit after apply: %w", err)
 		}
 	}
+	s.resetSessionCandidate(session)
 	return commitID, snap.Version, nil
+}
+
+// ValidateCandidate parses and validates the session candidate without applying it.
+func (s *Server) ValidateCandidate(ctx context.Context, sessionID string) error {
+	session, err := s.sessions.Get(sessionID)
+	if err != nil {
+		return err
+	}
+	session.mu.RLock()
+	candidateText := session.CandidateText
+	session.mu.RUnlock()
+	if candidateText == "" {
+		return fmt.Errorf("no candidate configuration to validate")
+	}
+	cfg, err := parseConfigText(candidateText)
+	if err != nil {
+		return fmt.Errorf("parse candidate config: %w", err)
+	}
+	return s.engine.Validate(ctx, cfg)
 }
 
 // Discard clears the candidate configuration for a session.
@@ -144,9 +191,7 @@ func (s *Server) Discard(ctx context.Context, sessionID string) error {
 	if err != nil {
 		return err
 	}
-	session.mu.Lock()
-	session.CandidateText, _ = s.runningText()
-	session.mu.Unlock()
+	s.resetSessionCandidate(session)
 	return nil
 }
 
@@ -318,6 +363,21 @@ func (s *Server) runningText() (string, uint64) {
 	return pkgconfig.ToSetCommands(snap.Config.ToLegacyConfig()), snap.Version
 }
 
+func (s *Server) resetSessionCandidate(session *Session) {
+	text, _ := s.runningText()
+	session.mu.Lock()
+	session.CandidateText = text
+	session.mu.Unlock()
+}
+
+func (s *Server) rollbackToSnapshot(ctx context.Context, snap *model.ConfigSnapshot, user string) error {
+	cfg := model.NewRouterConfig()
+	if snap != nil && snap.Config != nil {
+		cfg = snap.Config
+	}
+	return s.engine.Apply(ctx, cfg, user, "rollback failed commit persistence")
+}
+
 func applyCandidateCommand(candidate, commandText string) (string, error) {
 	lines := normalizeConfigLines(candidate)
 	commands := strings.Split(commandText, "\n")
@@ -339,6 +399,12 @@ func applyCandidateCommand(candidate, commandText string) (string, error) {
 				return "", fmt.Errorf("'set' requires arguments")
 			}
 			line := "set " + cli.NormalizeConfigPath(parts[1:])
+			if prefixes := replacementPrefixes(parts[1:]); len(prefixes) > 0 {
+				lines = removeMatchingPrefixes(lines, prefixes)
+			}
+			if containsLine(lines, line) {
+				continue
+			}
 			lines = append(lines, line)
 		case "delete":
 			prefix, err := cli.ParseDeleteCommand(parts[1:], nil)
@@ -357,6 +423,116 @@ func applyCandidateCommand(candidate, commandText string) (string, error) {
 		}
 	}
 	return strings.Join(lines, "\n"), nil
+}
+
+func removeMatchingPrefixes(lines []string, prefixes []string) []string {
+	filtered := lines[:0]
+	for _, line := range lines {
+		matched := false
+		for _, prefix := range prefixes {
+			if cli.MatchesPrefix(line, prefix) {
+				matched = true
+				break
+			}
+		}
+		if !matched {
+			filtered = append(filtered, line)
+		}
+	}
+	return filtered
+}
+
+func containsLine(lines []string, target string) bool {
+	for _, line := range lines {
+		if line == target {
+			return true
+		}
+	}
+	return false
+}
+
+func replacementPrefixes(path []string) []string {
+	prefix := func(n int) []string {
+		return []string{"set " + cli.NormalizeConfigPath(path[:n])}
+	}
+	if len(path) >= 3 && path[0] == "system" && path[1] == "host-name" {
+		return prefix(2)
+	}
+	if len(path) >= 4 && path[0] == "interfaces" && path[2] == "description" {
+		return prefix(3)
+	}
+	if len(path) >= 3 && path[0] == "routing-options" {
+		switch path[1] {
+		case "router-id", "autonomous-system":
+			return prefix(2)
+		case "static":
+			if len(path) >= 5 && path[2] == "route" {
+				return prefix(4)
+			}
+		}
+	}
+	if len(path) >= 4 && path[0] == "protocols" {
+		switch path[1] {
+		case "ospf":
+			if path[2] == "router-id" {
+				return prefix(3)
+			}
+			if len(path) >= 7 && path[2] == "area" && path[4] == "interface" {
+				return prefix(6)
+			}
+		case "bgp":
+			if len(path) >= 5 && path[2] == "group" {
+				switch path[4] {
+				case "type", "import", "export":
+					return prefix(5)
+				case "neighbor":
+					if len(path) >= 8 {
+						switch path[6] {
+						case "peer-as", "description", "local-address":
+							return prefix(7)
+						}
+					}
+				}
+			}
+		}
+	}
+	if len(path) >= 7 && path[0] == "policy-options" && path[1] == "policy-statement" && path[3] == "term" {
+		if path[5] == "from" {
+			if len(path) >= 8 {
+				switch path[6] {
+				case "protocol", "neighbor", "as-path":
+					return prefix(7)
+				}
+			}
+		}
+		if path[5] == "then" {
+			switch path[6] {
+			case "local-preference", "community":
+				return prefix(7)
+			case "accept", "reject":
+				base := "set " + cli.NormalizeConfigPath(path[:6])
+				return []string{base + " accept", base + " reject"}
+			}
+		}
+	}
+	if len(path) >= 4 && path[0] == "security" {
+		if path[1] == "netconf" && len(path) >= 5 && path[2] == "ssh" && path[3] == "port" {
+			return prefix(4)
+		}
+		if path[1] == "rate-limit" && len(path) >= 4 {
+			switch path[2] {
+			case "per-ip", "per-user":
+				return prefix(3)
+			}
+		}
+		if len(path) >= 6 && path[1] == "users" && path[2] == "user" {
+			switch path[4] {
+			case "password", "role", "ssh-key":
+				return prefix(5)
+			}
+		}
+	}
+	return nil
 }
 
 func normalizeConfigLines(text string) []string {

@@ -49,6 +49,33 @@ func (e *Engine) RunningSnapshot() *model.ConfigSnapshot {
 	return e.running
 }
 
+// Validate checks whether a candidate configuration can be applied without
+// mutating engine or southbound state.
+func (e *Engine) Validate(ctx context.Context, candidate *model.RouterConfig) error {
+	if candidate == nil {
+		return fmt.Errorf("configuration is nil")
+	}
+	if err := candidate.Validate(); err != nil {
+		return fmt.Errorf("config validation failed: %w", err)
+	}
+
+	e.mu.RLock()
+	var oldCfg *model.RouterConfig
+	if e.running != nil {
+		oldCfg = e.running.Config
+	}
+	plugins := append([]Plugin(nil), e.plugins...)
+	e.mu.RUnlock()
+
+	diff := ComputeDiff(oldCfg, candidate)
+	for _, p := range plugins {
+		if err := p.ValidateChanges(ctx, diff); err != nil {
+			return fmt.Errorf("plugin %s validation failed: %w", p.Name(), err)
+		}
+	}
+	return nil
+}
+
 // Apply validates and atomically applies a new configuration.
 // It computes the diff from the current running config, validates through all
 // plugins, and applies changes transactionally (rollback on failure).
