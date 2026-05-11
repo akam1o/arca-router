@@ -103,6 +103,16 @@ func (s *Session) resumeConfigurationLock(ctx context.Context) error {
 	return nil
 }
 
+func (s *Session) abortConfigurationSetup(err error) error {
+	if releaseErr := s.ds.ReleaseLock(context.Background(), datastore.LockTargetCandidate, s.id); releaseErr != nil {
+		s.leaveConfigurationMode()
+		s.lockAcquired = true
+		return fmt.Errorf("%w; additionally failed to release configuration lock: %v", err, releaseErr)
+	}
+	s.leaveConfigurationMode()
+	return err
+}
+
 type configurationRefreshError struct {
 	refreshErr error
 	releaseErr error
@@ -190,16 +200,12 @@ func (s *Session) EnterConfigurationMode(ctx context.Context) error {
 		var dsErr *datastore.Error
 		if err != nil && (!errors.As(err, &dsErr) || dsErr.Code != datastore.ErrCodeNotFound) {
 			// This is not a "not found" error - it's a real failure
-			_ = s.ds.ReleaseLock(context.Background(), datastore.LockTargetCandidate, s.id)
-			s.leaveConfigurationMode()
-			return fmt.Errorf("failed to get candidate: %w", err)
+			return s.abortConfigurationSetup(fmt.Errorf("failed to get candidate: %w", err))
 		}
 
 		// Candidate not found - initialize from running
 		if err := s.syncCandidateFromRunning(ctx); err != nil {
-			_ = s.ds.ReleaseLock(context.Background(), datastore.LockTargetCandidate, s.id)
-			s.leaveConfigurationMode()
-			return fmt.Errorf("failed to initialize candidate: %w", err)
+			return s.abortConfigurationSetup(fmt.Errorf("failed to initialize candidate: %w", err))
 		}
 	}
 

@@ -2,6 +2,7 @@ package cli
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"time"
 
@@ -15,6 +16,7 @@ type mockDatastore struct {
 	acquireLockCount  int
 	acquireLockErr    error
 	releaseLockErr    error
+	getCandidateErr   error
 	saveCandidateText string
 	saveCandidateErr  error
 	history           []*datastore.CommitHistoryEntry
@@ -29,6 +31,9 @@ func (m *mockDatastore) GetRunning(ctx context.Context) (*datastore.RunningConfi
 }
 
 func (m *mockDatastore) GetCandidate(ctx context.Context, sessionID string) (*datastore.CandidateConfig, error) {
+	if m.getCandidateErr != nil {
+		return nil, m.getCandidateErr
+	}
 	return &datastore.CandidateConfig{
 		SessionID:  sessionID,
 		ConfigText: "set system host-name test-router",
@@ -219,6 +224,63 @@ func TestEnterExitConfigurationMode(t *testing.T) {
 	err = session.ExitConfigurationMode(ctx)
 	if err == nil {
 		t.Error("Expected error when exiting operational mode")
+	}
+}
+
+func TestEnterConfigurationModeGetCandidateCleanupFailureLeavesRetryableLock(t *testing.T) {
+	ctx := context.Background()
+	ds := &mockDatastore{
+		getCandidateErr: errors.New("candidate read failed"),
+		releaseLockErr:  errors.New("release failed"),
+	}
+	session := NewSession("testuser", ds)
+
+	err := session.EnterConfigurationMode(ctx)
+	if err == nil {
+		t.Fatal("EnterConfigurationMode() error = nil, want cleanup failure")
+	}
+	if session.Mode() != ModeOperational {
+		t.Fatalf("mode = %v, want operational after setup failure", session.Mode())
+	}
+	if !session.lockAcquired || !ds.lockAcquired {
+		t.Fatal("lock state was not preserved for retry after release failure")
+	}
+
+	ds.releaseLockErr = nil
+	if err := session.Close(ctx); err != nil {
+		t.Fatalf("Close() error = %v", err)
+	}
+	if session.lockAcquired || ds.lockAcquired {
+		t.Fatal("Close() did not release retryable lock")
+	}
+}
+
+func TestEnterConfigurationModeInitializeCleanupFailureLeavesRetryableLock(t *testing.T) {
+	ctx := context.Background()
+	ds := &mockDatastore{
+		getCandidateErr:  datastore.NewError(datastore.ErrCodeNotFound, "candidate not found", nil),
+		saveCandidateErr: errors.New("candidate write failed"),
+		releaseLockErr:   errors.New("release failed"),
+	}
+	session := NewSession("testuser", ds)
+
+	err := session.EnterConfigurationMode(ctx)
+	if err == nil {
+		t.Fatal("EnterConfigurationMode() error = nil, want cleanup failure")
+	}
+	if session.Mode() != ModeOperational {
+		t.Fatalf("mode = %v, want operational after setup failure", session.Mode())
+	}
+	if !session.lockAcquired || !ds.lockAcquired {
+		t.Fatal("lock state was not preserved for retry after release failure")
+	}
+
+	ds.releaseLockErr = nil
+	if err := session.Close(ctx); err != nil {
+		t.Fatalf("Close() error = %v", err)
+	}
+	if session.lockAcquired || ds.lockAcquired {
+		t.Fatal("Close() did not release retryable lock")
 	}
 }
 
