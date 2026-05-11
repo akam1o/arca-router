@@ -220,6 +220,28 @@ func TestShowHistoryHandlesShortCommitIDs(t *testing.T) {
 	}
 }
 
+func TestShowHistoryRejectsInvalidLimit(t *testing.T) {
+	ctx := context.Background()
+
+	for _, arg := range []string{"-1", "0", "1abc"} {
+		client := &fakeInteractiveClient{}
+		sh := &interactiveShell{
+			client:    client,
+			hostname:  "router",
+			mode:      modeOperational,
+			sessionID: "session-1",
+		}
+
+		err := sh.cmdShow(ctx, []string{"history", arg})
+		if err == nil || !strings.Contains(err.Error(), "invalid limit") {
+			t.Fatalf("cmdShow(history %s) error = %v, want invalid limit", arg, err)
+		}
+		if client.listHistoryCalls != 0 {
+			t.Fatalf("ListHistory calls for %q = %d, want 0", arg, client.listHistoryCalls)
+		}
+	}
+}
+
 func TestRollbackRejectsNegativeNumber(t *testing.T) {
 	ctx := context.Background()
 	client := &fakeInteractiveClient{}

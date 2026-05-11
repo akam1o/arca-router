@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
+	"strconv"
 	"strings"
 	"syscall"
 
@@ -19,6 +20,14 @@ type InteractiveShell struct {
 	session  *cli.Session
 	rl       *readline.Instance
 	hostname string
+}
+
+func parseHistoryLimit(raw string) (int, error) {
+	limit, err := strconv.Atoi(raw)
+	if err != nil || limit <= 0 {
+		return 0, fmt.Errorf("invalid limit: %s", raw)
+	}
+	return limit, nil
 }
 
 // NewInteractiveShell creates a new interactive shell
@@ -218,9 +227,10 @@ func (sh *InteractiveShell) cmdShow(ctx context.Context, args []string) error {
 		// show history [N] - show last N commits (default 10)
 		limit := 10
 		if len(args) > 1 {
-			_, err := fmt.Sscanf(args[1], "%d", &limit)
+			var err error
+			limit, err = parseHistoryLimit(args[1])
 			if err != nil {
-				return fmt.Errorf("invalid limit: %s", args[1])
+				return err
 			}
 		}
 		return sh.session.ShowCommitHistory(ctx, limit)
