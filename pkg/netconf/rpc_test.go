@@ -51,6 +51,23 @@ func TestParseRPC(t *testing.T) {
 			wantErr: true,
 			errType: "malformed-message",
 		},
+		{
+			name: "trailing rpc not allowed",
+			xml: `<rpc message-id="101" xmlns="urn:ietf:params:xml:ns:netconf:base:1.0">
+					<get-config><source><running/></source></get-config>
+				</rpc><rpc message-id="102" xmlns="urn:ietf:params:xml:ns:netconf:base:1.0"><close-session/></rpc>`,
+			wantErr: true,
+			errType: "malformed-message",
+		},
+		{
+			name: "multiple operations not allowed",
+			xml: `<rpc message-id="101" xmlns="urn:ietf:params:xml:ns:netconf:base:1.0">
+					<get-config><source><running/></source></get-config>
+					<kill-session><session-id>1</session-id></kill-session>
+				</rpc>`,
+			wantErr: true,
+			errType: "malformed-message",
+		},
 	}
 
 	for _, tt := range tests {
@@ -80,6 +97,27 @@ func TestParseRPC(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestParseRPCContentIsOperationInnerXML(t *testing.T) {
+	xmlData := `<rpc message-id="101" xmlns="urn:ietf:params:xml:ns:netconf:base:1.0">
+		<get-config>
+			<source><running/></source>
+		</get-config>
+	</rpc>`
+
+	rpc, err := ParseRPC([]byte(xmlData))
+	if err != nil {
+		t.Fatalf("ParseRPC() error = %v", err)
+	}
+
+	var req GetConfigRequest
+	if err := rpc.UnmarshalOperation(&req); err != nil {
+		t.Fatalf("UnmarshalOperation() error = %v", err)
+	}
+	if req.Source.Running == nil {
+		t.Fatalf("UnmarshalOperation() source = %#v, want running", req.Source)
 	}
 }
 
