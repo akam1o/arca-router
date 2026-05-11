@@ -77,12 +77,28 @@ func TestParseRPC(t *testing.T) {
 			errType: "unknown-attribute",
 		},
 		{
+			name: "rpc root attribute rejected",
+			xml: `<rpc message-id="101" foo="bar" xmlns="urn:ietf:params:xml:ns:netconf:base:1.0">
+					<get-config><source><running/></source></get-config>
+				</rpc>`,
+			wantErr: true,
+			errType: "unknown-attribute",
+		},
+		{
 			name: "operation empty namespace rejected",
 			xml: `<rpc message-id="101" xmlns="urn:ietf:params:xml:ns:netconf:base:1.0">
 					<get-config xmlns=""><source><running/></source></get-config>
 				</rpc>`,
 			wantErr: true,
 			errType: "unknown-namespace",
+		},
+		{
+			name: "operation text rejected",
+			xml: `<rpc message-id="101" xmlns="urn:ietf:params:xml:ns:netconf:base:1.0">
+					<close-session>junk</close-session>
+				</rpc>`,
+			wantErr: true,
+			errType: "malformed-message",
 		},
 		{
 			name: "unknown operation child rejected",
@@ -107,6 +123,45 @@ func TestParseRPC(t *testing.T) {
 				</rpc>`,
 			wantErr: true,
 			errType: "unknown-namespace",
+		},
+		{
+			name: "missing required operation child rejected",
+			xml: `<rpc message-id="101" xmlns="urn:ietf:params:xml:ns:netconf:base:1.0">
+					<get-config/>
+				</rpc>`,
+			wantErr: true,
+			errType: "missing-element",
+		},
+		{
+			name: "duplicate operation child rejected",
+			xml: `<rpc message-id="101" xmlns="urn:ietf:params:xml:ns:netconf:base:1.0">
+					<get-config><source><running/></source><source><candidate/></source></get-config>
+				</rpc>`,
+			wantErr: true,
+			errType: "malformed-message",
+		},
+		{
+			name: "multiple datastore choices rejected",
+			xml: `<rpc message-id="101" xmlns="urn:ietf:params:xml:ns:netconf:base:1.0">
+					<get-config><source><running/><candidate/></source></get-config>
+				</rpc>`,
+			wantErr: true,
+			errType: "malformed-message",
+		},
+		{
+			name: "datastore choice text rejected",
+			xml: `<rpc message-id="101" xmlns="urn:ietf:params:xml:ns:netconf:base:1.0">
+					<get-config><source>running<running/></source></get-config>
+				</rpc>`,
+			wantErr: true,
+			errType: "malformed-message",
+		},
+		{
+			name: "valid kill-session text leaf",
+			xml: `<rpc message-id="101" xmlns="urn:ietf:params:xml:ns:netconf:base:1.0">
+					<kill-session><session-id>1</session-id></kill-session>
+				</rpc>`,
+			wantErr: false,
 		},
 	}
 
@@ -306,11 +361,64 @@ func TestSourceGetDatastore(t *testing.T) {
 			expected: "",
 			wantErr:  true,
 		},
+		{
+			name:     "multiple datastores",
+			source:   Source{Running: &struct{}{}, Candidate: &struct{}{}},
+			expected: "",
+			wantErr:  true,
+		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			ds, err := tt.source.GetDatastore()
+
+			if tt.wantErr {
+				if err == nil {
+					t.Errorf("Expected error, got nil")
+				}
+			} else {
+				if err != nil {
+					t.Errorf("Expected no error, got %v", err)
+				}
+				if ds != tt.expected {
+					t.Errorf("Expected datastore %s, got %s", tt.expected, ds)
+				}
+			}
+		})
+	}
+}
+
+func TestTargetGetDatastore(t *testing.T) {
+	tests := []struct {
+		name     string
+		target   Target
+		expected string
+		wantErr  bool
+	}{
+		{
+			name:     "candidate",
+			target:   Target{Candidate: &struct{}{}},
+			expected: DatastoreCandidate,
+			wantErr:  false,
+		},
+		{
+			name:     "none",
+			target:   Target{},
+			expected: "",
+			wantErr:  true,
+		},
+		{
+			name:     "multiple datastores",
+			target:   Target{Running: &struct{}{}, Candidate: &struct{}{}},
+			expected: "",
+			wantErr:  true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ds, err := tt.target.GetDatastore()
 
 			if tt.wantErr {
 				if err == nil {

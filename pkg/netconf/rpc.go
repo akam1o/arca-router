@@ -61,6 +61,9 @@ func ParseRPC(data []byte) (*RPC, error) {
 	if envelope.XMLName.Space != netconfNamespace {
 		return nil, ErrInvalidNamespace(envelope.XMLName.Space)
 	}
+	if err := validateRPCRootAttributes(envelope.Attrs); err != nil {
+		return nil, err
+	}
 
 	// Validate message-id presence
 	if envelope.MessageID == "" {
@@ -180,6 +183,23 @@ func validateRPCOperationAttributes(operation rpcOperation) error {
 	return nil
 }
 
+func validateRPCRootAttributes(attrs []xml.Attr) error {
+	for _, attr := range attrs {
+		if isNamespaceDeclarationAttribute(attr) {
+			continue
+		}
+		if attr.Name.Space == "" && attr.Name.Local == "message-id" {
+			continue
+		}
+		rpcErr := ErrUnknownAttribute("/rpc", attr.Name.Local)
+		if attr.Name.Space != "" {
+			rpcErr = rpcErr.WithBadNamespace(attr.Name.Space)
+		}
+		return rpcErr
+	}
+	return nil
+}
+
 func (r *RPC) validateOperationPayload() error {
 	if _, ok := rpcOperationElementPaths[r.Operation.Local]; !ok {
 		return nil
@@ -190,6 +210,7 @@ func (r *RPC) validateOperationPayload() error {
 	decoder.Entity = nil
 
 	stack := []string{}
+	counts := map[string]int{}
 	openContentDepth := 0
 	for {
 		token, err := decoder.Token()
@@ -197,7 +218,7 @@ func (r *RPC) validateOperationPayload() error {
 			if len(stack) != 0 || openContentDepth != 0 {
 				return ErrMalformedMessage("unexpected end of operation payload")
 			}
-			return nil
+			return r.validateOperationCardinality(counts)
 		}
 		if err != nil {
 			return ErrMalformedMessage(fmt.Sprintf("operation parse error: %v", err))
@@ -213,6 +234,7 @@ func (r *RPC) validateOperationPayload() error {
 			if err := r.validateOperationElement(t, path); err != nil {
 				return err
 			}
+			counts[rpcPathKey(path)]++
 			stack = append(stack, t.Name.Local)
 			if isOpenRPCContentPath(path) {
 				openContentDepth = 1
@@ -229,6 +251,15 @@ func (r *RPC) validateOperationPayload() error {
 				return ErrMalformedMessage(fmt.Sprintf("unexpected closing element: %s", t.Name.Local))
 			}
 			stack = stack[:len(stack)-1]
+		case xml.CharData:
+			if openContentDepth > 0 || len(bytes.TrimSpace(t)) == 0 {
+				continue
+			}
+			if isRPCTextContentPath(stack) {
+				continue
+			}
+			return ErrMalformedMessage(fmt.Sprintf("unexpected text in %s", rpcElementRPCPath(stack))).
+				WithPath(rpcElementRPCPath(stack))
 		}
 	}
 }
@@ -259,6 +290,36 @@ func (r *RPC) validateOperationElement(start xml.StartElement, path []string) er
 			rpcErr = rpcErr.WithBadNamespace(attr.Name.Space)
 		}
 		return rpcErr
+	}
+	return nil
+}
+
+func (r *RPC) validateOperationCardinality(counts map[string]int) error {
+	for _, rule := range rpcOperationCardinalityRules[r.Operation.Local] {
+		count := counts[rule.path]
+		path := rpcPathFromKey(rule.path)
+		if count < rule.min {
+			return missingRPCElement(path, lastRPCPathPart(rule.path))
+		}
+		if rule.max >= 0 && count > rule.max {
+			return ErrMalformedMessage(fmt.Sprintf("%s must appear at most once", rule.path)).
+				WithPath(rpcElementRPCPath(path))
+		}
+	}
+
+	for _, choicePath := range rpcDatastoreChoicePaths[r.Operation.Local] {
+		count := 0
+		for _, datastore := range rpcDatastoreElements {
+			count += counts[choicePath+"/"+datastore]
+		}
+		path := rpcPathFromKey(choicePath)
+		switch {
+		case count == 0:
+			return missingRPCElement(path, "datastore")
+		case count > 1:
+			return ErrMalformedMessage(fmt.Sprintf("%s must contain exactly one datastore", choicePath)).
+				WithPath(rpcElementRPCPath(path))
+		}
 	}
 	return nil
 }
@@ -320,6 +381,12 @@ func namespaceDeclarationAttrName(attr xml.Attr) (string, bool) {
 		return "xmlns:" + attr.Name.Local, true
 	}
 	return "", false
+}
+
+type rpcCardinalityRule struct {
+	path string
+	min  int
+	max  int
 }
 
 var rpcOperationElementPaths = map[string]map[string]struct{}{
@@ -400,6 +467,58 @@ var rpcOperationElementPaths = map[string]map[string]struct{}{
 	},
 }
 
+var rpcOperationCardinalityRules = map[string][]rpcCardinalityRule{
+	"get-config": {
+		{path: "get-config/source", min: 1, max: 1},
+		{path: "get-config/filter", min: 0, max: 1},
+	},
+	"edit-config": {
+		{path: "edit-config/target", min: 1, max: 1},
+		{path: "edit-config/default-operation", min: 0, max: 1},
+		{path: "edit-config/test-option", min: 0, max: 1},
+		{path: "edit-config/error-option", min: 0, max: 1},
+		{path: "edit-config/config", min: 1, max: 1},
+	},
+	"copy-config": {
+		{path: "copy-config/target", min: 1, max: 1},
+		{path: "copy-config/source", min: 1, max: 1},
+	},
+	"delete-config": {
+		{path: "delete-config/target", min: 1, max: 1},
+	},
+	"lock": {
+		{path: "lock/target", min: 1, max: 1},
+	},
+	"unlock": {
+		{path: "unlock/target", min: 1, max: 1},
+	},
+	"validate": {
+		{path: "validate/source", min: 1, max: 1},
+	},
+	"get": {
+		{path: "get/filter", min: 0, max: 1},
+	},
+	"kill-session": {
+		{path: "kill-session/session-id", min: 1, max: 1},
+	},
+}
+
+var rpcDatastoreChoicePaths = map[string][]string{
+	"get-config":    {"get-config/source"},
+	"edit-config":   {"edit-config/target"},
+	"copy-config":   {"copy-config/target", "copy-config/source"},
+	"delete-config": {"delete-config/target"},
+	"lock":          {"lock/target"},
+	"unlock":        {"unlock/target"},
+	"validate":      {"validate/source"},
+}
+
+var rpcDatastoreElements = []string{
+	"running",
+	"candidate",
+	"startup",
+}
+
 var rpcFilterAttrs = map[string]bool{
 	"type":   true,
 	"select": true,
@@ -423,6 +542,18 @@ func allowsAnyElementNamespace(path []string) bool {
 	return rpcPathKey(path) == "edit-config/config"
 }
 
+func isRPCTextContentPath(path []string) bool {
+	_, ok := rpcTextContentPaths[rpcPathKey(path)]
+	return ok
+}
+
+var rpcTextContentPaths = map[string]struct{}{
+	"edit-config/default-operation": {},
+	"edit-config/test-option":       {},
+	"edit-config/error-option":      {},
+	"kill-session/session-id":       {},
+}
+
 func rpcPathKey(path []string) string {
 	return strings.Join(path, "/")
 }
@@ -432,6 +563,27 @@ func rpcElementRPCPath(path []string) string {
 		return "/rpc"
 	}
 	return "/rpc/" + strings.Join(path, "/")
+}
+
+func rpcPathFromKey(path string) []string {
+	if path == "" {
+		return nil
+	}
+	return strings.Split(path, "/")
+}
+
+func lastRPCPathPart(path string) string {
+	parts := rpcPathFromKey(path)
+	if len(parts) == 0 {
+		return ""
+	}
+	return parts[len(parts)-1]
+}
+
+func missingRPCElement(path []string, element string) *RPCError {
+	return NewRPCError(ErrorTypeProtocol, ErrorTagMissingElement, fmt.Sprintf("missing required element: %s", element)).
+		WithPath(rpcElementRPCPath(path)).
+		WithBadElement(element)
 }
 
 // ValidateOperationNamespace checks if operation is in NETCONF namespace
@@ -455,16 +607,7 @@ type Source struct {
 
 // GetDatastore returns the datastore name from Source
 func (s *Source) GetDatastore() (string, error) {
-	if s.Running != nil {
-		return DatastoreRunning, nil
-	}
-	if s.Candidate != nil {
-		return DatastoreCandidate, nil
-	}
-	if s.Startup != nil {
-		return DatastoreStartup, nil
-	}
-	return "", ErrMissingElement("source", "datastore")
+	return selectDatastore("source", s.Running != nil, s.Candidate != nil, s.Startup != nil)
 }
 
 // Target represents <target> element in edit-config/lock/unlock
@@ -476,16 +619,32 @@ type Target struct {
 
 // GetDatastore returns the datastore name from Target
 func (t *Target) GetDatastore() (string, error) {
-	if t.Running != nil {
-		return DatastoreRunning, nil
+	return selectDatastore("target", t.Running != nil, t.Candidate != nil, t.Startup != nil)
+}
+
+func selectDatastore(container string, running, candidate, startup bool) (string, error) {
+	selected := ""
+	count := 0
+	if running {
+		selected = DatastoreRunning
+		count++
 	}
-	if t.Candidate != nil {
-		return DatastoreCandidate, nil
+	if candidate {
+		selected = DatastoreCandidate
+		count++
 	}
-	if t.Startup != nil {
-		return DatastoreStartup, nil
+	if startup {
+		selected = DatastoreStartup
+		count++
 	}
-	return "", ErrMissingElement("target", "datastore")
+	if count == 0 {
+		return "", ErrMissingElement(container, "datastore")
+	}
+	if count > 1 {
+		return "", ErrMalformedMessage(fmt.Sprintf("%s must contain exactly one datastore", container)).
+			WithPath("/rpc/" + container)
+	}
+	return selected, nil
 }
 
 // Filter represents optional <filter> element in get-config/get
