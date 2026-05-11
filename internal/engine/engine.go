@@ -39,14 +39,17 @@ func (e *Engine) Running() *model.RouterConfig {
 	if e.running == nil {
 		return model.NewRouterConfig()
 	}
-	return e.running.Config
+	if cfg := e.running.Config.Clone(); cfg != nil {
+		return cfg
+	}
+	return model.NewRouterConfig()
 }
 
 // RunningSnapshot returns the current running snapshot (version, hash, etc.).
 func (e *Engine) RunningSnapshot() *model.ConfigSnapshot {
 	e.mu.RLock()
 	defer e.mu.RUnlock()
-	return e.running
+	return e.running.Clone()
 }
 
 // Validate checks whether a candidate configuration can be applied without
@@ -82,6 +85,11 @@ func (e *Engine) Validate(ctx context.Context, candidate *model.RouterConfig) er
 func (e *Engine) Apply(ctx context.Context, candidate *model.RouterConfig, author, message string) error {
 	e.mu.Lock()
 	defer e.mu.Unlock()
+
+	if candidate == nil {
+		return fmt.Errorf("configuration is nil")
+	}
+	candidate = candidate.Clone()
 
 	// Validate the candidate config
 	if err := candidate.Validate(); err != nil {
