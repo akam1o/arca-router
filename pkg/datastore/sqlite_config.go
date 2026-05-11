@@ -4,6 +4,8 @@ import (
 	"context"
 	"database/sql"
 	"time"
+
+	pkgconfig "github.com/akam1o/arca-router/pkg/config"
 )
 
 // GetRunning retrieves the current running configuration.
@@ -61,6 +63,12 @@ func (ds *sqliteDatastore) GetCandidate(ctx context.Context, sessionID string) (
 
 // SaveCandidate saves or updates the candidate configuration for a session.
 func (ds *sqliteDatastore) SaveCandidate(ctx context.Context, sessionID string, configText string) error {
+	protectedText, err := pkgconfig.ProtectSecretsInSetCommands(configText)
+	if err != nil {
+		return NewError(ErrCodeValidation, "failed to protect sensitive candidate config values", err)
+	}
+	configText = protectedText
+
 	return ds.withTx(ctx, false, func(tx *sql.Tx) error {
 		now := time.Now()
 

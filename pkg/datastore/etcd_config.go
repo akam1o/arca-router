@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"time"
+
+	pkgconfig "github.com/akam1o/arca-router/pkg/config"
 )
 
 // runningMetadata stores metadata about the current running configuration.
@@ -90,6 +92,12 @@ func (ds *etcdDatastore) GetCandidate(ctx context.Context, sessionID string) (*C
 
 // SaveCandidate saves or updates a session's candidate configuration.
 func (ds *etcdDatastore) SaveCandidate(ctx context.Context, sessionID string, configText string) error {
+	protectedText, err := pkgconfig.ProtectSecretsInSetCommands(configText)
+	if err != nil {
+		return NewError(ErrCodeValidation, "failed to protect sensitive candidate config values", err)
+	}
+	configText = protectedText
+
 	ctx, cancel := ds.withTimeout(ctx)
 	defer cancel()
 

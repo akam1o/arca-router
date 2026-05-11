@@ -4,11 +4,12 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+	"unicode"
 )
 
 // EscapeValue escapes a scalar value for safe use in set-command text.
 func EscapeValue(s string) string {
-	if s == "" || strings.ContainsAny(s, " \t\n\"'\\") {
+	if s == "" || needsQuotedValue(s) {
 		s = strings.ReplaceAll(s, "\\", "\\\\")
 		s = strings.ReplaceAll(s, "\n", "\\n")
 		s = strings.ReplaceAll(s, "\t", "\\t")
@@ -16,6 +17,15 @@ func EscapeValue(s string) string {
 		return `"` + s + `"`
 	}
 	return s
+}
+
+func needsQuotedValue(s string) bool {
+	for _, ch := range s {
+		if unicode.IsSpace(ch) || ch == '"' || ch == '\'' || ch == '\\' || !isWordChar(ch) {
+			return true
+		}
+	}
+	return false
 }
 
 // ToSetCommands serializes Config into deterministic Junos-style set commands.
@@ -291,7 +301,12 @@ func writeSecurity(b *strings.Builder, sec *SecurityConfig) {
 			continue
 		}
 		if user.Password != "" {
-			writeLine(b, "set security users user %s password %s", username, EscapeValue(user.Password))
+			password, err := NormalizePasswordForStorage(user.Password)
+			if err != nil {
+				continue
+			}
+			user.Password = password
+			writeLine(b, "set security users user %s password %s", username, EscapeValue(password))
 		}
 		if user.Role != "" {
 			writeLine(b, "set security users user %s role %s", username, user.Role)
