@@ -21,6 +21,7 @@ import (
 	nbgrpc "github.com/akam1o/arca-router/internal/northbound/grpc"
 	sbfrr "github.com/akam1o/arca-router/internal/southbound/frr"
 	sbvpp "github.com/akam1o/arca-router/internal/southbound/vpp"
+	internalstore "github.com/akam1o/arca-router/internal/store"
 	storesqlite "github.com/akam1o/arca-router/internal/store/sqlite"
 	"github.com/akam1o/arca-router/pkg/config"
 	"github.com/akam1o/arca-router/pkg/device"
@@ -178,9 +179,16 @@ func run(ctx context.Context, f *daemonFlags, log *logger.Logger) error {
 		}(p)
 	}
 
-	// --- Step 6: Load initial configuration ---
+	// --- Step 6: Open config store ---
+	configStore, err := storesqlite.NewFromPath(f.datastorePath)
+	if err != nil {
+		return fmt.Errorf("open config store: %w", err)
+	}
+	defer configStore.Close()
+
+	// --- Step 7: Load initial configuration ---
 	log.Info("Loading initial configuration")
-	initialCfg, err := loadInitialConfig(f, log)
+	initialCfg, initialSource, err := loadInitialConfig(ctx, f, configStore, log)
 	if err != nil {
 		return fmt.Errorf("load initial config: %w", err)
 	}
@@ -189,14 +197,7 @@ func run(ctx context.Context, f *daemonFlags, log *logger.Logger) error {
 	if err := eng.Apply(ctx, initialCfg, "system", "initial startup"); err != nil {
 		return fmt.Errorf("apply initial config: %w", err)
 	}
-	log.Info("Initial configuration applied")
-
-	// --- Step 7: Open config store ---
-	store, err := storesqlite.NewFromPath(f.datastorePath)
-	if err != nil {
-		return fmt.Errorf("open config store: %w", err)
-	}
-	defer store.Close()
+	log.Info("Initial configuration applied", slog.String("source", initialSource))
 
 	// --- Step 8: Start NETCONF server ---
 	if f.hostKeyPath != "" {
@@ -235,7 +236,7 @@ func run(ctx context.Context, f *daemonFlags, log *logger.Logger) error {
 	}
 	defer lis.Close()
 
-	grpcServer := nbgrpc.NewServer(eng, store, slog.Default())
+	grpcServer := nbgrpc.NewServer(eng, configStore, slog.Default())
 	grpcErr := make(chan error, 1)
 	go func() {
 		grpcErr <- grpcServer.Serve(lis)
@@ -255,26 +256,37 @@ func run(ctx context.Context, f *daemonFlags, log *logger.Logger) error {
 }
 
 // loadInitialConfig loads the startup config from file and converts to new model.
-func loadInitialConfig(f *daemonFlags, log *logger.Logger) (*model.RouterConfig, error) {
+func loadInitialConfig(ctx context.Context, f *daemonFlags, st internalstore.ConfigStore, log *logger.Logger) (*model.RouterConfig, string, error) {
+	if st != nil {
+		snap, err := st.GetLatestSnapshot(ctx)
+		if err != nil {
+			return nil, "", fmt.Errorf("load config from datastore: %w", err)
+		}
+		if snap != nil && snap.Config != nil {
+			log.Info("Loaded initial configuration from datastore")
+			return snap.Config, "datastore", nil
+		}
+	}
+
 	file, err := os.Open(f.configPath)
 	if err != nil {
 		log.Warn("Config file not found, using empty config", slog.String("path", f.configPath))
-		return model.NewRouterConfig(), nil
+		return model.NewRouterConfig(), "empty", nil
 	}
 	defer file.Close()
 
 	legacyCfg, err := parseLegacyConfig(file)
 	if err != nil {
-		return nil, fmt.Errorf("parse config %s: %w", f.configPath, err)
+		return nil, "", fmt.Errorf("parse config %s: %w", f.configPath, err)
 	}
 
 	// Validate
 	if err := legacyCfg.Validate(); err != nil {
-		return nil, fmt.Errorf("validate config: %w", err)
+		return nil, "", fmt.Errorf("validate config: %w", err)
 	}
 
 	// Convert to new model
-	return model.FromLegacyConfig(legacyCfg), nil
+	return model.FromLegacyConfig(legacyCfg), "file", nil
 }
 
 func parseLegacyConfig(r io.Reader) (*config.Config, error) {

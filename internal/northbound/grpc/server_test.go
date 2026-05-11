@@ -2,6 +2,7 @@ package grpc
 
 import (
 	"context"
+	"errors"
 	"io"
 	"log/slog"
 	"net"
@@ -24,8 +25,10 @@ func listenUnix(path string) (net.Listener, error) {
 }
 
 type fakeStore struct {
-	commitID string
-	saved    *model.ConfigSnapshot
+	commitID  string
+	commitErr error
+	saved     *model.ConfigSnapshot
+	aborted   bool
 }
 
 func (f *fakeStore) GetLatestSnapshot(ctx context.Context) (*model.ConfigSnapshot, error) {
@@ -33,8 +36,16 @@ func (f *fakeStore) GetLatestSnapshot(ctx context.Context) (*model.ConfigSnapsho
 }
 
 func (f *fakeStore) SaveCommit(ctx context.Context, snap *model.ConfigSnapshot) (string, error) {
+	prepared, err := f.PrepareCommit(ctx, snap)
+	if err != nil {
+		return "", err
+	}
+	return prepared.Commit(ctx)
+}
+
+func (f *fakeStore) PrepareCommit(ctx context.Context, snap *model.ConfigSnapshot) (store.PreparedCommit, error) {
 	f.saved = snap
-	return f.commitID, nil
+	return &fakePreparedCommit{store: f}, nil
 }
 
 func (f *fakeStore) GetCommit(ctx context.Context, commitID string) (*store.CommitRecord, error) {
@@ -50,6 +61,22 @@ func (f *fakeStore) AuditLog(ctx context.Context, event *store.AuditEvent) error
 }
 
 func (f *fakeStore) Close() error {
+	return nil
+}
+
+type fakePreparedCommit struct {
+	store *fakeStore
+}
+
+func (p *fakePreparedCommit) Commit(ctx context.Context) (string, error) {
+	if p.store.commitErr != nil {
+		return "", p.store.commitErr
+	}
+	return p.store.commitID, nil
+}
+
+func (p *fakePreparedCommit) Abort(ctx context.Context) error {
+	p.store.aborted = true
 	return nil
 }
 
@@ -119,8 +146,11 @@ func TestClientServerConfigFlow(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GetCandidate() error = %v", err)
 	}
-	if !strings.Contains(candidate, "set system host-name router1") || !strings.Contains(candidate, "set system host-name router2") {
-		t.Fatalf("candidate did not preserve running config and edit: %q", candidate)
+	if strings.Contains(candidate, "set system host-name router1") || !strings.Contains(candidate, "set system host-name router2") {
+		t.Fatalf("candidate did not replace scalar hostname: %q", candidate)
+	}
+	if err := client.ValidateCandidate(ctx, sessionID); err != nil {
+		t.Fatalf("ValidateCandidate() error = %v", err)
 	}
 
 	commitID, version, err := client.Commit(ctx, sessionID, "alice", "test")
@@ -129,5 +159,85 @@ func TestClientServerConfigFlow(t *testing.T) {
 	}
 	if commitID != "commit-1" || version != 2 {
 		t.Fatalf("Commit() = (%q, %d), want commit-1 version 2", commitID, version)
+	}
+	diffText, hasChanges, err := client.Diff(ctx, sessionID)
+	if err != nil {
+		t.Fatalf("Diff() error = %v", err)
+	}
+	if hasChanges {
+		t.Fatalf("Diff() has changes after commit: %q", diffText)
+	}
+}
+
+func TestValidateCandidateRejectsInvalidConfig(t *testing.T) {
+	oldParser := ConfigTextParser
+	ConfigTextParser = func(text string) (*model.RouterConfig, error) {
+		cfg, err := pkgconfig.NewParser(strings.NewReader(text)).Parse()
+		if err != nil {
+			return nil, err
+		}
+		return model.FromLegacyConfig(cfg), nil
+	}
+	t.Cleanup(func() { ConfigTextParser = oldParser })
+
+	eng := engine.NewEngine(nil, testLogger())
+	eng.InitializeRunning(&model.RouterConfig{
+		System:     &model.SystemConfig{HostName: "router1"},
+		Interfaces: map[string]*model.InterfaceConfig{},
+	}, 1)
+	srv := NewServer(eng, &fakeStore{commitID: "commit-1"}, testLogger())
+	ctx := context.Background()
+	sessionID, err := srv.CreateSession(ctx, "alice")
+	if err != nil {
+		t.Fatalf("CreateSession() error = %v", err)
+	}
+	if err := srv.AcquireLock(ctx, sessionID, "alice"); err != nil {
+		t.Fatalf("AcquireLock() error = %v", err)
+	}
+	if err := srv.EditCandidate(ctx, sessionID, "set unsupported path value"); err != nil {
+		t.Fatalf("EditCandidate() error = %v", err)
+	}
+	if err := srv.ValidateCandidate(ctx, sessionID); err == nil {
+		t.Fatal("ValidateCandidate() expected error")
+	}
+}
+
+func TestCommitRollsBackEngineWhenPersistenceFails(t *testing.T) {
+	oldParser := ConfigTextParser
+	ConfigTextParser = func(text string) (*model.RouterConfig, error) {
+		cfg, err := pkgconfig.NewParser(strings.NewReader(text)).Parse()
+		if err != nil {
+			return nil, err
+		}
+		return model.FromLegacyConfig(cfg), nil
+	}
+	t.Cleanup(func() { ConfigTextParser = oldParser })
+
+	eng := engine.NewEngine(nil, testLogger())
+	eng.InitializeRunning(&model.RouterConfig{
+		System:     &model.SystemConfig{HostName: "router1"},
+		Interfaces: map[string]*model.InterfaceConfig{},
+	}, 1)
+	st := &fakeStore{commitID: "commit-1", commitErr: errors.New("commit failed")}
+	srv := NewServer(eng, st, testLogger())
+	ctx := context.Background()
+	sessionID, err := srv.CreateSession(ctx, "alice")
+	if err != nil {
+		t.Fatalf("CreateSession() error = %v", err)
+	}
+	if err := srv.AcquireLock(ctx, sessionID, "alice"); err != nil {
+		t.Fatalf("AcquireLock() error = %v", err)
+	}
+	if err := srv.EditCandidate(ctx, sessionID, "set system host-name router2"); err != nil {
+		t.Fatalf("EditCandidate() error = %v", err)
+	}
+	if _, _, err := srv.Commit(ctx, sessionID, "alice", "test"); err == nil {
+		t.Fatal("Commit() expected persistence error")
+	}
+	if !st.aborted {
+		t.Fatal("Commit() did not abort prepared persistence after commit failure")
+	}
+	if got := eng.Running().System.HostName; got != "router1" {
+		t.Fatalf("engine running hostname = %q, want rollback to router1", got)
 	}
 }

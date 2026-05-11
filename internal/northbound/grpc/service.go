@@ -17,6 +17,7 @@ type configServiceServer interface {
 	GetCandidate(context.Context, string) (string, error)
 	EditCandidate(context.Context, string, string) error
 	Commit(context.Context, string, string, string) (string, uint64, error)
+	ValidateCandidate(context.Context, string) error
 	Discard(context.Context, string) error
 	Diff(context.Context, string) (string, bool, error)
 	ListHistory(context.Context, int, int) ([]CommitInfo, error)
@@ -45,6 +46,7 @@ func registerConfigServiceServer(s *googlegrpc.Server, srv configServiceServer) 
 			{MethodName: "GetCandidate", Handler: configGetCandidateHandler},
 			{MethodName: "EditCandidate", Handler: configEditCandidateHandler},
 			{MethodName: "Commit", Handler: configCommitHandler},
+			{MethodName: "ValidateCandidate", Handler: configValidateCandidateHandler},
 			{MethodName: "Discard", Handler: configDiscardHandler},
 			{MethodName: "Diff", Handler: configDiffHandler},
 			{MethodName: "ListHistory", Handler: configListHistoryHandler},
@@ -131,6 +133,13 @@ func configCommitHandler(srv interface{}, ctx context.Context, dec func(interfac
 		func(ctx context.Context, req *commitRequest) (interface{}, error) {
 			commitID, version, err := srv.(configServiceServer).Commit(ctx, req.SessionID, req.User, req.Message)
 			return &commitResponse{CommitID: commitID, Version: version}, err
+		})
+}
+
+func configValidateCandidateHandler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor googlegrpc.UnaryServerInterceptor) (interface{}, error) {
+	return unaryHandler[validateCandidateRequest](srv, ctx, dec, interceptor, "/"+configServiceName+"/ValidateCandidate",
+		func(ctx context.Context, req *validateCandidateRequest) (interface{}, error) {
+			return &validateCandidateResponse{}, srv.(configServiceServer).ValidateCandidate(ctx, req.SessionID)
 		})
 }
 

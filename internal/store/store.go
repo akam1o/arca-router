@@ -16,6 +16,11 @@ type ConfigStore interface {
 	// GetLatestSnapshot returns the most recent committed configuration.
 	GetLatestSnapshot(ctx context.Context) (*model.ConfigSnapshot, error)
 
+	// PrepareCommit reserves persistence for a configuration commit before
+	// southbound changes are applied. The caller must either Commit or Abort
+	// the returned prepared commit.
+	PrepareCommit(ctx context.Context, snap *model.ConfigSnapshot) (PreparedCommit, error)
+
 	// SaveCommit persists a new configuration commit and returns its ID.
 	SaveCommit(ctx context.Context, snap *model.ConfigSnapshot) (string, error)
 
@@ -30,6 +35,13 @@ type ConfigStore interface {
 
 	// Close releases resources.
 	Close() error
+}
+
+// PreparedCommit represents a datastore commit that has been staged but not
+// promoted to running yet.
+type PreparedCommit interface {
+	Commit(ctx context.Context) (string, error)
+	Abort(ctx context.Context) error
 }
 
 // CommitRecord represents a persisted commit entry.

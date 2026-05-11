@@ -34,6 +34,12 @@ type commitResponse struct {
 	Version  uint64 `json:"version"`
 }
 
+type validateCandidateRequest struct {
+	SessionID string `json:"session_id"`
+}
+
+type validateCandidateResponse struct{}
+
 type discardRequest struct {
 	SessionID string `json:"session_id"`
 }

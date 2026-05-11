@@ -635,8 +635,10 @@ func (sh *interactiveShell) cmdCommit(ctx context.Context, args []string) error 
 		return fmt.Errorf("'check' and 'and-quit' cannot be used together")
 	}
 
-	// For 'commit check', we'd need a validate-only RPC. For now, do a full commit.
 	if check {
+		if err := sh.client.ValidateCandidate(ctx, sh.sessionID); err != nil {
+			return fmt.Errorf("configuration check failed: %w", err)
+		}
 		fmt.Println("configuration check succeeds")
 		return nil
 	}

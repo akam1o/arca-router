@@ -101,6 +101,12 @@ func (c *Client) Commit(ctx context.Context, sessionID, user, message string) (c
 	return resp.CommitID, resp.Version, nil
 }
 
+// ValidateCandidate validates a session's candidate configuration without committing it.
+func (c *Client) ValidateCandidate(ctx context.Context, sessionID string) error {
+	var resp validateCandidateResponse
+	return c.invoke(ctx, "/"+configServiceName+"/ValidateCandidate", &validateCandidateRequest{SessionID: sessionID}, &resp)
+}
+
 // Discard discards candidate changes.
 func (c *Client) Discard(ctx context.Context, sessionID string) error {
 	var resp discardResponse
