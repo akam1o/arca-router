@@ -81,3 +81,32 @@ func TestRollbackChangesRemovesAddedInterfaceIndex(t *testing.T) {
 		t.Fatal("RollbackChanges() left added interface in index")
 	}
 }
+
+func TestApplyChangesFailsOnRemovedInterfaceError(t *testing.T) {
+	ctx := context.Background()
+	client := pkgvpp.NewMockClient()
+	plugin := NewVPPPlugin(client, &device.HardwareConfig{
+		Interfaces: []device.PhysicalInterface{
+			{Name: "ge-0/0/0", PCI: "0000:03:00.0", Driver: "avf"},
+		},
+	}, testLogger())
+	if err := plugin.Init(ctx); err != nil {
+		t.Fatalf("Init() error = %v", err)
+	}
+	t.Cleanup(func() { _ = plugin.Close() })
+
+	oldCfg := model.NewRouterConfig()
+	oldCfg.Interfaces["ge-0/0/0"] = &model.InterfaceConfig{Units: map[int]*model.Unit{}}
+	if err := plugin.ApplyChanges(ctx, engine.ComputeDiff(model.NewRouterConfig(), oldCfg)); err != nil {
+		t.Fatalf("initial ApplyChanges() error = %v", err)
+	}
+
+	client.SetInterfaceDownError = errors.New("down failed")
+	diff := engine.ComputeDiff(oldCfg, model.NewRouterConfig())
+	if err := plugin.ApplyChanges(ctx, diff); err == nil {
+		t.Fatal("ApplyChanges() expected removed interface error")
+	}
+	if _, ok := plugin.GetInterfaceIndex("ge-0/0/0"); !ok {
+		t.Fatal("ApplyChanges() removed interface index after failed removal")
+	}
+}

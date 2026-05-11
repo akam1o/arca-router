@@ -137,7 +137,8 @@ func (p *VPPPlugin) ApplyChanges(ctx context.Context, diff *engine.ConfigDiff) e
 	// 3. Remove interfaces (remove addresses, LCP, then disable)
 	for _, name := range diff.InterfacesRemoved {
 		if err := p.removeInterface(ctx, name, &rollbackOps); err != nil {
-			p.log.Warn("Failed to remove interface (non-fatal)", slog.String("interface", name), slog.Any("error", err))
+			p.executeRollback(ctx, rollbackOps)
+			return fmt.Errorf("remove interface %s: %w", name, err)
 		}
 	}
 
@@ -386,7 +387,9 @@ func (p *VPPPlugin) removeInterface(ctx context.Context, name string, rollback *
 	})
 
 	// Remove LCP pair
-	_ = p.client.DeleteLCPInterface(ctx, swIfIndex)
+	if err := p.client.DeleteLCPInterface(ctx, swIfIndex); err != nil {
+		return fmt.Errorf("delete LCP interface: %w", err)
+	}
 
 	delete(p.ifaceIndex, name)
 	return nil
