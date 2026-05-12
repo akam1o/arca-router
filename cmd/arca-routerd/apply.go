@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
-	"net"
 	"os"
 	"strings"
 
@@ -508,7 +507,7 @@ func applyVPPConfig(
 			if family, exists := unit.Family["inet"]; exists {
 				for _, addrStr := range family.Addresses {
 					result.TotalAddresses++
-					_, ipNet, err := net.ParseCIDR(addrStr)
+					ipNet, err := vpp.ParseCIDRAddress(addrStr)
 					if err != nil {
 						unitLog.Error("Invalid CIDR address",
 							slog.String("address", addrStr),
@@ -543,7 +542,7 @@ func applyVPPConfig(
 			if family, exists := unit.Family["inet6"]; exists {
 				for _, addrStr := range family.Addresses {
 					result.TotalAddresses++
-					_, ipNet, err := net.ParseCIDR(addrStr)
+					ipNet, err := vpp.ParseCIDRAddress(addrStr)
 					if err != nil {
 						unitLog.Error("Invalid CIDR address",
 							slog.String("address", addrStr),

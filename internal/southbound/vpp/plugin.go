@@ -182,7 +182,7 @@ func (p *VPPPlugin) RollbackChanges(ctx context.Context, diff *engine.ConfigDiff
 		}
 		// Remove addresses that were added
 		for _, addr := range change.AddressesAdded {
-			_, ipNet, err := net.ParseCIDR(addr.Address)
+			ipNet, err := pkgvpp.ParseCIDRAddress(addr.Address)
 			if err != nil {
 				continue
 			}
@@ -190,7 +190,7 @@ func (p *VPPPlugin) RollbackChanges(ctx context.Context, diff *engine.ConfigDiff
 		}
 		// Re-add addresses that were removed
 		for _, addr := range change.AddressesRemoved {
-			_, ipNet, err := net.ParseCIDR(addr.Address)
+			ipNet, err := pkgvpp.ParseCIDRAddress(addr.Address)
 			if err != nil {
 				continue
 			}
@@ -334,7 +334,7 @@ func (p *VPPPlugin) applyInterfaceChanges(ctx context.Context, change *engine.In
 
 	// Remove old addresses
 	for _, addr := range change.AddressesRemoved {
-		_, ipNet, err := net.ParseCIDR(addr.Address)
+		ipNet, err := pkgvpp.ParseCIDRAddress(addr.Address)
 		if err != nil {
 			continue
 		}
@@ -350,7 +350,7 @@ func (p *VPPPlugin) applyInterfaceChanges(ctx context.Context, change *engine.In
 
 	// Add new addresses
 	for _, addr := range change.AddressesAdded {
-		_, ipNet, err := net.ParseCIDR(addr.Address)
+		ipNet, err := pkgvpp.ParseCIDRAddress(addr.Address)
 		if err != nil {
 			return fmt.Errorf("parse CIDR %s: %w", addr.Address, err)
 		}
@@ -422,7 +422,7 @@ func (p *VPPPlugin) applyAddresses(ctx context.Context, swIfIndex uint32, ifaceC
 	for _, unit := range ifaceCfg.Units {
 		for _, family := range unit.Family {
 			for _, addrStr := range family.Addresses {
-				_, ipNet, err := net.ParseCIDR(addrStr)
+				ipNet, err := pkgvpp.ParseCIDRAddress(addrStr)
 				if err != nil {
 					return fmt.Errorf("parse CIDR %s: %w", addrStr, err)
 				}
@@ -452,7 +452,7 @@ func (p *VPPPlugin) deleteConfiguredAddresses(ctx context.Context, swIfIndex uin
 				continue
 			}
 			for _, addrStr := range family.Addresses {
-				_, ipNet, err := net.ParseCIDR(addrStr)
+				ipNet, err := pkgvpp.ParseCIDRAddress(addrStr)
 				if err != nil {
 					continue
 				}
