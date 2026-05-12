@@ -26,7 +26,22 @@ type webStatus struct {
 	UptimeSeconds   float64         `json:"uptime_seconds"`
 	ConfigVersion   uint64          `json:"config_version"`
 	RunningHostname string          `json:"running_hostname"`
+	Datastore       webDatastore    `json:"datastore"`
+	Cluster         webCluster      `json:"cluster"`
 	NETCONF         webNETCONFStats `json:"netconf"`
+}
+
+type webDatastore struct {
+	Backend       string   `json:"backend"`
+	EtcdEndpoints []string `json:"etcd_endpoints,omitempty"`
+}
+
+type webCluster struct {
+	Enabled            bool     `json:"enabled"`
+	NodeCount          int      `json:"node_count"`
+	EtcdSyncConfigured bool     `json:"etcd_sync_configured"`
+	EtcdEndpoints      []string `json:"etcd_endpoints,omitempty"`
+	SyncAligned        bool     `json:"sync_aligned"`
 }
 
 type webNETCONFStats struct {
@@ -39,13 +54,19 @@ type webNETCONFStats struct {
 }
 
 type webIndexData struct {
-	Status              webStatus
-	Uptime              string
-	NETCONFState        string
-	NETCONFStateClass   string
-	NETCONFConnections  string
-	GeneratedAt         string
-	ConfigVersionString string
+	Status               webStatus
+	Uptime               string
+	NETCONFState         string
+	NETCONFStateClass    string
+	NETCONFConnections   string
+	ClusterState         string
+	ClusterStateClass    string
+	ClusterSyncState     string
+	ClusterSyncAlignment string
+	ClusterNodeCount     string
+	DatastoreBackend     string
+	GeneratedAt          string
+	ConfigVersionString  string
 }
 
 var webIndexTemplate = template.Must(template.New("web-index").Parse(`<!doctype html>
@@ -64,8 +85,10 @@ var webIndexTemplate = template.Must(template.New("web-index").Parse(`<!doctype 
       --muted: #667085;
       --accent: #0f766e;
       --warn: #b45309;
+      --neutral: #475467;
       --ok-bg: #dff5ef;
       --warn-bg: #fff1d6;
+      --neutral-bg: #eef2f6;
     }
     * { box-sizing: border-box; }
     body {
@@ -144,6 +167,7 @@ var webIndexTemplate = template.Must(template.New("web-index").Parse(`<!doctype 
     }
     .pill.ok { background: var(--ok-bg); color: var(--accent); }
     .pill.warn { background: var(--warn-bg); color: var(--warn); }
+    .pill.neutral { background: var(--neutral-bg); color: var(--neutral); }
     footer {
       display: flex;
       justify-content: space-between;
@@ -192,6 +216,14 @@ var webIndexTemplate = template.Must(template.New("web-index").Parse(`<!doctype 
         <span class="label">Connections</span>
         <span class="value">{{.NETCONFConnections}}</span>
       </article>
+      <article class="panel metric">
+        <span class="label">Datastore</span>
+        <span class="value small-value">{{.DatastoreBackend}}</span>
+      </article>
+      <article class="panel metric">
+        <span class="label">Cluster</span>
+        <span class="pill {{.ClusterStateClass}}">{{.ClusterState}}</span>
+      </article>
 
       <article class="panel span-2">
         <h2>NETCONF sessions</h2>
@@ -207,6 +239,14 @@ var webIndexTemplate = template.Must(template.New("web-index").Parse(`<!doctype 
           <div class="row"><span>Successful handshakes</span><strong>{{.Status.NETCONF.SuccessfulAuth}}</strong></div>
           <div class="row"><span>Failed handshakes</span><strong>{{.Status.NETCONF.FailedAuth}}</strong></div>
           <div class="row"><span>Build date</span><strong>{{.Status.BuildDate}}</strong></div>
+        </div>
+      </article>
+      <article class="panel span-2">
+        <h2>Cluster sync</h2>
+        <div class="rows">
+          <div class="row"><span>Configured nodes</span><strong>{{.ClusterNodeCount}}</strong></div>
+          <div class="row"><span>etcd sync</span><strong>{{.ClusterSyncState}}</strong></div>
+          <div class="row"><span>Backend alignment</span><strong>{{.ClusterSyncAlignment}}</strong></div>
         </div>
       </article>
     </section>
@@ -322,6 +362,17 @@ func newWebStatus(metrics routerMetrics) webStatus {
 		UptimeSeconds:   metrics.UptimeSeconds,
 		ConfigVersion:   metrics.ConfigVersion,
 		RunningHostname: metrics.RunningHostname,
+		Datastore: webDatastore{
+			Backend:       metrics.DatastoreBackend,
+			EtcdEndpoints: metrics.DatastoreEtcdEndpoints,
+		},
+		Cluster: webCluster{
+			Enabled:            metrics.ClusterEnabled,
+			NodeCount:          metrics.ClusterNodeCount,
+			EtcdSyncConfigured: metrics.ClusterEtcdSync,
+			EtcdEndpoints:      metrics.ClusterEtcdEndpoints,
+			SyncAligned:        metrics.ClusterSyncAligned,
+		},
 		NETCONF: webNETCONFStats{
 			Listening:         metrics.NETCONFListening,
 			ActiveSessions:    metrics.NETCONFActiveSessions,
@@ -340,15 +391,36 @@ func newWebIndexData(status webStatus, now time.Time) webIndexData {
 		state = "Listening"
 		stateClass = "ok"
 	}
+	clusterState := "Disabled"
+	clusterStateClass := "neutral"
+	if status.Cluster.Enabled {
+		clusterState = "Enabled"
+		clusterStateClass = "ok"
+	}
+	clusterSyncState := "Not configured"
+	clusterSyncAlignment := "Not applicable"
+	if status.Cluster.EtcdSyncConfigured {
+		clusterSyncState = "etcd"
+		clusterSyncAlignment = "Aligned"
+		if !status.Cluster.SyncAligned {
+			clusterSyncAlignment = "Mismatch"
+		}
+	}
 
 	return webIndexData{
-		Status:              status,
-		Uptime:              formatWebUptime(status.UptimeSeconds),
-		NETCONFState:        state,
-		NETCONFStateClass:   stateClass,
-		NETCONFConnections:  strconv.FormatUint(status.NETCONF.TotalConnections, 10),
-		GeneratedAt:         now.UTC().Format(time.RFC3339),
-		ConfigVersionString: strconv.FormatUint(status.ConfigVersion, 10),
+		Status:               status,
+		Uptime:               formatWebUptime(status.UptimeSeconds),
+		NETCONFState:         state,
+		NETCONFStateClass:    stateClass,
+		NETCONFConnections:   strconv.FormatUint(status.NETCONF.TotalConnections, 10),
+		ClusterState:         clusterState,
+		ClusterStateClass:    clusterStateClass,
+		ClusterSyncState:     clusterSyncState,
+		ClusterSyncAlignment: clusterSyncAlignment,
+		ClusterNodeCount:     strconv.Itoa(status.Cluster.NodeCount),
+		DatastoreBackend:     status.Datastore.Backend,
+		GeneratedAt:          now.UTC().Format(time.RFC3339),
+		ConfigVersionString:  strconv.FormatUint(status.ConfigVersion, 10),
 	}
 }
 

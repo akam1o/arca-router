@@ -407,6 +407,7 @@ func run(ctx context.Context, f *daemonFlags, log *logger.Logger) error {
 		startedAt:     time.Now(),
 		engine:        eng,
 		netconfServer: netconfServer,
+		datastore:     datastoreConfig,
 	}
 	var metricsErr <-chan error
 	if f.metricsListen != "" {
