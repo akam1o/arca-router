@@ -14,6 +14,7 @@ import (
 	"os/signal"
 	"path/filepath"
 	"strings"
+	"sync"
 	"syscall"
 
 	"github.com/akam1o/arca-router/internal/engine"
@@ -39,7 +40,10 @@ var (
 const (
 	secureGRPCSocketDirPerms  os.FileMode = 0750
 	secureGRPCSocketFilePerms os.FileMode = 0600
+	secureGRPCSocketUmask                 = 0077
 )
+
+var grpcSocketUmaskMu sync.Mutex
 
 type daemonFlags struct {
 	configPath    string
@@ -224,14 +228,11 @@ func run(ctx context.Context, f *daemonFlags, log *logger.Logger) error {
 		return err
 	}
 
-	lis, err := net.Listen("unix", f.grpcSocket)
+	lis, err := listenSecureGRPCSocket(f.grpcSocket)
 	if err != nil {
 		return fmt.Errorf("listen on gRPC socket: %w", err)
 	}
 	defer lis.Close()
-	if err := restrictGRPCSocketPermissions(f.grpcSocket); err != nil {
-		return err
-	}
 
 	grpcServer := nbgrpc.NewServer(eng, configStore, slog.Default())
 	grpcErr := make(chan error, 1)
@@ -321,6 +322,24 @@ func restrictGRPCSocketPermissions(socketPath string) error {
 		return fmt.Errorf("restrict gRPC socket permissions: %w", err)
 	}
 	return nil
+}
+
+func listenSecureGRPCSocket(socketPath string) (net.Listener, error) {
+	grpcSocketUmaskMu.Lock()
+	defer grpcSocketUmaskMu.Unlock()
+
+	oldUmask := syscall.Umask(secureGRPCSocketUmask)
+	defer syscall.Umask(oldUmask)
+
+	lis, err := net.Listen("unix", socketPath)
+	if err != nil {
+		return nil, err
+	}
+	if err := restrictGRPCSocketPermissions(socketPath); err != nil {
+		_ = lis.Close()
+		return nil, err
+	}
+	return lis, nil
 }
 
 // loadInitialConfig loads the startup config from file and converts to new model.
