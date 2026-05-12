@@ -58,11 +58,9 @@ func (s *Store) GetLatestSnapshot(ctx context.Context) (*model.ConfigSnapshot, e
 		return nil, fmt.Errorf("parse stored config: %w", err)
 	}
 
-	return &model.ConfigSnapshot{
-		Config:    cfg,
-		Author:    "system",
-		CreatedAt: running.Timestamp,
-	}, nil
+	snap := model.NewSnapshot(cfg, 1, "system", "loaded from datastore")
+	snap.CreatedAt = running.Timestamp
+	return snap, nil
 }
 
 func (s *Store) PrepareCommit(ctx context.Context, snap *model.ConfigSnapshot) (store.PreparedCommit, error) {

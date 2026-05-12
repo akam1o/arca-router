@@ -65,6 +65,12 @@ func TestSaveCommitStoresSetCommands(t *testing.T) {
 	if latest == nil || latest.Config == nil || latest.Config.System == nil || latest.Config.System.HostName != "router1" {
 		t.Fatalf("latest snapshot = %#v, want router1 config", latest)
 	}
+	if latest.Version == 0 {
+		t.Fatal("latest snapshot version = 0, want initialized version")
+	}
+	if latest.Hash == ([32]byte{}) {
+		t.Fatal("latest snapshot hash is empty")
+	}
 
 	commit, err := st.GetCommit(context.Background(), running.CommitID)
 	if err != nil {

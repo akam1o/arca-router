@@ -197,13 +197,14 @@ func run(ctx context.Context, f *daemonFlags, log *logger.Logger) error {
 
 	// --- Step 7: Load initial configuration ---
 	log.Info("Loading initial configuration")
-	initialCfg, initialSource, err := loadInitialConfig(ctx, f, configStore, log)
+	initialSnap, initialSource, err := loadInitialConfig(ctx, f, configStore, log)
 	if err != nil {
 		return fmt.Errorf("load initial config: %w", err)
 	}
 
-	// Apply initial configuration through the engine
-	if err := eng.Apply(ctx, initialCfg, "system", "initial startup"); err != nil {
+	// Apply initial configuration through the engine and keep the legacy
+	// datastore in sync for NETCONF running/candidate operations.
+	if err := applyInitialConfig(ctx, eng, configStore, initialSnap, initialSource); err != nil {
 		return fmt.Errorf("apply initial config: %w", err)
 	}
 	log.Info("Initial configuration applied", slog.String("source", initialSource))
@@ -342,8 +343,8 @@ func listenSecureGRPCSocket(socketPath string) (net.Listener, error) {
 	return lis, nil
 }
 
-// loadInitialConfig loads the startup config from file and converts to new model.
-func loadInitialConfig(ctx context.Context, f *daemonFlags, st internalstore.ConfigStore, log *logger.Logger) (*model.RouterConfig, string, error) {
+// loadInitialConfig loads the startup config from the datastore or file.
+func loadInitialConfig(ctx context.Context, f *daemonFlags, st internalstore.ConfigStore, log *logger.Logger) (*model.ConfigSnapshot, string, error) {
 	if st != nil {
 		snap, err := st.GetLatestSnapshot(ctx)
 		if err != nil {
@@ -351,7 +352,7 @@ func loadInitialConfig(ctx context.Context, f *daemonFlags, st internalstore.Con
 		}
 		if snap != nil && snap.Config != nil {
 			log.Info("Loaded initial configuration from datastore")
-			return snap.Config, "datastore", nil
+			return snap.Clone(), "datastore", nil
 		}
 	}
 
@@ -359,7 +360,7 @@ func loadInitialConfig(ctx context.Context, f *daemonFlags, st internalstore.Con
 	if err != nil {
 		if os.IsNotExist(err) {
 			log.Warn("Config file not found, using empty config", slog.String("path", f.configPath))
-			return model.NewRouterConfig(), "empty", nil
+			return model.NewSnapshot(model.NewRouterConfig(), 1, "system", "initial startup"), "empty", nil
 		}
 		return nil, "", fmt.Errorf("open config %s: %w", f.configPath, err)
 	}
@@ -376,7 +377,56 @@ func loadInitialConfig(ctx context.Context, f *daemonFlags, st internalstore.Con
 	}
 
 	// Convert to new model
-	return model.FromLegacyConfig(legacyCfg), "file", nil
+	return model.NewSnapshot(model.FromLegacyConfig(legacyCfg), 1, "system", "initial startup"), "file", nil
+}
+
+func applyInitialConfig(ctx context.Context, eng *engine.Engine, st internalstore.ConfigStore, snap *model.ConfigSnapshot, source string) error {
+	if snap == nil || snap.Config == nil {
+		return fmt.Errorf("initial configuration is nil")
+	}
+
+	var prepared internalstore.PreparedCommit
+	if source != "datastore" && st != nil {
+		var err error
+		prepared, err = st.PrepareCommit(ctx, snap)
+		if err != nil {
+			return fmt.Errorf("prepare initial config persistence: %w", err)
+		}
+	}
+
+	beforeSnap := eng.RunningSnapshot()
+	if err := eng.Apply(ctx, snap.Config, "system", "initial startup"); err != nil {
+		if prepared != nil {
+			_ = prepared.Abort(context.Background())
+		}
+		return err
+	}
+
+	if source == "datastore" {
+		eng.InitializeRunning(snap.Config, initialSnapshotVersion(snap))
+		return nil
+	}
+
+	if prepared != nil {
+		if _, err := prepared.Commit(ctx); err != nil {
+			_ = prepared.Abort(context.Background())
+			if rollbackErr := rollbackEngineToSnapshot(context.Background(), eng, beforeSnap, "system", "rollback failed initial config persistence"); rollbackErr != nil {
+				return fmt.Errorf("persist initial config after apply: %w (rollback failed: %v)", err, rollbackErr)
+			}
+			return fmt.Errorf("persist initial config after apply: %w", err)
+		}
+	}
+	if eng.RunningSnapshot() == nil {
+		eng.InitializeRunning(snap.Config, initialSnapshotVersion(snap))
+	}
+	return nil
+}
+
+func initialSnapshotVersion(snap *model.ConfigSnapshot) uint64 {
+	if snap != nil && snap.Version > 0 {
+		return snap.Version
+	}
+	return 1
 }
 
 func parseLegacyConfig(r io.Reader) (*config.Config, error) {

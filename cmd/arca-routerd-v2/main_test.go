@@ -18,8 +18,11 @@ import (
 )
 
 type initialConfigStore struct {
-	snap *model.ConfigSnapshot
-	err  error
+	snap         *model.ConfigSnapshot
+	err          error
+	prepareErr   error
+	prepared     *initialPreparedCommit
+	preparedSnap *model.ConfigSnapshot
 }
 
 func (s *initialConfigStore) GetLatestSnapshot(ctx context.Context) (*model.ConfigSnapshot, error) {
@@ -27,7 +30,12 @@ func (s *initialConfigStore) GetLatestSnapshot(ctx context.Context) (*model.Conf
 }
 
 func (s *initialConfigStore) PrepareCommit(ctx context.Context, snap *model.ConfigSnapshot) (store.PreparedCommit, error) {
-	return nil, nil
+	if s.prepareErr != nil {
+		return nil, s.prepareErr
+	}
+	s.preparedSnap = snap.Clone()
+	s.prepared = &initialPreparedCommit{}
+	return s.prepared, nil
 }
 
 func (s *initialConfigStore) SaveCommit(ctx context.Context, snap *model.ConfigSnapshot) (string, error) {
@@ -50,6 +58,26 @@ func (s *initialConfigStore) Close() error {
 	return nil
 }
 
+type initialPreparedCommit struct {
+	committed bool
+	aborted   bool
+	commitErr error
+	abortErr  error
+}
+
+func (p *initialPreparedCommit) Commit(ctx context.Context) (string, error) {
+	p.committed = true
+	if p.commitErr != nil {
+		return "", p.commitErr
+	}
+	return "initial-commit", nil
+}
+
+func (p *initialPreparedCommit) Abort(ctx context.Context) error {
+	p.aborted = true
+	return p.abortErr
+}
+
 func testDaemonLogger() *logger.Logger {
 	return logger.New("test", &logger.Config{Level: slog.LevelError})
 }
@@ -64,15 +92,15 @@ func TestLoadInitialConfigPrefersDatastore(t *testing.T) {
 		Interfaces: map[string]*model.InterfaceConfig{},
 	}, 7, "alice", "stored")
 
-	cfg, source, err := loadInitialConfig(context.Background(), &daemonFlags{configPath: configPath}, &initialConfigStore{snap: stored}, testDaemonLogger())
+	snap, source, err := loadInitialConfig(context.Background(), &daemonFlags{configPath: configPath}, &initialConfigStore{snap: stored}, testDaemonLogger())
 	if err != nil {
 		t.Fatalf("loadInitialConfig() error = %v", err)
 	}
 	if source != "datastore" {
 		t.Fatalf("source = %q, want datastore", source)
 	}
-	if cfg.System.HostName != "stored-router" {
-		t.Fatalf("hostname = %q, want stored-router", cfg.System.HostName)
+	if snap.Config.System.HostName != "stored-router" {
+		t.Fatalf("hostname = %q, want stored-router", snap.Config.System.HostName)
 	}
 }
 
@@ -82,15 +110,15 @@ func TestLoadInitialConfigFallsBackToFile(t *testing.T) {
 		t.Fatalf("WriteFile() error = %v", err)
 	}
 
-	cfg, source, err := loadInitialConfig(context.Background(), &daemonFlags{configPath: configPath}, &initialConfigStore{}, testDaemonLogger())
+	snap, source, err := loadInitialConfig(context.Background(), &daemonFlags{configPath: configPath}, &initialConfigStore{}, testDaemonLogger())
 	if err != nil {
 		t.Fatalf("loadInitialConfig() error = %v", err)
 	}
 	if source != "file" {
 		t.Fatalf("source = %q, want file", source)
 	}
-	if cfg.System.HostName != "file-router" {
-		t.Fatalf("hostname = %q, want file-router", cfg.System.HostName)
+	if snap.Config.System.HostName != "file-router" {
+		t.Fatalf("hostname = %q, want file-router", snap.Config.System.HostName)
 	}
 }
 
@@ -101,6 +129,60 @@ func TestLoadInitialConfigRejectsConfigOpenError(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "open config") {
 		t.Fatalf("loadInitialConfig() error = %v, want open config error", err)
+	}
+}
+
+func TestApplyInitialConfigPersistsFileStartupConfig(t *testing.T) {
+	eng := engine.NewEngine(nil, slog.Default())
+	st := &initialConfigStore{}
+	snap := model.NewSnapshot(&model.RouterConfig{
+		System:     &model.SystemConfig{HostName: "file-router"},
+		Interfaces: map[string]*model.InterfaceConfig{},
+	}, 1, "system", "initial startup")
+
+	if err := applyInitialConfig(context.Background(), eng, st, snap, "file"); err != nil {
+		t.Fatalf("applyInitialConfig() error = %v", err)
+	}
+	if st.preparedSnap == nil || st.preparedSnap.Config.System.HostName != "file-router" {
+		t.Fatalf("prepared snapshot = %#v, want file-router config", st.preparedSnap)
+	}
+	if st.prepared == nil || !st.prepared.committed {
+		t.Fatal("initial config was not committed to datastore")
+	}
+	if got := eng.Running().System.HostName; got != "file-router" {
+		t.Fatalf("engine hostname = %q, want file-router", got)
+	}
+}
+
+func TestApplyInitialConfigPersistsEmptyStartupConfigAndCreatesSnapshot(t *testing.T) {
+	eng := engine.NewEngine(nil, slog.Default())
+	st := &initialConfigStore{}
+	snap := model.NewSnapshot(model.NewRouterConfig(), 1, "system", "initial startup")
+
+	if err := applyInitialConfig(context.Background(), eng, st, snap, "empty"); err != nil {
+		t.Fatalf("applyInitialConfig() error = %v", err)
+	}
+	if st.prepared == nil || !st.prepared.committed {
+		t.Fatal("empty initial config was not committed to datastore")
+	}
+	if running := eng.RunningSnapshot(); running == nil || running.Version != 1 {
+		t.Fatalf("running snapshot = %#v, want version 1", running)
+	}
+}
+
+func TestApplyInitialConfigDoesNotPersistDatastoreStartupConfig(t *testing.T) {
+	eng := engine.NewEngine(nil, slog.Default())
+	st := &initialConfigStore{}
+	snap := model.NewSnapshot(model.NewRouterConfig(), 7, "system", "loaded from datastore")
+
+	if err := applyInitialConfig(context.Background(), eng, st, snap, "datastore"); err != nil {
+		t.Fatalf("applyInitialConfig() error = %v", err)
+	}
+	if st.prepared != nil {
+		t.Fatal("datastore initial config was prepared for persistence again")
+	}
+	if running := eng.RunningSnapshot(); running == nil || running.Version != 7 {
+		t.Fatalf("running snapshot = %#v, want datastore version 7", running)
 	}
 }
 
