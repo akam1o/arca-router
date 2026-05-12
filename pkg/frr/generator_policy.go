@@ -251,8 +251,8 @@ func GeneratePrefixListConfig(prefixLists []PrefixList) (string, error) {
 		}
 
 		for _, entry := range pl.Entries {
-			b.WriteString(fmt.Sprintf("%s prefix-list %s seq %d %s %s\n",
-				prefix, pl.Name, entry.Seq, entry.Action, entry.Prefix))
+			fmt.Fprintf(&b, "%s prefix-list %s seq %d %s %s\n",
+				prefix, pl.Name, entry.Seq, entry.Action, entry.Prefix)
 		}
 		b.WriteString("!\n")
 	}
@@ -277,7 +277,7 @@ func GenerateRouteMapConfig(routeMaps []RouteMap, prefixLists []PrefixList) (str
 
 	for _, rm := range routeMaps {
 		for _, entry := range rm.Entries {
-			b.WriteString(fmt.Sprintf("route-map %s %s %d\n", rm.Name, entry.Action, entry.Seq))
+			fmt.Fprintf(&b, "route-map %s %s %d\n", rm.Name, entry.Action, entry.Seq)
 
 			// Match conditions
 			if len(entry.MatchPrefixLists) > 0 {
@@ -287,29 +287,29 @@ func GenerateRouteMapConfig(routeMaps []RouteMap, prefixLists []PrefixList) (str
 					if isIPv6, found := plMap[plName]; found && isIPv6 {
 						ipVersion = "ipv6"
 					}
-					b.WriteString(fmt.Sprintf(" match %s address prefix-list %s\n", ipVersion, plName))
+					fmt.Fprintf(&b, " match %s address prefix-list %s\n", ipVersion, plName)
 				}
 			}
 
 			if entry.MatchProtocol != "" {
-				b.WriteString(fmt.Sprintf(" match source-protocol %s\n", entry.MatchProtocol))
+				fmt.Fprintf(&b, " match source-protocol %s\n", entry.MatchProtocol)
 			}
 
 			if entry.MatchNeighbor != "" {
-				b.WriteString(fmt.Sprintf(" match peer %s\n", entry.MatchNeighbor))
+				fmt.Fprintf(&b, " match peer %s\n", entry.MatchNeighbor)
 			}
 
 			if entry.MatchASPath != "" {
-				b.WriteString(fmt.Sprintf(" match as-path %s\n", entry.MatchASPath))
+				fmt.Fprintf(&b, " match as-path %s\n", entry.MatchASPath)
 			}
 
 			// Set actions
 			if entry.SetLocalPreference != nil {
-				b.WriteString(fmt.Sprintf(" set local-preference %d\n", *entry.SetLocalPreference))
+				fmt.Fprintf(&b, " set local-preference %d\n", *entry.SetLocalPreference)
 			}
 
 			if entry.SetCommunity != "" {
-				b.WriteString(fmt.Sprintf(" set community %s\n", entry.SetCommunity))
+				fmt.Fprintf(&b, " set community %s\n", entry.SetCommunity)
 			}
 
 			b.WriteString("!\n")
@@ -329,8 +329,8 @@ func GenerateASPathAccessListConfig(asPathLists []ASPathAccessList) (string, err
 
 	for _, apl := range asPathLists {
 		for _, entry := range apl.Entries {
-			b.WriteString(fmt.Sprintf("bgp as-path access-list %s seq %d %s %s\n",
-				apl.Name, entry.Seq, entry.Action, entry.Regex))
+			fmt.Fprintf(&b, "bgp as-path access-list %s seq %d %s %s\n",
+				apl.Name, entry.Seq, entry.Action, entry.Regex)
 		}
 		b.WriteString("!\n")
 	}

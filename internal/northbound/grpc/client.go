@@ -9,6 +9,7 @@ import (
 	"time"
 
 	googlegrpc "google.golang.org/grpc"
+	"google.golang.org/grpc/connectivity"
 	"google.golang.org/grpc/credentials/insecure"
 )
 
@@ -28,15 +29,27 @@ func Dial(socketPath string) (*Client, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	conn, err := googlegrpc.DialContext(ctx, "unix://"+socketPath,
+	conn, err := googlegrpc.NewClient("unix://"+socketPath,
 		googlegrpc.WithTransportCredentials(insecure.NewCredentials()),
 		googlegrpc.WithContextDialer(func(ctx context.Context, addr string) (net.Conn, error) {
-			return net.DialTimeout("unix", socketPath, 5*time.Second)
+			var d net.Dialer
+			return d.DialContext(ctx, "unix", socketPath)
 		}),
 		googlegrpc.WithDefaultCallOptions(googlegrpc.ForceCodec(jsonCodec{})),
 	)
 	if err != nil {
 		return nil, fmt.Errorf("dial arca-routerd at %s: %w", socketPath, err)
+	}
+	conn.Connect()
+	for {
+		state := conn.GetState()
+		if state == connectivity.Ready {
+			break
+		}
+		if !conn.WaitForStateChange(ctx, state) {
+			_ = conn.Close()
+			return nil, fmt.Errorf("dial arca-routerd at %s: %w", socketPath, ctx.Err())
+		}
 	}
 
 	return &Client{conn: conn}, nil

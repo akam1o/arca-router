@@ -192,7 +192,7 @@ func writeXMLAttribute(buf *bytes.Buffer, name, value string) {
 	buf.WriteByte(' ')
 	buf.WriteString(name)
 	buf.WriteString(`="`)
-	xml.EscapeText(buf, []byte(value))
+	_ = xml.EscapeText(buf, []byte(value))
 	buf.WriteByte('"')
 }
 

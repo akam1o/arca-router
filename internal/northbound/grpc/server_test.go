@@ -133,7 +133,7 @@ func TestClientServerConfigFlow(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Dial() error = %v", err)
 	}
-	defer client.Close()
+	defer func() { _ = client.Close() }()
 
 	ctx := context.Background()
 	text, version, err := client.GetRunning(ctx)

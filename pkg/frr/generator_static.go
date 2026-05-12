@@ -41,9 +41,9 @@ func GenerateStaticRouteConfig(routes []StaticRoute) (string, error) {
 		}
 
 		if route.Distance > 0 {
-			b.WriteString(fmt.Sprintf("%s %s %s %d\n", routeCmd, route.Prefix, route.NextHop, route.Distance))
+			fmt.Fprintf(&b, "%s %s %s %d\n", routeCmd, route.Prefix, route.NextHop, route.Distance)
 		} else {
-			b.WriteString(fmt.Sprintf("%s %s %s\n", routeCmd, route.Prefix, route.NextHop))
+			fmt.Fprintf(&b, "%s %s %s\n", routeCmd, route.Prefix, route.NextHop)
 		}
 	}
 

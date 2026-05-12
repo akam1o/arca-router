@@ -31,7 +31,7 @@ func TestSSHServerStopAfterStartFailureReleasesProcessLock(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Listen() error = %v", err)
 	}
-	defer listener.Close()
+	defer func() { _ = listener.Close() }()
 
 	cfg, dbPath := testSSHServerConfig(t, listener.Addr().String())
 	server, err := NewSSHServer(cfg)
@@ -64,7 +64,7 @@ func TestSSHServerStopClosesIdlePreAuthConnection(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Dial() error = %v", err)
 	}
-	defer conn.Close()
+	defer func() { _ = conn.Close() }()
 
 	waitForCondition(t, time.Second, func() bool {
 		return server.GetMetrics().ActiveConnections > 0

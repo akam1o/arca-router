@@ -249,7 +249,7 @@ func run(ctx context.Context, f *daemonFlags, log *logger.Logger) error {
 	if err != nil {
 		return fmt.Errorf("listen on gRPC socket: %w", err)
 	}
-	defer lis.Close()
+	defer func() { _ = lis.Close() }()
 
 	grpcServer := nbgrpc.NewServer(eng, configStore, slog.Default())
 	grpcErr := make(chan error, 1)
@@ -382,7 +382,7 @@ func loadInitialConfig(ctx context.Context, f *daemonFlags, st internalstore.Con
 		}
 		return nil, "", fmt.Errorf("open config %s: %w", f.configPath, err)
 	}
-	defer file.Close()
+	defer func() { _ = file.Close() }()
 
 	legacyCfg, err := parseLegacyConfig(file)
 	if err != nil {

@@ -154,7 +154,7 @@ func runOneShotCommand(ctx context.Context, f *cliFlags, args []string) int {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 		return ExitOperationError
 	}
-	defer client.Close()
+	defer func() { _ = client.Close() }()
 
 	command := args[0]
 	switch command {
@@ -307,7 +307,7 @@ func runInteractive(ctx context.Context, f *cliFlags) int {
 		fmt.Fprintf(os.Stderr, "Error: failed to connect to arca-routerd: %v\n", err)
 		return ExitOperationError
 	}
-	defer client.Close()
+	defer func() { _ = client.Close() }()
 
 	// Get hostname from daemon
 	hostname := "arca-router"
@@ -340,7 +340,7 @@ func runInteractive(ctx context.Context, f *cliFlags) int {
 		return ExitOperationError
 	}
 	sh.rl = rl
-	defer rl.Close()
+	defer func() { _ = rl.Close() }()
 
 	// Create a session with the daemon
 	sessionID, err := client.CreateSession(ctx, username)
