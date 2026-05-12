@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"sync"
+	"syscall"
 	"time"
 
 	_ "github.com/mattn/go-sqlite3" // SQLite driver
@@ -25,6 +26,13 @@ type sqliteDatastore struct {
 	cleanupStopChan chan struct{}
 	cleanupDoneChan chan struct{}
 	closeOnce       sync.Once
+}
+
+// ProcessLock is an OS-level lock that marks a SQLite datastore as owned by one daemon process.
+type ProcessLock struct {
+	file      *os.File
+	closeOnce sync.Once
+	closeErr  error
 }
 
 // NewSQLiteDatastore creates a new SQLite-backed datastore.
@@ -107,6 +115,69 @@ func NewSQLiteDatastore(cfg *Config) (Datastore, error) {
 	go ds.cleanupExpiredLocks()
 
 	return ds, nil
+}
+
+// AcquireSQLiteProcessLock acquires an exclusive non-blocking lock beside the
+// datastore file. It is intended for daemon startup coordination, not per-RPC
+// candidate locking.
+func AcquireSQLiteProcessLock(dbPath string) (*ProcessLock, error) {
+	if dbPath == "" {
+		dbPath = "/var/lib/arca-router/config.db"
+	}
+	if dbPath == ":memory:" {
+		return &ProcessLock{}, nil
+	}
+	dir := filepath.Dir(dbPath)
+	if err := os.MkdirAll(dir, secureSQLiteDirPerms); err != nil {
+		return nil, fmt.Errorf("failed to create database directory: %w", err)
+	}
+	if err := validateSQLiteDirectoryPermissions(dir); err != nil {
+		return nil, err
+	}
+
+	lockPath := dbPath + ".process.lock"
+	file, err := os.OpenFile(lockPath, os.O_RDWR|os.O_CREATE, secureSQLiteFilePerms)
+	if err != nil {
+		return nil, fmt.Errorf("failed to open datastore process lock: %w", err)
+	}
+	if err := os.Chmod(lockPath, secureSQLiteFilePerms); err != nil {
+		_ = file.Close()
+		return nil, fmt.Errorf("failed to restrict datastore process lock permissions: %w", err)
+	}
+	if err := syscall.Flock(int(file.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err != nil {
+		_ = file.Close()
+		if errors.Is(err, syscall.EWOULDBLOCK) || errors.Is(err, syscall.EAGAIN) {
+			return nil, NewError(ErrCodeConflict, "datastore is already owned by another process", err)
+		}
+		return nil, fmt.Errorf("failed to acquire datastore process lock: %w", err)
+	}
+	if err := file.Truncate(0); err != nil {
+		_ = syscall.Flock(int(file.Fd()), syscall.LOCK_UN)
+		_ = file.Close()
+		return nil, fmt.Errorf("failed to update datastore process lock: %w", err)
+	}
+	if _, err := fmt.Fprintf(file, "%d\n", os.Getpid()); err != nil {
+		_ = syscall.Flock(int(file.Fd()), syscall.LOCK_UN)
+		_ = file.Close()
+		return nil, fmt.Errorf("failed to write datastore process lock: %w", err)
+	}
+	return &ProcessLock{file: file}, nil
+}
+
+// Close releases the process lock.
+func (l *ProcessLock) Close() error {
+	if l == nil || l.file == nil {
+		return nil
+	}
+	l.closeOnce.Do(func() {
+		if err := syscall.Flock(int(l.file.Fd()), syscall.LOCK_UN); err != nil {
+			l.closeErr = err
+		}
+		if err := l.file.Close(); l.closeErr == nil && err != nil {
+			l.closeErr = err
+		}
+	})
+	return l.closeErr
 }
 
 func prepareSecureSQLiteFile(dbPath string) error {

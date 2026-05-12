@@ -4,13 +4,14 @@ import "time"
 
 // SSHConfig holds SSH server configuration
 type SSHConfig struct {
-	ListenAddr      string        // Default: ":830"
-	HostKeyPath     string        // Default: "/var/lib/arca-router/ssh_host_ed25519_key"
-	UserDBPath      string        // Default: "/var/lib/arca-router/users.db"
-	DatastorePath   string        // Default: "/var/lib/arca-router/config.db"
-	IdleTimeout     time.Duration // Default: 30m (idle timeout)
-	AbsoluteTimeout time.Duration // Default: 24h (max session lifetime)
-	MaxSessions     int           // Default: 100
+	ListenAddr                  string        // Default: ":830"
+	HostKeyPath                 string        // Default: "/var/lib/arca-router/ssh_host_ed25519_key"
+	UserDBPath                  string        // Default: "/var/lib/arca-router/users.db"
+	DatastorePath               string        // Default: "/var/lib/arca-router/config.db"
+	SkipDatastoreStartupCleanup bool          // For embedded servers whose parent owns datastore startup
+	IdleTimeout                 time.Duration // Default: 30m (idle timeout)
+	AbsoluteTimeout             time.Duration // Default: 24h (max session lifetime)
+	MaxSessions                 int           // Default: 100
 
 	// Lockout configuration
 	IPFailureLimit    int           // Default: 3 (IP-based lockout threshold)

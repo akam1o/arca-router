@@ -1,6 +1,7 @@
 package datastore
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"testing"
@@ -40,6 +41,37 @@ func TestSQLiteDatastoreRejectsInsecureDatabaseDirectory(t *testing.T) {
 		_ = ds.Close()
 		t.Fatal("NewSQLiteDatastore() error = nil, want insecure directory error")
 	}
+}
+
+func TestAcquireSQLiteProcessLockExcludesSecondOwner(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "config.db")
+	first, err := AcquireSQLiteProcessLock(dbPath)
+	if err != nil {
+		t.Fatalf("AcquireSQLiteProcessLock(first) error = %v", err)
+	}
+	t.Cleanup(func() { _ = first.Close() })
+
+	second, err := AcquireSQLiteProcessLock(dbPath)
+	if err == nil {
+		_ = second.Close()
+		t.Fatal("AcquireSQLiteProcessLock(second) error = nil, want conflict")
+	}
+	var dsErr *Error
+	if !errors.As(err, &dsErr) || dsErr.Code != ErrCodeConflict {
+		t.Fatalf("AcquireSQLiteProcessLock(second) error = %v, want conflict", err)
+	}
+
+	if err := first.Close(); err != nil {
+		t.Fatalf("first Close() error = %v", err)
+	}
+	third, err := AcquireSQLiteProcessLock(dbPath)
+	if err != nil {
+		t.Fatalf("AcquireSQLiteProcessLock(third) error = %v", err)
+	}
+	if err := third.Close(); err != nil {
+		t.Fatalf("third Close() error = %v", err)
+	}
+	assertSQLiteFileMode(t, dbPath+".process.lock", secureSQLiteFilePerms)
 }
 
 func assertSQLiteFileModeIfExists(t *testing.T, path string, want os.FileMode) {

@@ -25,6 +25,7 @@ import (
 	internalstore "github.com/akam1o/arca-router/internal/store"
 	storesqlite "github.com/akam1o/arca-router/internal/store/sqlite"
 	"github.com/akam1o/arca-router/pkg/config"
+	"github.com/akam1o/arca-router/pkg/datastore"
 	"github.com/akam1o/arca-router/pkg/device"
 	"github.com/akam1o/arca-router/pkg/logger"
 	"github.com/akam1o/arca-router/pkg/netconf"
@@ -189,11 +190,23 @@ func run(ctx context.Context, f *daemonFlags, log *logger.Logger) error {
 	}
 
 	// --- Step 6: Open config store ---
+	processLock, err := datastore.AcquireSQLiteProcessLock(f.datastorePath)
+	if err != nil {
+		return fmt.Errorf("acquire datastore process lock: %w", err)
+	}
 	configStore, err := storesqlite.NewFromPath(f.datastorePath)
 	if err != nil {
+		_ = processLock.Close()
 		return fmt.Errorf("open config store: %w", err)
 	}
-	defer configStore.Close()
+	defer func() {
+		if closeErr := configStore.Close(); closeErr != nil {
+			log.Error("Failed to close config store", slog.Any("error", closeErr))
+		}
+		if closeErr := processLock.Close(); closeErr != nil {
+			log.Error("Failed to release datastore process lock", slog.Any("error", closeErr))
+		}
+	}()
 	if err := configStore.CleanupEphemeralState(ctx); err != nil {
 		return fmt.Errorf("cleanup config store ephemeral state: %w", err)
 	}
@@ -264,6 +277,7 @@ func startNETCONFServer(ctx context.Context, f *daemonFlags, eng *engine.Engine,
 	ncConfig.HostKeyPath = f.hostKeyPath
 	ncConfig.UserDBPath = f.userDBPath
 	ncConfig.DatastorePath = f.datastorePath
+	ncConfig.SkipDatastoreStartupCleanup = true
 
 	server, err := netconf.NewSSHServer(ncConfig)
 	if err != nil {

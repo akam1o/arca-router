@@ -32,6 +32,7 @@ type SSHServer struct {
 	sessionMgr    *SessionManager
 	userDB        *UserDatabase
 	datastore     datastore.Datastore
+	processLock   *datastore.ProcessLock
 	netconfServer *Server
 	sshConfig     *ssh.ServerConfig
 	rateLimiter   *RateLimiter
@@ -78,6 +79,15 @@ func NewSSHServer(config *SSHConfig) (*SSHServer, error) {
 		return nil, fmt.Errorf("failed to create user database: %w", err)
 	}
 
+	var processLock *datastore.ProcessLock
+	if !config.SkipDatastoreStartupCleanup {
+		processLock, err = datastore.AcquireSQLiteProcessLock(config.DatastorePath)
+		if err != nil {
+			_ = userDB.Close()
+			return nil, fmt.Errorf("acquire datastore process lock: %w", err)
+		}
+	}
+
 	// Initialize datastore
 	datastoreConfig := &datastore.Config{
 		Backend:    datastore.BackendSQLite,
@@ -85,12 +95,17 @@ func NewSSHServer(config *SSHConfig) (*SSHServer, error) {
 	}
 	ds, err := datastore.NewSQLiteDatastore(datastoreConfig)
 	if err != nil {
+		_ = processLock.Close()
+		_ = userDB.Close()
 		return nil, fmt.Errorf("failed to create datastore: %w", err)
 	}
-	if err := cleanupDatastoreEphemeralState(context.Background(), ds); err != nil {
-		_ = ds.Close()
-		_ = userDB.Close()
-		return nil, fmt.Errorf("failed to cleanup datastore ephemeral state: %w", err)
+	if !config.SkipDatastoreStartupCleanup {
+		if err := cleanupDatastoreEphemeralState(context.Background(), ds); err != nil {
+			_ = processLock.Close()
+			_ = ds.Close()
+			_ = userDB.Close()
+			return nil, fmt.Errorf("failed to cleanup datastore ephemeral state: %w", err)
+		}
 	}
 
 	// Create audit logger with datastore for persistent audit trail
@@ -115,6 +130,7 @@ func NewSSHServer(config *SSHConfig) (*SSHServer, error) {
 		sessionMgr:    sessionMgr,
 		userDB:        userDB,
 		datastore:     ds,
+		processLock:   processLock,
 		netconfServer: netconfServer,
 		rateLimiter:   rateLimiter,
 		sshConfig:     nil, // Will be set below
@@ -224,6 +240,9 @@ func (s *SSHServer) Stop() error {
 	// Close datastore
 	if err := s.datastore.Close(); err != nil {
 		s.log.Error("Failed to close datastore", "error", err)
+	}
+	if err := s.processLock.Close(); err != nil {
+		s.log.Error("Failed to release datastore process lock", "error", err)
 	}
 
 	// Close user database
