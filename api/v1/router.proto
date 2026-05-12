@@ -20,6 +20,9 @@ service ConfigService {
   // Commit promotes the candidate to running, applying changes.
   rpc Commit(CommitRequest) returns (CommitResponse);
 
+  // ValidateCandidate validates the candidate configuration without committing it.
+  rpc ValidateCandidate(ValidateCandidateRequest) returns (ValidateCandidateResponse);
+
   // Discard discards candidate changes.
   rpc Discard(DiscardRequest) returns (DiscardResponse);
 
@@ -58,6 +61,18 @@ service StateService {
 
   // GetBGPNeighbors returns BGP neighbor state.
   rpc GetBGPNeighbors(GetBGPNeighborsRequest) returns (GetBGPNeighborsResponse);
+
+  // GetRouteText returns FRR route output for CLI display.
+  rpc GetRouteText(GetRouteTextRequest) returns (GetRouteTextResponse);
+
+  // GetBGPSummaryText returns FRR BGP summary output for CLI display.
+  rpc GetBGPSummaryText(GetBGPSummaryTextRequest) returns (GetBGPSummaryTextResponse);
+
+  // GetBGPNeighborText returns FRR BGP neighbor detail output for CLI display.
+  rpc GetBGPNeighborText(GetBGPNeighborTextRequest) returns (GetBGPNeighborTextResponse);
+
+  // GetOSPFNeighborsText returns FRR OSPF neighbor output for CLI display.
+  rpc GetOSPFNeighborsText(GetOSPFNeighborsTextRequest) returns (GetOSPFNeighborsTextResponse);
 
   // GetSystemInfo returns system information.
   rpc GetSystemInfo(GetSystemInfoRequest) returns (GetSystemInfoResponse);
@@ -98,6 +113,12 @@ message CommitResponse {
   string commit_id = 1;
   uint64 version = 2;
 }
+
+message ValidateCandidateRequest {
+  string session_id = 1;
+}
+
+message ValidateCandidateResponse {}
 
 message DiscardRequest {
   string session_id = 1;
@@ -228,6 +249,34 @@ message BGPNeighborState {
   uint64 uptime_secs = 4;
   uint32 prefix_received = 5;
   uint32 prefix_sent = 6;
+}
+
+message GetRouteTextRequest {
+  string protocol_filter = 1;
+}
+
+message GetRouteTextResponse {
+  string output = 1;
+}
+
+message GetBGPSummaryTextRequest {}
+
+message GetBGPSummaryTextResponse {
+  string output = 1;
+}
+
+message GetBGPNeighborTextRequest {
+  string peer_address = 1;
+}
+
+message GetBGPNeighborTextResponse {
+  string output = 1;
+}
+
+message GetOSPFNeighborsTextRequest {}
+
+message GetOSPFNeighborsTextResponse {
+  string output = 1;
 }
 
 message GetSystemInfoRequest {}

@@ -15,6 +15,7 @@ import (
 	"sync"
 	"time"
 
+	apiv1 "github.com/akam1o/arca-router/api/v1"
 	"github.com/akam1o/arca-router/internal/engine"
 	"github.com/akam1o/arca-router/internal/model"
 	"github.com/akam1o/arca-router/internal/store"
@@ -54,10 +55,10 @@ func NewServer(eng *engine.Engine, st store.ConfigStore, log *slog.Logger) *Serv
 
 // Serve starts the gRPC server on the given listener.
 func (s *Server) Serve(lis net.Listener) error {
-	s.server = googlegrpc.NewServer(googlegrpc.ForceServerCodec(jsonCodec{}))
-	registerConfigServiceServer(s.server, s)
-	registerSessionServiceServer(s.server, s)
-	registerStateServiceServer(s.server, s)
+	s.server = googlegrpc.NewServer()
+	apiv1.RegisterConfigServiceServer(s.server, &configServiceAdapter{server: s})
+	apiv1.RegisterSessionServiceServer(s.server, &sessionServiceAdapter{server: s})
+	apiv1.RegisterStateServiceServer(s.server, &stateServiceAdapter{server: s})
 	s.log.Info("gRPC server starting", slog.String("address", lis.Addr().String()))
 	return s.server.Serve(lis)
 }
