@@ -17,10 +17,19 @@ func (c *RouterConfig) Validate() error {
 		return fmt.Errorf("configuration is nil")
 	}
 
+	if err := c.validateSystem(); err != nil {
+		return err
+	}
 	if err := c.validateInterfaces(); err != nil {
 		return err
 	}
+	if err := c.validateChassis(); err != nil {
+		return err
+	}
 	if err := c.validateRouting(); err != nil {
+		return err
+	}
+	if err := c.validateRoutingInstances(); err != nil {
 		return err
 	}
 	if err := c.validateProtocols(); err != nil {
@@ -28,6 +37,23 @@ func (c *RouterConfig) Validate() error {
 	}
 	if err := c.validatePolicy(); err != nil {
 		return err
+	}
+	if err := c.validateClassOfService(); err != nil {
+		return err
+	}
+	return nil
+}
+
+func (c *RouterConfig) validateSystem() error {
+	if c.System == nil || c.System.Services == nil || c.System.Services.WebUI == nil {
+		return nil
+	}
+	web := c.System.Services.WebUI
+	if web.Port < 0 || web.Port > 65535 {
+		return fmt.Errorf("system services web-ui: port must be 0-65535, got %d", web.Port)
+	}
+	if web.ListenAddress != "" && web.ListenAddress != "localhost" && net.ParseIP(web.ListenAddress) == nil {
+		return fmt.Errorf("system services web-ui: invalid listen-address %q", web.ListenAddress)
 	}
 	return nil
 }
@@ -77,6 +103,54 @@ func (c *RouterConfig) validateRouting() error {
 	return nil
 }
 
+func (c *RouterConfig) validateChassis() error {
+	if c.Chassis == nil || c.Chassis.Cluster == nil {
+		return nil
+	}
+	for name, node := range c.Chassis.Cluster.Nodes {
+		if node == nil {
+			return fmt.Errorf("chassis cluster node %s is nil", name)
+		}
+		if node.Address != "" && net.ParseIP(node.Address) == nil {
+			return fmt.Errorf("chassis cluster node %s: invalid address %q", name, node.Address)
+		}
+		if node.Priority < 0 || node.Priority > 255 {
+			return fmt.Errorf("chassis cluster node %s: priority must be 0-255, got %d", name, node.Priority)
+		}
+	}
+	if sync := c.Chassis.Cluster.Sync; sync != nil && sync.Etcd != nil {
+		for _, endpoint := range sync.Etcd.Endpoints {
+			if strings.TrimSpace(endpoint) == "" {
+				return fmt.Errorf("chassis cluster sync etcd endpoint must not be empty")
+			}
+		}
+	}
+	return nil
+}
+
+func (c *RouterConfig) validateRoutingInstances() error {
+	for name, instance := range c.RoutingInstances {
+		if instance == nil {
+			return fmt.Errorf("routing-instance %s is nil", name)
+		}
+		if instance.InstanceType != "" && instance.InstanceType != "vrf" {
+			return fmt.Errorf("routing-instance %s: unsupported instance-type %q", name, instance.InstanceType)
+		}
+		if instance.RouteDistinguisher != "" && !regexp.MustCompile(`^\d+:\d+$`).MatchString(instance.RouteDistinguisher) {
+			return fmt.Errorf("routing-instance %s: invalid route-distinguisher %q", name, instance.RouteDistinguisher)
+		}
+		if instance.VRFTarget != "" && !regexp.MustCompile(`^target:\d+:\d+$`).MatchString(instance.VRFTarget) {
+			return fmt.Errorf("routing-instance %s: invalid vrf-target %q", name, instance.VRFTarget)
+		}
+		for _, ifName := range instance.Interfaces {
+			if !junosIfacePattern.MatchString(ifName) {
+				return fmt.Errorf("routing-instance %s: invalid interface name %q", name, ifName)
+			}
+		}
+	}
+	return nil
+}
+
 func (c *RouterConfig) validateProtocols() error {
 	if c.Protocols == nil {
 		return nil
@@ -90,6 +164,29 @@ func (c *RouterConfig) validateProtocols() error {
 		if ospf.RouterID != "" {
 			if net.ParseIP(ospf.RouterID) == nil {
 				return fmt.Errorf("ospf: invalid router-id %q", ospf.RouterID)
+			}
+		}
+	}
+	if mpls := c.Protocols.MPLS; mpls != nil {
+		for _, ifName := range mpls.Interfaces {
+			if !junosIfacePattern.MatchString(ifName) {
+				return fmt.Errorf("mpls: invalid interface name %q", ifName)
+			}
+		}
+	}
+	if vrrp := c.Protocols.VRRP; vrrp != nil {
+		for name, group := range vrrp.Groups {
+			if group == nil {
+				return fmt.Errorf("vrrp group %s is nil", name)
+			}
+			if group.Interface != "" && !junosIfacePattern.MatchString(group.Interface) {
+				return fmt.Errorf("vrrp group %s: invalid interface name %q", name, group.Interface)
+			}
+			if group.VirtualAddress != "" && net.ParseIP(group.VirtualAddress) == nil {
+				return fmt.Errorf("vrrp group %s: invalid virtual-address %q", name, group.VirtualAddress)
+			}
+			if group.Priority < 0 || group.Priority > 255 {
+				return fmt.Errorf("vrrp group %s: priority must be 0-255, got %d", name, group.Priority)
 			}
 		}
 	}
@@ -139,6 +236,34 @@ func (c *RouterConfig) validatePolicy() error {
 		for _, prefix := range pl.Prefixes {
 			if _, _, err := net.ParseCIDR(prefix); err != nil {
 				return fmt.Errorf("prefix-list %s: invalid prefix %q: %w", name, prefix, err)
+			}
+		}
+	}
+	return nil
+}
+
+func (c *RouterConfig) validateClassOfService() error {
+	if c.ClassOfService == nil {
+		return nil
+	}
+	for name, fc := range c.ClassOfService.ForwardingClasses {
+		if fc == nil {
+			return fmt.Errorf("class-of-service forwarding-class %s is nil", name)
+		}
+		if fc.Queue < 0 || fc.Queue > 7 {
+			return fmt.Errorf("class-of-service forwarding-class %s: queue must be 0-7, got %d", name, fc.Queue)
+		}
+	}
+	for name, iface := range c.ClassOfService.Interfaces {
+		if !junosIfacePattern.MatchString(name) {
+			return fmt.Errorf("class-of-service interface %s: invalid interface name", name)
+		}
+		if iface == nil {
+			return fmt.Errorf("class-of-service interface %s is nil", name)
+		}
+		if iface.OutputTrafficControlProfile != "" {
+			if _, ok := c.ClassOfService.TrafficControlProfiles[iface.OutputTrafficControlProfile]; !ok {
+				return fmt.Errorf("class-of-service interface %s: output traffic-control-profile %q not found", name, iface.OutputTrafficControlProfile)
 			}
 		}
 	}

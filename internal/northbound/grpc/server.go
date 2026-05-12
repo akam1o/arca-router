@@ -715,6 +715,29 @@ func replacementPrefixes(path []string) []string {
 	if len(path) >= 3 && path[0] == "system" && path[1] == "host-name" {
 		return prefix(2)
 	}
+	if len(path) >= 5 && path[0] == "system" && path[1] == "services" && path[2] == "web-ui" {
+		switch path[3] {
+		case "enabled", "listen-address", "port":
+			return prefix(4)
+		}
+	}
+	if len(path) >= 4 && path[0] == "chassis" && path[1] == "cluster" {
+		switch path[2] {
+		case "enabled":
+			return prefix(3)
+		case "node":
+			if len(path) >= 5 {
+				switch path[4] {
+				case "address", "priority":
+					return prefix(5)
+				}
+			}
+		case "sync":
+			if len(path) >= 6 && path[3] == "etcd" && path[4] == "endpoint" {
+				return nil
+			}
+		}
+	}
 	if len(path) >= 4 && path[0] == "interfaces" && path[2] == "description" {
 		return prefix(3)
 	}
@@ -730,6 +753,15 @@ func replacementPrefixes(path []string) []string {
 	}
 	if len(path) >= 4 && path[0] == "protocols" {
 		switch path[1] {
+		case "mpls":
+			return nil
+		case "vrrp":
+			if len(path) >= 5 && path[2] == "group" {
+				switch path[4] {
+				case "interface", "virtual-address", "priority", "preempt":
+					return prefix(5)
+				}
+			}
 		case "ospf":
 			if path[2] == "router-id" {
 				return prefix(3)
@@ -753,6 +785,33 @@ func replacementPrefixes(path []string) []string {
 						}
 					}
 				}
+			}
+		}
+	}
+	if len(path) >= 3 && path[0] == "routing-instances" {
+		switch path[2] {
+		case "instance-type", "route-distinguisher", "vrf-target":
+			return prefix(3)
+		case "interface":
+			return nil
+		}
+	}
+	if len(path) >= 4 && path[0] == "class-of-service" {
+		switch path[1] {
+		case "forwarding-class":
+			if len(path) >= 4 && path[3] == "queue" {
+				return prefix(4)
+			}
+		case "traffic-control-profile":
+			if len(path) >= 4 {
+				switch path[3] {
+				case "shaping-rate", "scheduler-map":
+					return prefix(4)
+				}
+			}
+		case "interfaces":
+			if len(path) >= 4 && path[3] == "output-traffic-control-profile" {
+				return prefix(4)
 			}
 		}
 	}
