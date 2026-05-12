@@ -251,6 +251,55 @@ func TestReleaseLockWaitsForInFlightCommit(t *testing.T) {
 	}
 }
 
+func TestCommitRejectsStaleCandidate(t *testing.T) {
+	oldParser := ConfigTextParser
+	ConfigTextParser = func(text string) (*model.RouterConfig, error) {
+		cfg, err := pkgconfig.NewParser(strings.NewReader(text)).Parse()
+		if err != nil {
+			return nil, err
+		}
+		return model.FromLegacyConfig(cfg), nil
+	}
+	t.Cleanup(func() { ConfigTextParser = oldParser })
+
+	ctx := context.Background()
+	eng := engine.NewEngine(nil, testLogger())
+	eng.InitializeRunning(&model.RouterConfig{
+		System:     &model.SystemConfig{HostName: "router1"},
+		Interfaces: map[string]*model.InterfaceConfig{},
+	}, 1)
+	st := &fakeStore{commitID: "commit-1"}
+	srv := NewServer(eng, st, testLogger())
+
+	sessionID, err := srv.CreateSession(ctx, "alice")
+	if err != nil {
+		t.Fatalf("CreateSession() error = %v", err)
+	}
+	if err := srv.AcquireLock(ctx, sessionID, "alice"); err != nil {
+		t.Fatalf("AcquireLock() error = %v", err)
+	}
+	if err := srv.EditCandidate(ctx, sessionID, "set system host-name router2"); err != nil {
+		t.Fatalf("EditCandidate() error = %v", err)
+	}
+	if err := eng.Apply(ctx, &model.RouterConfig{
+		System:     &model.SystemConfig{HostName: "netconf-router"},
+		Interfaces: map[string]*model.InterfaceConfig{},
+	}, "bob", "external commit"); err != nil {
+		t.Fatalf("Apply() external error = %v", err)
+	}
+
+	_, _, err = srv.Commit(ctx, sessionID, "alice", "stale")
+	if err == nil || !strings.Contains(err.Error(), "candidate configuration is stale") {
+		t.Fatalf("Commit() error = %v, want stale candidate", err)
+	}
+	if st.saved != nil {
+		t.Fatal("Commit() prepared persistence for stale candidate")
+	}
+	if got := eng.Running().System.HostName; got != "netconf-router" {
+		t.Fatalf("running hostname = %q, want netconf-router", got)
+	}
+}
+
 func TestListHistoryRejectsNegativePagination(t *testing.T) {
 	eng := engine.NewEngine(nil, testLogger())
 	st := &fakeStore{}

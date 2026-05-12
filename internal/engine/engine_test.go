@@ -38,6 +38,13 @@ func TestRunningSnapshotReturnsCopy(t *testing.T) {
 	}
 }
 
+func TestRunningSnapshotReturnsNilBeforeInitialize(t *testing.T) {
+	eng := NewEngine(nil, slog.Default())
+	if snap := eng.RunningSnapshot(); snap != nil {
+		t.Fatalf("RunningSnapshot() = %#v, want nil", snap)
+	}
+}
+
 func TestValidateDiffDoesNotExposeRunningOrCandidate(t *testing.T) {
 	plugin := &mutatingDiffPlugin{}
 	eng := NewEngine([]Plugin{plugin}, slog.Default())
