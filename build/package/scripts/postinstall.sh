@@ -13,13 +13,17 @@ if ! id arca-router >/dev/null 2>&1; then
         arca-router
 fi
 
-# Add arca-router to VPP/FRR groups
+# Add arca-router to groups needed by the default v0.5 backends.
 usermod -aG vpp arca-router 2>/dev/null || echo "Warning: vpp group not found. Ensure VPP is installed."
-usermod -aG frr arca-router 2>/dev/null || echo "Warning: frr group not found. Ensure FRR is installed."
 usermod -aG frrvty arca-router 2>/dev/null || echo "Warning: frrvty group not found. Ensure FRR is installed."
 
 # Reload systemd to recognize new service
 systemctl daemon-reload >/dev/null 2>&1 || true
+
+# v0.5 runs NETCONF inside arca-routerd. Stop the legacy standalone service if
+# it exists from an older package so it does not contend for port 830.
+systemctl stop arca-netconfd >/dev/null 2>&1 || true
+systemctl disable arca-netconfd >/dev/null 2>&1 || true
 
 # Ensure directory permissions
 mkdir -p /var/lib/arca-router /var/log/arca-router
@@ -28,12 +32,9 @@ chown arca-router:arca-router /var/log/arca-router || true
 chmod 0750 /var/lib/arca-router || true
 chmod 0750 /var/log/arca-router || true
 
-# Ensure FRR config permissions (if FRR is installed)
-# arca-routerd writes to /etc/frr/frr.conf directly (requires group write)
-if [ -f /etc/frr/frr.conf ]; then
-    chown root:frr /etc/frr/frr.conf || true
-    chmod 0660 /etc/frr/frr.conf || true
-fi
+# The default FRR apply backend is transactional and uses vtysh/mgmtd.
+# Do not grant /etc/frr write access by default. The legacy file backend can be
+# enabled with --frr-apply-mode=file plus a local systemd/group permission override.
 
 # SELinux context for log directory (RHEL 9)
 if command -v semanage >/dev/null 2>&1 && command -v restorecon >/dev/null 2>&1; then
@@ -46,14 +47,19 @@ if command -v systemctl >/dev/null 2>&1; then
     echo ""
     echo "Verifying VPP/FRR installation..."
     if ! systemctl list-unit-files 2>/dev/null | grep -q vpp.service; then
-        echo "WARNING: VPP service not found. Phase 2 requires VPP 24.10+"
+        echo "WARNING: VPP service not found. arca-router requires VPP 24.10+"
         echo "Install VPP (Debian): https://packagecloud.io/fdio/2410"
         echo "Install VPP (RHEL): sudo dnf install vpp vpp-plugin-core"
     fi
     if ! systemctl list-unit-files 2>/dev/null | grep -q frr.service; then
-        echo "WARNING: FRR service not found. Phase 2 requires FRR 8.0+"
+        echo "WARNING: FRR service not found. arca-router requires FRR 8.0+"
         echo "Install FRR: sudo apt install frr (Debian) or sudo dnf install frr (RHEL)"
     fi
+fi
+
+# Check FRR mgmtd enablement for the default transactional backend.
+if [ -f /etc/frr/daemons ] && ! grep -q '^mgmtd=yes' /etc/frr/daemons; then
+    echo "WARNING: FRR mgmtd is not enabled. Set mgmtd=yes in /etc/frr/daemons for the default transactional apply backend."
 fi
 
 # Check VPP socket permissions (if VPP is running)
@@ -70,11 +76,11 @@ if [ "$1" = "1" ]; then
     # Initial installation
     echo ""
     echo "=========================================="
-    echo "ARCA Router Phase 2 has been installed."
+    echo "ARCA Router v0.5 unified daemon has been installed."
     echo ""
     echo "Prerequisites:"
     echo "- VPP 24.10+ with linux-cp plugin enabled"
-    echo "- FRR 8.0+ (bgpd, ospfd, zebra, staticd)"
+    echo "- FRR 8.0+ (bgpd, ospfd, zebra, staticd, mgmtd)"
     echo ""
     echo "Next steps:"
     echo "1. Copy example configs:"
@@ -83,16 +89,21 @@ if [ "$1" = "1" ]; then
     echo ""
     echo "2. Edit the configuration files"
     echo ""
-    echo "3. Ensure VPP/FRR are running:"
+    echo "3. Add CLI operator users to the arca-router group:"
+    echo "   usermod -aG arca-router <admin-user>"
+    echo "   # log out and back in before running arca-cli as that user"
+    echo ""
+    echo "4. Ensure VPP/FRR are running and FRR has mgmtd=yes:"
+    echo "   grep '^mgmtd=yes' /etc/frr/daemons"
     echo "   systemctl start vpp frr"
     echo ""
-    echo "4. Enable and start arca-router:"
+    echo "5. Enable and start arca-router:"
     echo "   systemctl enable arca-routerd"
     echo "   systemctl start arca-routerd"
     echo ""
-    echo "5. Check status:"
+    echo "6. Check status:"
     echo "   systemctl status arca-routerd"
-    echo "   arca-cli show interfaces"
+    echo "   arca-cli show configuration"
     echo "=========================================="
 elif [ "$1" = "2" ]; then
     # Upgrade

@@ -70,8 +70,8 @@ func TestRPCErrorChaining(t *testing.T) {
 func TestErrMalformedMessage(t *testing.T) {
 	err := ErrMalformedMessage("invalid XML")
 
-	if err.ErrorType != ErrorTypeProtocol {
-		t.Errorf("Expected protocol error type")
+	if err.ErrorType != ErrorTypeRPC {
+		t.Errorf("Expected rpc error type")
 	}
 
 	if err.ErrorTag != ErrorTagMalformedMessage {
@@ -86,12 +86,60 @@ func TestErrMalformedMessage(t *testing.T) {
 func TestErrDTDNotAllowed(t *testing.T) {
 	err := ErrDTDNotAllowed()
 
-	if err.ErrorType != ErrorTypeProtocol {
-		t.Errorf("Expected protocol error type")
+	if err.ErrorType != ErrorTypeRPC {
+		t.Errorf("Expected rpc error type")
 	}
 
 	if err.ErrorInfo == nil || err.ErrorInfo.BadElement != "DOCTYPE" {
 		t.Errorf("Expected bad-element DOCTYPE")
+	}
+}
+
+func TestErrInvalidNamespace(t *testing.T) {
+	err := ErrInvalidNamespace("urn:example:invalid")
+
+	if err.ErrorTag != ErrorTagUnknownNamespace {
+		t.Errorf("Expected unknown-namespace tag, got %s", err.ErrorTag)
+	}
+
+	if err.ErrorInfo == nil || err.ErrorInfo.BadElement != "rpc" || err.ErrorInfo.BadNamespace != "urn:example:invalid" {
+		t.Errorf("Expected bad-element rpc and bad-namespace, got %v", err.ErrorInfo)
+	}
+}
+
+func TestErrMissingAttribute(t *testing.T) {
+	err := ErrMissingAttribute("rpc", "message-id")
+
+	if err.ErrorType != ErrorTypeRPC {
+		t.Errorf("Expected rpc error type, got %s", err.ErrorType)
+	}
+
+	if err.ErrorTag != ErrorTagMissingAttribute {
+		t.Errorf("Expected missing-attribute tag, got %s", err.ErrorTag)
+	}
+
+	if err.ErrorPath != "/rpc" {
+		t.Errorf("Expected /rpc path, got %s", err.ErrorPath)
+	}
+
+	if err.ErrorInfo == nil || err.ErrorInfo.BadElement != "rpc" || err.ErrorInfo.BadAttribute != "message-id" {
+		t.Errorf("Expected bad-element rpc and bad-attribute message-id, got %v", err.ErrorInfo)
+	}
+}
+
+func TestErrMissingElementAtRPCRoot(t *testing.T) {
+	err := ErrMissingElement("rpc", "operation")
+
+	if err.ErrorTag != ErrorTagMissingElement {
+		t.Errorf("Expected missing-element tag, got %s", err.ErrorTag)
+	}
+
+	if err.ErrorPath != "/rpc" {
+		t.Errorf("Expected /rpc path, got %s", err.ErrorPath)
+	}
+
+	if err.ErrorInfo == nil || err.ErrorInfo.BadElement != "operation" {
+		t.Errorf("Expected bad-element operation, got %v", err.ErrorInfo)
 	}
 }
 

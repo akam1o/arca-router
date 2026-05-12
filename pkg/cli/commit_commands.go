@@ -64,6 +64,7 @@ func (s *Session) CommitWithOptions(ctx context.Context, opts CommitOptions) err
 	if commitID != "" {
 		fmt.Printf("  Commit ID: %s\n", commitID)
 	}
+	s.finishConfigurationTransaction(ctx, "commit", !opts.AndQuit)
 
 	return nil
 }
@@ -111,23 +112,15 @@ func (s *Session) RollbackWithNumber(ctx context.Context, rollbackNum int) error
 	// Perform rollback
 	targetCommit := history[rollbackNum]
 	req := &datastore.RollbackRequest{
-		CommitID: targetCommit.CommitID,
-		User:     s.username,
-		Message:  fmt.Sprintf("CLI rollback %d", rollbackNum),
-		SourceIP: "local",
+		SessionID: s.id,
+		CommitID:  targetCommit.CommitID,
+		User:      s.username,
+		Message:   fmt.Sprintf("CLI rollback %d", rollbackNum),
+		SourceIP:  "local",
 	}
 	newCommitID, err := s.ds.Rollback(ctx, req)
 	if err != nil {
 		return fmt.Errorf("rollback failed: %w", err)
-	}
-
-	// Sync candidate with rolled-back running
-	running, err := s.ds.GetRunning(ctx)
-	if err != nil {
-		return fmt.Errorf("failed to get running after rollback: %w", err)
-	}
-	if err := s.ds.SaveCandidate(ctx, s.id, running.ConfigText); err != nil {
-		return fmt.Errorf("failed to sync candidate: %w", err)
 	}
 
 	fmt.Printf("rollback complete\n")
@@ -141,6 +134,7 @@ func (s *Session) RollbackWithNumber(ctx context.Context, rollbackNum int) error
 	} else if newCommitID != "" {
 		fmt.Printf("  New commit ID: %s\n", newCommitID)
 	}
+	s.finishConfigurationTransaction(ctx, "rollback", true)
 
 	return nil
 }
@@ -150,13 +144,11 @@ func (s *Session) DiscardChangesWithMessage(ctx context.Context) error {
 	if s.mode != ModeConfiguration {
 		return fmt.Errorf("not in configuration mode")
 	}
-
-	running, err := s.ds.GetRunning(ctx)
-	if err != nil {
-		return fmt.Errorf("failed to get running: %w", err)
+	if err := s.verifyLock(ctx); err != nil {
+		return fmt.Errorf("cannot discard changes: %w", err)
 	}
 
-	if err := s.ds.SaveCandidate(ctx, s.id, running.ConfigText); err != nil {
+	if err := s.syncCandidateFromRunning(ctx); err != nil {
 		return fmt.Errorf("failed to discard changes: %w", err)
 	}
 

@@ -16,8 +16,13 @@ type ConfigStore interface {
 	// GetLatestSnapshot returns the most recent committed configuration.
 	GetLatestSnapshot(ctx context.Context) (*model.ConfigSnapshot, error)
 
-	// SaveCommit persists a new configuration commit.
-	SaveCommit(ctx context.Context, commitID string, snap *model.ConfigSnapshot) error
+	// PrepareCommit reserves persistence for a configuration commit before
+	// southbound changes are applied. The caller must either Commit or Abort
+	// the returned prepared commit.
+	PrepareCommit(ctx context.Context, snap *model.ConfigSnapshot) (PreparedCommit, error)
+
+	// SaveCommit persists a new configuration commit and returns its ID.
+	SaveCommit(ctx context.Context, snap *model.ConfigSnapshot) (string, error)
 
 	// GetCommit retrieves a specific commit by ID.
 	GetCommit(ctx context.Context, commitID string) (*CommitRecord, error)
@@ -32,15 +37,27 @@ type ConfigStore interface {
 	Close() error
 }
 
+// PreparedCommit represents a datastore commit that has been staged but not
+// promoted to running yet.
+type PreparedCommit interface {
+	Commit(ctx context.Context) (string, error)
+	Abort(ctx context.Context) error
+}
+
+// RollbackPreparer prepares rollback commits with rollback history metadata.
+type RollbackPreparer interface {
+	PrepareRollback(ctx context.Context, snap *model.ConfigSnapshot, targetCommitID string) (PreparedCommit, error)
+}
+
 // CommitRecord represents a persisted commit entry.
 type CommitRecord struct {
-	CommitID   string               `json:"commit_id"`
-	Version    uint64               `json:"version"`
-	Config     *model.RouterConfig  `json:"config"`
-	Author     string               `json:"author"`
-	Message    string               `json:"message,omitempty"`
-	Timestamp  time.Time            `json:"timestamp"`
-	IsRollback bool                 `json:"is_rollback,omitempty"`
+	CommitID   string              `json:"commit_id"`
+	Version    uint64              `json:"version"`
+	Config     *model.RouterConfig `json:"config"`
+	Author     string              `json:"author"`
+	Message    string              `json:"message,omitempty"`
+	Timestamp  time.Time           `json:"timestamp"`
+	IsRollback bool                `json:"is_rollback,omitempty"`
 }
 
 // ListOptions controls pagination and filtering for commit history.

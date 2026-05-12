@@ -139,6 +139,19 @@ func TestVerifyPassword(t *testing.T) {
 	}
 }
 
+func TestVerifyPasswordRejectsUnsafeParameters(t *testing.T) {
+	hash, err := HashPassword("password")
+	if err != nil {
+		t.Fatalf("HashPassword() failed: %v", err)
+	}
+
+	badHash := strings.Replace(hash, "p=4", "p=0", 1)
+	_, err = VerifyPassword("password", badHash)
+	if err == nil || !strings.Contains(err.Error(), "invalid parameters") {
+		t.Fatalf("VerifyPassword() error = %v, want invalid parameters", err)
+	}
+}
+
 func TestPasswordHashUniqueness(t *testing.T) {
 	// Same password should produce different hashes (due to random salt)
 	password := "testPassword"

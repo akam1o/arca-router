@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net"
+	"strings"
 	"sync"
 
 	"github.com/akam1o/arca-router/internal/engine"
@@ -28,17 +29,21 @@ type VPPPlugin struct {
 
 	// appliedAddrs tracks addresses applied per interface for rollback
 	appliedAddrs map[uint32][]*net.IPNet
+
+	// removedInterfaces tracks interfaces disabled during the last apply.
+	removedInterfaces map[string]uint32
 }
 
 // NewVPPPlugin creates a new VPP plugin.
 func NewVPPPlugin(client pkgvpp.Client, hwConfig *device.HardwareConfig, log *slog.Logger) *VPPPlugin {
 	return &VPPPlugin{
-		client:       client,
-		lcpManager:   pkgvpp.NewLCPStateManager(client),
-		hwConfig:     hwConfig,
-		log:          log.With("plugin", "vpp"),
-		ifaceIndex:   make(map[string]uint32),
-		appliedAddrs: make(map[uint32][]*net.IPNet),
+		client:            client,
+		lcpManager:        pkgvpp.NewLCPStateManager(client),
+		hwConfig:          hwConfig,
+		log:               log.With("plugin", "vpp"),
+		ifaceIndex:        make(map[string]uint32),
+		appliedAddrs:      make(map[uint32][]*net.IPNet),
+		removedInterfaces: make(map[string]uint32),
 	}
 }
 
@@ -112,6 +117,7 @@ func (p *VPPPlugin) ApplyChanges(ctx context.Context, diff *engine.ConfigDiff) e
 
 	// Track changes for potential rollback
 	var rollbackOps []func(context.Context) error
+	p.removedInterfaces = make(map[string]uint32)
 
 	// 1. Create new interfaces
 	for name, ifaceCfg := range diff.InterfacesAdded {
@@ -132,7 +138,8 @@ func (p *VPPPlugin) ApplyChanges(ctx context.Context, diff *engine.ConfigDiff) e
 	// 3. Remove interfaces (remove addresses, LCP, then disable)
 	for _, name := range diff.InterfacesRemoved {
 		if err := p.removeInterface(ctx, name, &rollbackOps); err != nil {
-			p.log.Warn("Failed to remove interface (non-fatal)", slog.String("interface", name), slog.Any("error", err))
+			p.executeRollback(ctx, rollbackOps)
+			return fmt.Errorf("remove interface %s: %w", name, err)
 		}
 	}
 
@@ -145,6 +152,29 @@ func (p *VPPPlugin) RollbackChanges(ctx context.Context, diff *engine.ConfigDiff
 	defer p.mu.Unlock()
 
 	// Reverse of ApplyChanges: remove added addresses, re-add removed addresses
+	for name, ifaceCfg := range diff.InterfacesAdded {
+		swIfIndex, ok := p.ifaceIndex[name]
+		if !ok {
+			continue
+		}
+		p.deleteConfiguredAddresses(ctx, swIfIndex, ifaceCfg)
+		_ = p.client.DeleteLCPInterface(ctx, swIfIndex)
+		_ = p.client.SetInterfaceDown(ctx, swIfIndex)
+		delete(p.ifaceIndex, name)
+	}
+
+	for _, name := range diff.InterfacesRemoved {
+		swIfIndex, ok := p.removedInterfaces[name]
+		if !ok {
+			continue
+		}
+		p.ifaceIndex[name] = swIfIndex
+		_ = p.client.SetInterfaceUp(ctx, swIfIndex)
+		if linuxName, err := pkgvpp.ConvertJunosToLinuxName(name); err == nil {
+			_ = p.lcpManager.Create(ctx, swIfIndex, linuxName, name)
+		}
+	}
+
 	for _, change := range diff.InterfacesChanged {
 		swIfIndex, ok := p.ifaceIndex[change.Name]
 		if !ok {
@@ -152,7 +182,7 @@ func (p *VPPPlugin) RollbackChanges(ctx context.Context, diff *engine.ConfigDiff
 		}
 		// Remove addresses that were added
 		for _, addr := range change.AddressesAdded {
-			_, ipNet, err := net.ParseCIDR(addr.Address)
+			ipNet, err := pkgvpp.ParseCIDRAddress(addr.Address)
 			if err != nil {
 				continue
 			}
@@ -160,7 +190,7 @@ func (p *VPPPlugin) RollbackChanges(ctx context.Context, diff *engine.ConfigDiff
 		}
 		// Re-add addresses that were removed
 		for _, addr := range change.AddressesRemoved {
-			_, ipNet, err := net.ParseCIDR(addr.Address)
+			ipNet, err := pkgvpp.ParseCIDRAddress(addr.Address)
 			if err != nil {
 				continue
 			}
@@ -264,6 +294,12 @@ func (p *VPPPlugin) createInterface(ctx context.Context, name string, ifaceCfg *
 	}
 
 	p.ifaceIndex[name] = vppIface.SwIfIndex
+	*rollback = append(*rollback, func(ctx context.Context) error {
+		_ = p.client.DeleteLCPInterface(ctx, vppIface.SwIfIndex)
+		_ = p.client.SetInterfaceDown(ctx, vppIface.SwIfIndex)
+		delete(p.ifaceIndex, name)
+		return nil
+	})
 
 	// Set interface up
 	if err := p.client.SetInterfaceUp(ctx, vppIface.SwIfIndex); err != nil {
@@ -282,7 +318,7 @@ func (p *VPPPlugin) createInterface(ctx context.Context, name string, ifaceCfg *
 
 	// Apply addresses
 	if ifaceCfg != nil {
-		if err := p.applyAddresses(ctx, vppIface.SwIfIndex, ifaceCfg); err != nil {
+		if err := p.applyAddresses(ctx, vppIface.SwIfIndex, ifaceCfg, rollback); err != nil {
 			return err
 		}
 	}
@@ -298,24 +334,33 @@ func (p *VPPPlugin) applyInterfaceChanges(ctx context.Context, change *engine.In
 
 	// Remove old addresses
 	for _, addr := range change.AddressesRemoved {
-		_, ipNet, err := net.ParseCIDR(addr.Address)
+		ipNet, err := pkgvpp.ParseCIDRAddress(addr.Address)
 		if err != nil {
 			continue
 		}
 		if err := p.client.DeleteInterfaceAddress(ctx, swIfIndex, ipNet); err != nil {
 			p.log.Warn("Failed to remove address", slog.String("interface", change.Name), slog.String("address", addr.Address), slog.Any("error", err))
+		} else {
+			addrCopy := cloneIPNet(ipNet)
+			*rollback = append(*rollback, func(ctx context.Context) error {
+				return p.client.SetInterfaceAddress(ctx, swIfIndex, addrCopy)
+			})
 		}
 	}
 
 	// Add new addresses
 	for _, addr := range change.AddressesAdded {
-		_, ipNet, err := net.ParseCIDR(addr.Address)
+		ipNet, err := pkgvpp.ParseCIDRAddress(addr.Address)
 		if err != nil {
 			return fmt.Errorf("parse CIDR %s: %w", addr.Address, err)
 		}
 		if err := p.client.SetInterfaceAddress(ctx, swIfIndex, ipNet); err != nil {
 			return fmt.Errorf("set address %s: %w", addr.Address, err)
 		}
+		addrCopy := cloneIPNet(ipNet)
+		*rollback = append(*rollback, func(ctx context.Context) error {
+			return p.client.DeleteInterfaceAddress(ctx, swIfIndex, addrCopy)
+		})
 	}
 
 	return nil
@@ -326,34 +371,110 @@ func (p *VPPPlugin) removeInterface(ctx context.Context, name string, rollback *
 	if !ok {
 		return nil // Already gone
 	}
+	p.removedInterfaces[name] = swIfIndex
 
 	// Set interface down
 	if err := p.client.SetInterfaceDown(ctx, swIfIndex); err != nil {
 		return fmt.Errorf("set down: %w", err)
 	}
+	*rollback = append(*rollback, func(ctx context.Context) error {
+		p.ifaceIndex[name] = swIfIndex
+		if err := p.client.SetInterfaceUp(ctx, swIfIndex); err != nil {
+			return err
+		}
+		if linuxName, err := pkgvpp.ConvertJunosToLinuxName(name); err == nil {
+			_ = p.lcpManager.Create(ctx, swIfIndex, linuxName, name)
+		}
+		return nil
+	})
 
-	// Remove LCP pair
-	_ = p.client.DeleteLCPInterface(ctx, swIfIndex)
+	// Remove LCP pair if it exists. LCP creation is currently best-effort, so
+	// absence must not block deleting the owning interface config.
+	if err := p.deleteLCPIfPresent(ctx, swIfIndex); err != nil {
+		return fmt.Errorf("delete LCP interface: %w", err)
+	}
 
 	delete(p.ifaceIndex, name)
 	return nil
 }
 
-func (p *VPPPlugin) applyAddresses(ctx context.Context, swIfIndex uint32, ifaceCfg *model.InterfaceConfig) error {
+func (p *VPPPlugin) deleteLCPIfPresent(ctx context.Context, swIfIndex uint32) error {
+	if _, err := p.lcpManager.Get(ctx, swIfIndex); err != nil {
+		if isLCPNotFound(err) {
+			return nil
+		}
+		return err
+	}
+	if err := p.lcpManager.Delete(ctx, swIfIndex); err != nil {
+		if isLCPNotFound(err) {
+			return nil
+		}
+		return err
+	}
+	return nil
+}
+
+func isLCPNotFound(err error) bool {
+	return err != nil && strings.Contains(err.Error(), "LCP pair not found")
+}
+
+func (p *VPPPlugin) applyAddresses(ctx context.Context, swIfIndex uint32, ifaceCfg *model.InterfaceConfig, rollback *[]func(context.Context) error) error {
 	for _, unit := range ifaceCfg.Units {
 		for _, family := range unit.Family {
 			for _, addrStr := range family.Addresses {
-				_, ipNet, err := net.ParseCIDR(addrStr)
+				ipNet, err := pkgvpp.ParseCIDRAddress(addrStr)
 				if err != nil {
 					return fmt.Errorf("parse CIDR %s: %w", addrStr, err)
 				}
 				if err := p.client.SetInterfaceAddress(ctx, swIfIndex, ipNet); err != nil {
 					return fmt.Errorf("set address %s: %w", addrStr, err)
 				}
+				addrCopy := cloneIPNet(ipNet)
+				*rollback = append(*rollback, func(ctx context.Context) error {
+					return p.client.DeleteInterfaceAddress(ctx, swIfIndex, addrCopy)
+				})
 			}
 		}
 	}
 	return nil
+}
+
+func (p *VPPPlugin) deleteConfiguredAddresses(ctx context.Context, swIfIndex uint32, ifaceCfg *model.InterfaceConfig) {
+	if ifaceCfg == nil {
+		return
+	}
+	for _, unit := range ifaceCfg.Units {
+		if unit == nil {
+			continue
+		}
+		for _, family := range unit.Family {
+			if family == nil {
+				continue
+			}
+			for _, addrStr := range family.Addresses {
+				ipNet, err := pkgvpp.ParseCIDRAddress(addrStr)
+				if err != nil {
+					continue
+				}
+				if err := p.client.DeleteInterfaceAddress(ctx, swIfIndex, ipNet); err != nil {
+					p.log.Warn("Failed to remove address during rollback",
+						slog.Uint64("sw_if_index", uint64(swIfIndex)),
+						slog.String("address", addrStr),
+						slog.Any("error", err))
+				}
+			}
+		}
+	}
+}
+
+func cloneIPNet(ipNet *net.IPNet) *net.IPNet {
+	if ipNet == nil {
+		return nil
+	}
+	return &net.IPNet{
+		IP:   append(net.IP(nil), ipNet.IP...),
+		Mask: append(net.IPMask(nil), ipNet.Mask...),
+	}
 }
 
 func (p *VPPPlugin) findJunosName(swIfIndex uint32) string {

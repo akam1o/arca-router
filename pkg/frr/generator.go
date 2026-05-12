@@ -90,12 +90,12 @@ func GenerateFRRConfigFile(frrConfig *Config) (string, error) {
 
 	// Hostname
 	if frrConfig.Hostname != "" {
-		b.WriteString(fmt.Sprintf("hostname %s\n", frrConfig.Hostname))
+		fmt.Fprintf(&b, "hostname %s\n", frrConfig.Hostname)
 	}
 
 	// Logging
 	if frrConfig.LogFile != "" {
-		b.WriteString(fmt.Sprintf("log file %s\n", frrConfig.LogFile))
+		fmt.Fprintf(&b, "log file %s\n", frrConfig.LogFile)
 	}
 	if frrConfig.LogTimestamp {
 		b.WriteString("log timestamp precision 3\n")

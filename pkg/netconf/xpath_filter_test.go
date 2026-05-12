@@ -1,6 +1,7 @@
 package netconf
 
 import (
+	"encoding/xml"
 	"testing"
 )
 
@@ -220,8 +221,31 @@ func TestFilterMatches(t *testing.T) {
 			want:    true,
 		},
 		{
+			name: "subtree filter namespace prefix match",
+			filter: &Filter{
+				Content: []byte("<if:interfaces/>"),
+				InheritedAttrs: []xml.Attr{
+					{Name: xml.Name{Space: "xmlns", Local: "if"}, Value: IETFInterfacesNS},
+				},
+			},
+			element: "interfaces",
+			want:    true,
+		},
+		{
 			name:    "subtree filter no match",
 			filter:  &Filter{Content: []byte("<protocols/>")},
+			element: "interfaces",
+			want:    false,
+		},
+		{
+			name:    "text filter does not match all",
+			filter:  &Filter{Content: []byte("junk")},
+			element: "interfaces",
+			want:    false,
+		},
+		{
+			name:    "bare xpath text does not match subtree",
+			filter:  &Filter{Content: []byte("/interfaces")},
 			element: "interfaces",
 			want:    false,
 		},
@@ -247,6 +271,12 @@ func TestParseFilterElements(t *testing.T) {
 		{
 			name:    "single element",
 			xml:     []byte("<interfaces/>"),
+			want:    []string{"interfaces"},
+			wantErr: false,
+		},
+		{
+			name:    "namespace prefix element",
+			xml:     []byte(`<if:interfaces xmlns:if="urn:ietf:params:xml:ns:yang:ietf-interfaces"/>`),
 			want:    []string{"interfaces"},
 			wantErr: false,
 		},

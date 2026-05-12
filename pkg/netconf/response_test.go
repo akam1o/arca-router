@@ -1,7 +1,9 @@
 package netconf
 
 import (
+	"bytes"
 	"encoding/xml"
+	"io"
 	"strings"
 	"testing"
 )
@@ -127,6 +129,44 @@ func TestMarshalOKReply(t *testing.T) {
 	}
 }
 
+func TestMarshalReplyPreservesAttributes(t *testing.T) {
+	reply := NewOKReply("101").WithAttributes([]xml.Attr{
+		{Name: xml.Name{Space: "xmlns", Local: "ex"}, Value: "http://example.net/content/1.0"},
+		{Name: xml.Name{Space: "http://example.net/content/1.0", Local: "user-id"}, Value: "fred"},
+		{Name: xml.Name{Local: "trace-id"}, Value: "abc"},
+	})
+
+	data, err := MarshalReply(reply)
+	if err != nil {
+		t.Fatalf("Failed to marshal reply: %v", err)
+	}
+
+	xmlStr := string(data)
+	for _, want := range []string{
+		`xmlns:ex="http://example.net/content/1.0"`,
+		`ex:user-id="fred"`,
+		`trace-id="abc"`,
+	} {
+		if !strings.Contains(xmlStr, want) {
+			t.Errorf("Missing preserved attribute %s in %s", want, xmlStr)
+		}
+	}
+}
+
+func TestMarshalReplyOmitsEmptyMessageID(t *testing.T) {
+	reply := NewErrorReply("", ErrMissingAttribute("rpc", "message-id"))
+
+	data, err := MarshalReply(reply)
+	if err != nil {
+		t.Fatalf("Failed to marshal reply: %v", err)
+	}
+
+	xmlStr := string(data)
+	if strings.Contains(xmlStr, `message-id=""`) || strings.Contains(xmlStr, `message-id=`) {
+		t.Fatalf("Expected message-id to be omitted, got %s", xmlStr)
+	}
+}
+
 func TestMarshalDataReply(t *testing.T) {
 	data := []byte("<interfaces><interface>xe-0/0/0</interface></interfaces>")
 	reply := NewDataReply("102", data)
@@ -149,6 +189,18 @@ func TestMarshalDataReply(t *testing.T) {
 	if !strings.Contains(xmlStr, "xe-0/0/0") {
 		t.Errorf("Missing data content")
 	}
+	assertSingleDataElement(t, xmlData)
+}
+
+func TestMarshalOperationalDataReply(t *testing.T) {
+	reply := NewDataReply("105", []byte(buildAllOperationalData()))
+
+	xmlData, err := MarshalReply(reply)
+	if err != nil {
+		t.Fatalf("Failed to marshal reply: %v", err)
+	}
+
+	assertSingleDataElement(t, xmlData)
 }
 
 func TestMarshalErrorReply(t *testing.T) {
@@ -222,5 +274,40 @@ func TestDataReplyNamespace(t *testing.T) {
 	// Both rpc-reply and data should have NETCONF namespace
 	if !strings.Contains(xmlStr, `xmlns="urn:ietf:params:xml:ns:netconf:base:1.0"`) {
 		t.Errorf("Missing NETCONF namespace on rpc-reply")
+	}
+}
+
+func assertSingleDataElement(t *testing.T, xmlData []byte) {
+	t.Helper()
+
+	decoder := xml.NewDecoder(bytes.NewReader(xmlData))
+	depth := 0
+	directDataElements := 0
+	allDataElements := 0
+	for {
+		token, err := decoder.Token()
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			t.Fatalf("reply is not valid XML: %v\n%s", err, xmlData)
+		}
+
+		switch t := token.(type) {
+		case xml.StartElement:
+			depth++
+			if t.Name.Local == "data" {
+				allDataElements++
+				if depth == 2 {
+					directDataElements++
+				}
+			}
+		case xml.EndElement:
+			depth--
+		}
+	}
+
+	if directDataElements != 1 || allDataElements != 1 {
+		t.Fatalf("reply has direct/all data elements = %d/%d, want 1/1:\n%s", directDataElements, allDataElements, xmlData)
 	}
 }

@@ -1,6 +1,7 @@
 package netconf
 
 import (
+	"bytes"
 	"context"
 	"encoding/xml"
 	"fmt"
@@ -12,6 +13,12 @@ type GetConfigRequest struct {
 	XMLName xml.Name `xml:"get-config"`
 	Source  Source   `xml:"source"`
 	Filter  *Filter  `xml:"filter"`
+}
+
+func (r *GetConfigRequest) SetInheritedNamespaceAttrs(attrs []xml.Attr) {
+	if r.Filter != nil {
+		r.Filter.InheritedAttrs = cloneXMLAttrs(attrs)
+	}
 }
 
 // checkLockOwnership verifies if the session holds the lock for the target datastore.
@@ -125,9 +132,68 @@ type EditConfigRequest struct {
 	Config           ConfigElement     `xml:"config"`
 }
 
+func (r *EditConfigRequest) SetInheritedNamespaceAttrs(attrs []xml.Attr) {
+	r.Config.InheritedAttrs = cloneXMLAttrs(attrs)
+}
+
 // ConfigElement represents <config> element in edit-config
 type ConfigElement struct {
-	Content []byte `xml:",innerxml"`
+	XMLName        xml.Name   `xml:"config"`
+	Attrs          []xml.Attr `xml:",any,attr"`
+	InheritedAttrs []xml.Attr `xml:"-"`
+	Content        []byte     `xml:",innerxml"`
+}
+
+func (c ConfigElement) XML() ([]byte, error) {
+	if c.XMLName.Local == "" {
+		return nil, ErrMissingElement("edit-config", "config")
+	}
+
+	var buf bytes.Buffer
+	buf.WriteString("<config")
+
+	writtenNamespaces := map[string]string{}
+	if c.XMLName.Space != "" {
+		writeXMLAttribute(&buf, "xmlns", c.XMLName.Space)
+		writtenNamespaces["xmlns"] = c.XMLName.Space
+	}
+
+	namespaceAttrs := collectNamespaceAttrs(c.InheritedAttrs, c.Attrs)
+	writeNamespaceDeclarationAttrs(&buf, namespaceAttrs, writtenNamespaces)
+
+	namespacePrefixes := make(map[string]string)
+	for _, attr := range namespaceAttrs {
+		if attr.Name.Space == "xmlns" {
+			namespacePrefixes[attr.Value] = attr.Name.Local
+		}
+	}
+	for _, attr := range c.Attrs {
+		switch {
+		case isNamespaceDeclarationAttribute(attr):
+			continue
+		case attr.Name.Space == "":
+			writeXMLAttribute(&buf, attr.Name.Local, attr.Value)
+		default:
+			attrName := attr.Name.Local
+			if prefix := namespacePrefixes[attr.Name.Space]; prefix != "" {
+				attrName = prefix + ":" + attrName
+			}
+			writeXMLAttribute(&buf, attrName, attr.Value)
+		}
+	}
+
+	buf.WriteByte('>')
+	buf.Write(c.Content)
+	buf.WriteString("</config>")
+	return buf.Bytes(), nil
+}
+
+func writeXMLAttribute(buf *bytes.Buffer, name, value string) {
+	buf.WriteByte(' ')
+	buf.WriteString(name)
+	buf.WriteString(`="`)
+	_ = xml.EscapeText(buf, []byte(value))
+	buf.WriteByte('"')
 }
 
 // handleEditConfig handles <edit-config> RPC
@@ -187,7 +253,11 @@ func (s *Server) handleEditConfig(ctx context.Context, sess *Session, rpc *RPC) 
 	}
 
 	// Parse config XML to internal config structure
-	newCfg, err := XMLToConfig(req.Config.Content, defaultOp)
+	configXML, err := req.Config.XML()
+	if err != nil {
+		return NewErrorReply(rpc.MessageID, err.(*RPCError))
+	}
+	newCfg, err := XMLToConfig(configXML, defaultOp)
 	if err != nil {
 		log.Printf("[NETCONF] XML to config conversion error: %v", err)
 		if rpcErr, ok := err.(*RPCError); ok {

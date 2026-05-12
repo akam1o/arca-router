@@ -13,10 +13,11 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
+	"strconv"
 	"strings"
-	"syscall"
 
 	grpcclient "github.com/akam1o/arca-router/internal/northbound/grpc"
+	configcli "github.com/akam1o/arca-router/pkg/cli"
 	"github.com/chzyer/readline"
 )
 
@@ -98,6 +99,7 @@ Show subcommands:
   bgp neighbor <ip>           Show BGP neighbor details
   ospf neighbor               Show OSPF neighbors
   route                       Show routing table
+  route protocol <proto>      Show routes by protocol
 
 Options:
   -socket <path>     arca-routerd gRPC socket (default: %s)
@@ -114,6 +116,37 @@ func debugLog(f *cliFlags, format string, args ...interface{}) {
 	}
 }
 
+func currentUsername() string {
+	username := os.Getenv("USER")
+	if username == "" {
+		return "admin"
+	}
+	return username
+}
+
+func shortCommitID(commitID string) string {
+	if len(commitID) > 8 {
+		return commitID[:8]
+	}
+	return commitID
+}
+
+func parseHistoryLimit(raw string) (int, error) {
+	limit, err := strconv.Atoi(raw)
+	if err != nil || limit <= 0 {
+		return 0, fmt.Errorf("invalid limit: %s", raw)
+	}
+	return limit, nil
+}
+
+func parseRollbackNumber(raw string) (int, error) {
+	rollbackNum, err := strconv.Atoi(raw)
+	if err != nil || rollbackNum < 0 {
+		return 0, fmt.Errorf("invalid rollback number: %s", raw)
+	}
+	return rollbackNum, nil
+}
+
 // --- One-shot command ---
 
 func runOneShotCommand(ctx context.Context, f *cliFlags, args []string) int {
@@ -122,7 +155,7 @@ func runOneShotCommand(ctx context.Context, f *cliFlags, args []string) int {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 		return ExitOperationError
 	}
-	defer client.Close()
+	defer func() { _ = client.Close() }()
 
 	command := args[0]
 	switch command {
@@ -146,7 +179,7 @@ func runOneShotCommand(ctx context.Context, f *cliFlags, args []string) int {
 	}
 }
 
-func oneShotShow(ctx context.Context, client *grpcclient.Client, args []string, f *cliFlags) int {
+func oneShotShow(ctx context.Context, client showClient, args []string, f *cliFlags) int {
 	subcmd := args[0]
 	switch subcmd {
 	case "configuration":
@@ -179,24 +212,24 @@ func oneShotShow(ctx context.Context, client *grpcclient.Client, args []string, 
 		}
 		switch args[1] {
 		case "summary":
-			neighbors, err := client.GetBGPNeighbors(ctx)
+			output, err := client.GetBGPSummaryText(ctx)
 			if err != nil {
 				fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 				return ExitOperationError
 			}
-			printBGPSummary(neighbors)
+			printCommandOutput(output)
 			return ExitSuccess
 		case "neighbor":
 			if len(args) < 3 {
 				fmt.Fprintf(os.Stderr, "Error: 'show bgp neighbor' requires an IP address\n")
 				return ExitUsageError
 			}
-			neighbors, err := client.GetBGPNeighbors(ctx)
+			output, err := client.GetBGPNeighborText(ctx, args[2])
 			if err != nil {
 				fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 				return ExitOperationError
 			}
-			printBGPNeighborDetail(neighbors, args[2])
+			printCommandOutput(output)
 			return ExitSuccess
 		default:
 			fmt.Fprintf(os.Stderr, "Error: unknown bgp subcommand '%s'\n", args[1])
@@ -208,22 +241,26 @@ func oneShotShow(ctx context.Context, client *grpcclient.Client, args []string, 
 			fmt.Fprintf(os.Stderr, "Error: 'show ospf' requires 'neighbor' subcommand\n")
 			return ExitUsageError
 		}
-		// OSPF neighbor state is available via GetSystemInfo or a future RPC
-		fmt.Println("OSPF neighbor display not yet implemented via gRPC")
-		return ExitSuccess
-
-	case "route":
-		prefixFilter := ""
-		protoFilter := ""
-		if len(args) > 1 && args[1] == "protocol" && len(args) > 2 {
-			protoFilter = args[2]
-		}
-		routes, err := client.GetRoutes(ctx, prefixFilter, protoFilter)
+		output, err := client.GetOSPFNeighborsText(ctx)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 			return ExitOperationError
 		}
-		printRoutes(routes)
+		printCommandOutput(output)
+		return ExitSuccess
+
+	case "route":
+		protoFilter, err := routeProtocolFilter(args[1:])
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+			return ExitUsageError
+		}
+		output, err := client.GetRouteText(ctx, protoFilter)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+			return ExitOperationError
+		}
+		printCommandOutput(output)
 		return ExitSuccess
 
 	default:
@@ -235,7 +272,7 @@ func oneShotShow(ctx context.Context, client *grpcclient.Client, args []string, 
 // --- Interactive mode ---
 
 type interactiveShell struct {
-	client    *grpcclient.Client
+	client    interactiveClient
 	rl        *readline.Instance
 	hostname  string
 	mode      cliMode
@@ -245,10 +282,35 @@ type interactiveShell struct {
 	flags     *cliFlags
 }
 
+type interactiveClient interface {
+	showClient
+	GetCandidate(context.Context, string) (string, error)
+	EditCandidate(context.Context, string, string) error
+	Commit(context.Context, string, string, string) (string, uint64, error)
+	ValidateCandidate(context.Context, string) error
+	Discard(context.Context, string) error
+	Rollback(context.Context, string, string, string, string) (string, uint64, error)
+	Diff(context.Context, string) (string, bool, error)
+	ListHistory(context.Context, int, int) ([]grpcclient.CommitInfo, error)
+	AcquireLock(context.Context, string, string) error
+	ReleaseLock(context.Context, string) error
+	GetRoutes(context.Context, string, string) ([]grpcclient.RouteInfo, error)
+	GetBGPNeighbors(context.Context) ([]grpcclient.BGPNeighborInfo, error)
+}
+
+type showClient interface {
+	GetRunning(context.Context) (string, uint64, error)
+	GetInterfaces(context.Context, string) ([]grpcclient.InterfaceInfo, error)
+	GetRouteText(context.Context, string) (string, error)
+	GetBGPSummaryText(context.Context) (string, error)
+	GetBGPNeighborText(context.Context, string) (string, error)
+	GetOSPFNeighborsText(context.Context) (string, error)
+}
+
 type cliMode int
 
 const (
-	modeOperational   cliMode = iota
+	modeOperational cliMode = iota
 	modeConfiguration
 )
 
@@ -258,7 +320,7 @@ func runInteractive(ctx context.Context, f *cliFlags) int {
 		fmt.Fprintf(os.Stderr, "Error: failed to connect to arca-routerd: %v\n", err)
 		return ExitOperationError
 	}
-	defer client.Close()
+	defer func() { _ = client.Close() }()
 
 	// Get hostname from daemon
 	hostname := "arca-router"
@@ -267,10 +329,7 @@ func runInteractive(ctx context.Context, f *cliFlags) int {
 		hostname = info.Hostname
 	}
 
-	username := os.Getenv("USER")
-	if username == "" {
-		username = "admin"
-	}
+	username := currentUsername()
 
 	sh := &interactiveShell{
 		client:   client,
@@ -294,22 +353,26 @@ func runInteractive(ctx context.Context, f *cliFlags) int {
 		return ExitOperationError
 	}
 	sh.rl = rl
-	defer rl.Close()
+	defer func() { _ = rl.Close() }()
 
 	// Create a session with the daemon
 	sessionID, err := client.CreateSession(ctx, username)
 	if err != nil {
-		debugLog(f, "Warning: could not create session: %v", err)
-	} else {
-		sh.sessionID = sessionID
-		defer func() {
-			_ = client.CloseSession(ctx, sh.sessionID)
-		}()
+		fmt.Fprintf(os.Stderr, "Error: failed to create configuration session: %v\n", err)
+		return ExitOperationError
 	}
+	if sessionID == "" {
+		fmt.Fprintln(os.Stderr, "Error: daemon returned empty configuration session ID")
+		return ExitOperationError
+	}
+	sh.sessionID = sessionID
+	defer func() {
+		_ = client.CloseSession(ctx, sh.sessionID)
+	}()
 
 	// Handle Ctrl+C
 	sigCh := make(chan os.Signal, 1)
-	signal.Notify(sigCh, os.Interrupt, syscall.SIGTERM)
+	signal.Notify(sigCh, os.Interrupt)
 	go func() {
 		<-sigCh
 		fmt.Println("\nInterrupted. Use 'exit' or 'quit' to leave the shell.")
@@ -384,14 +447,9 @@ func (sh *interactiveShell) processCommand(ctx context.Context, line string) err
 			if response != "yes" && response != "y" {
 				return nil
 			}
-			// Discard and release lock
-			if sh.sessionID != "" {
-				_ = sh.client.Discard(ctx, sh.sessionID)
-				_ = sh.client.ReleaseLock(ctx, sh.sessionID)
+			if err := sh.exitConfigurationMode(ctx); err != nil {
+				return fmt.Errorf("exit configuration mode: %w", err)
 			}
-			sh.mode = modeOperational
-			sh.editPath = nil
-			sh.hasLock = false
 			return nil
 		}
 		return fmt.Errorf("exit")
@@ -429,17 +487,41 @@ func (sh *interactiveShell) cmdConfigure(ctx context.Context) error {
 		fmt.Println("Already in configuration mode")
 		return nil
 	}
+	if sh.sessionID == "" {
+		return fmt.Errorf("configuration session is not available")
+	}
 
 	// Acquire candidate lock via gRPC
-	if sh.sessionID != "" {
-		if err := sh.client.AcquireLock(ctx, sh.sessionID, os.Getenv("USER")); err != nil {
-			return fmt.Errorf("failed to acquire candidate lock: %w", err)
-		}
-		sh.hasLock = true
+	if err := sh.client.AcquireLock(ctx, sh.sessionID, currentUsername()); err != nil {
+		return fmt.Errorf("failed to acquire candidate lock: %w", err)
 	}
+	sh.hasLock = true
 
 	sh.mode = modeConfiguration
 	fmt.Println("Entering configuration mode")
+	return nil
+}
+
+func (sh *interactiveShell) exitConfigurationMode(ctx context.Context) error {
+	if sh.sessionID == "" {
+		return fmt.Errorf("configuration session is not available")
+	}
+	if err := sh.client.Discard(ctx, sh.sessionID); err != nil {
+		return fmt.Errorf("discard changes: %w", err)
+	}
+	return sh.releaseConfigurationLock(ctx)
+}
+
+func (sh *interactiveShell) releaseConfigurationLock(ctx context.Context) error {
+	if sh.sessionID == "" {
+		return fmt.Errorf("configuration session is not available")
+	}
+	if err := sh.client.ReleaseLock(ctx, sh.sessionID); err != nil {
+		return fmt.Errorf("release candidate lock: %w", err)
+	}
+	sh.mode = modeOperational
+	sh.editPath = nil
+	sh.hasLock = false
 	return nil
 }
 
@@ -447,7 +529,7 @@ func (sh *interactiveShell) cmdShow(ctx context.Context, args []string) error {
 	if len(args) == 0 {
 		if sh.mode == modeConfiguration {
 			// Show candidate config
-			text, _, err := sh.client.GetRunning(ctx)
+			text, err := sh.client.GetCandidate(ctx, sh.sessionID)
 			if err != nil {
 				return err
 			}
@@ -466,7 +548,13 @@ func (sh *interactiveShell) cmdShow(ctx context.Context, args []string) error {
 	subcmd := args[0]
 	switch subcmd {
 	case "configuration":
-		text, _, err := sh.client.GetRunning(ctx)
+		var text string
+		var err error
+		if sh.mode == modeConfiguration {
+			text, err = sh.client.GetCandidate(ctx, sh.sessionID)
+		} else {
+			text, _, err = sh.client.GetRunning(ctx)
+		}
 		if err != nil {
 			return err
 		}
@@ -479,8 +567,10 @@ func (sh *interactiveShell) cmdShow(ctx context.Context, args []string) error {
 	case "history":
 		limit := 10
 		if len(args) > 1 {
-			if _, err := fmt.Sscanf(args[1], "%d", &limit); err != nil {
-				return fmt.Errorf("invalid limit: %s", args[1])
+			var err error
+			limit, err = parseHistoryLimit(args[1])
+			if err != nil {
+				return err
 			}
 		}
 		entries, err := sh.client.ListHistory(ctx, limit, 0)
@@ -492,7 +582,7 @@ func (sh *interactiveShell) cmdShow(ctx context.Context, args []string) error {
 			if e.IsRollback {
 				rb = " (rollback)"
 			}
-			fmt.Printf("  %s  %s  by %s%s  %s\n", e.CommitID[:8], e.Timestamp, e.User, rb, e.Message)
+			fmt.Printf("  %s  %s  by %s%s  %s\n", shortCommitID(e.CommitID), e.Timestamp, e.User, rb, e.Message)
 		}
 		return nil
 
@@ -520,21 +610,21 @@ func (sh *interactiveShell) cmdShow(ctx context.Context, args []string) error {
 		}
 		switch args[1] {
 		case "summary":
-			neighbors, err := sh.client.GetBGPNeighbors(ctx)
+			output, err := sh.client.GetBGPSummaryText(ctx)
 			if err != nil {
 				return err
 			}
-			printBGPSummary(neighbors)
+			printCommandOutput(output)
 			return nil
 		case "neighbor":
 			if len(args) < 3 {
 				return fmt.Errorf("'show bgp neighbor' requires an IP address")
 			}
-			neighbors, err := sh.client.GetBGPNeighbors(ctx)
+			output, err := sh.client.GetBGPNeighborText(ctx, args[2])
 			if err != nil {
 				return err
 			}
-			printBGPNeighborDetail(neighbors, args[2])
+			printCommandOutput(output)
 			return nil
 		default:
 			return fmt.Errorf("unknown bgp subcommand '%s'", args[1])
@@ -547,23 +637,26 @@ func (sh *interactiveShell) cmdShow(ctx context.Context, args []string) error {
 		if len(args) < 2 || args[1] != "neighbor" {
 			return fmt.Errorf("'show ospf' requires 'neighbor' subcommand")
 		}
-		fmt.Println("OSPF neighbor display not yet implemented via gRPC")
+		output, err := sh.client.GetOSPFNeighborsText(ctx)
+		if err != nil {
+			return err
+		}
+		printCommandOutput(output)
 		return nil
 
 	case "route":
 		if sh.mode == modeConfiguration {
 			return fmt.Errorf("'show route' not available in configuration mode")
 		}
-		prefixFilter := ""
-		protoFilter := ""
-		if len(args) > 1 && args[1] == "protocol" && len(args) > 2 {
-			protoFilter = args[2]
-		}
-		routes, err := sh.client.GetRoutes(ctx, prefixFilter, protoFilter)
+		protoFilter, err := routeProtocolFilter(args[1:])
 		if err != nil {
 			return err
 		}
-		printRoutes(routes)
+		output, err := sh.client.GetRouteText(ctx, protoFilter)
+		if err != nil {
+			return err
+		}
+		printCommandOutput(output)
 		return nil
 
 	default:
@@ -577,7 +670,7 @@ func (sh *interactiveShell) cmdSet(ctx context.Context, args []string) error {
 	}
 	// Build the full set command and send to daemon
 	fullPath := append(sh.editPath, args...)
-	setCmd := "set " + strings.Join(fullPath, " ")
+	setCmd := "set " + configcli.NormalizeConfigPath(fullPath)
 	if err := sh.client.EditCandidate(ctx, sh.sessionID, setCmd); err != nil {
 		return err
 	}
@@ -590,7 +683,7 @@ func (sh *interactiveShell) cmdDelete(ctx context.Context, args []string) error 
 		return fmt.Errorf("'delete' command only available in configuration mode")
 	}
 	fullPath := append(sh.editPath, args...)
-	delCmd := "delete " + strings.Join(fullPath, " ")
+	delCmd := "delete " + configcli.NormalizeConfigPath(fullPath)
 	if err := sh.client.EditCandidate(ctx, sh.sessionID, delCmd); err != nil {
 		return err
 	}
@@ -628,29 +721,30 @@ func (sh *interactiveShell) cmdCommit(ctx context.Context, args []string) error 
 	if check && andQuit {
 		return fmt.Errorf("'check' and 'and-quit' cannot be used together")
 	}
+	if check && message != "" {
+		return fmt.Errorf("'check' and 'comment' cannot be used together")
+	}
 
-	// For 'commit check', we'd need a validate-only RPC. For now, do a full commit.
 	if check {
+		if err := sh.client.ValidateCandidate(ctx, sh.sessionID); err != nil {
+			return fmt.Errorf("configuration check failed: %w", err)
+		}
 		fmt.Println("configuration check succeeds")
 		return nil
 	}
 
-	user := os.Getenv("USER")
-	if user == "" {
-		user = "admin"
-	}
+	user := currentUsername()
 
 	commitID, version, err := sh.client.Commit(ctx, sh.sessionID, user, message)
 	if err != nil {
 		return fmt.Errorf("commit failed: %w", err)
 	}
-	fmt.Printf("commit complete (id: %s, version: %d)\n", commitID[:8], version)
+	fmt.Printf("commit complete (id: %s, version: %d)\n", shortCommitID(commitID), version)
 
 	if andQuit {
-		_ = sh.client.ReleaseLock(ctx, sh.sessionID)
-		sh.mode = modeOperational
-		sh.editPath = nil
-		sh.hasLock = false
+		if err := sh.releaseConfigurationLock(ctx); err != nil {
+			return fmt.Errorf("commit complete but failed to exit configuration mode: %w", err)
+		}
 	}
 	return nil
 }
@@ -659,17 +753,37 @@ func (sh *interactiveShell) cmdRollback(ctx context.Context, args []string) erro
 	if sh.mode != modeConfiguration {
 		return fmt.Errorf("'rollback' command only available in configuration mode")
 	}
+	rollbackNum := 0
 	if len(args) > 0 {
-		rollbackNum := 0
-		if _, err := fmt.Sscanf(args[0], "%d", &rollbackNum); err != nil {
-			return fmt.Errorf("invalid rollback number: %s", args[0])
-		}
-		if rollbackNum == 0 {
-			return sh.cmdDiscardChanges(ctx)
+		var err error
+		rollbackNum, err = parseRollbackNumber(args[0])
+		if err != nil {
+			return err
 		}
 	}
-	// Full rollback via the engine (discard candidate)
-	return sh.client.Discard(ctx, sh.sessionID)
+	if rollbackNum == 0 {
+		return sh.cmdDiscardChanges(ctx)
+	}
+
+	history, err := sh.client.ListHistory(ctx, rollbackNum+1, 0)
+	if err != nil {
+		return fmt.Errorf("failed to load commit history: %w", err)
+	}
+	if len(history) <= rollbackNum {
+		availableCommits := len(history) - 1
+		if availableCommits < 0 {
+			availableCommits = 0
+		}
+		return fmt.Errorf("not enough history for rollback %d (only %d commits available)", rollbackNum, availableCommits)
+	}
+	target := history[rollbackNum]
+	user := currentUsername()
+	newCommitID, version, err := sh.client.Rollback(ctx, sh.sessionID, target.CommitID, user, fmt.Sprintf("CLI rollback %d", rollbackNum))
+	if err != nil {
+		return fmt.Errorf("rollback failed: %w", err)
+	}
+	fmt.Printf("rollback complete (id: %s, version: %d)\n", shortCommitID(newCommitID), version)
+	return nil
 }
 
 func (sh *interactiveShell) cmdDiscardChanges(ctx context.Context) error {
@@ -792,51 +906,39 @@ func printInterfaces(ifaces []grpcclient.InterfaceInfo) {
 	}
 }
 
-func printBGPSummary(neighbors []grpcclient.BGPNeighborInfo) {
-	if len(neighbors) == 0 {
-		fmt.Println("No BGP neighbors found")
-		return
-	}
-	fmt.Printf("%-20s %-8s %-12s %-10s %-8s %-8s\n",
-		"Neighbor", "AS", "State", "Uptime", "Rcvd", "Sent")
-	fmt.Println(strings.Repeat("-", 70))
-	for _, n := range neighbors {
-		fmt.Printf("%-20s %-8d %-12s %-10d %-8d %-8d\n",
-			n.PeerAddress, n.PeerAS, n.State, n.UptimeSecs, n.PrefixReceived, n.PrefixSent)
+func printCommandOutput(output string) {
+	fmt.Print(output)
+	if output != "" && !strings.HasSuffix(output, "\n") {
+		fmt.Println()
 	}
 }
 
-func printBGPNeighborDetail(neighbors []grpcclient.BGPNeighborInfo, peer string) {
-	for _, n := range neighbors {
-		if n.PeerAddress == peer {
-			fmt.Printf("BGP neighbor %s\n", n.PeerAddress)
-			fmt.Printf("  Remote AS: %d\n", n.PeerAS)
-			fmt.Printf("  State: %s\n", n.State)
-			fmt.Printf("  Uptime: %d seconds\n", n.UptimeSecs)
-			fmt.Printf("  Prefixes received: %d\n", n.PrefixReceived)
-			fmt.Printf("  Prefixes sent: %d\n", n.PrefixSent)
-			return
-		}
+func routeProtocolFilter(args []string) (string, error) {
+	if len(args) == 0 {
+		return "", nil
 	}
-	fmt.Fprintf(os.Stderr, "BGP neighbor %s not found\n", peer)
+	if args[0] != "protocol" {
+		return "", fmt.Errorf("'show route' accepts 'protocol <proto>' or no arguments")
+	}
+	if len(args) < 2 {
+		return "", fmt.Errorf("'protocol' requires a protocol name")
+	}
+	if len(args) > 2 {
+		return "", fmt.Errorf("'show route protocol' does not accept extra arguments")
+	}
+	protocol := args[1]
+	if !validRouteProtocols[protocol] {
+		return "", fmt.Errorf("invalid protocol '%s'. Valid: bgp, ospf, static, connected, kernel", protocol)
+	}
+	return protocol, nil
 }
 
-func printRoutes(routes []grpcclient.RouteInfo) {
-	if len(routes) == 0 {
-		fmt.Println("No routes found")
-		return
-	}
-	fmt.Printf("%-20s %-20s %-10s %-8s %-12s %s\n",
-		"Prefix", "NextHop", "Protocol", "Metric", "Interface", "Active")
-	fmt.Println(strings.Repeat("-", 82))
-	for _, r := range routes {
-		active := " "
-		if r.Active {
-			active = "*"
-		}
-		fmt.Printf("%-20s %-20s %-10s %-8d %-12s %s\n",
-			r.Prefix, r.NextHop, r.Protocol, r.Metric, r.Interface, active)
-	}
+var validRouteProtocols = map[string]bool{
+	"bgp":       true,
+	"ospf":      true,
+	"static":    true,
+	"connected": true,
+	"kernel":    true,
 }
 
 // --- Utilities ---

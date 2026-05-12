@@ -1,5 +1,5 @@
 [Unit]
-Description=ARCA Router Daemon - VPP-based Network Router (Phase 2)
+Description=ARCA Router Daemon - Unified VPP/FRR/NETCONF Router
 Documentation=https://github.com/akam1o/arca-router
 After=network.target vpp.service frr.service
 Requires=vpp.service frr.service
@@ -15,22 +15,28 @@ StartLimitBurst=5
 # User and permissions
 User=arca-router
 Group=arca-router
-SupplementaryGroups=vpp frr frrvty
+SupplementaryGroups=vpp frrvty
 
-# Required capabilities for VPP and network operations
+# Required capabilities for VPP, NETCONF/SNMP, and network operations
 # CAP_NET_ADMIN: LCP operations, netlink, VPP FIB synchronization
-AmbientCapabilities=CAP_NET_ADMIN
-CapabilityBoundingSet=CAP_NET_ADMIN
+# CAP_NET_BIND_SERVICE: Bind NETCONF/SSH on port 830 and optional SNMP on port 161
+AmbientCapabilities=CAP_NET_ADMIN CAP_NET_BIND_SERVICE
+CapabilityBoundingSet=CAP_NET_ADMIN CAP_NET_BIND_SERVICE
 
 # Security hardening
 NoNewPrivileges=true
 PrivateTmp=true
 ProtectSystem=strict
 ProtectHome=true
-ReadWritePaths=/var/lib/arca-router /run/arca-router /var/log/arca-router /etc/frr
+ReadWritePaths=/var/lib/arca-router /run/arca-router /var/log/arca-router
+
+# The default FRR backend applies changes through vtysh/mgmtd and does not
+# write /etc/frr directly. If you intentionally run with --frr-apply-mode=file,
+# add a systemd drop-in that grants the frr group and ReadWritePaths=/etc/frr.
 
 # Runtime directories (auto-created by systemd)
 RuntimeDirectory=arca-router
+RuntimeDirectoryMode=0750
 StateDirectory=arca-router
 LogsDirectory=arca-router
 

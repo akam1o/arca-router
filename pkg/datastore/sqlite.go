@@ -8,9 +8,15 @@ import (
 	"os"
 	"path/filepath"
 	"sync"
+	"syscall"
 	"time"
 
 	_ "github.com/mattn/go-sqlite3" // SQLite driver
+)
+
+const (
+	secureSQLiteFilePerms os.FileMode = 0600
+	secureSQLiteDirPerms  os.FileMode = 0750
 )
 
 // sqliteDatastore implements the Datastore interface using SQLite.
@@ -20,6 +26,13 @@ type sqliteDatastore struct {
 	cleanupStopChan chan struct{}
 	cleanupDoneChan chan struct{}
 	closeOnce       sync.Once
+}
+
+// ProcessLock is an OS-level lock that marks a SQLite datastore as owned by one daemon process.
+type ProcessLock struct {
+	file      *os.File
+	closeOnce sync.Once
+	closeErr  error
 }
 
 // NewSQLiteDatastore creates a new SQLite-backed datastore.
@@ -35,9 +48,8 @@ func NewSQLiteDatastore(cfg *Config) (Datastore, error) {
 
 	// Create directory if it doesn't exist
 	if dbPath != ":memory:" {
-		dir := filepath.Dir(dbPath)
-		if err := os.MkdirAll(dir, 0750); err != nil {
-			return nil, fmt.Errorf("failed to create database directory: %w", err)
+		if err := prepareSecureSQLiteFile(dbPath); err != nil {
+			return nil, err
 		}
 	}
 
@@ -92,11 +104,134 @@ func NewSQLiteDatastore(cfg *Config) (Datastore, error) {
 		}
 		return nil, fmt.Errorf("failed to apply migrations: %w", err)
 	}
+	if err := restrictSQLiteFilePermissions(dbPath); err != nil {
+		if closeErr := db.Close(); closeErr != nil {
+			_ = closeErr
+		}
+		return nil, err
+	}
 
 	// Start background cleanup goroutine for expired locks
 	go ds.cleanupExpiredLocks()
 
 	return ds, nil
+}
+
+// AcquireSQLiteProcessLock acquires an exclusive non-blocking lock beside the
+// datastore file. It is intended for daemon startup coordination, not per-RPC
+// candidate locking.
+func AcquireSQLiteProcessLock(dbPath string) (*ProcessLock, error) {
+	if dbPath == "" {
+		dbPath = "/var/lib/arca-router/config.db"
+	}
+	if dbPath == ":memory:" {
+		return &ProcessLock{}, nil
+	}
+	dir := filepath.Dir(dbPath)
+	if err := os.MkdirAll(dir, secureSQLiteDirPerms); err != nil {
+		return nil, fmt.Errorf("failed to create database directory: %w", err)
+	}
+	if err := validateSQLiteDirectoryPermissions(dir); err != nil {
+		return nil, err
+	}
+
+	lockPath := dbPath + ".process.lock"
+	file, err := os.OpenFile(lockPath, os.O_RDWR|os.O_CREATE, secureSQLiteFilePerms)
+	if err != nil {
+		return nil, fmt.Errorf("failed to open datastore process lock: %w", err)
+	}
+	if err := os.Chmod(lockPath, secureSQLiteFilePerms); err != nil {
+		_ = file.Close()
+		return nil, fmt.Errorf("failed to restrict datastore process lock permissions: %w", err)
+	}
+	if err := syscall.Flock(int(file.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err != nil {
+		_ = file.Close()
+		if errors.Is(err, syscall.EWOULDBLOCK) || errors.Is(err, syscall.EAGAIN) {
+			return nil, NewError(ErrCodeConflict, "datastore is already owned by another process", err)
+		}
+		return nil, fmt.Errorf("failed to acquire datastore process lock: %w", err)
+	}
+	if err := file.Truncate(0); err != nil {
+		_ = syscall.Flock(int(file.Fd()), syscall.LOCK_UN)
+		_ = file.Close()
+		return nil, fmt.Errorf("failed to update datastore process lock: %w", err)
+	}
+	if _, err := fmt.Fprintf(file, "%d\n", os.Getpid()); err != nil {
+		_ = syscall.Flock(int(file.Fd()), syscall.LOCK_UN)
+		_ = file.Close()
+		return nil, fmt.Errorf("failed to write datastore process lock: %w", err)
+	}
+	return &ProcessLock{file: file}, nil
+}
+
+// Close releases the process lock.
+func (l *ProcessLock) Close() error {
+	if l == nil || l.file == nil {
+		return nil
+	}
+	l.closeOnce.Do(func() {
+		if err := syscall.Flock(int(l.file.Fd()), syscall.LOCK_UN); err != nil {
+			l.closeErr = err
+		}
+		if err := l.file.Close(); l.closeErr == nil && err != nil {
+			l.closeErr = err
+		}
+	})
+	return l.closeErr
+}
+
+func prepareSecureSQLiteFile(dbPath string) error {
+	dir := filepath.Dir(dbPath)
+	if err := os.MkdirAll(dir, secureSQLiteDirPerms); err != nil {
+		return fmt.Errorf("failed to create database directory: %w", err)
+	}
+	if err := validateSQLiteDirectoryPermissions(dir); err != nil {
+		return err
+	}
+	file, err := os.OpenFile(dbPath, os.O_RDWR|os.O_CREATE, secureSQLiteFilePerms)
+	if err != nil {
+		return fmt.Errorf("failed to create database file: %w", err)
+	}
+	if closeErr := file.Close(); closeErr != nil {
+		return fmt.Errorf("failed to close database file: %w", closeErr)
+	}
+	if err := os.Chmod(dbPath, secureSQLiteFilePerms); err != nil {
+		return fmt.Errorf("failed to restrict database file permissions: %w", err)
+	}
+	return nil
+}
+
+func validateSQLiteDirectoryPermissions(dir string) error {
+	info, err := os.Stat(dir)
+	if err != nil {
+		return fmt.Errorf("failed to stat database directory: %w", err)
+	}
+	if !info.IsDir() {
+		return fmt.Errorf("database parent path is not a directory: %s", dir)
+	}
+	perms := info.Mode().Perm()
+	if perms&0022 != 0 {
+		return fmt.Errorf("insecure permissions on database directory %s: mode=%04o", dir, perms)
+	}
+	return nil
+}
+
+func restrictSQLiteFilePermissions(dbPath string) error {
+	if dbPath == "" || dbPath == ":memory:" {
+		return nil
+	}
+	for _, path := range []string{dbPath, dbPath + "-wal", dbPath + "-shm"} {
+		if _, err := os.Stat(path); err != nil {
+			if os.IsNotExist(err) {
+				continue
+			}
+			return fmt.Errorf("failed to stat database file %s: %w", path, err)
+		}
+		if err := os.Chmod(path, secureSQLiteFilePerms); err != nil {
+			return fmt.Errorf("failed to restrict database file permissions for %s: %w", path, err)
+		}
+	}
+	return nil
 }
 
 // Close closes the datastore connection.
@@ -180,13 +315,22 @@ func (ds *sqliteDatastore) logCleanupError(cleanupErr error) error {
 // performLockCleanup removes expired locks from the database (for all targets).
 func (ds *sqliteDatastore) performLockCleanup(ctx context.Context) error {
 	return ds.withTx(ctx, false, func(tx *sql.Tx) error {
-		now := time.Now()
+		now := time.Now().Unix()
 
 		// Delete expired locks for all targets (candidate, running)
 		result, err := tx.ExecContext(ctx, `
-			DELETE FROM config_locks
-			WHERE expires_at < ?
-		`, now)
+				DELETE FROM config_locks
+				WHERE COALESCE(
+					CASE
+						WHEN typeof(expires_at) IN ('integer', 'real') THEN CAST(expires_at AS INTEGER)
+					END,
+					CASE
+						WHEN typeof(expires_at) = 'text' AND expires_at NOT GLOB '*[^0-9]*' THEN CAST(expires_at AS INTEGER)
+					END,
+					CAST(strftime('%s', expires_at) AS INTEGER),
+					0
+				) < ?
+			`, now)
 
 		if err != nil {
 			return NewError(ErrCodeInternal, "failed to cleanup expired locks", err)
@@ -208,6 +352,43 @@ func (ds *sqliteDatastore) performLockCleanup(ctx context.Context) error {
 			if err != nil {
 				return NewError(ErrCodeInternal, "failed to log cleanup audit event", err)
 			}
+		}
+
+		return nil
+	})
+}
+
+// CleanupEphemeralState removes locks and candidates that cannot survive a
+// daemon restart safely. Running configuration and commit history are preserved.
+func (ds *sqliteDatastore) CleanupEphemeralState(ctx context.Context) error {
+	return ds.withTx(ctx, false, func(tx *sql.Tx) error {
+		candidateResult, err := tx.ExecContext(ctx, `DELETE FROM candidate_configs`)
+		if err != nil {
+			return NewError(ErrCodeInternal, "failed to cleanup candidate configs", err)
+		}
+		lockResult, err := tx.ExecContext(ctx, `DELETE FROM config_locks`)
+		if err != nil {
+			return NewError(ErrCodeInternal, "failed to cleanup config locks", err)
+		}
+
+		candidatesRemoved, err := candidateResult.RowsAffected()
+		if err != nil {
+			return NewError(ErrCodeInternal, "failed to check candidate cleanup result", err)
+		}
+		locksRemoved, err := lockResult.RowsAffected()
+		if err != nil {
+			return NewError(ErrCodeInternal, "failed to check lock cleanup result", err)
+		}
+		if candidatesRemoved == 0 && locksRemoved == 0 {
+			return nil
+		}
+
+		_, err = tx.ExecContext(ctx, `
+			INSERT INTO audit_log (user, session_id, action, result, details)
+			VALUES ('system', '', 'startup_cleanup', 'success', ?)
+		`, fmt.Sprintf("removed %d lock(s), %d candidate config(s)", locksRemoved, candidatesRemoved))
+		if err != nil {
+			return NewError(ErrCodeInternal, "failed to log startup cleanup audit event", err)
 		}
 
 		return nil

@@ -29,7 +29,8 @@
 |------|--------|------|
 | **実行ユーザー** | `arca-router` (専用ユーザー) | root実行を避け、権限を制限 |
 | **プライマリグループ** | `arca-router` | 設定ファイル所有権管理 |
-| **セカンダリグループ** | `vpp`, `frr`, `frrvty` | VPP/FRRリソースへのアクセス |
+| **セカンダリグループ** | `vpp`, `frrvty` | VPP API と FRR vtysh/mgmtd へのアクセス |
+| **復旧用追加グループ** | `frr` | `--frr-apply-mode=file` 利用時のみ `/etc/frr/frr.conf` へ書き込み |
 | **ホームディレクトリ** | `/var/lib/arca-router` | 状態ファイル・キャッシュ保存先 |
 
 #### 専用ユーザー作成（RPM postinstallスクリプトで実施）
@@ -44,10 +45,12 @@ if ! id arca-router &>/dev/null; then
         arca-router
 fi
 
-# Add arca-router to VPP/FRR groups
+# Add arca-router to groups used by the default v0.5 backends
 usermod -aG vpp arca-router
-usermod -aG frr arca-router
 usermod -aG frrvty arca-router
+
+# Optional: only required for --frr-apply-mode=file
+usermod -aG frr arca-router
 ```
 
 ---
@@ -59,9 +62,11 @@ usermod -aG frrvty arca-router
 | 操作 | 必要な権限 | 理由 |
 |------|-----------|------|
 | VPP API socket接続 (`/run/vpp/api.sock`) | `vpp`グループ所属 | VPP APIアクセス |
-| FRR設定ファイル書き込み (`/etc/frr/frr.conf`) | `frr`グループ所属 | FRR設定管理 |
+| FRR設定適用 (`vtysh` management commit) | `frrvty`グループ所属 | FRR設定管理 |
+| FRR設定ファイル書き込み (`/etc/frr/frr.conf`) | `frr`グループ所属 | 復旧用 `--frr-apply-mode=file` のみ |
 | LCP (Linux Control Plane) 操作 | `CAP_NET_ADMIN` | netlink/TAP操作 |
 | VPP FIB操作（経路同期） | `CAP_NET_ADMIN` | Kernel routing table操作 |
+| NETCONF/SNMP privileged port bind | `CAP_NET_BIND_SERVICE` | 830/TCP と任意の 161/UDP |
 
 ---
 
@@ -76,6 +81,7 @@ usermod -aG frrvty arca-router
 | Capability | 用途 | 必須/推奨 |
 |-----------|------|----------|
 | `CAP_NET_ADMIN` | netlink操作、LCP、VPP FIB同期 | **必須** |
+| `CAP_NET_BIND_SERVICE` | NETCONF/SSHの830番ポート、任意のSNMP 161番ポート | **必須** |
 | `CAP_NET_RAW` | Raw socket操作（将来のBFD/LLDP用） | 推奨 (Phase 3以降) |
 
 #### systemd unit fileへの反映
@@ -86,18 +92,21 @@ usermod -aG frrvty arca-router
 [Service]
 User=arca-router
 Group=arca-router
-SupplementaryGroups=vpp frr frrvty
+SupplementaryGroups=vpp frrvty
 
 # Linux Capabilities
-AmbientCapabilities=CAP_NET_ADMIN
-CapabilityBoundingSet=CAP_NET_ADMIN
+AmbientCapabilities=CAP_NET_ADMIN CAP_NET_BIND_SERVICE
+CapabilityBoundingSet=CAP_NET_ADMIN CAP_NET_BIND_SERVICE
 
 # Security hardening
 NoNewPrivileges=true
 PrivateTmp=true
 ProtectSystem=strict
 ProtectHome=true
-ReadWritePaths=/var/lib/arca-router /run/arca-router /var/log/arca-router /etc/frr
+ReadWritePaths=/var/lib/arca-router /run/arca-router /var/log/arca-router
+
+# --frr-apply-mode=file を使う場合のみ、systemd drop-in で
+# SupplementaryGroups=frr と ReadWritePaths=/etc/frr を追加する。
 
 # VPP/FRR integration
 RuntimeDirectory=arca-router
@@ -115,7 +124,7 @@ LogsDirectory=arca-router
 |-------------|----------------|------|------|
 | `/etc/arca-router/arca-router.conf` | `root:arca-router` | `0640` | 設定には機密情報を含む可能性 |
 | `/etc/arca-router/hardware.yaml` | `root:arca-router` | `0640` | PCIアドレスは機密情報ではないが統一 |
-| `/etc/frr/frr.conf` | `root:frr` | `0660` | arca-routerdが書き込み可能（frrグループ所属） |
+| `/etc/frr/frr.conf` | `root:frr` | `0660` | `--frr-apply-mode=file` 利用時のみ arca-routerd が書き込み可能（frrグループ所属） |
 
 #### 設定ファイル作成時の権限設定
 
@@ -147,7 +156,7 @@ func writeConfigFile(path string, content []byte) error {
 | リソース | 所有者:グループ | 権限 | アクセス方法 |
 |---------|----------------|------|-------------|
 | `/run/vpp/api.sock` | `root:vpp` | `0660` | `vpp`グループ所属で接続 |
-| `/etc/frr/frr.conf` | `root:frr` | `0660` | `frr`グループ所属で読み書き（arca-routerdが直接書き込み） |
+| `/etc/frr/frr.conf` | `root:frr` | `0660` | `file` backend 利用時は `frr` グループ所属で読み書き |
 | `/run/frr/` | `frr:frr` | `0775` | FRR socket通信 |
 
 #### VPP API socket権限の確認
@@ -188,6 +197,10 @@ fi
 
 systemd `RuntimeDirectory`/`StateDirectory`により自動作成される。
 
+内部 gRPC ソケット `/run/arca-router/routerd.sock` は
+`arca-router:arca-router` の `0660` で作成される。root 以外で
+`arca-cli` を実行する運用ユーザーは `arca-router` グループに所属させる。
+
 ---
 
 ## 3. セキュリティ境界
@@ -207,7 +220,7 @@ systemd `RuntimeDirectory`/`StateDirectory`により自動作成される。
 │  - VPP/FRR設定生成                           │
 │  - 設定適用                                  │
 └─────────────────────────────────────────────┘
-          ↓ (vpp group)      ↓ (frr group)
+          ↓ (vpp group)      ↓ (frrvty group)
 ┌──────────────────┐   ┌─────────────────────┐
 │  VPP (root)      │   │  FRR (frr user)     │
 │  - Dataplane     │   │  - Routing daemon   │
@@ -236,7 +249,7 @@ systemd `RuntimeDirectory`/`StateDirectory`により自動作成される。
 |-------|--------|--------|
 | 設定ファイル改ざん | 不正なルーティング設定 | root権限のみ書き込み可能、設定検証 |
 | VPP API socket不正アクセス | VPP設定改ざん | vppグループのみアクセス、ソケット権限 |
-| FRR設定ファイル改ざん | ルーティング乗っ取り | frrグループのみアクセス、atomic write |
+| FRR設定ファイル改ざん | ルーティング乗っ取り | 標準経路では直接書き込み不可。`file` backend 利用時のみ frrグループとatomic write |
 | arca-routerdプロセス乗っ取り | システム権限昇格 | Capabilities制限、systemd sandboxing |
 | LCP操作悪用 | Kernel network stack操作 | CAP_NET_ADMIN最小化、入力検証 |
 
@@ -288,28 +301,30 @@ func (c *govppClient) Connect(ctx context.Context) error {
 
 | 操作 | 必要な権限 | 実装方法 |
 |------|-----------|---------|
-| FRR設定ファイル書き込み | `frr`グループ | `/etc/frr/frr.conf`への直接書き込み（0660） |
-| FRR設定適用 | `frrvty`グループ | `frr-reload.py` または `vtysh -f` |
+| FRR設定適用 | `frrvty`グループ | 標準は `vtysh` の management commit、復旧用 `file` backend では `frr-reload.py` または `vtysh -f` |
+| FRR設定ファイル書き込み | `frr`グループ | 復旧用 `--frr-apply-mode=file` のみ `/etc/frr/frr.conf`へ直接書き込み（0660） |
 | FRR状態確認（arca-cli用） | `frrvty`グループ | `vtysh -c 'show running-config'` |
 
-**注**: arca-routerdは`frr.conf`を直接書き込み、`frr-reload.py`で適用する方式を採用。`frrvty`グループはarca-cli（vtysh経由）とFRR設定適用時に必要。
+**注**: v0.5以降の標準経路では、arca-routerd は FRR management candidate に変更を投入し、commit check/apply で適用する。`frrvty`グループはarca-cli（vtysh経由）とFRR設定適用時に必要。復旧・互換用途の `--frr-apply-mode=file` では従来通り `frr.conf` を直接書き込み、`frr-reload.py` で適用する。
 
 **権限確認フロー**:
 
 ```go
-// pkg/frr/reloader.go
-func (r *Reloader) ApplyConfig(cfg *Config) error {
-    // Check if /etc/frr/frr.conf is writable
-    if err := checkFileWritable("/etc/frr/frr.conf"); err != nil {
-        return fmt.Errorf("FRR config not writable: %w "+
-            "(ensure user is in frr group)", err)
+// pkg/frr/transactional.go
+func (a *TransactionalApplier) ApplyConfig(ctx context.Context, _ string, cfg *Config) error {
+    ops, err := BuildMgmtOperations(cfg)
+    if err != nil {
+        return err
     }
 
-    // Atomic write (tmp → rename)
-    // ...
+    // Requires frrvty group access to vtysh and mgmtd enabled in FRR.
+    return a.client.Apply(ctx, ops)
+}
 
-    // Apply via frr-reload.py (requires frrvty group)
-    cmd := exec.Command("/usr/lib/frr/frr-reload.py", "--reload", "/etc/frr/frr.conf")
+// pkg/frr/reloader.go (only for --frr-apply-mode=file)
+func (r *Reloader) ApplyConfig(ctx context.Context, configContent string) error {
+    // Writes /etc/frr/frr.conf and applies it through frr-reload.py/vtysh.
+    // Requires frr group for file write and frrvty group for vtysh access.
     // ...
 }
 ```
@@ -323,9 +338,9 @@ func (r *Reloader) ApplyConfig(cfg *Config) error {
 - [x] systemd unit fileに`User=arca-router`を設定
 - [x] `AmbientCapabilities=CAP_NET_ADMIN`を設定
 - [x] RPM postinstallで`arca-router`ユーザー作成
-- [x] RPM postinstallでグループ追加（`vpp`, `frr`, `frrvty`）
+- [x] RPM postinstallで標準グループ追加（`vpp`, `frrvty`）
 - [ ] VPP socket権限確認ロジック実装（`pkg/vpp/govpp_client.go`）
-- [ ] FRR設定ファイル権限設定（`pkg/frr/reloader.go`）
+- [ ] FRR設定適用権限確認（`pkg/frr/transactional.go`, `pkg/frr/reloader.go`）
 - [ ] 設定ファイル権限設定（`pkg/config/writer.go`）
 - [ ] 統合テストで権限エラーハンドリング検証
 
@@ -365,20 +380,25 @@ sudo systemctl restart vpp
 
 ### 6.2 FRR設定適用エラー
 
-**症状**: `FRR config not writable`
+**症状**: `FRR management commit failed`, `vtysh` permission denied, or `FRR config not writable`
 
 **原因**:
-- ユーザーが`frr`グループに所属していない
-- `/etc/frr/frr.conf`の権限が正しくない
+- ユーザーが`frrvty`グループに所属していない
+- FRRで`mgmtd`が有効化されていない
+- `--frr-apply-mode=file`利用時のみ、ユーザーが`frr`グループに所属していない
+- `--frr-apply-mode=file`利用時のみ、`/etc/frr/frr.conf`の権限が正しくない
 
 **解決方法**:
 
 ```bash
-# Add user to frr group
-sudo usermod -aG frr arca-router
+# Add user to FRR access groups
 sudo usermod -aG frrvty arca-router
+sudo usermod -aG frr arca-router  # only required for --frr-apply-mode=file
 
-# Fix FRR config permissions (group write required for arca-routerd)
+# Enable mgmtd in /etc/frr/daemons
+grep '^mgmtd=yes' /etc/frr/daemons
+
+# Fix FRR config permissions (only required for --frr-apply-mode=file)
 sudo chown root:frr /etc/frr/frr.conf
 sudo chmod 0660 /etc/frr/frr.conf
 
@@ -439,7 +459,7 @@ echo "Capabilities: $(systemctl show -p AmbientCapabilities arca-routerd | cut -
 
 # Check file permissions
 echo "Config: $(ls -l /etc/arca-router/arca-router.conf)"
-echo "FRR: $(ls -l /etc/frr/frr.conf)"
+echo "FRR file backend: $(ls -l /etc/frr/frr.conf)"
 echo "VPP socket: $(ls -l /run/vpp/api.sock)"
 
 # Check groups

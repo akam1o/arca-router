@@ -32,7 +32,7 @@ vtysh --version
 
 **Installed components**:
 - `frr`: Main FRR package (all daemons)
-- `frr-pythontools`: Includes `frr-reload.py` for configuration management
+- `frr-pythontools`: Includes `frr-reload.py` for the optional `--frr-apply-mode=file` recovery backend
 
 ---
 
@@ -49,12 +49,13 @@ sudo vi /etc/frr/daemons
 **Enable the following daemons**:
 
 ```bash
-# /etc/frr/daemons - REQUIRED for arca-router v0.3.x
+# /etc/frr/daemons - REQUIRED for arca-router v0.5+
 
 bgpd=yes
 ospfd=yes
 zebra=yes
 staticd=yes
+mgmtd=yes
 
 # Optional daemons (set to 'no' if not needed)
 ospf6d=no
@@ -73,7 +74,7 @@ fabricd=no
 vrrpd=no
 pathd=no
 
-# Integrated config file (arca-router writes to /etc/frr/frr.conf)
+# Integrated config file (used by FRR and the optional file backend)
 vtysh_enable=yes
 zebra_options="  -A 127.0.0.1 -s 90000000"
 bgpd_options="   -A 127.0.0.1"
@@ -86,13 +87,16 @@ staticd_options=""
 - `bgpd`: BGP routing protocol
 - `ospfd`: OSPF routing protocol
 - `staticd`: Static route management
+- `mgmtd`: Transactional management datastore used by arca-router v0.5+
 
-### 3. Configure FRR File Permissions
+### 3. Configure FRR Apply Access
 
-**IMPORTANT**: `arca-router` writes directly to `/etc/frr/frr.conf` and needs write access:
+By default, `arca-router` applies FRR changes through the FRR management candidate datastore via `vtysh`. This requires `mgmtd=yes` and `frrvty` group access, but does not require direct writes to `/etc/frr/frr.conf`.
+
+If you plan to use the recovery backend `--frr-apply-mode=file`, also allow the `frr` group to write `/etc/frr/frr.conf`:
 
 ```bash
-# Set correct ownership and permissions
+# Optional: only required for --frr-apply-mode=file
 sudo chown root:frr /etc/frr/frr.conf
 sudo chmod 0660 /etc/frr/frr.conf
 
@@ -106,15 +110,15 @@ ls -l /etc/frr/frr.conf
 **Note**: The `arca-router` user will be created automatically when you install the `arca-router` package. Complete this step after installing the `arca-router` package.
 
 ```bash
-# Add to frr group (for config file write access)
-sudo usermod -aG frr arca-router
-
-# Add to frrvty group (for vtysh CLI access)
+# Required for transactional apply through vtysh
 sudo usermod -aG frrvty arca-router
+
+# Optional: only required for --frr-apply-mode=file
+sudo usermod -aG frr arca-router
 
 # Verify group membership
 groups arca-router
-# Expected: arca-router : arca-router vpp frr frrvty
+# Expected: arca-router : arca-router vpp frrvty (and frr if file backend is enabled)
 ```
 
 ### 5. Start FRR Service
@@ -151,24 +155,27 @@ sudo vtysh -c 'show running-config'
 
 ## Configuration Management
 
-### FRR Configuration File
+### FRR Apply Backend
 
-`arca-router` generates and applies FRR configuration to `/etc/frr/frr.conf`.
+`arca-router` generates an FRR view from the router model, then applies it through the selected backend.
 
-**Configuration apply methods** (automatic selection):
+**Configuration apply methods**:
 
-1. **Method A: frr-reload.py** (preferred)
-   - Uses `/usr/lib/frr/frr-reload.py --reload`
-   - Applies configuration changes incrementally
-   - Minimizes routing disruption
+1. **Method A: transactional management** (default)
+   - Enabled with `--frr-apply-mode=transactional`
+   - Uses FRR management commands through `vtysh`
+   - Runs candidate `commit check`, `commit apply`, then `write memory`
+   - Requires `mgmtd=yes` and `frrvty` group access
 
-2. **Method B: vtysh -f** (fallback)
-   - Uses `vtysh -f /etc/frr/frr.conf`
-   - Loads entire configuration file
-   - May cause temporary routing disruption
+2. **Method B: file backend** (recovery)
+   - Enabled with `--frr-apply-mode=file`
+   - Writes `/etc/frr/frr.conf`
+   - Uses `/usr/lib/frr/frr-reload.py --reload`, then falls back to `vtysh -f /etc/frr/frr.conf`
+   - Packaged systemd units do not grant `/etc/frr` write access by default; add a local drop-in with the `frr` group and `ReadWritePaths=/etc/frr` before using this backend.
 
 **Validation**:
-- All configurations are validated with `vtysh --check` before applying
+- Transactional apply validates with FRR management `commit check`
+- File backend validates with `vtysh --check` before applying
 - Invalid configurations are rejected with detailed error messages
 
 ---
@@ -185,11 +192,11 @@ sudo tail -f /var/log/frr/frr.log
 
 **Common issues**:
 - **Daemon not enabled**: Check `/etc/frr/daemons` and ensure required daemons are set to `yes`
-- **Configuration syntax error**: Run `sudo vtysh --check /etc/frr/frr.conf` to validate
+- **Configuration syntax error**: Check the arca-routerd log for the failing backend command. For `--frr-apply-mode=file`, run `sudo vtysh --check /etc/frr/frr.conf` to validate the generated file.
 
-### Permission Denied on /etc/frr/frr.conf
+### Permission Denied on /etc/frr/frr.conf (file backend only)
 
-**Symptom**: `arca-routerd` fails with "permission denied" writing to `/etc/frr/frr.conf`
+**Symptom**: `arca-routerd --frr-apply-mode=file` fails with "permission denied" writing to `/etc/frr/frr.conf`
 
 **Solution**:
 ```bash
@@ -200,7 +207,7 @@ ls -l /etc/frr/frr.conf
 sudo chown root:frr /etc/frr/frr.conf
 sudo chmod 0660 /etc/frr/frr.conf
 
-# Verify arca-router is in frr group
+# Verify arca-router is in frr group for the file backend
 groups arca-router | grep frr
 
 # If not, add to group
@@ -237,4 +244,4 @@ After FRR is running:
 
 1. **Start arca-router**: `sudo systemctl start arca-routerd`
 2. **Check arca-router status**: `sudo systemctl status arca-routerd`
-3. **View interfaces**: `arca-cli show interfaces`
+3. **View running configuration**: `arca-cli show configuration`

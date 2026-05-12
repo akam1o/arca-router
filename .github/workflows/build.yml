@@ -33,9 +33,9 @@ jobs:
 
     - name: Run go fmt
       run: |
-        if [ "$(gofmt -s -l . | wc -l)" -gt 0 ]; then
+        if [ "$(gofmt -s -l $(git ls-files '*.go') | wc -l)" -gt 0 ]; then
           echo "Code is not formatted. Please run 'make fmt'"
-          gofmt -s -l .
+          gofmt -s -l $(git ls-files '*.go')
           exit 1
         fi
 

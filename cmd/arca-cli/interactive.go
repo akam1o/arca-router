@@ -6,8 +6,8 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
+	"strconv"
 	"strings"
-	"syscall"
 
 	"github.com/akam1o/arca-router/pkg/cli"
 	"github.com/akam1o/arca-router/pkg/datastore"
@@ -19,6 +19,22 @@ type InteractiveShell struct {
 	session  *cli.Session
 	rl       *readline.Instance
 	hostname string
+}
+
+func parseHistoryLimit(raw string) (int, error) {
+	limit, err := strconv.Atoi(raw)
+	if err != nil || limit <= 0 {
+		return 0, fmt.Errorf("invalid limit: %s", raw)
+	}
+	return limit, nil
+}
+
+func parseRollbackNumber(raw string) (int, error) {
+	rollbackNum, err := strconv.Atoi(raw)
+	if err != nil || rollbackNum < 0 {
+		return 0, fmt.Errorf("invalid rollback number: %s", raw)
+	}
+	return rollbackNum, nil
 }
 
 // NewInteractiveShell creates a new interactive shell
@@ -62,7 +78,7 @@ func (sh *InteractiveShell) Run(ctx context.Context) error {
 
 	// Handle Ctrl+C gracefully
 	sigCh := make(chan os.Signal, 1)
-	signal.Notify(sigCh, os.Interrupt, syscall.SIGTERM)
+	signal.Notify(sigCh, os.Interrupt)
 	go func() {
 		<-sigCh
 		fmt.Println("\nInterrupted. Use 'exit' or 'quit' to leave the shell.")
@@ -218,9 +234,10 @@ func (sh *InteractiveShell) cmdShow(ctx context.Context, args []string) error {
 		// show history [N] - show last N commits (default 10)
 		limit := 10
 		if len(args) > 1 {
-			_, err := fmt.Sscanf(args[1], "%d", &limit)
+			var err error
+			limit, err = parseHistoryLimit(args[1])
 			if err != nil {
-				return fmt.Errorf("invalid limit: %s", args[1])
+				return err
 			}
 		}
 		return sh.session.ShowCommitHistory(ctx, limit)
@@ -429,11 +446,6 @@ func (sh *InteractiveShell) cmdCommit(ctx context.Context, args []string) error 
 		return err
 	}
 
-	// Exit configuration mode if and-quit
-	if opts.AndQuit {
-		return sh.session.ExitConfigurationMode(ctx)
-	}
-
 	return nil
 }
 
@@ -444,9 +456,10 @@ func (sh *InteractiveShell) cmdRollback(ctx context.Context, args []string) erro
 
 	rollbackNum := 0
 	if len(args) > 0 {
-		_, err := fmt.Sscanf(args[0], "%d", &rollbackNum)
+		var err error
+		rollbackNum, err = parseRollbackNumber(args[0])
 		if err != nil {
-			return fmt.Errorf("invalid rollback number: %s", args[0])
+			return err
 		}
 	}
 

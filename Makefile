@@ -1,9 +1,8 @@
-.PHONY: help build build-cli build-v2 build-v2-cli clean rpm rpm-package deb deb-package version test fmt vet check install-nfpm integration-test generate-binapi
+.PHONY: help build build-cli build-v2 build-v2-cli clean rpm rpm-package deb deb-package version test fmt vet check install-nfpm integration-test frr-mgmtd-smoke package-lint generate-binapi generate-proto
 
 # Binary names
 BINARY_NAME=arca-routerd
 CLI_BINARY_NAME=arca-cli
-NETCONFD_BINARY_NAME=arca-netconfd
 V2_BINARY_NAME=arca-routerd-v2
 V2_CLI_BINARY_NAME=arca-cli-v2
 BUILD_DIR=build/bin
@@ -43,21 +42,20 @@ version: ## Display version information
 	@echo "Build Date: $(BUILD_DATE)"
 	@echo "EPOCH:      $(SOURCE_DATE_EPOCH)"
 
-build: ## Build all binaries (arca-routerd, arca-cli, arca-netconfd)
-	@echo "Building $(BINARY_NAME), $(CLI_BINARY_NAME), and $(NETCONFD_BINARY_NAME)..."
+build: ## Build current v0.5 binaries (unified arca-routerd and arca-cli)
+	@echo "Building $(BINARY_NAME) and $(CLI_BINARY_NAME)..."
 	@mkdir -p $(BUILD_DIR)
-	CGO_ENABLED=1 SOURCE_DATE_EPOCH=$(SOURCE_DATE_EPOCH) go build $(BUILD_FLAGS) -o $(BUILD_DIR)/$(BINARY_NAME) ./cmd/arca-routerd
-	CGO_ENABLED=0 SOURCE_DATE_EPOCH=$(SOURCE_DATE_EPOCH) go build $(BUILD_FLAGS) -o $(BUILD_DIR)/$(CLI_BINARY_NAME) ./cmd/arca-cli
-	CGO_ENABLED=1 SOURCE_DATE_EPOCH=$(SOURCE_DATE_EPOCH) go build $(BUILD_FLAGS) -o $(BUILD_DIR)/$(NETCONFD_BINARY_NAME) ./cmd/arca-netconfd
-	@echo "Build complete: $(BUILD_DIR)/$(BINARY_NAME), $(BUILD_DIR)/$(CLI_BINARY_NAME), $(BUILD_DIR)/$(NETCONFD_BINARY_NAME)"
+	CGO_ENABLED=1 SOURCE_DATE_EPOCH=$(SOURCE_DATE_EPOCH) go build $(BUILD_FLAGS) -o $(BUILD_DIR)/$(BINARY_NAME) ./cmd/arca-routerd-v2
+	CGO_ENABLED=0 SOURCE_DATE_EPOCH=$(SOURCE_DATE_EPOCH) go build $(BUILD_FLAGS) -o $(BUILD_DIR)/$(CLI_BINARY_NAME) ./cmd/arca-cli-v2
+	@echo "Build complete: $(BUILD_DIR)/$(BINARY_NAME), $(BUILD_DIR)/$(CLI_BINARY_NAME)"
 
-build-cli: ## Build only arca-cli binary
+build-cli: ## Build only current arca-cli binary
 	@echo "Building $(CLI_BINARY_NAME)..."
 	@mkdir -p $(BUILD_DIR)
-	CGO_ENABLED=0 SOURCE_DATE_EPOCH=$(SOURCE_DATE_EPOCH) go build $(BUILD_FLAGS) -o $(BUILD_DIR)/$(CLI_BINARY_NAME) ./cmd/arca-cli
+	CGO_ENABLED=0 SOURCE_DATE_EPOCH=$(SOURCE_DATE_EPOCH) go build $(BUILD_FLAGS) -o $(BUILD_DIR)/$(CLI_BINARY_NAME) ./cmd/arca-cli-v2
 	@echo "Build complete: $(BUILD_DIR)/$(CLI_BINARY_NAME)"
 
-build-v2: ## Build v2 unified daemon (arca-routerd-v2)
+build-v2: ## Build v2 unified daemon and CLI with explicit v2 names
 	@echo "Building $(V2_BINARY_NAME) and $(V2_CLI_BINARY_NAME)..."
 	@mkdir -p $(BUILD_DIR)
 	CGO_ENABLED=1 SOURCE_DATE_EPOCH=$(SOURCE_DATE_EPOCH) go build $(BUILD_FLAGS) -o $(BUILD_DIR)/$(V2_BINARY_NAME) ./cmd/arca-routerd-v2
@@ -69,6 +67,12 @@ build-v2-cli: ## Build only arca-cli-v2 binary
 	@mkdir -p $(BUILD_DIR)
 	CGO_ENABLED=0 SOURCE_DATE_EPOCH=$(SOURCE_DATE_EPOCH) go build $(BUILD_FLAGS) -o $(BUILD_DIR)/$(V2_CLI_BINARY_NAME) ./cmd/arca-cli-v2
 	@echo "Build complete: $(BUILD_DIR)/$(V2_CLI_BINARY_NAME)"
+
+generate-proto: ## Generate Go gRPC bindings from api/v1/router.proto
+	PATH="$$(go env GOPATH)/bin:$$PATH" protoc \
+		--go_out=. --go_opt=paths=source_relative \
+		--go-grpc_out=. --go-grpc_opt=paths=source_relative \
+		api/v1/router.proto
 
 test: ## Run tests
 	@echo "Running tests..."
@@ -100,7 +104,7 @@ install-nfpm: ## Install NFPM tool
 
 rpm: build rpm-package ## Build RPM package
 
-rpm-package: ## Build RPM package (assumes binaries already built)
+rpm-package: package-lint ## Build RPM package (assumes binaries already built)
 	@echo "Building RPM package..."
 	@mkdir -p $(DIST_DIR)
 	@if ! command -v nfpm >/dev/null 2>&1; then \
@@ -119,7 +123,7 @@ rpm-package: ## Build RPM package (assumes binaries already built)
 
 deb: build deb-package ## Build DEB package (for Debian Bookworm)
 
-deb-package: ## Build DEB package (assumes binaries already built)
+deb-package: package-lint ## Build DEB package (assumes binaries already built)
 	@echo "Building DEB package..."
 	@mkdir -p $(DIST_DIR)
 	@if ! command -v nfpm >/dev/null 2>&1; then \
@@ -142,6 +146,7 @@ rpm-test: rpm ## Build and test RPM package metadata
 	@echo ""
 	@echo "RPM contents:"
 	@rpm -qpl $(DIST_DIR)/arca-router-*.rpm
+	@rpm -qpl $(DIST_DIR)/arca-router-*.rpm | grep -q '^/usr/share/arca-router/grafana/arca-routerd-dashboard.json$$'
 
 rpm-verify: ## Verify RPM package reproducibility (requires clean dist/)
 	@echo "Verifying reproducible build..."
@@ -168,6 +173,7 @@ deb-test: deb ## Build and test DEB package metadata
 	@echo ""
 	@echo "DEB contents:"
 	@dpkg-deb -c $(DIST_DIR)/arca-router_*.deb
+	@dpkg-deb -c $(DIST_DIR)/arca-router_*.deb | awk '{p=$$NF; sub(/^\.\//, "", p); if (p !~ /^\//) p="/" p; print p}' | grep -q '^/usr/share/arca-router/grafana/arca-routerd-dashboard.json$$'
 
 deb-verify: ## Verify DEB package reproducibility (requires clean dist/)
 	@echo "Verifying reproducible build..."
@@ -191,6 +197,23 @@ deb-verify: ## Verify DEB package reproducibility (requires clean dist/)
 integration-test: build ## Run integration tests
 	@echo "Running integration tests..."
 	@bash test/integration_test.sh
+
+frr-mgmtd-smoke: ## Run live FRR mgmtd transactional apply smoke test
+	@echo "Running live FRR mgmtd smoke test..."
+	ARCA_FRR_MGMTD_SMOKE=1 go test -v ./pkg/frr -run TestFRRMgmtdSmokeApplyAndCleanup -count=1
+
+package-lint: ## Validate package metadata and v0.5 service expectations
+	@echo "Linting package metadata..."
+	@for script in build/package/scripts/*.sh; do sh -n "$$script"; done
+	@grep -q 'SupplementaryGroups=vpp frrvty' build/systemd/arca-routerd.service
+	@if grep -Eq '^[[:space:]]*ReadWritePaths=.*\/etc\/frr' build/systemd/arca-routerd.service; then \
+		echo "Error: default service must not grant direct /etc/frr writes"; \
+		exit 1; \
+	fi
+	@grep -q 'observability/grafana/arca-routerd-dashboard.json' $(NFPM_CONFIG)
+	@grep -q '/usr/share/arca-router/grafana/arca-routerd-dashboard.json' $(NFPM_CONFIG)
+	@grep -q 'mgmtd=yes' build/package/scripts/postinstall.sh
+	@echo "Package metadata OK"
 
 generate-binapi: ## Generate VPP binapi (Go bindings for VPP API)
 	@echo "Generating VPP binapi..."

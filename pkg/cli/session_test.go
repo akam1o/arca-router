@@ -2,6 +2,7 @@ package cli
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"time"
 
@@ -10,8 +11,15 @@ import (
 
 // mockDatastore implements datastore.Datastore for testing
 type mockDatastore struct {
-	lockSessionID string
-	lockAcquired  bool
+	lockSessionID     string
+	lockAcquired      bool
+	acquireLockCount  int
+	acquireLockErr    error
+	releaseLockErr    error
+	getCandidateErr   error
+	saveCandidateText string
+	saveCandidateErr  error
+	history           []*datastore.CommitHistoryEntry
 }
 
 func (m *mockDatastore) GetRunning(ctx context.Context) (*datastore.RunningConfig, error) {
@@ -23,6 +31,9 @@ func (m *mockDatastore) GetRunning(ctx context.Context) (*datastore.RunningConfi
 }
 
 func (m *mockDatastore) GetCandidate(ctx context.Context, sessionID string) (*datastore.CandidateConfig, error) {
+	if m.getCandidateErr != nil {
+		return nil, m.getCandidateErr
+	}
 	return &datastore.CandidateConfig{
 		SessionID:  sessionID,
 		ConfigText: "set system host-name test-router",
@@ -32,6 +43,10 @@ func (m *mockDatastore) GetCandidate(ctx context.Context, sessionID string) (*da
 }
 
 func (m *mockDatastore) SaveCandidate(ctx context.Context, sessionID string, configText string) error {
+	if m.saveCandidateErr != nil {
+		return m.saveCandidateErr
+	}
+	m.saveCandidateText = configText
 	return nil
 }
 
@@ -40,10 +55,14 @@ func (m *mockDatastore) DeleteCandidate(ctx context.Context, sessionID string) e
 }
 
 func (m *mockDatastore) Commit(ctx context.Context, req *datastore.CommitRequest) (string, error) {
+	m.lockAcquired = false
+	m.lockSessionID = ""
 	return "new-commit-id", nil
 }
 
 func (m *mockDatastore) Rollback(ctx context.Context, req *datastore.RollbackRequest) (string, error) {
+	m.lockAcquired = false
+	m.lockSessionID = ""
 	return "rollback-commit-id", nil
 }
 
@@ -59,12 +78,19 @@ func (m *mockDatastore) CompareCommits(ctx context.Context, commitID1, commitID2
 }
 
 func (m *mockDatastore) AcquireLock(ctx context.Context, req *datastore.LockRequest) error {
+	m.acquireLockCount++
+	if m.acquireLockErr != nil {
+		return m.acquireLockErr
+	}
 	m.lockSessionID = req.SessionID
 	m.lockAcquired = true
 	return nil
 }
 
 func (m *mockDatastore) ReleaseLock(ctx context.Context, target string, sessionID string) error {
+	if m.releaseLockErr != nil {
+		return m.releaseLockErr
+	}
 	m.lockAcquired = false
 	m.lockSessionID = ""
 	return nil
@@ -94,6 +120,9 @@ func (m *mockDatastore) GetLockInfo(ctx context.Context, target string) (*datast
 }
 
 func (m *mockDatastore) ListCommitHistory(ctx context.Context, opts *datastore.HistoryOptions) ([]*datastore.CommitHistoryEntry, error) {
+	if m.history != nil {
+		return m.history, nil
+	}
 	return []*datastore.CommitHistoryEntry{
 		{
 			CommitID:   "commit-1",
@@ -198,6 +227,63 @@ func TestEnterExitConfigurationMode(t *testing.T) {
 	}
 }
 
+func TestEnterConfigurationModeGetCandidateCleanupFailureLeavesRetryableLock(t *testing.T) {
+	ctx := context.Background()
+	ds := &mockDatastore{
+		getCandidateErr: errors.New("candidate read failed"),
+		releaseLockErr:  errors.New("release failed"),
+	}
+	session := NewSession("testuser", ds)
+
+	err := session.EnterConfigurationMode(ctx)
+	if err == nil {
+		t.Fatal("EnterConfigurationMode() error = nil, want cleanup failure")
+	}
+	if session.Mode() != ModeOperational {
+		t.Fatalf("mode = %v, want operational after setup failure", session.Mode())
+	}
+	if !session.lockAcquired || !ds.lockAcquired {
+		t.Fatal("lock state was not preserved for retry after release failure")
+	}
+
+	ds.releaseLockErr = nil
+	if err := session.Close(ctx); err != nil {
+		t.Fatalf("Close() error = %v", err)
+	}
+	if session.lockAcquired || ds.lockAcquired {
+		t.Fatal("Close() did not release retryable lock")
+	}
+}
+
+func TestEnterConfigurationModeInitializeCleanupFailureLeavesRetryableLock(t *testing.T) {
+	ctx := context.Background()
+	ds := &mockDatastore{
+		getCandidateErr:  datastore.NewError(datastore.ErrCodeNotFound, "candidate not found", nil),
+		saveCandidateErr: errors.New("candidate write failed"),
+		releaseLockErr:   errors.New("release failed"),
+	}
+	session := NewSession("testuser", ds)
+
+	err := session.EnterConfigurationMode(ctx)
+	if err == nil {
+		t.Fatal("EnterConfigurationMode() error = nil, want cleanup failure")
+	}
+	if session.Mode() != ModeOperational {
+		t.Fatalf("mode = %v, want operational after setup failure", session.Mode())
+	}
+	if !session.lockAcquired || !ds.lockAcquired {
+		t.Fatal("lock state was not preserved for retry after release failure")
+	}
+
+	ds.releaseLockErr = nil
+	if err := session.Close(ctx); err != nil {
+		t.Fatalf("Close() error = %v", err)
+	}
+	if session.lockAcquired || ds.lockAcquired {
+		t.Fatal("Close() did not release retryable lock")
+	}
+}
+
 func TestSetCommand(t *testing.T) {
 	ctx := context.Background()
 	ds := &mockDatastore{}
@@ -254,6 +340,25 @@ func TestSetCommandRequiresConfigMode(t *testing.T) {
 	err := session.SetCommand(ctx, []string{"system", "host-name", "router1"})
 	if err == nil {
 		t.Error("Expected error when calling SetCommand in operational mode")
+	}
+}
+
+func TestSetCommandRequiresActiveLock(t *testing.T) {
+	ctx := context.Background()
+	ds := &mockDatastore{}
+	session := NewSession("testuser", ds)
+	if err := session.EnterConfigurationMode(ctx); err != nil {
+		t.Fatalf("EnterConfigurationMode() error = %v", err)
+	}
+	if err := ds.ReleaseLock(ctx, datastore.LockTargetCandidate, session.ID()); err != nil {
+		t.Fatalf("ReleaseLock() error = %v", err)
+	}
+
+	if err := session.SetCommand(ctx, []string{"system", "host-name", "router1"}); err == nil {
+		t.Fatal("SetCommand() expected lock error")
+	}
+	if err := session.SetCommandWithPath(ctx, []string{"system", "host-name", "router1"}); err == nil {
+		t.Fatal("SetCommandWithPath() expected lock error")
 	}
 }
 

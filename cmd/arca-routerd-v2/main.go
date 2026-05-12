@@ -12,16 +12,23 @@ import (
 	"net"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"strings"
+	"sync"
 	"syscall"
+	"time"
 
 	"github.com/akam1o/arca-router/internal/engine"
 	"github.com/akam1o/arca-router/internal/model"
+	nbgrpc "github.com/akam1o/arca-router/internal/northbound/grpc"
 	sbfrr "github.com/akam1o/arca-router/internal/southbound/frr"
 	sbvpp "github.com/akam1o/arca-router/internal/southbound/vpp"
-	"github.com/akam1o/arca-router/internal/store/sqlite"
+	internalstore "github.com/akam1o/arca-router/internal/store"
+	storesqlite "github.com/akam1o/arca-router/internal/store/sqlite"
 	"github.com/akam1o/arca-router/pkg/config"
+	"github.com/akam1o/arca-router/pkg/datastore"
 	"github.com/akam1o/arca-router/pkg/device"
+	pkgfrr "github.com/akam1o/arca-router/pkg/frr"
 	"github.com/akam1o/arca-router/pkg/logger"
 	"github.com/akam1o/arca-router/pkg/netconf"
 	pkgvpp "github.com/akam1o/arca-router/pkg/vpp"
@@ -33,6 +40,14 @@ var (
 	BuildDate = "unknown"
 )
 
+const (
+	secureGRPCSocketDirPerms  os.FileMode = 0750
+	secureGRPCSocketFilePerms os.FileMode = 0660
+	secureGRPCSocketUmask                 = 0077
+)
+
+var grpcSocketUmaskMu sync.Mutex
+
 type daemonFlags struct {
 	configPath    string
 	hardwarePath  string
@@ -42,10 +57,14 @@ type daemonFlags struct {
 	mockVPP       bool
 
 	// NETCONF settings (merged from arca-netconfd)
-	netconfListen  string
-	hostKeyPath    string
-	userDBPath     string
-	grpcSocket     string
+	netconfListen string
+	hostKeyPath   string
+	userDBPath    string
+	grpcSocket    string
+	metricsListen string
+	snmpListen    string
+	snmpCommunity string
+	frrApplyMode  string
 }
 
 func main() {
@@ -107,8 +126,16 @@ func parseFlags() *daemonFlags {
 		"Path to SSH host key")
 	flag.StringVar(&f.userDBPath, "user-db", "/var/lib/arca-router/users.db",
 		"Path to user database")
-	flag.StringVar(&f.grpcSocket, "grpc-socket", "/var/run/arca-router/api.sock",
+	flag.StringVar(&f.grpcSocket, "grpc-socket", "/run/arca-router/routerd.sock",
 		"Path to internal gRPC Unix socket")
+	flag.StringVar(&f.metricsListen, "metrics-listen", "",
+		"Prometheus metrics listen address (disabled when empty)")
+	flag.StringVar(&f.snmpListen, "snmp-listen", "",
+		"SNMPv2c UDP listen address (disabled when empty)")
+	flag.StringVar(&f.snmpCommunity, "snmp-community", "public",
+		"SNMPv2c read-only community")
+	flag.StringVar(&f.frrApplyMode, "frr-apply-mode", string(pkgfrr.BackendModeTransactional),
+		"FRR apply backend: transactional or file")
 
 	flag.Parse()
 	return f
@@ -128,12 +155,17 @@ func parseLogLevel(level string) slog.Level {
 }
 
 func run(ctx context.Context, f *daemonFlags, log *logger.Logger) error {
+	installParserHooks()
+
 	log.Info("Configuration",
 		slog.String("config_path", f.configPath),
 		slog.String("hardware_path", f.hardwarePath),
 		slog.String("datastore_path", f.datastorePath),
 		slog.String("netconf_listen", f.netconfListen),
 		slog.String("grpc_socket", f.grpcSocket),
+		slog.String("metrics_listen", f.metricsListen),
+		slog.String("snmp_listen", f.snmpListen),
+		slog.String("frr_apply_mode", f.frrApplyMode),
 	)
 
 	// --- Step 1: Load hardware configuration ---
@@ -152,9 +184,14 @@ func run(ctx context.Context, f *daemonFlags, log *logger.Logger) error {
 		vppClient = pkgvpp.NewGovppClient()
 	}
 
+	frrApplyMode, err := pkgfrr.ParseBackendMode(f.frrApplyMode)
+	if err != nil {
+		return err
+	}
+
 	// --- Step 3: Create southbound plugins ---
 	vppPlugin := sbvpp.NewVPPPlugin(vppClient, hwConfig, slog.Default())
-	frrPlugin := sbfrr.NewFRRPlugin(slog.Default())
+	frrPlugin := sbfrr.NewFRRPluginWithApplyMode(slog.Default(), frrApplyMode)
 
 	plugins := []engine.Plugin{vppPlugin, frrPlugin}
 
@@ -174,106 +211,363 @@ func run(ctx context.Context, f *daemonFlags, log *logger.Logger) error {
 		}(p)
 	}
 
-	// --- Step 6: Load initial configuration ---
+	// --- Step 6: Open config store ---
+	processLock, err := datastore.AcquireSQLiteProcessLock(f.datastorePath)
+	if err != nil {
+		return fmt.Errorf("acquire datastore process lock: %w", err)
+	}
+	configStore, err := storesqlite.NewFromPath(f.datastorePath)
+	if err != nil {
+		_ = processLock.Close()
+		return fmt.Errorf("open config store: %w", err)
+	}
+	defer func() {
+		if closeErr := configStore.Close(); closeErr != nil {
+			log.Error("Failed to close config store", slog.Any("error", closeErr))
+		}
+		if closeErr := processLock.Close(); closeErr != nil {
+			log.Error("Failed to release datastore process lock", slog.Any("error", closeErr))
+		}
+	}()
+	if err := configStore.CleanupEphemeralState(ctx); err != nil {
+		return fmt.Errorf("cleanup config store ephemeral state: %w", err)
+	}
+
+	// --- Step 7: Load initial configuration ---
 	log.Info("Loading initial configuration")
-	initialCfg, err := loadInitialConfig(f, log)
+	initialSnap, initialSource, err := loadInitialConfig(ctx, f, configStore, log)
 	if err != nil {
 		return fmt.Errorf("load initial config: %w", err)
 	}
 
-	// Apply initial configuration through the engine
-	if err := eng.Apply(ctx, initialCfg, "system", "initial startup"); err != nil {
+	// Apply initial configuration through the engine and keep the legacy
+	// datastore in sync for NETCONF running/candidate operations.
+	if err := applyInitialConfig(ctx, eng, configStore, initialSnap, initialSource); err != nil {
 		return fmt.Errorf("apply initial config: %w", err)
 	}
-	log.Info("Initial configuration applied")
-
-	// --- Step 7: Open config store ---
-	store, err := sqlite.NewFromPath(f.datastorePath)
-	if err != nil {
-		log.Warn("Failed to open config store (continuing without persistence)", slog.Any("error", err))
-	} else {
-		defer store.Close()
-	}
+	log.Info("Initial configuration applied", slog.String("source", initialSource))
 
 	// --- Step 8: Start NETCONF server ---
+	var netconfServer *netconf.SSHServer
 	if f.hostKeyPath != "" {
-		go func() {
-			log.Info("Starting NETCONF server", slog.String("listen", f.netconfListen))
-			ncConfig := netconf.DefaultSSHConfig()
-			ncConfig.ListenAddr = f.netconfListen
-			ncConfig.HostKeyPath = f.hostKeyPath
-			ncConfig.UserDBPath = f.userDBPath
-			ncConfig.DatastorePath = f.datastorePath
-
-			server, err := netconf.NewSSHServer(ncConfig)
-			if err != nil {
-				log.Error("Failed to create NETCONF server", slog.Any("error", err))
-				return
-			}
-			if err := server.Start(ctx); err != nil {
-				log.Error("NETCONF server failed", slog.Any("error", err))
+		netconfServer, err = startNETCONFServer(ctx, f, eng, log)
+		if err != nil {
+			return err
+		}
+		defer func() {
+			if err := netconfServer.Stop(); err != nil {
+				log.Error("Failed to stop NETCONF server", slog.Any("error", err))
 			}
 		}()
 	}
 
 	// --- Step 9: Start gRPC API (for CLI) ---
+	log.Info("Starting gRPC API", slog.String("socket", f.grpcSocket))
+	if err := prepareGRPCSocketPath(f.grpcSocket); err != nil {
+		return err
+	}
+
+	lis, err := listenSecureGRPCSocket(f.grpcSocket)
+	if err != nil {
+		return fmt.Errorf("listen on gRPC socket: %w", err)
+	}
+	defer func() { _ = lis.Close() }()
+
+	grpcServer := nbgrpc.NewServer(eng, configStore, slog.Default())
+	grpcErr := make(chan error, 1)
 	go func() {
-		log.Info("Starting gRPC API", slog.String("socket", f.grpcSocket))
-		// Ensure socket directory exists
-		socketDir := f.grpcSocket[:strings.LastIndex(f.grpcSocket, "/")]
-		if err := os.MkdirAll(socketDir, 0750); err != nil {
-			log.Error("Failed to create socket directory", slog.Any("error", err))
-			return
-		}
-		// Remove stale socket
-		os.Remove(f.grpcSocket)
-
-		lis, err := net.Listen("unix", f.grpcSocket)
-		if err != nil {
-			log.Error("Failed to listen on gRPC socket", slog.Any("error", err))
-			return
-		}
-		defer lis.Close()
-
-		_ = eng  // gRPC server would use eng for config operations
-		_ = store // and store for persistence
-
-		// For now, just keep the listener alive until shutdown
-		<-ctx.Done()
+		grpcErr <- grpcServer.Serve(lis)
 	}()
+
+	// --- Step 10: Start metrics endpoint ---
+	observabilitySource := metricsSource{
+		startedAt:     time.Now(),
+		engine:        eng,
+		netconfServer: netconfServer,
+	}
+	var metricsErr <-chan error
+	if f.metricsListen != "" {
+		metricsErr, err = startMetricsServer(ctx, f.metricsListen, observabilitySource, log)
+		if err != nil {
+			grpcServer.Stop()
+			return err
+		}
+	}
+
+	// --- Step 11: Start SNMP endpoint ---
+	var snmpErr <-chan error
+	if f.snmpListen != "" {
+		snmpErr, err = startSNMPServer(ctx, f.snmpListen, f.snmpCommunity, observabilitySource, log)
+		if err != nil {
+			grpcServer.Stop()
+			return err
+		}
+	}
 
 	// --- Wait for shutdown ---
 	log.Info("Daemon running, waiting for shutdown signal")
-	<-ctx.Done()
-	log.Info("Shutdown signal received, stopping")
+	select {
+	case <-ctx.Done():
+		log.Info("Shutdown signal received, stopping")
+	case err := <-grpcErr:
+		return fmt.Errorf("gRPC API stopped: %w", err)
+	case err := <-metricsErr:
+		if err != nil {
+			grpcServer.Stop()
+			return fmt.Errorf("metrics endpoint stopped: %w", err)
+		}
+	case err := <-snmpErr:
+		if err != nil {
+			grpcServer.Stop()
+			return fmt.Errorf("SNMP endpoint stopped: %w", err)
+		}
+	}
+	grpcServer.Stop()
 
 	return nil
 }
 
-// loadInitialConfig loads the startup config from file and converts to new model.
-func loadInitialConfig(f *daemonFlags, log *logger.Logger) (*model.RouterConfig, error) {
+func startNETCONFServer(ctx context.Context, f *daemonFlags, eng *engine.Engine, log *logger.Logger) (*netconf.SSHServer, error) {
+	log.Info("Starting NETCONF server", slog.String("listen", f.netconfListen))
+	ncConfig := netconf.DefaultSSHConfig()
+	ncConfig.ListenAddr = f.netconfListen
+	ncConfig.HostKeyPath = f.hostKeyPath
+	ncConfig.UserDBPath = f.userDBPath
+	ncConfig.DatastorePath = f.datastorePath
+	ncConfig.SkipDatastoreStartupCleanup = true
+
+	server, err := netconf.NewSSHServer(ncConfig)
+	if err != nil {
+		return nil, fmt.Errorf("create NETCONF server: %w", err)
+	}
+	server.SetCommitHook(newNETCONFCommitHook(eng))
+	if err := server.Start(ctx); err != nil {
+		_ = server.Stop()
+		return nil, fmt.Errorf("start NETCONF server: %w", err)
+	}
+	return server, nil
+}
+
+func prepareGRPCSocketPath(socketPath string) error {
+	socketDir := filepath.Dir(socketPath)
+	if err := os.MkdirAll(socketDir, secureGRPCSocketDirPerms); err != nil {
+		return fmt.Errorf("create socket directory: %w", err)
+	}
+	if err := validateGRPCSocketDirectory(socketDir); err != nil {
+		return err
+	}
+	if err := removeStaleGRPCSocket(socketPath); err != nil {
+		return err
+	}
+	return nil
+}
+
+func validateGRPCSocketDirectory(socketDir string) error {
+	info, err := os.Stat(socketDir)
+	if err != nil {
+		return fmt.Errorf("stat gRPC socket directory: %w", err)
+	}
+	if !info.IsDir() {
+		return fmt.Errorf("gRPC socket parent path is not a directory: %s", socketDir)
+	}
+	if perms := info.Mode().Perm(); perms&0022 != 0 {
+		return fmt.Errorf("insecure permissions on gRPC socket directory %s: mode=%04o", socketDir, perms)
+	}
+	return nil
+}
+
+func removeStaleGRPCSocket(socketPath string) error {
+	info, err := os.Lstat(socketPath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return fmt.Errorf("stat stale gRPC socket: %w", err)
+	}
+	if info.Mode()&os.ModeSocket == 0 {
+		return fmt.Errorf("refusing to remove non-socket gRPC path: %s", socketPath)
+	}
+	if err := os.Remove(socketPath); err != nil {
+		return fmt.Errorf("remove stale socket: %w", err)
+	}
+	return nil
+}
+
+func restrictGRPCSocketPermissions(socketPath string) error {
+	if err := os.Chmod(socketPath, secureGRPCSocketFilePerms); err != nil {
+		return fmt.Errorf("restrict gRPC socket permissions: %w", err)
+	}
+	return nil
+}
+
+func listenSecureGRPCSocket(socketPath string) (net.Listener, error) {
+	grpcSocketUmaskMu.Lock()
+	defer grpcSocketUmaskMu.Unlock()
+
+	oldUmask := syscall.Umask(secureGRPCSocketUmask)
+	defer syscall.Umask(oldUmask)
+
+	lis, err := net.Listen("unix", socketPath)
+	if err != nil {
+		return nil, err
+	}
+	if err := restrictGRPCSocketPermissions(socketPath); err != nil {
+		_ = lis.Close()
+		return nil, err
+	}
+	return lis, nil
+}
+
+// loadInitialConfig loads the startup config from the datastore or file.
+func loadInitialConfig(ctx context.Context, f *daemonFlags, st internalstore.ConfigStore, log *logger.Logger) (*model.ConfigSnapshot, string, error) {
+	if st != nil {
+		snap, err := st.GetLatestSnapshot(ctx)
+		if err != nil {
+			return nil, "", fmt.Errorf("load config from datastore: %w", err)
+		}
+		if snap != nil && snap.Config != nil {
+			log.Info("Loaded initial configuration from datastore")
+			return snap.Clone(), "datastore", nil
+		}
+	}
+
 	file, err := os.Open(f.configPath)
 	if err != nil {
-		log.Warn("Config file not found, using empty config", slog.String("path", f.configPath))
-		return model.NewRouterConfig(), nil
+		if os.IsNotExist(err) {
+			log.Warn("Config file not found, using empty config", slog.String("path", f.configPath))
+			return model.NewSnapshot(model.NewRouterConfig(), 1, "system", "initial startup"), "empty", nil
+		}
+		return nil, "", fmt.Errorf("open config %s: %w", f.configPath, err)
 	}
-	defer file.Close()
+	defer func() { _ = file.Close() }()
 
 	legacyCfg, err := parseLegacyConfig(file)
 	if err != nil {
-		return nil, fmt.Errorf("parse config %s: %w", f.configPath, err)
+		return nil, "", fmt.Errorf("parse config %s: %w", f.configPath, err)
 	}
 
 	// Validate
 	if err := legacyCfg.Validate(); err != nil {
-		return nil, fmt.Errorf("validate config: %w", err)
+		return nil, "", fmt.Errorf("validate config: %w", err)
 	}
 
 	// Convert to new model
-	return model.FromLegacyConfig(legacyCfg), nil
+	return model.NewSnapshot(model.FromLegacyConfig(legacyCfg), 1, "system", "initial startup"), "file", nil
+}
+
+func applyInitialConfig(ctx context.Context, eng *engine.Engine, st internalstore.ConfigStore, snap *model.ConfigSnapshot, source string) error {
+	if snap == nil || snap.Config == nil {
+		return fmt.Errorf("initial configuration is nil")
+	}
+
+	var prepared internalstore.PreparedCommit
+	if source != "datastore" && st != nil {
+		var err error
+		prepared, err = st.PrepareCommit(ctx, snap)
+		if err != nil {
+			return fmt.Errorf("prepare initial config persistence: %w", err)
+		}
+	}
+
+	beforeSnap := eng.RunningSnapshot()
+	if err := eng.Apply(ctx, snap.Config, "system", "initial startup"); err != nil {
+		if prepared != nil {
+			_ = prepared.Abort(context.Background())
+		}
+		return err
+	}
+
+	if source == "datastore" {
+		eng.InitializeRunning(snap.Config, initialSnapshotVersion(snap))
+		return nil
+	}
+
+	if prepared != nil {
+		if _, err := prepared.Commit(ctx); err != nil {
+			_ = prepared.Abort(context.Background())
+			if rollbackErr := rollbackEngineToSnapshot(context.Background(), eng, beforeSnap, "system", "rollback failed initial config persistence"); rollbackErr != nil {
+				return fmt.Errorf("persist initial config after apply: %w (rollback failed: %v)", err, rollbackErr)
+			}
+			return fmt.Errorf("persist initial config after apply: %w", err)
+		}
+	}
+	if eng.RunningSnapshot() == nil {
+		eng.InitializeRunning(snap.Config, initialSnapshotVersion(snap))
+	}
+	return nil
+}
+
+func initialSnapshotVersion(snap *model.ConfigSnapshot) uint64 {
+	if snap != nil && snap.Version > 0 {
+		return snap.Version
+	}
+	return 1
 }
 
 func parseLegacyConfig(r io.Reader) (*config.Config, error) {
 	parser := config.NewParser(r)
 	return parser.Parse()
+}
+
+func installParserHooks() {
+	parse := func(text string) (*model.RouterConfig, error) {
+		legacyCfg, err := parseLegacyConfig(strings.NewReader(text))
+		if err != nil {
+			return nil, err
+		}
+		return model.FromLegacyConfig(legacyCfg), nil
+	}
+	nbgrpc.ConfigTextParser = parse
+	storesqlite.LegacyTextParser = parse
+}
+
+func newNETCONFCommitHook(eng *engine.Engine) netconf.CommitHook {
+	return func(ctx context.Context, req *netconf.CommitHookRequest, persist func(context.Context) (string, error)) (string, error) {
+		if req == nil {
+			return "", fmt.Errorf("commit request is nil")
+		}
+		legacyCfg, err := parseLegacyConfig(strings.NewReader(req.ConfigText))
+		if err != nil {
+			return "", fmt.Errorf("parse candidate config: %w", err)
+		}
+		if err := legacyCfg.Validate(); err != nil {
+			return "", fmt.Errorf("validate candidate config: %w", err)
+		}
+		newCfg := model.FromLegacyConfig(legacyCfg)
+		if err := eng.Validate(ctx, newCfg); err != nil {
+			return "", err
+		}
+
+		beforeSnap := eng.RunningSnapshot()
+		if !engine.ComputeDiff(snapshotConfig(beforeSnap), newCfg).HasChanges() {
+			return "", fmt.Errorf("no configuration changes to commit")
+		}
+		if err := eng.Apply(ctx, newCfg, req.User, req.Message); err != nil {
+			return "", err
+		}
+
+		commitID, err := persist(ctx)
+		if err != nil {
+			if rollbackErr := rollbackEngineToSnapshot(context.Background(), eng, beforeSnap, req.User, "rollback failed NETCONF commit persistence"); rollbackErr != nil {
+				return "", fmt.Errorf("persist NETCONF commit after apply: %w (rollback failed: %v)", err, rollbackErr)
+			}
+			return "", fmt.Errorf("persist NETCONF commit after apply: %w", err)
+		}
+		return commitID, nil
+	}
+}
+
+func snapshotConfig(snap *model.ConfigSnapshot) *model.RouterConfig {
+	if snap == nil {
+		return nil
+	}
+	return snap.Config
+}
+
+func rollbackEngineToSnapshot(ctx context.Context, eng *engine.Engine, snap *model.ConfigSnapshot, user, message string) error {
+	cfg := model.NewRouterConfig()
+	if snap != nil && snap.Config != nil {
+		cfg = snap.Config
+	}
+	return eng.Apply(ctx, cfg, user, message)
 }

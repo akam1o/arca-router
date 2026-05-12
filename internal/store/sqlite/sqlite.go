@@ -6,12 +6,15 @@ package sqlite
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"time"
 
 	"github.com/akam1o/arca-router/internal/model"
 	"github.com/akam1o/arca-router/internal/store"
+	pkgconfig "github.com/akam1o/arca-router/pkg/config"
 	"github.com/akam1o/arca-router/pkg/datastore"
+	"github.com/google/uuid"
 )
 
 // Store implements store.ConfigStore using the legacy datastore.
@@ -36,9 +39,25 @@ func NewFromPath(path string) (*Store, error) {
 	return &Store{ds: ds}, nil
 }
 
+// CleanupEphemeralState removes lock and candidate rows left by a previous
+// daemon process before this process starts accepting configuration changes.
+func (s *Store) CleanupEphemeralState(ctx context.Context) error {
+	cleaner, ok := s.ds.(interface {
+		CleanupEphemeralState(context.Context) error
+	})
+	if !ok {
+		return nil
+	}
+	return cleaner.CleanupEphemeralState(ctx)
+}
+
 func (s *Store) GetLatestSnapshot(ctx context.Context) (*model.ConfigSnapshot, error) {
 	running, err := s.ds.GetRunning(ctx)
 	if err != nil {
+		var dsErr *datastore.Error
+		if errors.As(err, &dsErr) && dsErr.Code == datastore.ErrCodeNotFound {
+			return nil, nil
+		}
 		return nil, err
 	}
 	if running == nil {
@@ -51,35 +70,96 @@ func (s *Store) GetLatestSnapshot(ctx context.Context) (*model.ConfigSnapshot, e
 		return nil, fmt.Errorf("parse stored config: %w", err)
 	}
 
-	return &model.ConfigSnapshot{
-		Config:    cfg,
-		Author:    "system",
-		CreatedAt: running.Timestamp,
-	}, nil
+	snap := model.NewSnapshot(cfg, 1, "system", "loaded from datastore")
+	snap.CreatedAt = running.Timestamp
+	return snap, nil
 }
 
-func (s *Store) SaveCommit(ctx context.Context, commitID string, snap *model.ConfigSnapshot) error {
-	// Serialize config to JSON for storage
-	configJSON, err := json.Marshal(snap.Config)
+func (s *Store) PrepareCommit(ctx context.Context, snap *model.ConfigSnapshot) (store.PreparedCommit, error) {
+	if snap == nil || snap.Config == nil {
+		return nil, fmt.Errorf("snapshot is nil")
+	}
+
+	// Store set-command text so the legacy datastore users, including NETCONF,
+	// can continue to read the same running_config rows.
+	configText, err := pkgconfig.ToSetCommandsWithError(snap.Config.ToLegacyConfig())
 	if err != nil {
-		return fmt.Errorf("marshal config: %w", err)
+		return nil, fmt.Errorf("serialize config: %w", err)
 	}
 
 	// Use the legacy commit mechanism
-	// We store JSON in the config text field for the new model
+	sessionID := "engine-" + uuid.NewString()
 	req := &datastore.CommitRequest{
-		SessionID: "engine",
+		SessionID: sessionID,
 		User:      snap.Author,
 		Message:   snap.Message,
 	}
 
-	// First save as candidate, then commit
-	if err := s.ds.SaveCandidate(ctx, "engine", string(configJSON)); err != nil {
-		return fmt.Errorf("save candidate: %w", err)
+	if err := s.ds.AcquireLock(ctx, &datastore.LockRequest{
+		Target:    datastore.LockTargetCandidate,
+		SessionID: sessionID,
+		User:      snap.Author,
+		Timeout:   30 * time.Minute,
+	}); err != nil {
+		return nil, fmt.Errorf("acquire commit lock: %w", err)
 	}
 
-	_, err = s.ds.Commit(ctx, req)
-	return err
+	if err := s.ds.SaveCandidate(ctx, sessionID, configText); err != nil {
+		_ = s.ds.ReleaseLock(context.Background(), datastore.LockTargetCandidate, sessionID)
+		return nil, fmt.Errorf("save candidate: %w", err)
+	}
+
+	return &preparedCommit{
+		ds:        s.ds,
+		sessionID: sessionID,
+		req:       req,
+	}, nil
+}
+
+func (s *Store) SaveCommit(ctx context.Context, snap *model.ConfigSnapshot) (string, error) {
+	prepared, err := s.PrepareCommit(ctx, snap)
+	if err != nil {
+		return "", err
+	}
+	commitID, err := prepared.Commit(ctx)
+	if err != nil {
+		_ = prepared.Abort(context.Background())
+		return "", err
+	}
+	return commitID, nil
+}
+
+func (s *Store) PrepareRollback(ctx context.Context, snap *model.ConfigSnapshot, targetCommitID string) (store.PreparedCommit, error) {
+	if snap == nil || snap.Config == nil {
+		return nil, fmt.Errorf("snapshot is nil")
+	}
+	if targetCommitID == "" {
+		return nil, fmt.Errorf("target commit ID is required")
+	}
+	if _, err := s.ds.GetCommit(ctx, targetCommitID); err != nil {
+		return nil, fmt.Errorf("load rollback target: %w", err)
+	}
+
+	sessionID := "engine-" + uuid.NewString()
+	if err := s.ds.AcquireLock(ctx, &datastore.LockRequest{
+		Target:    datastore.LockTargetCandidate,
+		SessionID: sessionID,
+		User:      snap.Author,
+		Timeout:   30 * time.Minute,
+	}); err != nil {
+		return nil, fmt.Errorf("acquire rollback lock: %w", err)
+	}
+
+	return &preparedRollback{
+		ds:        s.ds,
+		sessionID: sessionID,
+		req: &datastore.RollbackRequest{
+			SessionID: sessionID,
+			CommitID:  targetCommitID,
+			User:      snap.Author,
+			Message:   snap.Message,
+		},
+	}, nil
 }
 
 func (s *Store) GetCommit(ctx context.Context, commitID string) (*store.CommitRecord, error) {
@@ -91,8 +171,14 @@ func (s *Store) GetCommit(ctx context.Context, commitID string) (*store.CommitRe
 		return nil, nil
 	}
 
+	cfg, err := parseStoredConfig(entry.ConfigText)
+	if err != nil {
+		return nil, fmt.Errorf("parse commit config: %w", err)
+	}
+
 	return &store.CommitRecord{
 		CommitID:   entry.CommitID,
+		Config:     cfg,
 		Author:     entry.User,
 		Message:    entry.Message,
 		Timestamp:  entry.Timestamp,
@@ -172,6 +258,7 @@ func parseLegacyText(text string) (*model.RouterConfig, error) {
 
 // Verify interface compliance at compile time.
 var _ store.ConfigStore = (*Store)(nil)
+var _ store.RollbackPreparer = (*Store)(nil)
 
 // Legacy returns the underlying legacy datastore for components that
 // still need it during the migration period.
@@ -181,3 +268,36 @@ func (s *Store) Legacy() datastore.Datastore {
 
 // TimeNow is used for testing. In production it returns time.Now().
 var TimeNow = time.Now
+
+type preparedCommit struct {
+	ds        datastore.Datastore
+	sessionID string
+	req       *datastore.CommitRequest
+}
+
+func (p *preparedCommit) Commit(ctx context.Context) (string, error) {
+	return p.ds.Commit(ctx, p.req)
+}
+
+func (p *preparedCommit) Abort(ctx context.Context) error {
+	deleteErr := p.ds.DeleteCandidate(ctx, p.sessionID)
+	releaseErr := p.ds.ReleaseLock(ctx, datastore.LockTargetCandidate, p.sessionID)
+	if deleteErr != nil {
+		return deleteErr
+	}
+	return releaseErr
+}
+
+type preparedRollback struct {
+	ds        datastore.Datastore
+	sessionID string
+	req       *datastore.RollbackRequest
+}
+
+func (p *preparedRollback) Commit(ctx context.Context) (string, error) {
+	return p.ds.Rollback(ctx, p.req)
+}
+
+func (p *preparedRollback) Abort(ctx context.Context) error {
+	return p.ds.ReleaseLock(ctx, datastore.LockTargetCandidate, p.sessionID)
+}

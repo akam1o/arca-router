@@ -21,10 +21,6 @@ func TestChunkedFramingRoundtrip(t *testing.T) {
 			message: strings.Repeat("x", 10000),
 		},
 		{
-			name:    "empty message",
-			message: "",
-		},
-		{
 			name:    "message with special chars",
 			message: `<rpc>]]>]]><hello>##\n</hello></rpc>`,
 		},
@@ -50,6 +46,21 @@ func TestChunkedFramingRoundtrip(t *testing.T) {
 				t.Errorf("ReadMessage mismatch:\nwant: %q\ngot:  %q", tt.message, string(got))
 			}
 		})
+	}
+}
+
+func TestChunkedFramingWritesRFC6242Markers(t *testing.T) {
+	message := "hello"
+
+	var buf bytes.Buffer
+	writer := NewFramingWriter(&buf, "1.1")
+	if err := writer.WriteMessage([]byte(message)); err != nil {
+		t.Fatalf("WriteMessage failed: %v", err)
+	}
+
+	want := fmt.Sprintf("\n#%d\n%s\n##\n", len(message), message)
+	if got := buf.String(); got != want {
+		t.Fatalf("WriteMessage() = %q, want %q", got, want)
 	}
 }
 
@@ -140,23 +151,35 @@ func TestChunkedFramingInvalidHeader(t *testing.T) {
 	}{
 		{
 			name:  "missing hash",
-			input: "123\ndata##\n",
+			input: "\n123\ndata\n##\n",
 		},
 		{
 			name:  "missing newline",
-			input: "#123data##\n",
+			input: "\n#123data\n##\n",
 		},
 		{
 			name:  "invalid size",
-			input: "#abc\ndata##\n",
+			input: "\n#abc\ndata\n##\n",
+		},
+		{
+			name:  "zero size",
+			input: "\n#0\n\n##\n",
+		},
+		{
+			name:  "leading zero size",
+			input: "\n#01\nx\n##\n",
+		},
+		{
+			name:  "explicit plus sign",
+			input: "\n#+1\nx\n##\n",
 		},
 		{
 			name:  "negative size",
-			input: "#-1\ndata##\n",
+			input: "\n#-1\ndata\n##\n",
 		},
 		{
 			name:  "oversized chunk",
-			input: "#99999\ndata##\n",
+			input: "\n#99999\ndata\n##\n",
 		},
 	}
 
@@ -186,6 +209,19 @@ func TestChunkedFramingMaxMessageSize(t *testing.T) {
 	_, err := reader.ReadMessage()
 	if err == nil {
 		t.Errorf("Expected error for oversized message, but got nil")
+	}
+}
+
+func TestChunkedFramingRejectsEmptyMessage(t *testing.T) {
+	var buf bytes.Buffer
+	writer := NewFramingWriter(&buf, "1.1")
+	if err := writer.WriteMessage([]byte("")); err == nil {
+		t.Fatal("Expected error when writing empty chunked message, but got nil")
+	}
+
+	reader := NewFramingReader(strings.NewReader(ChunkEnd), "1.1")
+	if _, err := reader.ReadMessage(); err == nil {
+		t.Fatal("Expected error when reading empty chunked message, but got nil")
 	}
 }
 
@@ -287,8 +323,8 @@ func BenchmarkEOMFramingRead(b *testing.B) {
 
 func TestChunkedFramingOversizedHeader(t *testing.T) {
 	// Create a header that exceeds MaxChunkHeaderLength
-	oversizedHeader := "#" + strings.Repeat("9", MaxChunkHeaderLength) + "\n"
-	input := oversizedHeader + "data##\n"
+	oversizedHeader := "\n#" + strings.Repeat("9", MaxChunkHeaderLength) + "\n"
+	input := oversizedHeader + "data\n##\n"
 
 	reader := NewFramingReader(strings.NewReader(input), "1.1")
 	_, err := reader.ReadMessage()
@@ -302,7 +338,7 @@ func TestChunkedFramingOversizedHeader(t *testing.T) {
 
 func TestChunkedFramingTruncatedChunkData(t *testing.T) {
 	// Chunk header says 10 bytes, but only 5 bytes provided
-	input := "#10\nabcde"
+	input := "\n#10\nabcde"
 
 	reader := NewFramingReader(strings.NewReader(input), "1.1")
 	_, err := reader.ReadMessage()
@@ -330,7 +366,7 @@ func TestEOMFramingWithEOMMarkerInPayload(t *testing.T) {
 
 func TestChunkedFramingMissingNewline(t *testing.T) {
 	// Chunk header without newline (will hit max length)
-	input := "#123456789"
+	input := "\n#123456789"
 
 	reader := NewFramingReader(strings.NewReader(input), "1.1")
 	_, err := reader.ReadMessage()
@@ -342,7 +378,7 @@ func TestChunkedFramingMissingNewline(t *testing.T) {
 func TestChunkedFramingHugeChunkSize(t *testing.T) {
 	// Chunk size exceeds MaxMessageSize
 	hugeSize := int64(MaxMessageSize) + 1
-	input := fmt.Sprintf("#%d\n", hugeSize)
+	input := fmt.Sprintf("\n#%d\n", hugeSize)
 
 	reader := NewFramingReader(strings.NewReader(input), "1.1")
 	_, err := reader.ReadMessage()
@@ -357,7 +393,7 @@ func TestChunkedFramingHugeChunkSize(t *testing.T) {
 func TestChunkedFramingOverflowProtection(t *testing.T) {
 	// Two chunks that together exceed MaxMessageSize
 	chunkSize := MaxMessageSize/2 + 1
-	input := fmt.Sprintf("#%d\n%s#%d\n%s##\n",
+	input := fmt.Sprintf("\n#%d\n%s\n#%d\n%s\n##\n",
 		chunkSize, strings.Repeat("x", chunkSize),
 		chunkSize, strings.Repeat("y", chunkSize))
 

@@ -16,15 +16,18 @@ const (
 	// MaxMessageSize is the maximum size of a complete NETCONF message
 	MaxMessageSize = 16 * 1024 * 1024 // 16 MB
 
-	// MaxChunkHeaderLength is the maximum length of a chunk header line (#<len>\n)
+	// MaxChunkHeaderLength is the maximum length of a chunk header line (#<len>\n),
+	// excluding the leading LF chunk separator.
 	// This prevents DoS attacks via unbounded header lines
 	MaxChunkHeaderLength = 64 // Enough for "#" + 18 digits (max int64) + "\n"
 
 	// EOMMarker is the end-of-message marker for base:1.0 framing
 	EOMMarker = "]]>]]>"
 
-	// ChunkEnd is the end-of-chunks marker for base:1.1 framing
-	ChunkEnd = "##\n"
+	// ChunkEnd is the end-of-chunks marker for base:1.1 framing, including leading LF.
+	ChunkEnd = "\n##\n"
+
+	chunkEndLine = "##\n"
 )
 
 // FramingReader reads NETCONF messages using either base:1.0 (EOM) or base:1.1 (chunked) framing
@@ -73,13 +76,18 @@ func (fr *FramingReader) readBoundedLine(maxLen int) (string, error) {
 	return "", fmt.Errorf("line exceeds maximum length %d", maxLen)
 }
 
-// readChunkedMessage reads a base:1.1 chunked message
-// Format: #<len>\n<chunk>[#<len>\n<chunk>]...##\n
+// readChunkedMessage reads a base:1.1 chunked message.
+// Format: \n#<len>\n<chunk>[\n#<len>\n<chunk>]...\n##\n
 func (fr *FramingReader) readChunkedMessage() ([]byte, error) {
 	fr.buffer.Reset()
 	var totalSize int64 // Use int64 to prevent overflow
+	chunksRead := 0
 
 	for {
+		if err := fr.readChunkSeparator(); err != nil {
+			return nil, err
+		}
+
 		// Read chunk header with bounded length (DoS prevention)
 		line, err := fr.readBoundedLine(MaxChunkHeaderLength)
 		if err != nil {
@@ -87,7 +95,10 @@ func (fr *FramingReader) readChunkedMessage() ([]byte, error) {
 		}
 
 		// Check for end-of-chunks marker
-		if line == ChunkEnd {
+		if line == chunkEndLine {
+			if chunksRead == 0 {
+				return nil, fmt.Errorf("chunked message must contain at least one chunk")
+			}
 			break
 		}
 
@@ -97,13 +108,9 @@ func (fr *FramingReader) readChunkedMessage() ([]byte, error) {
 		}
 
 		chunkSizeStr := line[1 : len(line)-1]
-		chunkSize, err := strconv.ParseInt(chunkSizeStr, 10, 64)
+		chunkSize, err := parseChunkSize(chunkSizeStr)
 		if err != nil {
-			return nil, fmt.Errorf("parse chunk size: %w", err)
-		}
-
-		if chunkSize < 0 {
-			return nil, fmt.Errorf("chunk size %d must be non-negative", chunkSize)
+			return nil, err
 		}
 
 		// Check individual chunk size limit (prevents single huge allocation)
@@ -124,12 +131,46 @@ func (fr *FramingReader) readChunkedMessage() ([]byte, error) {
 		}
 
 		fr.buffer.Write(chunkData)
+		chunksRead++
 	}
 
 	// Return a copy to prevent mutation if caller retains the slice
 	result := make([]byte, fr.buffer.Len())
 	copy(result, fr.buffer.Bytes())
 	return result, nil
+}
+
+func parseChunkSize(value string) (int64, error) {
+	if len(value) == 0 {
+		return 0, fmt.Errorf("chunk size is empty")
+	}
+
+	if value[0] < '1' || value[0] > '9' {
+		return 0, fmt.Errorf("invalid chunk size %q", value)
+	}
+
+	for i := 1; i < len(value); i++ {
+		if value[i] < '0' || value[i] > '9' {
+			return 0, fmt.Errorf("invalid chunk size %q", value)
+		}
+	}
+
+	chunkSize, err := strconv.ParseInt(value, 10, 64)
+	if err != nil {
+		return 0, fmt.Errorf("parse chunk size: %w", err)
+	}
+	return chunkSize, nil
+}
+
+func (fr *FramingReader) readChunkSeparator() error {
+	b, err := fr.reader.ReadByte()
+	if err != nil {
+		return fmt.Errorf("read chunk separator: %w", err)
+	}
+	if b != '\n' {
+		return fmt.Errorf("invalid chunk separator: expected LF before chunk header, got %q", b)
+	}
+	return nil
 }
 
 // readEOMMessage reads a base:1.0 EOM-delimited message
@@ -194,9 +235,13 @@ func (fw *FramingWriter) WriteMessage(data []byte) error {
 	return fw.writeEOMMessage(data)
 }
 
-// writeChunkedMessage writes a base:1.1 chunked message
-// Format: #<len>\n<chunk>[#<len>\n<chunk>]...##\n
+// writeChunkedMessage writes a base:1.1 chunked message.
+// Format: \n#<len>\n<chunk>[\n#<len>\n<chunk>]...\n##\n
 func (fw *FramingWriter) writeChunkedMessage(data []byte) error {
+	if len(data) == 0 {
+		return fmt.Errorf("chunked message must contain at least one chunk")
+	}
+
 	remaining := len(data)
 	offset := 0
 
@@ -206,8 +251,8 @@ func (fw *FramingWriter) writeChunkedMessage(data []byte) error {
 			chunkSize = MaxChunkSize
 		}
 
-		// Write chunk header: #<len>\n
-		header := fmt.Sprintf("#%d\n", chunkSize)
+		// Write chunk header: \n#<len>\n
+		header := fmt.Sprintf("\n#%d\n", chunkSize)
 		if _, err := fw.writer.Write([]byte(header)); err != nil {
 			return fmt.Errorf("write chunk header: %w", err)
 		}

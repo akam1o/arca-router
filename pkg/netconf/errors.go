@@ -27,7 +27,10 @@ const (
 	ErrorTagInUse                 ErrorTag = "in-use"
 	ErrorTagOperationFailed       ErrorTag = "operation-failed"
 	ErrorTagMissingElement        ErrorTag = "missing-element"
+	ErrorTagMissingAttribute      ErrorTag = "missing-attribute"
 	ErrorTagUnknownElement        ErrorTag = "unknown-element"
+	ErrorTagUnknownAttribute      ErrorTag = "unknown-attribute"
+	ErrorTagUnknownNamespace      ErrorTag = "unknown-namespace"
 )
 
 // ErrorSeverity represents NETCONF error-severity values per RFC 6241
@@ -128,7 +131,7 @@ func (e *RPCError) Error() string {
 
 // ErrMalformedMessage returns XML parse error
 func ErrMalformedMessage(message string) *RPCError {
-	return NewRPCError(ErrorTypeProtocol, ErrorTagMalformedMessage, message).
+	return NewRPCError(ErrorTypeRPC, ErrorTagMalformedMessage, message).
 		WithPath("/rpc")
 }
 
@@ -139,7 +142,7 @@ func ErrMalformedMessageWithElement(message, element string) *RPCError {
 
 // ErrDTDNotAllowed returns error for DTD/DOCTYPE in XML
 func ErrDTDNotAllowed() *RPCError {
-	return NewRPCError(ErrorTypeProtocol, ErrorTagMalformedMessage, "DTD declarations are not allowed").
+	return NewRPCError(ErrorTypeRPC, ErrorTagMalformedMessage, "DTD declarations are not allowed").
 		WithPath("/rpc").
 		WithBadElement("DOCTYPE")
 }
@@ -179,16 +182,32 @@ func ErrInvalidFilter(rpcName, message string) *RPCError {
 
 // ErrInvalidNamespace returns error for XML namespace mismatch
 func ErrInvalidNamespace(namespace string) *RPCError {
-	return NewRPCError(ErrorTypeProtocol, ErrorTagMalformedMessage, fmt.Sprintf("invalid namespace: %s", namespace)).
+	return NewRPCError(ErrorTypeProtocol, ErrorTagUnknownNamespace, fmt.Sprintf("invalid namespace: %s", namespace)).
 		WithPath("/rpc").
+		WithBadElement("rpc").
 		WithBadNamespace(namespace)
+}
+
+// ErrMissingAttribute returns error for missing required attribute
+func ErrMissingAttribute(element, attribute string) *RPCError {
+	return NewRPCError(ErrorTypeRPC, ErrorTagMissingAttribute, fmt.Sprintf("missing required attribute: %s", attribute)).
+		WithPath(rpcErrorPath(element)).
+		WithBadElement(element).
+		WithBadAttribute(attribute)
 }
 
 // ErrMissingElement returns error for missing required element
 func ErrMissingElement(rpcName, element string) *RPCError {
 	return NewRPCError(ErrorTypeProtocol, ErrorTagMissingElement, fmt.Sprintf("missing required element: %s", element)).
-		WithPath(fmt.Sprintf("/rpc/%s", rpcName)).
+		WithPath(rpcErrorPath(rpcName)).
 		WithBadElement(element)
+}
+
+func rpcErrorPath(element string) string {
+	if element == "" || element == "rpc" {
+		return "/rpc"
+	}
+	return fmt.Sprintf("/rpc/%s", element)
 }
 
 // ErrUnknownElement returns error for unknown/unsupported element
@@ -196,6 +215,13 @@ func ErrUnknownElement(path, element string) *RPCError {
 	return NewRPCError(ErrorTypeProtocol, ErrorTagUnknownElement, fmt.Sprintf("unknown element: %s", element)).
 		WithPath(path).
 		WithBadElement(element)
+}
+
+// ErrUnknownAttribute returns error for unknown/unsupported attribute
+func ErrUnknownAttribute(path, attribute string) *RPCError {
+	return NewRPCError(ErrorTypeProtocol, ErrorTagUnknownAttribute, fmt.Sprintf("unknown attribute: %s", attribute)).
+		WithPath(path).
+		WithBadAttribute(attribute)
 }
 
 // ErrAccessDenied returns error for RBAC denial

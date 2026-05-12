@@ -31,7 +31,7 @@ func GenerateOSPFConfig(cfg *OSPFConfig) (string, error) {
 		if err := validateRouterID(cfg.RouterID); err != nil {
 			return "", err
 		}
-		b.WriteString(fmt.Sprintf(" ospf router-id %s\n", cfg.RouterID))
+		fmt.Fprintf(&b, " ospf router-id %s\n", cfg.RouterID)
 	} else if !cfg.IsOSPFv3 {
 		// OSPFv2 requires router-id
 		return "", NewInvalidConfigError("OSPF router-id is required for OSPFv2")
@@ -49,7 +49,7 @@ func GenerateOSPFConfig(cfg *OSPFConfig) (string, error) {
 		if err := validateOSPFNetwork(&n); err != nil {
 			return "", err
 		}
-		b.WriteString(fmt.Sprintf(" network %s area %s\n", n.Prefix, n.AreaID))
+		fmt.Fprintf(&b, " network %s area %s\n", n.Prefix, n.AreaID)
 	}
 
 	b.WriteString("!\n")
@@ -70,20 +70,20 @@ func GenerateOSPFConfig(cfg *OSPFConfig) (string, error) {
 		// Only generate interface section if there are non-default settings
 		hasConfig := iface.Passive || iface.Metric > 0 || iface.Priority != nil
 		if hasConfig {
-			b.WriteString(fmt.Sprintf("interface %s\n", iface.Name))
+			fmt.Fprintf(&b, "interface %s\n", iface.Name)
 
 			if cfg.IsOSPFv3 {
 				// OSPFv3 interface configuration
-				b.WriteString(fmt.Sprintf(" ipv6 ospf6 area %s\n", iface.AreaID))
+				fmt.Fprintf(&b, " ipv6 ospf6 area %s\n", iface.AreaID)
 
 				if iface.Passive {
 					b.WriteString(" ipv6 ospf6 passive\n")
 				}
 				if iface.Metric > 0 {
-					b.WriteString(fmt.Sprintf(" ipv6 ospf6 cost %d\n", iface.Metric))
+					fmt.Fprintf(&b, " ipv6 ospf6 cost %d\n", iface.Metric)
 				}
 				if iface.Priority != nil {
-					b.WriteString(fmt.Sprintf(" ipv6 ospf6 priority %d\n", *iface.Priority))
+					fmt.Fprintf(&b, " ipv6 ospf6 priority %d\n", *iface.Priority)
 				}
 			} else {
 				// OSPFv2 interface configuration
@@ -91,10 +91,10 @@ func GenerateOSPFConfig(cfg *OSPFConfig) (string, error) {
 					b.WriteString(" ip ospf passive\n")
 				}
 				if iface.Metric > 0 {
-					b.WriteString(fmt.Sprintf(" ip ospf cost %d\n", iface.Metric))
+					fmt.Fprintf(&b, " ip ospf cost %d\n", iface.Metric)
 				}
 				if iface.Priority != nil {
-					b.WriteString(fmt.Sprintf(" ip ospf priority %d\n", *iface.Priority))
+					fmt.Fprintf(&b, " ip ospf priority %d\n", *iface.Priority)
 				}
 			}
 

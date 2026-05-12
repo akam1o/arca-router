@@ -15,6 +15,17 @@ import (
 	"github.com/akam1o/arca-router/pkg/logger"
 )
 
+const (
+	userDBFilePerms os.FileMode = 0600
+	userDBDirPerms  os.FileMode = 0750
+)
+
+// dummyPasswordHash is used when authentication must spend comparable work
+// without depending on a real user's stored hash.
+const dummyPasswordHash = "$argon2id$v=19$m=65536,t=3,p=4$AAAAAAAAAAAAAAAAAAAAAA$AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+
+var verifyPasswordHash = auth.VerifyPassword
+
 // Role constants for user authorization
 const (
 	RoleAdmin    = "admin"
@@ -42,10 +53,8 @@ type User struct {
 
 // NewUserDatabase creates a new user database connection
 func NewUserDatabase(path string, log *logger.Logger) (*UserDatabase, error) {
-	// Create directory if needed
-	dir := filepath.Dir(path)
-	if err := os.MkdirAll(dir, 0750); err != nil {
-		return nil, fmt.Errorf("failed to create directory: %w", err)
+	if err := prepareSecureUserDatabaseFile(path); err != nil {
+		return nil, err
 	}
 
 	// Open database
@@ -88,8 +97,65 @@ func NewUserDatabase(path string, log *logger.Logger) (*UserDatabase, error) {
 		}
 		return nil, fmt.Errorf("failed to initialize schema: %w", err)
 	}
+	if err := restrictUserDatabaseFiles(path); err != nil {
+		if closeErr := db.Close(); closeErr != nil {
+			_ = closeErr
+		}
+		return nil, err
+	}
 
 	return udb, nil
+}
+
+func prepareSecureUserDatabaseFile(path string) error {
+	dir := filepath.Dir(path)
+	if err := os.MkdirAll(dir, userDBDirPerms); err != nil {
+		return fmt.Errorf("failed to create directory: %w", err)
+	}
+	if err := validateUserDatabaseDirectoryPermissions(dir); err != nil {
+		return err
+	}
+	file, err := os.OpenFile(path, os.O_RDWR|os.O_CREATE, userDBFilePerms)
+	if err != nil {
+		return fmt.Errorf("failed to create user database file: %w", err)
+	}
+	if closeErr := file.Close(); closeErr != nil {
+		return fmt.Errorf("failed to close user database file: %w", closeErr)
+	}
+	if err := os.Chmod(path, userDBFilePerms); err != nil {
+		return fmt.Errorf("failed to restrict user database file permissions: %w", err)
+	}
+	return nil
+}
+
+func validateUserDatabaseDirectoryPermissions(dir string) error {
+	info, err := os.Stat(dir)
+	if err != nil {
+		return fmt.Errorf("failed to stat user database directory: %w", err)
+	}
+	if !info.IsDir() {
+		return fmt.Errorf("user database parent path is not a directory: %s", dir)
+	}
+	perms := info.Mode().Perm()
+	if perms&0022 != 0 {
+		return fmt.Errorf("insecure permissions on user database directory %s: mode=%04o", dir, perms)
+	}
+	return nil
+}
+
+func restrictUserDatabaseFiles(path string) error {
+	for _, filePath := range []string{path, path + "-wal", path + "-shm"} {
+		if _, err := os.Stat(filePath); err != nil {
+			if os.IsNotExist(err) {
+				continue
+			}
+			return fmt.Errorf("failed to stat user database file %s: %w", filePath, err)
+		}
+		if err := os.Chmod(filePath, userDBFilePerms); err != nil {
+			return fmt.Errorf("failed to restrict user database file permissions for %s: %w", filePath, err)
+		}
+	}
+	return nil
 }
 
 // Initialize initializes the database schema
@@ -141,6 +207,9 @@ func (udb *UserDatabase) CreateUser(username, passwordHash, role string) error {
 	if role != RoleAdmin && role != RoleOperator && role != RoleReadOnly {
 		return fmt.Errorf("invalid role: %s (must be %s, %s, or %s)", role, RoleAdmin, RoleOperator, RoleReadOnly)
 	}
+	if err := validateStoredPasswordHash(passwordHash); err != nil {
+		return err
+	}
 
 	now := time.Now().Unix()
 	query := `INSERT INTO users (username, password_hash, role, created_at, updated_at, enabled)
@@ -152,6 +221,13 @@ func (udb *UserDatabase) CreateUser(username, passwordHash, role string) error {
 	}
 
 	udb.log.Info("User created", "username", username, "role", role)
+	return nil
+}
+
+func validateStoredPasswordHash(passwordHash string) error {
+	if err := auth.ValidatePasswordHash(passwordHash); err != nil {
+		return fmt.Errorf("invalid password_hash: %w", err)
+	}
 	return nil
 }
 
@@ -186,6 +262,11 @@ func (udb *UserDatabase) UpdateUser(username, passwordHash, role string, enabled
 	// Validate role using constants
 	if role != "" && role != RoleAdmin && role != RoleOperator && role != RoleReadOnly {
 		return fmt.Errorf("invalid role: %s (must be %s, %s, or %s)", role, RoleAdmin, RoleOperator, RoleReadOnly)
+	}
+	if passwordHash != "" {
+		if err := validateStoredPasswordHash(passwordHash); err != nil {
+			return err
+		}
 	}
 
 	// Build update query dynamically
@@ -306,22 +387,28 @@ func (udb *UserDatabase) VerifyPassword(username, password string) (*User, error
 	// Get user from database
 	user, err := udb.GetUser(username)
 	if err != nil {
+		_, _ = verifyPasswordHash(password, dummyPasswordHash)
 		// Log for audit but return generic error to prevent user enumeration
 		udb.log.Warn("Authentication failed", "username", username, "reason", "user_not_found")
 		return nil, fmt.Errorf("authentication failed")
 	}
 
-	// Check if user is enabled
-	if !user.Enabled {
-		// Log for audit but return generic error
-		udb.log.Warn("Authentication failed", "username", username, "reason", "user_disabled")
-		return nil, fmt.Errorf("authentication failed")
+	userDisabled := !user.Enabled
+	hashToVerify := user.PasswordHash
+	if userDisabled {
+		hashToVerify = dummyPasswordHash
 	}
 
 	// Verify password (constant-time comparison)
-	valid, err := auth.VerifyPassword(password, user.PasswordHash)
+	valid, err := verifyPasswordHash(password, hashToVerify)
 	if err != nil {
 		udb.log.Warn("Authentication failed", "username", username, "reason", "password_verification_error", "error", err)
+		return nil, fmt.Errorf("authentication failed")
+	}
+
+	if userDisabled {
+		// Log for audit but return generic error
+		udb.log.Warn("Authentication failed", "username", username, "reason", "user_disabled")
 		return nil, fmt.Errorf("authentication failed")
 	}
 
@@ -340,15 +427,11 @@ func (udb *UserDatabase) VerifyPassword(username, password string) (*User, error
 // Used by SSH authentication callback for audit logging
 // Implements timing attack mitigation by performing dummy hash verification for non-existent users
 func (udb *UserDatabase) VerifyPasswordWithReason(username, password string) (*User, string, error) {
-	// Dummy hash for timing attack mitigation (argon2id with same parameters)
-	// This hash is never valid, but verification takes the same time as real hash
-	const dummyHash = "$argon2id$v=19$m=65536,t=3,p=4$c29tZXNhbHQxMjM0NTY3OA$qwertyuiopasdfghjklzxcvbnm1234567890qwertyuiopasdf"
-
 	// Get user from database
 	user, err := udb.GetUser(username)
 	if err != nil {
 		// Perform dummy verification to maintain constant timing
-		_, _ = auth.VerifyPassword(password, dummyHash)
+		_, _ = verifyPasswordHash(password, dummyPasswordHash)
 		return nil, "user_not_found", fmt.Errorf("authentication failed")
 	}
 
@@ -357,11 +440,11 @@ func (udb *UserDatabase) VerifyPasswordWithReason(username, password string) (*U
 	hashToVerify := user.PasswordHash
 	if userDisabled {
 		// Use dummy hash to maintain timing even for disabled users
-		hashToVerify = dummyHash
+		hashToVerify = dummyPasswordHash
 	}
 
 	// Verify password (constant-time comparison)
-	valid, err := auth.VerifyPassword(password, hashToVerify)
+	valid, err := verifyPasswordHash(password, hashToVerify)
 	if err != nil {
 		return nil, "password_verification_error", fmt.Errorf("authentication failed")
 	}

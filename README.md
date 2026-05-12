@@ -9,7 +9,7 @@ English | [日本語](README.ja.md)
 
 arca-router is a software router with Junos-compatible configuration syntax, powered by VPP (Vector Packet Processing) and FRR (Free Range Routing) for dynamic routing protocols.
 
-**Current Status**: v0.4.x - **Unified Architecture (v2)**
+**Current Status**: v0.5.x - **Production Hardening**
 
 ---
 
@@ -17,7 +17,18 @@ arca-router is a software router with Junos-compatible configuration syntax, pow
 
 Previous releases are documented in [`CHANGELOG.md`](CHANGELOG.md).
 
-### v0.4.x - **Current Release** ✅
+### v0.5.x - **Current Release** 🚧
+
+- ✅ **Proto Compilation & Full gRPC Wiring**: Generated `api/v1/router.proto` stubs are wired into daemon and CLI
+- ✅ **FRR Transactional Apply**: Default FRR apply path uses `transactional` management commits; `file` remains available for recovery
+- ✅ **Comprehensive v2 Tests**: Unit tests for engine, diff, plugins, gRPC server/client
+- ✅ **Monitoring/Observability**
+  - Prometheus metrics endpoint
+  - Health endpoint
+  - Grafana dashboard
+  - Optional read-only SNMPv2c endpoint
+
+### v0.4.x - **Previous Release** ✅
 
 - ✅ **Unified Daemon Architecture**: Single `arca-routerd` process (VPP + FRR + NETCONF + gRPC API)
 - ✅ **Struct-First Config Model**: Canonical Go types replace text-primary configuration
@@ -40,17 +51,6 @@ Previous releases are documented in [`CHANGELOG.md`](CHANGELOG.md).
 ---
 
 ## Roadmap
-
-### v0.5.x - Production Hardening 🔲
-
-- 🔲 **Proto Compilation & Full gRPC Wiring**: Compile `api/v1/router.proto` and wire typed stubs
-- 🔲 **FRR MGMT API**: Incremental FRR config via mgmtd (replace full-file regeneration)
-- 🔲 **Comprehensive v2 Tests**: Unit tests for engine, diff, plugins, gRPC server/client
-- 🔲 **Migration Tooling**: Auto-migrate v0.3.x deployments to unified daemon
-- 🔲 **Monitoring/Observability**
-  - Prometheus exporter
-  - Grafana dashboard
-  - SNMP (optional)
 
 ### v0.6.x - Advanced Features 🔲
 
@@ -89,9 +89,9 @@ Previous releases are documented in [`CHANGELOG.md`](CHANGELOG.md).
 
 ---
 
-## Quick Start (v0.3.x)
+## Quick Start (v0.5.x)
 
-✅ **Current Release (v0.3.x)**: Requires VPP 24.10+ and FRR 8.0+
+🚧 **Current Release (v0.5.x)**: Requires VPP 24.10+ and FRR 8.0+
 
 ### 1. Install Prerequisites
 
@@ -137,6 +137,13 @@ sudo dnf install -y ./arca-router-*.rpm
 # Verify installation
 /usr/sbin/arca-routerd --version
 arca-cli --version
+```
+
+To use `arca-cli` as a non-root operator, add that login user to the
+`arca-router` group and start a new login session:
+
+```bash
+sudo usermod -aG arca-router $USER
 ```
 
 ### 3. Configure Hardware Mapping
@@ -263,24 +270,18 @@ netconf-console --host localhost --port 830 --user admin --password YourSecurePa
 # Check daemon logs
 sudo journalctl -u arca-routerd -n 50
 
-# View interface status with arca-cli
+# View running configuration with arca-cli
+arca-cli show configuration
+
+# Check operational state through arca-routerd
 arca-cli show interfaces
-
-# View routing table
 arca-cli show route
-
-# View BGP status
 arca-cli show bgp summary
-
-# View OSPF neighbors
 arca-cli show ospf neighbor
 
-# Check VPP directly (optional)
+# Check VPP/FRR directly (optional)
 sudo vppctl show interface
 sudo vppctl show lcp
-sudo vppctl show ip fib
-
-# Check FRR directly (optional)
 sudo vtysh -c 'show running-config'
 sudo vtysh -c 'show ip route'
 ```
@@ -343,9 +344,11 @@ ls -lh dist/
 ```bash
 make help             # Show all available targets
 make version          # Display version information
-make build            # Build legacy binaries (v0.3.x)
-make build-v2         # Build v0.4.x unified daemon + CLI
+make build            # Build v0.5.x unified daemon + CLI
+make build-cli        # Build only current arca-cli
+make build-v2         # Build v0.5.x binaries with explicit -v2 names
 make build-v2-cli     # Build only arca-cli-v2
+make generate-proto   # Generate typed gRPC bindings
 make test             # Run unit tests
 make integration-test # Run integration tests
 make fmt              # Format code
@@ -372,14 +375,14 @@ arca-router/
 │   └── v1/
 │       └── router.proto        # gRPC API definitions (Config/Session/State)
 ├── cmd/
-│   ├── arca-routerd-v2/        # Unified daemon (v0.4.x)
+│   ├── arca-routerd-v2/        # Unified daemon (v0.5.x)
 │   │   └── main.go             # Single process: VPP + FRR + NETCONF + gRPC
-│   ├── arca-cli-v2/            # Thin gRPC CLI client (v0.4.x)
+│   ├── arca-cli-v2/            # Thin gRPC CLI client (v0.5.x)
 │   │   └── main.go             # Communicates via Unix socket
 │   ├── arca-routerd/           # Legacy daemon (v0.3.x)
 │   ├── arca-cli/               # Legacy CLI (v0.3.x)
 │   └── arca-netconfd/          # Legacy NETCONF daemon (v0.3.x)
-├── internal/                   # v0.4.x core packages
+├── internal/                   # v0.5.x core packages
 │   ├── model/                  # Canonical config & state types
 │   │   ├── config.go           # RouterConfig (struct-first model)
 │   │   ├── state.go            # OperationalState

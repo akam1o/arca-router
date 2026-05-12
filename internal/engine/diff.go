@@ -1,6 +1,7 @@
 package engine
 
 import (
+	"reflect"
 	"sort"
 
 	"github.com/akam1o/arca-router/internal/model"
@@ -10,6 +11,9 @@ import (
 // Instead of re-applying the entire configuration, southbound plugins use this
 // to apply only what changed.
 type ConfigDiff struct {
+	OldConfig *model.RouterConfig
+	NewConfig *model.RouterConfig
+
 	// Interface changes
 	InterfacesAdded   map[string]*model.InterfaceConfig
 	InterfacesRemoved []string
@@ -59,9 +63,9 @@ type InterfaceChange struct {
 
 // UnitAddress identifies an address on a specific unit/family.
 type UnitAddress struct {
-	UnitNum    int
-	Family     string
-	Address    string
+	UnitNum int
+	Family  string
+	Address string
 }
 
 // HasChanges returns true if any changes exist.
@@ -78,6 +82,14 @@ func (d *ConfigDiff) HasChanges() bool {
 		d.SecurityChanged
 }
 
+// Clone returns an independent diff with cloned old and new configuration trees.
+func (d *ConfigDiff) Clone() *ConfigDiff {
+	if d == nil {
+		return nil
+	}
+	return ComputeDiff(d.OldConfig.Clone(), d.NewConfig.Clone())
+}
+
 // ComputeDiff computes the minimal diff between two RouterConfig snapshots.
 func ComputeDiff(old, new *model.RouterConfig) *ConfigDiff {
 	diff := &ConfigDiff{
@@ -91,6 +103,8 @@ func ComputeDiff(old, new *model.RouterConfig) *ConfigDiff {
 	if new == nil {
 		new = model.NewRouterConfig()
 	}
+	diff.OldConfig = old
+	diff.NewConfig = new
 
 	computeInterfaceDiff(old, new, diff)
 	computeProtocolDiff(old, new, diff)
@@ -361,40 +375,7 @@ func staticRoutesEqual(a, b []*model.StaticRoute) bool {
 }
 
 func policyEqual(a, b *model.PolicyConfig) bool {
-	if a == nil && b == nil {
-		return true
-	}
-	if a == nil || b == nil {
-		return false
-	}
-	if len(a.PrefixLists) != len(b.PrefixLists) || len(a.PolicyStatements) != len(b.PolicyStatements) {
-		return false
-	}
-	for name, apl := range a.PrefixLists {
-		bpl, ok := b.PrefixLists[name]
-		if !ok {
-			return false
-		}
-		if len(apl.Prefixes) != len(bpl.Prefixes) {
-			return false
-		}
-		for i := range apl.Prefixes {
-			if apl.Prefixes[i] != bpl.Prefixes[i] {
-				return false
-			}
-		}
-	}
-	// PolicyStatements — simplified comparison (could be more granular)
-	for name, aps := range a.PolicyStatements {
-		bps, ok := b.PolicyStatements[name]
-		if !ok {
-			return false
-		}
-		if len(aps.Terms) != len(bps.Terms) {
-			return false
-		}
-	}
-	return true
+	return reflect.DeepEqual(a, b)
 }
 
 func systemEqual(a, b *model.SystemConfig) bool {
@@ -408,24 +389,5 @@ func systemEqual(a, b *model.SystemConfig) bool {
 }
 
 func securityEqual(a, b *model.SecurityConfig) bool {
-	if a == nil && b == nil {
-		return true
-	}
-	if a == nil || b == nil {
-		return false
-	}
-	// Deep comparison of all security fields
-	if len(a.Users) != len(b.Users) {
-		return false
-	}
-	for uname, au := range a.Users {
-		bu, ok := b.Users[uname]
-		if !ok {
-			return false
-		}
-		if au.Role != bu.Role || au.Password != bu.Password || au.SSHKey != bu.SSHKey {
-			return false
-		}
-	}
-	return true
+	return reflect.DeepEqual(a, b)
 }

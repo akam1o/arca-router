@@ -27,10 +27,10 @@ func (ds *sqliteDatastore) Commit(ctx context.Context, req *CommitRequest) (stri
 	err = ds.withTx(ctx, false, func(tx *sql.Tx) error {
 		// 0. Verify the session holds a valid (non-expired) candidate lock (enforces exclusive access)
 		var lockSessionID string
-		var expiresAt time.Time
+		var expiresAt sqliteUnixTime
 		err := tx.QueryRowContext(ctx, `
-			SELECT session_id, expires_at FROM config_locks WHERE target = ?
-		`, LockTargetCandidate).Scan(&lockSessionID, &expiresAt)
+					SELECT session_id, expires_at FROM config_locks WHERE target = ?
+				`, LockTargetCandidate).Scan(&lockSessionID, &expiresAt)
 
 		if err == sql.ErrNoRows {
 			return NewError(ErrCodeConflict,
@@ -41,7 +41,7 @@ func (ds *sqliteDatastore) Commit(ctx context.Context, req *CommitRequest) (stri
 		}
 
 		// Check if lock has expired
-		if now.After(expiresAt) {
+		if now.Unix() > expiresAt.Unix() {
 			return NewError(ErrCodeConflict,
 				"cannot commit: config lock has expired (re-acquire lock before commit)", nil)
 		}
@@ -127,8 +127,36 @@ func (ds *sqliteDatastore) Rollback(ctx context.Context, req *RollbackRequest) (
 
 	// Execute rollback transaction
 	err = ds.withTx(ctx, false, func(tx *sql.Tx) error {
+		// 0. Verify the session holds a valid candidate lock, same as commit.
+		if req.SessionID == "" {
+			return NewError(ErrCodeConflict,
+				"cannot rollback: no config lock held (lock must be acquired before rollback)", nil)
+		}
+
+		var lockSessionID string
+		var expiresAt sqliteUnixTime
+		err := tx.QueryRowContext(ctx, `
+					SELECT session_id, expires_at FROM config_locks WHERE target = ?
+				`, LockTargetCandidate).Scan(&lockSessionID, &expiresAt)
+
+		if err == sql.ErrNoRows {
+			return NewError(ErrCodeConflict,
+				"cannot rollback: no config lock held (lock must be acquired before rollback)", nil)
+		}
+		if err != nil {
+			return NewError(ErrCodeInternal, "failed to check lock ownership", err)
+		}
+		if now.Unix() > expiresAt.Unix() {
+			return NewError(ErrCodeConflict,
+				"cannot rollback: config lock has expired (re-acquire lock before rollback)", nil)
+		}
+		if lockSessionID != req.SessionID {
+			return NewError(ErrCodeConflict,
+				fmt.Sprintf("cannot rollback: config lock is held by another session (%s)", lockSessionID), nil)
+		}
+
 		// 1. Update all running_config rows to is_current = 0
-		_, err := tx.ExecContext(ctx, `
+		_, err = tx.ExecContext(ctx, `
 			UPDATE running_config SET is_current = 0 WHERE is_current = 1
 		`)
 		if err != nil {
@@ -158,11 +186,19 @@ func (ds *sqliteDatastore) Rollback(ctx context.Context, req *RollbackRequest) (
 			return NewError(ErrCodeInternal, "failed to insert rollback history", err)
 		}
 
-		// 4. Log audit event
+		// 4. Release candidate lock.
 		_, err = tx.ExecContext(ctx, `
-			INSERT INTO audit_log (user, source_ip, action, result, details)
-			VALUES (?, ?, 'rollback', 'success', ?)
-		`, req.User, req.SourceIP, fmt.Sprintf("new_commit_id: %s, target_commit_id: %s", newCommitID, req.CommitID))
+			DELETE FROM config_locks WHERE target = ? AND session_id = ?
+		`, LockTargetCandidate, req.SessionID)
+		if err != nil {
+			return NewError(ErrCodeInternal, "failed to release lock", err)
+		}
+
+		// 5. Log audit event
+		_, err = tx.ExecContext(ctx, `
+			INSERT INTO audit_log (user, session_id, source_ip, action, result, details)
+			VALUES (?, ?, ?, 'rollback', 'success', ?)
+		`, req.User, req.SessionID, req.SourceIP, fmt.Sprintf("new_commit_id: %s, target_commit_id: %s", newCommitID, req.CommitID))
 		if err != nil {
 			return NewError(ErrCodeInternal, "failed to log audit event", err)
 		}
@@ -218,6 +254,8 @@ func (ds *sqliteDatastore) ListCommitHistory(ctx context.Context, opts *HistoryO
 	if opts.Limit > 0 {
 		query += " LIMIT ?"
 		args = append(args, opts.Limit)
+	} else if opts.Offset > 0 {
+		query += " LIMIT -1"
 	}
 
 	if opts.Offset > 0 {

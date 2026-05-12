@@ -26,18 +26,18 @@ func TestParseRPC(t *testing.T) {
 		{
 			name: "missing message-id",
 			xml: `<rpc xmlns="urn:ietf:params:xml:ns:netconf:base:1.0">
-				<get-config><source><running/></source></get-config>
-			</rpc>`,
+					<get-config><source><running/></source></get-config>
+				</rpc>`,
 			wantErr: true,
-			errType: "missing-element",
+			errType: "missing-attribute",
 		},
 		{
 			name: "invalid namespace",
 			xml: `<rpc message-id="101" xmlns="http://example.com/invalid">
-				<get-config><source><running/></source></get-config>
-			</rpc>`,
+					<get-config><source><running/></source></get-config>
+				</rpc>`,
 			wantErr: true,
-			errType: "malformed-message",
+			errType: "unknown-namespace",
 		},
 		{
 			name:    "DTD not allowed",
@@ -50,6 +50,135 @@ func TestParseRPC(t *testing.T) {
 			xml:     `<!ENTITY xxe SYSTEM "file:///etc/passwd"><rpc message-id="101" xmlns="urn:ietf:params:xml:ns:netconf:base:1.0"><get-config/></rpc>`,
 			wantErr: true,
 			errType: "malformed-message",
+		},
+		{
+			name: "trailing rpc not allowed",
+			xml: `<rpc message-id="101" xmlns="urn:ietf:params:xml:ns:netconf:base:1.0">
+					<get-config><source><running/></source></get-config>
+				</rpc><rpc message-id="102" xmlns="urn:ietf:params:xml:ns:netconf:base:1.0"><close-session/></rpc>`,
+			wantErr: true,
+			errType: "malformed-message",
+		},
+		{
+			name: "rpc root text before operation rejected",
+			xml: `<rpc message-id="101" xmlns="urn:ietf:params:xml:ns:netconf:base:1.0">
+					junk
+					<get-config><source><running/></source></get-config>
+				</rpc>`,
+			wantErr: true,
+			errType: "malformed-message",
+		},
+		{
+			name: "rpc root text after operation rejected",
+			xml: `<rpc message-id="101" xmlns="urn:ietf:params:xml:ns:netconf:base:1.0">
+					<get-config><source><running/></source></get-config>
+					junk
+				</rpc>`,
+			wantErr: true,
+			errType: "malformed-message",
+		},
+		{
+			name: "multiple operations not allowed",
+			xml: `<rpc message-id="101" xmlns="urn:ietf:params:xml:ns:netconf:base:1.0">
+					<get-config><source><running/></source></get-config>
+					<kill-session><session-id>1</session-id></kill-session>
+				</rpc>`,
+			wantErr: true,
+			errType: "malformed-message",
+		},
+		{
+			name: "operation attribute rejected",
+			xml: `<rpc message-id="101" xmlns="urn:ietf:params:xml:ns:netconf:base:1.0">
+					<get-config foo="bar"><source><running/></source></get-config>
+				</rpc>`,
+			wantErr: true,
+			errType: "unknown-attribute",
+		},
+		{
+			name: "rpc root additional attribute accepted",
+			xml: `<rpc message-id="101" foo="bar" xmlns="urn:ietf:params:xml:ns:netconf:base:1.0">
+						<get-config><source><running/></source></get-config>
+					</rpc>`,
+			wantErr: false,
+		},
+		{
+			name: "operation empty namespace rejected",
+			xml: `<rpc message-id="101" xmlns="urn:ietf:params:xml:ns:netconf:base:1.0">
+					<get-config xmlns=""><source><running/></source></get-config>
+				</rpc>`,
+			wantErr: true,
+			errType: "unknown-namespace",
+		},
+		{
+			name: "operation text rejected",
+			xml: `<rpc message-id="101" xmlns="urn:ietf:params:xml:ns:netconf:base:1.0">
+					<close-session>junk</close-session>
+				</rpc>`,
+			wantErr: true,
+			errType: "malformed-message",
+		},
+		{
+			name: "unknown operation child rejected",
+			xml: `<rpc message-id="101" xmlns="urn:ietf:params:xml:ns:netconf:base:1.0">
+					<get-config><source><running/></source><unexpected/></get-config>
+				</rpc>`,
+			wantErr: true,
+			errType: "unknown-element",
+		},
+		{
+			name: "filter attribute rejected",
+			xml: `<rpc message-id="101" xmlns="urn:ietf:params:xml:ns:netconf:base:1.0">
+					<get-config><source><running/></source><filter foo="bar"><interfaces/></filter></get-config>
+				</rpc>`,
+			wantErr: true,
+			errType: "unknown-attribute",
+		},
+		{
+			name: "filter empty namespace rejected",
+			xml: `<rpc message-id="101" xmlns="urn:ietf:params:xml:ns:netconf:base:1.0">
+					<get-config><source><running/></source><filter xmlns=""><interfaces/></filter></get-config>
+				</rpc>`,
+			wantErr: true,
+			errType: "unknown-namespace",
+		},
+		{
+			name: "missing required operation child rejected",
+			xml: `<rpc message-id="101" xmlns="urn:ietf:params:xml:ns:netconf:base:1.0">
+					<get-config/>
+				</rpc>`,
+			wantErr: true,
+			errType: "missing-element",
+		},
+		{
+			name: "duplicate operation child rejected",
+			xml: `<rpc message-id="101" xmlns="urn:ietf:params:xml:ns:netconf:base:1.0">
+					<get-config><source><running/></source><source><candidate/></source></get-config>
+				</rpc>`,
+			wantErr: true,
+			errType: "malformed-message",
+		},
+		{
+			name: "multiple datastore choices rejected",
+			xml: `<rpc message-id="101" xmlns="urn:ietf:params:xml:ns:netconf:base:1.0">
+					<get-config><source><running/><candidate/></source></get-config>
+				</rpc>`,
+			wantErr: true,
+			errType: "malformed-message",
+		},
+		{
+			name: "datastore choice text rejected",
+			xml: `<rpc message-id="101" xmlns="urn:ietf:params:xml:ns:netconf:base:1.0">
+					<get-config><source>running<running/></source></get-config>
+				</rpc>`,
+			wantErr: true,
+			errType: "malformed-message",
+		},
+		{
+			name: "valid kill-session text leaf",
+			xml: `<rpc message-id="101" xmlns="urn:ietf:params:xml:ns:netconf:base:1.0">
+					<kill-session><session-id>1</session-id></kill-session>
+				</rpc>`,
+			wantErr: false,
 		},
 	}
 
@@ -78,6 +207,197 @@ func TestParseRPC(t *testing.T) {
 				if rpc == nil {
 					t.Errorf("Expected RPC, got nil")
 				}
+			}
+		})
+	}
+}
+
+func TestParseRPCContentIsOperationInnerXML(t *testing.T) {
+	xmlData := `<rpc message-id="101" xmlns="urn:ietf:params:xml:ns:netconf:base:1.0">
+		<get-config>
+			<source><running/></source>
+		</get-config>
+	</rpc>`
+
+	rpc, err := ParseRPC([]byte(xmlData))
+	if err != nil {
+		t.Fatalf("ParseRPC() error = %v", err)
+	}
+
+	var req GetConfigRequest
+	if err := rpc.UnmarshalOperation(&req); err != nil {
+		t.Fatalf("UnmarshalOperation() error = %v", err)
+	}
+	if req.Source.Running == nil {
+		t.Fatalf("UnmarshalOperation() source = %#v, want running", req.Source)
+	}
+}
+
+func TestParseRPCPreservesReplyAttributes(t *testing.T) {
+	xmlData := `<rpc message-id="101"
+		xmlns="urn:ietf:params:xml:ns:netconf:base:1.0"
+		xmlns:ex="http://example.net/content/1.0"
+		ex:user-id="fred"
+		trace-id="abc">
+		<get/>
+	</rpc>`
+
+	rpc, err := ParseRPC([]byte(xmlData))
+	if err != nil {
+		t.Fatalf("ParseRPC() error = %v", err)
+	}
+
+	reply := NewOKReply(rpc.MessageID).WithAttributes(rpc.ReplyAttrs)
+	data, err := MarshalReply(reply)
+	if err != nil {
+		t.Fatalf("MarshalReply() error = %v", err)
+	}
+
+	xmlStr := string(data)
+	for _, want := range []string{
+		`xmlns:ex="http://example.net/content/1.0"`,
+		`ex:user-id="fred"`,
+		`trace-id="abc"`,
+	} {
+		if !strings.Contains(xmlStr, want) {
+			t.Fatalf("MarshalReply() missing %s in %s", want, xmlStr)
+		}
+	}
+}
+
+func TestExtractRPCReplyContextFromMalformedRPC(t *testing.T) {
+	xmlData := `<rpc message-id="101"
+		xmlns="urn:ietf:params:xml:ns:netconf:base:1.0"
+		xmlns:ex="http://example.net/content/1.0"
+		ex:user-id="fred">
+		<get/>
+		trailing text
+	</rpc>`
+
+	if _, err := ParseRPC([]byte(xmlData)); err == nil {
+		t.Fatal("ParseRPC() error = nil, want malformed RPC error")
+	}
+
+	messageID, attrs := extractRPCReplyContext([]byte(xmlData))
+	if messageID != "101" {
+		t.Fatalf("messageID = %q, want 101", messageID)
+	}
+
+	reply := NewErrorReply(messageID, ErrMalformedMessage("bad rpc")).WithAttributes(attrs)
+	data, err := MarshalReply(reply)
+	if err != nil {
+		t.Fatalf("MarshalReply() error = %v", err)
+	}
+
+	xmlStr := string(data)
+	for _, want := range []string{
+		`message-id="101"`,
+		`xmlns:ex="http://example.net/content/1.0"`,
+		`ex:user-id="fred"`,
+	} {
+		if !strings.Contains(xmlStr, want) {
+			t.Fatalf("MarshalReply() missing %s in %s", want, xmlStr)
+		}
+	}
+}
+
+func TestUnmarshalOperationPreservesAncestorNamespaceDeclarations(t *testing.T) {
+	tests := []struct {
+		name string
+		xml  string
+	}{
+		{
+			name: "rpc namespace declaration",
+			xml: `<rpc message-id="101" xmlns="urn:ietf:params:xml:ns:netconf:base:1.0" xmlns:arca="urn:arca:router:config:1.0">
+				<edit-config>
+					<target><candidate/></target>
+					<config>
+						<arca:system><arca:host-name>router1</arca:host-name></arca:system>
+					</config>
+				</edit-config>
+			</rpc>`,
+		},
+		{
+			name: "operation namespace declaration",
+			xml: `<rpc message-id="101" xmlns="urn:ietf:params:xml:ns:netconf:base:1.0">
+				<edit-config xmlns:arca="urn:arca:router:config:1.0">
+					<target><candidate/></target>
+					<config>
+						<arca:system><arca:host-name>router1</arca:host-name></arca:system>
+					</config>
+				</edit-config>
+			</rpc>`,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			rpc, err := ParseRPC([]byte(tt.xml))
+			if err != nil {
+				t.Fatalf("ParseRPC() error = %v", err)
+			}
+
+			var req EditConfigRequest
+			if err := rpc.UnmarshalOperation(&req); err != nil {
+				t.Fatalf("UnmarshalOperation() error = %v", err)
+			}
+
+			configXML, err := req.Config.XML()
+			if err != nil {
+				t.Fatalf("Config.XML() error = %v", err)
+			}
+			cfg, err := XMLToConfig(configXML, DefaultOpMerge)
+			if err != nil {
+				t.Fatalf("XMLToConfig() error = %v\nXML:\n%s", err, configXML)
+			}
+			if cfg.System == nil || cfg.System.HostName != "router1" {
+				t.Fatalf("XMLToConfig() system = %#v, want host-name router1", cfg.System)
+			}
+		})
+	}
+}
+
+func TestUnmarshalOperationPreservesFilterNamespaceDeclarations(t *testing.T) {
+	tests := []struct {
+		name string
+		xml  string
+	}{
+		{
+			name: "rpc namespace declaration",
+			xml: `<rpc message-id="101" xmlns="urn:ietf:params:xml:ns:netconf:base:1.0" xmlns:if="urn:ietf:params:xml:ns:yang:ietf-interfaces">
+				<get-config>
+					<source><running/></source>
+					<filter><if:interfaces/></filter>
+				</get-config>
+			</rpc>`,
+		},
+		{
+			name: "filter namespace declaration",
+			xml: `<rpc message-id="101" xmlns="urn:ietf:params:xml:ns:netconf:base:1.0">
+				<get-config>
+					<source><running/></source>
+					<filter xmlns:if="urn:ietf:params:xml:ns:yang:ietf-interfaces"><if:interfaces/></filter>
+				</get-config>
+			</rpc>`,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			rpc, err := ParseRPC([]byte(tt.xml))
+			if err != nil {
+				t.Fatalf("ParseRPC() error = %v", err)
+			}
+
+			var req GetConfigRequest
+			if err := rpc.UnmarshalOperation(&req); err != nil {
+				t.Fatalf("UnmarshalOperation() error = %v", err)
+			}
+			if req.Filter == nil {
+				t.Fatal("UnmarshalOperation() filter = nil")
+			}
+			if !filterMatches(req.Filter, "interfaces") {
+				t.Fatalf("filterMatches() = false, want true for namespace-prefixed interfaces filter")
 			}
 		})
 	}
@@ -126,11 +446,64 @@ func TestSourceGetDatastore(t *testing.T) {
 			expected: "",
 			wantErr:  true,
 		},
+		{
+			name:     "multiple datastores",
+			source:   Source{Running: &struct{}{}, Candidate: &struct{}{}},
+			expected: "",
+			wantErr:  true,
+		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			ds, err := tt.source.GetDatastore()
+
+			if tt.wantErr {
+				if err == nil {
+					t.Errorf("Expected error, got nil")
+				}
+			} else {
+				if err != nil {
+					t.Errorf("Expected no error, got %v", err)
+				}
+				if ds != tt.expected {
+					t.Errorf("Expected datastore %s, got %s", tt.expected, ds)
+				}
+			}
+		})
+	}
+}
+
+func TestTargetGetDatastore(t *testing.T) {
+	tests := []struct {
+		name     string
+		target   Target
+		expected string
+		wantErr  bool
+	}{
+		{
+			name:     "candidate",
+			target:   Target{Candidate: &struct{}{}},
+			expected: DatastoreCandidate,
+			wantErr:  false,
+		},
+		{
+			name:     "none",
+			target:   Target{},
+			expected: "",
+			wantErr:  true,
+		},
+		{
+			name:     "multiple datastores",
+			target:   Target{Running: &struct{}{}, Candidate: &struct{}{}},
+			expected: "",
+			wantErr:  true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ds, err := tt.target.GetDatastore()
 
 			if tt.wantErr {
 				if err == nil {
@@ -185,6 +558,24 @@ func TestFilterValidate(t *testing.T) {
 			rpcName: "get-config",
 			wantErr: false,
 		},
+		{
+			name:    "subtree filter text rejected",
+			filter:  &Filter{Type: "subtree", Content: []byte("junk")},
+			rpcName: "get-config",
+			wantErr: true,
+		},
+		{
+			name:    "default subtree xpath text rejected",
+			filter:  &Filter{Content: []byte("/interfaces")},
+			rpcName: "get-config",
+			wantErr: true,
+		},
+		{
+			name:    "comment only filter rejected",
+			filter:  &Filter{Content: []byte("<!-- no element -->")},
+			rpcName: "get-config",
+			wantErr: true,
+		},
 	}
 
 	for _, tt := range tests {
@@ -221,8 +612,8 @@ func TestParseSizeLimit(t *testing.T) {
 		return
 	}
 
-	if rpcErr.ErrorTag != ErrorTagMalformedMessage {
-		t.Errorf("Expected malformed-message error for size limit")
+	if rpcErr.ErrorType != ErrorTypeRPC || rpcErr.ErrorTag != ErrorTagMalformedMessage {
+		t.Errorf("Expected rpc/malformed-message error for size limit, got %s/%s", rpcErr.ErrorType, rpcErr.ErrorTag)
 	}
 }
 
@@ -247,9 +638,9 @@ func TestParseAndValidateRPC(t *testing.T) {
 
 func TestReadRPCFromFraming(t *testing.T) {
 	// Test base:1.1 chunked framing
-	// Format: #<length>\n<data>\n##\n
+	// Format: \n#<length>\n<data>\n##\n
 	rpcXML := `<rpc message-id="101" xmlns="urn:ietf:params:xml:ns:netconf:base:1.0"><get-config><source><running/></source></get-config></rpc>`
-	chunked := []byte(fmt.Sprintf("#%d\n%s##\n", len(rpcXML), rpcXML))
+	chunked := []byte(fmt.Sprintf("\n#%d\n%s\n##\n", len(rpcXML), rpcXML))
 
 	reader := bytes.NewReader(chunked)
 	rpc, err := ReadRPCFromFraming(reader, "1.1")

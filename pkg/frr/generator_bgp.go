@@ -22,11 +22,11 @@ func GenerateBGPConfig(cfg *BGPConfig) (string, error) {
 
 	// Router BGP section
 	b.WriteString("!\n")
-	b.WriteString(fmt.Sprintf("router bgp %d\n", cfg.ASN))
+	fmt.Fprintf(&b, "router bgp %d\n", cfg.ASN)
 
 	// BGP router-id
 	if cfg.RouterID != "" {
-		b.WriteString(fmt.Sprintf(" bgp router-id %s\n", cfg.RouterID))
+		fmt.Fprintf(&b, " bgp router-id %s\n", cfg.RouterID)
 	}
 
 	// Sort neighbors for deterministic output (test stability)
@@ -42,14 +42,14 @@ func GenerateBGPConfig(cfg *BGPConfig) (string, error) {
 			return "", err
 		}
 
-		b.WriteString(fmt.Sprintf(" neighbor %s remote-as %d\n", n.IP, n.RemoteAS))
+		fmt.Fprintf(&b, " neighbor %s remote-as %d\n", n.IP, n.RemoteAS)
 
 		if n.Description != "" {
-			b.WriteString(fmt.Sprintf(" neighbor %s description %s\n", n.IP, escapeDescription(n.Description)))
+			fmt.Fprintf(&b, " neighbor %s description %s\n", n.IP, escapeDescription(n.Description))
 		}
 
 		if n.UpdateSource != "" {
-			b.WriteString(fmt.Sprintf(" neighbor %s update-source %s\n", n.IP, n.UpdateSource))
+			fmt.Fprintf(&b, " neighbor %s update-source %s\n", n.IP, n.UpdateSource)
 		}
 	}
 
@@ -60,14 +60,14 @@ func GenerateBGPConfig(cfg *BGPConfig) (string, error) {
 
 		for _, n := range neighbors {
 			if !n.IsIPv6 {
-				b.WriteString(fmt.Sprintf("  neighbor %s activate\n", n.IP))
+				fmt.Fprintf(&b, "  neighbor %s activate\n", n.IP)
 
 				// Apply route-maps (import/export policies)
 				if n.RouteMapIn != "" {
-					b.WriteString(fmt.Sprintf("  neighbor %s route-map %s in\n", n.IP, n.RouteMapIn))
+					fmt.Fprintf(&b, "  neighbor %s route-map %s in\n", n.IP, n.RouteMapIn)
 				}
 				if n.RouteMapOut != "" {
-					b.WriteString(fmt.Sprintf("  neighbor %s route-map %s out\n", n.IP, n.RouteMapOut))
+					fmt.Fprintf(&b, "  neighbor %s route-map %s out\n", n.IP, n.RouteMapOut)
 				}
 			}
 		}
@@ -81,14 +81,14 @@ func GenerateBGPConfig(cfg *BGPConfig) (string, error) {
 
 		for _, n := range neighbors {
 			if n.IsIPv6 {
-				b.WriteString(fmt.Sprintf("  neighbor %s activate\n", n.IP))
+				fmt.Fprintf(&b, "  neighbor %s activate\n", n.IP)
 
 				// Apply route-maps (import/export policies)
 				if n.RouteMapIn != "" {
-					b.WriteString(fmt.Sprintf("  neighbor %s route-map %s in\n", n.IP, n.RouteMapIn))
+					fmt.Fprintf(&b, "  neighbor %s route-map %s in\n", n.IP, n.RouteMapIn)
 				}
 				if n.RouteMapOut != "" {
-					b.WriteString(fmt.Sprintf("  neighbor %s route-map %s out\n", n.IP, n.RouteMapOut))
+					fmt.Fprintf(&b, "  neighbor %s route-map %s out\n", n.IP, n.RouteMapOut)
 				}
 			}
 		}

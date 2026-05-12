@@ -190,6 +190,11 @@ func (ds *etcdDatastore) Rollback(ctx context.Context, req *RollbackRequest) (st
 	ctx, cancel := ds.withTimeout(ctx)
 	defer cancel()
 
+	if req.SessionID == "" {
+		return "", NewError(ErrCodeConflict,
+			"cannot rollback: no config lock held (lock must be acquired before rollback)", nil)
+	}
+
 	// Get target commit
 	targetCommit, err := ds.GetCommit(ctx, req.CommitID)
 	if err != nil {
@@ -233,6 +238,7 @@ func (ds *etcdDatastore) Rollback(ctx context.Context, req *RollbackRequest) (st
 		Key:       auditULID, // Set Key field for consistency
 		Timestamp: now,
 		User:      req.User,
+		SessionID: req.SessionID,
 		SourceIP:  req.SourceIP,
 		Action:    "rollback",
 		Result:    "success",
@@ -245,17 +251,55 @@ func (ds *etcdDatastore) Rollback(ctx context.Context, req *RollbackRequest) (st
 	}
 
 	// Keys
+	lockKey := ds.lockKeyForTarget(LockTargetCandidate)
 	runningMetadataKey := ds.key("running", "current")
 	runningConfigKey := ds.key("running", "config")
 	commitKey := ds.key("commits", newCommitID)
 	auditKey := ds.key("audit", auditULID)
 
+	// Check for legacy lock (fail-closed)
+	if err := ds.checkLegacyLock(ctx); err != nil {
+		return "", err
+	}
+
+	// Get current candidate lock to verify ownership
+	getLockResp, err := ds.client.Get(ctx, lockKey)
+	if err != nil {
+		return "", NewError(ErrCodeInternal, "failed to get lock", err)
+	}
+	if len(getLockResp.Kvs) == 0 {
+		return "", NewError(ErrCodeConflict, "lock not held", nil)
+	}
+
+	var currentLock lockData
+	if err := json.Unmarshal(getLockResp.Kvs[0].Value, &currentLock); err != nil {
+		return "", NewError(ErrCodeInternal, "failed to parse lock data", err)
+	}
+	if currentLock.SessionID != req.SessionID {
+		return "", NewError(ErrCodeConflict,
+			fmt.Sprintf("lock is held by another session %s", currentLock.SessionID),
+			nil)
+	}
+	if currentLock.LeaseID > 0 {
+		leaseTTLResp, leaseErr := ds.client.TimeToLive(ctx, clientv3.LeaseID(currentLock.LeaseID))
+		if leaseErr != nil {
+			return "", NewError(ErrCodeConflict, "lock status cannot be verified", leaseErr)
+		}
+		if leaseTTLResp.TTL <= 0 {
+			return "", NewError(ErrCodeConflict, "lock has expired", nil)
+		}
+	}
+
+	lockValue := string(getLockResp.Kvs[0].Value)
+
 	// Atomic rollback transaction
 	txnResp, err := ds.client.Txn(ctx).
+		If(clientv3.Compare(clientv3.Value(lockKey), "=", lockValue)).
 		Then(
 			clientv3.OpPut(runningMetadataKey, string(metadataJSON)),
 			clientv3.OpPut(runningConfigKey, targetCommit.ConfigText),
 			clientv3.OpPut(commitKey, string(entryJSON)),
+			clientv3.OpDelete(lockKey),
 			clientv3.OpPut(auditKey, string(auditJSON)),
 		).
 		Commit()
@@ -265,7 +309,13 @@ func (ds *etcdDatastore) Rollback(ctx context.Context, req *RollbackRequest) (st
 	}
 
 	if !txnResp.Succeeded {
-		return "", NewError(ErrCodeInternal, "rollback transaction failed", nil)
+		return "", NewError(ErrCodeConflict, "rollback failed: lock was lost", nil)
+	}
+
+	if currentLock.LeaseID > 0 {
+		if _, err := ds.client.Revoke(ctx, clientv3.LeaseID(currentLock.LeaseID)); err != nil {
+			_ = err
+		}
 	}
 
 	return newCommitID, nil

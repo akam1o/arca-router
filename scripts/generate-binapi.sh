@@ -170,7 +170,7 @@ echo "Next steps:"
 echo "1. Review generated binapi in $OUTPUT_DIR"
 echo "2. Commit generated files to repository"
 if [[ "$MINIMAL_MODE" == "true" ]]; then
-    echo "3. Run PoC: cd test/vpp_poc && go build && sudo ./vpp_poc"
+    echo "3. Review minimal generated bindings and run relevant VPP client tests"
     echo "4. Generate full binapi: ./scripts/generate-binapi.sh (without --minimal)"
 else
     echo "3. Implement VPP client: pkg/vpp/govpp_client.go"

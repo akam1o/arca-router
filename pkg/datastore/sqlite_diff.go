@@ -187,13 +187,13 @@ func FormatJunosStyleDiff(diffText string) string {
 		switch prefix {
 		case "-":
 			// Deletion: show as "delete" command
-			result.WriteString(fmt.Sprintf("[delete] %s\n", content))
+			fmt.Fprintf(&result, "[delete] %s\n", content)
 		case "+":
 			// Addition: show as "set" command
-			result.WriteString(fmt.Sprintf("[set] %s\n", content))
+			fmt.Fprintf(&result, "[set] %s\n", content)
 		case " ":
 			// Context: show as-is
-			result.WriteString(fmt.Sprintf("  %s\n", content))
+			fmt.Fprintf(&result, "  %s\n", content)
 		}
 	}
 

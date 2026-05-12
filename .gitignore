@@ -27,6 +27,7 @@ build/output/
 *.tar.gz
 
 # Local caches / tools (do not commit)
+.serena/
 .gocache/
 .gomodcache/
 .gopath/
@@ -54,3 +55,6 @@ Thumbs.db
 # Temporary files
 tmp/
 temp/
+
+# Crash dumps
+/core

@@ -94,7 +94,7 @@ func FromLegacyConfig(old *config.Config) *RouterConfig {
 						Passive: i.Passive,
 						Metric:  i.Metric,
 					}
-					if i.Priority != 0 {
+					if i.PrioritySet || i.Priority != 0 {
 						p := i.Priority
 						oi.Priority = &p
 					}
@@ -255,6 +255,7 @@ func (c *RouterConfig) ToLegacyConfig() *config.Config {
 					}
 					if i.Priority != nil {
 						oi.Priority = *i.Priority
+						oi.PrioritySet = true
 					}
 					area.Interfaces[iName] = oi
 				}

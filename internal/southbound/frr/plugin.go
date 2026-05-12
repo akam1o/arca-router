@@ -15,26 +15,33 @@ import (
 
 // FRRPlugin implements engine.Plugin for FRR routing daemon operations.
 type FRRPlugin struct {
-	mu       sync.Mutex
-	reloader *pkgfrr.Reloader
-	log      *slog.Logger
+	mu      sync.Mutex
+	applier pkgfrr.Applier
+	log     *slog.Logger
 
-	// lastConfig tracks the last applied FRR config for rollback
-	lastConfig string
+	currentConfig     string
+	rollbackConfig    string
+	currentFRRConfig  *pkgfrr.Config
+	rollbackFRRConfig *pkgfrr.Config
 }
 
 // NewFRRPlugin creates a new FRR plugin.
 func NewFRRPlugin(log *slog.Logger) *FRRPlugin {
+	return NewFRRPluginWithApplyMode(log, pkgfrr.BackendModeTransactional)
+}
+
+// NewFRRPluginWithApplyMode creates a new FRR plugin with an explicit apply backend.
+func NewFRRPluginWithApplyMode(log *slog.Logger, mode pkgfrr.BackendMode) *FRRPlugin {
 	return &FRRPlugin{
-		reloader: pkgfrr.NewReloader(),
-		log:      log.With("plugin", "frr"),
+		applier: pkgfrr.NewApplier(mode),
+		log:     log.With("plugin", "frr", "apply_mode", string(mode)),
 	}
 }
 
 func (p *FRRPlugin) Name() string { return "frr" }
 
 func (p *FRRPlugin) Init(ctx context.Context) error {
-	// FRR is managed via config file + reload, no persistent connection needed
+	// FRR apply backends are command-driven, so no persistent connection is needed.
 	return nil
 }
 
@@ -54,9 +61,8 @@ func (p *FRRPlugin) ValidateChanges(ctx context.Context, diff *engine.ConfigDiff
 	return nil
 }
 
-// ApplyChanges regenerates the FRR configuration and reloads.
-// Currently does a full regeneration — incremental updates via FRR MGMT API
-// is a future optimization.
+// ApplyChanges regenerates the desired FRR view and commits it through the
+// configured apply backend. The default backend is transactional management.
 func (p *FRRPlugin) ApplyChanges(ctx context.Context, diff *engine.ConfigDiff) error {
 	p.mu.Lock()
 	defer p.mu.Unlock()
@@ -64,7 +70,7 @@ func (p *FRRPlugin) ApplyChanges(ctx context.Context, diff *engine.ConfigDiff) e
 	// Only regenerate FRR config if routing-related changes occurred
 	if !diff.BGPChanged && !diff.OSPFChanged && !diff.StaticRoutesChanged &&
 		!diff.PolicyChanged && !diff.RoutingChanged && !diff.SystemChanged &&
-		len(diff.InterfacesAdded) == 0 && len(diff.InterfacesRemoved) == 0 {
+		!hasFRRRelevantInterfaceChanges(diff) {
 		p.log.Debug("No routing-related changes, skipping FRR reload")
 		return nil
 	}
@@ -74,27 +80,28 @@ func (p *FRRPlugin) ApplyChanges(ctx context.Context, diff *engine.ConfigDiff) e
 	// generation is whole-file based. The diff tells us *whether* to regenerate.
 	newCfg := p.buildFullConfig(diff)
 
-	// Convert to legacy config for the existing FRR generator
-	legacyCfg := newCfg.ToLegacyConfig()
-
-	// Generate FRR config
-	frrConfig, err := pkgfrr.GenerateFRRConfig(legacyCfg)
+	frrConfig, configContent, err := generateFRRArtifacts(newCfg)
 	if err != nil {
-		return fmt.Errorf("generate FRR config: %w", err)
+		return err
 	}
 
-	configContent, err := pkgfrr.GenerateFRRConfigFile(frrConfig)
-	if err != nil {
-		return fmt.Errorf("generate FRR config file: %w", err)
+	previousConfig := p.currentConfig
+	previousFRRConfig := p.currentFRRConfig
+	if previousConfig == "" && diff.OldConfig != nil {
+		if oldFRRConfig, oldConfigContent, oldErr := generateFRRArtifacts(diff.OldConfig); oldErr == nil {
+			previousConfig = oldConfigContent
+			previousFRRConfig = oldFRRConfig
+		}
 	}
 
-	// Apply via reloader (atomic write + validation + reload)
-	if err := p.reloader.ApplyConfig(ctx, configContent); err != nil {
+	if err := p.applier.ApplyConfig(ctx, configContent, frrConfig); err != nil {
 		return fmt.Errorf("apply FRR config: %w", err)
 	}
 
-	// Store for rollback
-	p.lastConfig = configContent
+	p.rollbackConfig = previousConfig
+	p.rollbackFRRConfig = previousFRRConfig
+	p.currentConfig = configContent
+	p.currentFRRConfig = frrConfig
 
 	p.log.Info("FRR configuration applied",
 		slog.Int("config_length", len(configContent)),
@@ -105,19 +112,45 @@ func (p *FRRPlugin) ApplyChanges(ctx context.Context, diff *engine.ConfigDiff) e
 	return nil
 }
 
+func generateFRRArtifacts(cfg *model.RouterConfig) (*pkgfrr.Config, string, error) {
+	legacyCfg := cfg.ToLegacyConfig()
+	frrConfig, err := pkgfrr.GenerateFRRConfig(legacyCfg)
+	if err != nil {
+		return nil, "", fmt.Errorf("generate FRR config: %w", err)
+	}
+	configContent, err := pkgfrr.GenerateFRRConfigFile(frrConfig)
+	if err != nil {
+		return nil, "", fmt.Errorf("generate FRR config file: %w", err)
+	}
+	return frrConfig, configContent, nil
+}
+
 // RollbackChanges reverts to the previous FRR configuration.
 func (p *FRRPlugin) RollbackChanges(ctx context.Context, diff *engine.ConfigDiff) error {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 
-	if p.lastConfig == "" {
+	if p.rollbackConfig == "" {
 		p.log.Warn("No previous FRR config for rollback")
 		return nil
 	}
 
-	if err := p.reloader.ApplyConfig(ctx, p.lastConfig); err != nil {
+	rollbackConfig := p.rollbackConfig
+	rollbackFRRConfig := p.rollbackFRRConfig
+	if rollbackFRRConfig == nil && diff != nil && diff.OldConfig != nil {
+		if oldFRRConfig, oldConfigContent, oldErr := generateFRRArtifacts(diff.OldConfig); oldErr == nil {
+			rollbackFRRConfig = oldFRRConfig
+			if rollbackConfig == "" {
+				rollbackConfig = oldConfigContent
+			}
+		}
+	}
+
+	if err := p.applier.ApplyConfig(ctx, rollbackConfig, rollbackFRRConfig); err != nil {
 		return fmt.Errorf("rollback FRR config: %w", err)
 	}
+	p.currentConfig = rollbackConfig
+	p.currentFRRConfig = rollbackFRRConfig
 
 	p.log.Info("FRR configuration rolled back")
 	return nil
@@ -126,6 +159,10 @@ func (p *FRRPlugin) RollbackChanges(ctx context.Context, diff *engine.ConfigDiff
 // buildFullConfig reconstructs the complete RouterConfig from the diff's new state.
 // This is needed because FRR generates the entire config file, not incremental changes.
 func (p *FRRPlugin) buildFullConfig(diff *engine.ConfigDiff) *model.RouterConfig {
+	if diff.NewConfig != nil {
+		return diff.NewConfig
+	}
+
 	cfg := model.NewRouterConfig()
 
 	// System
@@ -176,4 +213,16 @@ func (p *FRRPlugin) buildFullConfig(diff *engine.ConfigDiff) *model.RouterConfig
 	}
 
 	return cfg
+}
+
+func hasFRRRelevantInterfaceChanges(diff *engine.ConfigDiff) bool {
+	if len(diff.InterfacesAdded) > 0 || len(diff.InterfacesRemoved) > 0 {
+		return true
+	}
+	for _, change := range diff.InterfacesChanged {
+		if len(change.AddressesAdded) > 0 || len(change.AddressesRemoved) > 0 {
+			return true
+		}
+	}
+	return false
 }

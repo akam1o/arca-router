@@ -462,7 +462,7 @@ Phase 4: Cleanup
 If commit/rollback fails partially:
 
 1. Check audit log for failure details
-2. Inspect VPP state: `arca-cli show interfaces`
+2. Inspect VPP state: `vppctl show interface`
 3. Inspect FRR state: `vtysh -c "show running-config"`
 4. Manually correct VPP/FRR to match running config
 5. Or: Rollback to last known good commit

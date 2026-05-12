@@ -39,14 +39,47 @@ func (e *Engine) Running() *model.RouterConfig {
 	if e.running == nil {
 		return model.NewRouterConfig()
 	}
-	return e.running.Config
+	if cfg := e.running.Config.Clone(); cfg != nil {
+		return cfg
+	}
+	return model.NewRouterConfig()
 }
 
 // RunningSnapshot returns the current running snapshot (version, hash, etc.).
 func (e *Engine) RunningSnapshot() *model.ConfigSnapshot {
 	e.mu.RLock()
 	defer e.mu.RUnlock()
-	return e.running
+	if e.running == nil {
+		return nil
+	}
+	return e.running.Clone()
+}
+
+// Validate checks whether a candidate configuration can be applied without
+// mutating engine or southbound state.
+func (e *Engine) Validate(ctx context.Context, candidate *model.RouterConfig) error {
+	if candidate == nil {
+		return fmt.Errorf("configuration is nil")
+	}
+	if err := candidate.Validate(); err != nil {
+		return fmt.Errorf("config validation failed: %w", err)
+	}
+
+	e.mu.RLock()
+	var oldCfg *model.RouterConfig
+	if e.running != nil {
+		oldCfg = e.running.Config.Clone()
+	}
+	plugins := append([]Plugin(nil), e.plugins...)
+	e.mu.RUnlock()
+
+	diff := ComputeDiff(oldCfg, candidate.Clone())
+	for _, p := range plugins {
+		if err := p.ValidateChanges(ctx, diff.Clone()); err != nil {
+			return fmt.Errorf("plugin %s validation failed: %w", p.Name(), err)
+		}
+	}
+	return nil
 }
 
 // Apply validates and atomically applies a new configuration.
@@ -56,6 +89,11 @@ func (e *Engine) Apply(ctx context.Context, candidate *model.RouterConfig, autho
 	e.mu.Lock()
 	defer e.mu.Unlock()
 
+	if candidate == nil {
+		return fmt.Errorf("configuration is nil")
+	}
+	candidate = candidate.Clone()
+
 	// Validate the candidate config
 	if err := candidate.Validate(); err != nil {
 		return fmt.Errorf("config validation failed: %w", err)
@@ -64,9 +102,9 @@ func (e *Engine) Apply(ctx context.Context, candidate *model.RouterConfig, autho
 	// Compute diff from running → candidate
 	var oldCfg *model.RouterConfig
 	if e.running != nil {
-		oldCfg = e.running.Config
+		oldCfg = e.running.Config.Clone()
 	}
-	diff := ComputeDiff(oldCfg, candidate)
+	diff := ComputeDiff(oldCfg, candidate.Clone())
 
 	if !diff.HasChanges() {
 		e.log.Info("No configuration changes detected")
@@ -85,27 +123,31 @@ func (e *Engine) Apply(ctx context.Context, candidate *model.RouterConfig, autho
 
 	// Phase 1: Validate across all plugins (dry-run)
 	for _, p := range e.plugins {
-		if err := p.ValidateChanges(ctx, diff); err != nil {
+		if err := p.ValidateChanges(ctx, diff.Clone()); err != nil {
 			return fmt.Errorf("plugin %s validation failed: %w", p.Name(), err)
 		}
 	}
 
 	// Phase 2: Apply with rollback-on-failure
 	tx := &transaction{
-		applied: make([]Plugin, 0, len(e.plugins)),
-		diff:    diff,
+		applied: make([]appliedPlugin, 0, len(e.plugins)),
 		log:     e.log,
 	}
 
 	for _, p := range e.plugins {
-		if err := p.ApplyChanges(ctx, diff); err != nil {
+		applyDiff := diff.Clone()
+		rollbackDiff := diff.Clone()
+		if err := p.ApplyChanges(ctx, applyDiff); err != nil {
 			e.log.Error("Plugin apply failed, initiating rollback",
 				slog.String("plugin", p.Name()),
 				slog.Any("error", err))
 			tx.rollback(ctx)
 			return fmt.Errorf("plugin %s apply failed (rolled back): %w", p.Name(), err)
 		}
-		tx.applied = append(tx.applied, p)
+		tx.applied = append(tx.applied, appliedPlugin{
+			plugin: p,
+			diff:   rollbackDiff,
+		})
 	}
 
 	// Phase 3: Commit — update running config
@@ -131,16 +173,21 @@ func (e *Engine) InitializeRunning(cfg *model.RouterConfig, version uint64) {
 
 // transaction tracks which plugins have been applied so we can rollback on failure.
 type transaction struct {
-	applied []Plugin
-	diff    *ConfigDiff
+	applied []appliedPlugin
 	log     *slog.Logger
+}
+
+type appliedPlugin struct {
+	plugin Plugin
+	diff   *ConfigDiff
 }
 
 func (t *transaction) rollback(ctx context.Context) {
 	// Rollback in reverse order
 	for i := len(t.applied) - 1; i >= 0; i-- {
-		p := t.applied[i]
-		if err := p.RollbackChanges(ctx, t.diff); err != nil {
+		applied := t.applied[i]
+		p := applied.plugin
+		if err := p.RollbackChanges(ctx, applied.diff); err != nil {
 			t.log.Error("Plugin rollback failed (manual intervention may be required)",
 				slog.String("plugin", p.Name()),
 				slog.Any("error", err))

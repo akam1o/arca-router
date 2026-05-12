@@ -34,7 +34,7 @@ This document describes the compatibility verification between govpp (Go binding
    - Use `govpp` binapi generator to generate Go bindings
    - Verify generation succeeds without errors
 
-3. **Verify API compatibility** with minimal PoC
+3. **Verify API compatibility** in a VPP-enabled environment
    - Connect to VPP via `/run/vpp/api.sock`
    - Execute `ShowVersion` API call
    - Confirm VPP responds with version information
@@ -105,74 +105,18 @@ The script uses VPP 24.10 `.api.json` files stored in `vpp-api-json/` directory.
 
 ---
 
-## PoC Implementation
+## Runtime Verification
 
-### Minimal VPP Connection Test
+govpp compatibility should be verified in an environment where VPP 24.10 is installed and `/run/vpp/api.sock` is accessible by the test user.
 
-See `test/vpp_poc/main.go` for the minimal PoC implementation.
+**Verification Goals**:
+- Connect to VPP via socket (`/run/vpp/api.sock`)
+- Execute VPP control-plane API calls such as `ShowVersion`
+- Retrieve and display VPP version information
+- Confirm the returned major.minor version matches 24.10
+- Disconnect cleanly without API compatibility warnings
 
-**PoC Goals**:
-- [x] Connect to VPP via socket (`/run/vpp/api.sock`)
-- [x] Execute `ShowVersion` API call
-- [x] Retrieve and display VPP version information
-- [x] Graceful disconnect
-
-**Note**: Version validation (confirming "24.10" in version string) will be performed during actual execution in a VPP environment.
-
-**PoC Design Decision**:
-
-The PoC uses govpp's built-in `binapi/vpe` instead of locally generated binapi for the following reasons:
-
-1. **Task 1.0 Scope**: Verify govpp v0.13.0 can communicate with VPP 24.10
-2. **Minimal Dependencies**: ShowVersion API is stable and requires no custom binapi generation
-3. **Rapid Validation**: Allows immediate compatibility testing without VPP installation
-4. **Full binapi Generation**: Deferred to Task 1.1 when VPP 24.10 environment is available
-
-This approach validates the critical path (govpp ↔ VPP communication) while deferring full binapi generation to a more appropriate task.
-
-**Success Criteria**:
-- No connection errors
-- VPP version retrieved successfully
-- No API compatibility warnings
-
-### Running the PoC
-
-```bash
-# Prerequisites:
-# - VPP 24.10 installed and running
-# - /run/vpp/api.sock accessible (requires root or appropriate permissions)
-
-# Build and run PoC (no binapi generation required for Task 1.0)
-cd test/vpp_poc
-go build -o vpp_poc .
-sudo ./vpp_poc
-
-# Expected output:
-# ==================================================
-#   VPP Connection PoC - govpp v0.13.0 + VPP 24.10
-# ==================================================
-# Socket: /run/vpp/api.sock
-#
-# [1/4] Creating socket adapter...
-# [2/4] Connecting to VPP...
-# ✓ Connected to VPP
-# [3/4] Creating API channel...
-# ✓ API channel created
-# [4/4] Executing ShowVersion API call...
-# ✓ ShowVersion succeeded
-#
-# VPP Information:
-#   Version:    v24.10-rc0~...
-#   Build Date: ...
-#   Build Dir:  ...
-#
-# ==================================================
-#   PoC: SUCCESS
-# ==================================================
-#
-# govpp v0.13.0 is compatible with VPP 24.10
-# Next: Update docs/govpp-compatibility.md with findings
-```
+The standalone connection PoC has been removed from the repository. Use the VPP client and integration test paths that exercise `pkg/vpp` and the daemon when a VPP-enabled environment is available.
 
 ---
 
@@ -220,9 +164,9 @@ Phase 2 Task 1.0 requirements:
 - [x] binapi source determined (VPP 24.10 `.api.json` files from `/usr/share/vpp/api`)
 - [x] binapi generation reproducibility established (`scripts/generate-binapi.sh`)
 - [ ] Binapi included in repository (requires VPP 24.10 environment to generate)
-- [x] Minimal VPP connection PoC implemented (`test/vpp_poc/main.go`)
+- [ ] Runtime VPP compatibility verified in a VPP 24.10 environment
 - [ ] VPP API compatibility verified (requires VPP 24.10 environment to execute)
-- [x] Connection/disconnection logic tested (code review complete)
+- [x] Connection/disconnection logic covered by VPP client implementation review
 
 **Note**: Items marked as requiring VPP 24.10 environment will be completed during Task 1.3 implementation or in a VPP-enabled CI/CD environment.
 

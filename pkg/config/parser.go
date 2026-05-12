@@ -634,6 +634,7 @@ func (p *Parser) parseOSPFArea(ospf *OSPFConfig) error {
 				return p.error(fmt.Sprintf("invalid priority value: %s", p.current.Value))
 			}
 			ospfIf.Priority = priority
+			ospfIf.PrioritySet = true
 			p.nextToken()
 		default:
 			// Not an OSPF interface parameter, break the loop
@@ -1126,10 +1127,14 @@ func (p *Parser) parseSecurityUsers(config *Config) error {
 
 	switch param {
 	case "password":
-		if p.current.Type != TokenWord {
+		if p.current.Type != TokenWord && p.current.Type != TokenString {
 			return p.error("expected password value")
 		}
-		user.Password = p.current.Value
+		password, err := NormalizePasswordForStorage(p.current.Value)
+		if err != nil {
+			return p.error(fmt.Sprintf("failed to protect password value: %v", err))
+		}
+		user.Password = password
 		p.nextToken()
 
 	case "role":

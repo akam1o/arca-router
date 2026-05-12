@@ -21,16 +21,18 @@ func (ds *sqliteDatastore) AcquireLock(ctx context.Context, req *LockRequest) er
 
 	return ds.withTx(ctx, false, func(tx *sql.Tx) error {
 		now := time.Now()
+		nowUnix := now.Unix()
 		expiresAt := now.Add(timeout)
+		expiresAtUnix := expiresAt.Unix()
 
 		// Check existing lock in the same transaction
 		var existingSessionID, existingUser string
-		var existingExpiresAt time.Time
+		var existingExpiresAt sqliteUnixTime
 		err := tx.QueryRowContext(ctx, `
-			SELECT session_id, user, expires_at
-			FROM config_locks
-			WHERE target = ?
-		`, req.Target).Scan(&existingSessionID, &existingUser, &existingExpiresAt)
+				SELECT session_id, user, expires_at
+				FROM config_locks
+				WHERE target = ?
+			`, req.Target).Scan(&existingSessionID, &existingUser, &existingExpiresAt)
 
 		if err != nil && err != sql.ErrNoRows {
 			return NewError(ErrCodeInternal, fmt.Sprintf("failed to check %s lock", req.Target), err)
@@ -38,20 +40,20 @@ func (ds *sqliteDatastore) AcquireLock(ctx context.Context, req *LockRequest) er
 
 		if err == nil {
 			// Lock exists: decide based on session and expiration
-			if now.After(existingExpiresAt) {
+			if nowUnix > existingExpiresAt.Unix() {
 				_, err = tx.ExecContext(ctx, `
-					DELETE FROM config_locks WHERE target = ?
-				`, req.Target)
+						DELETE FROM config_locks WHERE target = ?
+					`, req.Target)
 				if err != nil {
 					return NewError(ErrCodeInternal, fmt.Sprintf("failed to delete expired %s lock", req.Target), err)
 				}
 			} else if existingSessionID == req.SessionID {
 				// Same session: extend lock
 				_, err = tx.ExecContext(ctx, `
-					UPDATE config_locks
-					SET expires_at = ?, last_activity = ?
-					WHERE target = ?
-				`, expiresAt, now, req.Target)
+						UPDATE config_locks
+						SET expires_at = ?, last_activity = ?
+						WHERE target = ?
+					`, expiresAtUnix, nowUnix, req.Target)
 				if err != nil {
 					return NewError(ErrCodeInternal, fmt.Sprintf("failed to extend %s lock", req.Target), err)
 				}
@@ -76,10 +78,10 @@ func (ds *sqliteDatastore) AcquireLock(ctx context.Context, req *LockRequest) er
 
 		// Acquire new lock (no existing lock or expired lock was removed)
 		_, err = tx.ExecContext(ctx, `
-			INSERT INTO config_locks (
-				target, session_id, user, acquired_at, expires_at, last_activity
-			) VALUES (?, ?, ?, ?, ?, ?)
-		`, req.Target, req.SessionID, req.User, now, expiresAt, now)
+				INSERT INTO config_locks (
+					target, session_id, user, acquired_at, expires_at, last_activity
+				) VALUES (?, ?, ?, ?, ?, ?)
+			`, req.Target, req.SessionID, req.User, nowUnix, expiresAtUnix, nowUnix)
 
 		if err != nil {
 			return NewError(ErrCodeInternal, fmt.Sprintf("failed to acquire %s lock", req.Target), err)
@@ -111,10 +113,10 @@ func (ds *sqliteDatastore) ReleaseLock(ctx context.Context, target string, sessi
 		// Verify the lock is held by this session
 		var lockSessionID string
 		var lockUser string
-		var expiresAt time.Time
+		var expiresAt sqliteUnixTime
 		err := tx.QueryRowContext(ctx, `
-			SELECT session_id, user, expires_at FROM config_locks WHERE target = ?
-		`, target).Scan(&lockSessionID, &lockUser, &expiresAt)
+				SELECT session_id, user, expires_at FROM config_locks WHERE target = ?
+			`, target).Scan(&lockSessionID, &lockUser, &expiresAt)
 
 		if err == sql.ErrNoRows {
 			// No lock exists, nothing to release (idempotent)
@@ -125,7 +127,7 @@ func (ds *sqliteDatastore) ReleaseLock(ctx context.Context, target string, sessi
 		}
 
 		// Check if lock has expired (treat as if no lock exists)
-		if time.Now().After(expiresAt) {
+		if time.Now().Unix() > expiresAt.Unix() {
 			// Lock is expired - delete it and return success
 			_, _ = tx.ExecContext(ctx, `DELETE FROM config_locks WHERE target = ?`, target)
 			return nil
@@ -174,10 +176,10 @@ func (ds *sqliteDatastore) ExtendLock(ctx context.Context, target string, sessio
 		// Verify lock is held by this session and not expired
 		var lockSessionID string
 		var lockUser string
-		var expiresAt time.Time
+		var expiresAt sqliteUnixTime
 		err := tx.QueryRowContext(ctx, `
-			SELECT session_id, user, expires_at FROM config_locks WHERE target = ?
-		`, target).Scan(&lockSessionID, &lockUser, &expiresAt)
+				SELECT session_id, user, expires_at FROM config_locks WHERE target = ?
+			`, target).Scan(&lockSessionID, &lockUser, &expiresAt)
 
 		if err == sql.ErrNoRows {
 			return NewError(ErrCodeNotFound, fmt.Sprintf("no %s lock to extend", target), nil)
@@ -187,7 +189,8 @@ func (ds *sqliteDatastore) ExtendLock(ctx context.Context, target string, sessio
 		}
 
 		// Check if lock has expired
-		if time.Now().After(expiresAt) {
+		now := time.Now()
+		if now.Unix() > expiresAt.Unix() {
 			return NewError(ErrCodeConflict,
 				fmt.Sprintf("%s lock has expired, cannot extend (re-acquire lock instead)", target), nil)
 		}
@@ -198,13 +201,13 @@ func (ds *sqliteDatastore) ExtendLock(ctx context.Context, target string, sessio
 		}
 
 		// Extend lock
-		newExpiresAt := time.Now().Add(duration)
-		now := time.Now()
+		newExpiresAtUnix := now.Add(duration).Unix()
+		nowUnix := now.Unix()
 		_, err = tx.ExecContext(ctx, `
-			UPDATE config_locks
-			SET expires_at = ?, last_activity = ?
-			WHERE target = ?
-		`, newExpiresAt, now, target)
+				UPDATE config_locks
+				SET expires_at = ?, last_activity = ?
+				WHERE target = ?
+			`, newExpiresAtUnix, nowUnix, target)
 
 		if err != nil {
 			return NewError(ErrCodeInternal, fmt.Sprintf("failed to extend %s lock", target), err)
@@ -233,7 +236,8 @@ func (ds *sqliteDatastore) StealLock(ctx context.Context, req *StealLockRequest)
 	}
 
 	timeout := 30 * time.Minute
-	expiresAt := time.Now().Add(timeout)
+	now := time.Now()
+	expiresAt := now.Add(timeout)
 
 	return ds.withTx(ctx, false, func(tx *sql.Tx) error {
 		// Get current lock holder for audit
@@ -248,10 +252,10 @@ func (ds *sqliteDatastore) StealLock(ctx context.Context, req *StealLockRequest)
 
 		// Replace lock
 		_, err = tx.ExecContext(ctx, `
-			INSERT OR REPLACE INTO config_locks (
-				target, session_id, user, acquired_at, expires_at, last_activity
-			) VALUES (?, ?, ?, ?, ?, ?)
-		`, req.Target, req.NewSessionID, req.User, time.Now(), expiresAt, time.Now())
+				INSERT OR REPLACE INTO config_locks (
+					target, session_id, user, acquired_at, expires_at, last_activity
+				) VALUES (?, ?, ?, ?, ?, ?)
+			`, req.Target, req.NewSessionID, req.User, now.Unix(), expiresAt.Unix(), now.Unix())
 
 		if err != nil {
 			return NewError(ErrCodeInternal, fmt.Sprintf("failed to steal %s lock", req.Target), err)
@@ -285,7 +289,7 @@ func (ds *sqliteDatastore) GetLockInfo(ctx context.Context, target string) (*Loc
 	}
 
 	var sessionID, user string
-	var acquiredAt, expiresAt time.Time
+	var acquiredAt, expiresAt sqliteUnixTime
 
 	err := ds.db.QueryRowContext(ctx, `
 		SELECT session_id, user, acquired_at, expires_at
@@ -304,7 +308,8 @@ func (ds *sqliteDatastore) GetLockInfo(ctx context.Context, target string) (*Loc
 	}
 
 	// Check if lock is expired
-	if time.Now().After(expiresAt) {
+	expiresAtTime := expiresAt.Time()
+	if time.Now().After(expiresAtTime) {
 		// Lock expired but not yet cleaned up
 		return &LockInfo{
 			IsLocked: false,
@@ -315,7 +320,7 @@ func (ds *sqliteDatastore) GetLockInfo(ctx context.Context, target string) (*Loc
 		IsLocked:   true,
 		SessionID:  sessionID,
 		User:       user,
-		AcquiredAt: acquiredAt,
-		ExpiresAt:  expiresAt,
+		AcquiredAt: acquiredAt.Time(),
+		ExpiresAt:  expiresAtTime,
 	}, nil
 }

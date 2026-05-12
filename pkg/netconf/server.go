@@ -10,9 +10,24 @@ import (
 
 // Server represents NETCONF server with RPC dispatch
 type Server struct {
-	datastore datastore.Datastore
-	sessions  *SessionManager
+	datastore  datastore.Datastore
+	sessions   *SessionManager
+	commitHook CommitHook
 }
+
+// CommitHookRequest contains the data needed to apply a NETCONF candidate
+// through an external commit coordinator before it is persisted.
+type CommitHookRequest struct {
+	SessionID  string
+	User       string
+	SourceIP   string
+	Message    string
+	ConfigText string
+}
+
+// CommitHook can wrap the datastore commit path. The persist callback performs
+// the legacy datastore commit after the hook has applied any external state.
+type CommitHook func(ctx context.Context, req *CommitHookRequest, persist func(context.Context) (string, error)) (string, error)
 
 // NewServer creates a new NETCONF server
 func NewServer(ds datastore.Datastore, sm *SessionManager) *Server {
@@ -20,6 +35,11 @@ func NewServer(ds datastore.Datastore, sm *SessionManager) *Server {
 		datastore: ds,
 		sessions:  sm,
 	}
+}
+
+// SetCommitHook installs a commit coordinator for NETCONF commits.
+func (s *Server) SetCommitHook(h CommitHook) {
+	s.commitHook = h
 }
 
 // HandleRPC dispatches RPC to appropriate handler with RBAC enforcement
@@ -59,7 +79,7 @@ func (s *Server) HandleRPC(ctx context.Context, sess *Session, rpc *RPC) *RPCRep
 		handler = s.handleKillSession
 	default:
 		// Unknown operation -> operation-not-supported (not access-denied)
-		return NewErrorReply(rpc.MessageID, ErrUnknownRPC(opName))
+		return NewErrorReply(rpc.MessageID, ErrUnknownRPC(opName)).WithAttributes(rpc.ReplyAttrs)
 	}
 
 	// Check RBAC after confirming operation exists
@@ -67,11 +87,11 @@ func (s *Server) HandleRPC(ctx context.Context, sess *Session, rpc *RPC) *RPCRep
 		// Log RBAC denial for audit trail
 		log.Printf("[RBAC] Access denied: user=%s role=%s operation=%s session=%s",
 			sess.Username, sess.Role, opName, sess.ID)
-		return NewErrorReply(rpc.MessageID, err)
+		return NewErrorReply(rpc.MessageID, err).WithAttributes(rpc.ReplyAttrs)
 	}
 
 	// Execute handler
-	return handler(ctx, sess, rpc)
+	return handler(ctx, sess, rpc).WithAttributes(rpc.ReplyAttrs)
 }
 
 // checkRBAC enforces role-based access control per design document Section 4

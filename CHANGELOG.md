@@ -1,6 +1,19 @@
 # Changelog
 
-## v0.4.x – Unified Architecture (current)
+## v0.5.x – Production Hardening (current)
+
+- **Generated gRPC API**: `api/v1/router.proto` is compiled into typed Go stubs
+- **Typed daemon/CLI RPC wiring**: `arca-routerd-v2` and `arca-cli-v2` use generated gRPC clients and servers
+- **Transactional FRR apply**: `arca-routerd-v2` defaults to `--frr-apply-mode=transactional`, using FRR management commit check/apply
+- **FRR file backend retained**: `--frr-apply-mode=file` keeps the legacy full-file reload backend for recovery and compatibility
+- **Prometheus metrics endpoint**: optional `--metrics-listen` HTTP endpoint exposes daemon, config, and NETCONF metrics
+- **Health endpoint**: optional metrics server also exposes `/healthz`
+- **SNMP observability endpoint**: optional `--snmp-listen` read-only SNMPv2c endpoint exposes daemon, config, and NETCONF metrics
+- **Grafana dashboard**: dashboard JSON is included for the Prometheus metrics endpoint
+- **v2 test coverage**: engine, diff, plugins, gRPC server/client, and daemon tests cover the hardened v2 path
+- **No migration tooling**: v0.3.x legacy binaries remain available; automatic migration tooling is intentionally not planned
+
+## v0.4.x – Unified Architecture (previous)
 
 - **Unified daemon** (`arca-routerd-v2`): single process managing VPP, FRR, NETCONF, and CLI API
 - **Struct-first configuration model** (`internal/model`): Go structs as the canonical config representation
