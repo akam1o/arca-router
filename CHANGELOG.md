@@ -4,6 +4,7 @@
 
 - **Advanced configuration model**: parser, serializer, validation, clone, conversion, and diff support for clustering, MPLS, VRRP, routing instances, class of service, and Web UI service settings
 - **Candidate command replacement**: v0.6 scalar settings replace existing candidate lines instead of accumulating duplicates
+- **etcd datastore selection**: `arca-routerd` and embedded NETCONF can use the existing etcd-backed candidate/running datastore for clustered deployments
 - **Read-only Web UI**: optional `--web-listen` HTTP dashboard and `/api/status` JSON endpoint backed by daemon observability state
 - **Web UI configuration**: `system services web-ui` can enable the dashboard without a command-line flag
 

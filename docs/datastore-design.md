@@ -1,8 +1,8 @@
 # Config Datastore Design
 
-**Version**: 0.3.0
-**Phase**: Phase 3 - Management Interfaces & Advanced Features
-**Last Updated**: 2024-12-26
+**Version**: 0.6.0
+**Phase**: Phase 6 - Advanced Features
+**Last Updated**: 2026-05-13
 
 ## Overview
 
@@ -10,7 +10,7 @@ This document describes the design of the configuration datastore for arca-route
 
 The datastore supports **multiple backend implementations**:
 - **SQLite**: File-based storage for single-node deployments (Phase 3)
-- **etcd**: Distributed storage for multi-node clustering (Phase 4)
+- **etcd**: Distributed storage for multi-node clustering (v0.6)
 
 ## Goals
 
@@ -46,7 +46,7 @@ datastore:
     path: /var/lib/arca-router/config.db
 ```
 
-### etcd Backend (Phase 4)
+### etcd Backend (v0.6)
 
 **Use Case**: Multi-node clustering, high availability, distributed deployments
 
@@ -62,20 +62,15 @@ datastore:
 - Network latency
 
 **Configuration**:
-```yaml
-datastore:
-  backend: etcd
-  etcd:
-    endpoints:
-      - https://etcd1:2379
-      - https://etcd2:2379
-      - https://etcd3:2379
-    prefix: /arca-router/
-    timeout: 5s
-    tls:
-      cert_file: /etc/arca-router/etcd-client.crt
-      key_file: /etc/arca-router/etcd-client.key
-      ca_file: /etc/arca-router/etcd-ca.crt
+```bash
+arca-routerd \
+  --datastore-backend=etcd \
+  --etcd-endpoints=https://etcd1:2379,https://etcd2:2379,https://etcd3:2379 \
+  --etcd-prefix=/arca-router/ \
+  --etcd-timeout=5s \
+  --etcd-cert=/etc/arca-router/etcd-client.crt \
+  --etcd-key=/etc/arca-router/etcd-client.key \
+  --etcd-ca=/etc/arca-router/etcd-ca.crt
 ```
 
 ## Configuration Datastores

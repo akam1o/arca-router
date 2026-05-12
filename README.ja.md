@@ -26,7 +26,7 @@ arca-router は現在 v0.6.x の advanced features フェーズです。この R
 - FRR management candidate datastore 経由の transactional apply
 - clustering、VRRP、MPLS、routing instances、QoS 向け v0.6 設定基盤
 - Prometheus、health、SNMP、Web UI、Grafana によるオブザーバビリティ
-- SQLite ベースの candidate/running datastore とコミット履歴
+- SQLite または etcd ベースの candidate/running datastore とコミット履歴
 
 ---
 

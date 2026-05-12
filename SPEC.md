@@ -11,14 +11,14 @@ arca-router uses Junos-like configuration syntax via `set` commands. Configurati
 1. **Unified daemon (`arca-routerd`)**: Single process handling VPP, FRR, NETCONF, gRPC, Prometheus, Web UI, and SNMP.
 2. **Interactive CLI (`arca`)**: Thin gRPC client for operational commands and candidate/running configuration workflow.
 3. **NETCONF/SSH**: Remote configuration via NETCONF protocol (RFC 6241), built into the daemon and backed by the same datastore/engine.
-4. **File bootstrap**: `/etc/arca-router/arca-router.conf` is used at startup only when the SQLite datastore has no running configuration.
+4. **File bootstrap**: `/etc/arca-router/arca-router.conf` is used at startup only when the configured datastore has no running configuration.
 
 ### v0.6.x Architecture
 
 The v0.6.x line extends the unified daemon path:
 
 - **Struct-first config model**: Configuration is represented as Go structs (`internal/model.RouterConfig`), not text. Text format is just one serialization.
-- **SQLite candidate/running datastore**: `/var/lib/arca-router/config.db` stores running config, candidate sessions, commit history, rollback metadata, locks, and audit events.
+- **SQLite or etcd candidate/running datastore**: SQLite remains the single-node default; etcd can be selected for clustered deployments.
 - **Diff-based engine**: The config engine (`internal/engine`) computes minimal diffs between running and candidate configs, applying only what changed.
 - **Plugin-based southbound**: VPP and FRR are `engine.Plugin` implementations, each receiving only the relevant diff.
 - **Transactional FRR apply**: The default `--frr-apply-mode=transactional` backend uses the FRR management candidate datastore through `vtysh` `mgmt commit check` / `mgmt commit apply`.
@@ -26,6 +26,7 @@ The v0.6.x line extends the unified daemon path:
 - **gRPC internal API**: `arca` communicates with the daemon via Unix socket gRPC (`api/v1/router.proto`, default `/run/arca-router/routerd.sock`).
 - **2-phase commit**: Validate all plugins → apply all plugins → rollback on any failure.
 - **Advanced configuration model**: Clustering, MPLS, VRRP, routing instances, class of service, and Web UI service settings are represented in the struct-first model and diff engine.
+- **Cluster datastore selection**: `arca-routerd` and embedded NETCONF share the same SQLite or etcd datastore backend.
 - **Observability**: Optional Prometheus `/metrics`, `/healthz`, read-only Web UI, read-only SNMPv2c, and a packaged Grafana dashboard.
 
 Only the current command names are part of this specification: `arca-routerd` and `arca`. Obsolete command entrypoints are not maintained.
@@ -642,13 +643,22 @@ set security rate-limit per-user 20
 
 ### File-based Configuration
 
-The file at `/etc/arca-router/arca-router.conf` is a bootstrap source. On startup, `arca-routerd` first attempts to load the current running configuration from `/var/lib/arca-router/config.db`. If no running configuration exists, it parses the file, applies it through the engine, and persists it to the datastore.
+The file at `/etc/arca-router/arca-router.conf` is a bootstrap source. On startup, `arca-routerd` first attempts to load the current running configuration from the configured datastore. If no running configuration exists, it parses the file, applies it through the engine, and persists it to the datastore.
 
 1. Edit `/etc/arca-router/arca-router.conf` before the first daemon start, or after intentionally clearing the datastore.
 2. Start or restart daemon: `sudo systemctl restart arca-routerd`
 3. Verify: `sudo journalctl -u arca-routerd -n 50`
 
 After the datastore is initialized, use `arca` or NETCONF for normal configuration changes.
+
+For clustered deployments, use the etcd datastore backend:
+
+```bash
+arca-routerd \
+  --datastore-backend=etcd \
+  --etcd-endpoints=https://etcd1:2379,https://etcd2:2379,https://etcd3:2379 \
+  --etcd-prefix=/arca-router/
+```
 
 ### NETCONF Configuration
 
@@ -867,6 +877,15 @@ Common options:
 --config <path>            Bootstrap config file (default: /etc/arca-router/arca-router.conf)
 --hardware <path>          Hardware mapping file (default: /etc/arca-router/hardware.yaml)
 --datastore <path>         SQLite datastore (default: /var/lib/arca-router/config.db)
+--datastore-backend <mode> Configuration datastore backend: sqlite or etcd (default: sqlite)
+--etcd-endpoints <list>    Comma-separated etcd endpoints for --datastore-backend=etcd
+--etcd-prefix <prefix>     etcd key prefix (default: /arca-router/)
+--etcd-timeout <duration>  etcd connection and operation timeout (default: 5s)
+--etcd-username <value>    etcd username
+--etcd-password <value>    etcd password
+--etcd-cert <path>         etcd TLS client certificate
+--etcd-key <path>          etcd TLS client key
+--etcd-ca <path>           etcd TLS CA certificate
 --grpc-socket <path>       Internal gRPC Unix socket (default: /run/arca-router/routerd.sock)
 --netconf-listen <addr>    NETCONF/SSH listen address (default: :830)
 --host-key <path>          NETCONF SSH host key path
@@ -1125,6 +1144,7 @@ sudo vppctl show interface addr
 
 - **v0.6.x**: Advanced feature foundations
   - Management-plane config model for clustering, MPLS, VRRP, routing instances, class of service, and Web UI
+  - etcd datastore backend selection for clustered candidate/running configuration
   - Read-only Web UI dashboard and JSON status endpoint
   - v0.6 config diff and candidate replacement coverage
 

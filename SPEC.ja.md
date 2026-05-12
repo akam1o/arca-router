@@ -11,14 +11,14 @@ arca-router は Junos 風の `set` コマンド構文を採用しています。
 1. **統合デーモン (`arca-routerd`)**: VPP、FRR、NETCONF、gRPC、Prometheus、Web UI、SNMP を単一プロセスで処理
 2. **対話型 CLI (`arca`)**: gRPC シンクライアントによる運用コマンドと candidate/running 設定ワークフロー
 3. **NETCONF/SSH**: NETCONF（RFC 6241）によるリモート設定。デーモンに内蔵され、同じ datastore/engine を利用
-4. **ファイルブートストラップ**: SQLite datastore に running 設定がない場合のみ、起動時に `/etc/arca-router/arca-router.conf` を読み込み
+4. **ファイルブートストラップ**: 設定済み datastore に running 設定がない場合のみ、起動時に `/etc/arca-router/arca-router.conf` を読み込み
 
 ### v0.6.x アーキテクチャ
 
 v0.6.x は統合デーモン経路を advanced features 向けに拡張します：
 
 - **構造体ファースト設定モデル**: 設定は Go 構造体（`internal/model.RouterConfig`）で表現。テキストはシリアライズの一形式。
-- **SQLite candidate/running datastore**: `/var/lib/arca-router/config.db` に running 設定、candidate session、commit 履歴、rollback メタデータ、lock、audit event を保存。
+- **SQLite または etcd candidate/running datastore**: single-node では SQLite が標準。clustered deployment では etcd を選択できます。
 - **差分ベースエンジン**: 設定エンジン（`internal/engine`）が running/candidate の最小差分を計算し、変更箇所のみ適用。
 - **プラグインベース サウスバウンド**: VPP / FRR は `engine.Plugin` 実装として、それぞれ関連する差分のみを受け取る。
 - **Transactional FRR apply**: 標準の `--frr-apply-mode=transactional` は FRR management candidate datastore に対して `vtysh` の `mgmt commit check` / `mgmt commit apply` を実行。
@@ -26,6 +26,7 @@ v0.6.x は統合デーモン経路を advanced features 向けに拡張します
 - **gRPC 内部 API**: `arca` は Unix ソケット gRPC（`api/v1/router.proto`、デフォルト `/run/arca-router/routerd.sock`）経由でデーモンと通信。
 - **2 フェーズコミット**: 全プラグイン検証 → 全プラグイン適用 → 障害時ロールバック。
 - **Advanced configuration model**: clustering、MPLS、VRRP、routing instances、class of service、Web UI service settings を構造体ファースト model と diff engine で扱います。
+- **Cluster datastore selection**: `arca-routerd` と embedded NETCONF は同じ SQLite または etcd datastore backend を共有します。
 - **Observability**: 任意で Prometheus `/metrics`、`/healthz`、read-only Web UI、read-only SNMPv2c、パッケージ同梱 Grafana dashboard を提供。
 
 この仕様で扱うコマンド名は `arca-routerd` と `arca` のみです。廃止済みの command entrypoint はメンテナンス対象外です。
@@ -658,13 +659,22 @@ set security rate-limit per-user 20
 
 ### ファイルベース設定
 
-`/etc/arca-router/arca-router.conf` はブートストラップ用の設定ソースです。`arca-routerd` は起動時にまず `/var/lib/arca-router/config.db` から current running configuration を読み込みます。running 設定が存在しない場合のみ、設定ファイルを parse して engine 経由で適用し、datastore に保存します。
+`/etc/arca-router/arca-router.conf` はブートストラップ用の設定ソースです。`arca-routerd` は起動時にまず設定済み datastore から current running configuration を読み込みます。running 設定が存在しない場合のみ、設定ファイルを parse して engine 経由で適用し、datastore に保存します。
 
 1. 初回起動前、または datastore を意図的に初期化した後に `/etc/arca-router/arca-router.conf` を編集
 2. デーモン起動/再起動: `sudo systemctl restart arca-routerd`
 3. 確認: `sudo journalctl -u arca-routerd -n 50`
 
 datastore 初期化後の通常の設定変更は `arca` または NETCONF を使用します。
+
+clustered deployment では etcd datastore backend を使用します。
+
+```bash
+arca-routerd \
+  --datastore-backend=etcd \
+  --etcd-endpoints=https://etcd1:2379,https://etcd2:2379,https://etcd3:2379 \
+  --etcd-prefix=/arca-router/
+```
 
 ### NETCONF 設定
 
@@ -885,6 +895,15 @@ set security rate-limit per-user 20
 --config <path>            bootstrap 設定ファイル（デフォルト: /etc/arca-router/arca-router.conf）
 --hardware <path>          hardware mapping file（デフォルト: /etc/arca-router/hardware.yaml）
 --datastore <path>         SQLite datastore（デフォルト: /var/lib/arca-router/config.db）
+--datastore-backend <mode> configuration datastore backend: sqlite または etcd（デフォルト: sqlite）
+--etcd-endpoints <list>    --datastore-backend=etcd 用の comma-separated etcd endpoints
+--etcd-prefix <prefix>     etcd key prefix（デフォルト: /arca-router/）
+--etcd-timeout <duration>  etcd connection / operation timeout（デフォルト: 5s）
+--etcd-username <value>    etcd username
+--etcd-password <value>    etcd password
+--etcd-cert <path>         etcd TLS client certificate
+--etcd-key <path>          etcd TLS client key
+--etcd-ca <path>           etcd TLS CA certificate
 --grpc-socket <path>       内部 gRPC Unix socket（デフォルト: /run/arca-router/routerd.sock）
 --netconf-listen <addr>    NETCONF/SSH listen address（デフォルト: :830）
 --host-key <path>          NETCONF SSH host key path
@@ -1144,6 +1163,7 @@ sudo vppctl show interface addr
 
 - **v0.6.x**: Advanced feature foundations
   - clustering、MPLS、VRRP、routing instances、class of service、Web UI の management-plane config model
+  - clustered candidate/running configuration 向け etcd datastore backend selection
   - read-only Web UI dashboard と JSON status endpoint
   - v0.6 config diff と candidate replacement coverage
 
