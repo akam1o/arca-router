@@ -153,6 +153,32 @@ func TestRestrictGRPCSocketPermissions(t *testing.T) {
 	}
 }
 
+func TestListenSecureGRPCSocketCreatesRestrictedSocket(t *testing.T) {
+	dir, err := os.MkdirTemp("/tmp", "arca-routerd-")
+	if err != nil {
+		t.Fatalf("MkdirTemp() error = %v", err)
+	}
+	t.Cleanup(func() { _ = os.RemoveAll(dir) })
+
+	path := filepath.Join(dir, "routerd.sock")
+	listener, err := listenSecureGRPCSocket(path)
+	if err != nil {
+		t.Fatalf("listenSecureGRPCSocket() error = %v", err)
+	}
+	t.Cleanup(func() {
+		_ = listener.Close()
+		_ = os.Remove(path)
+	})
+
+	info, err := os.Stat(path)
+	if err != nil {
+		t.Fatalf("Stat() error = %v", err)
+	}
+	if got := info.Mode().Perm(); got != secureGRPCSocketFilePerms {
+		t.Fatalf("socket mode = %04o, want %04o", got, secureGRPCSocketFilePerms)
+	}
+}
+
 func TestNETCONFCommitHookAppliesEngineBeforePersist(t *testing.T) {
 	eng := engine.NewEngine(nil, slog.Default())
 	eng.InitializeRunning(&model.RouterConfig{
