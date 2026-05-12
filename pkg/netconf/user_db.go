@@ -20,6 +20,12 @@ const (
 	userDBDirPerms  os.FileMode = 0750
 )
 
+// dummyPasswordHash is used when authentication must spend comparable work
+// without depending on a real user's stored hash.
+const dummyPasswordHash = "$argon2id$v=19$m=65536,t=3,p=4$AAAAAAAAAAAAAAAAAAAAAA$AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+
+var verifyPasswordHash = auth.VerifyPassword
+
 // Role constants for user authorization
 const (
 	RoleAdmin    = "admin"
@@ -201,6 +207,9 @@ func (udb *UserDatabase) CreateUser(username, passwordHash, role string) error {
 	if role != RoleAdmin && role != RoleOperator && role != RoleReadOnly {
 		return fmt.Errorf("invalid role: %s (must be %s, %s, or %s)", role, RoleAdmin, RoleOperator, RoleReadOnly)
 	}
+	if err := validateStoredPasswordHash(passwordHash); err != nil {
+		return err
+	}
 
 	now := time.Now().Unix()
 	query := `INSERT INTO users (username, password_hash, role, created_at, updated_at, enabled)
@@ -212,6 +221,13 @@ func (udb *UserDatabase) CreateUser(username, passwordHash, role string) error {
 	}
 
 	udb.log.Info("User created", "username", username, "role", role)
+	return nil
+}
+
+func validateStoredPasswordHash(passwordHash string) error {
+	if err := auth.ValidatePasswordHash(passwordHash); err != nil {
+		return fmt.Errorf("invalid password_hash: %w", err)
+	}
 	return nil
 }
 
@@ -246,6 +262,11 @@ func (udb *UserDatabase) UpdateUser(username, passwordHash, role string, enabled
 	// Validate role using constants
 	if role != "" && role != RoleAdmin && role != RoleOperator && role != RoleReadOnly {
 		return fmt.Errorf("invalid role: %s (must be %s, %s, or %s)", role, RoleAdmin, RoleOperator, RoleReadOnly)
+	}
+	if passwordHash != "" {
+		if err := validateStoredPasswordHash(passwordHash); err != nil {
+			return err
+		}
 	}
 
 	// Build update query dynamically
@@ -366,22 +387,28 @@ func (udb *UserDatabase) VerifyPassword(username, password string) (*User, error
 	// Get user from database
 	user, err := udb.GetUser(username)
 	if err != nil {
+		_, _ = verifyPasswordHash(password, dummyPasswordHash)
 		// Log for audit but return generic error to prevent user enumeration
 		udb.log.Warn("Authentication failed", "username", username, "reason", "user_not_found")
 		return nil, fmt.Errorf("authentication failed")
 	}
 
-	// Check if user is enabled
-	if !user.Enabled {
-		// Log for audit but return generic error
-		udb.log.Warn("Authentication failed", "username", username, "reason", "user_disabled")
-		return nil, fmt.Errorf("authentication failed")
+	userDisabled := !user.Enabled
+	hashToVerify := user.PasswordHash
+	if userDisabled {
+		hashToVerify = dummyPasswordHash
 	}
 
 	// Verify password (constant-time comparison)
-	valid, err := auth.VerifyPassword(password, user.PasswordHash)
+	valid, err := verifyPasswordHash(password, hashToVerify)
 	if err != nil {
 		udb.log.Warn("Authentication failed", "username", username, "reason", "password_verification_error", "error", err)
+		return nil, fmt.Errorf("authentication failed")
+	}
+
+	if userDisabled {
+		// Log for audit but return generic error
+		udb.log.Warn("Authentication failed", "username", username, "reason", "user_disabled")
 		return nil, fmt.Errorf("authentication failed")
 	}
 
@@ -400,15 +427,11 @@ func (udb *UserDatabase) VerifyPassword(username, password string) (*User, error
 // Used by SSH authentication callback for audit logging
 // Implements timing attack mitigation by performing dummy hash verification for non-existent users
 func (udb *UserDatabase) VerifyPasswordWithReason(username, password string) (*User, string, error) {
-	// Dummy hash for timing attack mitigation (argon2id with same parameters).
-	// The verification result is ignored; only the comparable cost matters.
-	const dummyHash = "$argon2id$v=19$m=65536,t=3,p=4$AAAAAAAAAAAAAAAAAAAAAA$AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
-
 	// Get user from database
 	user, err := udb.GetUser(username)
 	if err != nil {
 		// Perform dummy verification to maintain constant timing
-		_, _ = auth.VerifyPassword(password, dummyHash)
+		_, _ = verifyPasswordHash(password, dummyPasswordHash)
 		return nil, "user_not_found", fmt.Errorf("authentication failed")
 	}
 
@@ -417,11 +440,11 @@ func (udb *UserDatabase) VerifyPasswordWithReason(username, password string) (*U
 	hashToVerify := user.PasswordHash
 	if userDisabled {
 		// Use dummy hash to maintain timing even for disabled users
-		hashToVerify = dummyHash
+		hashToVerify = dummyPasswordHash
 	}
 
 	// Verify password (constant-time comparison)
-	valid, err := auth.VerifyPassword(password, hashToVerify)
+	valid, err := verifyPasswordHash(password, hashToVerify)
 	if err != nil {
 		return nil, "password_verification_error", fmt.Errorf("authentication failed")
 	}
