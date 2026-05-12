@@ -67,6 +67,19 @@ func TestNormalizePasswordForStorageRejectsInvalidEncodedHash(t *testing.T) {
 	}
 }
 
+func TestNormalizePasswordForStorageRejectsWeakEncodedHash(t *testing.T) {
+	hash, err := NormalizePasswordForStorage("plain-password-value")
+	if err != nil {
+		t.Fatalf("NormalizePasswordForStorage() error = %v", err)
+	}
+	weakHash := strings.Replace(hash, "m=65536,t=3,p=4", "m=8,t=1,p=1", 1)
+
+	_, err = NormalizePasswordForStorage(weakHash)
+	if err == nil {
+		t.Fatal("NormalizePasswordForStorage() error = nil, want invalid hash error")
+	}
+}
+
 func TestToSetCommandsWithErrorRejectsInvalidPasswordHash(t *testing.T) {
 	cfg := &Config{
 		Security: &SecurityConfig{
