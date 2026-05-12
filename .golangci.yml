@@ -24,7 +24,6 @@ linters:
         - style
   exclusions:
     paths:
-      - test/vpp_poc
       - vendor
 
 issues:
