@@ -237,4 +237,4 @@ After FRR is running:
 
 1. **Start arca-router**: `sudo systemctl start arca-routerd`
 2. **Check arca-router status**: `sudo systemctl status arca-routerd`
-3. **View interfaces**: `arca-cli show interfaces`
+3. **View running configuration**: `arca-cli show configuration`

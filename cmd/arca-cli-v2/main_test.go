@@ -289,6 +289,29 @@ func TestShowHistoryRejectsInvalidLimit(t *testing.T) {
 	}
 }
 
+func TestCmdShowOSPFNeighborReturnsUnsupportedError(t *testing.T) {
+	ctx := context.Background()
+	client := &fakeInteractiveClient{}
+	sh := &interactiveShell{
+		client:    client,
+		hostname:  "router",
+		mode:      modeOperational,
+		sessionID: "session-1",
+	}
+
+	err := sh.cmdShow(ctx, []string{"ospf", "neighbor"})
+	if err == nil || !strings.Contains(err.Error(), "not available via gRPC yet") {
+		t.Fatalf("cmdShow(ospf neighbor) error = %v, want unsupported gRPC state", err)
+	}
+}
+
+func TestOneShotShowOSPFNeighborReturnsOperationError(t *testing.T) {
+	code := oneShotShow(context.Background(), nil, []string{"ospf", "neighbor"}, &cliFlags{})
+	if code != ExitOperationError {
+		t.Fatalf("oneShotShow(ospf neighbor) = %d, want %d", code, ExitOperationError)
+	}
+}
+
 func TestRollbackRejectsInvalidNumber(t *testing.T) {
 	ctx := context.Background()
 

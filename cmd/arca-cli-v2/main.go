@@ -93,12 +93,11 @@ Show subcommands:
   configuration               Show full configuration
   configuration interfaces    Show interface configuration
   configuration protocols     Show routing protocol configuration
-  interfaces                  Show interface status
-  interfaces <name>           Show specific interface details
-  bgp summary                 Show BGP summary
-  bgp neighbor <ip>           Show BGP neighbor details
-  ospf neighbor               Show OSPF neighbors
-  route                       Show routing table
+  interfaces                  Show interface status (not yet available via gRPC)
+  interfaces <name>           Show specific interface details (not yet available via gRPC)
+  bgp summary                 Show BGP summary (not yet available via gRPC)
+  bgp neighbor <ip>           Show BGP neighbor details (not yet available via gRPC)
+  route                       Show routing table (not yet available via gRPC)
 
 Options:
   -socket <path>     arca-routerd gRPC socket (default: %s)
@@ -240,9 +239,8 @@ func oneShotShow(ctx context.Context, client *grpcclient.Client, args []string, 
 			fmt.Fprintf(os.Stderr, "Error: 'show ospf' requires 'neighbor' subcommand\n")
 			return ExitUsageError
 		}
-		// OSPF neighbor state is available via GetSystemInfo or a future RPC
-		fmt.Println("OSPF neighbor display not yet implemented via gRPC")
-		return ExitSuccess
+		fmt.Fprintf(os.Stderr, "Error: OSPF neighbor state is not available via gRPC yet\n")
+		return ExitOperationError
 
 	case "route":
 		prefixFilter := ""
@@ -624,8 +622,7 @@ func (sh *interactiveShell) cmdShow(ctx context.Context, args []string) error {
 		if len(args) < 2 || args[1] != "neighbor" {
 			return fmt.Errorf("'show ospf' requires 'neighbor' subcommand")
 		}
-		fmt.Println("OSPF neighbor display not yet implemented via gRPC")
-		return nil
+		return fmt.Errorf("OSPF neighbor state is not available via gRPC yet")
 
 	case "route":
 		if sh.mode == modeConfiguration {
@@ -841,12 +838,11 @@ func (sh *interactiveShell) showHelp() {
 		fmt.Println("  help                          Show this help message")
 		fmt.Println("  configure                     Enter configuration mode")
 		fmt.Println("  show configuration            Show running configuration")
-		fmt.Println("  show interfaces [<name>]      Show interface status")
-		fmt.Println("  show bgp summary              Show BGP summary")
-		fmt.Println("  show bgp neighbor <ip>        Show BGP neighbor details")
-		fmt.Println("  show ospf neighbor            Show OSPF neighbors")
-		fmt.Println("  show route                    Show routing table")
-		fmt.Println("  show route protocol <proto>   Show routes by protocol")
+		fmt.Println("  show interfaces [<name>]      Show interface status (not yet available via gRPC)")
+		fmt.Println("  show bgp summary              Show BGP summary (not yet available via gRPC)")
+		fmt.Println("  show bgp neighbor <ip>        Show BGP neighbor details (not yet available via gRPC)")
+		fmt.Println("  show route                    Show routing table (not yet available via gRPC)")
+		fmt.Println("  show route protocol <proto>   Show routes by protocol (not yet available via gRPC)")
 		fmt.Println("  exit, quit                    Exit interactive CLI")
 	} else {
 		fmt.Println("Configuration mode commands:")

@@ -101,7 +101,7 @@ if [ "$1" = "1" ]; then
     echo ""
     echo "6. Check status:"
     echo "   systemctl status arca-routerd"
-    echo "   arca-cli show interfaces"
+    echo "   arca-cli show configuration"
     echo "=========================================="
 elif [ "$1" = "2" ]; then
     # Upgrade

@@ -270,22 +270,16 @@ netconf-console --host localhost --port 830 --user admin --password YourSecurePa
 # Check daemon logs
 sudo journalctl -u arca-routerd -n 50
 
-# View interface status with arca-cli
-arca-cli show interfaces
+# View running configuration with arca-cli
+arca-cli show configuration
 
-# View routing table
-arca-cli show route
-
-# View BGP status
-arca-cli show bgp summary
-
-# View OSPF neighbors
-arca-cli show ospf neighbor
-
-# Check VPP directly (optional)
+# Check operational state directly
 sudo vppctl show interface
 sudo vppctl show lcp
 sudo vppctl show ip fib
+sudo vtysh -c 'show ip route'
+sudo vtysh -c 'show bgp summary'
+sudo vtysh -c 'show ip ospf neighbor'
 
 # Check FRR directly (optional)
 sudo vtysh -c 'show running-config'

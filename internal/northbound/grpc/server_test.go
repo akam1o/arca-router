@@ -181,6 +181,21 @@ func TestClientServerConfigFlow(t *testing.T) {
 	}
 }
 
+func TestOperationalStateEndpointsRejectUnsupportedState(t *testing.T) {
+	srv := NewServer(engine.NewEngine(nil, testLogger()), &fakeStore{}, testLogger())
+	ctx := context.Background()
+
+	if _, err := srv.GetInterfaces(ctx, ""); err == nil || !strings.Contains(err.Error(), "not available via gRPC yet") {
+		t.Fatalf("GetInterfaces() error = %v, want unsupported operational state", err)
+	}
+	if _, err := srv.GetRoutes(ctx, "", ""); err == nil || !strings.Contains(err.Error(), "not available via gRPC yet") {
+		t.Fatalf("GetRoutes() error = %v, want unsupported operational state", err)
+	}
+	if _, err := srv.GetBGPNeighbors(ctx); err == nil || !strings.Contains(err.Error(), "not available via gRPC yet") {
+		t.Fatalf("GetBGPNeighbors() error = %v, want unsupported operational state", err)
+	}
+}
+
 func TestReleaseLockWaitsForInFlightCommit(t *testing.T) {
 	parserEntered := make(chan struct{})
 	unblockParser := make(chan struct{})

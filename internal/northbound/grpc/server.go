@@ -410,84 +410,19 @@ func (s *Server) ReleaseLock(ctx context.Context, sessionID string) error {
 	return s.sessions.ReleaseLock(sessionID)
 }
 
-// GetInterfaces returns configured interfaces with basic status placeholders.
+// GetInterfaces returns interface operational state.
 func (s *Server) GetInterfaces(ctx context.Context, nameFilter string) ([]InterfaceInfo, error) {
-	cfg := s.engine.Running()
-	names := make([]string, 0, len(cfg.Interfaces))
-	for name := range cfg.Interfaces {
-		if nameFilter == "" || name == nameFilter {
-			names = append(names, name)
-		}
-	}
-	sort.Strings(names)
-
-	result := make([]InterfaceInfo, 0, len(names))
-	for _, name := range names {
-		result = append(result, InterfaceInfo{
-			Name:        name,
-			AdminStatus: "configured",
-			OperStatus:  "unknown",
-		})
-	}
-	return result, nil
+	return nil, unsupportedOperationalStateError("interface state")
 }
 
-// GetRoutes returns configured static routes.
+// GetRoutes returns routing table entries.
 func (s *Server) GetRoutes(ctx context.Context, prefixFilter, protoFilter string) ([]RouteInfo, error) {
-	if protoFilter != "" && protoFilter != "static" {
-		return nil, nil
-	}
-	cfg := s.engine.Running()
-	if cfg.Routing == nil {
-		return nil, nil
-	}
-	routes := make([]RouteInfo, 0, len(cfg.Routing.StaticRoutes))
-	for _, route := range cfg.Routing.StaticRoutes {
-		if route == nil {
-			continue
-		}
-		if prefixFilter != "" && route.Prefix != prefixFilter {
-			continue
-		}
-		routes = append(routes, RouteInfo{
-			Prefix:   route.Prefix,
-			NextHop:  route.NextHop,
-			Protocol: "static",
-			Metric:   uint32(route.Distance),
-			Active:   true,
-		})
-	}
-	sort.Slice(routes, func(i, j int) bool {
-		return routes[i].Prefix < routes[j].Prefix
-	})
-	return routes, nil
+	return nil, unsupportedOperationalStateError("route state")
 }
 
-// GetBGPNeighbors returns configured BGP neighbors.
+// GetBGPNeighbors returns BGP neighbor state.
 func (s *Server) GetBGPNeighbors(ctx context.Context) ([]BGPNeighborInfo, error) {
-	cfg := s.engine.Running()
-	if cfg.Protocols == nil || cfg.Protocols.BGP == nil {
-		return nil, nil
-	}
-	var neighbors []BGPNeighborInfo
-	for _, groupName := range sortedMapKeys(cfg.Protocols.BGP.Groups) {
-		group := cfg.Protocols.BGP.Groups[groupName]
-		if group == nil {
-			continue
-		}
-		for _, peer := range sortedMapKeys(group.Neighbors) {
-			neighbor := group.Neighbors[peer]
-			if neighbor == nil {
-				continue
-			}
-			neighbors = append(neighbors, BGPNeighborInfo{
-				PeerAddress: peer,
-				PeerAS:      neighbor.PeerAS,
-				State:       "configured",
-			})
-		}
-	}
-	return neighbors, nil
+	return nil, unsupportedOperationalStateError("BGP neighbor state")
 }
 
 // GetSystemInfo returns basic system information.
@@ -498,6 +433,10 @@ func (s *Server) GetSystemInfo(ctx context.Context) (*SystemInfo, error) {
 		info.Hostname = cfg.System.HostName
 	}
 	return info, nil
+}
+
+func unsupportedOperationalStateError(name string) error {
+	return fmt.Errorf("%s is not available via gRPC yet; use VPP/FRR tools directly or NETCONF <get> for configuration-derived state", name)
 }
 
 func (s *Server) runningText() (string, uint64, error) {
@@ -769,15 +708,6 @@ func lineDiff(oldText, newText string) string {
 	}
 	sort.Strings(out)
 	return strings.Join(out, "\n")
-}
-
-func sortedMapKeys[V any](m map[string]V) []string {
-	keys := make([]string, 0, len(m))
-	for key := range m {
-		keys = append(keys, key)
-	}
-	sort.Strings(keys)
-	return keys
 }
 
 // ConfigTextParser is a hook for parsing set-command text into legacy config.
