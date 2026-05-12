@@ -4,6 +4,8 @@
 
 - **Generated gRPC API**: `api/v1/router.proto` is compiled into typed Go stubs
 - **Typed daemon/CLI RPC wiring**: `arca-routerd-v2` and `arca-cli-v2` use generated gRPC clients and servers
+- **Transactional FRR apply**: `arca-routerd-v2` defaults to `--frr-apply-mode=transactional`, using FRR management commit check/apply
+- **FRR file backend retained**: `--frr-apply-mode=file` keeps the legacy full-file reload backend for recovery and compatibility
 - **Prometheus metrics endpoint**: optional `--metrics-listen` HTTP endpoint exposes daemon, config, and NETCONF metrics
 - **Health endpoint**: optional metrics server also exposes `/healthz`
 - **v2 test coverage**: engine, diff, plugins, gRPC server/client, and daemon tests cover the hardened v2 path
