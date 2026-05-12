@@ -59,3 +59,25 @@ func TestProtectSecretsInSetCommandPreservesEncodedHash(t *testing.T) {
 		t.Fatalf("protected line = %q, want %q", line, want)
 	}
 }
+
+func TestNormalizePasswordForStorageRejectsInvalidEncodedHash(t *testing.T) {
+	_, err := NormalizePasswordForStorage("$argon2id$not-a-valid-hash")
+	if err == nil {
+		t.Fatal("NormalizePasswordForStorage() error = nil, want invalid hash error")
+	}
+}
+
+func TestToSetCommandsWithErrorRejectsInvalidPasswordHash(t *testing.T) {
+	cfg := &Config{
+		Security: &SecurityConfig{
+			Users: map[string]*UserConfig{
+				"admin": {Username: "admin", Password: "$argon2id$not-a-valid-hash"},
+			},
+		},
+	}
+
+	_, err := ToSetCommandsWithError(cfg)
+	if err == nil {
+		t.Fatal("ToSetCommandsWithError() error = nil, want invalid hash error")
+	}
+}

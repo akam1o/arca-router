@@ -62,8 +62,7 @@ func (s *Server) Stop() {
 
 // GetRunning returns the current running configuration.
 func (s *Server) GetRunning(ctx context.Context) (configText string, version uint64, err error) {
-	text, version := s.runningText()
-	return text, version, nil
+	return s.runningText()
 }
 
 // GetCandidate returns the session candidate configuration.
@@ -164,7 +163,9 @@ func (s *Server) Commit(ctx context.Context, sessionID, user, message string) (s
 			return "", 0, fmt.Errorf("persist commit after apply: %w", err)
 		}
 	}
-	s.resetSessionCandidateLocked(session)
+	if err := s.resetSessionCandidateLocked(session); err != nil {
+		return "", 0, err
+	}
 	return commitID, snap.Version, nil
 }
 
@@ -193,8 +194,7 @@ func (s *Server) Discard(ctx context.Context, sessionID string) error {
 	if err != nil {
 		return err
 	}
-	s.resetSessionCandidate(session)
-	return nil
+	return s.resetSessionCandidate(session)
 }
 
 // Rollback reverts running configuration to a previous commit.
@@ -265,7 +265,9 @@ func (s *Server) Rollback(ctx context.Context, sessionID, commitID, user, messag
 	}
 
 	snap := s.engine.RunningSnapshot()
-	s.resetSessionCandidateLocked(session)
+	if err := s.resetSessionCandidateLocked(session); err != nil {
+		return "", 0, err
+	}
 	if snap == nil {
 		return newCommitID, 0, nil
 	}
@@ -278,7 +280,10 @@ func (s *Server) Diff(ctx context.Context, sessionID string) (string, bool, erro
 	if err != nil {
 		return "", false, err
 	}
-	running, _ := s.runningText()
+	running, _, err := s.runningText()
+	if err != nil {
+		return "", false, err
+	}
 	session.mu.RLock()
 	candidate := session.CandidateText
 	session.mu.RUnlock()
@@ -337,7 +342,12 @@ func (s *Server) AcquireLock(ctx context.Context, sessionID, user string) error 
 	}
 	session.mu.Lock()
 	if session.CandidateText == "" {
-		session.CandidateText, _ = s.runningText()
+		text, _, err := s.runningText()
+		if err != nil {
+			session.mu.Unlock()
+			return err
+		}
+		session.CandidateText = text
 	}
 	session.mu.Unlock()
 	return nil
@@ -438,23 +448,32 @@ func (s *Server) GetSystemInfo(ctx context.Context) (*SystemInfo, error) {
 	return info, nil
 }
 
-func (s *Server) runningText() (string, uint64) {
+func (s *Server) runningText() (string, uint64, error) {
 	snap := s.engine.RunningSnapshot()
 	if snap == nil || snap.Config == nil {
-		return "", 0
+		return "", 0, nil
 	}
-	return pkgconfig.ToSetCommands(snap.Config.ToLegacyConfig()), snap.Version
+	text, err := pkgconfig.ToSetCommandsWithError(snap.Config.ToLegacyConfig())
+	if err != nil {
+		return "", 0, fmt.Errorf("serialize running config: %w", err)
+	}
+	return text, snap.Version, nil
 }
 
-func (s *Server) resetSessionCandidate(session *Session) {
+func (s *Server) resetSessionCandidate(session *Session) error {
 	session.mu.Lock()
-	s.resetSessionCandidateLocked(session)
+	err := s.resetSessionCandidateLocked(session)
 	session.mu.Unlock()
+	return err
 }
 
-func (s *Server) resetSessionCandidateLocked(session *Session) {
-	text, _ := s.runningText()
+func (s *Server) resetSessionCandidateLocked(session *Session) error {
+	text, _, err := s.runningText()
+	if err != nil {
+		return err
+	}
 	session.CandidateText = text
+	return nil
 }
 
 func (s *Server) rollbackToSnapshot(ctx context.Context, snap *model.ConfigSnapshot, user string) error {

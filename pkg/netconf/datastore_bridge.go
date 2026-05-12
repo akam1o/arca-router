@@ -10,7 +10,7 @@ import (
 // ConfigToText converts config.Config to text format (set commands)
 // This implements Phase 2 Step 4: Datastore Bridge Layer
 func ConfigToText(cfg *config.Config) (string, error) {
-	return config.ToSetCommands(cfg), nil
+	return config.ToSetCommandsWithError(cfg)
 }
 
 // TextToConfig converts text format (set commands) to config.Config

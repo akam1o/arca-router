@@ -13,7 +13,13 @@ const encodedPasswordHashPrefix = "$argon2id$"
 // NormalizePasswordForStorage converts a plain-text password to the stored hash
 // representation. Already-encoded argon2id hashes are preserved for round trips.
 func NormalizePasswordForStorage(password string) (string, error) {
-	if password == "" || IsEncodedPasswordHash(password) {
+	if password == "" {
+		return password, nil
+	}
+	if strings.HasPrefix(password, encodedPasswordHashPrefix) {
+		if err := ValidatePasswordHash(password); err != nil {
+			return "", err
+		}
 		return password, nil
 	}
 	hash, err := auth.HashPassword(password)
@@ -23,10 +29,22 @@ func NormalizePasswordForStorage(password string) (string, error) {
 	return hash, nil
 }
 
-// IsEncodedPasswordHash reports whether password already looks like a stored
-// argon2id hash.
+// IsEncodedPasswordHash reports whether password is a valid stored argon2id
+// hash.
 func IsEncodedPasswordHash(password string) bool {
-	return strings.HasPrefix(password, encodedPasswordHashPrefix)
+	return ValidatePasswordHash(password) == nil
+}
+
+// ValidatePasswordHash verifies that passwordHash is a supported encoded
+// argon2id hash.
+func ValidatePasswordHash(passwordHash string) error {
+	if !strings.HasPrefix(passwordHash, encodedPasswordHashPrefix) {
+		return fmt.Errorf("password hash must use argon2id")
+	}
+	if _, err := auth.VerifyPassword("", passwordHash); err != nil {
+		return fmt.Errorf("invalid password hash: %w", err)
+	}
+	return nil
 }
 
 // ProtectSecretsInSetCommands hashes plain-text secrets in set-command text

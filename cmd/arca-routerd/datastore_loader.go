@@ -89,7 +89,10 @@ func (d *datastoreConfigLoader) LoadConfig(path string) (*config.Config, error) 
 func (d *datastoreConfigLoader) bootstrapDatastore(ds datastore.Datastore, cfg *config.Config) error {
 	ctx := context.Background()
 
-	configText := config.ToSetCommands(cfg)
+	configText, err := config.ToSetCommandsWithError(cfg)
+	if err != nil {
+		return fmt.Errorf("serialize config: %w", err)
+	}
 	if strings.TrimSpace(configText) == "" {
 		return fmt.Errorf("cannot bootstrap datastore with empty configuration")
 	}
@@ -118,7 +121,7 @@ func (d *datastoreConfigLoader) bootstrapDatastore(ds datastore.Datastore, cfg *
 	}
 
 	// Commit to running
-	_, err := ds.Commit(ctx, &datastore.CommitRequest{
+	_, err = ds.Commit(ctx, &datastore.CommitRequest{
 		SessionID: sessionID,
 		User:      "system",
 		Message:   "Bootstrapped from file configuration",

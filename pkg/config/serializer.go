@@ -29,9 +29,21 @@ func needsQuotedValue(s string) bool {
 }
 
 // ToSetCommands serializes Config into deterministic Junos-style set commands.
+// It panics if sensitive value protection fails; callers that can return errors
+// should use ToSetCommandsWithError.
 func ToSetCommands(cfg *Config) string {
+	text, err := ToSetCommandsWithError(cfg)
+	if err != nil {
+		panic(fmt.Sprintf("failed to serialize config: %v", err))
+	}
+	return text
+}
+
+// ToSetCommandsWithError serializes Config into deterministic Junos-style set
+// commands and reports sensitive value protection failures.
+func ToSetCommandsWithError(cfg *Config) (string, error) {
 	if cfg == nil {
-		return ""
+		return "", nil
 	}
 
 	var b strings.Builder
@@ -44,9 +56,11 @@ func ToSetCommands(cfg *Config) string {
 	writeRoutingOptions(&b, cfg.RoutingOptions)
 	writeProtocols(&b, cfg.Protocols)
 	writePolicyOptions(&b, cfg.PolicyOptions)
-	writeSecurity(&b, cfg.Security)
+	if err := writeSecurity(&b, cfg.Security); err != nil {
+		return "", err
+	}
 
-	return b.String()
+	return b.String(), nil
 }
 
 func writeLine(b *strings.Builder, format string, args ...interface{}) {
@@ -288,9 +302,9 @@ func writePolicyTerm(b *strings.Builder, policyName string, term *PolicyTerm) {
 	}
 }
 
-func writeSecurity(b *strings.Builder, sec *SecurityConfig) {
+func writeSecurity(b *strings.Builder, sec *SecurityConfig) error {
 	if sec == nil {
-		return
+		return nil
 	}
 	if sec.NETCONF != nil && sec.NETCONF.SSH != nil && sec.NETCONF.SSH.Port != 0 {
 		writeLine(b, "set security netconf ssh port %d", sec.NETCONF.SSH.Port)
@@ -303,7 +317,7 @@ func writeSecurity(b *strings.Builder, sec *SecurityConfig) {
 		if user.Password != "" {
 			password, err := NormalizePasswordForStorage(user.Password)
 			if err != nil {
-				continue
+				return fmt.Errorf("protect password for user %s: %w", username, err)
 			}
 			user.Password = password
 			writeLine(b, "set security users user %s password %s", username, EscapeValue(password))
@@ -323,4 +337,5 @@ func writeSecurity(b *strings.Builder, sec *SecurityConfig) {
 			writeLine(b, "set security rate-limit per-user %d", sec.RateLimit.PerUser)
 		}
 	}
+	return nil
 }

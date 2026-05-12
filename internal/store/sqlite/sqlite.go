@@ -72,7 +72,10 @@ func (s *Store) PrepareCommit(ctx context.Context, snap *model.ConfigSnapshot) (
 
 	// Store set-command text so the legacy datastore users, including NETCONF,
 	// can continue to read the same running_config rows.
-	configText := pkgconfig.ToSetCommands(snap.Config.ToLegacyConfig())
+	configText, err := pkgconfig.ToSetCommandsWithError(snap.Config.ToLegacyConfig())
+	if err != nil {
+		return nil, fmt.Errorf("serialize config: %w", err)
+	}
 
 	// Use the legacy commit mechanism
 	sessionID := "engine-" + uuid.NewString()
