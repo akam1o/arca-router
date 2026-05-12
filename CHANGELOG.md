@@ -5,7 +5,8 @@
 - **Advanced configuration model**: parser, serializer, validation, clone, conversion, and diff support for clustering, MPLS, VRRP, routing instances, class of service, and Web UI service settings
 - **Candidate command replacement**: v0.6 scalar settings replace existing candidate lines instead of accumulating duplicates
 - **etcd datastore selection**: `arca-routerd` and embedded NETCONF can use the existing etcd-backed candidate/running datastore for clustered deployments
-- **v0.6 southbound safety gates**: unsupported MPLS, VRRP, routing-instance, and class-of-service southbound changes fail validation instead of being silently ignored
+- **FRR VRRP generation**: `--frr-apply-mode=file` can render `protocols vrrp` groups into FRR integrated interface configuration
+- **v0.6 southbound safety gates**: unsupported MPLS, routing-instance, class-of-service, and transactional VRRP southbound changes fail validation instead of being silently ignored
 - **Read-only Web UI**: optional `--web-listen` HTTP dashboard and `/api/status` JSON endpoint backed by daemon observability state
 - **Web UI configuration**: `system services web-ui` can enable the dashboard without a command-line flag
 

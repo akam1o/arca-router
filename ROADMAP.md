@@ -10,6 +10,7 @@ Focus: expand the hardened unified daemon into higher-level router features.
 - **Multi-chassis / clustering**
   - Management-plane config model for cluster nodes and etcd sync
   - arca-routerd datastore backend selection for etcd-backed config synchronization
+  - FRR VRRP config generation through the file apply backend
   - Control-plane HA using FRR and VRRP
   - Config synchronization through etcd
   - Failover reconciliation for local daemon state

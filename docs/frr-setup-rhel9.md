@@ -71,6 +71,7 @@ sharpd=no
 pbrd=no
 bfdd=no
 fabricd=no
+# Set vrrpd=yes when using protocols vrrp with --frr-apply-mode=file
 vrrpd=no
 pathd=no
 
@@ -88,6 +89,7 @@ staticd_options=""
 - `ospfd`: OSPF routing protocol
 - `staticd`: Static route management
 - `mgmtd`: Transactional management datastore used by arca-router v0.5+
+- `vrrpd`: VRRP daemon, required only when using `protocols vrrp` with `--frr-apply-mode=file`
 
 ### 3. Configure FRR Apply Access
 
@@ -142,6 +144,7 @@ sudo systemctl status frr
 
 # Verify daemons are running
 ps aux | grep -E 'zebra|bgpd|ospfd|staticd'
+# If VRRP is enabled, also verify vrrpd.
 
 # Test FRR CLI (vtysh)
 sudo vtysh -c 'show version'
