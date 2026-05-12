@@ -145,6 +145,20 @@ func (s *Server) Commit(ctx context.Context, sessionID, user, message string) (s
 		if err != nil {
 			return "", 0, fmt.Errorf("prepare commit persistence: %w", err)
 		}
+		if err := s.ensureCandidateBaseCurrentLocked(session); err != nil {
+			abortErr := prepared.Abort(context.Background())
+			if abortErr != nil {
+				return "", 0, fmt.Errorf("%w (abort failed: %v)", err, abortErr)
+			}
+			return "", 0, err
+		}
+		if !s.hasCandidateChanges(newCfg) {
+			abortErr := prepared.Abort(context.Background())
+			if abortErr != nil {
+				return "", 0, fmt.Errorf("no configuration changes to commit (abort failed: %v)", abortErr)
+			}
+			return "", 0, fmt.Errorf("no configuration changes to commit")
+		}
 	}
 
 	beforeSnap := s.engine.RunningSnapshot()
@@ -267,6 +281,20 @@ func (s *Server) Rollback(ctx context.Context, sessionID, commitID, user, messag
 	}
 	if err != nil {
 		return "", 0, fmt.Errorf("prepare rollback persistence: %w", err)
+	}
+	if err := s.ensureCandidateBaseCurrentLocked(session); err != nil {
+		abortErr := prepared.Abort(context.Background())
+		if abortErr != nil {
+			return "", 0, fmt.Errorf("%w (abort failed: %v)", err, abortErr)
+		}
+		return "", 0, err
+	}
+	if !s.hasCandidateChanges(newCfg) {
+		abortErr := prepared.Abort(context.Background())
+		if abortErr != nil {
+			return "", 0, fmt.Errorf("rollback target matches running configuration (abort failed: %v)", abortErr)
+		}
+		return "", 0, fmt.Errorf("rollback target matches running configuration")
 	}
 
 	beforeSnap := s.engine.RunningSnapshot()
