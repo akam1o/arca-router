@@ -82,9 +82,11 @@ func NewSSHServer(config *SSHConfig) (*SSHServer, error) {
 		return nil, fmt.Errorf("failed to create user database: %w", err)
 	}
 
+	datastoreConfig := netconfDatastoreConfig(config)
+
 	var processLock *datastore.ProcessLock
-	if !config.SkipDatastoreStartupCleanup {
-		processLock, err = datastore.AcquireSQLiteProcessLock(config.DatastorePath)
+	if datastoreConfig.Backend == datastore.BackendSQLite && !config.SkipDatastoreStartupCleanup {
+		processLock, err = datastore.AcquireSQLiteProcessLock(datastoreConfig.SQLitePath)
 		if err != nil {
 			_ = userDB.Close()
 			return nil, fmt.Errorf("acquire datastore process lock: %w", err)
@@ -92,19 +94,19 @@ func NewSSHServer(config *SSHConfig) (*SSHServer, error) {
 	}
 
 	// Initialize datastore
-	datastoreConfig := &datastore.Config{
-		Backend:    datastore.BackendSQLite,
-		SQLitePath: config.DatastorePath,
-	}
-	ds, err := datastore.NewSQLiteDatastore(datastoreConfig)
+	ds, err := datastore.NewDatastore(datastoreConfig)
 	if err != nil {
-		_ = processLock.Close()
+		if processLock != nil {
+			_ = processLock.Close()
+		}
 		_ = userDB.Close()
 		return nil, fmt.Errorf("failed to create datastore: %w", err)
 	}
 	if !config.SkipDatastoreStartupCleanup {
 		if err := cleanupDatastoreEphemeralState(context.Background(), ds); err != nil {
-			_ = processLock.Close()
+			if processLock != nil {
+				_ = processLock.Close()
+			}
 			_ = ds.Close()
 			_ = userDB.Close()
 			return nil, fmt.Errorf("failed to cleanup datastore ephemeral state: %w", err)
@@ -158,6 +160,20 @@ func NewSSHServer(config *SSHConfig) (*SSHServer, error) {
 	srv.sshConfig = sshConfig
 
 	return srv, nil
+}
+
+func netconfDatastoreConfig(config *SSHConfig) *datastore.Config {
+	if config.DatastoreConfig != nil {
+		cfg := *config.DatastoreConfig
+		if cfg.SQLitePath == "" {
+			cfg.SQLitePath = config.DatastorePath
+		}
+		return &cfg
+	}
+	return &datastore.Config{
+		Backend:    datastore.BackendSQLite,
+		SQLitePath: config.DatastorePath,
+	}
 }
 
 type ephemeralStateCleaner interface {
