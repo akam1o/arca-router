@@ -25,6 +25,7 @@ This directory contains user guides, design notes, and internal drafts for `arca
 - `docs/ansible-integration.md`
 
 ## Development / Release
+- [`ROADMAP.md`](../ROADMAP.md)
 - `docs/development.md`
 - `docs/release-process.md`
 

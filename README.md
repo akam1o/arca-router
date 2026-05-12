@@ -16,6 +16,7 @@ arca-router is a software router with Junos-compatible configuration syntax, pow
 ## Releases
 
 Previous releases are documented in [`CHANGELOG.md`](CHANGELOG.md).
+Future planned work is tracked in [`ROADMAP.md`](ROADMAP.md).
 
 ### v0.5.x - **Current Release** 🚧
 
@@ -47,24 +48,6 @@ Previous releases are documented in [`CHANGELOG.md`](CHANGELOG.md).
 - ✅ **Security Features**: Authentication (password + SSH key), RBAC (admin/operator/read-only), Rate limiting, Audit logging
 - ✅ **Configuration Datastore**: Candidate/running config with commit history
 - ✅ **CI/CD Pipeline**: Automated build, test, and release via GitHub Actions
-
----
-
-## Roadmap
-
-### v0.6.x - Advanced Features 🔲
-
-- 🔲 **Multi-chassis/Clustering**
-  - Control plane HA (FRR + VRRP)
-  - Config sync (etcd)
-- 🔲 **MPLS/VPN**
-  - MPLS label switching (VPP)
-  - L3VPN (FRR + VPP)
-- 🔲 **QoS/Traffic Engineering**
-  - VPP QoS policy
-  - Traffic shaping
-- 🔲 **Web UI**
-  - Browser-based monitoring and configuration
 
 ---
 
