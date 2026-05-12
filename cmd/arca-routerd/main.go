@@ -314,29 +314,7 @@ func run(ctx context.Context, f *daemonFlags, log *logger.Logger) error {
 		return err
 	}
 
-	// --- Step 3: Create southbound plugins ---
-	vppPlugin := sbvpp.NewVPPPlugin(vppClient, hwConfig, slog.Default())
-	frrPlugin := sbfrr.NewFRRPluginWithApplyMode(slog.Default(), frrApplyMode)
-
-	plugins := []engine.Plugin{vppPlugin, frrPlugin}
-
-	// --- Step 4: Create engine ---
-	eng := engine.NewEngine(plugins, slog.Default())
-
-	// --- Step 5: Initialize plugins ---
-	log.Info("Initializing southbound plugins")
-	for _, p := range plugins {
-		if err := p.Init(ctx); err != nil {
-			return fmt.Errorf("init plugin %s: %w", p.Name(), err)
-		}
-		defer func(p engine.Plugin) {
-			if closeErr := p.Close(); closeErr != nil {
-				log.Error("Failed to close plugin", slog.String("plugin", p.Name()), slog.Any("error", closeErr))
-			}
-		}(p)
-	}
-
-	// --- Step 6: Open config store ---
+	// --- Step 3: Open config store ---
 	configStore, processLock, datastoreConfig, err := openConfigStore(f)
 	if err != nil {
 		return fmt.Errorf("open config store: %w", err)
@@ -353,6 +331,29 @@ func run(ctx context.Context, f *daemonFlags, log *logger.Logger) error {
 	}()
 	if err := configStore.CleanupEphemeralState(ctx); err != nil {
 		return fmt.Errorf("cleanup config store ephemeral state: %w", err)
+	}
+
+	// --- Step 4: Create validation and southbound plugins ---
+	clusterPlugin := newClusterSyncPlugin(datastoreConfig)
+	vppPlugin := sbvpp.NewVPPPlugin(vppClient, hwConfig, slog.Default())
+	frrPlugin := sbfrr.NewFRRPluginWithApplyMode(slog.Default(), frrApplyMode)
+
+	plugins := []engine.Plugin{clusterPlugin, vppPlugin, frrPlugin}
+
+	// --- Step 5: Create engine ---
+	eng := engine.NewEngine(plugins, slog.Default())
+
+	// --- Step 6: Initialize plugins ---
+	log.Info("Initializing engine plugins")
+	for _, p := range plugins {
+		if err := p.Init(ctx); err != nil {
+			return fmt.Errorf("init plugin %s: %w", p.Name(), err)
+		}
+		defer func(p engine.Plugin) {
+			if closeErr := p.Close(); closeErr != nil {
+				log.Error("Failed to close plugin", slog.String("plugin", p.Name()), slog.Any("error", closeErr))
+			}
+		}(p)
 	}
 
 	// --- Step 7: Load initial configuration ---
