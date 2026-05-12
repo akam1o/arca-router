@@ -300,6 +300,97 @@ func TestCommitRejectsStaleCandidate(t *testing.T) {
 	}
 }
 
+func TestCommitAllowsEmptyCandidate(t *testing.T) {
+	oldParser := ConfigTextParser
+	ConfigTextParser = func(text string) (*model.RouterConfig, error) {
+		cfg, err := pkgconfig.NewParser(strings.NewReader(text)).Parse()
+		if err != nil {
+			return nil, err
+		}
+		return model.FromLegacyConfig(cfg), nil
+	}
+	t.Cleanup(func() { ConfigTextParser = oldParser })
+
+	ctx := context.Background()
+	eng := engine.NewEngine(nil, testLogger())
+	eng.InitializeRunning(&model.RouterConfig{
+		System:     &model.SystemConfig{HostName: "router1"},
+		Interfaces: map[string]*model.InterfaceConfig{},
+	}, 1)
+	st := &fakeStore{commitID: "commit-empty"}
+	srv := NewServer(eng, st, testLogger())
+
+	sessionID, err := srv.CreateSession(ctx, "alice")
+	if err != nil {
+		t.Fatalf("CreateSession() error = %v", err)
+	}
+	if err := srv.AcquireLock(ctx, sessionID, "alice"); err != nil {
+		t.Fatalf("AcquireLock() error = %v", err)
+	}
+	if err := srv.EditCandidate(ctx, sessionID, "delete system host-name"); err != nil {
+		t.Fatalf("EditCandidate() error = %v", err)
+	}
+	if candidate, err := srv.GetCandidate(ctx, sessionID); err != nil {
+		t.Fatalf("GetCandidate() error = %v", err)
+	} else if candidate != "" {
+		t.Fatalf("candidate = %q, want empty config", candidate)
+	}
+	if err := srv.ValidateCandidate(ctx, sessionID); err != nil {
+		t.Fatalf("ValidateCandidate() error = %v", err)
+	}
+
+	commitID, version, err := srv.Commit(ctx, sessionID, "alice", "clear config")
+	if err != nil {
+		t.Fatalf("Commit() error = %v", err)
+	}
+	if commitID != "commit-empty" || version != 2 {
+		t.Fatalf("Commit() = (%q, %d), want commit-empty version 2", commitID, version)
+	}
+	if got := eng.Running().System; got != nil && got.HostName != "" {
+		t.Fatalf("running system = %#v, want empty hostname", got)
+	}
+}
+
+func TestCommitRejectsNoopCandidate(t *testing.T) {
+	oldParser := ConfigTextParser
+	ConfigTextParser = func(text string) (*model.RouterConfig, error) {
+		cfg, err := pkgconfig.NewParser(strings.NewReader(text)).Parse()
+		if err != nil {
+			return nil, err
+		}
+		return model.FromLegacyConfig(cfg), nil
+	}
+	t.Cleanup(func() { ConfigTextParser = oldParser })
+
+	ctx := context.Background()
+	eng := engine.NewEngine(nil, testLogger())
+	eng.InitializeRunning(&model.RouterConfig{
+		System:     &model.SystemConfig{HostName: "router1"},
+		Interfaces: map[string]*model.InterfaceConfig{},
+	}, 1)
+	st := &fakeStore{commitID: "commit-1"}
+	srv := NewServer(eng, st, testLogger())
+
+	sessionID, err := srv.CreateSession(ctx, "alice")
+	if err != nil {
+		t.Fatalf("CreateSession() error = %v", err)
+	}
+	if err := srv.AcquireLock(ctx, sessionID, "alice"); err != nil {
+		t.Fatalf("AcquireLock() error = %v", err)
+	}
+
+	_, _, err = srv.Commit(ctx, sessionID, "alice", "noop")
+	if err == nil || !strings.Contains(err.Error(), "no configuration changes to commit") {
+		t.Fatalf("Commit() error = %v, want no changes", err)
+	}
+	if st.saved != nil {
+		t.Fatal("Commit() prepared persistence for unchanged candidate")
+	}
+	if snap := eng.RunningSnapshot(); snap == nil || snap.Version != 1 {
+		t.Fatalf("running snapshot = %#v, want version 1", snap)
+	}
+}
+
 func TestListHistoryRejectsNegativePagination(t *testing.T) {
 	eng := engine.NewEngine(nil, testLogger())
 	st := &fakeStore{}
@@ -526,6 +617,44 @@ func TestRollbackDoesNotApplyEngineWhenPersistencePrepareFails(t *testing.T) {
 	}
 	if got := eng.Running().System.HostName; got != "router2" {
 		t.Fatalf("engine running hostname = %q, want unchanged router2", got)
+	}
+}
+
+func TestRollbackRejectsNoopTarget(t *testing.T) {
+	eng := engine.NewEngine(nil, testLogger())
+	eng.InitializeRunning(&model.RouterConfig{
+		System:     &model.SystemConfig{HostName: "router1"},
+		Interfaces: map[string]*model.InterfaceConfig{},
+	}, 2)
+	targetCfg := &model.RouterConfig{
+		System:     &model.SystemConfig{HostName: "router1"},
+		Interfaces: map[string]*model.InterfaceConfig{},
+	}
+	st := &fakeStore{
+		commitID: "rollback-1",
+		commits: map[string]*store.CommitRecord{
+			"commit-old": {CommitID: "commit-old", Config: targetCfg},
+		},
+	}
+	srv := NewServer(eng, st, testLogger())
+	ctx := context.Background()
+	sessionID, err := srv.CreateSession(ctx, "alice")
+	if err != nil {
+		t.Fatalf("CreateSession() error = %v", err)
+	}
+	if err := srv.AcquireLock(ctx, sessionID, "alice"); err != nil {
+		t.Fatalf("AcquireLock() error = %v", err)
+	}
+
+	_, _, err = srv.Rollback(ctx, sessionID, "commit-old", "alice", "")
+	if err == nil || !strings.Contains(err.Error(), "rollback target matches running configuration") {
+		t.Fatalf("Rollback() error = %v, want no changes", err)
+	}
+	if st.saved != nil {
+		t.Fatal("Rollback() prepared persistence for unchanged target")
+	}
+	if snap := eng.RunningSnapshot(); snap == nil || snap.Version != 2 {
+		t.Fatalf("running snapshot = %#v, want version 2", snap)
 	}
 }
 

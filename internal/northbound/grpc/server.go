@@ -116,7 +116,7 @@ func (s *Server) Commit(ctx context.Context, sessionID, user, message string) (s
 	// Parse the candidate config text using the existing pkg/config parser
 	candidateText := session.CandidateText
 
-	if candidateText == "" {
+	if !session.CandidateBaseSet {
 		return "", 0, fmt.Errorf("no candidate configuration to commit")
 	}
 	if err := s.ensureCandidateBaseCurrentLocked(session); err != nil {
@@ -130,6 +130,9 @@ func (s *Server) Commit(ctx context.Context, sessionID, user, message string) (s
 	}
 	if err := s.engine.Validate(ctx, newCfg); err != nil {
 		return "", 0, err
+	}
+	if !s.hasCandidateChanges(newCfg) {
+		return "", 0, fmt.Errorf("no configuration changes to commit")
 	}
 
 	var prepared store.PreparedCommit
@@ -183,9 +186,14 @@ func (s *Server) ValidateCandidate(ctx context.Context, sessionID string) error 
 	}
 	session.mu.RLock()
 	candidateText := session.CandidateText
+	hasCandidate := session.CandidateBaseSet
+	staleErr := s.ensureCandidateBaseCurrentLocked(session)
 	session.mu.RUnlock()
-	if candidateText == "" {
+	if !hasCandidate {
 		return fmt.Errorf("no candidate configuration to validate")
+	}
+	if staleErr != nil {
+		return staleErr
 	}
 	cfg, err := parseConfigText(candidateText)
 	if err != nil {
@@ -241,6 +249,9 @@ func (s *Server) Rollback(ctx context.Context, sessionID, commitID, user, messag
 	newCfg := record.Config
 	if err := s.engine.Validate(ctx, newCfg); err != nil {
 		return "", 0, err
+	}
+	if !s.hasCandidateChanges(newCfg) {
+		return "", 0, fmt.Errorf("rollback target matches running configuration")
 	}
 
 	version := uint64(1)
@@ -517,6 +528,15 @@ func (s *Server) ensureCandidateBaseCurrentLocked(session *Session) error {
 		return fmt.Errorf("candidate configuration is stale: running configuration changed from version %d to %d; discard or reload the candidate before editing", session.CandidateBaseVersion, version)
 	}
 	return nil
+}
+
+func (s *Server) hasCandidateChanges(candidate *model.RouterConfig) bool {
+	snap := s.engine.RunningSnapshot()
+	var running *model.RouterConfig
+	if snap != nil {
+		running = snap.Config
+	}
+	return engine.ComputeDiff(running, candidate).HasChanges()
 }
 
 func (s *Server) rollbackToSnapshot(ctx context.Context, snap *model.ConfigSnapshot, user string) error {
