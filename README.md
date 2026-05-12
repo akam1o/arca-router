@@ -413,7 +413,6 @@ Licensed under the Apache License 2.0. See [`LICENSE`](LICENSE).
 - **Community Support**: GitHub Issues - https://github.com/akam1o/arca-router/issues
 - **Support Policy**: See [`SUPPORT.md`](SUPPORT.md)
 - **Security**: See [`SECURITY.md`](SECURITY.md)
-- **Trademark**: See [`TRADEMARK.md`](TRADEMARK.md)
 
 ---
 

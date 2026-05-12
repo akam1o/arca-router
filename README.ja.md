@@ -414,7 +414,6 @@ Apache License 2.0 で提供しています。[`LICENSE`](LICENSE) を参照し�
 - **Community Support**: GitHub Issues - https://github.com/akam1o/arca-router/issues
 - **Support Policy**: [`SUPPORT.md`](SUPPORT.md)
 - **Security**: [`SECURITY.md`](SECURITY.md)
-- **Trademark**: [`TRADEMARK.md`](TRADEMARK.md)
 
 ---
 
