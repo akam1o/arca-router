@@ -338,6 +338,7 @@ func (s *Server) AcquireLock(ctx context.Context, sessionID, user string) error 
 	}
 	session, err := s.sessions.Get(sessionID)
 	if err != nil {
+		_ = s.sessions.ReleaseLock(sessionID)
 		return err
 	}
 	session.mu.Lock()
@@ -345,6 +346,7 @@ func (s *Server) AcquireLock(ctx context.Context, sessionID, user string) error 
 		text, _, err := s.runningText()
 		if err != nil {
 			session.mu.Unlock()
+			_ = s.sessions.ReleaseLock(sessionID)
 			return err
 		}
 		session.CandidateText = text

@@ -312,6 +312,45 @@ func TestValidateCandidateRejectsInvalidConfig(t *testing.T) {
 	}
 }
 
+func TestAcquireLockReleasesLockWhenRunningSerializationFails(t *testing.T) {
+	eng := engine.NewEngine(nil, testLogger())
+	eng.InitializeRunning(&model.RouterConfig{
+		Security: &model.SecurityConfig{
+			Users: map[string]*model.UserConfig{
+				"admin": {Password: "$argon2id$v=19$m=8,t=1,p=1$AQ$AQ"},
+			},
+		},
+	}, 1)
+	srv := NewServer(eng, &fakeStore{commitID: "commit-1"}, testLogger())
+	ctx := context.Background()
+
+	sessionID, err := srv.CreateSession(ctx, "alice")
+	if err != nil {
+		t.Fatalf("CreateSession() error = %v", err)
+	}
+	if err := srv.AcquireLock(ctx, sessionID, "alice"); err == nil {
+		t.Fatal("AcquireLock() error = nil, want serialization error")
+	}
+
+	session, err := srv.sessions.Get(sessionID)
+	if err != nil {
+		t.Fatalf("Get() error = %v", err)
+	}
+	session.mu.RLock()
+	hasLock := session.HasLock
+	session.mu.RUnlock()
+	if hasLock {
+		t.Fatal("session kept lock after AcquireLock failure")
+	}
+
+	srv.sessions.mu.Lock()
+	lockHeld := srv.sessions.lockHeld
+	srv.sessions.mu.Unlock()
+	if lockHeld != "" {
+		t.Fatalf("candidate lock held by %q after AcquireLock failure, want none", lockHeld)
+	}
+}
+
 func TestCommitRollsBackEngineWhenPersistenceFails(t *testing.T) {
 	oldParser := ConfigTextParser
 	ConfigTextParser = func(text string) (*model.RouterConfig, error) {
