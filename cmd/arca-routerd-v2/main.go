@@ -16,6 +16,7 @@ import (
 	"strings"
 	"sync"
 	"syscall"
+	"time"
 
 	"github.com/akam1o/arca-router/internal/engine"
 	"github.com/akam1o/arca-router/internal/model"
@@ -59,6 +60,7 @@ type daemonFlags struct {
 	hostKeyPath   string
 	userDBPath    string
 	grpcSocket    string
+	metricsListen string
 }
 
 func main() {
@@ -122,6 +124,8 @@ func parseFlags() *daemonFlags {
 		"Path to user database")
 	flag.StringVar(&f.grpcSocket, "grpc-socket", "/run/arca-router/routerd.sock",
 		"Path to internal gRPC Unix socket")
+	flag.StringVar(&f.metricsListen, "metrics-listen", "",
+		"Prometheus metrics listen address (disabled when empty)")
 
 	flag.Parse()
 	return f
@@ -149,6 +153,7 @@ func run(ctx context.Context, f *daemonFlags, log *logger.Logger) error {
 		slog.String("datastore_path", f.datastorePath),
 		slog.String("netconf_listen", f.netconfListen),
 		slog.String("grpc_socket", f.grpcSocket),
+		slog.String("metrics_listen", f.metricsListen),
 	)
 
 	// --- Step 1: Load hardware configuration ---
@@ -257,6 +262,20 @@ func run(ctx context.Context, f *daemonFlags, log *logger.Logger) error {
 		grpcErr <- grpcServer.Serve(lis)
 	}()
 
+	// --- Step 10: Start metrics endpoint ---
+	var metricsErr <-chan error
+	if f.metricsListen != "" {
+		metricsErr, err = startMetricsServer(ctx, f.metricsListen, metricsSource{
+			startedAt:     time.Now(),
+			engine:        eng,
+			netconfServer: netconfServer,
+		}, log)
+		if err != nil {
+			grpcServer.Stop()
+			return err
+		}
+	}
+
 	// --- Wait for shutdown ---
 	log.Info("Daemon running, waiting for shutdown signal")
 	select {
@@ -264,6 +283,11 @@ func run(ctx context.Context, f *daemonFlags, log *logger.Logger) error {
 		log.Info("Shutdown signal received, stopping")
 	case err := <-grpcErr:
 		return fmt.Errorf("gRPC API stopped: %w", err)
+	case err := <-metricsErr:
+		if err != nil {
+			grpcServer.Stop()
+			return fmt.Errorf("metrics endpoint stopped: %w", err)
+		}
 	}
 	grpcServer.Stop()
 
