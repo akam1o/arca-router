@@ -104,6 +104,18 @@ func TestVerifyPasswordRejectsUnsafeParameters(t *testing.T) {
 	}
 }
 
+func TestVerifyPasswordRejectsPrefixedHash(t *testing.T) {
+	hash, err := HashPassword("password")
+	if err != nil {
+		t.Fatalf("HashPassword failed: %v", err)
+	}
+
+	_, err = VerifyPassword("password", "prefix"+hash)
+	if err == nil {
+		t.Fatal("VerifyPassword() error = nil, want invalid hash format")
+	}
+}
+
 func TestVerifyPasswordRejectsInvalidDecodedLengths(t *testing.T) {
 	hash, err := HashPassword("password")
 	if err != nil {
@@ -154,6 +166,7 @@ func TestValidatePasswordHashRejectsWeakOrTruncatedHash(t *testing.T) {
 		name string
 		hash string
 	}{
+		{name: "prefixed hash", hash: "prefix" + hash},
 		{name: "weak parameters", hash: strings.Replace(hash, "m=65536,t=3,p=4", "m=8,t=1,p=1", 1)},
 		{name: "short salt", hash: strings.Join(replaceHashPart(parts, 4, "AQ"), "$")},
 		{name: "short hash", hash: strings.Join(replaceHashPart(parts, 5, "AQ"), "$")},

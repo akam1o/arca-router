@@ -92,7 +92,7 @@ func ValidatePasswordHash(encodedHash string) error {
 
 func parseEncodedPasswordHash(encodedHash string) (*encodedPasswordHash, error) {
 	parts := strings.Split(encodedHash, "$")
-	if len(parts) != 6 {
+	if len(parts) != 6 || parts[0] != "" {
 		return nil, fmt.Errorf("invalid hash format")
 	}
 
