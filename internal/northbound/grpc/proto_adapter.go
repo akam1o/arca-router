@@ -1,0 +1,241 @@
+package grpc
+
+import (
+	"context"
+	"time"
+
+	apiv1 "github.com/akam1o/arca-router/api/v1"
+)
+
+type configServiceAdapter struct {
+	apiv1.UnimplementedConfigServiceServer
+	server *Server
+}
+
+func (a *configServiceAdapter) GetRunning(ctx context.Context, _ *apiv1.GetRunningRequest) (*apiv1.GetRunningResponse, error) {
+	configText, version, err := a.server.GetRunning(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return &apiv1.GetRunningResponse{
+		ConfigText: configText,
+		Version:    version,
+	}, nil
+}
+
+func (a *configServiceAdapter) GetCandidate(ctx context.Context, req *apiv1.GetCandidateRequest) (*apiv1.GetCandidateResponse, error) {
+	configText, err := a.server.GetCandidate(ctx, req.GetSessionId())
+	if err != nil {
+		return nil, err
+	}
+	return &apiv1.GetCandidateResponse{ConfigText: configText}, nil
+}
+
+func (a *configServiceAdapter) EditCandidate(ctx context.Context, req *apiv1.EditCandidateRequest) (*apiv1.EditCandidateResponse, error) {
+	if err := a.server.EditCandidate(ctx, req.GetSessionId(), req.GetConfigText()); err != nil {
+		return nil, err
+	}
+	return &apiv1.EditCandidateResponse{}, nil
+}
+
+func (a *configServiceAdapter) Commit(ctx context.Context, req *apiv1.CommitRequest) (*apiv1.CommitResponse, error) {
+	commitID, version, err := a.server.Commit(ctx, req.GetSessionId(), req.GetUser(), req.GetMessage())
+	if err != nil {
+		return nil, err
+	}
+	return &apiv1.CommitResponse{CommitId: commitID, Version: version}, nil
+}
+
+func (a *configServiceAdapter) ValidateCandidate(ctx context.Context, req *apiv1.ValidateCandidateRequest) (*apiv1.ValidateCandidateResponse, error) {
+	if err := a.server.ValidateCandidate(ctx, req.GetSessionId()); err != nil {
+		return nil, err
+	}
+	return &apiv1.ValidateCandidateResponse{}, nil
+}
+
+func (a *configServiceAdapter) Discard(ctx context.Context, req *apiv1.DiscardRequest) (*apiv1.DiscardResponse, error) {
+	if err := a.server.Discard(ctx, req.GetSessionId()); err != nil {
+		return nil, err
+	}
+	return &apiv1.DiscardResponse{}, nil
+}
+
+func (a *configServiceAdapter) Rollback(ctx context.Context, req *apiv1.RollbackRequest) (*apiv1.RollbackResponse, error) {
+	commitID, version, err := a.server.Rollback(ctx, req.GetSessionId(), req.GetCommitId(), req.GetUser(), req.GetMessage())
+	if err != nil {
+		return nil, err
+	}
+	return &apiv1.RollbackResponse{NewCommitId: commitID, Version: version}, nil
+}
+
+func (a *configServiceAdapter) Diff(ctx context.Context, req *apiv1.DiffRequest) (*apiv1.DiffResponse, error) {
+	diffText, hasChanges, err := a.server.Diff(ctx, req.GetSessionId())
+	if err != nil {
+		return nil, err
+	}
+	return &apiv1.DiffResponse{DiffText: diffText, HasChanges: hasChanges}, nil
+}
+
+func (a *configServiceAdapter) ListHistory(ctx context.Context, req *apiv1.ListHistoryRequest) (*apiv1.ListHistoryResponse, error) {
+	entries, err := a.server.ListHistory(ctx, int(req.GetLimit()), int(req.GetOffset()))
+	if err != nil {
+		return nil, err
+	}
+	resp := &apiv1.ListHistoryResponse{Entries: make([]*apiv1.CommitEntry, 0, len(entries))}
+	for _, entry := range entries {
+		resp.Entries = append(resp.Entries, &apiv1.CommitEntry{
+			CommitId:   entry.CommitID,
+			User:       entry.User,
+			Timestamp:  entry.Timestamp.Format(time.RFC3339Nano),
+			Message:    entry.Message,
+			IsRollback: entry.IsRollback,
+		})
+	}
+	return resp, nil
+}
+
+type sessionServiceAdapter struct {
+	apiv1.UnimplementedSessionServiceServer
+	server *Server
+}
+
+func (a *sessionServiceAdapter) CreateSession(ctx context.Context, req *apiv1.CreateSessionRequest) (*apiv1.CreateSessionResponse, error) {
+	sessionID, err := a.server.CreateSession(ctx, req.GetUser())
+	if err != nil {
+		return nil, err
+	}
+	return &apiv1.CreateSessionResponse{SessionId: sessionID}, nil
+}
+
+func (a *sessionServiceAdapter) CloseSession(ctx context.Context, req *apiv1.CloseSessionRequest) (*apiv1.CloseSessionResponse, error) {
+	if err := a.server.CloseSession(ctx, req.GetSessionId()); err != nil {
+		return nil, err
+	}
+	return &apiv1.CloseSessionResponse{}, nil
+}
+
+func (a *sessionServiceAdapter) AcquireLock(ctx context.Context, req *apiv1.AcquireLockRequest) (*apiv1.AcquireLockResponse, error) {
+	if err := a.server.AcquireLock(ctx, req.GetSessionId(), req.GetUser()); err != nil {
+		return nil, err
+	}
+	return &apiv1.AcquireLockResponse{}, nil
+}
+
+func (a *sessionServiceAdapter) ReleaseLock(ctx context.Context, req *apiv1.ReleaseLockRequest) (*apiv1.ReleaseLockResponse, error) {
+	if err := a.server.ReleaseLock(ctx, req.GetSessionId()); err != nil {
+		return nil, err
+	}
+	return &apiv1.ReleaseLockResponse{}, nil
+}
+
+type stateServiceAdapter struct {
+	apiv1.UnimplementedStateServiceServer
+	server *Server
+}
+
+func (a *stateServiceAdapter) GetInterfaces(ctx context.Context, req *apiv1.GetInterfacesRequest) (*apiv1.GetInterfacesResponse, error) {
+	interfaces, err := a.server.GetInterfaces(ctx, req.GetNameFilter())
+	if err != nil {
+		return nil, err
+	}
+	resp := &apiv1.GetInterfacesResponse{Interfaces: make([]*apiv1.InterfaceState, 0, len(interfaces))}
+	for _, iface := range interfaces {
+		resp.Interfaces = append(resp.Interfaces, &apiv1.InterfaceState{
+			Name:        iface.Name,
+			AdminStatus: iface.AdminStatus,
+			OperStatus:  iface.OperStatus,
+			Speed:       iface.Speed,
+			Mtu:         iface.MTU,
+			Mac:         iface.MAC,
+			RxPackets:   iface.RxPackets,
+			TxPackets:   iface.TxPackets,
+			RxBytes:     iface.RxBytes,
+			TxBytes:     iface.TxBytes,
+			RxErrors:    iface.RxErrors,
+			TxErrors:    iface.TxErrors,
+		})
+	}
+	return resp, nil
+}
+
+func (a *stateServiceAdapter) GetRoutes(ctx context.Context, req *apiv1.GetRoutesRequest) (*apiv1.GetRoutesResponse, error) {
+	routes, err := a.server.GetRoutes(ctx, req.GetPrefixFilter(), req.GetProtocolFilter())
+	if err != nil {
+		return nil, err
+	}
+	resp := &apiv1.GetRoutesResponse{Routes: make([]*apiv1.RouteEntry, 0, len(routes))}
+	for _, route := range routes {
+		resp.Routes = append(resp.Routes, &apiv1.RouteEntry{
+			Prefix:    route.Prefix,
+			NextHop:   route.NextHop,
+			Protocol:  route.Protocol,
+			Metric:    route.Metric,
+			Interface: route.Interface,
+			Active:    route.Active,
+		})
+	}
+	return resp, nil
+}
+
+func (a *stateServiceAdapter) GetBGPNeighbors(ctx context.Context, _ *apiv1.GetBGPNeighborsRequest) (*apiv1.GetBGPNeighborsResponse, error) {
+	neighbors, err := a.server.GetBGPNeighbors(ctx)
+	if err != nil {
+		return nil, err
+	}
+	resp := &apiv1.GetBGPNeighborsResponse{Neighbors: make([]*apiv1.BGPNeighborState, 0, len(neighbors))}
+	for _, neighbor := range neighbors {
+		resp.Neighbors = append(resp.Neighbors, &apiv1.BGPNeighborState{
+			PeerAddress:    neighbor.PeerAddress,
+			PeerAs:         neighbor.PeerAS,
+			State:          neighbor.State,
+			UptimeSecs:     neighbor.UptimeSecs,
+			PrefixReceived: neighbor.PrefixReceived,
+			PrefixSent:     neighbor.PrefixSent,
+		})
+	}
+	return resp, nil
+}
+
+func (a *stateServiceAdapter) GetRouteText(ctx context.Context, req *apiv1.GetRouteTextRequest) (*apiv1.GetRouteTextResponse, error) {
+	output, err := a.server.GetRouteText(ctx, req.GetProtocolFilter())
+	if err != nil {
+		return nil, err
+	}
+	return &apiv1.GetRouteTextResponse{Output: output}, nil
+}
+
+func (a *stateServiceAdapter) GetBGPSummaryText(ctx context.Context, _ *apiv1.GetBGPSummaryTextRequest) (*apiv1.GetBGPSummaryTextResponse, error) {
+	output, err := a.server.GetBGPSummaryText(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return &apiv1.GetBGPSummaryTextResponse{Output: output}, nil
+}
+
+func (a *stateServiceAdapter) GetBGPNeighborText(ctx context.Context, req *apiv1.GetBGPNeighborTextRequest) (*apiv1.GetBGPNeighborTextResponse, error) {
+	output, err := a.server.GetBGPNeighborText(ctx, req.GetPeerAddress())
+	if err != nil {
+		return nil, err
+	}
+	return &apiv1.GetBGPNeighborTextResponse{Output: output}, nil
+}
+
+func (a *stateServiceAdapter) GetOSPFNeighborsText(ctx context.Context, _ *apiv1.GetOSPFNeighborsTextRequest) (*apiv1.GetOSPFNeighborsTextResponse, error) {
+	output, err := a.server.GetOSPFNeighborsText(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return &apiv1.GetOSPFNeighborsTextResponse{Output: output}, nil
+}
+
+func (a *stateServiceAdapter) GetSystemInfo(ctx context.Context, _ *apiv1.GetSystemInfoRequest) (*apiv1.GetSystemInfoResponse, error) {
+	info, err := a.server.GetSystemInfo(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return &apiv1.GetSystemInfoResponse{
+		Hostname:   info.Hostname,
+		Version:    info.Version,
+		UptimeSecs: info.UptimeSecs,
+	}, nil
+}

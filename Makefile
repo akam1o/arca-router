@@ -1,4 +1,4 @@
-.PHONY: help build build-cli build-v2 build-v2-cli clean rpm rpm-package deb deb-package version test fmt vet check install-nfpm integration-test generate-binapi
+.PHONY: help build build-cli build-v2 build-v2-cli clean rpm rpm-package deb deb-package version test fmt vet check install-nfpm integration-test generate-binapi generate-proto
 
 # Binary names
 BINARY_NAME=arca-routerd
@@ -42,7 +42,7 @@ version: ## Display version information
 	@echo "Build Date: $(BUILD_DATE)"
 	@echo "EPOCH:      $(SOURCE_DATE_EPOCH)"
 
-build: ## Build current v0.4 binaries (unified arca-routerd and arca-cli)
+build: ## Build current v0.5 binaries (unified arca-routerd and arca-cli)
 	@echo "Building $(BINARY_NAME) and $(CLI_BINARY_NAME)..."
 	@mkdir -p $(BUILD_DIR)
 	CGO_ENABLED=1 SOURCE_DATE_EPOCH=$(SOURCE_DATE_EPOCH) go build $(BUILD_FLAGS) -o $(BUILD_DIR)/$(BINARY_NAME) ./cmd/arca-routerd-v2
@@ -67,6 +67,12 @@ build-v2-cli: ## Build only arca-cli-v2 binary
 	@mkdir -p $(BUILD_DIR)
 	CGO_ENABLED=0 SOURCE_DATE_EPOCH=$(SOURCE_DATE_EPOCH) go build $(BUILD_FLAGS) -o $(BUILD_DIR)/$(V2_CLI_BINARY_NAME) ./cmd/arca-cli-v2
 	@echo "Build complete: $(BUILD_DIR)/$(V2_CLI_BINARY_NAME)"
+
+generate-proto: ## Generate Go gRPC bindings from api/v1/router.proto
+	PATH="$$(go env GOPATH)/bin:$$PATH" protoc \
+		--go_out=. --go_opt=paths=source_relative \
+		--go-grpc_out=. --go-grpc_opt=paths=source_relative \
+		api/v1/router.proto
 
 test: ## Run tests
 	@echo "Running tests..."
