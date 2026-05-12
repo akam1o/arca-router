@@ -17,6 +17,7 @@ import (
 	"strings"
 
 	grpcclient "github.com/akam1o/arca-router/internal/northbound/grpc"
+	configcli "github.com/akam1o/arca-router/pkg/cli"
 	"github.com/chzyer/readline"
 )
 
@@ -653,7 +654,7 @@ func (sh *interactiveShell) cmdSet(ctx context.Context, args []string) error {
 	}
 	// Build the full set command and send to daemon
 	fullPath := append(sh.editPath, args...)
-	setCmd := "set " + strings.Join(fullPath, " ")
+	setCmd := "set " + configcli.NormalizeConfigPath(fullPath)
 	if err := sh.client.EditCandidate(ctx, sh.sessionID, setCmd); err != nil {
 		return err
 	}
@@ -666,7 +667,7 @@ func (sh *interactiveShell) cmdDelete(ctx context.Context, args []string) error 
 		return fmt.Errorf("'delete' command only available in configuration mode")
 	}
 	fullPath := append(sh.editPath, args...)
-	delCmd := "delete " + strings.Join(fullPath, " ")
+	delCmd := "delete " + configcli.NormalizeConfigPath(fullPath)
 	if err := sh.client.EditCandidate(ctx, sh.sessionID, delCmd); err != nil {
 		return err
 	}
