@@ -274,9 +274,7 @@ jobs:
         for expected in \
           /usr/sbin/arca-routerd \
           /usr/bin/arca-cli \
-          /usr/sbin/arca-netconfd \
           /usr/lib/systemd/system/arca-routerd.service \
-          /usr/lib/systemd/system/arca-netconfd.service \
           /etc/arca-router/hardware.yaml.example \
         ; do
           if ! printf '%s\n' "${FILES}" | grep -qx "${expected}"; then
@@ -304,9 +302,7 @@ jobs:
           for expected in \
             /usr/sbin/arca-routerd \
             /usr/bin/arca-cli \
-            /usr/sbin/arca-netconfd \
             /usr/lib/systemd/system/arca-routerd.service \
-            /usr/lib/systemd/system/arca-netconfd.service \
             /etc/arca-router/hardware.yaml.example \
           ; do
             if ! printf '%s\n' "${FILES}" | grep -qx "${expected}"; then

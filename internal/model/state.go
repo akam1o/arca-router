@@ -54,8 +54,8 @@ type BGPPeerState struct {
 
 // OSPFState holds live OSPF state.
 type OSPFState struct {
-	RouterID   string              `json:"router-id,omitempty"`
-	Neighbors  []*OSPFNeighborState `json:"neighbors,omitempty"`
+	RouterID  string               `json:"router-id,omitempty"`
+	Neighbors []*OSPFNeighborState `json:"neighbors,omitempty"`
 }
 
 // OSPFNeighborState holds live state for a single OSPF neighbor.
@@ -69,13 +69,13 @@ type OSPFNeighborState struct {
 
 // RouteEntry represents a single entry in the routing table.
 type RouteEntry struct {
-	Prefix    string `json:"prefix"`
-	NextHop   string `json:"next-hop"`
-	Protocol  string `json:"protocol"` // "bgp", "ospf", "static", "connected"
-	Metric    uint32 `json:"metric,omitempty"`
+	Prefix     string `json:"prefix"`
+	NextHop    string `json:"next-hop"`
+	Protocol   string `json:"protocol"` // "bgp", "ospf", "static", "connected"
+	Metric     uint32 `json:"metric,omitempty"`
 	Preference uint32 `json:"preference,omitempty"`
-	Interface string `json:"interface,omitempty"`
-	Active    bool   `json:"active"`
+	Interface  string `json:"interface,omitempty"`
+	Active     bool   `json:"active"`
 }
 
 // SystemState holds live system state.
