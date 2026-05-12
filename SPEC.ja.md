@@ -1,4 +1,4 @@
-# arca-router 設定仕様（v0.4.x）
+# arca-router 設定仕様（v0.5.x）
 
 このドキュメントは arca-router の設定構文とセマンティクスを定義します。
 
@@ -8,22 +8,28 @@
 
 arca-router は Junos 風の `set` コマンド構文を採用しています。設定は以下の方法で管理します。
 
-1. **統合デーモン (`arca-routerd`)**: VPP、FRR、NETCONF、gRPC API を単一プロセスで処理（v0.4.x）
-2. **対話型 CLI (`arca`)**: gRPC シンクライアントによるリアルタイム設定（commit/rollback）（v0.4.x）
-3. **NETCONF/SSH**: NETCONF（RFC 6241）によるリモート設定、デーモンに内蔵
-4. **ファイルベース**: 初回ブートストラップ用の静的設定ファイル（`/etc/arca-router/arca-router.conf`）
+1. **統合デーモン (`arca-routerd`)**: VPP、FRR、NETCONF、gRPC、Prometheus、SNMP を単一プロセスで処理
+2. **対話型 CLI (`arca`)**: gRPC シンクライアントによる運用コマンドと candidate/running 設定ワークフロー
+3. **NETCONF/SSH**: NETCONF（RFC 6241）によるリモート設定。デーモンに内蔵され、同じ datastore/engine を利用
+4. **ファイルブートストラップ**: SQLite datastore に running 設定がない場合のみ、起動時に `/etc/arca-router/arca-router.conf` を読み込み
 
-### v0.4.x アーキテクチャ
+### v0.5.x アーキテクチャ
 
-v0.4.x では**統合デーモンアーキテクチャ**を導入しました：
+v0.5.x は現在の統合デーモン経路です：
 
 - **構造体ファースト設定モデル**: 設定は Go 構造体（`internal/model.RouterConfig`）で表現。テキストはシリアライズの一形式。
-- **差分ベースエンジン**: 設定エンジン（`internal/engine`）が新旧設定の最小差分を計算し、変更箇所のみ適用。
+- **SQLite candidate/running datastore**: `/var/lib/arca-router/config.db` に running 設定、candidate session、commit 履歴、rollback メタデータ、lock、audit event を保存。
+- **差分ベースエンジン**: 設定エンジン（`internal/engine`）が running/candidate の最小差分を計算し、変更箇所のみ適用。
 - **プラグインベース サウスバウンド**: VPP / FRR は `engine.Plugin` 実装として、それぞれ関連する差分のみを受け取る。
-- **gRPC 内部 API**: CLI は Unix ソケット gRPC（`api/v1/router.proto`）経由でデーモンと通信。
+- **Transactional FRR apply**: 標準の `--frr-apply-mode=transactional` は FRR management candidate datastore に対して `vtysh` の `mgmt commit check` / `mgmt commit apply` を実行。
+- **復旧用 FRR file backend**: `--frr-apply-mode=file` は復旧・互換用途の full-file reload 経路として保持。
+- **gRPC 内部 API**: `arca` は Unix ソケット gRPC（`api/v1/router.proto`、デフォルト `/run/arca-router/routerd.sock`）経由でデーモンと通信。
 - **2 フェーズコミット**: 全プラグイン検証 → 全プラグイン適用 → 障害時ロールバック。
+- **Observability**: 任意で Prometheus `/metrics`、`/healthz`、read-only SNMPv2c、パッケージ同梱 Grafana dashboard を提供。
 
-> **後方互換**: `set` コマンド構文と NETCONF プロトコルはそのままです。内部アーキテクチャのみ変更されています。
+この仕様で扱うコマンド名は `arca-routerd` と `arca` のみです。廃止済みの command entrypoint はメンテナンス対象外です。
+
+> **互換性メモ**: `set` コマンド構文と NETCONF 設定モデルは維持します。自動移行ツールは v0.5.x の対象外です。
 
 ---
 
@@ -46,6 +52,12 @@ v0.4.x では**統合デーモンアーキテクチャ**を導入しました：
    - [レート制限](#rate-limiting)
 8. [設定ワークフロー](#configuration-workflow)
 9. [例](#examples)
+10. [実行時オプションと Observability](#runtime-options-and-observability)
+11. [運用コマンド](#operational-commands)
+12. [設定の妥当性確認](#configuration-validation)
+13. [トラブルシューティング](#troubleshooting)
+14. [参照](#references)
+15. [バージョン履歴](#version-history)
 
 ---
 
@@ -486,7 +498,7 @@ set protocols bgp group external import PREFER-CUSTOMER
 <a id="netconf-server"></a>
 ### NETCONF サーバ
 
-#### NETCONF サーバを有効化
+#### NETCONF ポート
 
 **構文**:
 ```
@@ -501,7 +513,7 @@ set security netconf ssh port <port>
 set security netconf ssh port 830
 ```
 
-**注**: NETCONF サーバは `arca-routerd` に統合されています。
+**注**: NETCONF サーバは `arca-routerd` に統合されています。実際の bind address はデーモンの `--netconf-listen`（デフォルト `:830`）で制御します。この設定値はモデル上に保持されるため、配備時の NETCONF ポートと一致させてください。
 
 <a id="user-management"></a>
 ### ユーザ管理
@@ -587,11 +599,17 @@ set security rate-limit per-user 20
 
 ### ファイルベース設定
 
-1. `/etc/arca-router/arca-router.conf` を編集
-2. デーモン再起動: `sudo systemctl restart arca-routerd`
+`/etc/arca-router/arca-router.conf` はブートストラップ用の設定ソースです。`arca-routerd` は起動時にまず `/var/lib/arca-router/config.db` から current running configuration を読み込みます。running 設定が存在しない場合のみ、設定ファイルを parse して engine 経由で適用し、datastore に保存します。
+
+1. 初回起動前、または datastore を意図的に初期化した後に `/etc/arca-router/arca-router.conf` を編集
+2. デーモン起動/再起動: `sudo systemctl restart arca-routerd`
 3. 確認: `sudo journalctl -u arca-routerd -n 50`
 
+datastore 初期化後の通常の設定変更は `arca` または NETCONF を使用します。
+
 ### NETCONF 設定
+
+NETCONF の編集は `arca` と同じ candidate/running datastore と engine を使用します。
 
 1. NETCONF クライアントで接続:
    ```bash
@@ -620,6 +638,8 @@ set security rate-limit per-user 20
 
 ### 対話型 CLI 設定
 
+`arca` は Unix ソケット gRPC API 経由で `arca-routerd` と通信します。デフォルトソケットは `/run/arca-router/routerd.sock` です。デーモン側で `--grpc-socket` を変更した場合は `arca -socket <path>` を使用します。
+
 1. 設定モードに入る:
    ```bash
    arca
@@ -642,8 +662,27 @@ set security rate-limit per-user 20
 
 4. 変更を確認:
    ```bash
-   > show configuration changes
+   # show | compare
    ```
+
+設定モードで利用できる主なコマンド:
+
+```
+set <config>              設定を追加または変更
+delete <config>           prefix に一致する設定を削除
+show                      candidate 設定を表示
+show | compare            candidate と running の差分を表示
+commit                    candidate 設定を commit
+commit check              commit せずに検証
+commit and-quit           commit 後に設定モードを終了
+commit comment <msg>      commit message を指定
+rollback <N>              N 個前の commit に rollback
+discard-changes           candidate 変更を破棄
+show history [N]          commit history を表示
+edit <path>               hierarchy path に移動
+up                        hierarchy を 1 階層上に移動
+top                       hierarchy の top に戻る
+```
 
 ### ロールバック
 
@@ -658,6 +697,8 @@ set security rate-limit per-user 20
 # rollback 1
 # commit
 ```
+
+`rollback 0` は `discard-changes` と同じです。`rollback <N>` は履歴上の対象 commit を復元する新しい commit を作成します。
 
 **ファイルベース**:
 ```
@@ -772,6 +813,74 @@ set security rate-limit per-user 20
 
 ---
 
+<a id="runtime-options-and-observability"></a>
+## 実行時オプションと Observability
+
+### arca-routerd 実行時オプション
+
+パッケージ版のサービスは `/usr/sbin/arca-routerd` を実行します。ソースビルドでは `build/bin/arca-routerd` が生成されます。
+
+主なオプション:
+
+```
+--config <path>            bootstrap 設定ファイル（デフォルト: /etc/arca-router/arca-router.conf）
+--hardware <path>          hardware mapping file（デフォルト: /etc/arca-router/hardware.yaml）
+--datastore <path>         SQLite datastore（デフォルト: /var/lib/arca-router/config.db）
+--grpc-socket <path>       内部 gRPC Unix socket（デフォルト: /run/arca-router/routerd.sock）
+--netconf-listen <addr>    NETCONF/SSH listen address（デフォルト: :830）
+--host-key <path>          NETCONF SSH host key path
+--user-db <path>           NETCONF user database path
+--frr-apply-mode <mode>    FRR backend: transactional または file（デフォルト: transactional）
+--metrics-listen <addr>    Prometheus listen address。空の場合は無効
+--snmp-listen <addr>       SNMPv2c UDP listen address。空の場合は無効
+--snmp-community <value>   SNMPv2c read-only community（デフォルト: public）
+--mock-vpp                 test 用の mock VPP client を使用
+```
+
+### FRR apply backend
+
+標準 backend は `transactional` です。FRR 側で `/etc/frr/daemons` の `mgmtd=yes` と、`arca-router` service user からの `vtysh` access（通常は `frrvty` group）が必要です。
+
+`file` backend は full FRR config を書き出し、`frr-reload.py` で適用します。復旧・互換用途として保持しており、利用する場合は service user が `/etc/frr/frr.conf` に書き込むための追加権限が必要です。
+
+### Prometheus と health
+
+metrics endpoint は次のように起動します。
+
+```bash
+arca-routerd --metrics-listen=:9090
+```
+
+Endpoints:
+
+- `GET /metrics`
+- `GET /healthz`
+
+パッケージ版では Grafana dashboard を次の場所へインストールします。
+
+```
+/usr/share/arca-router/grafana/arca-routerd-dashboard.json
+```
+
+### SNMP
+
+read-only SNMPv2c endpoint は次のように起動します。
+
+```bash
+arca-routerd --snmp-listen=:1161 --snmp-community=public
+```
+
+パッケージ版の systemd unit は `CAP_NET_BIND_SERVICE` を付与しているため、設定すれば標準 UDP port 161 も利用できます。
+
+```bash
+arca-routerd --snmp-listen=:161 --snmp-community=<read-only-community>
+```
+
+SNMP は監視用途のみを想定しています。信頼できないネットワークには公開しないでください。
+
+---
+
+<a id="operational-commands"></a>
 ## 運用コマンド
 
 ### show コマンド（arca）
@@ -779,9 +888,11 @@ set security rate-limit per-user 20
 ```
 # Interface status
 arca show interfaces
+arca show interfaces ge-0/0/0
 
 # Routing table
 arca show route
+arca show route protocol bgp
 
 # BGP summary
 arca show bgp summary
@@ -795,6 +906,8 @@ arca show ospf neighbor
 # Configuration
 arca show configuration
 ```
+
+対話型の設定モードでは、`show history [N]` で commit history も表示できます。
 
 ### VPP 直接操作
 
@@ -851,7 +964,13 @@ arca
 ### デプロイ前チェック
 
 ```
-# FRR configuration is generated/applied by arca-routerd; verify on the host using vtysh.
+# package metadata と service expectation を検証
+make package-lint
+
+# FRR mgmtd が有効なホストで transactional apply smoke test を実行
+make frr-mgmtd-smoke
+
+# FRR configuration is generated/applied by arca-routerd; verify on the host using vtysh
 
 # Check BGP session status
 sudo vtysh -c "show ip bgp summary"
@@ -871,6 +990,16 @@ sudo systemctl status arca-routerd
 sudo journalctl -u arca-routerd -n 50
 ```
 
+### Datastore と socket の確認
+
+```
+# running/candidate datastore
+sudo ls -l /var/lib/arca-router/config.db
+
+# arca が利用する内部 gRPC socket
+sudo ls -l /run/arca-router/routerd.sock
+```
+
 ### VPP 状態確認
 
 ```
@@ -882,7 +1011,19 @@ sudo vppctl show interface
 
 ```
 sudo systemctl status frr
+grep '^mgmtd=yes' /etc/frr/daemons
 sudo vtysh -c "show running-config"
+```
+
+### Observability endpoint の確認
+
+```
+# --metrics-listen 有効時の Prometheus / health
+curl http://127.0.0.1:9090/healthz
+curl http://127.0.0.1:9090/metrics
+
+# --snmp-listen 有効時の SNMP
+snmpget -v 2c -c public 127.0.0.1:1161 1.3.6.1.3.9950.1.3.0
 ```
 
 ### インターフェースマッピング確認
@@ -902,16 +1043,34 @@ sudo vppctl show interface addr
 
 ## 参照
 
+- [Roadmap](ROADMAP.md)
+- [Changelog](CHANGELOG.md)
+- [Observability](docs/observability.md)
+- [Datastore Design](docs/datastore-design.md)
+- [Configuration Precedence Rules](docs/config-precedence.md)
 - [Policy Options Guide](docs/policy-options-guide.md)
 - [RBAC Guide](docs/rbac-guide.md)
 - [Security Model](docs/security-model.md)
 - [VPP Setup Guide](docs/vpp-setup-debian.md)
 - [FRR Setup Guide](docs/frr-setup-debian.md)
-- [NETCONF Implementation Plan](docs/netconf-implementation-plan.md)
 
 ---
 
 ## バージョン履歴
+
+- **v0.5.x**: Production hardening
+  - 現行コマンド名は `arca-routerd` と `arca`
+  - daemon/CLI 間の generated gRPC API
+  - SQLite-backed candidate/running datastore と commit history
+  - FRR management candidate datastore を使う transactional apply
+  - Prometheus、health、SNMP、Grafana observability
+  - 廃止済み command entrypoint を削除
+
+- **v0.4.x**: 統合アーキテクチャ
+  - VPP、FRR、NETCONF、gRPC を単一 daemon に統合
+  - 構造体ファースト設定モデル
+  - 差分ベース apply engine と plugin southbound
+  - gRPC シンクライアント CLI
 
 - **v0.3.1** (2025-12-28): 仕様策定（完了）
   - NETCONF/SSH サブシステム
