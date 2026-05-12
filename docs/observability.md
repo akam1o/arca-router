@@ -20,6 +20,10 @@ Exported metrics:
 - `arca_routerd_up`
 - `arca_routerd_uptime_seconds`
 - `arca_router_config_version`
+- `arca_router_cluster_enabled`
+- `arca_router_cluster_nodes`
+- `arca_router_cluster_sync_etcd_configured`
+- `arca_router_cluster_sync_aligned`
 - `arca_router_netconf_active_sessions`
 - `arca_router_netconf_active_connections`
 - `arca_router_netconf_total_connections`
@@ -60,7 +64,7 @@ Endpoints:
 - `GET /`
 - `GET /api/status`
 
-The Web UI is intended for trusted management networks. It exposes the same daemon status used by the metrics endpoint and does not provide authentication yet.
+The Web UI is intended for trusted management networks. It exposes the same daemon status used by the metrics endpoint, including datastore backend and cluster sync alignment, and does not provide authentication yet.
 
 ## SNMP
 

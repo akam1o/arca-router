@@ -11,6 +11,7 @@ Focus: expand the hardened unified daemon into higher-level router features.
   - Management-plane config model for cluster nodes and etcd sync
   - arca-routerd datastore backend selection for etcd-backed config synchronization
   - Commit-time consistency guard between cluster sync config and the active etcd datastore backend
+  - Cluster sync observability through Web UI status and Prometheus metrics
   - FRR VRRP config generation through the file apply backend
   - Control-plane HA using FRR and VRRP
   - Config synchronization through etcd

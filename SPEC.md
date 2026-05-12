@@ -923,6 +923,8 @@ Endpoints:
 - `GET /metrics`
 - `GET /healthz`
 
+The metrics endpoint exports daemon uptime, running config version, NETCONF counters, and cluster sync gauges for enabled state, node count, etcd sync configuration, and datastore alignment.
+
 The packaged Grafana dashboard is installed at:
 
 ```
@@ -949,6 +951,8 @@ Endpoints:
 
 - `GET /`
 - `GET /api/status`
+
+`/api/status` includes build metadata, uptime, running config version, datastore backend, cluster sync state, and NETCONF counters.
 
 ### SNMP
 

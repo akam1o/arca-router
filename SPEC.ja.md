@@ -941,6 +941,8 @@ Endpoints:
 - `GET /metrics`
 - `GET /healthz`
 
+metrics endpoint は daemon uptime、running config version、NETCONF counters に加えて、cluster enabled state、node count、etcd sync configuration、datastore alignment の cluster sync gauge を出力します。
+
 パッケージ版では Grafana dashboard を次の場所へインストールします。
 
 ```
@@ -967,6 +969,8 @@ Endpoints:
 
 - `GET /`
 - `GET /api/status`
+
+`/api/status` は build metadata、uptime、running config version、datastore backend、cluster sync state、NETCONF counters を返します。
 
 ### SNMP
 
