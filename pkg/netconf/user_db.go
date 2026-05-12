@@ -400,9 +400,9 @@ func (udb *UserDatabase) VerifyPassword(username, password string) (*User, error
 // Used by SSH authentication callback for audit logging
 // Implements timing attack mitigation by performing dummy hash verification for non-existent users
 func (udb *UserDatabase) VerifyPasswordWithReason(username, password string) (*User, string, error) {
-	// Dummy hash for timing attack mitigation (argon2id with same parameters)
-	// This hash is never valid, but verification takes the same time as real hash
-	const dummyHash = "$argon2id$v=19$m=65536,t=3,p=4$c29tZXNhbHQxMjM0NTY3OA$qwertyuiopasdfghjklzxcvbnm1234567890qwertyuiopasdf"
+	// Dummy hash for timing attack mitigation (argon2id with same parameters).
+	// The verification result is ignored; only the comparable cost matters.
+	const dummyHash = "$argon2id$v=19$m=65536,t=3,p=4$AAAAAAAAAAAAAAAAAAAAAA$AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
 
 	// Get user from database
 	user, err := udb.GetUser(username)

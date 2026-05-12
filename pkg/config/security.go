@@ -41,7 +41,7 @@ func ValidatePasswordHash(passwordHash string) error {
 	if !strings.HasPrefix(passwordHash, encodedPasswordHashPrefix) {
 		return fmt.Errorf("password hash must use argon2id")
 	}
-	if _, err := auth.VerifyPassword("", passwordHash); err != nil {
+	if err := auth.ValidatePasswordHash(passwordHash); err != nil {
 		return fmt.Errorf("invalid password hash: %w", err)
 	}
 	return nil

@@ -104,6 +104,76 @@ func TestVerifyPasswordRejectsUnsafeParameters(t *testing.T) {
 	}
 }
 
+func TestVerifyPasswordRejectsInvalidDecodedLengths(t *testing.T) {
+	hash, err := HashPassword("password")
+	if err != nil {
+		t.Fatalf("HashPassword failed: %v", err)
+	}
+	parts := strings.Split(hash, "$")
+
+	tests := []struct {
+		name string
+		part int
+		val  string
+	}{
+		{name: "short salt", part: 4, val: "AQ"},
+		{name: "short hash", part: 5, val: "AQ"},
+		{name: "empty hash", part: 5, val: ""},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			tampered := append([]string(nil), parts...)
+			tampered[tt.part] = tt.val
+			_, err := VerifyPassword("password", strings.Join(tampered, "$"))
+			if err == nil {
+				t.Fatal("VerifyPassword() error = nil, want decoded length error")
+			}
+		})
+	}
+}
+
+func TestValidatePasswordHash(t *testing.T) {
+	hash, err := HashPassword("password")
+	if err != nil {
+		t.Fatalf("HashPassword failed: %v", err)
+	}
+	if err := ValidatePasswordHash(hash); err != nil {
+		t.Fatalf("ValidatePasswordHash() error = %v", err)
+	}
+}
+
+func TestValidatePasswordHashRejectsWeakOrTruncatedHash(t *testing.T) {
+	hash, err := HashPassword("password")
+	if err != nil {
+		t.Fatalf("HashPassword failed: %v", err)
+	}
+	parts := strings.Split(hash, "$")
+
+	tests := []struct {
+		name string
+		hash string
+	}{
+		{name: "weak parameters", hash: strings.Replace(hash, "m=65536,t=3,p=4", "m=8,t=1,p=1", 1)},
+		{name: "short salt", hash: strings.Join(replaceHashPart(parts, 4, "AQ"), "$")},
+		{name: "short hash", hash: strings.Join(replaceHashPart(parts, 5, "AQ"), "$")},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if err := ValidatePasswordHash(tt.hash); err == nil {
+				t.Fatal("ValidatePasswordHash() error = nil, want invalid hash error")
+			}
+		})
+	}
+}
+
+func replaceHashPart(parts []string, index int, value string) []string {
+	replaced := append([]string(nil), parts...)
+	replaced[index] = value
+	return replaced
+}
+
 func TestPasswordWithSpecialCharacters(t *testing.T) {
 	passwords := []string{
 		"password with spaces",
