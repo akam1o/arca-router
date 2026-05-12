@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/akam1o/arca-router/internal/engine"
+	"github.com/akam1o/arca-router/pkg/datastore"
 	"github.com/akam1o/arca-router/pkg/logger"
 	"github.com/akam1o/arca-router/pkg/netconf"
 )
@@ -20,24 +21,41 @@ type metricsSource struct {
 	startedAt     time.Time
 	engine        *engine.Engine
 	netconfServer *netconf.SSHServer
+	datastore     *datastore.Config
 }
 
 type routerMetrics struct {
-	UptimeSeconds         float64
-	ConfigVersion         uint64
-	NETCONFActiveSessions int
-	NETCONFActiveConns    int32
-	NETCONFTotalConns     uint64
-	NETCONFSuccess        uint64
-	NETCONFFailures       uint64
-	NETCONFListening      bool
-	RunningHostname       string
+	UptimeSeconds          float64
+	ConfigVersion          uint64
+	NETCONFActiveSessions  int
+	NETCONFActiveConns     int32
+	NETCONFTotalConns      uint64
+	NETCONFSuccess         uint64
+	NETCONFFailures        uint64
+	NETCONFListening       bool
+	RunningHostname        string
+	DatastoreBackend       string
+	DatastoreEtcdEndpoints []string
+	ClusterEnabled         bool
+	ClusterNodeCount       int
+	ClusterEtcdSync        bool
+	ClusterEtcdEndpoints   []string
+	ClusterSyncAligned     bool
 }
 
 func (s metricsSource) snapshot(now time.Time) routerMetrics {
-	metrics := routerMetrics{}
+	metrics := routerMetrics{
+		DatastoreBackend:   string(datastore.BackendSQLite),
+		ClusterSyncAligned: true,
+	}
 	if !s.startedAt.IsZero() {
 		metrics.UptimeSeconds = now.Sub(s.startedAt).Seconds()
+	}
+	if s.datastore != nil {
+		if s.datastore.Backend != "" {
+			metrics.DatastoreBackend = string(s.datastore.Backend)
+		}
+		metrics.DatastoreEtcdEndpoints = normalizedEndpoints(s.datastore.EtcdEndpoints)
 	}
 
 	if s.engine != nil {
@@ -45,6 +63,18 @@ func (s metricsSource) snapshot(now time.Time) routerMetrics {
 			metrics.ConfigVersion = running.Version
 			if running.Config != nil && running.Config.System != nil {
 				metrics.RunningHostname = running.Config.System.HostName
+			}
+			if running.Config != nil && running.Config.Chassis != nil && running.Config.Chassis.Cluster != nil {
+				cluster := running.Config.Chassis.Cluster
+				metrics.ClusterEnabled = cluster.Enabled
+				metrics.ClusterNodeCount = len(cluster.Nodes)
+				metrics.ClusterEtcdEndpoints = normalizedEndpoints(clusterEtcdEndpoints(running.Config))
+				metrics.ClusterEtcdSync = len(metrics.ClusterEtcdEndpoints) > 0
+				if metrics.ClusterEtcdSync {
+					metrics.ClusterSyncAligned = s.datastore != nil &&
+						s.datastore.Backend == datastore.BackendEtcd &&
+						sameEndpoints(metrics.ClusterEtcdEndpoints, metrics.DatastoreEtcdEndpoints)
+				}
 			}
 		}
 	}
@@ -134,6 +164,19 @@ func (s metricsSource) handleMetrics(w http.ResponseWriter, r *http.Request) {
 	writeMetricType(&b, "arca_router_config_version", "gauge")
 	writeMetricValue(&b, "arca_router_config_version", float64(metrics.ConfigVersion))
 
+	writeMetricHelp(&b, "arca_router_cluster_enabled", "Whether chassis clustering is enabled in the running configuration.")
+	writeMetricType(&b, "arca_router_cluster_enabled", "gauge")
+	writeMetricHelp(&b, "arca_router_cluster_nodes", "Number of configured chassis cluster nodes.")
+	writeMetricType(&b, "arca_router_cluster_nodes", "gauge")
+	writeMetricHelp(&b, "arca_router_cluster_sync_etcd_configured", "Whether chassis cluster sync uses etcd endpoints.")
+	writeMetricType(&b, "arca_router_cluster_sync_etcd_configured", "gauge")
+	writeMetricHelp(&b, "arca_router_cluster_sync_aligned", "Whether cluster sync etcd config matches the daemon datastore backend and endpoints.")
+	writeMetricType(&b, "arca_router_cluster_sync_aligned", "gauge")
+	writeMetricBool(&b, "arca_router_cluster_enabled", metrics.ClusterEnabled)
+	writeMetricValue(&b, "arca_router_cluster_nodes", float64(metrics.ClusterNodeCount))
+	writeMetricBool(&b, "arca_router_cluster_sync_etcd_configured", metrics.ClusterEtcdSync)
+	writeMetricBool(&b, "arca_router_cluster_sync_aligned", metrics.ClusterSyncAligned)
+
 	writeMetricHelp(&b, "arca_router_netconf_active_sessions", "Current active NETCONF sessions.")
 	writeMetricType(&b, "arca_router_netconf_active_sessions", "gauge")
 	writeMetricHelp(&b, "arca_router_netconf_active_connections", "Current active NETCONF SSH connections.")
@@ -152,11 +195,7 @@ func (s metricsSource) handleMetrics(w http.ResponseWriter, r *http.Request) {
 	writeMetricValue(&b, "arca_router_netconf_total_connections", float64(metrics.NETCONFTotalConns))
 	writeMetricValue(&b, "arca_router_netconf_successful_handshakes", float64(metrics.NETCONFSuccess))
 	writeMetricValue(&b, "arca_router_netconf_failed_handshakes", float64(metrics.NETCONFFailures))
-	if metrics.NETCONFListening {
-		writeMetricValue(&b, "arca_router_netconf_listening", 1)
-	} else {
-		writeMetricValue(&b, "arca_router_netconf_listening", 0)
-	}
+	writeMetricBool(&b, "arca_router_netconf_listening", metrics.NETCONFListening)
 
 	_, _ = w.Write([]byte(b.String()))
 }
@@ -182,4 +221,12 @@ func writeMetricValue(b *strings.Builder, name string, value float64) {
 	b.WriteByte(' ')
 	b.WriteString(strconv.FormatFloat(value, 'f', -1, 64))
 	b.WriteByte('\n')
+}
+
+func writeMetricBool(b *strings.Builder, name string, value bool) {
+	if value {
+		writeMetricValue(b, name, 1)
+		return
+	}
+	writeMetricValue(b, name, 0)
 }
