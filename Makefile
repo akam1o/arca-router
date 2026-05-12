@@ -40,7 +40,7 @@ version: ## Display version information
 	@echo "Build Date: $(BUILD_DATE)"
 	@echo "EPOCH:      $(SOURCE_DATE_EPOCH)"
 
-build: ## Build current v0.5 binaries (unified arca-routerd and arca CLI)
+build: ## Build current v0.6 binaries (unified arca-routerd and arca CLI)
 	@echo "Building $(BINARY_NAME) and $(CLI_BINARY_NAME)..."
 	@mkdir -p $(BUILD_DIR)
 	CGO_ENABLED=1 SOURCE_DATE_EPOCH=$(SOURCE_DATE_EPOCH) go build $(BUILD_FLAGS) -o $(BUILD_DIR)/$(BINARY_NAME) ./cmd/arca-routerd
@@ -187,7 +187,7 @@ frr-mgmtd-smoke: ## Run live FRR mgmtd transactional apply smoke test
 	@echo "Running live FRR mgmtd smoke test..."
 	ARCA_FRR_MGMTD_SMOKE=1 go test -v ./pkg/frr -run TestFRRMgmtdSmokeApplyAndCleanup -count=1
 
-package-lint: ## Validate package metadata and v0.5 service expectations
+package-lint: ## Validate package metadata and v0.6 service expectations
 	@echo "Linting package metadata..."
 	@for script in build/package/scripts/*.sh; do sh -n "$$script"; done
 	@grep -q 'SupplementaryGroups=vpp frrvty' build/systemd/arca-routerd.service
@@ -211,6 +211,7 @@ package-lint: ## Validate package metadata and v0.5 service expectations
 		exit 1; \
 	fi
 	@grep -q 'mgmtd=yes' build/package/scripts/postinstall.sh
+	@grep -q 'vrrpd=yes' build/package/scripts/postinstall.sh
 	@echo "Package metadata OK"
 
 generate-binapi: ## Generate VPP binapi (Go bindings for VPP API)
