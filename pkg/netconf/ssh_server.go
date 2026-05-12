@@ -36,10 +36,12 @@ type SSHServer struct {
 	netconfServer *Server
 	sshConfig     *ssh.ServerConfig
 	rateLimiter   *RateLimiter
+	activeConns   map[net.Conn]struct{}
 	done          chan struct{}
 	wg            sync.WaitGroup
 	mu            sync.Mutex
 	stopOnce      sync.Once
+	stopped       bool
 	log           *logger.Logger
 
 	// Metrics (thread-safe via atomic operations)
@@ -135,6 +137,7 @@ func NewSSHServer(config *SSHConfig) (*SSHServer, error) {
 		netconfServer: netconfServer,
 		rateLimiter:   rateLimiter,
 		sshConfig:     nil, // Will be set below
+		activeConns:   make(map[net.Conn]struct{}),
 		done:          make(chan struct{}),
 		log:           log,
 	}
@@ -179,6 +182,10 @@ func (s *SSHServer) SetCommitHook(h CommitHook) {
 // Start starts the SSH server
 func (s *SSHServer) Start(ctx context.Context) error {
 	s.mu.Lock()
+	if s.stopped {
+		s.mu.Unlock()
+		return fmt.Errorf("server stopped")
+	}
 	if s.listener != nil {
 		s.mu.Unlock()
 		return fmt.Errorf("server already started")
@@ -190,20 +197,17 @@ func (s *SSHServer) Start(ctx context.Context) error {
 		return fmt.Errorf("failed to listen on %s: %w", s.config.ListenAddr, err)
 	}
 	s.listener = listener
+	atomic.StoreInt32(&s.isListening, 1)
+
+	// Start goroutines while holding the lifecycle lock so Stop cannot wait
+	// before all startup workers have been registered.
+	s.wg.Add(1)
+	go s.sessionMgr.StartCleanup(ctx, &s.wg)
+	s.wg.Add(1)
+	go s.acceptConnections(ctx)
 	s.mu.Unlock()
 
 	s.log.Info("SSH server started", "addr", s.config.ListenAddr)
-
-	// Mark as listening
-	atomic.StoreInt32(&s.isListening, 1)
-
-	// Start session cleanup goroutine
-	s.wg.Add(1)
-	go s.sessionMgr.StartCleanup(ctx, &s.wg)
-
-	// Accept connections
-	s.wg.Add(1)
-	go s.acceptConnections(ctx)
 
 	return nil
 }
@@ -214,17 +218,27 @@ func (s *SSHServer) Stop() error {
 		// Mark as not listening
 		atomic.StoreInt32(&s.isListening, 0)
 
-		// Signal shutdown even if Start failed before creating a listener.
-		close(s.done)
-
 		s.mu.Lock()
+		s.stopped = true
 		listener := s.listener
 		s.listener = nil
+		activeConns := make([]net.Conn, 0, len(s.activeConns))
+		for conn := range s.activeConns {
+			activeConns = append(activeConns, conn)
+		}
 		s.mu.Unlock()
+
+		// Signal shutdown even if Start failed before creating a listener.
+		close(s.done)
 
 		if listener != nil {
 			if err := listener.Close(); err != nil {
 				s.log.Error("Failed to close listener", "error", err)
+			}
+		}
+		for _, conn := range activeConns {
+			if err := conn.Close(); err != nil {
+				_ = err
 			}
 		}
 
@@ -253,6 +267,53 @@ func (s *SSHServer) Stop() error {
 		s.log.Info("SSH server stopped")
 	})
 	return nil
+}
+
+func (s *SSHServer) startConnectionHandler(ctx context.Context, conn net.Conn) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.stopped {
+		return false
+	}
+	s.activeConns[conn] = struct{}{}
+	s.wg.Add(1)
+	go s.handleConnection(ctx, conn)
+	return true
+}
+
+func (s *SSHServer) unregisterConnection(conn net.Conn) {
+	s.mu.Lock()
+	delete(s.activeConns, conn)
+	s.mu.Unlock()
+}
+
+func (s *SSHServer) startWorker(fn func()) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.stopped {
+		return false
+	}
+	s.wg.Add(1)
+	go func() {
+		defer s.wg.Done()
+		fn()
+	}()
+	return true
+}
+
+func (s *SSHServer) startNETCONFHandler(ctx context.Context, username, role string, sshConn *ssh.ServerConn, channel ssh.Channel) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.stopped {
+		return false
+	}
+	session := s.sessionMgr.Create(username, role, sshConn, channel)
+	s.wg.Add(1)
+	go func() {
+		defer s.wg.Done()
+		s.handleNETCONF(ctx, session, channel)
+	}()
+	return true
 }
 
 // acceptConnections accepts incoming SSH connections
@@ -296,9 +357,12 @@ func (s *SSHServer) acceptConnections(ctx context.Context) {
 			}
 		}
 
-		// Handle connection in goroutine
-		s.wg.Add(1)
-		go s.handleConnection(ctx, conn)
+		if !s.startConnectionHandler(ctx, conn) {
+			if err := conn.Close(); err != nil {
+				_ = err
+			}
+			return
+		}
 	}
 }
 
@@ -306,6 +370,7 @@ func (s *SSHServer) acceptConnections(ctx context.Context) {
 func (s *SSHServer) handleConnection(ctx context.Context, conn net.Conn) {
 	defer s.wg.Done()
 	defer func() {
+		s.unregisterConnection(conn)
 		if err := conn.Close(); err != nil {
 			_ = err
 		}
@@ -356,15 +421,19 @@ func (s *SSHServer) handleConnection(ctx context.Context, conn net.Conn) {
 			continue
 		}
 
-		// Handle session (NETCONF subsystem will be handled in Phase 2)
-		s.wg.Add(1)
-		go s.handleSession(ctx, sshConn, channel, requests)
+		if !s.startWorker(func() {
+			s.handleSession(ctx, sshConn, channel, requests)
+		}) {
+			if err := channel.Close(); err != nil {
+				_ = err
+			}
+			return
+		}
 	}
 }
 
 // handleSession handles a single SSH session
 func (s *SSHServer) handleSession(ctx context.Context, sshConn *ssh.ServerConn, channel ssh.Channel, requests <-chan *ssh.Request) {
-	defer s.wg.Done()
 	defer func() {
 		if err := channel.Close(); err != nil {
 			_ = err
@@ -406,11 +475,10 @@ func (s *SSHServer) handleSession(ctx context.Context, sshConn *ssh.ServerConn, 
 						role = authRole
 					}
 				}
-				session := s.sessionMgr.Create(sshConn.User(), role, sshConn, channel)
-
 				// Start NETCONF protocol handling
-				s.wg.Add(1)
-				go s.handleNETCONF(ctx, session, channel)
+				if !s.startNETCONFHandler(ctx, sshConn.User(), role, sshConn, channel) {
+					return
+				}
 			} else {
 				if err := req.Reply(false, nil); err != nil {
 					s.log.Warn("Failed to reply to request", "error", err)
@@ -652,7 +720,6 @@ func (s *SSHServer) HealthCheck() error {
 
 // handleNETCONF handles NETCONF protocol over SSH channel
 func (s *SSHServer) handleNETCONF(ctx context.Context, sess *Session, channel ssh.Channel) {
-	defer s.wg.Done()
 	defer func() {
 		// Clean up session and release any locks held by this session
 		if err := s.sessionMgr.CloseSession(sess.ID); err != nil {
