@@ -73,6 +73,10 @@ arca-routerd \
   --etcd-ca=/etc/arca-router/etcd-ca.crt
 ```
 
+When the running configuration enables `chassis cluster sync etcd endpoint`, those
+configured endpoints must match the daemon's `--etcd-endpoints`. This keeps the
+cluster sync model aligned with the active candidate/running datastore.
+
 ## Configuration Datastores
 
 ### Running Configuration

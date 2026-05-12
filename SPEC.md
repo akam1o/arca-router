@@ -515,6 +515,8 @@ set protocols vrrp group 10 priority 110
 set protocols vrrp group 10 preempt
 ```
 
+When `chassis cluster` is enabled with `sync etcd endpoint` values, the daemon must be running with `--datastore-backend=etcd`, and the configured sync endpoints must match `--etcd-endpoints`. Commits that would leave a mismatched cluster sync configuration active fail validation.
+
 VRRP group IDs must be numeric and between `1` and `255`. VRRP priority must be between `1` and `254` when configured; omit it for default behavior.
 
 ### MPLS and Routing Instances
@@ -661,6 +663,8 @@ arca-routerd \
   --etcd-endpoints=https://etcd1:2379,https://etcd2:2379,https://etcd3:2379 \
   --etcd-prefix=/arca-router/
 ```
+
+If `chassis cluster sync etcd endpoint` is configured, those endpoints must match the daemon's `--etcd-endpoints`; otherwise startup or commit validation fails before the configuration is accepted.
 
 ### NETCONF Configuration
 
