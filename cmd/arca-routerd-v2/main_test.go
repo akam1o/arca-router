@@ -7,6 +7,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/akam1o/arca-router/internal/engine"
@@ -90,6 +91,16 @@ func TestLoadInitialConfigFallsBackToFile(t *testing.T) {
 	}
 	if cfg.System.HostName != "file-router" {
 		t.Fatalf("hostname = %q, want file-router", cfg.System.HostName)
+	}
+}
+
+func TestLoadInitialConfigRejectsConfigOpenError(t *testing.T) {
+	_, _, err := loadInitialConfig(context.Background(), &daemonFlags{configPath: "\x00"}, &initialConfigStore{}, testDaemonLogger())
+	if err == nil {
+		t.Fatal("loadInitialConfig() error = nil, want open error")
+	}
+	if !strings.Contains(err.Error(), "open config") {
+		t.Fatalf("loadInitialConfig() error = %v, want open config error", err)
 	}
 }
 

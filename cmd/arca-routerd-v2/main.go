@@ -357,8 +357,11 @@ func loadInitialConfig(ctx context.Context, f *daemonFlags, st internalstore.Con
 
 	file, err := os.Open(f.configPath)
 	if err != nil {
-		log.Warn("Config file not found, using empty config", slog.String("path", f.configPath))
-		return model.NewRouterConfig(), "empty", nil
+		if os.IsNotExist(err) {
+			log.Warn("Config file not found, using empty config", slog.String("path", f.configPath))
+			return model.NewRouterConfig(), "empty", nil
+		}
+		return nil, "", fmt.Errorf("open config %s: %w", f.configPath, err)
 	}
 	defer file.Close()
 
