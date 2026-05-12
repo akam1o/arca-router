@@ -62,6 +62,7 @@ type daemonFlags struct {
 	userDBPath    string
 	grpcSocket    string
 	metricsListen string
+	webListen     string
 	snmpListen    string
 	snmpCommunity string
 	frrApplyMode  string
@@ -130,6 +131,8 @@ func parseFlags() *daemonFlags {
 		"Path to internal gRPC Unix socket")
 	flag.StringVar(&f.metricsListen, "metrics-listen", "",
 		"Prometheus metrics listen address (disabled when empty)")
+	flag.StringVar(&f.webListen, "web-listen", "",
+		"Web UI listen address (overrides system services web-ui config; disabled when empty and config disabled)")
 	flag.StringVar(&f.snmpListen, "snmp-listen", "",
 		"SNMPv2c UDP listen address (disabled when empty)")
 	flag.StringVar(&f.snmpCommunity, "snmp-community", "public",
@@ -164,6 +167,7 @@ func run(ctx context.Context, f *daemonFlags, log *logger.Logger) error {
 		slog.String("netconf_listen", f.netconfListen),
 		slog.String("grpc_socket", f.grpcSocket),
 		slog.String("metrics_listen", f.metricsListen),
+		slog.String("web_listen", f.webListen),
 		slog.String("snmp_listen", f.snmpListen),
 		slog.String("frr_apply_mode", f.frrApplyMode),
 	)
@@ -294,7 +298,17 @@ func run(ctx context.Context, f *daemonFlags, log *logger.Logger) error {
 		}
 	}
 
-	// --- Step 11: Start SNMP endpoint ---
+	// --- Step 11: Start Web UI endpoint ---
+	var webErr <-chan error
+	if webListen := effectiveWebListen(f.webListen, eng.RunningSnapshot()); webListen != "" {
+		webErr, err = startWebServer(ctx, webListen, observabilitySource, log)
+		if err != nil {
+			grpcServer.Stop()
+			return err
+		}
+	}
+
+	// --- Step 12: Start SNMP endpoint ---
 	var snmpErr <-chan error
 	if f.snmpListen != "" {
 		snmpErr, err = startSNMPServer(ctx, f.snmpListen, f.snmpCommunity, observabilitySource, log)
@@ -315,6 +329,11 @@ func run(ctx context.Context, f *daemonFlags, log *logger.Logger) error {
 		if err != nil {
 			grpcServer.Stop()
 			return fmt.Errorf("metrics endpoint stopped: %w", err)
+		}
+	case err := <-webErr:
+		if err != nil {
+			grpcServer.Stop()
+			return fmt.Errorf("web endpoint stopped: %w", err)
 		}
 	case err := <-snmpErr:
 		if err != nil {
