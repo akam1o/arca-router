@@ -285,6 +285,7 @@ func startNETCONFServer(ctx context.Context, f *daemonFlags, eng *engine.Engine,
 	}
 	server.SetCommitHook(newNETCONFCommitHook(eng))
 	if err := server.Start(ctx); err != nil {
+		_ = server.Stop()
 		return nil, fmt.Errorf("start NETCONF server: %w", err)
 	}
 	return server, nil
