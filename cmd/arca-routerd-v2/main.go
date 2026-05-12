@@ -40,7 +40,7 @@ var (
 
 const (
 	secureGRPCSocketDirPerms  os.FileMode = 0750
-	secureGRPCSocketFilePerms os.FileMode = 0600
+	secureGRPCSocketFilePerms os.FileMode = 0660
 	secureGRPCSocketUmask                 = 0077
 )
 

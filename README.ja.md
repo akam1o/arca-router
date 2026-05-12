@@ -139,6 +139,13 @@ sudo dnf install -y ./arca-router-*.rpm
 arca-cli --version
 ```
 
+root 以外の運用ユーザーで `arca-cli` を使う場合は、そのログインユーザーを
+`arca-router` グループに追加し、ログインし直してください。
+
+```bash
+sudo usermod -aG arca-router $USER
+```
+
 ### 3. ハードウェアマッピングを設定
 
 例の設定をコピーして編集します。

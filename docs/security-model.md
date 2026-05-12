@@ -188,6 +188,10 @@ fi
 
 systemd `RuntimeDirectory`/`StateDirectory`により自動作成される。
 
+内部 gRPC ソケット `/run/arca-router/routerd.sock` は
+`arca-router:arca-router` の `0660` で作成される。root 以外で
+`arca-cli` を実行する運用ユーザーは `arca-router` グループに所属させる。
+
 ---
 
 ## 3. セキュリティ境界

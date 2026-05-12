@@ -32,6 +32,7 @@ ReadWritePaths=/var/lib/arca-router /run/arca-router /var/log/arca-router /etc/f
 
 # Runtime directories (auto-created by systemd)
 RuntimeDirectory=arca-router
+RuntimeDirectoryMode=0750
 StateDirectory=arca-router
 LogsDirectory=arca-router
 

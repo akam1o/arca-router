@@ -139,6 +139,13 @@ sudo dnf install -y ./arca-router-*.rpm
 arca-cli --version
 ```
 
+To use `arca-cli` as a non-root operator, add that login user to the
+`arca-router` group and start a new login session:
+
+```bash
+sudo usermod -aG arca-router $USER
+```
+
 ### 3. Configure Hardware Mapping
 
 Copy and edit the example configuration:
