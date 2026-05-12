@@ -20,7 +20,7 @@ Previous releases are documented in [`CHANGELOG.md`](CHANGELOG.md).
 ### v0.5.x - **Current Release** 🚧
 
 - ✅ **Proto Compilation & Full gRPC Wiring**: Generated `api/v1/router.proto` stubs are wired into daemon and CLI
-- 🔲 **FRR MGMT API**: Incremental FRR config via mgmtd (replace full-file regeneration)
+- ✅ **FRR Transactional Apply**: Default FRR apply path uses `transactional` management commits; `file` remains available for recovery
 - ✅ **Comprehensive v2 Tests**: Unit tests for engine, diff, plugins, gRPC server/client
 - ✅ **Monitoring/Observability**
   - Prometheus metrics endpoint
