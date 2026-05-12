@@ -489,7 +489,7 @@ set protocols bgp group external import PREFER-CUSTOMER
 
 The following hierarchies are part of the v0.6 management-plane model. Parser, serializer, validation, clone, conversion, diff, and candidate command replacement support are implemented. Southbound application for data-plane HA, MPLS forwarding, L3VPN plumbing, and QoS enforcement is staged separately.
 
-Until the corresponding southbound apply path is implemented, commits that leave unsupported MPLS, VRRP, routing-instance, or class-of-service configuration active fail validation instead of being silently accepted. Removing those unsupported stanzas is allowed.
+Until the corresponding southbound apply path is implemented, commits that leave unsupported MPLS, routing-instance, or class-of-service configuration active fail validation instead of being silently accepted. Removing those unsupported stanzas is allowed. VRRP is currently supported only by the FRR file backend (`--frr-apply-mode=file`); the transactional FRR backend still rejects active VRRP configuration.
 
 ### Web UI Service
 
@@ -515,7 +515,7 @@ set protocols vrrp group 10 priority 110
 set protocols vrrp group 10 preempt
 ```
 
-VRRP group priority must be between `0` and `255`; omit it for default behavior.
+VRRP group IDs must be numeric and between `1` and `255`. VRRP priority must be between `1` and `254` when configured; omit it for default behavior.
 
 ### MPLS and Routing Instances
 
@@ -904,7 +904,7 @@ Common options:
 
 The default backend is `transactional`. It requires FRR `mgmtd=yes` in `/etc/frr/daemons` and `vtysh` access for the `arca-router` service user, typically through the `frrvty` group.
 
-The `file` backend writes a full FRR config and applies it with `frr-reload.py`. It is retained for recovery and compatibility; deployments that use it must grant the service user the additional permissions needed to write `/etc/frr/frr.conf`.
+The `file` backend writes a full FRR config and applies it with `frr-reload.py`. It is retained for recovery and compatibility; deployments that use it must grant the service user the additional permissions needed to write `/etc/frr/frr.conf`. VRRP configuration through this backend also requires `vrrpd=yes` in `/etc/frr/daemons`.
 
 ### Prometheus and Health
 
