@@ -194,6 +194,9 @@ func run(ctx context.Context, f *daemonFlags, log *logger.Logger) error {
 		return fmt.Errorf("open config store: %w", err)
 	}
 	defer configStore.Close()
+	if err := configStore.CleanupEphemeralState(ctx); err != nil {
+		return fmt.Errorf("cleanup config store ephemeral state: %w", err)
+	}
 
 	// --- Step 7: Load initial configuration ---
 	log.Info("Loading initial configuration")

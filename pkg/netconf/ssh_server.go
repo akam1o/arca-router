@@ -87,6 +87,11 @@ func NewSSHServer(config *SSHConfig) (*SSHServer, error) {
 	if err != nil {
 		return nil, fmt.Errorf("failed to create datastore: %w", err)
 	}
+	if err := cleanupDatastoreEphemeralState(context.Background(), ds); err != nil {
+		_ = ds.Close()
+		_ = userDB.Close()
+		return nil, fmt.Errorf("failed to cleanup datastore ephemeral state: %w", err)
+	}
 
 	// Create audit logger with datastore for persistent audit trail
 	// Use nil for slog - audit.NewLogger will use slog.Default() internally
@@ -133,6 +138,18 @@ func NewSSHServer(config *SSHConfig) (*SSHServer, error) {
 	srv.sshConfig = sshConfig
 
 	return srv, nil
+}
+
+type ephemeralStateCleaner interface {
+	CleanupEphemeralState(ctx context.Context) error
+}
+
+func cleanupDatastoreEphemeralState(ctx context.Context, ds datastore.Datastore) error {
+	cleaner, ok := ds.(ephemeralStateCleaner)
+	if !ok {
+		return nil
+	}
+	return cleaner.CleanupEphemeralState(ctx)
 }
 
 // SetCommitHook installs a commit coordinator for NETCONF commits.

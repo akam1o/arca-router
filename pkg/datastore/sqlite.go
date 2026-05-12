@@ -287,6 +287,43 @@ func (ds *sqliteDatastore) performLockCleanup(ctx context.Context) error {
 	})
 }
 
+// CleanupEphemeralState removes locks and candidates that cannot survive a
+// daemon restart safely. Running configuration and commit history are preserved.
+func (ds *sqliteDatastore) CleanupEphemeralState(ctx context.Context) error {
+	return ds.withTx(ctx, false, func(tx *sql.Tx) error {
+		candidateResult, err := tx.ExecContext(ctx, `DELETE FROM candidate_configs`)
+		if err != nil {
+			return NewError(ErrCodeInternal, "failed to cleanup candidate configs", err)
+		}
+		lockResult, err := tx.ExecContext(ctx, `DELETE FROM config_locks`)
+		if err != nil {
+			return NewError(ErrCodeInternal, "failed to cleanup config locks", err)
+		}
+
+		candidatesRemoved, err := candidateResult.RowsAffected()
+		if err != nil {
+			return NewError(ErrCodeInternal, "failed to check candidate cleanup result", err)
+		}
+		locksRemoved, err := lockResult.RowsAffected()
+		if err != nil {
+			return NewError(ErrCodeInternal, "failed to check lock cleanup result", err)
+		}
+		if candidatesRemoved == 0 && locksRemoved == 0 {
+			return nil
+		}
+
+		_, err = tx.ExecContext(ctx, `
+			INSERT INTO audit_log (user, session_id, action, result, details)
+			VALUES ('system', '', 'startup_cleanup', 'success', ?)
+		`, fmt.Sprintf("removed %d lock(s), %d candidate config(s)", locksRemoved, candidatesRemoved))
+		if err != nil {
+			return NewError(ErrCodeInternal, "failed to log startup cleanup audit event", err)
+		}
+
+		return nil
+	})
+}
+
 // beginTx starts a new transaction with the specified isolation level.
 func (ds *sqliteDatastore) beginTx(ctx context.Context, readOnly bool) (*sql.Tx, error) {
 	opts := &sql.TxOptions{}

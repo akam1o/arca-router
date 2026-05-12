@@ -39,6 +39,18 @@ func NewFromPath(path string) (*Store, error) {
 	return &Store{ds: ds}, nil
 }
 
+// CleanupEphemeralState removes lock and candidate rows left by a previous
+// daemon process before this process starts accepting configuration changes.
+func (s *Store) CleanupEphemeralState(ctx context.Context) error {
+	cleaner, ok := s.ds.(interface {
+		CleanupEphemeralState(context.Context) error
+	})
+	if !ok {
+		return nil
+	}
+	return cleaner.CleanupEphemeralState(ctx)
+}
+
 func (s *Store) GetLatestSnapshot(ctx context.Context) (*model.ConfigSnapshot, error) {
 	running, err := s.ds.GetRunning(ctx)
 	if err != nil {
