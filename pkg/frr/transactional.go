@@ -127,6 +127,9 @@ func BuildMgmtOperations(cfg *Config) ([]MgmtOperation, error) {
 	if cfg == nil {
 		return nil, NewInvalidConfigError("FRR config is nil")
 	}
+	if cfg.VRRP != nil && len(cfg.VRRP.Groups) > 0 {
+		return nil, NewInvalidConfigError("transactional FRR VRRP apply is not supported")
+	}
 	var ops []MgmtOperation
 	ops = append(ops,
 		deleteOp(staticProtocolBase()),

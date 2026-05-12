@@ -9,6 +9,7 @@ import (
 
 	"github.com/akam1o/arca-router/internal/engine"
 	"github.com/akam1o/arca-router/internal/model"
+	pkgfrr "github.com/akam1o/arca-router/pkg/frr"
 )
 
 func testLogger() *slog.Logger {
@@ -80,6 +81,21 @@ func TestValidateChangesRejectsUnsupportedV06FRRConfig(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "protocols vrrp") {
 		t.Fatalf("ValidateChanges() error = %v, want protocols vrrp", err)
+	}
+}
+
+func TestValidateChangesAllowsVRRPWithFileBackend(t *testing.T) {
+	newCfg := model.NewRouterConfig()
+	newCfg.Protocols = &model.ProtocolsConfig{
+		VRRP: &model.VRRPConfig{Groups: map[string]*model.VRRPGroup{
+			"10": {Interface: "ge-0/0/0", VirtualAddress: "192.0.2.254"},
+		}},
+	}
+	diff := engine.ComputeDiff(model.NewRouterConfig(), newCfg)
+
+	err := NewFRRPluginWithApplyMode(testLogger(), pkgfrr.BackendModeFile).ValidateChanges(context.Background(), diff)
+	if err != nil {
+		t.Fatalf("ValidateChanges() error = %v, want nil", err)
 	}
 }
 

@@ -18,6 +18,7 @@ import (
 type FRRPlugin struct {
 	mu      sync.Mutex
 	applier pkgfrr.Applier
+	mode    pkgfrr.BackendMode
 	log     *slog.Logger
 
 	currentConfig     string
@@ -35,6 +36,7 @@ func NewFRRPlugin(log *slog.Logger) *FRRPlugin {
 func NewFRRPluginWithApplyMode(log *slog.Logger, mode pkgfrr.BackendMode) *FRRPlugin {
 	return &FRRPlugin{
 		applier: pkgfrr.NewApplier(mode),
+		mode:    mode,
 		log:     log.With("plugin", "frr", "apply_mode", string(mode)),
 	}
 }
@@ -64,7 +66,7 @@ func (p *FRRPlugin) ValidateChanges(ctx context.Context, diff *engine.ConfigDiff
 	if diff.MPLSChanged && hasFRRMPLSConfig(diff.NewMPLS) {
 		unsupported = append(unsupported, "protocols mpls")
 	}
-	if diff.VRRPChanged && hasFRRVRRPConfig(diff.NewVRRP) {
+	if diff.VRRPChanged && hasFRRVRRPConfig(diff.NewVRRP) && p.mode != pkgfrr.BackendModeFile {
 		unsupported = append(unsupported, "protocols vrrp")
 	}
 	if diff.RoutingInstancesChanged && len(diff.NewRoutingInstances) > 0 {
@@ -84,7 +86,7 @@ func (p *FRRPlugin) ApplyChanges(ctx context.Context, diff *engine.ConfigDiff) e
 
 	// Only regenerate FRR config if routing-related changes occurred
 	if !diff.BGPChanged && !diff.OSPFChanged && !diff.StaticRoutesChanged &&
-		!diff.PolicyChanged && !diff.RoutingChanged && !diff.SystemChanged &&
+		!diff.PolicyChanged && !diff.RoutingChanged && !diff.SystemChanged && !diff.VRRPChanged &&
 		!hasFRRRelevantInterfaceChanges(diff) {
 		p.log.Debug("No routing-related changes, skipping FRR reload")
 		return nil
@@ -205,6 +207,11 @@ func (p *FRRPlugin) buildFullConfig(diff *engine.ConfigDiff) *model.RouterConfig
 		cfg.Protocols.OSPF = diff.NewOSPF
 	} else if diff.OldOSPF != nil && !diff.OSPFChanged {
 		cfg.Protocols.OSPF = diff.OldOSPF
+	}
+	if diff.NewVRRP != nil {
+		cfg.Protocols.VRRP = diff.NewVRRP
+	} else if diff.OldVRRP != nil && !diff.VRRPChanged {
+		cfg.Protocols.VRRP = diff.OldVRRP
 	}
 
 	// Policy

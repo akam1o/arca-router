@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"net"
 	"regexp"
+	"strconv"
 	"strings"
 )
 
@@ -179,14 +180,18 @@ func (c *RouterConfig) validateProtocols() error {
 			if group == nil {
 				return fmt.Errorf("vrrp group %s is nil", name)
 			}
+			id, err := strconv.Atoi(name)
+			if err != nil || id < 1 || id > 255 {
+				return fmt.Errorf("vrrp group %s: id must be numeric 1-255", name)
+			}
 			if group.Interface != "" && !junosIfacePattern.MatchString(group.Interface) {
 				return fmt.Errorf("vrrp group %s: invalid interface name %q", name, group.Interface)
 			}
 			if group.VirtualAddress != "" && net.ParseIP(group.VirtualAddress) == nil {
 				return fmt.Errorf("vrrp group %s: invalid virtual-address %q", name, group.VirtualAddress)
 			}
-			if group.Priority < 0 || group.Priority > 255 {
-				return fmt.Errorf("vrrp group %s: priority must be 0-255, got %d", name, group.Priority)
+			if group.Priority < 0 || group.Priority > 254 {
+				return fmt.Errorf("vrrp group %s: priority must be 1-254 when configured, got %d", name, group.Priority)
 			}
 		}
 	}

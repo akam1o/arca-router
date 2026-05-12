@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"net"
 	"regexp"
+	"strconv"
 	"strings"
 
 	"github.com/akam1o/arca-router/pkg/errors"
@@ -547,6 +548,10 @@ func (v *VRRPConfig) Validate() error {
 		if group == nil {
 			return errors.New(errors.ErrCodeConfigValidation, fmt.Sprintf("VRRP group %s is nil", name), "VRRP group is invalid", "Remove or recreate the group")
 		}
+		id, err := strconv.Atoi(name)
+		if err != nil || id < 1 || id > 255 {
+			return errors.New(errors.ErrCodeConfigValidation, fmt.Sprintf("Invalid VRRP group id: %s", name), "VRRP group id must be numeric and between 1 and 255", "Use a valid VRRP group id")
+		}
 		if group.Interface != "" {
 			if err := validateInterfaceName(group.Interface); err != nil {
 				return err
@@ -555,8 +560,8 @@ func (v *VRRPConfig) Validate() error {
 		if group.VirtualAddress != "" && net.ParseIP(group.VirtualAddress) == nil {
 			return errors.New(errors.ErrCodeConfigValidation, fmt.Sprintf("Invalid VRRP virtual address for %s: %s", name, group.VirtualAddress), "VRRP virtual-address must be a valid IP address", "Use a valid IPv4 or IPv6 address")
 		}
-		if group.Priority < 0 || group.Priority > 255 {
-			return errors.New(errors.ErrCodeConfigValidation, fmt.Sprintf("Invalid VRRP priority for %s: %d", name, group.Priority), "VRRP priority must be between 0 and 255", "Use a valid priority")
+		if group.Priority < 0 || group.Priority > 254 {
+			return errors.New(errors.ErrCodeConfigValidation, fmt.Sprintf("Invalid VRRP priority for %s: %d", name, group.Priority), "VRRP priority must be between 1 and 254 when configured", "Use a valid priority")
 		}
 	}
 	return nil

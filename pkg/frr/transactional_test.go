@@ -49,6 +49,20 @@ func TestBuildMgmtOperationsStaticAndBGP(t *testing.T) {
 	}
 }
 
+func TestBuildMgmtOperationsRejectsVRRP(t *testing.T) {
+	_, err := BuildMgmtOperations(&Config{
+		VRRP: &VRRPConfig{Groups: []VRRPGroup{
+			{ID: 10, Interface: "ge0-0-0", VirtualAddress: "192.0.2.254"},
+		}},
+	})
+	if err == nil {
+		t.Fatal("BuildMgmtOperations() error = nil, want unsupported VRRP error")
+	}
+	if !strings.Contains(err.Error(), "VRRP") {
+		t.Fatalf("BuildMgmtOperations() error = %v, want VRRP", err)
+	}
+}
+
 func TestVtyshMgmtClientApplySequence(t *testing.T) {
 	var got []string
 	client := NewVtyshMgmtClientWithRunner(func(ctx context.Context, command string) ([]byte, error) {

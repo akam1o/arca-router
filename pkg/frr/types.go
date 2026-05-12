@@ -18,6 +18,9 @@ type Config struct {
 	// OSPF holds OSPF configuration
 	OSPF *OSPFConfig
 
+	// VRRP holds VRRP configuration
+	VRRP *VRRPConfig
+
 	// StaticRoutes holds static route configurations
 	StaticRoutes []StaticRoute
 
@@ -118,6 +121,20 @@ type OSPFInterface struct {
 
 	// Priority is the OSPF priority for this interface (nil = not set)
 	Priority *int
+}
+
+// VRRPConfig represents FRR VRRP configuration.
+type VRRPConfig struct {
+	Groups []VRRPGroup
+}
+
+// VRRPGroup represents one VRRP virtual router in FRR format.
+type VRRPGroup struct {
+	ID             int
+	Interface      string
+	VirtualAddress string
+	Priority       int
+	Preempt        bool
 }
 
 // StaticRoute represents a static route configuration in FRR format.
