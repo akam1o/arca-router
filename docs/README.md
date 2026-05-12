@@ -19,6 +19,7 @@ This directory contains user guides, design notes, and internal drafts for `arca
 - `docs/vpp-setup-rhel9.md`
 - `docs/frr-setup-debian.md`
 - `docs/frr-setup-rhel9.md`
+- `docs/observability.md`
 
 ## Usage / Automation
 - `docs/ansible-integration.md`

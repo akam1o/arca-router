@@ -8,6 +8,8 @@
 - **FRR file backend retained**: `--frr-apply-mode=file` keeps the legacy full-file reload backend for recovery and compatibility
 - **Prometheus metrics endpoint**: optional `--metrics-listen` HTTP endpoint exposes daemon, config, and NETCONF metrics
 - **Health endpoint**: optional metrics server also exposes `/healthz`
+- **SNMP observability endpoint**: optional `--snmp-listen` read-only SNMPv2c endpoint exposes daemon, config, and NETCONF metrics
+- **Grafana dashboard**: dashboard JSON is included for the Prometheus metrics endpoint
 - **v2 test coverage**: engine, diff, plugins, gRPC server/client, and daemon tests cover the hardened v2 path
 - **No migration tooling**: v0.3.x legacy binaries remain available; automatic migration tooling is intentionally not planned
 

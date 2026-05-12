@@ -25,8 +25,8 @@ Previous releases are documented in [`CHANGELOG.md`](CHANGELOG.md).
 - ✅ **Monitoring/Observability**
   - Prometheus metrics endpoint
   - Health endpoint
-  - Grafana dashboard (planned)
-  - SNMP (optional, planned)
+  - Grafana dashboard
+  - Optional read-only SNMPv2c endpoint
 
 ### v0.4.x - **Previous Release** ✅
 

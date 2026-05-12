@@ -97,6 +97,14 @@ contents:
       owner: root
       group: root
 
+  # Grafana dashboard for the optional Prometheus endpoint
+  - src: observability/grafana/arca-routerd-dashboard.json
+    dst: /usr/share/arca-router/grafana/arca-routerd-dashboard.json
+    file_info:
+      mode: 0644
+      owner: root
+      group: root
+
 # Installation scripts
 scripts:
   preinstall: build/package/scripts/preinstall.sh
