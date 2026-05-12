@@ -171,6 +171,7 @@ sudo vtysh -c 'show running-config'
    - Enabled with `--frr-apply-mode=file`
    - Writes `/etc/frr/frr.conf`
    - Uses `/usr/lib/frr/frr-reload.py --reload`, then falls back to `vtysh -f /etc/frr/frr.conf`
+   - Packaged systemd units do not grant `/etc/frr` write access by default; add a local drop-in with the `frr` group and `ReadWritePaths=/etc/frr` before using this backend.
 
 **Validation**:
 - Transactional apply validates with FRR management `commit check`
