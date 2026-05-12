@@ -814,7 +814,7 @@ Action:
 - `PHASE3.md`: Phase 3 implementation plan
 - `SPEC.md`: arca-router specification
 - `pkg/config/parser.go`: Existing config parser
-- `cmd/arca-routerd/apply.go`: VPP/FRR application logic
+- `internal/engine/engine.go`: VPP/FRR application orchestration
 - RFC 6241: NETCONF Protocol
 - RFC 6242: NETCONF over SSH
 

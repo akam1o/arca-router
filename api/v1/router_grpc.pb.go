@@ -35,7 +35,7 @@ const (
 // For semantics around ctx use and closing/ending streaming RPCs, please refer to https://pkg.go.dev/google.golang.org/grpc/?tab=doc#ClientConn.NewStream.
 //
 // ConfigService provides configuration management operations.
-// This is the internal API used by arca-cli and the NETCONF subsystem
+// This is the internal API used by arca and the NETCONF subsystem
 // to interact with the arca-routerd engine.
 type ConfigServiceClient interface {
 	// GetRunning returns the current running configuration.
@@ -161,7 +161,7 @@ func (c *configServiceClient) ListHistory(ctx context.Context, in *ListHistoryRe
 // for forward compatibility.
 //
 // ConfigService provides configuration management operations.
-// This is the internal API used by arca-cli and the NETCONF subsystem
+// This is the internal API used by arca and the NETCONF subsystem
 // to interact with the arca-routerd engine.
 type ConfigServiceServer interface {
 	// GetRunning returns the current running configuration.

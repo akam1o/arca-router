@@ -9,62 +9,23 @@ English | [日本語](README.ja.md)
 
 arca-router is a software router with Junos-compatible configuration syntax, powered by VPP (Vector Packet Processing) and FRR (Free Range Routing) for dynamic routing protocols.
 
-**Current Status**: v0.5.x - **Production Hardening**
-
 ---
 
-## Releases
+## Status
 
-Previous releases are documented in [`CHANGELOG.md`](CHANGELOG.md).
+arca-router is currently in the v0.5.x production hardening phase. This README
+describes the current unified daemon path; detailed release history is kept in
+[`CHANGELOG.md`](CHANGELOG.md), and future scope is tracked in
+[`ROADMAP.md`](ROADMAP.md).
 
-### v0.5.x - **Current Release** 🚧
+Current capabilities:
 
-- ✅ **Proto Compilation & Full gRPC Wiring**: Generated `api/v1/router.proto` stubs are wired into daemon and CLI
-- ✅ **FRR Transactional Apply**: Default FRR apply path uses `transactional` management commits; `file` remains available for recovery
-- ✅ **Comprehensive v2 Tests**: Unit tests for engine, diff, plugins, gRPC server/client
-- ✅ **Monitoring/Observability**
-  - Prometheus metrics endpoint
-  - Health endpoint
-  - Grafana dashboard
-  - Optional read-only SNMPv2c endpoint
-
-### v0.4.x - **Previous Release** ✅
-
-- ✅ **Unified Daemon Architecture**: Single `arca-routerd` process (VPP + FRR + NETCONF + gRPC API)
-- ✅ **Struct-First Config Model**: Canonical Go types replace text-primary configuration
-- ✅ **Diff-Based Config Engine**: Computes minimal diffs; applies only what changed
-- ✅ **Plugin-Based Southbound**: VPP and FRR as hot-swappable `engine.Plugin` implementations
-- ✅ **gRPC Internal API**: CLI ↔ daemon communication via Unix socket (proto-defined)
-- ✅ **Thin CLI Client**: `arca-cli` delegates all state to the daemon via gRPC
-- ✅ **2-Phase Commit with Rollback**: Atomic validate → apply → rollback on failure
-- ✅ **Backward Compatible**: All v0.3.x `pkg/` code and tests preserved
-
-### v0.3.x - **Previous Release**
-
-- ✅ **NETCONF/SSH Subsystem**: Remote management via NETCONF protocol (RFC 6241)
-- ✅ **Interactive CLI**: Real-time configuration and commit/rollback
-- ✅ **Advanced Policy Options**: Route filtering, policy-based routing (prefix-lists, policy-statements)
-- ✅ **Security Features**: Authentication (password + SSH key), RBAC (admin/operator/read-only), Rate limiting, Audit logging
-- ✅ **Configuration Datastore**: Candidate/running config with commit history
-- ✅ **CI/CD Pipeline**: Automated build, test, and release via GitHub Actions
-
----
-
-## Roadmap
-
-### v0.6.x - Advanced Features 🔲
-
-- 🔲 **Multi-chassis/Clustering**
-  - Control plane HA (FRR + VRRP)
-  - Config sync (etcd)
-- 🔲 **MPLS/VPN**
-  - MPLS label switching (VPP)
-  - L3VPN (FRR + VPP)
-- 🔲 **QoS/Traffic Engineering**
-  - VPP QoS policy
-  - Traffic shaping
-- 🔲 **Web UI**
-  - Browser-based monitoring and configuration
+- Unified `arca-routerd` process for VPP, FRR, NETCONF, and gRPC
+- Junos-like `set` configuration syntax with a thin `arca` client
+- Struct-first configuration model with diff-based 2-phase commit and rollback
+- FRR transactional apply through the management candidate datastore
+- Prometheus, health, SNMP, and Grafana observability assets
+- SQLite-backed candidate/running datastore with commit history
 
 ---
 
@@ -91,7 +52,7 @@ Previous releases are documented in [`CHANGELOG.md`](CHANGELOG.md).
 
 ## Quick Start (v0.5.x)
 
-🚧 **Current Release (v0.5.x)**: Requires VPP 24.10+ and FRR 8.0+
+Requires VPP 24.10+ and FRR 8.0+.
 
 ### 1. Install Prerequisites
 
@@ -126,7 +87,7 @@ sudo dpkg -i arca-router_*.deb
 
 # Verify installation
 /usr/sbin/arca-routerd --version
-arca-cli --version
+arca --version
 ```
 
 **RHEL 9 / AlmaLinux 9 / Rocky Linux 9**:
@@ -136,10 +97,10 @@ sudo dnf install -y ./arca-router-*.rpm
 
 # Verify installation
 /usr/sbin/arca-routerd --version
-arca-cli --version
+arca --version
 ```
 
-To use `arca-cli` as a non-root operator, add that login user to the
+To use `arca` as a non-root operator, add that login user to the
 `arca-router` group and start a new login session:
 
 ```bash
@@ -248,14 +209,7 @@ set security rate-limit per-ip 10
 set security rate-limit per-user 20
 ```
 
-> **v0.4.x (Unified Daemon)**: NETCONF is built into `arca-routerd` — no separate `arca-netconfd` daemon is needed. The daemon listens on port 830 automatically when security/netconf is configured.
-
-**Legacy mode (v0.3.x)**:
-
-```bash
-# Start arca-netconfd (standalone, deprecated in v0.4.x)
-sudo systemctl start arca-netconfd
-```
+> NETCONF is built into `arca-routerd`; no separate NETCONF daemon is needed. The daemon listens on port 830 when security/netconf is configured.
 
 **Test NETCONF connection**:
 
@@ -270,14 +224,14 @@ netconf-console --host localhost --port 830 --user admin --password YourSecurePa
 # Check daemon logs
 sudo journalctl -u arca-routerd -n 50
 
-# View running configuration with arca-cli
-arca-cli show configuration
+# View running configuration with arca
+arca show configuration
 
 # Check operational state through arca-routerd
-arca-cli show interfaces
-arca-cli show route
-arca-cli show bgp summary
-arca-cli show ospf neighbor
+arca show interfaces
+arca show route
+arca show bgp summary
+arca show ospf neighbor
 
 # Check VPP/FRR directly (optional)
 sudo vppctl show interface
@@ -323,7 +277,7 @@ Top-level stanzas:
 git clone https://github.com/akam1o/arca-router.git
 cd arca-router
 
-# Build binary (with mock VPP flag)
+# Build binaries
 make build
 
 # Run tests
@@ -345,12 +299,12 @@ ls -lh dist/
 make help             # Show all available targets
 make version          # Display version information
 make build            # Build v0.5.x unified daemon + CLI
-make build-cli        # Build only current arca-cli
-make build-v2         # Build v0.5.x binaries with explicit -v2 names
-make build-v2-cli     # Build only arca-cli-v2
+make build-cli        # Build only current arca CLI
 make generate-proto   # Generate typed gRPC bindings
 make test             # Run unit tests
 make integration-test # Run integration tests
+make package-lint     # Validate package metadata and service expectations
+make frr-mgmtd-smoke  # Run live FRR mgmtd smoke test
 make fmt              # Format code
 make vet              # Run go vet
 make check            # Run all checks (fmt, vet, test)
@@ -375,26 +329,23 @@ arca-router/
 │   └── v1/
 │       └── router.proto        # gRPC API definitions (Config/Session/State)
 ├── cmd/
-│   ├── arca-routerd-v2/        # Unified daemon (v0.5.x)
+│   ├── arca-routerd/           # Unified daemon (v0.5.x)
 │   │   └── main.go             # Single process: VPP + FRR + NETCONF + gRPC
-│   ├── arca-cli-v2/            # Thin gRPC CLI client (v0.5.x)
-│   │   └── main.go             # Communicates via Unix socket
-│   ├── arca-routerd/           # Legacy daemon (v0.3.x)
-│   ├── arca-cli/               # Legacy CLI (v0.3.x)
-│   └── arca-netconfd/          # Legacy NETCONF daemon (v0.3.x)
+│   └── arca/                   # Thin gRPC CLI client (v0.5.x)
+│       └── main.go             # Communicates via Unix socket
 ├── internal/                   # v0.5.x core packages
 │   ├── model/                  # Canonical config & state types
 │   │   ├── config.go           # RouterConfig (struct-first model)
 │   │   ├── state.go            # OperationalState
 │   │   ├── validate.go         # Validation logic
-│   │   └── convert.go          # Legacy ↔ new model conversion
+│   │   └── convert.go          # Text config ↔ canonical model conversion
 │   ├── engine/                 # Config engine
 │   │   ├── engine.go           # 2-phase commit, atomic apply
 │   │   ├── diff.go             # Minimal diff computation
 │   │   └── plugin.go           # Southbound plugin interface
 │   ├── southbound/
 │   │   ├── vpp/plugin.go       # VPP plugin (govpp)
-│   │   └── frr/plugin.go       # FRR plugin (config gen + reload)
+│   │   └── frr/plugin.go       # FRR plugin (transactional/file apply)
 │   ├── northbound/
 │   │   └── grpc/               # gRPC server + client
 │   │       ├── server.go       # Session mgmt, config ops
@@ -403,7 +354,7 @@ arca-router/
 │   │   ├── store.go            # ConfigStore interface
 │   │   └── sqlite/sqlite.go    # SQLite backend
 │   └── auth/auth.go            # Auth/RBAC/audit wrapper
-├── pkg/                        # Legacy packages (v0.3.x, still used)
+├── pkg/                        # Reusable packages used by daemon and CLI
 │   ├── config/                 # Set-command parser
 │   ├── vpp/                    # VPP client interface
 │   ├── frr/                    # FRR config generator
@@ -428,6 +379,7 @@ arca-router/
 ## Documentation
 
 - [Documentation Index](docs/README.md) - All docs in one place
+- [Roadmap](ROADMAP.md) - Planned feature scope
 - [VPP Setup Guide for Debian](docs/vpp-setup-debian.md) - VPP installation for Debian
 - [VPP Setup Guide for RHEL9](docs/vpp-setup-rhel9.md) - VPP installation for RHEL9
 - [FRR Setup Guide for Debian](docs/frr-setup-debian.md) - FRR installation for Debian
@@ -456,7 +408,6 @@ Licensed under the Apache License 2.0. See [`LICENSE`](LICENSE).
 - **Community Support**: GitHub Issues - https://github.com/akam1o/arca-router/issues
 - **Support Policy**: See [`SUPPORT.md`](SUPPORT.md)
 - **Security**: See [`SECURITY.md`](SECURITY.md)
-- **Trademark**: See [`TRADEMARK.md`](TRADEMARK.md)
 
 ---
 

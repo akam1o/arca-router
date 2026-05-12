@@ -32,8 +32,8 @@ contents:
       group: root
 
   # CLI binary
-  - src: build/bin/arca-cli
-    dst: /usr/bin/arca-cli
+  - src: build/bin/arca
+    dst: /usr/bin/arca
     file_info:
       mode: 0755
       owner: root

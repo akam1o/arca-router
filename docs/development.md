@@ -77,12 +77,12 @@ git checkout -b feature/my-new-feature
 ### 2. Make Changes
 
 Edit code in your favorite editor. Key directories:
-- `cmd/arca-routerd-v2/` - Unified daemon (v0.5.x)
-- `cmd/arca-cli-v2/` - Thin gRPC CLI client (v0.5.x)
+- `cmd/arca-routerd/` - Unified daemon (v0.5.x)
+- `cmd/arca/` - Thin gRPC CLI client (v0.5.x)
 - `internal/` - v0.5.x core packages (model, engine, southbound, northbound, store, auth)
 - `api/v1/` - gRPC proto definitions
-- `cmd/` - Legacy applications (arca-routerd, arca-cli, arca-netconfd)
-- `pkg/` - Reusable packages (still used by both legacy and v2)
+- `cmd/` - Application entrypoints
+- `pkg/` - Reusable packages shared by the current daemon and CLI
 - `test/` - Integration tests
 - `examples/` - Configuration examples
 
@@ -108,18 +108,12 @@ make check
 # Build current v0.5.x unified daemon + CLI
 make build
 
-# Build v0.5.x unified daemon + CLI with explicit -v2 names
-make build-v2
-
 # Verify binaries
 ./build/bin/arca-routerd --version
-./build/bin/arca-cli --version
+./build/bin/arca --version
 
 # Build current CLI only
 make build-cli
-
-# Build v2 CLI only
-make build-v2-cli
 ```
 
 ### 5. Test Your Changes
@@ -148,16 +142,7 @@ make build
 
 This creates the current v0.5.x binaries in `build/bin/`:
 - `arca-routerd` - Unified daemon (VPP + FRR + NETCONF + gRPC)
-- `arca-cli` - Thin gRPC CLI client
-
-For explicit v2 binary names, run:
-```bash
-make build-v2
-```
-
-This creates:
-- `arca-routerd-v2` - Unified daemon (VPP + FRR + NETCONF + gRPC)
-- `arca-cli-v2` - Thin gRPC CLI client
+- `arca` - Thin gRPC CLI client
 
 ### Version Information
 
@@ -466,7 +451,7 @@ make rpm-verify
 Packages are configured via NFPM: [build/package/nfpm.yaml](../build/package/nfpm.yaml)
 
 **Package contents:**
-- Binaries: `/usr/sbin/arca-routerd`, `/usr/bin/arca-cli`
+- Binaries: `/usr/sbin/arca-routerd`, `/usr/bin/arca`
 - Systemd unit: `/usr/lib/systemd/system/arca-routerd.service`
 - Configuration: `/etc/arca-router/*.yaml.example`
 - Data directory: `/var/lib/arca-router/`

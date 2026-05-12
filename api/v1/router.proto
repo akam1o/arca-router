@@ -5,7 +5,7 @@ package arca.router.v1;
 option go_package = "github.com/akam1o/arca-router/api/v1;apiv1";
 
 // ConfigService provides configuration management operations.
-// This is the internal API used by arca-cli and the NETCONF subsystem
+// This is the internal API used by arca and the NETCONF subsystem
 // to interact with the arca-routerd engine.
 service ConfigService {
   // GetRunning returns the current running configuration.

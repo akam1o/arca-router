@@ -20,11 +20,6 @@ usermod -aG frrvty arca-router 2>/dev/null || echo "Warning: frrvty group not fo
 # Reload systemd to recognize new service
 systemctl daemon-reload >/dev/null 2>&1 || true
 
-# v0.5 runs NETCONF inside arca-routerd. Stop the legacy standalone service if
-# it exists from an older package so it does not contend for port 830.
-systemctl stop arca-netconfd >/dev/null 2>&1 || true
-systemctl disable arca-netconfd >/dev/null 2>&1 || true
-
 # Ensure directory permissions
 mkdir -p /var/lib/arca-router /var/log/arca-router
 chown arca-router:arca-router /var/lib/arca-router || true
@@ -91,7 +86,7 @@ if [ "$1" = "1" ]; then
     echo ""
     echo "3. Add CLI operator users to the arca-router group:"
     echo "   usermod -aG arca-router <admin-user>"
-    echo "   # log out and back in before running arca-cli as that user"
+    echo "   # log out and back in before running arca as that user"
     echo ""
     echo "4. Ensure VPP/FRR are running and FRR has mgmtd=yes:"
     echo "   grep '^mgmtd=yes' /etc/frr/daemons"
@@ -103,7 +98,7 @@ if [ "$1" = "1" ]; then
     echo ""
     echo "6. Check status:"
     echo "   systemctl status arca-routerd"
-    echo "   arca-cli show configuration"
+    echo "   arca show configuration"
     echo "=========================================="
 elif [ "$1" = "2" ]; then
     # Upgrade

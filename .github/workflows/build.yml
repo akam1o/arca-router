@@ -63,7 +63,7 @@ jobs:
     - name: Verify binaries
       run: |
         ./build/bin/arca-routerd --version
-        ./build/bin/arca-cli --version
+        ./build/bin/arca --version
 
     - name: Upload binaries
       uses: actions/upload-artifact@v4
@@ -71,7 +71,7 @@ jobs:
         name: binaries
         path: |
           build/bin/arca-routerd
-          build/bin/arca-cli
+          build/bin/arca
         retention-days: 30
 
   build-packages:

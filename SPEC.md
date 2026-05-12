@@ -1,27 +1,35 @@
-# arca-router Configuration Specification (v0.4.x)
+# arca-router Configuration Specification (v0.5.x)
 
 This document specifies the configuration syntax and semantics for arca-router.
+
+[日本語](SPEC.ja.md)
 
 ## Overview
 
 arca-router uses Junos-like configuration syntax via `set` commands. Configuration is managed through:
 
-1. **Unified Daemon (`arca-routerd`)**: Single process handling VPP, FRR, NETCONF, and gRPC API (v0.4.x)
-2. **Interactive CLI (`arca-cli`)**: Thin gRPC client for real-time configuration with commit/rollback (v0.4.x)
-3. **NETCONF/SSH**: Remote configuration via NETCONF protocol (RFC 6241), built into the daemon
-4. **File-based**: Static configuration files (`/etc/arca-router/arca-router.conf`) for initial bootstrap
+1. **Unified daemon (`arca-routerd`)**: Single process handling VPP, FRR, NETCONF, gRPC, Prometheus, and SNMP.
+2. **Interactive CLI (`arca`)**: Thin gRPC client for operational commands and candidate/running configuration workflow.
+3. **NETCONF/SSH**: Remote configuration via NETCONF protocol (RFC 6241), built into the daemon and backed by the same datastore/engine.
+4. **File bootstrap**: `/etc/arca-router/arca-router.conf` is used at startup only when the SQLite datastore has no running configuration.
 
-### v0.4.x Architecture
+### v0.5.x Architecture
 
-The v0.4.x release introduces a **unified daemon architecture**:
+The v0.5.x line is the current unified daemon path:
 
 - **Struct-first config model**: Configuration is represented as Go structs (`internal/model.RouterConfig`), not text. Text format is just one serialization.
-- **Diff-based engine**: The config engine (`internal/engine`) computes minimal diffs between old and new configs, applying only what changed.
+- **SQLite candidate/running datastore**: `/var/lib/arca-router/config.db` stores running config, candidate sessions, commit history, rollback metadata, locks, and audit events.
+- **Diff-based engine**: The config engine (`internal/engine`) computes minimal diffs between running and candidate configs, applying only what changed.
 - **Plugin-based southbound**: VPP and FRR are `engine.Plugin` implementations, each receiving only the relevant diff.
-- **gRPC internal API**: CLI communicates with the daemon via Unix socket gRPC (`api/v1/router.proto`).
+- **Transactional FRR apply**: The default `--frr-apply-mode=transactional` backend uses the FRR management candidate datastore through `vtysh` `mgmt commit check` / `mgmt commit apply`.
+- **Recovery FRR file backend**: `--frr-apply-mode=file` keeps the full-file reload path for recovery and compatibility.
+- **gRPC internal API**: `arca` communicates with the daemon via Unix socket gRPC (`api/v1/router.proto`, default `/run/arca-router/routerd.sock`).
 - **2-phase commit**: Validate all plugins → apply all plugins → rollback on any failure.
+- **Observability**: Optional Prometheus `/metrics`, `/healthz`, read-only SNMPv2c, and a packaged Grafana dashboard.
 
-> **Backward compatibility**: The `set` command syntax and NETCONF protocol remain identical. Only the internal architecture has changed.
+Only the current command names are part of this specification: `arca-routerd` and `arca`. Obsolete command entrypoints are not maintained.
+
+> **Compatibility note**: The `set` command syntax and NETCONF configuration model remain stable. Automatic migration tooling is intentionally not part of v0.5.x.
 
 ---
 
@@ -44,6 +52,12 @@ The v0.4.x release introduces a **unified daemon architecture**:
    - [Rate Limiting](#rate-limiting)
 8. [Configuration Workflow](#configuration-workflow)
 9. [Examples](#examples)
+10. [Runtime Options and Observability](#runtime-options-and-observability)
+11. [Operational Commands](#operational-commands)
+12. [Configuration Validation](#configuration-validation)
+13. [Troubleshooting](#troubleshooting)
+14. [References](#references)
+15. [Version History](#version-history)
 
 ---
 
@@ -471,7 +485,7 @@ set protocols bgp group external import PREFER-CUSTOMER
 
 ### NETCONF Server
 
-#### Enable NETCONF Server
+#### NETCONF Port
 
 **Syntax**:
 ```
@@ -486,7 +500,7 @@ set security netconf ssh port <port>
 set security netconf ssh port 830
 ```
 
-**Note**: NETCONF server is managed by `arca-netconfd` daemon (separate from `arca-routerd`).
+**Note**: The NETCONF server is built into `arca-routerd`. The runtime bind address is controlled by the daemon flag `--netconf-listen` (default `:830`); this configuration value is retained in the model and should match the deployed NETCONF port.
 
 ### User Management
 
@@ -569,11 +583,17 @@ set security rate-limit per-user 20
 
 ### File-based Configuration
 
-1. Edit `/etc/arca-router/arca-router.conf`
-2. Restart daemon: `sudo systemctl restart arca-routerd`
+The file at `/etc/arca-router/arca-router.conf` is a bootstrap source. On startup, `arca-routerd` first attempts to load the current running configuration from `/var/lib/arca-router/config.db`. If no running configuration exists, it parses the file, applies it through the engine, and persists it to the datastore.
+
+1. Edit `/etc/arca-router/arca-router.conf` before the first daemon start, or after intentionally clearing the datastore.
+2. Start or restart daemon: `sudo systemctl restart arca-routerd`
 3. Verify: `sudo journalctl -u arca-routerd -n 50`
 
+After the datastore is initialized, use `arca` or NETCONF for normal configuration changes.
+
 ### NETCONF Configuration
+
+NETCONF edits use the same candidate/running datastore and engine as `arca`.
 
 1. Connect via NETCONF client:
    ```bash
@@ -602,9 +622,11 @@ set security rate-limit per-user 20
 
 ### Interactive CLI Configuration
 
+`arca` talks to `arca-routerd` over the Unix socket gRPC API. The default socket is `/run/arca-router/routerd.sock`; use `arca -socket <path>` when the daemon is started with a custom `--grpc-socket`.
+
 1. Enter configuration mode:
    ```bash
-   arca-cli
+   arca
    > configure
    [edit]
    ```
@@ -624,8 +646,27 @@ set security rate-limit per-user 20
 
 4. View changes:
    ```bash
-   > show configuration changes
+   # show | compare
    ```
+
+Supported configuration mode commands:
+
+```
+set <config>              Add or modify configuration
+delete <config>           Delete configuration by prefix
+show                      Show candidate configuration
+show | compare            Show candidate vs running diff
+commit                    Commit candidate configuration
+commit check              Validate without committing
+commit and-quit           Commit and exit configuration mode
+commit comment <msg>      Commit with custom message
+rollback <N>              Roll back N commits
+discard-changes           Discard candidate changes
+show history [N]          Show commit history
+edit <path>               Enter a hierarchy path
+up                        Move up one hierarchy level
+top                       Return to the top hierarchy
+```
 
 ### Rollback Configuration
 
@@ -640,6 +681,8 @@ set security rate-limit per-user 20
 # rollback 1
 # commit
 ```
+
+`rollback 0` is equivalent to `discard-changes`. `rollback <N>` creates a new commit that restores the target commit from history.
 
 **File-based**:
 ```
@@ -753,29 +796,99 @@ set security rate-limit per-user 20
 
 ---
 
+## Runtime Options and Observability
+
+### arca-routerd Runtime Options
+
+The packaged service runs `/usr/sbin/arca-routerd`. The source build produces `build/bin/arca-routerd`.
+
+Common options:
+
+```
+--config <path>            Bootstrap config file (default: /etc/arca-router/arca-router.conf)
+--hardware <path>          Hardware mapping file (default: /etc/arca-router/hardware.yaml)
+--datastore <path>         SQLite datastore (default: /var/lib/arca-router/config.db)
+--grpc-socket <path>       Internal gRPC Unix socket (default: /run/arca-router/routerd.sock)
+--netconf-listen <addr>    NETCONF/SSH listen address (default: :830)
+--host-key <path>          NETCONF SSH host key path
+--user-db <path>           NETCONF user database path
+--frr-apply-mode <mode>    FRR backend: transactional or file (default: transactional)
+--metrics-listen <addr>    Prometheus listen address; disabled when empty
+--snmp-listen <addr>       SNMPv2c UDP listen address; disabled when empty
+--snmp-community <value>   SNMPv2c read-only community (default: public)
+--mock-vpp                 Use mock VPP client for tests
+```
+
+### FRR Apply Backend
+
+The default backend is `transactional`. It requires FRR `mgmtd=yes` in `/etc/frr/daemons` and `vtysh` access for the `arca-router` service user, typically through the `frrvty` group.
+
+The `file` backend writes a full FRR config and applies it with `frr-reload.py`. It is retained for recovery and compatibility; deployments that use it must grant the service user the additional permissions needed to write `/etc/frr/frr.conf`.
+
+### Prometheus and Health
+
+Start the metrics endpoint with:
+
+```bash
+arca-routerd --metrics-listen=:9090
+```
+
+Endpoints:
+
+- `GET /metrics`
+- `GET /healthz`
+
+The packaged Grafana dashboard is installed at:
+
+```
+/usr/share/arca-router/grafana/arca-routerd-dashboard.json
+```
+
+### SNMP
+
+Start the read-only SNMPv2c endpoint with:
+
+```bash
+arca-routerd --snmp-listen=:1161 --snmp-community=public
+```
+
+The packaged systemd unit grants `CAP_NET_BIND_SERVICE`, so the standard UDP port 161 can be used when configured:
+
+```bash
+arca-routerd --snmp-listen=:161 --snmp-community=<read-only-community>
+```
+
+SNMP is intended for monitoring only and should not be exposed on untrusted networks.
+
+---
+
 ## Operational Commands
 
-### Show Commands (arca-cli)
+### Show Commands (arca)
 
 ```
 # Interface status
-arca-cli show interfaces
+arca show interfaces
+arca show interfaces ge-0/0/0
 
 # Routing table
-arca-cli show route
+arca show route
+arca show route protocol bgp
 
 # BGP summary
-arca-cli show bgp summary
+arca show bgp summary
 
 # BGP neighbors
-arca-cli show bgp neighbor <ip>
+arca show bgp neighbor <ip>
 
 # OSPF neighbors
-arca-cli show ospf neighbor
+arca show ospf neighbor
 
 # Configuration
-arca-cli show configuration
+arca show configuration
 ```
+
+Interactive mode also supports `show history [N]` in configuration mode for commit history.
 
 ### Direct VPP Commands
 
@@ -823,7 +936,7 @@ show ip ospf neighbor
 
 ```
 # Interactive candidate validation
-arca-cli
+arca
 > configure
 [edit]
 # commit check
@@ -832,7 +945,13 @@ arca-cli
 ### Pre-deployment Checks
 
 ```
-# FRR configuration is generated/applied by arca-routerd; verify on the host using vtysh.
+# Validate local package metadata and service expectations
+make package-lint
+
+# Run the live FRR transactional apply smoke test on a host with FRR mgmtd enabled
+make frr-mgmtd-smoke
+
+# FRR configuration is generated/applied by arca-routerd; verify on the host using vtysh
 
 # Check BGP session status
 sudo vtysh -c "show ip bgp summary"
@@ -852,6 +971,16 @@ sudo systemctl status arca-routerd
 sudo journalctl -u arca-routerd -n 50
 ```
 
+### Check Datastore and Socket
+
+```
+# Running/candidate datastore
+sudo ls -l /var/lib/arca-router/config.db
+
+# Internal gRPC socket used by arca
+sudo ls -l /run/arca-router/routerd.sock
+```
+
 ### Check VPP Status
 
 ```
@@ -863,7 +992,19 @@ sudo vppctl show interface
 
 ```
 sudo systemctl status frr
+grep '^mgmtd=yes' /etc/frr/daemons
 sudo vtysh -c "show running-config"
+```
+
+### Check Observability Endpoints
+
+```
+# Prometheus and health, when --metrics-listen is enabled
+curl http://127.0.0.1:9090/healthz
+curl http://127.0.0.1:9090/metrics
+
+# SNMP, when --snmp-listen is enabled
+snmpget -v 2c -c public 127.0.0.1:1161 1.3.6.1.3.9950.1.3.0
 ```
 
 ### Verify Interface Mapping
@@ -883,16 +1024,34 @@ sudo vppctl show interface addr
 
 ## References
 
+- [Roadmap](ROADMAP.md)
+- [Changelog](CHANGELOG.md)
+- [Observability](docs/observability.md)
+- [Datastore Design](docs/datastore-design.md)
+- [Configuration Precedence Rules](docs/config-precedence.md)
 - [Policy Options Guide](docs/policy-options-guide.md)
 - [RBAC Guide](docs/rbac-guide.md)
 - [Security Model](docs/security-model.md)
 - [VPP Setup Guide](docs/vpp-setup-debian.md)
 - [FRR Setup Guide](docs/frr-setup-debian.md)
-- [NETCONF Implementation Plan](docs/netconf-implementation-plan.md)
 
 ---
 
 ## Version History
+
+- **v0.5.x**: Production hardening
+  - Current command names: `arca-routerd` and `arca`
+  - Generated gRPC API between daemon and CLI
+  - SQLite-backed candidate/running datastore with commit history
+  - FRR transactional apply through management candidate datastore
+  - Prometheus, health, SNMP, and Grafana observability
+  - Obsolete command entrypoints removed
+
+- **v0.4.x**: Unified architecture
+  - Single daemon for VPP, FRR, NETCONF, and gRPC
+  - Struct-first configuration model
+  - Diff-based apply engine and plugin southbound
+  - Thin gRPC CLI client
 
 - **v0.3.1** (2025-12-28): Complete specification
   - NETCONF/SSH subsystem

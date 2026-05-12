@@ -199,7 +199,7 @@ systemd `RuntimeDirectory`/`StateDirectory`により自動作成される。
 
 内部 gRPC ソケット `/run/arca-router/routerd.sock` は
 `arca-router:arca-router` の `0660` で作成される。root 以外で
-`arca-cli` を実行する運用ユーザーは `arca-router` グループに所属させる。
+`arca` を実行する運用ユーザーは `arca-router` グループに所属させる。
 
 ---
 
@@ -303,9 +303,9 @@ func (c *govppClient) Connect(ctx context.Context) error {
 |------|-----------|---------|
 | FRR設定適用 | `frrvty`グループ | 標準は `vtysh` の management commit、復旧用 `file` backend では `frr-reload.py` または `vtysh -f` |
 | FRR設定ファイル書き込み | `frr`グループ | 復旧用 `--frr-apply-mode=file` のみ `/etc/frr/frr.conf`へ直接書き込み（0660） |
-| FRR状態確認（arca-cli用） | `frrvty`グループ | `vtysh -c 'show running-config'` |
+| FRR状態確認（arca用） | `frrvty`グループ | `vtysh -c 'show running-config'` |
 
-**注**: v0.5以降の標準経路では、arca-routerd は FRR management candidate に変更を投入し、commit check/apply で適用する。`frrvty`グループはarca-cli（vtysh経由）とFRR設定適用時に必要。復旧・互換用途の `--frr-apply-mode=file` では従来通り `frr.conf` を直接書き込み、`frr-reload.py` で適用する。
+**注**: v0.5以降の標準経路では、arca-routerd は FRR management candidate に変更を投入し、commit check/apply で適用する。`frrvty`グループはarca（vtysh経由）とFRR設定適用時に必要。復旧・互換用途の `--frr-apply-mode=file` では従来通り `frr.conf` を直接書き込み、`frr-reload.py` で適用する。
 
 **権限確認フロー**:
 
@@ -493,7 +493,7 @@ echo "Groups: $(id arca-router)"
 **実装場所**:
 - `pkg/netconf/ssh_server.go` - SSH認証処理
 - `pkg/netconf/user_db.go` - ユーザー管理
-- `cmd/arca-netconfd/main.go` - NETCONFデーモン
+- `cmd/arca-routerd/main.go` - NETCONFを内蔵した統合デーモン
 
 ---
 
@@ -641,7 +641,7 @@ Environment="NETCONF_ADMIN_PASSWORD_FILE=/run/secrets/admin-password"
 echo "=== NETCONF Security Audit ==="
 
 # Check NETCONF service status
-echo "NETCONF Service: $(systemctl is-active arca-netconfd)"
+echo "NETCONF Service: $(systemctl is-active arca-routerd)"
 
 # Check user database permissions
 echo "User DB: $(ls -l /var/lib/arca-router/netconf.db)"
@@ -651,11 +651,11 @@ sqlite3 /var/lib/arca-router/netconf.db "SELECT username, role FROM users;"
 
 # Check audit logs
 echo "Recent authentication events:"
-journalctl -u arca-netconfd | grep "auth_success\|auth_failure" | tail -10
+journalctl -u arca-routerd | grep "auth_success\|auth_failure" | tail -10
 
 # Check RBAC denials
 echo "Recent RBAC denials:"
-journalctl -u arca-netconfd | grep "Access denied" | tail -10
+journalctl -u arca-routerd | grep "Access denied" | tail -10
 ```
 
 ---
@@ -669,7 +669,7 @@ journalctl -u arca-netconfd | grep "Access denied" | tail -10
 | RBAC bypass | Privilege escalation | Server-side enforcement, comprehensive unit tests |
 | Audit log tampering | Evidence destruction | Database permissions (root only), immutable logging |
 | NETCONF DoS attack | Service unavailability | Rate limiting, connection limits, timeout |
-| Privilege escalation via arca-netconfd | System compromise | Capabilities restriction, systemd sandboxing |
+| Privilege escalation via arca-routerd | System compromise | Capabilities restriction, systemd sandboxing |
 
 **追加対策 (Phase 4以降)**:
 - Multi-factor authentication (MFA)

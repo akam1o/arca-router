@@ -203,10 +203,10 @@ When a user attempts an operation they're not authorized for, they receive an RF
 
 ```bash
 # Create read-only user
-arca-cli user create monitor --role read-only
+arca user create monitor --role read-only
 
 # Add public key for automated access
-arca-cli user add-key monitor ~/.ssh/monitor_key.pub
+arca user add-key monitor ~/.ssh/monitor_key.pub
 
 # Monitoring system can now:
 # - Retrieve configuration (get-config)
@@ -223,7 +223,7 @@ arca-cli user add-key monitor ~/.ssh/monitor_key.pub
 
 ```bash
 # Create operator user
-arca-cli user create cicd --role operator
+arca user create cicd --role operator
 
 # CI/CD pipeline can:
 # - Lock datastore
@@ -241,7 +241,7 @@ arca-cli user create cicd --role operator
 
 ```bash
 # Create admin user
-arca-cli user create emergency-admin --role admin
+arca user create emergency-admin --role admin
 
 # Admin can:
 # - Perform all operator operations
@@ -337,7 +337,7 @@ netconf-console --host 192.168.1.1 --user cicd --password xxx \
 ### Problem: User Can't Perform Expected Operation
 
 **Diagnosis:**
-1. Check user's role: `arca-cli user get <username>`
+1. Check user's role: `arca user get <username>`
 2. Verify role has permission for operation (see Permission Matrix above)
 3. Check NETCONF error response for `error-app-tag="rbac-deny"`
 
