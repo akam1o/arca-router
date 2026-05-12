@@ -222,6 +222,42 @@ func (c *Client) GetBGPNeighbors(ctx context.Context) ([]BGPNeighborInfo, error)
 	return resp.Neighbors, nil
 }
 
+// GetRouteText returns FRR routing table output.
+func (c *Client) GetRouteText(ctx context.Context, protoFilter string) (string, error) {
+	var resp getRouteTextResponse
+	if err := c.invoke(ctx, "/"+stateServiceName+"/GetRouteText", &getRouteTextRequest{ProtoFilter: protoFilter}, &resp); err != nil {
+		return "", err
+	}
+	return resp.Output, nil
+}
+
+// GetBGPSummaryText returns FRR BGP summary output.
+func (c *Client) GetBGPSummaryText(ctx context.Context) (string, error) {
+	var resp getBGPSummaryTextResponse
+	if err := c.invoke(ctx, "/"+stateServiceName+"/GetBGPSummaryText", &getBGPSummaryTextRequest{}, &resp); err != nil {
+		return "", err
+	}
+	return resp.Output, nil
+}
+
+// GetBGPNeighborText returns FRR BGP neighbor detail output.
+func (c *Client) GetBGPNeighborText(ctx context.Context, peerAddress string) (string, error) {
+	var resp getBGPNeighborTextResponse
+	if err := c.invoke(ctx, "/"+stateServiceName+"/GetBGPNeighborText", &getBGPNeighborTextRequest{PeerAddress: peerAddress}, &resp); err != nil {
+		return "", err
+	}
+	return resp.Output, nil
+}
+
+// GetOSPFNeighborsText returns FRR OSPF neighbor output.
+func (c *Client) GetOSPFNeighborsText(ctx context.Context) (string, error) {
+	var resp getOSPFNeighborsTextResponse
+	if err := c.invoke(ctx, "/"+stateServiceName+"/GetOSPFNeighborsText", &getOSPFNeighborsTextRequest{}, &resp); err != nil {
+		return "", err
+	}
+	return resp.Output, nil
+}
+
 // GetSystemInfo returns system information.
 func (c *Client) GetSystemInfo(ctx context.Context) (*SystemInfo, error) {
 	var resp getSystemInfoResponse

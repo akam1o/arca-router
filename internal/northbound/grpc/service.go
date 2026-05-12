@@ -35,6 +35,10 @@ type stateServiceServer interface {
 	GetInterfaces(context.Context, string) ([]InterfaceInfo, error)
 	GetRoutes(context.Context, string, string) ([]RouteInfo, error)
 	GetBGPNeighbors(context.Context) ([]BGPNeighborInfo, error)
+	GetRouteText(context.Context, string) (string, error)
+	GetBGPSummaryText(context.Context) (string, error)
+	GetBGPNeighborText(context.Context, string) (string, error)
+	GetOSPFNeighborsText(context.Context) (string, error)
 	GetSystemInfo(context.Context) (*SystemInfo, error)
 }
 
@@ -77,6 +81,10 @@ func registerStateServiceServer(s *googlegrpc.Server, srv stateServiceServer) {
 			{MethodName: "GetInterfaces", Handler: stateGetInterfacesHandler},
 			{MethodName: "GetRoutes", Handler: stateGetRoutesHandler},
 			{MethodName: "GetBGPNeighbors", Handler: stateGetBGPNeighborsHandler},
+			{MethodName: "GetRouteText", Handler: stateGetRouteTextHandler},
+			{MethodName: "GetBGPSummaryText", Handler: stateGetBGPSummaryTextHandler},
+			{MethodName: "GetBGPNeighborText", Handler: stateGetBGPNeighborTextHandler},
+			{MethodName: "GetOSPFNeighborsText", Handler: stateGetOSPFNeighborsTextHandler},
 			{MethodName: "GetSystemInfo", Handler: stateGetSystemInfoHandler},
 		},
 	}, srv)
@@ -226,6 +234,38 @@ func stateGetBGPNeighborsHandler(srv interface{}, ctx context.Context, dec func(
 		func(ctx context.Context, _ *getBGPNeighborsRequest) (interface{}, error) {
 			neighbors, err := srv.(stateServiceServer).GetBGPNeighbors(ctx)
 			return &getBGPNeighborsResponse{Neighbors: neighbors}, err
+		})
+}
+
+func stateGetRouteTextHandler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor googlegrpc.UnaryServerInterceptor) (interface{}, error) {
+	return unaryHandler[getRouteTextRequest](srv, ctx, dec, interceptor, "/"+stateServiceName+"/GetRouteText",
+		func(ctx context.Context, req *getRouteTextRequest) (interface{}, error) {
+			output, err := srv.(stateServiceServer).GetRouteText(ctx, req.ProtoFilter)
+			return &getRouteTextResponse{Output: output}, err
+		})
+}
+
+func stateGetBGPSummaryTextHandler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor googlegrpc.UnaryServerInterceptor) (interface{}, error) {
+	return unaryHandler[getBGPSummaryTextRequest](srv, ctx, dec, interceptor, "/"+stateServiceName+"/GetBGPSummaryText",
+		func(ctx context.Context, _ *getBGPSummaryTextRequest) (interface{}, error) {
+			output, err := srv.(stateServiceServer).GetBGPSummaryText(ctx)
+			return &getBGPSummaryTextResponse{Output: output}, err
+		})
+}
+
+func stateGetBGPNeighborTextHandler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor googlegrpc.UnaryServerInterceptor) (interface{}, error) {
+	return unaryHandler[getBGPNeighborTextRequest](srv, ctx, dec, interceptor, "/"+stateServiceName+"/GetBGPNeighborText",
+		func(ctx context.Context, req *getBGPNeighborTextRequest) (interface{}, error) {
+			output, err := srv.(stateServiceServer).GetBGPNeighborText(ctx, req.PeerAddress)
+			return &getBGPNeighborTextResponse{Output: output}, err
+		})
+}
+
+func stateGetOSPFNeighborsTextHandler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor googlegrpc.UnaryServerInterceptor) (interface{}, error) {
+	return unaryHandler[getOSPFNeighborsTextRequest](srv, ctx, dec, interceptor, "/"+stateServiceName+"/GetOSPFNeighborsText",
+		func(ctx context.Context, _ *getOSPFNeighborsTextRequest) (interface{}, error) {
+			output, err := srv.(stateServiceServer).GetOSPFNeighborsText(ctx)
+			return &getOSPFNeighborsTextResponse{Output: output}, err
 		})
 }
 

@@ -3,10 +3,13 @@
 package grpc
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"log/slog"
 	"net"
+	"net/netip"
+	"os/exec"
 	"sort"
 	"strings"
 	"sync"
@@ -17,6 +20,7 @@ import (
 	"github.com/akam1o/arca-router/internal/store"
 	"github.com/akam1o/arca-router/pkg/cli"
 	pkgconfig "github.com/akam1o/arca-router/pkg/config"
+	pkgvpp "github.com/akam1o/arca-router/pkg/vpp"
 	"github.com/google/uuid"
 	googlegrpc "google.golang.org/grpc"
 )
@@ -30,6 +34,13 @@ type Server struct {
 	log      *slog.Logger
 	server   *googlegrpc.Server
 }
+
+var (
+	newOperationalVPPClient = func() pkgvpp.Client {
+		return pkgvpp.NewGovppClient()
+	}
+	runOperationalVtyshCommand = runVtyshCommandReal
+)
 
 // NewServer creates a new gRPC server.
 func NewServer(eng *engine.Engine, st store.ConfigStore, log *slog.Logger) *Server {
@@ -412,7 +423,40 @@ func (s *Server) ReleaseLock(ctx context.Context, sessionID string) error {
 
 // GetInterfaces returns interface operational state.
 func (s *Server) GetInterfaces(ctx context.Context, nameFilter string) ([]InterfaceInfo, error) {
-	return nil, unsupportedOperationalStateError("interface state")
+	client := newOperationalVPPClient()
+	if err := client.Connect(ctx); err != nil {
+		return nil, fmt.Errorf("connect to VPP: %w", err)
+	}
+	defer func() {
+		if err := client.Close(); err != nil {
+			s.log.Debug("failed to close VPP client", slog.Any("error", err))
+		}
+	}()
+
+	ifaces, err := client.ListInterfaces(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("list VPP interfaces: %w", err)
+	}
+
+	out := make([]InterfaceInfo, 0, len(ifaces))
+	for _, iface := range ifaces {
+		if iface == nil {
+			continue
+		}
+		if nameFilter != "" && iface.Name != nameFilter {
+			continue
+		}
+		out = append(out, InterfaceInfo{
+			Name:        iface.Name,
+			AdminStatus: upDown(iface.AdminUp),
+			OperStatus:  upDown(iface.LinkUp),
+			MAC:         iface.MAC.String(),
+		})
+	}
+	sort.Slice(out, func(i, j int) bool {
+		return out[i].Name < out[j].Name
+	})
+	return out, nil
 }
 
 // GetRoutes returns routing table entries.
@@ -423,6 +467,36 @@ func (s *Server) GetRoutes(ctx context.Context, prefixFilter, protoFilter string
 // GetBGPNeighbors returns BGP neighbor state.
 func (s *Server) GetBGPNeighbors(ctx context.Context) ([]BGPNeighborInfo, error) {
 	return nil, unsupportedOperationalStateError("BGP neighbor state")
+}
+
+// GetRouteText returns FRR routing table output.
+func (s *Server) GetRouteText(ctx context.Context, protoFilter string) (string, error) {
+	command := "show ip route"
+	if protoFilter != "" {
+		if !validRouteProtocols[protoFilter] {
+			return "", fmt.Errorf("invalid route protocol %q", protoFilter)
+		}
+		command += " " + protoFilter
+	}
+	return runOperationalVtyshCommand(ctx, command)
+}
+
+// GetBGPSummaryText returns FRR BGP summary output.
+func (s *Server) GetBGPSummaryText(ctx context.Context) (string, error) {
+	return runOperationalVtyshCommand(ctx, "show bgp summary")
+}
+
+// GetBGPNeighborText returns FRR BGP neighbor detail output.
+func (s *Server) GetBGPNeighborText(ctx context.Context, peerAddress string) (string, error) {
+	if _, err := netip.ParseAddr(peerAddress); err != nil {
+		return "", fmt.Errorf("invalid BGP neighbor address %q", peerAddress)
+	}
+	return runOperationalVtyshCommand(ctx, "show bgp neighbor "+peerAddress)
+}
+
+// GetOSPFNeighborsText returns FRR OSPF neighbor output.
+func (s *Server) GetOSPFNeighborsText(ctx context.Context) (string, error) {
+	return runOperationalVtyshCommand(ctx, "show ip ospf neighbor")
 }
 
 // GetSystemInfo returns basic system information.
@@ -437,6 +511,52 @@ func (s *Server) GetSystemInfo(ctx context.Context) (*SystemInfo, error) {
 
 func unsupportedOperationalStateError(name string) error {
 	return fmt.Errorf("%s is not available via gRPC yet; use VPP/FRR tools directly or NETCONF <get> for configuration-derived state", name)
+}
+
+var validRouteProtocols = map[string]bool{
+	"bgp":       true,
+	"ospf":      true,
+	"static":    true,
+	"connected": true,
+	"kernel":    true,
+}
+
+func upDown(up bool) string {
+	if up {
+		return "up"
+	}
+	return "down"
+}
+
+func runVtyshCommandReal(ctx context.Context, command string) (string, error) {
+	path, err := exec.LookPath("vtysh")
+	if err != nil {
+		return "", fmt.Errorf("vtysh not found in PATH: %w", err)
+	}
+
+	cmdCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+
+	cmd := exec.CommandContext(cmdCtx, path, "-c", command)
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+
+	if err := cmd.Run(); err != nil {
+		detail := strings.TrimSpace(stderr.String())
+		if cmdCtx.Err() == context.DeadlineExceeded {
+			if detail != "" {
+				return "", fmt.Errorf("vtysh command timed out: %s", detail)
+			}
+			return "", fmt.Errorf("vtysh command timed out")
+		}
+		if detail != "" {
+			return stdout.String(), fmt.Errorf("vtysh command %q failed: %w: %s", command, err, detail)
+		}
+		return stdout.String(), fmt.Errorf("vtysh command %q failed: %w", command, err)
+	}
+
+	return stdout.String(), nil
 }
 
 func (s *Server) runningText() (string, uint64, error) {

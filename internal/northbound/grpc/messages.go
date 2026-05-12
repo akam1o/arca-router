@@ -126,6 +126,34 @@ type getBGPNeighborsResponse struct {
 	Neighbors []BGPNeighborInfo `json:"neighbors"`
 }
 
+type getRouteTextRequest struct {
+	ProtoFilter string `json:"protocol_filter"`
+}
+
+type getRouteTextResponse struct {
+	Output string `json:"output"`
+}
+
+type getBGPSummaryTextRequest struct{}
+
+type getBGPSummaryTextResponse struct {
+	Output string `json:"output"`
+}
+
+type getBGPNeighborTextRequest struct {
+	PeerAddress string `json:"peer_address"`
+}
+
+type getBGPNeighborTextResponse struct {
+	Output string `json:"output"`
+}
+
+type getOSPFNeighborsTextRequest struct{}
+
+type getOSPFNeighborsTextResponse struct {
+	Output string `json:"output"`
+}
+
 type getSystemInfoRequest struct{}
 
 type getSystemInfoResponse struct {

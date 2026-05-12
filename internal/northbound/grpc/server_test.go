@@ -15,6 +15,7 @@ import (
 	"github.com/akam1o/arca-router/internal/model"
 	"github.com/akam1o/arca-router/internal/store"
 	pkgconfig "github.com/akam1o/arca-router/pkg/config"
+	pkgvpp "github.com/akam1o/arca-router/pkg/vpp"
 )
 
 func testLogger() *slog.Logger {
@@ -181,18 +182,68 @@ func TestClientServerConfigFlow(t *testing.T) {
 	}
 }
 
-func TestOperationalStateEndpointsRejectUnsupportedState(t *testing.T) {
+func TestOperationalStateEndpointsReadVPPAndFRR(t *testing.T) {
 	srv := NewServer(engine.NewEngine(nil, testLogger()), &fakeStore{}, testLogger())
 	ctx := context.Background()
 
-	if _, err := srv.GetInterfaces(ctx, ""); err == nil || !strings.Contains(err.Error(), "not available via gRPC yet") {
-		t.Fatalf("GetInterfaces() error = %v, want unsupported operational state", err)
+	vppClient := pkgvpp.NewMockClient()
+	if err := vppClient.Connect(ctx); err != nil {
+		t.Fatalf("mock VPP Connect() error = %v", err)
 	}
-	if _, err := srv.GetRoutes(ctx, "", ""); err == nil || !strings.Contains(err.Error(), "not available via gRPC yet") {
-		t.Fatalf("GetRoutes() error = %v, want unsupported operational state", err)
+	iface, err := vppClient.CreateInterface(ctx, &pkgvpp.CreateInterfaceRequest{Type: pkgvpp.InterfaceTypeTap})
+	if err != nil {
+		t.Fatalf("mock VPP CreateInterface() error = %v", err)
 	}
-	if _, err := srv.GetBGPNeighbors(ctx); err == nil || !strings.Contains(err.Error(), "not available via gRPC yet") {
-		t.Fatalf("GetBGPNeighbors() error = %v, want unsupported operational state", err)
+	if err := vppClient.SetInterfaceUp(ctx, iface.SwIfIndex); err != nil {
+		t.Fatalf("mock VPP SetInterfaceUp() error = %v", err)
+	}
+	if err := vppClient.Close(); err != nil {
+		t.Fatalf("mock VPP Close() error = %v", err)
+	}
+
+	oldVPPClient := newOperationalVPPClient
+	newOperationalVPPClient = func() pkgvpp.Client { return vppClient }
+	t.Cleanup(func() { newOperationalVPPClient = oldVPPClient })
+
+	ifaces, err := srv.GetInterfaces(ctx, "")
+	if err != nil {
+		t.Fatalf("GetInterfaces() error = %v", err)
+	}
+	if len(ifaces) != 1 {
+		t.Fatalf("GetInterfaces() returned %d interfaces, want 1", len(ifaces))
+	}
+	if ifaces[0].Name != iface.Name || ifaces[0].AdminStatus != "up" || ifaces[0].OperStatus != "up" {
+		t.Fatalf("GetInterfaces()[0] = %#v, want operational VPP state", ifaces[0])
+	}
+
+	var commands []string
+	oldVtysh := runOperationalVtyshCommand
+	runOperationalVtyshCommand = func(ctx context.Context, command string) (string, error) {
+		commands = append(commands, command)
+		return command + "\n", nil
+	}
+	t.Cleanup(func() { runOperationalVtyshCommand = oldVtysh })
+
+	if output, err := srv.GetRouteText(ctx, "ospf"); err != nil || output != "show ip route ospf\n" {
+		t.Fatalf("GetRouteText() = %q, %v", output, err)
+	}
+	if output, err := srv.GetBGPSummaryText(ctx); err != nil || output != "show bgp summary\n" {
+		t.Fatalf("GetBGPSummaryText() = %q, %v", output, err)
+	}
+	if output, err := srv.GetBGPNeighborText(ctx, "192.0.2.1"); err != nil || output != "show bgp neighbor 192.0.2.1\n" {
+		t.Fatalf("GetBGPNeighborText() = %q, %v", output, err)
+	}
+	if output, err := srv.GetOSPFNeighborsText(ctx); err != nil || output != "show ip ospf neighbor\n" {
+		t.Fatalf("GetOSPFNeighborsText() = %q, %v", output, err)
+	}
+	if len(commands) != 4 {
+		t.Fatalf("vtysh commands = %v, want 4 commands", commands)
+	}
+	if _, err := srv.GetRouteText(ctx, "rip"); err == nil || !strings.Contains(err.Error(), "invalid route protocol") {
+		t.Fatalf("GetRouteText(invalid) error = %v, want invalid protocol", err)
+	}
+	if _, err := srv.GetBGPNeighborText(ctx, "not-an-address"); err == nil || !strings.Contains(err.Error(), "invalid BGP neighbor address") {
+		t.Fatalf("GetBGPNeighborText(invalid) error = %v, want invalid peer address", err)
 	}
 }
 
