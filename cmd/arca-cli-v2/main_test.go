@@ -22,6 +22,7 @@ type fakeInteractiveClient struct {
 	listHistoryCalls int
 	rollbackCalls    int
 	validateCalls    int
+	editTexts        []string
 }
 
 func (f *fakeInteractiveClient) GetRunning(ctx context.Context) (string, uint64, error) {
@@ -33,6 +34,7 @@ func (f *fakeInteractiveClient) GetCandidate(ctx context.Context, sessionID stri
 }
 
 func (f *fakeInteractiveClient) EditCandidate(ctx context.Context, sessionID, configText string) error {
+	f.editTexts = append(f.editTexts, configText)
 	return nil
 }
 
@@ -197,6 +199,29 @@ func TestCommitAndQuitKeepsConfigurationModeOnReleaseFailure(t *testing.T) {
 	}
 	if sh.mode != modeConfiguration || !sh.hasLock || len(sh.editPath) == 0 {
 		t.Fatal("configuration state changed after commit and-quit release failure")
+	}
+}
+
+func TestCmdSetQuotesValuesWithSpaces(t *testing.T) {
+	ctx := context.Background()
+	client := &fakeInteractiveClient{}
+	sh := &interactiveShell{
+		client:    client,
+		hostname:  "router",
+		mode:      modeConfiguration,
+		sessionID: "session-1",
+		hasLock:   true,
+	}
+
+	if err := sh.processCommand(ctx, `set interfaces ge-0/0/0 description "WAN Uplink"`); err != nil {
+		t.Fatalf("processCommand() error = %v", err)
+	}
+	if len(client.editTexts) != 1 {
+		t.Fatalf("EditCandidate calls = %d, want 1", len(client.editTexts))
+	}
+	want := `set interfaces ge-0/0/0 description "WAN Uplink"`
+	if got := client.editTexts[0]; got != want {
+		t.Fatalf("EditCandidate config = %q, want %q", got, want)
 	}
 }
 
