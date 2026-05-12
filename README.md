@@ -13,7 +13,7 @@ arca-router is a software router with Junos-compatible configuration syntax, pow
 
 ## Status
 
-arca-router is currently in the v0.5.x production hardening phase. This README
+arca-router is currently in the v0.6.x advanced features phase. This README
 describes the current unified daemon path; detailed release history is kept in
 [`CHANGELOG.md`](CHANGELOG.md), and future scope is tracked in
 [`ROADMAP.md`](ROADMAP.md).
@@ -24,7 +24,8 @@ Current capabilities:
 - Junos-like `set` configuration syntax with a thin `arca` client
 - Struct-first configuration model with diff-based 2-phase commit and rollback
 - FRR transactional apply through the management candidate datastore
-- Prometheus, health, SNMP, and Grafana observability assets
+- v0.6 config foundations for clustering, VRRP, MPLS, routing instances, and QoS
+- Prometheus, health, SNMP, Web UI, and Grafana observability assets
 - SQLite-backed candidate/running datastore with commit history
 
 ---
@@ -50,7 +51,7 @@ Current capabilities:
 
 ---
 
-## Quick Start (v0.5.x)
+## Quick Start (v0.6.x)
 
 Requires VPP 24.10+ and FRR 8.0+.
 

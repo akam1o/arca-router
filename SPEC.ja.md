@@ -1,4 +1,4 @@
-# arca-router 設定仕様（v0.5.x）
+# arca-router 設定仕様（v0.6.x）
 
 このドキュメントは arca-router の設定構文とセマンティクスを定義します。
 
@@ -8,14 +8,14 @@
 
 arca-router は Junos 風の `set` コマンド構文を採用しています。設定は以下の方法で管理します。
 
-1. **統合デーモン (`arca-routerd`)**: VPP、FRR、NETCONF、gRPC、Prometheus、SNMP を単一プロセスで処理
+1. **統合デーモン (`arca-routerd`)**: VPP、FRR、NETCONF、gRPC、Prometheus、Web UI、SNMP を単一プロセスで処理
 2. **対話型 CLI (`arca`)**: gRPC シンクライアントによる運用コマンドと candidate/running 設定ワークフロー
 3. **NETCONF/SSH**: NETCONF（RFC 6241）によるリモート設定。デーモンに内蔵され、同じ datastore/engine を利用
 4. **ファイルブートストラップ**: SQLite datastore に running 設定がない場合のみ、起動時に `/etc/arca-router/arca-router.conf` を読み込み
 
-### v0.5.x アーキテクチャ
+### v0.6.x アーキテクチャ
 
-v0.5.x は現在の統合デーモン経路です：
+v0.6.x は統合デーモン経路を advanced features 向けに拡張します：
 
 - **構造体ファースト設定モデル**: 設定は Go 構造体（`internal/model.RouterConfig`）で表現。テキストはシリアライズの一形式。
 - **SQLite candidate/running datastore**: `/var/lib/arca-router/config.db` に running 設定、candidate session、commit 履歴、rollback メタデータ、lock、audit event を保存。
@@ -25,11 +25,12 @@ v0.5.x は現在の統合デーモン経路です：
 - **復旧用 FRR file backend**: `--frr-apply-mode=file` は復旧・互換用途の full-file reload 経路として保持。
 - **gRPC 内部 API**: `arca` は Unix ソケット gRPC（`api/v1/router.proto`、デフォルト `/run/arca-router/routerd.sock`）経由でデーモンと通信。
 - **2 フェーズコミット**: 全プラグイン検証 → 全プラグイン適用 → 障害時ロールバック。
-- **Observability**: 任意で Prometheus `/metrics`、`/healthz`、read-only SNMPv2c、パッケージ同梱 Grafana dashboard を提供。
+- **Advanced configuration model**: clustering、MPLS、VRRP、routing instances、class of service、Web UI service settings を構造体ファースト model と diff engine で扱います。
+- **Observability**: 任意で Prometheus `/metrics`、`/healthz`、read-only Web UI、read-only SNMPv2c、パッケージ同梱 Grafana dashboard を提供。
 
 この仕様で扱うコマンド名は `arca-routerd` と `arca` のみです。廃止済みの command entrypoint はメンテナンス対象外です。
 
-> **互換性メモ**: `set` コマンド構文と NETCONF 設定モデルは維持します。自動移行ツールは v0.5.x の対象外です。
+> **互換性メモ**: `set` コマンド構文と NETCONF 設定モデルは維持します。自動移行ツールは v0.6.x の対象外です。
 
 ---
 
@@ -46,18 +47,19 @@ v0.5.x は現在の統合デーモン経路です：
 6. [Policy Options](#policy-options)
    - [Prefix Lists](#prefix-lists)
    - [Policy Statements](#policy-statements)
-7. [セキュリティ](#security)
+7. [Advanced v0.6 Configuration](#advanced-v06-configuration)
+8. [セキュリティ](#security)
    - [NETCONF サーバ](#netconf-server)
    - [ユーザ管理](#user-management)
    - [レート制限](#rate-limiting)
-8. [設定ワークフロー](#configuration-workflow)
-9. [例](#examples)
-10. [実行時オプションと Observability](#runtime-options-and-observability)
-11. [運用コマンド](#operational-commands)
-12. [設定の妥当性確認](#configuration-validation)
-13. [トラブルシューティング](#troubleshooting)
-14. [参照](#references)
-15. [バージョン履歴](#version-history)
+9. [設定ワークフロー](#configuration-workflow)
+10. [例](#examples)
+11. [実行時オプションと Observability](#runtime-options-and-observability)
+12. [運用コマンド](#operational-commands)
+13. [設定の妥当性確認](#configuration-validation)
+14. [トラブルシューティング](#troubleshooting)
+15. [参照](#references)
+16. [バージョン履歴](#version-history)
 
 ---
 
@@ -492,6 +494,63 @@ set protocols bgp group external import PREFER-CUSTOMER
 
 ---
 
+<a id="advanced-v06-configuration"></a>
+## Advanced v0.6 Configuration
+
+以下の hierarchy は v0.6 の management-plane model です。parser、serializer、validation、clone、conversion、diff、candidate command replacement は実装済みです。data-plane HA、MPLS forwarding、L3VPN plumbing、QoS enforcement の southbound 適用は段階的に実装します。
+
+### Web UI service
+
+```
+set system services web-ui enabled true
+set system services web-ui listen-address 127.0.0.1
+set system services web-ui port 8080
+```
+
+`listen-address` は IP address または `localhost` を指定します。port を明示せずに有効化した場合、daemon は `8080` を使用します。
+
+### Multi-chassis and VRRP
+
+```
+set chassis cluster enabled true
+set chassis cluster node node0 address 192.0.2.10
+set chassis cluster node node0 priority 120
+set chassis cluster sync etcd endpoint http://127.0.0.1:2379
+
+set protocols vrrp group 10 interface ge-0/0/0
+set protocols vrrp group 10 virtual-address 192.0.2.1
+set protocols vrrp group 10 priority 110
+set protocols vrrp group 10 preempt
+```
+
+VRRP group priority は `0` から `255` の範囲です。default 動作にする場合は省略します。
+
+### MPLS and Routing Instances
+
+```
+set protocols mpls interface ge-0/0/0
+
+set routing-instances BLUE instance-type vrf
+set routing-instances BLUE route-distinguisher 65000:100
+set routing-instances BLUE vrf-target target:65000:100
+set routing-instances BLUE interface ge-0/0/1
+```
+
+v0.6 では `instance-type vrf` のみ受け付けます。route distinguisher は `<asn>:<number>`、VRF target は `target:<asn>:<number>` 形式です。
+
+### Class of Service
+
+```
+set class-of-service forwarding-class expedited-forwarding queue 5
+set class-of-service traffic-control-profile WAN shaping-rate 1000000000
+set class-of-service traffic-control-profile WAN scheduler-map WAN-SCHED
+set class-of-service interfaces ge-0/0/0 output-traffic-control-profile WAN
+```
+
+Forwarding class queue は `0` から `7` の範囲です。interface binding では既存の traffic-control profile を参照する必要があります。
+
+---
+
 <a id="security"></a>
 ## セキュリティ
 
@@ -832,6 +891,7 @@ set security rate-limit per-user 20
 --user-db <path>           NETCONF user database path
 --frr-apply-mode <mode>    FRR backend: transactional または file（デフォルト: transactional）
 --metrics-listen <addr>    Prometheus listen address。空の場合は無効
+--web-listen <addr>        Web UI listen address。system services web-ui config より優先
 --snmp-listen <addr>       SNMPv2c UDP listen address。空の場合は無効
 --snmp-community <value>   SNMPv2c read-only community（デフォルト: public）
 --mock-vpp                 test 用の mock VPP client を使用
@@ -861,6 +921,27 @@ Endpoints:
 ```
 /usr/share/arca-router/grafana/arca-routerd-dashboard.json
 ```
+
+### Web UI
+
+read-only Web UI は次のように起動します。
+
+```bash
+arca-routerd --web-listen=127.0.0.1:8080
+```
+
+設定からも有効化できます。
+
+```
+set system services web-ui enabled true
+set system services web-ui listen-address 127.0.0.1
+set system services web-ui port 8080
+```
+
+Endpoints:
+
+- `GET /`
+- `GET /api/status`
 
 ### SNMP
 
@@ -1022,6 +1103,9 @@ sudo vtysh -c "show running-config"
 curl http://127.0.0.1:9090/healthz
 curl http://127.0.0.1:9090/metrics
 
+# --web-listen または system services web-ui 有効時の Web UI
+curl http://127.0.0.1:8080/api/status
+
 # --snmp-listen 有効時の SNMP
 snmpget -v 2c -c public 127.0.0.1:1161 1.3.6.1.3.9950.1.3.0
 ```
@@ -1057,6 +1141,11 @@ sudo vppctl show interface addr
 ---
 
 ## バージョン履歴
+
+- **v0.6.x**: Advanced feature foundations
+  - clustering、MPLS、VRRP、routing instances、class of service、Web UI の management-plane config model
+  - read-only Web UI dashboard と JSON status endpoint
+  - v0.6 config diff と candidate replacement coverage
 
 - **v0.5.x**: Production hardening
   - 現行コマンド名は `arca-routerd` と `arca`

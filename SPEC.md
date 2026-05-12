@@ -1,4 +1,4 @@
-# arca-router Configuration Specification (v0.5.x)
+# arca-router Configuration Specification (v0.6.x)
 
 This document specifies the configuration syntax and semantics for arca-router.
 
@@ -8,14 +8,14 @@ This document specifies the configuration syntax and semantics for arca-router.
 
 arca-router uses Junos-like configuration syntax via `set` commands. Configuration is managed through:
 
-1. **Unified daemon (`arca-routerd`)**: Single process handling VPP, FRR, NETCONF, gRPC, Prometheus, and SNMP.
+1. **Unified daemon (`arca-routerd`)**: Single process handling VPP, FRR, NETCONF, gRPC, Prometheus, Web UI, and SNMP.
 2. **Interactive CLI (`arca`)**: Thin gRPC client for operational commands and candidate/running configuration workflow.
 3. **NETCONF/SSH**: Remote configuration via NETCONF protocol (RFC 6241), built into the daemon and backed by the same datastore/engine.
 4. **File bootstrap**: `/etc/arca-router/arca-router.conf` is used at startup only when the SQLite datastore has no running configuration.
 
-### v0.5.x Architecture
+### v0.6.x Architecture
 
-The v0.5.x line is the current unified daemon path:
+The v0.6.x line extends the unified daemon path:
 
 - **Struct-first config model**: Configuration is represented as Go structs (`internal/model.RouterConfig`), not text. Text format is just one serialization.
 - **SQLite candidate/running datastore**: `/var/lib/arca-router/config.db` stores running config, candidate sessions, commit history, rollback metadata, locks, and audit events.
@@ -25,11 +25,12 @@ The v0.5.x line is the current unified daemon path:
 - **Recovery FRR file backend**: `--frr-apply-mode=file` keeps the full-file reload path for recovery and compatibility.
 - **gRPC internal API**: `arca` communicates with the daemon via Unix socket gRPC (`api/v1/router.proto`, default `/run/arca-router/routerd.sock`).
 - **2-phase commit**: Validate all plugins → apply all plugins → rollback on any failure.
-- **Observability**: Optional Prometheus `/metrics`, `/healthz`, read-only SNMPv2c, and a packaged Grafana dashboard.
+- **Advanced configuration model**: Clustering, MPLS, VRRP, routing instances, class of service, and Web UI service settings are represented in the struct-first model and diff engine.
+- **Observability**: Optional Prometheus `/metrics`, `/healthz`, read-only Web UI, read-only SNMPv2c, and a packaged Grafana dashboard.
 
 Only the current command names are part of this specification: `arca-routerd` and `arca`. Obsolete command entrypoints are not maintained.
 
-> **Compatibility note**: The `set` command syntax and NETCONF configuration model remain stable. Automatic migration tooling is intentionally not part of v0.5.x.
+> **Compatibility note**: The `set` command syntax and NETCONF configuration model remain stable. Automatic migration tooling is intentionally not part of v0.6.x.
 
 ---
 
@@ -46,18 +47,19 @@ Only the current command names are part of this specification: `arca-routerd` an
 6. [Policy Options](#policy-options)
    - [Prefix Lists](#prefix-lists)
    - [Policy Statements](#policy-statements)
-7. [Security](#security)
+7. [Advanced v0.6 Configuration](#advanced-v06-configuration)
+8. [Security](#security)
    - [NETCONF Server](#netconf-server)
    - [User Management](#user-management)
    - [Rate Limiting](#rate-limiting)
-8. [Configuration Workflow](#configuration-workflow)
-9. [Examples](#examples)
-10. [Runtime Options and Observability](#runtime-options-and-observability)
-11. [Operational Commands](#operational-commands)
-12. [Configuration Validation](#configuration-validation)
-13. [Troubleshooting](#troubleshooting)
-14. [References](#references)
-15. [Version History](#version-history)
+9. [Configuration Workflow](#configuration-workflow)
+10. [Examples](#examples)
+11. [Runtime Options and Observability](#runtime-options-and-observability)
+12. [Operational Commands](#operational-commands)
+13. [Configuration Validation](#configuration-validation)
+14. [Troubleshooting](#troubleshooting)
+15. [References](#references)
+16. [Version History](#version-history)
 
 ---
 
@@ -481,6 +483,63 @@ set protocols bgp group external import PREFER-CUSTOMER
 
 ---
 
+<a id="advanced-v06-configuration"></a>
+## Advanced v0.6 Configuration
+
+The following hierarchies are part of the v0.6 management-plane model. Parser, serializer, validation, clone, conversion, diff, and candidate command replacement support are implemented. Southbound application for data-plane HA, MPLS forwarding, L3VPN plumbing, and QoS enforcement is staged separately.
+
+### Web UI Service
+
+```
+set system services web-ui enabled true
+set system services web-ui listen-address 127.0.0.1
+set system services web-ui port 8080
+```
+
+`listen-address` must be an IP address or `localhost`. When enabled without an explicit port, the daemon uses port `8080`.
+
+### Multi-chassis and VRRP
+
+```
+set chassis cluster enabled true
+set chassis cluster node node0 address 192.0.2.10
+set chassis cluster node node0 priority 120
+set chassis cluster sync etcd endpoint http://127.0.0.1:2379
+
+set protocols vrrp group 10 interface ge-0/0/0
+set protocols vrrp group 10 virtual-address 192.0.2.1
+set protocols vrrp group 10 priority 110
+set protocols vrrp group 10 preempt
+```
+
+VRRP group priority must be between `0` and `255`; omit it for default behavior.
+
+### MPLS and Routing Instances
+
+```
+set protocols mpls interface ge-0/0/0
+
+set routing-instances BLUE instance-type vrf
+set routing-instances BLUE route-distinguisher 65000:100
+set routing-instances BLUE vrf-target target:65000:100
+set routing-instances BLUE interface ge-0/0/1
+```
+
+Only `instance-type vrf` is accepted in v0.6. Route distinguishers use `<asn>:<number>`, and VRF targets use `target:<asn>:<number>`.
+
+### Class of Service
+
+```
+set class-of-service forwarding-class expedited-forwarding queue 5
+set class-of-service traffic-control-profile WAN shaping-rate 1000000000
+set class-of-service traffic-control-profile WAN scheduler-map WAN-SCHED
+set class-of-service interfaces ge-0/0/0 output-traffic-control-profile WAN
+```
+
+Forwarding class queues must be between `0` and `7`. Interface bindings must reference an existing traffic-control profile.
+
+---
+
 ## Security
 
 ### NETCONF Server
@@ -814,6 +873,7 @@ Common options:
 --user-db <path>           NETCONF user database path
 --frr-apply-mode <mode>    FRR backend: transactional or file (default: transactional)
 --metrics-listen <addr>    Prometheus listen address; disabled when empty
+--web-listen <addr>        Web UI listen address; overrides system services web-ui config
 --snmp-listen <addr>       SNMPv2c UDP listen address; disabled when empty
 --snmp-community <value>   SNMPv2c read-only community (default: public)
 --mock-vpp                 Use mock VPP client for tests
@@ -843,6 +903,27 @@ The packaged Grafana dashboard is installed at:
 ```
 /usr/share/arca-router/grafana/arca-routerd-dashboard.json
 ```
+
+### Web UI
+
+Start the read-only Web UI with:
+
+```bash
+arca-routerd --web-listen=127.0.0.1:8080
+```
+
+It can also be enabled from configuration:
+
+```
+set system services web-ui enabled true
+set system services web-ui listen-address 127.0.0.1
+set system services web-ui port 8080
+```
+
+Endpoints:
+
+- `GET /`
+- `GET /api/status`
 
 ### SNMP
 
@@ -1003,6 +1084,9 @@ sudo vtysh -c "show running-config"
 curl http://127.0.0.1:9090/healthz
 curl http://127.0.0.1:9090/metrics
 
+# Web UI, when --web-listen or system services web-ui is enabled
+curl http://127.0.0.1:8080/api/status
+
 # SNMP, when --snmp-listen is enabled
 snmpget -v 2c -c public 127.0.0.1:1161 1.3.6.1.3.9950.1.3.0
 ```
@@ -1038,6 +1122,11 @@ sudo vppctl show interface addr
 ---
 
 ## Version History
+
+- **v0.6.x**: Advanced feature foundations
+  - Management-plane config model for clustering, MPLS, VRRP, routing instances, class of service, and Web UI
+  - Read-only Web UI dashboard and JSON status endpoint
+  - v0.6 config diff and candidate replacement coverage
 
 - **v0.5.x**: Production hardening
   - Current command names: `arca-routerd` and `arca`

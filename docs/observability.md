@@ -39,6 +39,29 @@ Source path:
 observability/grafana/arca-routerd-dashboard.json
 ```
 
+## Web UI
+
+Start the read-only Web UI with an explicit listen address:
+
+```bash
+arca-routerd --web-listen=127.0.0.1:8080
+```
+
+It can also be enabled through configuration:
+
+```text
+set system services web-ui enabled true
+set system services web-ui listen-address 127.0.0.1
+set system services web-ui port 8080
+```
+
+Endpoints:
+
+- `GET /`
+- `GET /api/status`
+
+The Web UI is intended for trusted management networks. It exposes the same daemon status used by the metrics endpoint and does not provide authentication yet.
+
 ## SNMP
 
 Start the daemon with an SNMP listen address:

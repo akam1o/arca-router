@@ -8,19 +8,23 @@ release. Delivered changes are tracked in [CHANGELOG.md](CHANGELOG.md).
 Focus: expand the hardened unified daemon into higher-level router features.
 
 - **Multi-chassis / clustering**
+  - Management-plane config model for cluster nodes and etcd sync
   - Control-plane HA using FRR and VRRP
   - Config synchronization through etcd
   - Failover reconciliation for local daemon state
 - **MPLS / VPN**
+  - Management-plane config model for MPLS interfaces and L3VPN service stanzas
   - MPLS label switching through VPP
   - L3VPN integration across FRR and VPP
   - Junos-like config model for VPN services
 - **QoS / Traffic Engineering**
+  - Management-plane config model for forwarding classes, traffic-control profiles, and interface bindings
   - VPP QoS policy configuration
   - Traffic shaping and policing
   - Operational counters for queues and schedulers
 - **Web UI**
-  - Browser-based monitoring and configuration
+  - Read-only browser-based monitoring and JSON status endpoint
+  - Browser-based configuration
   - gRPC-backed API integration
   - Authentication and RBAC integration
 

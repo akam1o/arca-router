@@ -1,6 +1,13 @@
 # Changelog
 
-## v0.5.x – Production Hardening (current)
+## v0.6.x - Advanced Features (current)
+
+- **Advanced configuration model**: parser, serializer, validation, clone, conversion, and diff support for clustering, MPLS, VRRP, routing instances, class of service, and Web UI service settings
+- **Candidate command replacement**: v0.6 scalar settings replace existing candidate lines instead of accumulating duplicates
+- **Read-only Web UI**: optional `--web-listen` HTTP dashboard and `/api/status` JSON endpoint backed by daemon observability state
+- **Web UI configuration**: `system services web-ui` can enable the dashboard without a command-line flag
+
+## v0.5.x – Production Hardening (previous)
 
 - **Generated gRPC API**: `api/v1/router.proto` is compiled into typed Go stubs
 - **Typed daemon/CLI RPC wiring**: `arca-routerd` and `arca` use generated gRPC clients and servers
