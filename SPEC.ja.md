@@ -500,6 +500,8 @@ set protocols bgp group external import PREFER-CUSTOMER
 
 以下の hierarchy は v0.6 の management-plane model です。parser、serializer、validation、clone、conversion、diff、candidate command replacement は実装済みです。data-plane HA、MPLS forwarding、L3VPN plumbing、QoS enforcement の southbound 適用は段階的に実装します。
 
+対応する southbound apply path が実装されるまでは、未対応の MPLS、VRRP、routing-instance、class-of-service 設定を active に残す commit は validation で失敗します。未対応 stanza の削除は許可します。
+
 ### Web UI service
 
 ```

@@ -489,6 +489,8 @@ set protocols bgp group external import PREFER-CUSTOMER
 
 The following hierarchies are part of the v0.6 management-plane model. Parser, serializer, validation, clone, conversion, diff, and candidate command replacement support are implemented. Southbound application for data-plane HA, MPLS forwarding, L3VPN plumbing, and QoS enforcement is staged separately.
 
+Until the corresponding southbound apply path is implemented, commits that leave unsupported MPLS, VRRP, routing-instance, or class-of-service configuration active fail validation instead of being silently accepted. Removing those unsupported stanzas is allowed.
+
 ### Web UI Service
 
 ```

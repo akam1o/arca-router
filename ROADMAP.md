@@ -15,11 +15,13 @@ Focus: expand the hardened unified daemon into higher-level router features.
   - Failover reconciliation for local daemon state
 - **MPLS / VPN**
   - Management-plane config model for MPLS interfaces and L3VPN service stanzas
+  - Commit-time safety gates for unsupported MPLS and routing-instance southbound apply
   - MPLS label switching through VPP
   - L3VPN integration across FRR and VPP
   - Junos-like config model for VPN services
 - **QoS / Traffic Engineering**
   - Management-plane config model for forwarding classes, traffic-control profiles, and interface bindings
+  - Commit-time safety gates for unsupported QoS southbound apply
   - VPP QoS policy configuration
   - Traffic shaping and policing
   - Operational counters for queues and schedulers
