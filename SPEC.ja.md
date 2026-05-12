@@ -9,7 +9,7 @@
 arca-router は Junos 風の `set` コマンド構文を採用しています。設定は以下の方法で管理します。
 
 1. **統合デーモン (`arca-routerd`)**: VPP、FRR、NETCONF、gRPC API を単一プロセスで処理（v0.4.x）
-2. **対話型 CLI (`arca-cli`)**: gRPC シンクライアントによるリアルタイム設定（commit/rollback）（v0.4.x）
+2. **対話型 CLI (`arca`)**: gRPC シンクライアントによるリアルタイム設定（commit/rollback）（v0.4.x）
 3. **NETCONF/SSH**: NETCONF（RFC 6241）によるリモート設定、デーモンに内蔵
 4. **ファイルベース**: 初回ブートストラップ用の静的設定ファイル（`/etc/arca-router/arca-router.conf`）
 
@@ -622,7 +622,7 @@ set security rate-limit per-user 20
 
 1. 設定モードに入る:
    ```bash
-   arca-cli
+   arca
    > configure
    [edit]
    ```
@@ -774,26 +774,26 @@ set security rate-limit per-user 20
 
 ## 運用コマンド
 
-### show コマンド（arca-cli）
+### show コマンド（arca）
 
 ```
 # Interface status
-arca-cli show interfaces
+arca show interfaces
 
 # Routing table
-arca-cli show route
+arca show route
 
 # BGP summary
-arca-cli show bgp summary
+arca show bgp summary
 
 # BGP neighbors
-arca-cli show bgp neighbor <ip>
+arca show bgp neighbor <ip>
 
 # OSPF neighbors
-arca-cli show ospf neighbor
+arca show ospf neighbor
 
 # Configuration
-arca-cli show configuration
+arca show configuration
 ```
 
 ### VPP 直接操作
@@ -842,7 +842,7 @@ show ip ospf neighbor
 
 ```
 # Interactive candidate validation
-arca-cli
+arca
 > configure
 [edit]
 # commit check

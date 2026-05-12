@@ -1,4 +1,4 @@
-// Package grpc provides the internal gRPC client for arca-cli to communicate
+// Package grpc provides the internal gRPC client for arca to communicate
 // with the arca-routerd engine over a Unix domain socket.
 package grpc
 
@@ -14,7 +14,7 @@ import (
 	"google.golang.org/grpc/credentials/insecure"
 )
 
-// Client is the gRPC client that arca-cli uses to talk to arca-routerd.
+// Client is the gRPC client that arca uses to talk to arca-routerd.
 // It provides high-level methods for config management, session control,
 // and operational state queries.
 type Client struct {

@@ -91,7 +91,7 @@ if [ "$1" = "1" ]; then
     echo ""
     echo "3. Add CLI operator users to the arca-router group:"
     echo "   usermod -aG arca-router <admin-user>"
-    echo "   # log out and back in before running arca-cli as that user"
+    echo "   # log out and back in before running arca as that user"
     echo ""
     echo "4. Ensure VPP/FRR are running and FRR has mgmtd=yes:"
     echo "   grep '^mgmtd=yes' /etc/frr/daemons"
@@ -103,7 +103,7 @@ if [ "$1" = "1" ]; then
     echo ""
     echo "6. Check status:"
     echo "   systemctl status arca-routerd"
-    echo "   arca-cli show configuration"
+    echo "   arca show configuration"
     echo "=========================================="
 elif [ "$1" = "2" ]; then
     # Upgrade

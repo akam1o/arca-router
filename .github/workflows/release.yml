@@ -305,7 +305,7 @@ jobs:
         FILES="$(dpkg-deb -c "${DEB_PKG}" | awk '{p=$NF; sub(/^\.\//, "", p); if (p !~ /^\//) p="/" p; print p}')"
         for expected in \
           /usr/sbin/arca-routerd \
-          /usr/bin/arca-cli \
+          /usr/bin/arca \
           /usr/lib/systemd/system/arca-routerd.service \
           /etc/arca-router/hardware.yaml.example \
           /usr/share/arca-router/grafana/arca-routerd-dashboard.json \
@@ -334,7 +334,7 @@ jobs:
           FILES="$(rpm -qpl "${RPM_PKG}")"
           for expected in \
             /usr/sbin/arca-routerd \
-            /usr/bin/arca-cli \
+            /usr/bin/arca \
             /usr/lib/systemd/system/arca-routerd.service \
             /etc/arca-router/hardware.yaml.example \
             /usr/share/arca-router/grafana/arca-routerd-dashboard.json \

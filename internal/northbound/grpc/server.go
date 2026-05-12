@@ -1,5 +1,5 @@
 // Package grpc implements the internal gRPC API server for arca-routerd.
-// This is the unified entry point for both arca-cli and the NETCONF subsystem.
+// This is the unified entry point for both arca and the NETCONF subsystem.
 package grpc
 
 import (

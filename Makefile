@@ -2,9 +2,9 @@
 
 # Binary names
 BINARY_NAME=arca-routerd
-CLI_BINARY_NAME=arca-cli
+CLI_BINARY_NAME=arca
 V2_BINARY_NAME=arca-routerd-v2
-V2_CLI_BINARY_NAME=arca-cli-v2
+V2_CLI_BINARY_NAME=arca-v2
 BUILD_DIR=build/bin
 DIST_DIR=dist
 
@@ -42,30 +42,30 @@ version: ## Display version information
 	@echo "Build Date: $(BUILD_DATE)"
 	@echo "EPOCH:      $(SOURCE_DATE_EPOCH)"
 
-build: ## Build current v0.5 binaries (unified arca-routerd and arca-cli)
+build: ## Build current v0.5 binaries (unified arca-routerd and arca CLI)
 	@echo "Building $(BINARY_NAME) and $(CLI_BINARY_NAME)..."
 	@mkdir -p $(BUILD_DIR)
 	CGO_ENABLED=1 SOURCE_DATE_EPOCH=$(SOURCE_DATE_EPOCH) go build $(BUILD_FLAGS) -o $(BUILD_DIR)/$(BINARY_NAME) ./cmd/arca-routerd-v2
-	CGO_ENABLED=0 SOURCE_DATE_EPOCH=$(SOURCE_DATE_EPOCH) go build $(BUILD_FLAGS) -o $(BUILD_DIR)/$(CLI_BINARY_NAME) ./cmd/arca-cli-v2
+	CGO_ENABLED=0 SOURCE_DATE_EPOCH=$(SOURCE_DATE_EPOCH) go build $(BUILD_FLAGS) -o $(BUILD_DIR)/$(CLI_BINARY_NAME) ./cmd/arca
 	@echo "Build complete: $(BUILD_DIR)/$(BINARY_NAME), $(BUILD_DIR)/$(CLI_BINARY_NAME)"
 
-build-cli: ## Build only current arca-cli binary
+build-cli: ## Build only current arca CLI binary
 	@echo "Building $(CLI_BINARY_NAME)..."
 	@mkdir -p $(BUILD_DIR)
-	CGO_ENABLED=0 SOURCE_DATE_EPOCH=$(SOURCE_DATE_EPOCH) go build $(BUILD_FLAGS) -o $(BUILD_DIR)/$(CLI_BINARY_NAME) ./cmd/arca-cli-v2
+	CGO_ENABLED=0 SOURCE_DATE_EPOCH=$(SOURCE_DATE_EPOCH) go build $(BUILD_FLAGS) -o $(BUILD_DIR)/$(CLI_BINARY_NAME) ./cmd/arca
 	@echo "Build complete: $(BUILD_DIR)/$(CLI_BINARY_NAME)"
 
 build-v2: ## Build v2 unified daemon and CLI with explicit v2 names
 	@echo "Building $(V2_BINARY_NAME) and $(V2_CLI_BINARY_NAME)..."
 	@mkdir -p $(BUILD_DIR)
 	CGO_ENABLED=1 SOURCE_DATE_EPOCH=$(SOURCE_DATE_EPOCH) go build $(BUILD_FLAGS) -o $(BUILD_DIR)/$(V2_BINARY_NAME) ./cmd/arca-routerd-v2
-	CGO_ENABLED=0 SOURCE_DATE_EPOCH=$(SOURCE_DATE_EPOCH) go build $(BUILD_FLAGS) -o $(BUILD_DIR)/$(V2_CLI_BINARY_NAME) ./cmd/arca-cli-v2
+	CGO_ENABLED=0 SOURCE_DATE_EPOCH=$(SOURCE_DATE_EPOCH) go build $(BUILD_FLAGS) -o $(BUILD_DIR)/$(V2_CLI_BINARY_NAME) ./cmd/arca
 	@echo "Build complete: $(BUILD_DIR)/$(V2_BINARY_NAME), $(BUILD_DIR)/$(V2_CLI_BINARY_NAME)"
 
-build-v2-cli: ## Build only arca-cli-v2 binary
+build-v2-cli: ## Build only arca-v2 binary
 	@echo "Building $(V2_CLI_BINARY_NAME)..."
 	@mkdir -p $(BUILD_DIR)
-	CGO_ENABLED=0 SOURCE_DATE_EPOCH=$(SOURCE_DATE_EPOCH) go build $(BUILD_FLAGS) -o $(BUILD_DIR)/$(V2_CLI_BINARY_NAME) ./cmd/arca-cli-v2
+	CGO_ENABLED=0 SOURCE_DATE_EPOCH=$(SOURCE_DATE_EPOCH) go build $(BUILD_FLAGS) -o $(BUILD_DIR)/$(V2_CLI_BINARY_NAME) ./cmd/arca
 	@echo "Build complete: $(BUILD_DIR)/$(V2_CLI_BINARY_NAME)"
 
 generate-proto: ## Generate Go gRPC bindings from api/v1/router.proto
@@ -212,6 +212,11 @@ package-lint: ## Validate package metadata and v0.5 service expectations
 	fi
 	@grep -q 'observability/grafana/arca-routerd-dashboard.json' $(NFPM_CONFIG)
 	@grep -q '/usr/share/arca-router/grafana/arca-routerd-dashboard.json' $(NFPM_CONFIG)
+	@grep -q 'dst: /usr/bin/arca' $(NFPM_CONFIG)
+	@if grep -q 'dst: /usr/bin/arca-cli' $(NFPM_CONFIG); then \
+		echo "Error: package must not ship legacy arca-cli command"; \
+		exit 1; \
+	fi
 	@grep -q 'mgmtd=yes' build/package/scripts/postinstall.sh
 	@echo "Package metadata OK"
 

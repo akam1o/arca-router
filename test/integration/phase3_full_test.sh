@@ -8,7 +8,7 @@
 # - Policy options (prefix-lists, policy-statements, BGP policy)
 # - Security features (RBAC, rate limiting, audit logging)
 # - Configuration commit/rollback
-# - Component integration (VPP + FRR + arca-routerd + arca-netconfd + arca-cli)
+# - Component integration (VPP + FRR + arca-routerd + arca-netconfd + arca)
 
 set -e
 
@@ -115,13 +115,13 @@ echo ""
 
 test_binary_exists() {
     [ -f "$PROJECT_ROOT/build/bin/arca-routerd" ] && \
-    [ -f "$PROJECT_ROOT/build/bin/arca-cli" ] && \
+    [ -f "$PROJECT_ROOT/build/bin/arca" ] && \
     [ -f "$PROJECT_ROOT/build/bin/arca-netconfd" ]
 }
 
 test_binary_version() {
     "$PROJECT_ROOT/build/bin/arca-routerd" --version && \
-    "$PROJECT_ROOT/build/bin/arca-cli" --version && \
+    "$PROJECT_ROOT/build/bin/arca" --version && \
     "$PROJECT_ROOT/build/bin/arca-netconfd" --version
 }
 
@@ -288,11 +288,11 @@ echo -e "${BLUE}=== Test Group 6: CLI Functionality ===${NC}"
 echo ""
 
 test_cli_version() {
-    "$PROJECT_ROOT/build/bin/arca-cli" --version
+    "$PROJECT_ROOT/build/bin/arca" --version
 }
 
 test_cli_help() {
-    "$PROJECT_ROOT/build/bin/arca-cli" --help | grep -q "show"
+    "$PROJECT_ROOT/build/bin/arca" --help | grep -q "show"
 }
 
 test_cli_show_interfaces() {
@@ -300,7 +300,7 @@ test_cli_show_interfaces() {
     if ! pgrep -f arca-routerd >/dev/null; then
         return 0  # Skip silently
     fi
-    "$PROJECT_ROOT/build/bin/arca-cli" show interfaces || return 0
+    "$PROJECT_ROOT/build/bin/arca" show interfaces || return 0
 }
 
 run_test "CLI version check" test_cli_version

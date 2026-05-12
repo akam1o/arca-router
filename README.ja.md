@@ -21,7 +21,7 @@ arca-router は現在 v0.5.x のプロダクション強化フェーズです。
 現在の主な機能:
 
 - VPP、FRR、NETCONF、gRPC を単一の `arca-routerd` プロセスに統合
-- Junos-like な `set` 設定構文とシン `arca-cli` クライアント
+- Junos-like な `set` 設定構文とシン `arca` クライアント
 - 構造体ファースト設定モデル、差分ベース 2 フェーズコミット、ロールバック
 - FRR management candidate datastore 経由の transactional apply
 - Prometheus、health、SNMP、Grafana によるオブザーバビリティ
@@ -87,7 +87,7 @@ sudo dpkg -i arca-router_*.deb
 
 # Verify installation
 /usr/sbin/arca-routerd --version
-arca-cli --version
+arca --version
 ```
 
 **RHEL 9 / AlmaLinux 9 / Rocky Linux 9**:
@@ -97,10 +97,10 @@ sudo dnf install -y ./arca-router-*.rpm
 
 # Verify installation
 /usr/sbin/arca-routerd --version
-arca-cli --version
+arca --version
 ```
 
-root 以外の運用ユーザーで `arca-cli` を使う場合は、そのログインユーザーを
+root 以外の運用ユーザーで `arca` を使う場合は、そのログインユーザーを
 `arca-router` グループに追加し、ログインし直してください。
 
 ```bash
@@ -224,14 +224,14 @@ netconf-console --host localhost --port 830 --user admin --password YourSecurePa
 # Check daemon logs
 sudo journalctl -u arca-routerd -n 50
 
-# arca-cli で running configuration を確認
-arca-cli show configuration
+# arca で running configuration を確認
+arca show configuration
 
 # arca-routerd 経由で operational state を確認
-arca-cli show interfaces
-arca-cli show route
-arca-cli show bgp summary
-arca-cli show ospf neighbor
+arca show interfaces
+arca show route
+arca show bgp summary
+arca show ospf neighbor
 
 # VPP/FRR を直接確認（任意）
 sudo vppctl show interface
@@ -299,9 +299,9 @@ ls -lh dist/
 make help             # Show all available targets
 make version          # Display version information
 make build            # v0.5.x 統合デーモン + CLI をビルド
-make build-cli        # 現行 arca-cli のみビルド
+make build-cli        # 現行 arca CLI のみビルド
 make build-v2         # 明示的な -v2 名で v0.5.x バイナリをビルド
-make build-v2-cli     # arca-cli-v2 のみビルド
+make build-v2-cli     # arca-v2 のみビルド
 make generate-proto   # typed gRPC bindings を生成
 make test             # Run unit tests
 make integration-test # Run integration tests
@@ -333,10 +333,10 @@ arca-router/
 ├── cmd/
 │   ├── arca-routerd-v2/        # 統合デーモン（v0.5.x）
 │   │   └── main.go             # 単一プロセス: VPP + FRR + NETCONF + gRPC
-│   ├── arca-cli-v2/            # シン gRPC CLI クライアント（v0.5.x）
+│   ├── arca/                   # シン gRPC CLI クライアント（v0.5.x）
 │   │   └── main.go             # Unix ソケット経由で通信
 │   ├── arca-routerd/           # レガシーデーモン
-│   ├── arca-cli/               # レガシー CLI
+│   ├── arca-legacy/            # レガシー CLI ソース
 │   └── arca-netconfd/          # レガシー NETCONF デーモン
 ├── internal/                   # v0.5.x コアパッケージ
 │   ├── model/                  # 正準的な設定 & 状態型

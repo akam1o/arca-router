@@ -110,10 +110,10 @@ func dispatch(ctx context.Context, command string, args []string, f *flags) int 
 }
 
 func showUsage() {
-	fmt.Fprintf(os.Stderr, `Usage: arca-cli [options] [command] [args...]
+	fmt.Fprintf(os.Stderr, `Usage: arca [options] [command] [args...]
 
 Interactive Mode:
-  arca-cli                    Start interactive CLI shell (no command given)
+  arca                    Start interactive CLI shell (no command given)
 
 Commands:
   help              Show this help message
@@ -144,11 +144,11 @@ Phase 3 Features (Interactive mode):
   - Tab completion and command history
 
 Examples:
-  arca-cli                    # Start interactive mode
-  arca-cli show configuration # Show configuration (one-shot)
-  arca-cli show interfaces    # Show interfaces (one-shot)
-  arca-cli show bgp summary
-  arca-cli version
+  arca                    # Start interactive mode
+  arca show configuration # Show configuration (one-shot)
+  arca show interfaces    # Show interfaces (one-shot)
+  arca show bgp summary
+  arca version
 
 `)
 }

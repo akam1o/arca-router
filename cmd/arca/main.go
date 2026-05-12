@@ -1,9 +1,6 @@
-// arca-cli-v2 is the redesigned CLI that communicates with arca-routerd
+// arca is the CLI that communicates with arca-routerd
 // via gRPC over a Unix domain socket. It is a thin client that delegates
 // all state, validation, and config management to the daemon.
-//
-// This replaces the original arca-cli which directly accessed the SQLite
-// datastore and VPP API socket.
 package main
 
 import (
@@ -52,7 +49,7 @@ func main() {
 		os.Exit(ExitSuccess)
 	}
 	if f.showVersion {
-		fmt.Printf("arca-cli %s (commit %s, built %s)\n", Version, Commit, BuildDate)
+		fmt.Printf("arca %s (commit %s, built %s)\n", Version, Commit, BuildDate)
 		os.Exit(ExitSuccess)
 	}
 
@@ -79,10 +76,10 @@ func parseFlags() *cliFlags {
 }
 
 func showUsage() {
-	fmt.Fprintf(os.Stderr, `Usage: arca-cli [options] [command] [args...]
+	fmt.Fprintf(os.Stderr, `Usage: arca [options] [command] [args...]
 
 Interactive Mode:
-  arca-cli                    Start interactive CLI shell
+  arca                    Start interactive CLI shell
 
 Commands:
   help              Show this help message
@@ -167,7 +164,7 @@ func runOneShotCommand(ctx context.Context, f *cliFlags, args []string) int {
 		}
 		return oneShotShow(ctx, client, args[1:], f)
 	case "version":
-		fmt.Printf("arca-cli %s (commit %s, built %s)\n", Version, Commit, BuildDate)
+		fmt.Printf("arca %s (commit %s, built %s)\n", Version, Commit, BuildDate)
 		return ExitSuccess
 	case "help":
 		showUsage()
@@ -341,7 +338,7 @@ func runInteractive(ctx context.Context, f *cliFlags) int {
 	completer := createCompleter()
 	rl, err := readline.NewEx(&readline.Config{
 		Prompt:              sh.buildPrompt(),
-		HistoryFile:         "/tmp/.arca-cli-history",
+		HistoryFile:         "/tmp/.arca-history",
 		AutoComplete:        completer,
 		InterruptPrompt:     "^C",
 		EOFPrompt:           "exit",

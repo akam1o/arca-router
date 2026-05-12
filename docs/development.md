@@ -78,10 +78,10 @@ git checkout -b feature/my-new-feature
 
 Edit code in your favorite editor. Key directories:
 - `cmd/arca-routerd-v2/` - Unified daemon (v0.5.x)
-- `cmd/arca-cli-v2/` - Thin gRPC CLI client (v0.5.x)
+- `cmd/arca/` - Thin gRPC CLI client (v0.5.x)
 - `internal/` - v0.5.x core packages (model, engine, southbound, northbound, store, auth)
 - `api/v1/` - gRPC proto definitions
-- `cmd/` - Legacy applications (arca-routerd, arca-cli, arca-netconfd)
+- `cmd/` - Application entrypoints, including legacy sources
 - `pkg/` - Reusable packages (still used by both legacy and v2)
 - `test/` - Integration tests
 - `examples/` - Configuration examples
@@ -113,7 +113,7 @@ make build-v2
 
 # Verify binaries
 ./build/bin/arca-routerd --version
-./build/bin/arca-cli --version
+./build/bin/arca --version
 
 # Build current CLI only
 make build-cli
@@ -148,7 +148,7 @@ make build
 
 This creates the current v0.5.x binaries in `build/bin/`:
 - `arca-routerd` - Unified daemon (VPP + FRR + NETCONF + gRPC)
-- `arca-cli` - Thin gRPC CLI client
+- `arca` - Thin gRPC CLI client
 
 For explicit v2 binary names, run:
 ```bash
@@ -157,7 +157,7 @@ make build-v2
 
 This creates:
 - `arca-routerd-v2` - Unified daemon (VPP + FRR + NETCONF + gRPC)
-- `arca-cli-v2` - Thin gRPC CLI client
+- `arca-v2` - Thin gRPC CLI client
 
 ### Version Information
 
@@ -466,7 +466,7 @@ make rpm-verify
 Packages are configured via NFPM: [build/package/nfpm.yaml](../build/package/nfpm.yaml)
 
 **Package contents:**
-- Binaries: `/usr/sbin/arca-routerd`, `/usr/bin/arca-cli`
+- Binaries: `/usr/sbin/arca-routerd`, `/usr/bin/arca`
 - Systemd unit: `/usr/lib/systemd/system/arca-routerd.service`
 - Configuration: `/etc/arca-router/*.yaml.example`
 - Data directory: `/var/lib/arca-router/`

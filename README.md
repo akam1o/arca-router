@@ -21,7 +21,7 @@ describes the current unified daemon path; detailed release history is kept in
 Current capabilities:
 
 - Unified `arca-routerd` process for VPP, FRR, NETCONF, and gRPC
-- Junos-like `set` configuration syntax with a thin `arca-cli` client
+- Junos-like `set` configuration syntax with a thin `arca` client
 - Struct-first configuration model with diff-based 2-phase commit and rollback
 - FRR transactional apply through the management candidate datastore
 - Prometheus, health, SNMP, and Grafana observability assets
@@ -87,7 +87,7 @@ sudo dpkg -i arca-router_*.deb
 
 # Verify installation
 /usr/sbin/arca-routerd --version
-arca-cli --version
+arca --version
 ```
 
 **RHEL 9 / AlmaLinux 9 / Rocky Linux 9**:
@@ -97,10 +97,10 @@ sudo dnf install -y ./arca-router-*.rpm
 
 # Verify installation
 /usr/sbin/arca-routerd --version
-arca-cli --version
+arca --version
 ```
 
-To use `arca-cli` as a non-root operator, add that login user to the
+To use `arca` as a non-root operator, add that login user to the
 `arca-router` group and start a new login session:
 
 ```bash
@@ -224,14 +224,14 @@ netconf-console --host localhost --port 830 --user admin --password YourSecurePa
 # Check daemon logs
 sudo journalctl -u arca-routerd -n 50
 
-# View running configuration with arca-cli
-arca-cli show configuration
+# View running configuration with arca
+arca show configuration
 
 # Check operational state through arca-routerd
-arca-cli show interfaces
-arca-cli show route
-arca-cli show bgp summary
-arca-cli show ospf neighbor
+arca show interfaces
+arca show route
+arca show bgp summary
+arca show ospf neighbor
 
 # Check VPP/FRR directly (optional)
 sudo vppctl show interface
@@ -299,9 +299,9 @@ ls -lh dist/
 make help             # Show all available targets
 make version          # Display version information
 make build            # Build v0.5.x unified daemon + CLI
-make build-cli        # Build only current arca-cli
+make build-cli        # Build only current arca CLI
 make build-v2         # Build v0.5.x binaries with explicit -v2 names
-make build-v2-cli     # Build only arca-cli-v2
+make build-v2-cli     # Build only arca-v2
 make generate-proto   # Generate typed gRPC bindings
 make test             # Run unit tests
 make integration-test # Run integration tests
@@ -333,10 +333,10 @@ arca-router/
 ├── cmd/
 │   ├── arca-routerd-v2/        # Unified daemon (v0.5.x)
 │   │   └── main.go             # Single process: VPP + FRR + NETCONF + gRPC
-│   ├── arca-cli-v2/            # Thin gRPC CLI client (v0.5.x)
+│   ├── arca/                   # Thin gRPC CLI client (v0.5.x)
 │   │   └── main.go             # Communicates via Unix socket
 │   ├── arca-routerd/           # Legacy daemon
-│   ├── arca-cli/               # Legacy CLI
+│   ├── arca-legacy/            # Legacy CLI source
 │   └── arca-netconfd/          # Legacy NETCONF daemon
 ├── internal/                   # v0.5.x core packages
 │   ├── model/                  # Canonical config & state types

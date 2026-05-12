@@ -199,7 +199,7 @@ systemd `RuntimeDirectory`/`StateDirectory`により自動作成される。
 
 内部 gRPC ソケット `/run/arca-router/routerd.sock` は
 `arca-router:arca-router` の `0660` で作成される。root 以外で
-`arca-cli` を実行する運用ユーザーは `arca-router` グループに所属させる。
+`arca` を実行する運用ユーザーは `arca-router` グループに所属させる。
 
 ---
 
@@ -303,9 +303,9 @@ func (c *govppClient) Connect(ctx context.Context) error {
 |------|-----------|---------|
 | FRR設定適用 | `frrvty`グループ | 標準は `vtysh` の management commit、復旧用 `file` backend では `frr-reload.py` または `vtysh -f` |
 | FRR設定ファイル書き込み | `frr`グループ | 復旧用 `--frr-apply-mode=file` のみ `/etc/frr/frr.conf`へ直接書き込み（0660） |
-| FRR状態確認（arca-cli用） | `frrvty`グループ | `vtysh -c 'show running-config'` |
+| FRR状態確認（arca用） | `frrvty`グループ | `vtysh -c 'show running-config'` |
 
-**注**: v0.5以降の標準経路では、arca-routerd は FRR management candidate に変更を投入し、commit check/apply で適用する。`frrvty`グループはarca-cli（vtysh経由）とFRR設定適用時に必要。復旧・互換用途の `--frr-apply-mode=file` では従来通り `frr.conf` を直接書き込み、`frr-reload.py` で適用する。
+**注**: v0.5以降の標準経路では、arca-routerd は FRR management candidate に変更を投入し、commit check/apply で適用する。`frrvty`グループはarca（vtysh経由）とFRR設定適用時に必要。復旧・互換用途の `--frr-apply-mode=file` では従来通り `frr.conf` を直接書き込み、`frr-reload.py` で適用する。
 
 **権限確認フロー**:
 

@@ -45,7 +45,7 @@ func NewInteractiveShell(username string, ds datastore.Datastore, hostname strin
 	completer := createCompleter()
 	rl, err := readline.NewEx(&readline.Config{
 		Prompt:              buildPrompt(hostname, session),
-		HistoryFile:         "/tmp/.arca-cli-history",
+		HistoryFile:         "/tmp/.arca-history",
 		AutoComplete:        completer,
 		InterruptPrompt:     "^C",
 		EOFPrompt:           "exit",

@@ -488,7 +488,7 @@ Each release includes:
 - **Size**: ~15-20 MB
 - **Contents**:
   - `/usr/sbin/arca-routerd`
-  - `/usr/bin/arca-cli`
+  - `/usr/bin/arca`
   - `/usr/lib/systemd/system/arca-routerd.service`
   - `/etc/arca-router/*.yaml.example`
   - `/usr/share/arca-router/grafana/arca-routerd-dashboard.json`

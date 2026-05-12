@@ -523,13 +523,13 @@ set protocols bgp group upstream neighbor 10.0.2.1 peer-as 65003
 
 1. **Config Syntax Validation**:
 ```bash
-arca-cli config validate
+arca config validate
 ```
 
 2. **Policy Dry-run** (FRR):
 ```bash
 # Generate FRR config without applying
-arca-cli frr generate --dry-run
+arca frr generate --dry-run
 ```
 
 3. **BGP Session Check**:

@@ -1,5 +1,7 @@
 # Binaries (root level only)
 /arca-routerd
+/arca
+/arca-v2
 /arca-cli
 /arca-netconfd
 *.exe

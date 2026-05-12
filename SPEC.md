@@ -7,7 +7,7 @@ This document specifies the configuration syntax and semantics for arca-router.
 arca-router uses Junos-like configuration syntax via `set` commands. Configuration is managed through:
 
 1. **Unified Daemon (`arca-routerd`)**: Single process handling VPP, FRR, NETCONF, and gRPC API (v0.4.x)
-2. **Interactive CLI (`arca-cli`)**: Thin gRPC client for real-time configuration with commit/rollback (v0.4.x)
+2. **Interactive CLI (`arca`)**: Thin gRPC client for real-time configuration with commit/rollback (v0.4.x)
 3. **NETCONF/SSH**: Remote configuration via NETCONF protocol (RFC 6241), built into the daemon
 4. **File-based**: Static configuration files (`/etc/arca-router/arca-router.conf`) for initial bootstrap
 
@@ -604,7 +604,7 @@ set security rate-limit per-user 20
 
 1. Enter configuration mode:
    ```bash
-   arca-cli
+   arca
    > configure
    [edit]
    ```
@@ -755,26 +755,26 @@ set security rate-limit per-user 20
 
 ## Operational Commands
 
-### Show Commands (arca-cli)
+### Show Commands (arca)
 
 ```
 # Interface status
-arca-cli show interfaces
+arca show interfaces
 
 # Routing table
-arca-cli show route
+arca show route
 
 # BGP summary
-arca-cli show bgp summary
+arca show bgp summary
 
 # BGP neighbors
-arca-cli show bgp neighbor <ip>
+arca show bgp neighbor <ip>
 
 # OSPF neighbors
-arca-cli show ospf neighbor
+arca show ospf neighbor
 
 # Configuration
-arca-cli show configuration
+arca show configuration
 ```
 
 ### Direct VPP Commands
@@ -823,7 +823,7 @@ show ip ospf neighbor
 
 ```
 # Interactive candidate validation
-arca-cli
+arca
 > configure
 [edit]
 # commit check
