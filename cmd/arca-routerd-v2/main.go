@@ -414,6 +414,9 @@ func newNETCONFCommitHook(eng *engine.Engine) netconf.CommitHook {
 		}
 
 		beforeSnap := eng.RunningSnapshot()
+		if !engine.ComputeDiff(snapshotConfig(beforeSnap), newCfg).HasChanges() {
+			return "", fmt.Errorf("no configuration changes to commit")
+		}
 		if err := eng.Apply(ctx, newCfg, req.User, req.Message); err != nil {
 			return "", err
 		}
@@ -427,6 +430,13 @@ func newNETCONFCommitHook(eng *engine.Engine) netconf.CommitHook {
 		}
 		return commitID, nil
 	}
+}
+
+func snapshotConfig(snap *model.ConfigSnapshot) *model.RouterConfig {
+	if snap == nil {
+		return nil
+	}
+	return snap.Config
 }
 
 func rollbackEngineToSnapshot(ctx context.Context, eng *engine.Engine, snap *model.ConfigSnapshot, user, message string) error {

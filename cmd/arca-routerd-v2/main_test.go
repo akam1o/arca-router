@@ -221,6 +221,34 @@ func TestNETCONFCommitHookAppliesEngineBeforePersist(t *testing.T) {
 	}
 }
 
+func TestNETCONFCommitHookRejectsNoopCandidate(t *testing.T) {
+	eng := engine.NewEngine(nil, slog.Default())
+	eng.InitializeRunning(&model.RouterConfig{
+		System:     &model.SystemConfig{HostName: "router1"},
+		Interfaces: map[string]*model.InterfaceConfig{},
+	}, 1)
+
+	hook := newNETCONFCommitHook(eng)
+	persistCalled := false
+	_, err := hook(context.Background(), &netconf.CommitHookRequest{
+		User:       "alice",
+		Message:    "NETCONF commit by alice",
+		ConfigText: "set system host-name router1\n",
+	}, func(ctx context.Context) (string, error) {
+		persistCalled = true
+		return "commit-1", nil
+	})
+	if err == nil || !strings.Contains(err.Error(), "no configuration changes to commit") {
+		t.Fatalf("commit hook error = %v, want no changes", err)
+	}
+	if persistCalled {
+		t.Fatal("persist callback was called for unchanged NETCONF candidate")
+	}
+	if snap := eng.RunningSnapshot(); snap == nil || snap.Version != 1 {
+		t.Fatalf("running snapshot = %#v, want version 1", snap)
+	}
+}
+
 func TestNETCONFCommitHookRollsBackEngineWhenPersistFails(t *testing.T) {
 	eng := engine.NewEngine(nil, slog.Default())
 	eng.InitializeRunning(&model.RouterConfig{
