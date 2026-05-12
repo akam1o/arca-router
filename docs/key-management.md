@@ -79,7 +79,7 @@ This method requires stopping the server:
 
 ```bash
 # 1. Stop the NETCONF server
-sudo systemctl stop arca-netconfd
+sudo systemctl stop arca-routerd
 
 # 2. Backup the old key
 sudo cp /var/lib/arca-router/ssh_host_ed25519_key \
@@ -89,11 +89,11 @@ sudo cp /var/lib/arca-router/ssh_host_ed25519_key \
 sudo rm /var/lib/arca-router/ssh_host_ed25519_key
 
 # 4. Start the server (will auto-generate new key)
-sudo systemctl start arca-netconfd
+sudo systemctl start arca-routerd
 
 # 5. Verify new key was generated
 sudo ls -l /var/lib/arca-router/ssh_host_ed25519_key
-sudo journalctl -u arca-netconfd | grep "host key"
+sudo journalctl -u arca-routerd | grep "host key"
 ```
 
 #### Option 2: Pre-Generated Key (No Downtime)
@@ -108,7 +108,7 @@ ssh-keygen -t ed25519 -f /tmp/new_host_key -N "" -C "arca-router-$(date +%Y%m%d)
 # ssh-keygen already generates in correct format
 
 # 3. Stop the server
-sudo systemctl stop arca-netconfd
+sudo systemctl stop arca-routerd
 
 # 4. Backup old key
 sudo cp /var/lib/arca-router/ssh_host_ed25519_key \
@@ -120,7 +120,7 @@ sudo chmod 0600 /var/lib/arca-router/ssh_host_ed25519_key
 sudo chown arca-router:arca-router /var/lib/arca-router/ssh_host_ed25519_key
 
 # 6. Start the server
-sudo systemctl start arca-netconfd
+sudo systemctl start arca-routerd
 
 # 7. Clean up
 sudo rm /tmp/new_host_key.pub
@@ -224,7 +224,7 @@ Monitor for suspicious key-related events:
 
 ```bash
 # Check for permission changes
-sudo journalctl -u arca-netconfd | grep "insecure permissions"
+sudo journalctl -u arca-routerd | grep "insecure permissions"
 
 # Check for key access
 sudo ausearch -f /var/lib/arca-router/ssh_host_ed25519_key
@@ -306,7 +306,7 @@ Common compliance frameworks and key management:
 **Solution:**
 ```bash
 sudo chmod 0600 /var/lib/arca-router/ssh_host_ed25519_key
-sudo systemctl restart arca-netconfd
+sudo systemctl restart arca-routerd
 ```
 
 ### Issue: Clients Can't Connect After Key Rotation
@@ -333,7 +333,7 @@ ssh-keygen -R <server-ip-or-hostname>
 Remove corrupted key and restart (will auto-generate):
 ```bash
 sudo rm /var/lib/arca-router/ssh_host_ed25519_key
-sudo systemctl restart arca-netconfd
+sudo systemctl restart arca-routerd
 ```
 
 ### Issue: Wrong Ownership
@@ -346,7 +346,7 @@ sudo systemctl restart arca-netconfd
 **Solution:**
 ```bash
 sudo chown arca-router:arca-router /var/lib/arca-router/ssh_host_ed25519_key
-sudo systemctl restart arca-netconfd
+sudo systemctl restart arca-routerd
 ```
 
 ## Best Practices Summary
@@ -383,9 +383,9 @@ ls -l /var/lib/arca-router/ssh_host_ed25519_key
 sudo chmod 0600 /var/lib/arca-router/ssh_host_ed25519_key
 
 # Rotate key (with downtime)
-sudo systemctl stop arca-netconfd
+sudo systemctl stop arca-routerd
 sudo rm /var/lib/arca-router/ssh_host_ed25519_key
-sudo systemctl start arca-netconfd
+sudo systemctl start arca-routerd
 
 # View host key fingerprint
 ssh-keygen -l -f /var/lib/arca-router/ssh_host_ed25519_key

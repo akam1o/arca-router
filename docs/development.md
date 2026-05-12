@@ -77,12 +77,12 @@ git checkout -b feature/my-new-feature
 ### 2. Make Changes
 
 Edit code in your favorite editor. Key directories:
-- `cmd/arca-routerd-v2/` - Unified daemon (v0.5.x)
+- `cmd/arca-routerd/` - Unified daemon (v0.5.x)
 - `cmd/arca/` - Thin gRPC CLI client (v0.5.x)
 - `internal/` - v0.5.x core packages (model, engine, southbound, northbound, store, auth)
 - `api/v1/` - gRPC proto definitions
-- `cmd/` - Application entrypoints, including legacy sources
-- `pkg/` - Reusable packages (still used by both legacy and v2)
+- `cmd/` - Application entrypoints
+- `pkg/` - Reusable packages shared by the current daemon and CLI
 - `test/` - Integration tests
 - `examples/` - Configuration examples
 
@@ -108,18 +108,12 @@ make check
 # Build current v0.5.x unified daemon + CLI
 make build
 
-# Build v0.5.x unified daemon + CLI with explicit -v2 names
-make build-v2
-
 # Verify binaries
 ./build/bin/arca-routerd --version
 ./build/bin/arca --version
 
 # Build current CLI only
 make build-cli
-
-# Build v2 CLI only
-make build-v2-cli
 ```
 
 ### 5. Test Your Changes
@@ -149,15 +143,6 @@ make build
 This creates the current v0.5.x binaries in `build/bin/`:
 - `arca-routerd` - Unified daemon (VPP + FRR + NETCONF + gRPC)
 - `arca` - Thin gRPC CLI client
-
-For explicit v2 binary names, run:
-```bash
-make build-v2
-```
-
-This creates:
-- `arca-routerd-v2` - Unified daemon (VPP + FRR + NETCONF + gRPC)
-- `arca-v2` - Thin gRPC CLI client
 
 ### Version Information
 

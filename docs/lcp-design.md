@@ -329,7 +329,7 @@ type LCPInterface struct {
 
 ### 2. Configuration Flow Update
 
-File: `cmd/arca-routerd/apply.go`
+File: `internal/southbound/vpp/plugin.go`
 
 ```go
 func applyVPPConfig(cfg *config.Config, vppClient vpp.Client, log *logger.Logger) error {
@@ -585,7 +585,7 @@ if len(linuxName) > 15 {
 - Create `docs/frr-vpp-route-sync.md`
 
 ### Task 2.4: Configuration Flow Integration
-- Update `cmd/arca-routerd/apply.go` to create LCP pairs
+- Update `internal/southbound/vpp/plugin.go` to create LCP pairs
 - Add rollback on failure
 
 ### Task 2.5: Interface Name Conversion Logic

@@ -209,7 +209,7 @@ set security rate-limit per-ip 10
 set security rate-limit per-user 20
 ```
 
-> NETCONF is built into `arca-routerd`; no separate `arca-netconfd` daemon is needed. The daemon listens on port 830 when security/netconf is configured.
+> NETCONF is built into `arca-routerd`; no separate NETCONF daemon is needed. The daemon listens on port 830 when security/netconf is configured.
 
 **Test NETCONF connection**:
 
@@ -300,8 +300,6 @@ make help             # Show all available targets
 make version          # Display version information
 make build            # Build v0.5.x unified daemon + CLI
 make build-cli        # Build only current arca CLI
-make build-v2         # Build v0.5.x binaries with explicit -v2 names
-make build-v2-cli     # Build only arca-v2
 make generate-proto   # Generate typed gRPC bindings
 make test             # Run unit tests
 make integration-test # Run integration tests
@@ -331,19 +329,16 @@ arca-router/
 │   └── v1/
 │       └── router.proto        # gRPC API definitions (Config/Session/State)
 ├── cmd/
-│   ├── arca-routerd-v2/        # Unified daemon (v0.5.x)
+│   ├── arca-routerd/           # Unified daemon (v0.5.x)
 │   │   └── main.go             # Single process: VPP + FRR + NETCONF + gRPC
-│   ├── arca/                   # Thin gRPC CLI client (v0.5.x)
-│   │   └── main.go             # Communicates via Unix socket
-│   ├── arca-routerd/           # Legacy daemon
-│   ├── arca-legacy/            # Legacy CLI source
-│   └── arca-netconfd/          # Legacy NETCONF daemon
+│   └── arca/                   # Thin gRPC CLI client (v0.5.x)
+│       └── main.go             # Communicates via Unix socket
 ├── internal/                   # v0.5.x core packages
 │   ├── model/                  # Canonical config & state types
 │   │   ├── config.go           # RouterConfig (struct-first model)
 │   │   ├── state.go            # OperationalState
 │   │   ├── validate.go         # Validation logic
-│   │   └── convert.go          # Legacy ↔ new model conversion
+│   │   └── convert.go          # Text config ↔ canonical model conversion
 │   ├── engine/                 # Config engine
 │   │   ├── engine.go           # 2-phase commit, atomic apply
 │   │   ├── diff.go             # Minimal diff computation
@@ -359,7 +354,7 @@ arca-router/
 │   │   ├── store.go            # ConfigStore interface
 │   │   └── sqlite/sqlite.go    # SQLite backend
 │   └── auth/auth.go            # Auth/RBAC/audit wrapper
-├── pkg/                        # Reusable packages shared by legacy and current paths
+├── pkg/                        # Reusable packages used by daemon and CLI
 │   ├── config/                 # Set-command parser
 │   ├── vpp/                    # VPP client interface
 │   ├── frr/                    # FRR config generator

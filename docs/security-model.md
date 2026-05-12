@@ -493,7 +493,7 @@ echo "Groups: $(id arca-router)"
 **実装場所**:
 - `pkg/netconf/ssh_server.go` - SSH認証処理
 - `pkg/netconf/user_db.go` - ユーザー管理
-- `cmd/arca-netconfd/main.go` - NETCONFデーモン
+- `cmd/arca-routerd/main.go` - NETCONFを内蔵した統合デーモン
 
 ---
 
@@ -641,7 +641,7 @@ Environment="NETCONF_ADMIN_PASSWORD_FILE=/run/secrets/admin-password"
 echo "=== NETCONF Security Audit ==="
 
 # Check NETCONF service status
-echo "NETCONF Service: $(systemctl is-active arca-netconfd)"
+echo "NETCONF Service: $(systemctl is-active arca-routerd)"
 
 # Check user database permissions
 echo "User DB: $(ls -l /var/lib/arca-router/netconf.db)"
@@ -651,11 +651,11 @@ sqlite3 /var/lib/arca-router/netconf.db "SELECT username, role FROM users;"
 
 # Check audit logs
 echo "Recent authentication events:"
-journalctl -u arca-netconfd | grep "auth_success\|auth_failure" | tail -10
+journalctl -u arca-routerd | grep "auth_success\|auth_failure" | tail -10
 
 # Check RBAC denials
 echo "Recent RBAC denials:"
-journalctl -u arca-netconfd | grep "Access denied" | tail -10
+journalctl -u arca-routerd | grep "Access denied" | tail -10
 ```
 
 ---
@@ -669,7 +669,7 @@ journalctl -u arca-netconfd | grep "Access denied" | tail -10
 | RBAC bypass | Privilege escalation | Server-side enforcement, comprehensive unit tests |
 | Audit log tampering | Evidence destruction | Database permissions (root only), immutable logging |
 | NETCONF DoS attack | Service unavailability | Rate limiting, connection limits, timeout |
-| Privilege escalation via arca-netconfd | System compromise | Capabilities restriction, systemd sandboxing |
+| Privilege escalation via arca-routerd | System compromise | Capabilities restriction, systemd sandboxing |
 
 **追加対策 (Phase 4以降)**:
 - Multi-factor authentication (MFA)

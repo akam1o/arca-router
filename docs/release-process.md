@@ -191,7 +191,7 @@ Update version in relevant files:
 - `file` FRR apply backend remains available for recovery
 
 ### Fixed
-- v2 daemon and CLI test coverage gaps
+- daemon and CLI test coverage gaps
 
 ### Removed
 - Automatic legacy migration tooling is intentionally not planned
@@ -255,7 +255,7 @@ Key features:
 - Transactional FRR apply backend
 - gRPC daemon/CLI wiring
 - Prometheus, health, SNMP, and Grafana observability
-- v2 daemon and CLI hardening
+- daemon and CLI hardening
 
 See CHANGELOG.md for full details."
 

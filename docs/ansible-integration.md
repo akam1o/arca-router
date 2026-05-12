@@ -11,7 +11,7 @@ arca-router supports NETCONF over SSH (RFC 6241/6242), enabling Infrastructure a
 - Apply consistent configurations across multiple routers
 - Implement configuration rollback strategies
 
-## Compatibility Notes (arca-netconfd)
+## Compatibility Notes (arca-routerd)
 
 - NETCONF base:1.1 (RFC 6242 chunked framing `\n#<len>\n` ... `\n##\n`)
 - Candidate datastore only: `target: running` returns `operation-not-supported`
@@ -51,13 +51,13 @@ pip install ncclient
 python3 -c "import ncclient; print(f'ncclient {ncclient.__version__}')"
 ```
 
-### 4. arca-netconfd Server
+### 4. arca-routerd NETCONF server
 
-Ensure `arca-netconfd` is running on target routers:
+Ensure `arca-routerd` is running on target routers:
 
 ```bash
-# Start arca-netconfd
-sudo systemctl start arca-netconfd
+# Start arca-routerd
+sudo systemctl start arca-routerd
 
 # Verify NETCONF is listening
 sudo netstat -tlnp | grep 830
@@ -508,8 +508,8 @@ Use roles in playbook:
 
 **Solution**:
 ```bash
-# Check arca-netconfd is running
-sudo systemctl status arca-netconfd
+# Check arca-routerd is running
+sudo systemctl status arca-routerd
 
 # Check port is listening
 sudo netstat -tlnp | grep 830
@@ -596,7 +596,7 @@ Batch multiple configurations in a single commit:
 1. **Use SSH Keys**: Prefer SSH keys (supported now) and disable passwords where possible
 2. **Ansible Vault**: Store credentials in encrypted vault files
 3. **RBAC**: Use read-only accounts for get-config operations
-4. **Audit Logs**: Enable audit logging on arca-netconfd
+4. **Audit Logs**: Enable audit logging on arca-routerd
 5. **Network Isolation**: Use management VLANs for NETCONF access
 
 ## Phase 3 Limitations

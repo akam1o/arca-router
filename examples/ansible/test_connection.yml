@@ -48,7 +48,7 @@
           ERROR: {{ result.msg }}
 
           Troubleshooting:
-          - Verify arca-netconfd is running: sudo systemctl status arca-netconfd
+          - Verify arca-routerd is running: sudo systemctl status arca-routerd
           - Check port is listening: sudo netstat -tlnp | grep {{ ansible_port }}
           - Test SSH manually: ssh -p {{ ansible_port }} {{ ansible_user }}@{{ ansible_host }} -s netconf
       when: result is failed

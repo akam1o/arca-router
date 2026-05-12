@@ -501,7 +501,7 @@ set security netconf ssh port <port>
 set security netconf ssh port 830
 ```
 
-**注**: NETCONF サーバは `arca-netconfd` デーモン（`arca-routerd` とは別プロセス）で管理されます。
+**注**: NETCONF サーバは `arca-routerd` に統合されています。
 
 <a id="user-management"></a>
 ### ユーザ管理

@@ -209,7 +209,7 @@ set security rate-limit per-ip 10
 set security rate-limit per-user 20
 ```
 
-> NETCONF は `arca-routerd` に統合されています。別プロセスの `arca-netconfd` は不要です。security/netconf が設定されると、デーモンが 830 番ポートで待ち受けます。
+> NETCONF は `arca-routerd` に統合されています。別プロセスの NETCONF デーモンは不要です。security/netconf が設定されると、デーモンが 830 番ポートで待ち受けます。
 
 **NETCONF 接続のテスト**:
 
@@ -300,8 +300,6 @@ make help             # Show all available targets
 make version          # Display version information
 make build            # v0.5.x 統合デーモン + CLI をビルド
 make build-cli        # 現行 arca CLI のみビルド
-make build-v2         # 明示的な -v2 名で v0.5.x バイナリをビルド
-make build-v2-cli     # arca-v2 のみビルド
 make generate-proto   # typed gRPC bindings を生成
 make test             # Run unit tests
 make integration-test # Run integration tests
@@ -331,19 +329,16 @@ arca-router/
 │   └── v1/
 │       └── router.proto        # gRPC API 定義（Config/Session/State）
 ├── cmd/
-│   ├── arca-routerd-v2/        # 統合デーモン（v0.5.x）
+│   ├── arca-routerd/           # 統合デーモン（v0.5.x）
 │   │   └── main.go             # 単一プロセス: VPP + FRR + NETCONF + gRPC
-│   ├── arca/                   # シン gRPC CLI クライアント（v0.5.x）
-│   │   └── main.go             # Unix ソケット経由で通信
-│   ├── arca-routerd/           # レガシーデーモン
-│   ├── arca-legacy/            # レガシー CLI ソース
-│   └── arca-netconfd/          # レガシー NETCONF デーモン
+│   └── arca/                   # シン gRPC CLI クライアント（v0.5.x）
+│       └── main.go             # Unix ソケット経由で通信
 ├── internal/                   # v0.5.x コアパッケージ
 │   ├── model/                  # 正準的な設定 & 状態型
 │   │   ├── config.go           # RouterConfig（構造体ファーストモデル）
 │   │   ├── state.go            # OperationalState
 │   │   ├── validate.go         # バリデーションロジック
-│   │   └── convert.go          # レガシー ↔ 新モデル変換
+│   │   └── convert.go          # テキスト設定 ↔ 正準モデル変換
 │   ├── engine/                 # 設定エンジン
 │   │   ├── engine.go           # 2 フェーズコミット、アトミック適用
 │   │   ├── diff.go             # 最小差分計算
@@ -359,7 +354,7 @@ arca-router/
 │   │   ├── store.go            # ConfigStore インターフェース
 │   │   └── sqlite/sqlite.go    # SQLite バックエンド
 │   └── auth/auth.go            # 認証/RBAC/監査ラッパー
-├── pkg/                        # レガシー/現行経路で共有する再利用パッケージ
+├── pkg/                        # デーモンと CLI で使う再利用パッケージ
 │   ├── config/                 # set コマンドパーサー
 │   ├── vpp/                    # VPP クライアントインターフェース
 │   ├── frr/                    # FRR 設定ジェネレーター

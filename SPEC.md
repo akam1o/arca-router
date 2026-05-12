@@ -486,7 +486,7 @@ set security netconf ssh port <port>
 set security netconf ssh port 830
 ```
 
-**Note**: NETCONF server is managed by `arca-netconfd` daemon (separate from `arca-routerd`).
+**Note**: The NETCONF server is built into `arca-routerd`.
 
 ### User Management
 

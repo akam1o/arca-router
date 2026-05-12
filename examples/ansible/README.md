@@ -53,16 +53,16 @@ ansible.netcommon    5.0.0
 pip3 install ncclient
 ```
 
-### 4. Start arca-netconfd
+### 4. Start arca-routerd
 
 Ensure the NETCONF server is running on target routers:
 
 ```bash
-# Start arca-netconfd
-sudo ./build/bin/arca-netconfd --listen 127.0.0.1:830
+# Start arca-routerd
+sudo ./build/bin/arca-routerd --netconf-listen 127.0.0.1:830
 
 # Or use systemd (if configured)
-sudo systemctl start arca-netconfd
+sudo systemctl start arca-routerd
 
 # Verify it's running
 sudo netstat -tlnp | grep 830
@@ -157,7 +157,7 @@ This will:
 
 ### test_connection.yml
 
-**Purpose**: Test NETCONF connectivity and verify arca-netconfd is accessible.
+**Purpose**: Test NETCONF connectivity and verify arca-routerd is accessible.
 
 **Usage**:
 ```bash
@@ -274,11 +274,11 @@ fatal: [router1]: FAILED! => {"msg": "Connection refused"}
 ```
 
 **Solution**:
-1. Verify arca-netconfd is running:
+1. Verify arca-routerd is running:
    ```bash
-   sudo systemctl status arca-netconfd
+   sudo systemctl status arca-routerd
    # or
-   ps aux | grep arca-netconfd
+   ps aux | grep arca-routerd
    ```
 
 2. Check port is listening:
