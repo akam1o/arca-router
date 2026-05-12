@@ -29,7 +29,7 @@ Examples:
 - `0.1.0` - Initial Phase 1 release
 - `0.2.0` - Phase 2 (VPP/FRR integration)
 - `0.2.1` - Patch release (bug fixes)
-- `0.3.0-rc1` - Release candidate
+- `0.5.0-rc1` - Release candidate
 - `1.0.0` - First stable release
 
 ### Version Increment Rules
@@ -55,9 +55,9 @@ Examples:
 
 **Release Candidates (rc)**:
 ```
-0.3.0-rc1  → Testing
-0.3.0-rc2  → Bug fixes
-0.3.0      → Stable release
+0.5.0-rc1  → Testing
+0.5.0-rc2  → Bug fixes
+0.5.0      → Stable release
 ```
 
 **Alpha/Beta** (for major versions):
@@ -80,9 +80,10 @@ arca-router follows a phase-based development model:
 |-------|---------|----------|--------|
 | Phase 1 | v0.1.x | Hardware abstraction, basic config | ✅ Complete |
 | Phase 2 | v0.2.x | VPP/FRR integration, routing | ✅ Complete |
-| Phase 3 | v0.3.x | NETCONF, interactive CLI, policy | 🚧 Current |
-| Phase 4 | v0.4.x | Advanced VPP (HA/MPLS/QoS), observability | 🔲 Planned |
-| Phase 5 | v1.0.x | Production-ready, Web UI | 🔲 Planned |
+| Phase 3 | v0.3.x | NETCONF, interactive CLI, policy | ✅ Complete |
+| Phase 4 | v0.4.x | Unified daemon, struct-first config engine, gRPC CLI | ✅ Complete |
+| Phase 5 | v0.5.x | Production hardening, transactional FRR apply, observability | 🚧 Current |
+| Phase 6 | v0.6.x | HA, MPLS/VPN, QoS/TE, Web UI | 🔲 Planned |
 
 ### Release Cadence
 
@@ -116,15 +117,28 @@ arca-router follows a phase-based development model:
   make integration-test
   ```
 
+- [ ] **Package metadata lint**: v0.5 service and package metadata expectations pass
+  ```bash
+  make package-lint
+  ```
+
+- [ ] **FRR mgmtd smoke**: Transactional FRR apply works on a live FRR host
+  ```bash
+  make frr-mgmtd-smoke
+  ```
+
 - [ ] **Manual testing**: Key scenarios verified
   - Fresh installation (DEB/RPM)
   - Upgrade from previous version
-  - Configuration migration
   - VPP/FRR integration
+  - FRR transactional apply with `mgmtd=yes`
+  - Prometheus, health, and SNMP endpoints
+  - Grafana dashboard import
 
 - [ ] **Package testing**: Verify on all supported distros
   - Debian 12 (Bookworm)
-  - Ubuntu 22.04 LTS
+  - Debian 13 (Trixie)
+  - Ubuntu 22.04 LTS / 24.04 LTS
   - RHEL 9 / AlmaLinux 9 / Rocky Linux 9
 
 ### 3. Documentation
@@ -142,7 +156,7 @@ arca-router follows a phase-based development model:
 - [ ] **CHANGELOG.md** updated
   - All changes since last release
   - Grouped by type (Added, Changed, Fixed, Removed)
-  - Migration notes if needed
+  - Notes when migration tooling is intentionally not provided
 
 - [ ] **docs/** updated
   - New feature guides
@@ -159,26 +173,24 @@ Update version in relevant files:
 
 **Example CHANGELOG.md update:**
 ```markdown
-## [0.3.0] - 2024-01-15
+## [0.5.0] - 2026-05-12
 
 ### Added
-- NETCONF/SSH subsystem for remote management
-- Interactive CLI with commit/rollback
-- Policy-based routing configuration
-- Audit logging for all configuration changes
+- Generated gRPC router API bindings wired into daemon and CLI
+- Transactional FRR apply backend using the FRR management candidate datastore
+- Prometheus, health, SNMP, and Grafana observability assets
 
 ### Changed
-- Improved error messages in arca-cli
-- Enhanced VPP interface validation
+- Default daemon package permissions no longer grant direct `/etc/frr` writes
+- `file` FRR apply backend remains available for recovery
 
 ### Fixed
-- Fixed LCP interface creation race condition
-- Corrected FRR route import handling
+- v2 daemon and CLI test coverage gaps
 
-### Deprecated
-- Legacy configuration format (will be removed in v0.4.0)
+### Removed
+- Automatic legacy migration tooling is intentionally not planned
 
-## [0.2.1] - 2023-12-20
+## [0.4.1] - YYYY-MM-DD
 
 ...
 ```
@@ -217,7 +229,7 @@ git pull origin main
 
 # Commit final changes
 git add CHANGELOG.md README.md
-git commit -m "chore: prepare for v0.3.0 release
+git commit -m "chore: prepare for v0.5.0 release
 
 - Update CHANGELOG.md
 - Update version references in README.md"
@@ -229,23 +241,23 @@ git push origin main
 
 ```bash
 # Create annotated tag
-git tag -a v0.3.0 -m "Release v0.3.0
+git tag -a v0.5.0 -m "Release v0.5.0
 
-Phase 3 - NETCONF and Interactive CLI
+Production hardening
 
 Key features:
-- NETCONF/SSH subsystem
-- Interactive CLI with commit/rollback
-- Policy-based routing
-- Audit logging
+- Transactional FRR apply backend
+- gRPC daemon/CLI wiring
+- Prometheus, health, SNMP, and Grafana observability
+- v2 daemon and CLI hardening
 
 See CHANGELOG.md for full details."
 
-# Verify tag
-git tag -v v0.3.0
+# Inspect tag
+git show --stat v0.5.0
 
 # Push tag to GitHub
-git push origin v0.3.0
+git push origin v0.5.0
 ```
 
 **Important**: Use annotated tags (`-a`), not lightweight tags.
@@ -256,10 +268,9 @@ The `release.yml` GitHub Action will automatically:
 1. Build binaries
 2. Create DEB/RPM packages
 3. Generate SHA256 checksums
-4. Extract release notes from CHANGELOG.md
-5. Create GitHub Release
+4. Verify package contents on supported distros
+5. Create or update the GitHub Release
 6. Upload artifacts
-7. Verify packages on multiple distros
 
 **Monitor progress:**
 - Go to: https://github.com/akam1o/arca-router/actions
@@ -272,16 +283,17 @@ Once workflow completes:
 
 ```bash
 # Check GitHub Release page
-# https://github.com/akam1o/arca-router/releases/tag/v0.3.0
+# https://github.com/akam1o/arca-router/releases/tag/v0.5.0
 
 # Verify artifacts uploaded:
-# - arca-router_0.3.0-1_amd64.deb
-# - arca-router-0.3.0-1.x86_64.rpm
+# - arca-router_0.5.0-1~debian12_amd64.deb
+# - arca-router_0.5.0-1~ubuntu24.04_amd64.deb
+# - arca-router-0.5.0-1.el9.x86_64.rpm
 # - SHA256SUMS
 ```
 
 **Verification checklist:**
-- [ ] Release notes extracted correctly
+- [ ] Release notes are clear and complete
 - [ ] All artifacts present
 - [ ] Checksums valid
 - [ ] Download links work
@@ -293,11 +305,11 @@ Download and test packages:
 **Debian:**
 ```bash
 # Download DEB package
-wget https://github.com/akam1o/arca-router/releases/download/v0.3.0/arca-router_0.3.0-1_amd64.deb
+wget https://github.com/akam1o/arca-router/releases/download/v0.5.0/arca-router_0.5.0-1~debian12_amd64.deb
 
 # Verify checksum
-sha256sum arca-router_0.3.0-1_amd64.deb
-curl -sL https://github.com/akam1o/arca-router/releases/download/v0.3.0/SHA256SUMS | grep deb
+sha256sum arca-router_0.5.0-1~debian12_amd64.deb
+curl -sL https://github.com/akam1o/arca-router/releases/download/v0.5.0/SHA256SUMS | grep deb
 
 # Test installation (in Docker)
 docker run --rm -it debian:12 bash
@@ -307,14 +319,14 @@ docker run --rm -it debian:12 bash
 **RHEL/Rocky:**
 ```bash
 # Download RPM package
-wget https://github.com/akam1o/arca-router/releases/download/v0.3.0/arca-router-0.3.0-1.x86_64.rpm
+wget https://github.com/akam1o/arca-router/releases/download/v0.5.0/arca-router-0.5.0-1.el9.x86_64.rpm
 
 # Verify checksum
-sha256sum arca-router-0.3.0-1.x86_64.rpm
-curl -sL https://github.com/akam1o/arca-router/releases/download/v0.3.0/SHA256SUMS | grep rpm
+sha256sum arca-router-0.5.0-1.el9.x86_64.rpm
+curl -sL https://github.com/akam1o/arca-router/releases/download/v0.5.0/SHA256SUMS | grep rpm
 
 # Test installation
-sudo yum install -y ./arca-router-0.3.0-1.x86_64.rpm
+sudo yum install -y ./arca-router-0.5.0-1.el9.x86_64.rpm
 ```
 
 ---
@@ -329,29 +341,29 @@ sudo yum install -y ./arca-router-0.3.0-1.x86_64.rpm
 
 **Release announcement template:**
 ```markdown
-# arca-router v0.3.0 Released 🎉
+# arca-router v0.5.0 Released
 
-We're excited to announce arca-router v0.3.0, completing Phase 3 development!
+arca-router v0.5.0 is the production hardening release for the unified daemon architecture.
 
 ## Highlights
 
-- **NETCONF/SSH Subsystem**: Remote management via NETCONF protocol
-- **Interactive CLI**: Real-time configuration with commit/rollback
-- **Policy-Based Routing**: Advanced traffic engineering
-- **Audit Logging**: Complete security audit trail
+- **Transactional FRR Apply**: Default FRR changes go through the management candidate datastore
+- **gRPC Management API**: Generated router proto bindings are wired into daemon and CLI
+- **Observability**: Prometheus, health, SNMP, and Grafana dashboard assets
+- **Package Hardening**: Default service permissions avoid direct `/etc/frr` writes
 
 ## Installation
 
 **Debian/Ubuntu:**
 ```bash
-wget https://github.com/akam1o/arca-router/releases/download/v0.3.0/arca-router_0.3.0-1_amd64.deb
-sudo dpkg -i arca-router_0.3.0-1_amd64.deb
+wget https://github.com/akam1o/arca-router/releases/download/v0.5.0/arca-router_0.5.0-1~debian12_amd64.deb
+sudo dpkg -i arca-router_0.5.0-1~debian12_amd64.deb
 ```
 
 **RHEL/Rocky/Alma:**
 ```bash
-wget https://github.com/akam1o/arca-router/releases/download/v0.3.0/arca-router-0.3.0-1.x86_64.rpm
-sudo yum install -y ./arca-router-0.3.0-1.x86_64.rpm
+wget https://github.com/akam1o/arca-router/releases/download/v0.5.0/arca-router-0.5.0-1.el9.x86_64.rpm
+sudo yum install -y ./arca-router-0.5.0-1.el9.x86_64.rpm
 ```
 
 See [CHANGELOG](https://github.com/akam1o/arca-router/blob/main/CHANGELOG.md) for full details.
@@ -377,7 +389,7 @@ cat >> CHANGELOG.md << 'EOF'
 EOF
 
 git add CHANGELOG.md
-git commit -m "chore: start v0.3.1 development"
+git commit -m "chore: start v0.5.1 development"
 git push origin main
 ```
 
@@ -398,7 +410,7 @@ For critical bugs in production:
 
 ```bash
 # Create hotfix branch from release tag
-git checkout -b hotfix/v0.3.1 v0.3.0
+git checkout -b hotfix/v0.5.1 v0.5.0
 
 # Fix the issue
 # ... make changes ...
@@ -416,7 +428,7 @@ Fixes #234"
 make check
 
 # Build and test packages
-make deb rpm
+make deb-test rpm-test
 
 # Manual testing
 ```
@@ -426,7 +438,7 @@ make deb rpm
 ```bash
 # Update CHANGELOG.md
 cat > /tmp/changelog-entry << 'EOF'
-## [0.3.1] - 2024-01-18
+## [0.5.1] - YYYY-MM-DD
 
 ### Fixed
 - Critical VPP crash on startup (#234)
@@ -435,20 +447,20 @@ EOF
 
 # Merge to main
 git checkout main
-git merge --no-ff hotfix/v0.3.1
+git merge --no-ff hotfix/v0.5.1
 git push origin main
 
 # Create tag
-git tag -a v0.3.1 -m "Hotfix v0.3.1
+git tag -a v0.5.1 -m "Hotfix v0.5.1
 
 Critical fixes:
 - VPP crash on startup
 - NETCONF memory leak"
 
-git push origin v0.3.1
+git push origin v0.5.1
 
 # Delete hotfix branch
-git branch -d hotfix/v0.3.1
+git branch -d hotfix/v0.5.1
 ```
 
 **Timeline for hotfixes:**
@@ -465,17 +477,18 @@ Each release includes:
 ### Binary Artifacts
 
 **DEB Package** (Debian/Ubuntu):
-- **Filename**: `arca-router_<version>-1_amd64.deb`
+- **Filename**: `arca-router_<version>-<release>_amd64.deb`
 - **Architecture**: amd64 (x86_64)
 - **Size**: ~15-20 MB
 - **Contents**:
   - `/usr/sbin/arca-routerd`
   - `/usr/bin/arca-cli`
-  - `/lib/systemd/system/arca-routerd.service`
+  - `/usr/lib/systemd/system/arca-routerd.service`
   - `/etc/arca-router/*.yaml.example`
+  - `/usr/share/arca-router/grafana/arca-routerd-dashboard.json`
 
 **RPM Package** (RHEL/Rocky/Alma):
-- **Filename**: `arca-router-<version>-1.x86_64.rpm`
+- **Filename**: `arca-router-<version>-<release>.x86_64.rpm`
 - **Architecture**: x86_64
 - **Size**: ~15-20 MB
 - **Contents**: Same as DEB
@@ -513,13 +526,13 @@ Common causes:
 **Solution:**
 ```bash
 # Delete failed tag
-git tag -d v0.3.0
-git push origin :refs/tags/v0.3.0
+git tag -d v0.5.0
+git push origin :refs/tags/v0.5.0
 
 # Fix issue, commit, re-tag
 git commit -am "fix: resolve build issue"
-git tag -a v0.3.0 -m "..."
-git push origin main v0.3.0
+git tag -a v0.5.0 -m "..."
+git push origin main v0.5.0
 ```
 
 ### Package Verification Failed
@@ -527,8 +540,8 @@ git push origin main v0.3.0
 **Issue: verify-packages job failed**
 
 Check which distro failed:
-- Debian 12
-- Ubuntu 22.04
+- Debian 12 / Debian 13
+- Ubuntu 22.04 / Ubuntu 24.04
 - Rocky Linux 9
 
 Common causes:
@@ -553,12 +566,12 @@ Caused by incorrect tag format.
 **Solution:**
 ```bash
 # Delete tag
-git tag -d v0.3.0
-git push origin :refs/tags/v0.3.0
+git tag -d v0.5.0
+git push origin :refs/tags/v0.5.0
 
 # Create proper tag
-git tag -a v0.3.0 -m "Release v0.3.0"
-git push origin v0.3.0
+git tag -a v0.5.0 -m "Release v0.5.0"
+git push origin v0.5.0
 ```
 
 ---
@@ -571,11 +584,13 @@ git push origin v0.3.0
 - [ ] Documentation updated
 - [ ] CHANGELOG.md complete
 - [ ] Security review done
+- [ ] `make package-lint` passing
+- [ ] Live FRR mgmtd smoke checked, or explicitly deferred to lab validation
 - [ ] Packages tested on all distros
 
 **Release:**
-- [ ] Create annotated tag (`git tag -a v0.3.0`)
-- [ ] Push tag (`git push origin v0.3.0`)
+- [ ] Create annotated tag (`git tag -a v0.5.0`)
+- [ ] Push tag (`git push origin v0.5.0`)
 - [ ] Monitor workflow completion
 - [ ] Verify artifacts on GitHub Release
 - [ ] Test installation from artifacts
@@ -601,16 +616,16 @@ git push origin v0.3.0
 
 ```bash
 # Create release
-git tag -a v0.3.0 -m "Release v0.3.0"
-git push origin v0.3.0
+git tag -a v0.5.0 -m "Release v0.5.0"
+git push origin v0.5.0
 
 # Hotfix
-git checkout -b hotfix/v0.3.1 v0.3.0
+git checkout -b hotfix/v0.5.1 v0.5.0
 # ... fix ...
 git checkout main
-git merge --no-ff hotfix/v0.3.1
-git tag -a v0.3.1 -m "Hotfix v0.3.1"
-git push origin main v0.3.1
+git merge --no-ff hotfix/v0.5.1
+git tag -a v0.5.1 -m "Hotfix v0.5.1"
+git push origin main v0.5.1
 
 # Verify release
 curl -sL https://api.github.com/repos/akam1o/arca-router/releases/latest | jq -r '.tag_name'

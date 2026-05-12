@@ -77,9 +77,9 @@ git checkout -b feature/my-new-feature
 ### 2. Make Changes
 
 Edit code in your favorite editor. Key directories:
-- `cmd/arca-routerd-v2/` - Unified daemon (v0.4.x)
-- `cmd/arca-cli-v2/` - Thin gRPC CLI client (v0.4.x)
-- `internal/` - v0.4.x core packages (model, engine, southbound, northbound, store, auth)
+- `cmd/arca-routerd-v2/` - Unified daemon (v0.5.x)
+- `cmd/arca-cli-v2/` - Thin gRPC CLI client (v0.5.x)
+- `internal/` - v0.5.x core packages (model, engine, southbound, northbound, store, auth)
 - `api/v1/` - gRPC proto definitions
 - `cmd/` - Legacy applications (arca-routerd, arca-cli, arca-netconfd)
 - `pkg/` - Reusable packages (still used by both legacy and v2)
@@ -105,10 +105,10 @@ make check
 ### 4. Build Locally
 
 ```bash
-# Build current v0.4.x unified daemon + CLI
+# Build current v0.5.x unified daemon + CLI
 make build
 
-# Build v0.4.x unified daemon + CLI with explicit -v2 names
+# Build v0.5.x unified daemon + CLI with explicit -v2 names
 make build-v2
 
 # Verify binaries
@@ -146,12 +146,11 @@ go tool cover -html=coverage.out
 make build
 ```
 
-This creates binaries in `build/bin/`:
-- `arca-routerd` - Legacy daemon (v0.3.x)
-- `arca-cli` - Legacy CLI tool (v0.3.x)
-- `arca-netconfd` - Legacy NETCONF daemon (v0.3.x)
+This creates the current v0.5.x binaries in `build/bin/`:
+- `arca-routerd` - Unified daemon (VPP + FRR + NETCONF + gRPC)
+- `arca-cli` - Thin gRPC CLI client
 
-For the v0.4.x unified architecture:
+For explicit v2 binary names, run:
 ```bash
 make build-v2
 ```
@@ -169,7 +168,7 @@ Build uses version from git tags:
 make version
 
 # Override version
-VERSION=0.3.0 make build
+VERSION=0.5.0 make build
 ```
 
 **Version sources (priority order):**
@@ -182,7 +181,7 @@ VERSION=0.3.0 make build
 The build process uses:
 - **Trimpath**: Removes local path information for reproducibility
 - **LDFLAGS**: Embeds version, commit hash, and build date
-- **CGO_ENABLED=0**: Static linking (no external C dependencies)
+- **CGO_ENABLED=1**: Daemon build uses cgo for SQLite; CLI builds with `CGO_ENABLED=0`
 
 ### Reproducible Builds
 
@@ -443,7 +442,7 @@ See [Release Process Guide](release-process.md) for details.
 # Build DEB package
 make deb
 
-# Test package contents
+# Test package contents and v0.5 package metadata expectations
 make deb-test
 
 # Verify reproducibility
@@ -455,7 +454,7 @@ make deb-verify
 # Build RPM package
 make rpm
 
-# Test package contents
+# Test package contents and v0.5 package metadata expectations
 make rpm-test
 
 # Verify reproducibility
@@ -468,15 +467,31 @@ Packages are configured via NFPM: [build/package/nfpm.yaml](../build/package/nfp
 
 **Package contents:**
 - Binaries: `/usr/sbin/arca-routerd`, `/usr/bin/arca-cli`
-- Systemd unit: `/lib/systemd/system/arca-routerd.service`
+- Systemd unit: `/usr/lib/systemd/system/arca-routerd.service`
 - Configuration: `/etc/arca-router/*.yaml.example`
 - Data directory: `/var/lib/arca-router/`
 - Log directory: `/var/log/arca-router/`
+- Grafana dashboard: `/usr/share/arca-router/grafana/arca-routerd-dashboard.json`
 
 **Post-install scripts:**
 - Creates `arca-router` user/group
+- Adds the service user to `vpp` and `frrvty`
 - Sets directory permissions
+- Warns when FRR `mgmtd=yes` is missing for the default transactional backend
 - Reloads systemd daemon
+
+### v0.5 Smoke Checks
+
+```bash
+# Validate local package metadata without building artifacts
+make package-lint
+
+# Run the live FRR mgmtd transactional apply smoke test
+make frr-mgmtd-smoke
+```
+
+The FRR smoke test requires a host with FRR running, `mgmtd=yes` in `/etc/frr/daemons`,
+and `vtysh` access for the current user.
 
 ### Testing Packages in Docker
 
@@ -571,6 +586,7 @@ go generate ./...
 # Development cycle
 git checkout -b feature/my-feature
 make fmt vet test           # Local checks
+make package-lint           # Package/service metadata checks
 make build                   # Build binaries
 git commit -am "feat: ..."
 git push origin feature/my-feature
@@ -582,6 +598,6 @@ make rpm                     # Build RPM
 make deb-test rpm-test       # Test packages
 
 # Release (maintainers only)
-git tag v0.3.0
-git push origin v0.3.0       # Triggers release workflow
+git tag v0.5.0
+git push origin v0.5.0       # Triggers release workflow
 ```
