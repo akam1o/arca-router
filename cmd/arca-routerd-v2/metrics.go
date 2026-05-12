@@ -22,6 +22,48 @@ type metricsSource struct {
 	netconfServer *netconf.SSHServer
 }
 
+type routerMetrics struct {
+	UptimeSeconds         float64
+	ConfigVersion         uint64
+	NETCONFActiveSessions int
+	NETCONFActiveConns    int32
+	NETCONFTotalConns     uint64
+	NETCONFSuccess        uint64
+	NETCONFFailures       uint64
+	NETCONFListening      bool
+	RunningHostname       string
+}
+
+func (s metricsSource) snapshot(now time.Time) routerMetrics {
+	metrics := routerMetrics{}
+	if !s.startedAt.IsZero() {
+		metrics.UptimeSeconds = now.Sub(s.startedAt).Seconds()
+	}
+
+	if s.engine != nil {
+		if running := s.engine.RunningSnapshot(); running != nil {
+			metrics.ConfigVersion = running.Version
+			if running.Config != nil && running.Config.System != nil {
+				metrics.RunningHostname = running.Config.System.HostName
+			}
+		}
+	}
+	if metrics.RunningHostname == "" {
+		metrics.RunningHostname = "arca-router"
+	}
+
+	if s.netconfServer != nil {
+		nc := s.netconfServer.GetMetrics()
+		metrics.NETCONFActiveSessions = nc.ActiveSessions
+		metrics.NETCONFActiveConns = nc.ActiveConnections
+		metrics.NETCONFTotalConns = nc.TotalConnections
+		metrics.NETCONFSuccess = nc.SuccessfulHandshakes
+		metrics.NETCONFFailures = nc.FailedHandshakes
+		metrics.NETCONFListening = nc.IsListening
+	}
+	return metrics
+}
+
 func startMetricsServer(ctx context.Context, listenAddr string, source metricsSource, log *logger.Logger) (<-chan error, error) {
 	lis, err := net.Listen("tcp", listenAddr)
 	if err != nil {
@@ -77,9 +119,7 @@ func (s metricsSource) handleMetrics(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.Header().Set("Content-Type", "text/plain; version=0.0.4; charset=utf-8")
-	now := time.Now()
-	uptime := now.Sub(s.startedAt).Seconds()
-	running := s.engine.RunningSnapshot()
+	metrics := s.snapshot(time.Now())
 
 	var b strings.Builder
 	writeMetricHelp(&b, "arca_routerd_up", "Whether arca-routerd is serving metrics.")
@@ -88,15 +128,11 @@ func (s metricsSource) handleMetrics(w http.ResponseWriter, r *http.Request) {
 
 	writeMetricHelp(&b, "arca_routerd_uptime_seconds", "Seconds since arca-routerd started.")
 	writeMetricType(&b, "arca_routerd_uptime_seconds", "counter")
-	writeMetricValue(&b, "arca_routerd_uptime_seconds", uptime)
+	writeMetricValue(&b, "arca_routerd_uptime_seconds", metrics.UptimeSeconds)
 
 	writeMetricHelp(&b, "arca_router_config_version", "Current running configuration version.")
 	writeMetricType(&b, "arca_router_config_version", "gauge")
-	if running != nil {
-		writeMetricValue(&b, "arca_router_config_version", float64(running.Version))
-	} else {
-		writeMetricValue(&b, "arca_router_config_version", 0)
-	}
+	writeMetricValue(&b, "arca_router_config_version", float64(metrics.ConfigVersion))
 
 	writeMetricHelp(&b, "arca_router_netconf_active_sessions", "Current active NETCONF sessions.")
 	writeMetricType(&b, "arca_router_netconf_active_sessions", "gauge")
@@ -111,24 +147,14 @@ func (s metricsSource) handleMetrics(w http.ResponseWriter, r *http.Request) {
 	writeMetricHelp(&b, "arca_router_netconf_listening", "Whether the NETCONF SSH server is listening.")
 	writeMetricType(&b, "arca_router_netconf_listening", "gauge")
 
-	if s.netconfServer != nil {
-		metrics := s.netconfServer.GetMetrics()
-		writeMetricValue(&b, "arca_router_netconf_active_sessions", float64(metrics.ActiveSessions))
-		writeMetricValue(&b, "arca_router_netconf_active_connections", float64(metrics.ActiveConnections))
-		writeMetricValue(&b, "arca_router_netconf_total_connections", float64(metrics.TotalConnections))
-		writeMetricValue(&b, "arca_router_netconf_successful_handshakes", float64(metrics.SuccessfulHandshakes))
-		writeMetricValue(&b, "arca_router_netconf_failed_handshakes", float64(metrics.FailedHandshakes))
-		if metrics.IsListening {
-			writeMetricValue(&b, "arca_router_netconf_listening", 1)
-		} else {
-			writeMetricValue(&b, "arca_router_netconf_listening", 0)
-		}
+	writeMetricValue(&b, "arca_router_netconf_active_sessions", float64(metrics.NETCONFActiveSessions))
+	writeMetricValue(&b, "arca_router_netconf_active_connections", float64(metrics.NETCONFActiveConns))
+	writeMetricValue(&b, "arca_router_netconf_total_connections", float64(metrics.NETCONFTotalConns))
+	writeMetricValue(&b, "arca_router_netconf_successful_handshakes", float64(metrics.NETCONFSuccess))
+	writeMetricValue(&b, "arca_router_netconf_failed_handshakes", float64(metrics.NETCONFFailures))
+	if metrics.NETCONFListening {
+		writeMetricValue(&b, "arca_router_netconf_listening", 1)
 	} else {
-		writeMetricValue(&b, "arca_router_netconf_active_sessions", 0)
-		writeMetricValue(&b, "arca_router_netconf_active_connections", 0)
-		writeMetricValue(&b, "arca_router_netconf_total_connections", 0)
-		writeMetricValue(&b, "arca_router_netconf_successful_handshakes", 0)
-		writeMetricValue(&b, "arca_router_netconf_failed_handshakes", 0)
 		writeMetricValue(&b, "arca_router_netconf_listening", 0)
 	}
 

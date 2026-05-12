@@ -62,6 +62,8 @@ type daemonFlags struct {
 	userDBPath    string
 	grpcSocket    string
 	metricsListen string
+	snmpListen    string
+	snmpCommunity string
 	frrApplyMode  string
 }
 
@@ -128,6 +130,10 @@ func parseFlags() *daemonFlags {
 		"Path to internal gRPC Unix socket")
 	flag.StringVar(&f.metricsListen, "metrics-listen", "",
 		"Prometheus metrics listen address (disabled when empty)")
+	flag.StringVar(&f.snmpListen, "snmp-listen", "",
+		"SNMPv2c UDP listen address (disabled when empty)")
+	flag.StringVar(&f.snmpCommunity, "snmp-community", "public",
+		"SNMPv2c read-only community")
 	flag.StringVar(&f.frrApplyMode, "frr-apply-mode", string(pkgfrr.BackendModeTransactional),
 		"FRR apply backend: transactional or file")
 
@@ -158,6 +164,7 @@ func run(ctx context.Context, f *daemonFlags, log *logger.Logger) error {
 		slog.String("netconf_listen", f.netconfListen),
 		slog.String("grpc_socket", f.grpcSocket),
 		slog.String("metrics_listen", f.metricsListen),
+		slog.String("snmp_listen", f.snmpListen),
 		slog.String("frr_apply_mode", f.frrApplyMode),
 	)
 
@@ -273,13 +280,24 @@ func run(ctx context.Context, f *daemonFlags, log *logger.Logger) error {
 	}()
 
 	// --- Step 10: Start metrics endpoint ---
+	observabilitySource := metricsSource{
+		startedAt:     time.Now(),
+		engine:        eng,
+		netconfServer: netconfServer,
+	}
 	var metricsErr <-chan error
 	if f.metricsListen != "" {
-		metricsErr, err = startMetricsServer(ctx, f.metricsListen, metricsSource{
-			startedAt:     time.Now(),
-			engine:        eng,
-			netconfServer: netconfServer,
-		}, log)
+		metricsErr, err = startMetricsServer(ctx, f.metricsListen, observabilitySource, log)
+		if err != nil {
+			grpcServer.Stop()
+			return err
+		}
+	}
+
+	// --- Step 11: Start SNMP endpoint ---
+	var snmpErr <-chan error
+	if f.snmpListen != "" {
+		snmpErr, err = startSNMPServer(ctx, f.snmpListen, f.snmpCommunity, observabilitySource, log)
 		if err != nil {
 			grpcServer.Stop()
 			return err
@@ -297,6 +315,11 @@ func run(ctx context.Context, f *daemonFlags, log *logger.Logger) error {
 		if err != nil {
 			grpcServer.Stop()
 			return fmt.Errorf("metrics endpoint stopped: %w", err)
+		}
+	case err := <-snmpErr:
+		if err != nil {
+			grpcServer.Stop()
+			return fmt.Errorf("SNMP endpoint stopped: %w", err)
 		}
 	}
 	grpcServer.Stop()
