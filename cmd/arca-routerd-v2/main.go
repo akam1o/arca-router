@@ -28,6 +28,7 @@ import (
 	"github.com/akam1o/arca-router/pkg/config"
 	"github.com/akam1o/arca-router/pkg/datastore"
 	"github.com/akam1o/arca-router/pkg/device"
+	pkgfrr "github.com/akam1o/arca-router/pkg/frr"
 	"github.com/akam1o/arca-router/pkg/logger"
 	"github.com/akam1o/arca-router/pkg/netconf"
 	pkgvpp "github.com/akam1o/arca-router/pkg/vpp"
@@ -61,6 +62,7 @@ type daemonFlags struct {
 	userDBPath    string
 	grpcSocket    string
 	metricsListen string
+	frrApplyMode  string
 }
 
 func main() {
@@ -126,6 +128,8 @@ func parseFlags() *daemonFlags {
 		"Path to internal gRPC Unix socket")
 	flag.StringVar(&f.metricsListen, "metrics-listen", "",
 		"Prometheus metrics listen address (disabled when empty)")
+	flag.StringVar(&f.frrApplyMode, "frr-apply-mode", string(pkgfrr.BackendModeTransactional),
+		"FRR apply backend: transactional or file")
 
 	flag.Parse()
 	return f
@@ -154,6 +158,7 @@ func run(ctx context.Context, f *daemonFlags, log *logger.Logger) error {
 		slog.String("netconf_listen", f.netconfListen),
 		slog.String("grpc_socket", f.grpcSocket),
 		slog.String("metrics_listen", f.metricsListen),
+		slog.String("frr_apply_mode", f.frrApplyMode),
 	)
 
 	// --- Step 1: Load hardware configuration ---
@@ -172,9 +177,14 @@ func run(ctx context.Context, f *daemonFlags, log *logger.Logger) error {
 		vppClient = pkgvpp.NewGovppClient()
 	}
 
+	frrApplyMode, err := pkgfrr.ParseBackendMode(f.frrApplyMode)
+	if err != nil {
+		return err
+	}
+
 	// --- Step 3: Create southbound plugins ---
 	vppPlugin := sbvpp.NewVPPPlugin(vppClient, hwConfig, slog.Default())
-	frrPlugin := sbfrr.NewFRRPlugin(slog.Default())
+	frrPlugin := sbfrr.NewFRRPluginWithApplyMode(slog.Default(), frrApplyMode)
 
 	plugins := []engine.Plugin{vppPlugin, frrPlugin}
 

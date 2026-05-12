@@ -6,7 +6,6 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
-	"os"
 	"sync"
 
 	"github.com/akam1o/arca-router/internal/engine"
@@ -16,26 +15,33 @@ import (
 
 // FRRPlugin implements engine.Plugin for FRR routing daemon operations.
 type FRRPlugin struct {
-	mu       sync.Mutex
-	reloader *pkgfrr.Reloader
-	log      *slog.Logger
+	mu      sync.Mutex
+	applier pkgfrr.Applier
+	log     *slog.Logger
 
-	currentConfig  string
-	rollbackConfig string
+	currentConfig     string
+	rollbackConfig    string
+	currentFRRConfig  *pkgfrr.Config
+	rollbackFRRConfig *pkgfrr.Config
 }
 
 // NewFRRPlugin creates a new FRR plugin.
 func NewFRRPlugin(log *slog.Logger) *FRRPlugin {
+	return NewFRRPluginWithApplyMode(log, pkgfrr.BackendModeTransactional)
+}
+
+// NewFRRPluginWithApplyMode creates a new FRR plugin with an explicit apply backend.
+func NewFRRPluginWithApplyMode(log *slog.Logger, mode pkgfrr.BackendMode) *FRRPlugin {
 	return &FRRPlugin{
-		reloader: pkgfrr.NewReloader(),
-		log:      log.With("plugin", "frr"),
+		applier: pkgfrr.NewApplier(mode),
+		log:     log.With("plugin", "frr", "apply_mode", string(mode)),
 	}
 }
 
 func (p *FRRPlugin) Name() string { return "frr" }
 
 func (p *FRRPlugin) Init(ctx context.Context) error {
-	// FRR is managed via config file + reload, no persistent connection needed
+	// FRR apply backends are command-driven, so no persistent connection is needed.
 	return nil
 }
 
@@ -55,9 +61,8 @@ func (p *FRRPlugin) ValidateChanges(ctx context.Context, diff *engine.ConfigDiff
 	return nil
 }
 
-// ApplyChanges regenerates the FRR configuration and reloads.
-// Currently does a full regeneration — incremental updates via FRR MGMT API
-// is a future optimization.
+// ApplyChanges regenerates the desired FRR view and commits it through the
+// configured apply backend. The default backend is transactional management.
 func (p *FRRPlugin) ApplyChanges(ctx context.Context, diff *engine.ConfigDiff) error {
 	p.mu.Lock()
 	defer p.mu.Unlock()
@@ -75,34 +80,28 @@ func (p *FRRPlugin) ApplyChanges(ctx context.Context, diff *engine.ConfigDiff) e
 	// generation is whole-file based. The diff tells us *whether* to regenerate.
 	newCfg := p.buildFullConfig(diff)
 
-	// Convert to legacy config for the existing FRR generator
-	legacyCfg := newCfg.ToLegacyConfig()
-
-	// Generate FRR config
-	frrConfig, err := pkgfrr.GenerateFRRConfig(legacyCfg)
+	frrConfig, configContent, err := generateFRRArtifacts(newCfg)
 	if err != nil {
-		return fmt.Errorf("generate FRR config: %w", err)
-	}
-
-	configContent, err := pkgfrr.GenerateFRRConfigFile(frrConfig)
-	if err != nil {
-		return fmt.Errorf("generate FRR config file: %w", err)
+		return err
 	}
 
 	previousConfig := p.currentConfig
-	if previousConfig == "" {
-		if data, readErr := os.ReadFile(p.reloader.ConfigPath); readErr == nil {
-			previousConfig = string(data)
+	previousFRRConfig := p.currentFRRConfig
+	if previousConfig == "" && diff.OldConfig != nil {
+		if oldFRRConfig, oldConfigContent, oldErr := generateFRRArtifacts(diff.OldConfig); oldErr == nil {
+			previousConfig = oldConfigContent
+			previousFRRConfig = oldFRRConfig
 		}
 	}
 
-	// Apply via reloader (atomic write + validation + reload)
-	if err := p.reloader.ApplyConfig(ctx, configContent); err != nil {
+	if err := p.applier.ApplyConfig(ctx, configContent, frrConfig); err != nil {
 		return fmt.Errorf("apply FRR config: %w", err)
 	}
 
 	p.rollbackConfig = previousConfig
+	p.rollbackFRRConfig = previousFRRConfig
 	p.currentConfig = configContent
+	p.currentFRRConfig = frrConfig
 
 	p.log.Info("FRR configuration applied",
 		slog.Int("config_length", len(configContent)),
@@ -111,6 +110,19 @@ func (p *FRRPlugin) ApplyChanges(ctx context.Context, diff *engine.ConfigDiff) e
 	)
 
 	return nil
+}
+
+func generateFRRArtifacts(cfg *model.RouterConfig) (*pkgfrr.Config, string, error) {
+	legacyCfg := cfg.ToLegacyConfig()
+	frrConfig, err := pkgfrr.GenerateFRRConfig(legacyCfg)
+	if err != nil {
+		return nil, "", fmt.Errorf("generate FRR config: %w", err)
+	}
+	configContent, err := pkgfrr.GenerateFRRConfigFile(frrConfig)
+	if err != nil {
+		return nil, "", fmt.Errorf("generate FRR config file: %w", err)
+	}
+	return frrConfig, configContent, nil
 }
 
 // RollbackChanges reverts to the previous FRR configuration.
@@ -123,10 +135,22 @@ func (p *FRRPlugin) RollbackChanges(ctx context.Context, diff *engine.ConfigDiff
 		return nil
 	}
 
-	if err := p.reloader.ApplyConfig(ctx, p.rollbackConfig); err != nil {
+	rollbackConfig := p.rollbackConfig
+	rollbackFRRConfig := p.rollbackFRRConfig
+	if rollbackFRRConfig == nil && diff != nil && diff.OldConfig != nil {
+		if oldFRRConfig, oldConfigContent, oldErr := generateFRRArtifacts(diff.OldConfig); oldErr == nil {
+			rollbackFRRConfig = oldFRRConfig
+			if rollbackConfig == "" {
+				rollbackConfig = oldConfigContent
+			}
+		}
+	}
+
+	if err := p.applier.ApplyConfig(ctx, rollbackConfig, rollbackFRRConfig); err != nil {
 		return fmt.Errorf("rollback FRR config: %w", err)
 	}
-	p.currentConfig = p.rollbackConfig
+	p.currentConfig = rollbackConfig
+	p.currentFRRConfig = rollbackFRRConfig
 
 	p.log.Info("FRR configuration rolled back")
 	return nil
