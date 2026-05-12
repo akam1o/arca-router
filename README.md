@@ -273,15 +273,15 @@ sudo journalctl -u arca-routerd -n 50
 # View running configuration with arca-cli
 arca-cli show configuration
 
-# Check operational state directly
+# Check operational state through arca-routerd
+arca-cli show interfaces
+arca-cli show route
+arca-cli show bgp summary
+arca-cli show ospf neighbor
+
+# Check VPP/FRR directly (optional)
 sudo vppctl show interface
 sudo vppctl show lcp
-sudo vppctl show ip fib
-sudo vtysh -c 'show ip route'
-sudo vtysh -c 'show bgp summary'
-sudo vtysh -c 'show ip ospf neighbor'
-
-# Check FRR directly (optional)
 sudo vtysh -c 'show running-config'
 sudo vtysh -c 'show ip route'
 ```

@@ -93,11 +93,13 @@ Show subcommands:
   configuration               Show full configuration
   configuration interfaces    Show interface configuration
   configuration protocols     Show routing protocol configuration
-  interfaces                  Show interface status (not yet available via gRPC)
-  interfaces <name>           Show specific interface details (not yet available via gRPC)
-  bgp summary                 Show BGP summary (not yet available via gRPC)
-  bgp neighbor <ip>           Show BGP neighbor details (not yet available via gRPC)
-  route                       Show routing table (not yet available via gRPC)
+  interfaces                  Show interface status
+  interfaces <name>           Show specific interface details
+  bgp summary                 Show BGP summary
+  bgp neighbor <ip>           Show BGP neighbor details
+  ospf neighbor               Show OSPF neighbors
+  route                       Show routing table
+  route protocol <proto>      Show routes by protocol
 
 Options:
   -socket <path>     arca-routerd gRPC socket (default: %s)
@@ -177,7 +179,7 @@ func runOneShotCommand(ctx context.Context, f *cliFlags, args []string) int {
 	}
 }
 
-func oneShotShow(ctx context.Context, client *grpcclient.Client, args []string, f *cliFlags) int {
+func oneShotShow(ctx context.Context, client showClient, args []string, f *cliFlags) int {
 	subcmd := args[0]
 	switch subcmd {
 	case "configuration":
@@ -210,24 +212,24 @@ func oneShotShow(ctx context.Context, client *grpcclient.Client, args []string, 
 		}
 		switch args[1] {
 		case "summary":
-			neighbors, err := client.GetBGPNeighbors(ctx)
+			output, err := client.GetBGPSummaryText(ctx)
 			if err != nil {
 				fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 				return ExitOperationError
 			}
-			printBGPSummary(neighbors)
+			printCommandOutput(output)
 			return ExitSuccess
 		case "neighbor":
 			if len(args) < 3 {
 				fmt.Fprintf(os.Stderr, "Error: 'show bgp neighbor' requires an IP address\n")
 				return ExitUsageError
 			}
-			neighbors, err := client.GetBGPNeighbors(ctx)
+			output, err := client.GetBGPNeighborText(ctx, args[2])
 			if err != nil {
 				fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 				return ExitOperationError
 			}
-			printBGPNeighborDetail(neighbors, args[2])
+			printCommandOutput(output)
 			return ExitSuccess
 		default:
 			fmt.Fprintf(os.Stderr, "Error: unknown bgp subcommand '%s'\n", args[1])
@@ -239,21 +241,26 @@ func oneShotShow(ctx context.Context, client *grpcclient.Client, args []string, 
 			fmt.Fprintf(os.Stderr, "Error: 'show ospf' requires 'neighbor' subcommand\n")
 			return ExitUsageError
 		}
-		fmt.Fprintf(os.Stderr, "Error: OSPF neighbor state is not available via gRPC yet\n")
-		return ExitOperationError
-
-	case "route":
-		prefixFilter := ""
-		protoFilter := ""
-		if len(args) > 1 && args[1] == "protocol" && len(args) > 2 {
-			protoFilter = args[2]
-		}
-		routes, err := client.GetRoutes(ctx, prefixFilter, protoFilter)
+		output, err := client.GetOSPFNeighborsText(ctx)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 			return ExitOperationError
 		}
-		printRoutes(routes)
+		printCommandOutput(output)
+		return ExitSuccess
+
+	case "route":
+		protoFilter, err := routeProtocolFilter(args[1:])
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+			return ExitUsageError
+		}
+		output, err := client.GetRouteText(ctx, protoFilter)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+			return ExitOperationError
+		}
+		printCommandOutput(output)
 		return ExitSuccess
 
 	default:
@@ -276,7 +283,7 @@ type interactiveShell struct {
 }
 
 type interactiveClient interface {
-	GetRunning(context.Context) (string, uint64, error)
+	showClient
 	GetCandidate(context.Context, string) (string, error)
 	EditCandidate(context.Context, string, string) error
 	Commit(context.Context, string, string, string) (string, uint64, error)
@@ -287,9 +294,17 @@ type interactiveClient interface {
 	ListHistory(context.Context, int, int) ([]grpcclient.CommitInfo, error)
 	AcquireLock(context.Context, string, string) error
 	ReleaseLock(context.Context, string) error
-	GetInterfaces(context.Context, string) ([]grpcclient.InterfaceInfo, error)
 	GetRoutes(context.Context, string, string) ([]grpcclient.RouteInfo, error)
 	GetBGPNeighbors(context.Context) ([]grpcclient.BGPNeighborInfo, error)
+}
+
+type showClient interface {
+	GetRunning(context.Context) (string, uint64, error)
+	GetInterfaces(context.Context, string) ([]grpcclient.InterfaceInfo, error)
+	GetRouteText(context.Context, string) (string, error)
+	GetBGPSummaryText(context.Context) (string, error)
+	GetBGPNeighborText(context.Context, string) (string, error)
+	GetOSPFNeighborsText(context.Context) (string, error)
 }
 
 type cliMode int
@@ -595,21 +610,21 @@ func (sh *interactiveShell) cmdShow(ctx context.Context, args []string) error {
 		}
 		switch args[1] {
 		case "summary":
-			neighbors, err := sh.client.GetBGPNeighbors(ctx)
+			output, err := sh.client.GetBGPSummaryText(ctx)
 			if err != nil {
 				return err
 			}
-			printBGPSummary(neighbors)
+			printCommandOutput(output)
 			return nil
 		case "neighbor":
 			if len(args) < 3 {
 				return fmt.Errorf("'show bgp neighbor' requires an IP address")
 			}
-			neighbors, err := sh.client.GetBGPNeighbors(ctx)
+			output, err := sh.client.GetBGPNeighborText(ctx, args[2])
 			if err != nil {
 				return err
 			}
-			printBGPNeighborDetail(neighbors, args[2])
+			printCommandOutput(output)
 			return nil
 		default:
 			return fmt.Errorf("unknown bgp subcommand '%s'", args[1])
@@ -622,22 +637,26 @@ func (sh *interactiveShell) cmdShow(ctx context.Context, args []string) error {
 		if len(args) < 2 || args[1] != "neighbor" {
 			return fmt.Errorf("'show ospf' requires 'neighbor' subcommand")
 		}
-		return fmt.Errorf("OSPF neighbor state is not available via gRPC yet")
+		output, err := sh.client.GetOSPFNeighborsText(ctx)
+		if err != nil {
+			return err
+		}
+		printCommandOutput(output)
+		return nil
 
 	case "route":
 		if sh.mode == modeConfiguration {
 			return fmt.Errorf("'show route' not available in configuration mode")
 		}
-		prefixFilter := ""
-		protoFilter := ""
-		if len(args) > 1 && args[1] == "protocol" && len(args) > 2 {
-			protoFilter = args[2]
-		}
-		routes, err := sh.client.GetRoutes(ctx, prefixFilter, protoFilter)
+		protoFilter, err := routeProtocolFilter(args[1:])
 		if err != nil {
 			return err
 		}
-		printRoutes(routes)
+		output, err := sh.client.GetRouteText(ctx, protoFilter)
+		if err != nil {
+			return err
+		}
+		printCommandOutput(output)
 		return nil
 
 	default:
@@ -838,11 +857,12 @@ func (sh *interactiveShell) showHelp() {
 		fmt.Println("  help                          Show this help message")
 		fmt.Println("  configure                     Enter configuration mode")
 		fmt.Println("  show configuration            Show running configuration")
-		fmt.Println("  show interfaces [<name>]      Show interface status (not yet available via gRPC)")
-		fmt.Println("  show bgp summary              Show BGP summary (not yet available via gRPC)")
-		fmt.Println("  show bgp neighbor <ip>        Show BGP neighbor details (not yet available via gRPC)")
-		fmt.Println("  show route                    Show routing table (not yet available via gRPC)")
-		fmt.Println("  show route protocol <proto>   Show routes by protocol (not yet available via gRPC)")
+		fmt.Println("  show interfaces [<name>]      Show interface status")
+		fmt.Println("  show bgp summary              Show BGP summary")
+		fmt.Println("  show bgp neighbor <ip>        Show BGP neighbor details")
+		fmt.Println("  show ospf neighbor            Show OSPF neighbors")
+		fmt.Println("  show route                    Show routing table")
+		fmt.Println("  show route protocol <proto>   Show routes by protocol")
 		fmt.Println("  exit, quit                    Exit interactive CLI")
 	} else {
 		fmt.Println("Configuration mode commands:")
@@ -886,51 +906,39 @@ func printInterfaces(ifaces []grpcclient.InterfaceInfo) {
 	}
 }
 
-func printBGPSummary(neighbors []grpcclient.BGPNeighborInfo) {
-	if len(neighbors) == 0 {
-		fmt.Println("No BGP neighbors found")
-		return
-	}
-	fmt.Printf("%-20s %-8s %-12s %-10s %-8s %-8s\n",
-		"Neighbor", "AS", "State", "Uptime", "Rcvd", "Sent")
-	fmt.Println(strings.Repeat("-", 70))
-	for _, n := range neighbors {
-		fmt.Printf("%-20s %-8d %-12s %-10d %-8d %-8d\n",
-			n.PeerAddress, n.PeerAS, n.State, n.UptimeSecs, n.PrefixReceived, n.PrefixSent)
+func printCommandOutput(output string) {
+	fmt.Print(output)
+	if output != "" && !strings.HasSuffix(output, "\n") {
+		fmt.Println()
 	}
 }
 
-func printBGPNeighborDetail(neighbors []grpcclient.BGPNeighborInfo, peer string) {
-	for _, n := range neighbors {
-		if n.PeerAddress == peer {
-			fmt.Printf("BGP neighbor %s\n", n.PeerAddress)
-			fmt.Printf("  Remote AS: %d\n", n.PeerAS)
-			fmt.Printf("  State: %s\n", n.State)
-			fmt.Printf("  Uptime: %d seconds\n", n.UptimeSecs)
-			fmt.Printf("  Prefixes received: %d\n", n.PrefixReceived)
-			fmt.Printf("  Prefixes sent: %d\n", n.PrefixSent)
-			return
-		}
+func routeProtocolFilter(args []string) (string, error) {
+	if len(args) == 0 {
+		return "", nil
 	}
-	fmt.Fprintf(os.Stderr, "BGP neighbor %s not found\n", peer)
+	if args[0] != "protocol" {
+		return "", fmt.Errorf("'show route' accepts 'protocol <proto>' or no arguments")
+	}
+	if len(args) < 2 {
+		return "", fmt.Errorf("'protocol' requires a protocol name")
+	}
+	if len(args) > 2 {
+		return "", fmt.Errorf("'show route protocol' does not accept extra arguments")
+	}
+	protocol := args[1]
+	if !validRouteProtocols[protocol] {
+		return "", fmt.Errorf("invalid protocol '%s'. Valid: bgp, ospf, static, connected, kernel", protocol)
+	}
+	return protocol, nil
 }
 
-func printRoutes(routes []grpcclient.RouteInfo) {
-	if len(routes) == 0 {
-		fmt.Println("No routes found")
-		return
-	}
-	fmt.Printf("%-20s %-20s %-10s %-8s %-12s %s\n",
-		"Prefix", "NextHop", "Protocol", "Metric", "Interface", "Active")
-	fmt.Println(strings.Repeat("-", 82))
-	for _, r := range routes {
-		active := " "
-		if r.Active {
-			active = "*"
-		}
-		fmt.Printf("%-20s %-20s %-10s %-8d %-12s %s\n",
-			r.Prefix, r.NextHop, r.Protocol, r.Metric, r.Interface, active)
-	}
+var validRouteProtocols = map[string]bool{
+	"bgp":       true,
+	"ospf":      true,
+	"static":    true,
+	"connected": true,
+	"kernel":    true,
 }
 
 // --- Utilities ---

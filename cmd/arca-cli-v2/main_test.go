@@ -10,10 +10,14 @@ import (
 )
 
 type fakeInteractiveClient struct {
-	acquireLockErr error
-	discardErr     error
-	releaseLockErr error
-	history        []grpcclient.CommitInfo
+	acquireLockErr  error
+	discardErr      error
+	releaseLockErr  error
+	history         []grpcclient.CommitInfo
+	routeText       string
+	bgpSummaryText  string
+	bgpNeighborText string
+	ospfText        string
 
 	acquireLockCalls int
 	discardCalls     int
@@ -87,6 +91,34 @@ func (f *fakeInteractiveClient) GetRoutes(ctx context.Context, prefixFilter, pro
 
 func (f *fakeInteractiveClient) GetBGPNeighbors(ctx context.Context) ([]grpcclient.BGPNeighborInfo, error) {
 	return nil, nil
+}
+
+func (f *fakeInteractiveClient) GetRouteText(ctx context.Context, protoFilter string) (string, error) {
+	if f.routeText == "" {
+		return "route output\n", nil
+	}
+	return f.routeText, nil
+}
+
+func (f *fakeInteractiveClient) GetBGPSummaryText(ctx context.Context) (string, error) {
+	if f.bgpSummaryText == "" {
+		return "bgp summary output\n", nil
+	}
+	return f.bgpSummaryText, nil
+}
+
+func (f *fakeInteractiveClient) GetBGPNeighborText(ctx context.Context, peerAddress string) (string, error) {
+	if f.bgpNeighborText == "" {
+		return "bgp neighbor output\n", nil
+	}
+	return f.bgpNeighborText, nil
+}
+
+func (f *fakeInteractiveClient) GetOSPFNeighborsText(ctx context.Context) (string, error) {
+	if f.ospfText == "" {
+		return "ospf neighbor output\n", nil
+	}
+	return f.ospfText, nil
 }
 
 func TestCmdConfigureRequiresSession(t *testing.T) {
@@ -289,7 +321,7 @@ func TestShowHistoryRejectsInvalidLimit(t *testing.T) {
 	}
 }
 
-func TestCmdShowOSPFNeighborReturnsUnsupportedError(t *testing.T) {
+func TestCmdShowOSPFNeighborReturnsOutput(t *testing.T) {
 	ctx := context.Background()
 	client := &fakeInteractiveClient{}
 	sh := &interactiveShell{
@@ -300,15 +332,16 @@ func TestCmdShowOSPFNeighborReturnsUnsupportedError(t *testing.T) {
 	}
 
 	err := sh.cmdShow(ctx, []string{"ospf", "neighbor"})
-	if err == nil || !strings.Contains(err.Error(), "not available via gRPC yet") {
-		t.Fatalf("cmdShow(ospf neighbor) error = %v, want unsupported gRPC state", err)
+	if err != nil {
+		t.Fatalf("cmdShow(ospf neighbor) error = %v", err)
 	}
 }
 
-func TestOneShotShowOSPFNeighborReturnsOperationError(t *testing.T) {
-	code := oneShotShow(context.Background(), nil, []string{"ospf", "neighbor"}, &cliFlags{})
-	if code != ExitOperationError {
-		t.Fatalf("oneShotShow(ospf neighbor) = %d, want %d", code, ExitOperationError)
+func TestOneShotShowOSPFNeighborReturnsSuccess(t *testing.T) {
+	client := &fakeInteractiveClient{}
+	code := oneShotShow(context.Background(), client, []string{"ospf", "neighbor"}, &cliFlags{})
+	if code != ExitSuccess {
+		t.Fatalf("oneShotShow(ospf neighbor) = %d, want %d", code, ExitSuccess)
 	}
 }
 
