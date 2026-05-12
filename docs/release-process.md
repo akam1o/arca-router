@@ -84,6 +84,12 @@ arca-router follows a phase-based development model:
 | Phase 4 | v0.4.x | Unified daemon, struct-first config engine, gRPC CLI | ✅ Complete |
 | Phase 5 | v0.5.x | Production hardening, transactional FRR apply, observability | 🚧 Current |
 | Phase 6 | v0.6.x | HA, MPLS/VPN, QoS/TE, Web UI | 🔲 Planned |
+| Phase 7 | v0.7.x | IPv6 parity, VRF/routing instances, BFD | 🔲 Planned |
+| Phase 8 | v0.8.x | EVPN/VXLAN, streaming telemetry, NMS integration | 🔲 Planned |
+| Phase 9 | v0.9.x | NETCONF/YANG maturity, operational safety | 🔲 Planned |
+| Phase 10 | v0.10.x | Stabilization, compatibility, upgrade readiness | 🔲 Planned |
+
+Detailed future scope is maintained in [`ROADMAP.md`](../ROADMAP.md).
 
 ### Release Cadence
 
