@@ -29,7 +29,8 @@
 |------|--------|------|
 | **実行ユーザー** | `arca-router` (専用ユーザー) | root実行を避け、権限を制限 |
 | **プライマリグループ** | `arca-router` | 設定ファイル所有権管理 |
-| **セカンダリグループ** | `vpp`, `frr`, `frrvty` | VPP/FRRリソースへのアクセス |
+| **セカンダリグループ** | `vpp`, `frrvty` | VPP API と FRR vtysh/mgmtd へのアクセス |
+| **復旧用追加グループ** | `frr` | `--frr-apply-mode=file` 利用時のみ `/etc/frr/frr.conf` へ書き込み |
 | **ホームディレクトリ** | `/var/lib/arca-router` | 状態ファイル・キャッシュ保存先 |
 
 #### 専用ユーザー作成（RPM postinstallスクリプトで実施）
@@ -44,10 +45,12 @@ if ! id arca-router &>/dev/null; then
         arca-router
 fi
 
-# Add arca-router to VPP/FRR groups
+# Add arca-router to groups used by the default v0.5 backends
 usermod -aG vpp arca-router
-usermod -aG frr arca-router
 usermod -aG frrvty arca-router
+
+# Optional: only required for --frr-apply-mode=file
+usermod -aG frr arca-router
 ```
 
 ---
@@ -63,6 +66,7 @@ usermod -aG frrvty arca-router
 | FRR設定ファイル書き込み (`/etc/frr/frr.conf`) | `frr`グループ所属 | 復旧用 `--frr-apply-mode=file` のみ |
 | LCP (Linux Control Plane) 操作 | `CAP_NET_ADMIN` | netlink/TAP操作 |
 | VPP FIB操作（経路同期） | `CAP_NET_ADMIN` | Kernel routing table操作 |
+| NETCONF/SNMP privileged port bind | `CAP_NET_BIND_SERVICE` | 830/TCP と任意の 161/UDP |
 
 ---
 
@@ -77,6 +81,7 @@ usermod -aG frrvty arca-router
 | Capability | 用途 | 必須/推奨 |
 |-----------|------|----------|
 | `CAP_NET_ADMIN` | netlink操作、LCP、VPP FIB同期 | **必須** |
+| `CAP_NET_BIND_SERVICE` | NETCONF/SSHの830番ポート、任意のSNMP 161番ポート | **必須** |
 | `CAP_NET_RAW` | Raw socket操作（将来のBFD/LLDP用） | 推奨 (Phase 3以降) |
 
 #### systemd unit fileへの反映
@@ -87,18 +92,21 @@ usermod -aG frrvty arca-router
 [Service]
 User=arca-router
 Group=arca-router
-SupplementaryGroups=vpp frr frrvty
+SupplementaryGroups=vpp frrvty
 
 # Linux Capabilities
-AmbientCapabilities=CAP_NET_ADMIN
-CapabilityBoundingSet=CAP_NET_ADMIN
+AmbientCapabilities=CAP_NET_ADMIN CAP_NET_BIND_SERVICE
+CapabilityBoundingSet=CAP_NET_ADMIN CAP_NET_BIND_SERVICE
 
 # Security hardening
 NoNewPrivileges=true
 PrivateTmp=true
 ProtectSystem=strict
 ProtectHome=true
-ReadWritePaths=/var/lib/arca-router /run/arca-router /var/log/arca-router /etc/frr
+ReadWritePaths=/var/lib/arca-router /run/arca-router /var/log/arca-router
+
+# --frr-apply-mode=file を使う場合のみ、systemd drop-in で
+# SupplementaryGroups=frr と ReadWritePaths=/etc/frr を追加する。
 
 # VPP/FRR integration
 RuntimeDirectory=arca-router
@@ -212,7 +220,7 @@ systemd `RuntimeDirectory`/`StateDirectory`により自動作成される。
 │  - VPP/FRR設定生成                           │
 │  - 設定適用                                  │
 └─────────────────────────────────────────────┘
-          ↓ (vpp group)      ↓ (frr group)
+          ↓ (vpp group)      ↓ (frrvty group)
 ┌──────────────────┐   ┌─────────────────────┐
 │  VPP (root)      │   │  FRR (frr user)     │
 │  - Dataplane     │   │  - Routing daemon   │
@@ -241,7 +249,7 @@ systemd `RuntimeDirectory`/`StateDirectory`により自動作成される。
 |-------|--------|--------|
 | 設定ファイル改ざん | 不正なルーティング設定 | root権限のみ書き込み可能、設定検証 |
 | VPP API socket不正アクセス | VPP設定改ざん | vppグループのみアクセス、ソケット権限 |
-| FRR設定ファイル改ざん | ルーティング乗っ取り | frrグループのみアクセス、atomic write |
+| FRR設定ファイル改ざん | ルーティング乗っ取り | 標準経路では直接書き込み不可。`file` backend 利用時のみ frrグループとatomic write |
 | arca-routerdプロセス乗っ取り | システム権限昇格 | Capabilities制限、systemd sandboxing |
 | LCP操作悪用 | Kernel network stack操作 | CAP_NET_ADMIN最小化、入力検証 |
 
@@ -330,7 +338,7 @@ func (r *Reloader) ApplyConfig(ctx context.Context, configContent string) error 
 - [x] systemd unit fileに`User=arca-router`を設定
 - [x] `AmbientCapabilities=CAP_NET_ADMIN`を設定
 - [x] RPM postinstallで`arca-router`ユーザー作成
-- [x] RPM postinstallでグループ追加（`vpp`, `frr`, `frrvty`）
+- [x] RPM postinstallで標準グループ追加（`vpp`, `frrvty`）
 - [ ] VPP socket権限確認ロジック実装（`pkg/vpp/govpp_client.go`）
 - [ ] FRR設定適用権限確認（`pkg/frr/transactional.go`, `pkg/frr/reloader.go`）
 - [ ] 設定ファイル権限設定（`pkg/config/writer.go`）
@@ -383,7 +391,7 @@ sudo systemctl restart vpp
 **解決方法**:
 
 ```bash
-# Add user to frr group
+# Add user to FRR access groups
 sudo usermod -aG frrvty arca-router
 sudo usermod -aG frr arca-router  # only required for --frr-apply-mode=file
 
