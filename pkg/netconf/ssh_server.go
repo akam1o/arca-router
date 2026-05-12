@@ -39,6 +39,7 @@ type SSHServer struct {
 	done          chan struct{}
 	wg            sync.WaitGroup
 	mu            sync.Mutex
+	stopOnce      sync.Once
 	log           *logger.Logger
 
 	// Metrics (thread-safe via atomic operations)
@@ -209,48 +210,48 @@ func (s *SSHServer) Start(ctx context.Context) error {
 
 // Stop stops the SSH server gracefully
 func (s *SSHServer) Stop() error {
-	// Mark as not listening
-	atomic.StoreInt32(&s.isListening, 0)
+	s.stopOnce.Do(func() {
+		// Mark as not listening
+		atomic.StoreInt32(&s.isListening, 0)
 
-	s.mu.Lock()
-	if s.listener == nil {
+		// Signal shutdown even if Start failed before creating a listener.
+		close(s.done)
+
+		s.mu.Lock()
+		listener := s.listener
+		s.listener = nil
 		s.mu.Unlock()
-		return nil
-	}
 
-	// Close listener
-	if err := s.listener.Close(); err != nil {
-		s.log.Error("Failed to close listener", "error", err)
-	}
-	s.listener = nil
-	s.mu.Unlock()
+		if listener != nil {
+			if err := listener.Close(); err != nil {
+				s.log.Error("Failed to close listener", "error", err)
+			}
+		}
 
-	// Signal shutdown
-	close(s.done)
+		// Close all sessions (this will trigger cleanup goroutine to stop)
+		s.sessionMgr.CloseAll()
 
-	// Close all sessions (this will trigger cleanup goroutine to stop)
-	s.sessionMgr.CloseAll()
+		// Stop rate limiter
+		s.rateLimiter.Stop()
 
-	// Stop rate limiter
-	s.rateLimiter.Stop()
+		// Wait for goroutines to finish
+		s.wg.Wait()
 
-	// Wait for goroutines to finish
-	s.wg.Wait()
+		// Close datastore
+		if err := s.datastore.Close(); err != nil {
+			s.log.Error("Failed to close datastore", "error", err)
+		}
+		if err := s.processLock.Close(); err != nil {
+			s.log.Error("Failed to release datastore process lock", "error", err)
+		}
 
-	// Close datastore
-	if err := s.datastore.Close(); err != nil {
-		s.log.Error("Failed to close datastore", "error", err)
-	}
-	if err := s.processLock.Close(); err != nil {
-		s.log.Error("Failed to release datastore process lock", "error", err)
-	}
+		// Close user database
+		if err := s.userDB.Close(); err != nil {
+			s.log.Error("Failed to close user database", "error", err)
+		}
 
-	// Close user database
-	if err := s.userDB.Close(); err != nil {
-		s.log.Error("Failed to close user database", "error", err)
-	}
-
-	s.log.Info("SSH server stopped")
+		s.log.Info("SSH server stopped")
+	})
 	return nil
 }
 
