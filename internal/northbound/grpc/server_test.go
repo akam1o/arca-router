@@ -845,3 +845,42 @@ func TestApplyCandidateCommandPreservesOSPFInterfaceAttributes(t *testing.T) {
 		}
 	}
 }
+
+func TestApplyCandidateCommandReplacesV06ScalarAttributes(t *testing.T) {
+	candidate := strings.Join([]string{
+		"set system services web-ui port 8080",
+		"set protocols vrrp group 10 priority 100",
+		"set routing-instances BLUE route-distinguisher 65000:100",
+		"set class-of-service traffic-control-profile WAN shaping-rate 1000",
+	}, "\n")
+
+	updated, err := applyCandidateCommand(candidate, strings.Join([]string{
+		"set system services web-ui port 8443",
+		"set protocols vrrp group 10 priority 120",
+		"set routing-instances BLUE route-distinguisher 65000:200",
+		"set class-of-service traffic-control-profile WAN shaping-rate 2000",
+	}, "\n"))
+	if err != nil {
+		t.Fatalf("applyCandidateCommand() error = %v", err)
+	}
+	for _, oldLine := range []string{
+		"set system services web-ui port 8080",
+		"set protocols vrrp group 10 priority 100",
+		"set routing-instances BLUE route-distinguisher 65000:100",
+		"set class-of-service traffic-control-profile WAN shaping-rate 1000",
+	} {
+		if strings.Contains(updated, oldLine) {
+			t.Fatalf("updated candidate retained old line %q:\n%s", oldLine, updated)
+		}
+	}
+	for _, want := range []string{
+		"set system services web-ui port 8443",
+		"set protocols vrrp group 10 priority 120",
+		"set routing-instances BLUE route-distinguisher 65000:200",
+		"set class-of-service traffic-control-profile WAN shaping-rate 2000",
+	} {
+		if !strings.Contains(updated, want) {
+			t.Fatalf("updated candidate missing %q:\n%s", want, updated)
+		}
+	}
+}

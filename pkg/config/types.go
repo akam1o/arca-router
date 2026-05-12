@@ -5,6 +5,9 @@ type Config struct {
 	// System holds system-level configuration
 	System *SystemConfig `json:"system,omitempty"`
 
+	// Chassis holds multi-chassis and clustering configuration
+	Chassis *ChassisConfig `json:"chassis,omitempty"`
+
 	// Interfaces holds interface configuration
 	Interfaces map[string]*Interface `json:"interfaces,omitempty"`
 
@@ -14,8 +17,14 @@ type Config struct {
 	// RoutingOptions holds routing options
 	RoutingOptions *RoutingOptions `json:"routing-options,omitempty"`
 
+	// RoutingInstances holds per-instance VPN/VRF configuration
+	RoutingInstances map[string]*RoutingInstance `json:"routing-instances,omitempty"`
+
 	// PolicyOptions holds policy-options configuration
 	PolicyOptions *PolicyOptions `json:"policy-options,omitempty"`
+
+	// ClassOfService holds QoS and traffic-control configuration
+	ClassOfService *ClassOfServiceConfig `json:"class-of-service,omitempty"`
 
 	// Security holds security configuration (Phase 3)
 	Security *SecurityConfig `json:"security,omitempty"`
@@ -26,6 +35,51 @@ type Config struct {
 type SystemConfig struct {
 	// HostName is the router's hostname
 	HostName string `json:"host-name,omitempty"`
+
+	// Services holds system service settings
+	Services *SystemServicesConfig `json:"services,omitempty"`
+}
+
+// SystemServicesConfig represents system service settings.
+type SystemServicesConfig struct {
+	// WebUI holds browser UI service settings.
+	WebUI *WebUIConfig `json:"web-ui,omitempty"`
+}
+
+// WebUIConfig represents browser UI service settings.
+type WebUIConfig struct {
+	Enabled       bool   `json:"enabled,omitempty"`
+	ListenAddress string `json:"listen-address,omitempty"`
+	Port          int    `json:"port,omitempty"`
+}
+
+// ChassisConfig represents chassis-level configuration.
+type ChassisConfig struct {
+	Cluster *ClusterConfig `json:"cluster,omitempty"`
+}
+
+// ClusterConfig represents multi-chassis clustering configuration.
+type ClusterConfig struct {
+	Enabled bool                    `json:"enabled,omitempty"`
+	Nodes   map[string]*ClusterNode `json:"nodes,omitempty"`
+	Sync    *ClusterSyncConfig      `json:"sync,omitempty"`
+}
+
+// ClusterNode represents a node in an HA cluster.
+type ClusterNode struct {
+	Name     string `json:"name"`
+	Address  string `json:"address,omitempty"`
+	Priority int    `json:"priority,omitempty"`
+}
+
+// ClusterSyncConfig represents cluster synchronization settings.
+type ClusterSyncConfig struct {
+	Etcd *EtcdSyncConfig `json:"etcd,omitempty"`
+}
+
+// EtcdSyncConfig represents etcd-backed config synchronization settings.
+type EtcdSyncConfig struct {
+	Endpoints []string `json:"endpoints,omitempty"`
 }
 
 // Interface represents a logical interface configuration
@@ -119,6 +173,15 @@ type StaticRoute struct {
 	Distance int `json:"distance,omitempty"`
 }
 
+// RoutingInstance represents a routing instance, initially focused on VRF/L3VPN.
+type RoutingInstance struct {
+	Name               string   `json:"name"`
+	InstanceType       string   `json:"instance-type,omitempty"`
+	RouteDistinguisher string   `json:"route-distinguisher,omitempty"`
+	VRFTarget          string   `json:"vrf-target,omitempty"`
+	Interfaces         []string `json:"interfaces,omitempty"`
+}
+
 // ProtocolConfig represents routing protocol configuration
 type ProtocolConfig struct {
 	// BGP holds BGP protocol configuration
@@ -126,6 +189,31 @@ type ProtocolConfig struct {
 
 	// OSPF holds OSPF protocol configuration
 	OSPF *OSPFConfig `json:"ospf,omitempty"`
+
+	// MPLS holds MPLS protocol configuration
+	MPLS *MPLSConfig `json:"mpls,omitempty"`
+
+	// VRRP holds VRRP high-availability groups
+	VRRP *VRRPConfig `json:"vrrp,omitempty"`
+}
+
+// MPLSConfig represents MPLS forwarding configuration.
+type MPLSConfig struct {
+	Interfaces []string `json:"interfaces,omitempty"`
+}
+
+// VRRPConfig represents VRRP groups.
+type VRRPConfig struct {
+	Groups map[string]*VRRPGroup `json:"groups,omitempty"`
+}
+
+// VRRPGroup represents one VRRP group.
+type VRRPGroup struct {
+	Name           string `json:"name"`
+	Interface      string `json:"interface,omitempty"`
+	VirtualAddress string `json:"virtual-address,omitempty"`
+	Priority       int    `json:"priority,omitempty"`
+	Preempt        bool   `json:"preempt,omitempty"`
 }
 
 // BGPConfig represents BGP protocol configuration
@@ -313,4 +401,30 @@ type RateLimitConfig struct {
 
 	// PerUser is the per-user rate limit (requests per second)
 	PerUser int `json:"per-user,omitempty"`
+}
+
+// ClassOfServiceConfig represents QoS and traffic-control configuration.
+type ClassOfServiceConfig struct {
+	ForwardingClasses      map[string]*ForwardingClass       `json:"forwarding-classes,omitempty"`
+	TrafficControlProfiles map[string]*TrafficControlProfile `json:"traffic-control-profiles,omitempty"`
+	Interfaces             map[string]*CoSInterface          `json:"interfaces,omitempty"`
+}
+
+// ForwardingClass maps a forwarding class to a queue.
+type ForwardingClass struct {
+	Name  string `json:"name"`
+	Queue int    `json:"queue"`
+}
+
+// TrafficControlProfile represents shaping and scheduler settings.
+type TrafficControlProfile struct {
+	Name         string `json:"name"`
+	ShapingRate  uint64 `json:"shaping-rate,omitempty"`
+	SchedulerMap string `json:"scheduler-map,omitempty"`
+}
+
+// CoSInterface binds QoS profiles to interfaces.
+type CoSInterface struct {
+	Name                        string `json:"name"`
+	OutputTrafficControlProfile string `json:"output-traffic-control-profile,omitempty"`
 }

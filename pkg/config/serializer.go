@@ -51,16 +51,65 @@ func ToSetCommandsWithError(cfg *Config) (string, error) {
 	if cfg.System != nil && cfg.System.HostName != "" {
 		writeLine(&b, "set system host-name %s", EscapeValue(cfg.System.HostName))
 	}
+	writeSystemServices(&b, cfg.System)
 
+	writeChassis(&b, cfg.Chassis)
 	writeInterfaces(&b, cfg.Interfaces)
 	writeRoutingOptions(&b, cfg.RoutingOptions)
+	writeRoutingInstances(&b, cfg.RoutingInstances)
 	writeProtocols(&b, cfg.Protocols)
 	writePolicyOptions(&b, cfg.PolicyOptions)
+	writeClassOfService(&b, cfg.ClassOfService)
 	if err := writeSecurity(&b, cfg.Security); err != nil {
 		return "", err
 	}
 
 	return b.String(), nil
+}
+
+func writeSystemServices(b *strings.Builder, system *SystemConfig) {
+	if system == nil || system.Services == nil || system.Services.WebUI == nil {
+		return
+	}
+	web := system.Services.WebUI
+	if web.Enabled {
+		writeLine(b, "set system services web-ui enabled true")
+	}
+	if web.ListenAddress != "" {
+		writeLine(b, "set system services web-ui listen-address %s", EscapeValue(web.ListenAddress))
+	}
+	if web.Port != 0 {
+		writeLine(b, "set system services web-ui port %d", web.Port)
+	}
+}
+
+func writeChassis(b *strings.Builder, chassis *ChassisConfig) {
+	if chassis == nil || chassis.Cluster == nil {
+		return
+	}
+	cluster := chassis.Cluster
+	if cluster.Enabled {
+		writeLine(b, "set chassis cluster enabled true")
+	}
+	for _, name := range sortedKeys(cluster.Nodes) {
+		node := cluster.Nodes[name]
+		if node == nil {
+			continue
+		}
+		if node.Address != "" {
+			writeLine(b, "set chassis cluster node %s address %s", name, node.Address)
+		}
+		if node.Priority != 0 {
+			writeLine(b, "set chassis cluster node %s priority %d", name, node.Priority)
+		}
+	}
+	if cluster.Sync != nil && cluster.Sync.Etcd != nil {
+		endpoints := append([]string(nil), cluster.Sync.Etcd.Endpoints...)
+		sort.Strings(endpoints)
+		for _, endpoint := range endpoints {
+			writeLine(b, "set chassis cluster sync etcd endpoint %s", EscapeValue(endpoint))
+		}
+	}
 }
 
 func writeLine(b *strings.Builder, format string, args ...interface{}) {
@@ -153,12 +202,72 @@ func writeRoutingOptions(b *strings.Builder, ro *RoutingOptions) {
 	}
 }
 
+func writeRoutingInstances(b *strings.Builder, instances map[string]*RoutingInstance) {
+	for _, name := range sortedKeys(instances) {
+		instance := instances[name]
+		if instance == nil {
+			continue
+		}
+		if instance.InstanceType != "" {
+			writeLine(b, "set routing-instances %s instance-type %s", name, instance.InstanceType)
+		}
+		if instance.RouteDistinguisher != "" {
+			writeLine(b, "set routing-instances %s route-distinguisher %s", name, instance.RouteDistinguisher)
+		}
+		if instance.VRFTarget != "" {
+			writeLine(b, "set routing-instances %s vrf-target %s", name, instance.VRFTarget)
+		}
+		interfaces := append([]string(nil), instance.Interfaces...)
+		sort.Strings(interfaces)
+		for _, iface := range interfaces {
+			writeLine(b, "set routing-instances %s interface %s", name, iface)
+		}
+	}
+}
+
 func writeProtocols(b *strings.Builder, pc *ProtocolConfig) {
 	if pc == nil {
 		return
 	}
 	writeBGP(b, pc.BGP)
 	writeOSPF(b, pc.OSPF)
+	writeMPLS(b, pc.MPLS)
+	writeVRRP(b, pc.VRRP)
+}
+
+func writeMPLS(b *strings.Builder, mpls *MPLSConfig) {
+	if mpls == nil {
+		return
+	}
+	interfaces := append([]string(nil), mpls.Interfaces...)
+	sort.Strings(interfaces)
+	for _, iface := range interfaces {
+		writeLine(b, "set protocols mpls interface %s", iface)
+	}
+}
+
+func writeVRRP(b *strings.Builder, vrrp *VRRPConfig) {
+	if vrrp == nil {
+		return
+	}
+	for _, groupName := range sortedKeys(vrrp.Groups) {
+		group := vrrp.Groups[groupName]
+		if group == nil {
+			continue
+		}
+		if group.Interface != "" {
+			writeLine(b, "set protocols vrrp group %s interface %s", groupName, group.Interface)
+		}
+		if group.VirtualAddress != "" {
+			writeLine(b, "set protocols vrrp group %s virtual-address %s", groupName, group.VirtualAddress)
+		}
+		if group.Priority != 0 {
+			writeLine(b, "set protocols vrrp group %s priority %d", groupName, group.Priority)
+		}
+		if group.Preempt {
+			writeLine(b, "set protocols vrrp group %s preempt", groupName)
+		}
+	}
 }
 
 func writeBGP(b *strings.Builder, bgp *BGPConfig) {
@@ -299,6 +408,39 @@ func writePolicyTerm(b *strings.Builder, policyName string, term *PolicyTerm) {
 		if term.Then.Community != "" {
 			writeLine(b, "%s then community %s", base, EscapeValue(term.Then.Community))
 		}
+	}
+}
+
+func writeClassOfService(b *strings.Builder, cos *ClassOfServiceConfig) {
+	if cos == nil {
+		return
+	}
+	for _, name := range sortedKeys(cos.ForwardingClasses) {
+		fc := cos.ForwardingClasses[name]
+		if fc == nil {
+			continue
+		}
+		writeLine(b, "set class-of-service forwarding-class %s queue %d", name, fc.Queue)
+	}
+	for _, name := range sortedKeys(cos.TrafficControlProfiles) {
+		profile := cos.TrafficControlProfiles[name]
+		if profile == nil {
+			continue
+		}
+		if profile.ShapingRate != 0 {
+			writeLine(b, "set class-of-service traffic-control-profile %s shaping-rate %d", name, profile.ShapingRate)
+		}
+		if profile.SchedulerMap != "" {
+			writeLine(b, "set class-of-service traffic-control-profile %s scheduler-map %s", name, profile.SchedulerMap)
+		}
+	}
+	for _, name := range sortedKeys(cos.Interfaces) {
+		iface := cos.Interfaces[name]
+		if iface == nil || iface.OutputTrafficControlProfile == "" {
+			continue
+		}
+		writeLine(b, "set class-of-service interfaces %s output-traffic-control-profile %s",
+			name, iface.OutputTrafficControlProfile)
 	}
 }
 
