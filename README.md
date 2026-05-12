@@ -46,6 +46,7 @@ Current capabilities:
 
 - **FRR 8.0+**: Free Range Routing for dynamic routing protocols
   - See [FRR Setup Guide (Debian)](docs/frr-setup-debian.md) and [FRR Setup Guide (RHEL9)](docs/frr-setup-rhel9.md)
+  - Enable `bgpd`, `ospfd`, `zebra`, `staticd`, `mgmtd`, and `vrrpd` in `/etc/frr/daemons`
 
 - **Go 1.25+**: For building from source (optional)
 
@@ -53,7 +54,7 @@ Current capabilities:
 
 ## Quick Start (v0.6.x)
 
-Requires VPP 24.10+ and FRR 8.0+.
+Requires VPP 24.10+ and FRR 8.0+ with the standard arca-router FRR daemon set enabled.
 
 ### 1. Install Prerequisites
 

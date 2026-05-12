@@ -46,6 +46,7 @@ arca-router は現在 v0.6.x の advanced features フェーズです。この R
 
 - **FRR 8.0+**: 動的ルーティングプロトコルのための Free Range Routing
   - [FRR Setup Guide (Debian)](docs/frr-setup-debian.md) / [FRR Setup Guide (RHEL9)](docs/frr-setup-rhel9.md)
+  - `/etc/frr/daemons` で `bgpd`、`ospfd`、`zebra`、`staticd`、`mgmtd`、`vrrpd` を有効化してください
 
 - **Go 1.25+**: ソースからビルドする場合（任意）
 
@@ -53,7 +54,7 @@ arca-router は現在 v0.6.x の advanced features フェーズです。この R
 
 ## クイックスタート（v0.6.x）
 
-VPP 24.10+ と FRR 8.0+ が必要です。
+VPP 24.10+ と、arca-router 標準の FRR daemon set を有効化した FRR 8.0+ が必要です。
 
 ### 1. 前提ソフトをインストール
 

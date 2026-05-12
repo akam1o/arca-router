@@ -123,7 +123,7 @@ Detailed future scope is maintained in [`ROADMAP.md`](../ROADMAP.md).
   make integration-test
   ```
 
-- [ ] **Package metadata lint**: v0.5 service and package metadata expectations pass
+- [ ] **Package metadata lint**: v0.6 service and package metadata expectations pass
   ```bash
   make package-lint
   ```
@@ -137,7 +137,7 @@ Detailed future scope is maintained in [`ROADMAP.md`](../ROADMAP.md).
   - Fresh installation (DEB/RPM)
   - Upgrade from previous version
   - VPP/FRR integration
-  - FRR transactional apply with `mgmtd=yes`
+  - FRR transactional apply with the standard daemon set enabled
   - Prometheus, health, and SNMP endpoints
   - Grafana dashboard import
 

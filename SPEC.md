@@ -904,7 +904,7 @@ Common options:
 
 The default backend is `transactional`. It requires FRR `mgmtd=yes` in `/etc/frr/daemons` and `vtysh` access for the `arca-router` service user, typically through the `frrvty` group.
 
-The `file` backend writes a full FRR config and applies it with `frr-reload.py`. It is retained for recovery and compatibility; deployments that use it must grant the service user the additional permissions needed to write `/etc/frr/frr.conf`. VRRP configuration through this backend also requires `vrrpd=yes` in `/etc/frr/daemons`.
+The standard FRR daemon set for arca-router is `bgpd`, `ospfd`, `zebra`, `staticd`, `mgmtd`, and `vrrpd`. The `file` backend writes a full FRR config and applies it with `frr-reload.py`. It is retained for recovery and compatibility; deployments that use it must grant the service user the additional permissions needed to write `/etc/frr/frr.conf`.
 
 ### Prometheus and Health
 

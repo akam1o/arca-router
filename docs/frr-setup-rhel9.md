@@ -1,8 +1,8 @@
 # FRR Setup Guide for RHEL 9
 
-This guide covers FRR 8.0+ installation and configuration for arca-router v0.3.x.
+This guide covers FRR 8.0+ installation and configuration for arca-router v0.6.x.
 
-**Status**: v0.3.x - FRR is **required** for dynamic routing (BGP, OSPF)
+**Status**: v0.6.x - FRR is **required** for dynamic routing and VRRP-based HA.
 
 ---
 
@@ -49,13 +49,14 @@ sudo vi /etc/frr/daemons
 **Enable the following daemons**:
 
 ```bash
-# /etc/frr/daemons - REQUIRED for arca-router v0.5+
+# /etc/frr/daemons - REQUIRED for arca-router v0.6+
 
 bgpd=yes
 ospfd=yes
 zebra=yes
 staticd=yes
 mgmtd=yes
+vrrpd=yes
 
 # Optional daemons (set to 'no' if not needed)
 ospf6d=no
@@ -71,8 +72,6 @@ sharpd=no
 pbrd=no
 bfdd=no
 fabricd=no
-# Set vrrpd=yes when using protocols vrrp with --frr-apply-mode=file
-vrrpd=no
 pathd=no
 
 # Integrated config file (used by FRR and the optional file backend)
@@ -89,11 +88,11 @@ staticd_options=""
 - `ospfd`: OSPF routing protocol
 - `staticd`: Static route management
 - `mgmtd`: Transactional management datastore used by arca-router v0.5+
-- `vrrpd`: VRRP daemon, required only when using `protocols vrrp` with `--frr-apply-mode=file`
+- `vrrpd`: VRRP daemon used for appliance-style control-plane HA
 
 ### 3. Configure FRR Apply Access
 
-By default, `arca-router` applies FRR changes through the FRR management candidate datastore via `vtysh`. This requires `mgmtd=yes` and `frrvty` group access, but does not require direct writes to `/etc/frr/frr.conf`.
+By default, `arca-router` applies FRR changes through the FRR management candidate datastore via `vtysh`. This requires `mgmtd=yes`, the standard `vrrpd=yes` HA daemon, and `frrvty` group access, but does not require direct writes to `/etc/frr/frr.conf`.
 
 If you plan to use the recovery backend `--frr-apply-mode=file`, also allow the `frr` group to write `/etc/frr/frr.conf`:
 
@@ -143,8 +142,7 @@ sudo systemctl status frr
 sudo systemctl status frr
 
 # Verify daemons are running
-ps aux | grep -E 'zebra|bgpd|ospfd|staticd'
-# If VRRP is enabled, also verify vrrpd.
+ps aux | grep -E 'zebra|bgpd|ospfd|staticd|mgmtd|vrrpd'
 
 # Test FRR CLI (vtysh)
 sudo vtysh -c 'show version'

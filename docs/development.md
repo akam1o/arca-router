@@ -105,7 +105,7 @@ make check
 ### 4. Build Locally
 
 ```bash
-# Build current v0.5.x unified daemon + CLI
+# Build current v0.6.x unified daemon + CLI
 make build
 
 # Verify binaries
@@ -462,10 +462,10 @@ Packages are configured via NFPM: [build/package/nfpm.yaml](../build/package/nfp
 - Creates `arca-router` user/group
 - Adds the service user to `vpp` and `frrvty`
 - Sets directory permissions
-- Warns when FRR `mgmtd=yes` is missing for the default transactional backend
+- Warns when required FRR daemons such as `mgmtd=yes` or `vrrpd=yes` are missing
 - Reloads systemd daemon
 
-### v0.5 Smoke Checks
+### v0.6 Smoke Checks
 
 ```bash
 # Validate local package metadata without building artifacts
@@ -475,8 +475,8 @@ make package-lint
 make frr-mgmtd-smoke
 ```
 
-The FRR smoke test requires a host with FRR running, `mgmtd=yes` in `/etc/frr/daemons`,
-and `vtysh` access for the current user.
+The FRR smoke test requires a host with FRR running, the standard daemon set enabled
+in `/etc/frr/daemons`, and `vtysh` access for the current user.
 
 ### Testing Packages in Docker
 

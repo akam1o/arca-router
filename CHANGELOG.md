@@ -6,6 +6,7 @@
 - **Candidate command replacement**: v0.6 scalar settings replace existing candidate lines instead of accumulating duplicates
 - **etcd datastore selection**: `arca-routerd` and embedded NETCONF can use the existing etcd-backed candidate/running datastore for clustered deployments
 - **FRR VRRP generation**: `--frr-apply-mode=file` can render `protocols vrrp` groups into FRR integrated interface configuration
+- **Standard FRR VRRP daemon**: `vrrpd` is part of the documented required FRR daemon set for appliance-router HA deployments
 - **v0.6 southbound safety gates**: unsupported MPLS, routing-instance, class-of-service, and transactional VRRP southbound changes fail validation instead of being silently ignored
 - **Read-only Web UI**: optional `--web-listen` HTTP dashboard and `/api/status` JSON endpoint backed by daemon observability state
 - **Web UI configuration**: `system services web-ui` can enable the dashboard without a command-line flag
