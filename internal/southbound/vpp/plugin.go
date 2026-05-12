@@ -91,11 +91,24 @@ func (p *VPPPlugin) HealthCheck(ctx context.Context) error {
 
 // ValidateChanges checks if the proposed interface changes are feasible.
 func (p *VPPPlugin) ValidateChanges(ctx context.Context, diff *engine.ConfigDiff) error {
+	if diff == nil {
+		return nil
+	}
 	// Validate added interfaces exist in hardware config
 	for name := range diff.InterfacesAdded {
 		if !p.hasHardwareConfig(name) {
 			return fmt.Errorf("interface %s: not found in hardware configuration", name)
 		}
+	}
+
+	if diff.MPLSChanged && hasVPPMPLSConfig(diff.NewMPLS) {
+		return fmt.Errorf("VPP southbound does not yet support v0.6 configuration: protocols mpls")
+	}
+	if diff.RoutingInstancesChanged && len(diff.NewRoutingInstances) > 0 {
+		return fmt.Errorf("VPP southbound does not yet support v0.6 configuration: routing-instances")
+	}
+	if diff.ClassOfServiceChanged && hasVPPClassOfServiceConfig(diff.NewClassOfService) {
+		return fmt.Errorf("VPP southbound does not yet support v0.6 configuration: class-of-service")
 	}
 
 	// Validate addresses on changed interfaces
@@ -245,6 +258,19 @@ func (p *VPPPlugin) hasHardwareConfig(name string) bool {
 		}
 	}
 	return false
+}
+
+func hasVPPMPLSConfig(cfg *model.MPLSConfig) bool {
+	return cfg != nil && len(cfg.Interfaces) > 0
+}
+
+func hasVPPClassOfServiceConfig(cfg *model.ClassOfServiceConfig) bool {
+	if cfg == nil {
+		return false
+	}
+	return len(cfg.ForwardingClasses) > 0 ||
+		len(cfg.TrafficControlProfiles) > 0 ||
+		len(cfg.Interfaces) > 0
 }
 
 func (p *VPPPlugin) getHardwareConfig(name string) *device.PhysicalInterface {

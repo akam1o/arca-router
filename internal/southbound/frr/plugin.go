@@ -6,6 +6,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"strings"
 	"sync"
 
 	"github.com/akam1o/arca-router/internal/engine"
@@ -56,8 +57,22 @@ func (p *FRRPlugin) HealthCheck(ctx context.Context) error {
 
 // ValidateChanges validates that routing configuration changes are feasible.
 func (p *FRRPlugin) ValidateChanges(ctx context.Context, diff *engine.ConfigDiff) error {
-	// FRR validation is done at config parse time.
-	// Additional validation could check that referenced interfaces exist in VPP.
+	if diff == nil {
+		return nil
+	}
+	var unsupported []string
+	if diff.MPLSChanged && hasFRRMPLSConfig(diff.NewMPLS) {
+		unsupported = append(unsupported, "protocols mpls")
+	}
+	if diff.VRRPChanged && hasFRRVRRPConfig(diff.NewVRRP) {
+		unsupported = append(unsupported, "protocols vrrp")
+	}
+	if diff.RoutingInstancesChanged && len(diff.NewRoutingInstances) > 0 {
+		unsupported = append(unsupported, "routing-instances")
+	}
+	if len(unsupported) > 0 {
+		return fmt.Errorf("FRR southbound does not yet support v0.6 configuration: %s", strings.Join(unsupported, ", "))
+	}
 	return nil
 }
 
@@ -225,4 +240,12 @@ func hasFRRRelevantInterfaceChanges(diff *engine.ConfigDiff) bool {
 		}
 	}
 	return false
+}
+
+func hasFRRMPLSConfig(cfg *model.MPLSConfig) bool {
+	return cfg != nil && len(cfg.Interfaces) > 0
+}
+
+func hasFRRVRRPConfig(cfg *model.VRRPConfig) bool {
+	return cfg != nil && len(cfg.Groups) > 0
 }

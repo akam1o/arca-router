@@ -6,6 +6,7 @@ import (
 	"io"
 	"log/slog"
 	"net"
+	"strings"
 	"testing"
 
 	"github.com/akam1o/arca-router/internal/engine"
@@ -191,5 +192,54 @@ func TestApplyChangesRemovesInterfaceWithoutLCPPair(t *testing.T) {
 	}
 	if _, ok := plugin.GetInterfaceIndex("ge-0/0/0"); ok {
 		t.Fatal("ApplyChanges() left removed interface index")
+	}
+}
+
+func TestValidateChangesRejectsUnsupportedV06VPPConfig(t *testing.T) {
+	plugin := NewVPPPlugin(pkgvpp.NewMockClient(), &device.HardwareConfig{}, testLogger())
+	newCfg := model.NewRouterConfig()
+	newCfg.Protocols = &model.ProtocolsConfig{
+		MPLS: &model.MPLSConfig{Interfaces: []string{"ge-0/0/0"}},
+	}
+	diff := engine.ComputeDiff(model.NewRouterConfig(), newCfg)
+
+	err := plugin.ValidateChanges(context.Background(), diff)
+	if err == nil {
+		t.Fatal("ValidateChanges() error = nil, want unsupported MPLS error")
+	}
+	if !strings.Contains(err.Error(), "protocols mpls") {
+		t.Fatalf("ValidateChanges() error = %v, want protocols mpls", err)
+	}
+}
+
+func TestValidateChangesRejectsUnsupportedClassOfService(t *testing.T) {
+	plugin := NewVPPPlugin(pkgvpp.NewMockClient(), &device.HardwareConfig{}, testLogger())
+	newCfg := model.NewRouterConfig()
+	newCfg.ClassOfService = &model.ClassOfServiceConfig{
+		ForwardingClasses: map[string]*model.ForwardingClass{
+			"expedited-forwarding": {Queue: 5},
+		},
+	}
+	diff := engine.ComputeDiff(model.NewRouterConfig(), newCfg)
+
+	err := plugin.ValidateChanges(context.Background(), diff)
+	if err == nil {
+		t.Fatal("ValidateChanges() error = nil, want unsupported class-of-service error")
+	}
+	if !strings.Contains(err.Error(), "class-of-service") {
+		t.Fatalf("ValidateChanges() error = %v, want class-of-service", err)
+	}
+}
+
+func TestValidateChangesAllowsRemovingUnsupportedV06VPPConfig(t *testing.T) {
+	plugin := NewVPPPlugin(pkgvpp.NewMockClient(), &device.HardwareConfig{}, testLogger())
+	oldCfg := model.NewRouterConfig()
+	oldCfg.Protocols = &model.ProtocolsConfig{
+		MPLS: &model.MPLSConfig{Interfaces: []string{"ge-0/0/0"}},
+	}
+	diff := engine.ComputeDiff(oldCfg, model.NewRouterConfig())
+
+	if err := plugin.ValidateChanges(context.Background(), diff); err != nil {
+		t.Fatalf("ValidateChanges() error = %v, want nil", err)
 	}
 }
