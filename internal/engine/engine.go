@@ -49,6 +49,9 @@ func (e *Engine) Running() *model.RouterConfig {
 func (e *Engine) RunningSnapshot() *model.ConfigSnapshot {
 	e.mu.RLock()
 	defer e.mu.RUnlock()
+	if e.running == nil {
+		return nil
+	}
 	return e.running.Clone()
 }
 

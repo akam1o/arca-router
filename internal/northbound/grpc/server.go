@@ -88,6 +88,9 @@ func (s *Server) EditCandidate(ctx context.Context, sessionID, configText string
 	if !session.HasLock {
 		return fmt.Errorf("session %s does not hold the candidate lock", sessionID)
 	}
+	if err := s.ensureCandidateBaseCurrentLocked(session); err != nil {
+		return err
+	}
 
 	updated, err := applyCandidateCommand(session.CandidateText, configText)
 	if err != nil {
@@ -115,6 +118,9 @@ func (s *Server) Commit(ctx context.Context, sessionID, user, message string) (s
 
 	if candidateText == "" {
 		return "", 0, fmt.Errorf("no candidate configuration to commit")
+	}
+	if err := s.ensureCandidateBaseCurrentLocked(session); err != nil {
+		return "", 0, err
 	}
 
 	// Parse candidate text into new config model
@@ -214,6 +220,9 @@ func (s *Server) Rollback(ctx context.Context, sessionID, commitID, user, messag
 	defer session.mu.Unlock()
 	if !session.HasLock {
 		return "", 0, fmt.Errorf("session %s does not hold the candidate lock", sessionID)
+	}
+	if err := s.ensureCandidateBaseCurrentLocked(session); err != nil {
+		return "", 0, err
 	}
 	if user == "" {
 		user = session.User
@@ -343,13 +352,15 @@ func (s *Server) AcquireLock(ctx context.Context, sessionID, user string) error 
 	}
 	session.mu.Lock()
 	if session.CandidateText == "" {
-		text, _, err := s.runningText()
-		if err != nil {
+		if err := s.resetSessionCandidateLocked(session); err != nil {
 			session.mu.Unlock()
 			_ = s.sessions.ReleaseLock(sessionID)
 			return err
 		}
-		session.CandidateText = text
+	} else if err := s.ensureCandidateBaseCurrentLocked(session); err != nil {
+		session.mu.Unlock()
+		_ = s.sessions.ReleaseLock(sessionID)
+		return err
 	}
 	session.mu.Unlock()
 	return nil
@@ -470,11 +481,41 @@ func (s *Server) resetSessionCandidate(session *Session) error {
 }
 
 func (s *Server) resetSessionCandidateLocked(session *Session) error {
-	text, _, err := s.runningText()
-	if err != nil {
-		return err
+	snap := s.engine.RunningSnapshot()
+	text := ""
+	if snap != nil && snap.Config != nil {
+		var err error
+		text, err = pkgconfig.ToSetCommandsWithError(snap.Config.ToLegacyConfig())
+		if err != nil {
+			return fmt.Errorf("serialize running config: %w", err)
+		}
+	}
+	session.CandidateBaseSet = true
+	if snap == nil {
+		session.CandidateBaseVersion = 0
+		session.CandidateBaseHash = [32]byte{}
+	} else {
+		session.CandidateBaseVersion = snap.Version
+		session.CandidateBaseHash = snap.Hash
 	}
 	session.CandidateText = text
+	return nil
+}
+
+func (s *Server) ensureCandidateBaseCurrentLocked(session *Session) error {
+	if !session.CandidateBaseSet {
+		return nil
+	}
+	snap := s.engine.RunningSnapshot()
+	var version uint64
+	var hash [32]byte
+	if snap != nil {
+		version = snap.Version
+		hash = snap.Hash
+	}
+	if session.CandidateBaseVersion != version || session.CandidateBaseHash != hash {
+		return fmt.Errorf("candidate configuration is stale: running configuration changed from version %d to %d; discard or reload the candidate before editing", session.CandidateBaseVersion, version)
+	}
 	return nil
 }
 
@@ -707,12 +748,15 @@ func parseConfigText(text string) (*model.RouterConfig, error) {
 
 // Session represents an active configuration session.
 type Session struct {
-	mu            sync.RWMutex
-	ID            string
-	User          string
-	HasLock       bool
-	CandidateText string
-	CreatedAt     time.Time
+	mu                   sync.RWMutex
+	ID                   string
+	User                 string
+	HasLock              bool
+	CandidateText        string
+	CandidateBaseVersion uint64
+	CandidateBaseHash    [32]byte
+	CandidateBaseSet     bool
+	CreatedAt            time.Time
 }
 
 // SessionManager manages active sessions with exclusive locking.
