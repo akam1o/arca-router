@@ -1,4 +1,4 @@
-.PHONY: help build build-cli build-v2 build-v2-cli clean rpm rpm-package deb deb-package version test fmt vet check install-nfpm integration-test generate-binapi generate-proto
+.PHONY: help build build-cli build-v2 build-v2-cli clean rpm rpm-package deb deb-package version test fmt vet check install-nfpm integration-test frr-mgmtd-smoke package-lint generate-binapi generate-proto
 
 # Binary names
 BINARY_NAME=arca-routerd
@@ -104,7 +104,7 @@ install-nfpm: ## Install NFPM tool
 
 rpm: build rpm-package ## Build RPM package
 
-rpm-package: ## Build RPM package (assumes binaries already built)
+rpm-package: package-lint ## Build RPM package (assumes binaries already built)
 	@echo "Building RPM package..."
 	@mkdir -p $(DIST_DIR)
 	@if ! command -v nfpm >/dev/null 2>&1; then \
@@ -123,7 +123,7 @@ rpm-package: ## Build RPM package (assumes binaries already built)
 
 deb: build deb-package ## Build DEB package (for Debian Bookworm)
 
-deb-package: ## Build DEB package (assumes binaries already built)
+deb-package: package-lint ## Build DEB package (assumes binaries already built)
 	@echo "Building DEB package..."
 	@mkdir -p $(DIST_DIR)
 	@if ! command -v nfpm >/dev/null 2>&1; then \
@@ -146,6 +146,7 @@ rpm-test: rpm ## Build and test RPM package metadata
 	@echo ""
 	@echo "RPM contents:"
 	@rpm -qpl $(DIST_DIR)/arca-router-*.rpm
+	@rpm -qpl $(DIST_DIR)/arca-router-*.rpm | grep -q '^/usr/share/arca-router/grafana/arca-routerd-dashboard.json$$'
 
 rpm-verify: ## Verify RPM package reproducibility (requires clean dist/)
 	@echo "Verifying reproducible build..."
@@ -172,6 +173,7 @@ deb-test: deb ## Build and test DEB package metadata
 	@echo ""
 	@echo "DEB contents:"
 	@dpkg-deb -c $(DIST_DIR)/arca-router_*.deb
+	@dpkg-deb -c $(DIST_DIR)/arca-router_*.deb | awk '{p=$$NF; sub(/^\.\//, "", p); if (p !~ /^\//) p="/" p; print p}' | grep -q '^/usr/share/arca-router/grafana/arca-routerd-dashboard.json$$'
 
 deb-verify: ## Verify DEB package reproducibility (requires clean dist/)
 	@echo "Verifying reproducible build..."
@@ -195,6 +197,23 @@ deb-verify: ## Verify DEB package reproducibility (requires clean dist/)
 integration-test: build ## Run integration tests
 	@echo "Running integration tests..."
 	@bash test/integration_test.sh
+
+frr-mgmtd-smoke: ## Run live FRR mgmtd transactional apply smoke test
+	@echo "Running live FRR mgmtd smoke test..."
+	ARCA_FRR_MGMTD_SMOKE=1 go test -v ./pkg/frr -run TestFRRMgmtdSmokeApplyAndCleanup -count=1
+
+package-lint: ## Validate package metadata and v0.5 service expectations
+	@echo "Linting package metadata..."
+	@for script in build/package/scripts/*.sh; do sh -n "$$script"; done
+	@grep -q 'SupplementaryGroups=vpp frrvty' build/systemd/arca-routerd.service
+	@if grep -Eq '^[[:space:]]*ReadWritePaths=.*\/etc\/frr' build/systemd/arca-routerd.service; then \
+		echo "Error: default service must not grant direct /etc/frr writes"; \
+		exit 1; \
+	fi
+	@grep -q 'observability/grafana/arca-routerd-dashboard.json' $(NFPM_CONFIG)
+	@grep -q '/usr/share/arca-router/grafana/arca-routerd-dashboard.json' $(NFPM_CONFIG)
+	@grep -q 'mgmtd=yes' build/package/scripts/postinstall.sh
+	@echo "Package metadata OK"
 
 generate-binapi: ## Generate VPP binapi (Go bindings for VPP API)
 	@echo "Generating VPP binapi..."
