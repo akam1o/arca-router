@@ -95,6 +95,15 @@ func TestWebStatusEndpoint(t *testing.T) {
 			Backend:       datastore.BackendEtcd,
 			EtcdEndpoints: []string{"https://etcd1:2379"},
 		},
+		configSync: fakeConfigSyncRuntimeSource{status: configSyncStatus{
+			Enabled:         true,
+			Healthy:         true,
+			EtcdRevision:    123,
+			RunningRevision: 120,
+			RunningCommitID: "commit-120",
+			LastCheck:       time.Unix(1700000100, 0),
+			LastApply:       time.Unix(1700000200, 0),
+		}},
 		vpp: fakeVPPReconciliationSource{status: sbvpp.LCPReconciliationStatus{
 			LastRun:         time.Unix(1700000000, 0),
 			PairCount:       2,
@@ -120,6 +129,10 @@ func TestWebStatusEndpoint(t *testing.T) {
 	}
 	if status.Datastore.Backend != "etcd" {
 		t.Fatalf("Datastore.Backend = %q, want etcd", status.Datastore.Backend)
+	}
+	if !status.ConfigSync.Enabled || !status.ConfigSync.Healthy || status.ConfigSync.RunningRevision != 120 ||
+		status.ConfigSync.RunningCommitID != "commit-120" {
+		t.Fatalf("ConfigSync status = %#v, want healthy revision 120", status.ConfigSync)
 	}
 	if !status.Cluster.Enabled || status.Cluster.NodeCount != 1 || !status.Cluster.EtcdSyncConfigured || !status.Cluster.SyncAligned {
 		t.Fatalf("Cluster status = %#v, want enabled aligned etcd sync", status.Cluster)

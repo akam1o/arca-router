@@ -372,6 +372,18 @@ func run(ctx context.Context, f *daemonFlags, log *logger.Logger) error {
 	}
 	log.Info("Initial configuration applied", slog.String("source", initialSource))
 
+	var configSync configSyncRuntimeSource
+	if datastoreConfig.Backend == datastore.BackendEtcd {
+		etcdStatus, ok := configStore.Legacy().(datastore.EtcdStatusProvider)
+		if !ok {
+			log.Warn("etcd datastore does not expose config synchronization status")
+		} else {
+			syncer := newEtcdConfigSynchronizer(configStore, eng, etcdStatus, defaultEtcdConfigSyncInterval, log.Logger)
+			syncer.Start(ctx)
+			configSync = syncer
+		}
+	}
+
 	// --- Step 8: Start NETCONF server ---
 	var netconfServer *netconf.SSHServer
 	if f.hostKeyPath != "" {
@@ -411,6 +423,7 @@ func run(ctx context.Context, f *daemonFlags, log *logger.Logger) error {
 		netconfServer: netconfServer,
 		datastore:     datastoreConfig,
 		configAPI:     grpcServer,
+		configSync:    configSync,
 		vpp:           vppPlugin,
 	}
 	var metricsErr <-chan error

@@ -50,6 +50,7 @@ type webStatus struct {
 	ConfigVersion   uint64          `json:"config_version"`
 	RunningHostname string          `json:"running_hostname"`
 	Datastore       webDatastore    `json:"datastore"`
+	ConfigSync      webConfigSync   `json:"config_sync"`
 	Cluster         webCluster      `json:"cluster"`
 	VPP             webVPPStats     `json:"vpp"`
 	NETCONF         webNETCONFStats `json:"netconf"`
@@ -58,6 +59,17 @@ type webStatus struct {
 type webDatastore struct {
 	Backend       string   `json:"backend"`
 	EtcdEndpoints []string `json:"etcd_endpoints,omitempty"`
+}
+
+type webConfigSync struct {
+	Enabled         bool   `json:"enabled"`
+	Healthy         bool   `json:"healthy"`
+	EtcdRevision    int64  `json:"etcd_revision,omitempty"`
+	RunningRevision int64  `json:"running_revision,omitempty"`
+	RunningCommitID string `json:"running_commit_id,omitempty"`
+	LastCheck       string `json:"last_check,omitempty"`
+	LastApply       string `json:"last_apply,omitempty"`
+	LastError       string `json:"last_error,omitempty"`
 }
 
 type webCluster struct {
@@ -143,6 +155,10 @@ type webIndexData struct {
 	ClusterSyncState      string
 	ClusterSyncAlignment  string
 	ClusterNodeCount      string
+	ConfigSyncState       string
+	ConfigSyncStateClass  string
+	ConfigSyncRevision    string
+	ConfigSyncLastApply   string
 	VPPLCPState           string
 	VPPLCPStateClass      string
 	VPPLCPPairs           string
@@ -409,6 +425,9 @@ var webIndexTemplate = template.Must(template.New("web-index").Parse(`<!doctype 
           <div class="row"><span>Configured nodes</span><strong>{{.ClusterNodeCount}}</strong></div>
           <div class="row"><span>etcd sync</span><strong>{{.ClusterSyncState}}</strong></div>
           <div class="row"><span>Backend alignment</span><strong>{{.ClusterSyncAlignment}}</strong></div>
+          <div class="row"><span>Config sync</span><strong><span class="pill {{.ConfigSyncStateClass}}">{{.ConfigSyncState}}</span></strong></div>
+          <div class="row"><span>Running revision</span><strong>{{.ConfigSyncRevision}}</strong></div>
+          <div class="row"><span>Last apply</span><strong>{{.ConfigSyncLastApply}}</strong></div>
         </div>
       </article>
       <article class="panel span-2">
@@ -1061,6 +1080,16 @@ func newWebStatus(metrics routerMetrics) webStatus {
 			Backend:       metrics.DatastoreBackend,
 			EtcdEndpoints: metrics.DatastoreEtcdEndpoints,
 		},
+		ConfigSync: webConfigSync{
+			Enabled:         metrics.ConfigSyncEnabled,
+			Healthy:         metrics.ConfigSyncHealthy,
+			EtcdRevision:    metrics.ConfigSyncEtcdRevision,
+			RunningRevision: metrics.ConfigSyncRunningRevision,
+			RunningCommitID: metrics.ConfigSyncCommitID,
+			LastCheck:       formatWebOptionalTime(metrics.ConfigSyncLastCheck),
+			LastApply:       formatWebOptionalTime(metrics.ConfigSyncLastApply),
+			LastError:       metrics.ConfigSyncLastError,
+		},
 		Cluster: webCluster{
 			Enabled:            metrics.ClusterEnabled,
 			NodeCount:          metrics.ClusterNodeCount,
@@ -1110,6 +1139,23 @@ func newWebIndexData(status webStatus, now time.Time, runningConfig string, hist
 			clusterSyncAlignment = "Mismatch"
 		}
 	}
+	configSyncState := "Disabled"
+	configSyncStateClass := "neutral"
+	if status.ConfigSync.Enabled {
+		configSyncState = "Healthy"
+		configSyncStateClass = "ok"
+		if status.ConfigSync.LastError != "" {
+			configSyncState = "Error"
+			configSyncStateClass = "warn"
+		} else if !status.ConfigSync.Healthy {
+			configSyncState = "Unknown"
+			configSyncStateClass = "neutral"
+		}
+	}
+	configSyncRevision := "n/a"
+	if status.ConfigSync.RunningRevision > 0 {
+		configSyncRevision = strconv.FormatInt(status.ConfigSync.RunningRevision, 10)
+	}
 	vppLCPState := "Consistent"
 	vppLCPStateClass := "ok"
 	if status.VPP.LCP.LastError != "" {
@@ -1134,6 +1180,10 @@ func newWebIndexData(status webStatus, now time.Time, runningConfig string, hist
 		ClusterSyncState:      clusterSyncState,
 		ClusterSyncAlignment:  clusterSyncAlignment,
 		ClusterNodeCount:      strconv.Itoa(status.Cluster.NodeCount),
+		ConfigSyncState:       configSyncState,
+		ConfigSyncStateClass:  configSyncStateClass,
+		ConfigSyncRevision:    configSyncRevision,
+		ConfigSyncLastApply:   formatWebOptionalDisplayTime(status.ConfigSync.LastApply),
 		VPPLCPState:           vppLCPState,
 		VPPLCPStateClass:      vppLCPStateClass,
 		VPPLCPPairs:           strconv.Itoa(status.VPP.LCP.PairCount),
