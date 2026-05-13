@@ -154,6 +154,10 @@ func TestApplyChangesPassesVRRPToTransactionalApplier(t *testing.T) {
 	if status.ConfiguredGroups != 1 || status.ObservedGroups != 1 || status.ActiveGroups != 1 || len(status.Issues) != 0 {
 		t.Fatalf("VRRPOperationalStatus() = %#v, want converged group", status)
 	}
+	if len(status.Groups) != 1 || status.Groups[0].Interface != "ge0-0-0" || status.Groups[0].ID != 10 ||
+		status.Groups[0].State != "Master" || !status.Groups[0].Observed || !status.Groups[0].Active {
+		t.Fatalf("VRRPOperationalStatus().Groups = %#v, want active group detail", status.Groups)
+	}
 }
 
 func TestApplyChangesPassesRoutingInstancesToApplier(t *testing.T) {
@@ -215,6 +219,9 @@ func TestCheckVRRPOperationalStatusReportsMissingGroup(t *testing.T) {
 	if status.ConfiguredGroups != 1 || status.ObservedGroups != 0 || status.ActiveGroups != 0 ||
 		len(status.Issues) != 1 || status.LastError != "" {
 		t.Fatalf("checkVRRPOperationalStatus() = %#v, want one missing group issue", status)
+	}
+	if len(status.Groups) != 1 || status.Groups[0].State != "missing" || status.Groups[0].Observed || status.Groups[0].Active {
+		t.Fatalf("checkVRRPOperationalStatus().Groups = %#v, want missing group detail", status.Groups)
 	}
 }
 

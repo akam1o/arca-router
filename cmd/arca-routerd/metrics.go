@@ -74,6 +74,7 @@ type routerMetrics struct {
 	FRRVRRPConfiguredGroups   int
 	FRRVRRPObservedGroups     int
 	FRRVRRPActiveGroups       int
+	FRRVRRPGroups             []sbfrr.VRRPGroupOperationalStatus
 	FRRVRRPIssues             []string
 	FRRVRRPError              string
 	VPPLCPReconcileLastRun    time.Time
@@ -149,6 +150,7 @@ func (s metricsSource) snapshot(now time.Time) routerMetrics {
 		metrics.FRRVRRPConfiguredGroups = vrrp.ConfiguredGroups
 		metrics.FRRVRRPObservedGroups = vrrp.ObservedGroups
 		metrics.FRRVRRPActiveGroups = vrrp.ActiveGroups
+		metrics.FRRVRRPGroups = append([]sbfrr.VRRPGroupOperationalStatus(nil), vrrp.Groups...)
 		metrics.FRRVRRPIssues = append([]string(nil), vrrp.Issues...)
 		metrics.FRRVRRPError = vrrp.LastError
 	}

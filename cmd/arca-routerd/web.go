@@ -15,6 +15,7 @@ import (
 
 	"github.com/akam1o/arca-router/internal/model"
 	nbgrpc "github.com/akam1o/arca-router/internal/northbound/grpc"
+	sbfrr "github.com/akam1o/arca-router/internal/southbound/frr"
 	"github.com/akam1o/arca-router/pkg/auth"
 	pkgconfig "github.com/akam1o/arca-router/pkg/config"
 	"github.com/akam1o/arca-router/pkg/logger"
@@ -95,13 +96,23 @@ type webFRRStats struct {
 }
 
 type webVRRPStats struct {
-	LastCheck        string   `json:"last_check,omitempty"`
-	ConfiguredGroups int      `json:"configured_groups"`
-	ObservedGroups   int      `json:"observed_groups"`
-	ActiveGroups     int      `json:"active_groups"`
-	IssueCount       int      `json:"issue_count"`
-	Issues           []string `json:"issues,omitempty"`
-	LastError        string   `json:"last_error,omitempty"`
+	LastCheck        string              `json:"last_check,omitempty"`
+	ConfiguredGroups int                 `json:"configured_groups"`
+	ObservedGroups   int                 `json:"observed_groups"`
+	ActiveGroups     int                 `json:"active_groups"`
+	Groups           []webVRRPGroupStats `json:"groups,omitempty"`
+	IssueCount       int                 `json:"issue_count"`
+	Issues           []string            `json:"issues,omitempty"`
+	LastError        string              `json:"last_error,omitempty"`
+}
+
+type webVRRPGroupStats struct {
+	Interface      string `json:"interface"`
+	ID             int    `json:"id"`
+	VirtualAddress string `json:"virtual_address,omitempty"`
+	State          string `json:"state"`
+	Observed       bool   `json:"observed"`
+	Active         bool   `json:"active"`
 }
 
 type webVPPStats struct {
@@ -190,6 +201,7 @@ type webIndexData struct {
 	FRRVRRPState          string
 	FRRVRRPStateClass     string
 	FRRVRRPActiveGroups   string
+	FRRVRRPGroups         []webVRRPGroupView
 	VPPLCPState           string
 	VPPLCPStateClass      string
 	VPPLCPPairs           string
@@ -200,6 +212,12 @@ type webIndexData struct {
 	ConfigVersionString   string
 	RunningConfig         string
 	History               []webCommitEntry
+}
+
+type webVRRPGroupView struct {
+	Label      string
+	State      string
+	StateClass string
 }
 
 var webIndexTemplate = template.Must(template.New("web-index").Parse(`<!doctype html>
@@ -469,6 +487,9 @@ var webIndexTemplate = template.Must(template.New("web-index").Parse(`<!doctype 
         <div class="rows">
           <div class="row"><span>FRR VRRP</span><strong><span class="pill {{.FRRVRRPStateClass}}">{{.FRRVRRPState}}</span></strong></div>
           <div class="row"><span>Active VRRP groups</span><strong>{{.FRRVRRPActiveGroups}}</strong></div>
+          {{range .FRRVRRPGroups}}
+          <div class="row"><span>{{.Label}}</span><strong><span class="pill {{.StateClass}}">{{.State}}</span></strong></div>
+          {{end}}
           <div class="row"><span>VPP LCP</span><strong><span class="pill {{.VPPLCPStateClass}}">{{.VPPLCPState}}</span></strong></div>
           <div class="row"><span>Pairs</span><strong>{{.VPPLCPPairs}}</strong></div>
           <div class="row"><span>Inconsistencies</span><strong>{{.VPPLCPInconsistencies}}</strong></div>
@@ -1188,6 +1209,7 @@ func newWebStatus(metrics routerMetrics) webStatus {
 				ConfiguredGroups: metrics.FRRVRRPConfiguredGroups,
 				ObservedGroups:   metrics.FRRVRRPObservedGroups,
 				ActiveGroups:     metrics.FRRVRRPActiveGroups,
+				Groups:           webVRRPGroups(metrics.FRRVRRPGroups),
 				IssueCount:       len(metrics.FRRVRRPIssues),
 				Issues:           append([]string(nil), metrics.FRRVRRPIssues...),
 				LastError:        metrics.FRRVRRPError,
@@ -1211,6 +1233,21 @@ func newWebStatus(metrics routerMetrics) webStatus {
 			FailedAuth:        metrics.NETCONFFailures,
 		},
 	}
+}
+
+func webVRRPGroups(groups []sbfrr.VRRPGroupOperationalStatus) []webVRRPGroupStats {
+	result := make([]webVRRPGroupStats, 0, len(groups))
+	for _, group := range groups {
+		result = append(result, webVRRPGroupStats{
+			Interface:      group.Interface,
+			ID:             group.ID,
+			VirtualAddress: group.VirtualAddress,
+			State:          group.State,
+			Observed:       group.Observed,
+			Active:         group.Active,
+		})
+	}
+	return result
 }
 
 func newWebIndexData(status webStatus, now time.Time, runningConfig string, history []webCommitEntry) webIndexData {
@@ -1311,6 +1348,7 @@ func newWebIndexData(status webStatus, now time.Time, runningConfig string, hist
 		FRRVRRPState:          frrVRRPState,
 		FRRVRRPStateClass:     frrVRRPStateClass,
 		FRRVRRPActiveGroups:   fmt.Sprintf("%d/%d", status.FRR.VRRP.ActiveGroups, status.FRR.VRRP.ConfiguredGroups),
+		FRRVRRPGroups:         webVRRPGroupViews(status.FRR.VRRP.Groups),
 		VPPLCPState:           vppLCPState,
 		VPPLCPStateClass:      vppLCPStateClass,
 		VPPLCPPairs:           strconv.Itoa(status.VPP.LCP.PairCount),
@@ -1322,6 +1360,29 @@ func newWebIndexData(status webStatus, now time.Time, runningConfig string, hist
 		RunningConfig:         runningConfig,
 		History:               history,
 	}
+}
+
+func webVRRPGroupViews(groups []webVRRPGroupStats) []webVRRPGroupView {
+	result := make([]webVRRPGroupView, 0, len(groups))
+	for _, group := range groups {
+		state := group.State
+		if state == "" {
+			state = "unknown"
+		}
+		result = append(result, webVRRPGroupView{
+			Label:      fmt.Sprintf("%s vrid %d", group.Interface, group.ID),
+			State:      state,
+			StateClass: webVRRPGroupStateClass(group),
+		})
+	}
+	return result
+}
+
+func webVRRPGroupStateClass(group webVRRPGroupStats) string {
+	if group.Active {
+		return "ok"
+	}
+	return "warn"
 }
 
 func formatWebUptime(seconds float64) string {
