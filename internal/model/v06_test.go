@@ -22,6 +22,7 @@ func TestV06ConfigConversionAndClone(t *testing.T) {
 		"set security netconf ssh port 1830",
 		"set chassis cluster node node0 address 192.0.2.10",
 		"set interfaces ge-0/0/0 unit 0 family inet address 192.0.2.1/24",
+		"set routing-options autonomous-system 65000",
 		"set protocols mpls interface ge-0/0/0",
 		"set protocols vrrp group 10 interface ge-0/0/0",
 		"set protocols vrrp group 10 virtual-address 192.0.2.254",
@@ -275,6 +276,72 @@ func TestV06ModelValidationRejectsUnknownRoutingInstancePolicies(t *testing.T) {
 			err := cfg.Validate()
 			if err == nil {
 				t.Fatal("Validate() error = nil, want unknown policy-statement error")
+			}
+			if !strings.Contains(err.Error(), tt.want) {
+				t.Fatalf("Validate() error = %v, want substring %q", err, tt.want)
+			}
+		})
+	}
+}
+
+func TestV06ModelValidationRejectsL3VPNSafetyViolations(t *testing.T) {
+	tests := []struct {
+		name      string
+		configure func(*RouterConfig, *RoutingInstance)
+		want      string
+	}{
+		{
+			name: "vrf-import without import target",
+			configure: func(cfg *RouterConfig, instance *RoutingInstance) {
+				cfg.Routing = &RoutingConfig{AutonomousSystem: 65000}
+				instance.VRFImport = []string{"BLUE-IN"}
+			},
+			want: "routing-instance BLUE: vrf-import requires an import vrf-target",
+		},
+		{
+			name: "vrf-export without export target",
+			configure: func(cfg *RouterConfig, instance *RoutingInstance) {
+				cfg.Routing = &RoutingConfig{AutonomousSystem: 65000}
+				instance.RouteDistinguisher = "65000:100"
+				instance.VRFExport = []string{"BLUE-OUT"}
+			},
+			want: "routing-instance BLUE: vrf-export requires an export vrf-target",
+		},
+		{
+			name: "export target without route distinguisher",
+			configure: func(cfg *RouterConfig, instance *RoutingInstance) {
+				cfg.Routing = &RoutingConfig{AutonomousSystem: 65000}
+				instance.VRFTargetExport = []string{"target:65000:100"}
+			},
+			want: "routing-instance BLUE: route-distinguisher is required for VPN export",
+		},
+		{
+			name: "vpn target without autonomous system",
+			configure: func(cfg *RouterConfig, instance *RoutingInstance) {
+				instance.RouteDistinguisher = "65000:100"
+				instance.VRFTarget = "target:65000:100"
+			},
+			want: "routing-instance BLUE: routing-options autonomous-system is required for VPN import/export",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg := NewRouterConfig()
+			cfg.Policy = &PolicyConfig{
+				PolicyStatements: map[string]*PolicyStatement{
+					"BLUE-IN":  {},
+					"BLUE-OUT": {},
+				},
+			}
+			cfg.RoutingInstances = map[string]*RoutingInstance{
+				"BLUE": {InstanceType: "vrf"},
+			}
+			tt.configure(cfg, cfg.RoutingInstances["BLUE"])
+
+			err := cfg.Validate()
+			if err == nil {
+				t.Fatal("Validate() error = nil, want L3VPN safety error")
 			}
 			if !strings.Contains(err.Error(), tt.want) {
 				t.Fatalf("Validate() error = %v, want substring %q", err, tt.want)
