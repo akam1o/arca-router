@@ -538,6 +538,8 @@ set protocols vrrp group 10 preempt
 
 When `chassis cluster` is enabled with `sync etcd endpoint` values, the daemon must be running with `--datastore-backend=etcd`, and the configured sync endpoints must match `--etcd-endpoints`. Commits that would leave a mismatched cluster sync configuration active fail validation.
 
+When `--datastore-backend=etcd` is active, arca-routerd polls the etcd running configuration revision. If another chassis commits a newer running configuration, the daemon reloads the latest snapshot from etcd and applies it through the same engine and southbound plugins used by local commits. The sync loop only reacts to changes in the etcd `running/current` key revision, so a local commit that has updated the engine but has not yet persisted its new running revision is not overwritten by an older snapshot.
+
 VRRP group IDs must be numeric and between `1` and `255`. VRRP priority must be between `1` and `254` when configured; omit it for default behavior.
 
 Before applying FRR VRRP configuration, arca-routerd prepares the Linux state expected by FRR `vrrpd`: arca-owned macvlan interfaces named `arv4-<id>-<hash>` or `arv6-<id>-<hash>` are created on the LCP interface, assigned the RFC VRRP virtual MAC, configured with the virtual address as `/32` or `/128`, and brought up. The prepared interface names are persisted in `/var/lib/arca-router/vrrp-interfaces.json` so stale arca-owned macvlan interfaces can be removed after daemon restart. This requires `CAP_NET_ADMIN`, which is included in the packaged systemd unit.
@@ -954,7 +956,7 @@ Endpoints:
 - `GET /metrics`
 - `GET /healthz`
 
-The metrics endpoint exports daemon uptime, running config version, NETCONF counters, cluster sync gauges for enabled state, node count, etcd sync configuration, datastore alignment, and VPP LCP reconciliation gauges for pair count, inconsistency count, check failures, and latest check timestamp.
+The metrics endpoint exports daemon uptime, running config version, NETCONF counters, config sync gauges for etcd health and running revision, cluster sync gauges for enabled state, node count, etcd sync configuration, datastore alignment, and VPP LCP reconciliation gauges for pair count, inconsistency count, check failures, and latest check timestamp.
 
 The packaged Grafana dashboard is installed at:
 

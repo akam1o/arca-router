@@ -26,7 +26,7 @@ Current capabilities:
 - FRR transactional apply through the management candidate datastore
 - v0.6 config foundations for clustering, VRRP, MPLS, routing instances, and QoS
 - Prometheus, health, SNMP, Web UI, and Grafana observability assets
-- SQLite or etcd-backed candidate/running datastore with commit history
+- SQLite or etcd-backed candidate/running datastore with commit history and etcd config sync
 
 ---
 

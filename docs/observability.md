@@ -28,6 +28,13 @@ Exported metrics:
 - `arca_routerd_up`
 - `arca_routerd_uptime_seconds`
 - `arca_router_config_version`
+- `arca_router_config_sync_etcd_enabled`
+- `arca_router_config_sync_etcd_healthy`
+- `arca_router_config_sync_etcd_revision`
+- `arca_router_config_sync_running_revision`
+- `arca_router_config_sync_error`
+- `arca_router_config_sync_last_check_timestamp_seconds`
+- `arca_router_config_sync_last_apply_timestamp_seconds`
 - `arca_router_cluster_enabled`
 - `arca_router_cluster_nodes`
 - `arca_router_cluster_sync_etcd_configured`
@@ -80,7 +87,7 @@ Endpoints:
 - `POST /api/config/validate`
 - `POST /api/config/commit`
 
-The Web UI is intended for trusted management networks. It exposes the same daemon status used by the metrics endpoint, including datastore backend, cluster sync alignment, and VPP LCP reconciliation state. It also exposes the running configuration in set-command format through `/api/config`, renders it in the dashboard editor, shows recent commit history from `/api/config/history`, and can validate or commit edited set-command text.
+The Web UI is intended for trusted management networks. It exposes the same daemon status used by the metrics endpoint, including datastore backend, etcd config sync health, cluster sync alignment, and VPP LCP reconciliation state. It also exposes the running configuration in set-command format through `/api/config`, renders it in the dashboard editor, shows recent commit history from `/api/config/history`, and can validate or commit edited set-command text.
 
 When the running configuration contains password-backed `security users`, the Web UI requires HTTP Basic authentication. The `read-only`, `operator`, and `admin` roles can access the read-only dashboard and API endpoints.
 

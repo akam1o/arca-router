@@ -10,14 +10,14 @@ Focus: expand the hardened unified daemon into higher-level router features.
 - **Multi-chassis / clustering**
   - Management-plane config model for cluster nodes and etcd sync
   - arca-routerd datastore backend selection for etcd-backed config synchronization
+  - Runtime config synchronization through etcd running revision polling
   - Commit-time consistency guard between cluster sync config and the active etcd datastore backend
-  - Cluster sync observability through Web UI status and Prometheus metrics
+  - Cluster and config sync observability through Web UI status and Prometheus metrics
   - FRR VRRP config generation through the file apply backend
   - FRR VRRP transactional apply through the management candidate datastore
   - VRRP Linux macvlan preparation for FRR vrrpd
   - VPP LCP cache reconciliation status through Web UI, Prometheus, and SNMP
   - Control-plane HA using FRR and VRRP
-  - Config synchronization through etcd
   - Post-failover FRR/VPP convergence validation
 - **MPLS / VPN**
   - Management-plane config model for MPLS interfaces and L3VPN service stanzas

@@ -77,6 +77,14 @@ When the running configuration enables `chassis cluster sync etcd endpoint`, tho
 configured endpoints must match the daemon's `--etcd-endpoints`. This keeps the
 cluster sync model aligned with the active candidate/running datastore.
 
+When `--datastore-backend=etcd` is active, arca-routerd also starts a runtime
+config synchronizer. It polls the etcd `running/current` key revision and only
+reloads the latest running snapshot when that revision changes, which lets a
+node apply commits made on another chassis without racing local commits that
+have not yet been persisted. The synchronizer applies the remote snapshot
+through the same engine and southbound plugins as local commits, but does not
+write the snapshot back to etcd.
+
 ## Configuration Datastores
 
 ### Running Configuration
