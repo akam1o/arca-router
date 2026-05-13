@@ -854,6 +854,7 @@ func TestApplyCandidateCommandReplacesV06ScalarAttributes(t *testing.T) {
 		"set security netconf ssh port 830",
 		"set protocols vrrp group 10 priority 100",
 		"set routing-instances BLUE route-distinguisher 65000:100",
+		"set routing-instances BLUE vrf-target target:65000:100",
 		"set class-of-service traffic-control-profile WAN shaping-rate 1000",
 	}, "\n")
 
@@ -864,6 +865,7 @@ func TestApplyCandidateCommandReplacesV06ScalarAttributes(t *testing.T) {
 		"set security netconf ssh port 1830",
 		"set protocols vrrp group 10 priority 120",
 		"set routing-instances BLUE route-distinguisher 65000:200",
+		"set routing-instances BLUE vrf-target target:65000:200",
 		"set class-of-service traffic-control-profile WAN shaping-rate 2000",
 	}, "\n"))
 	if err != nil {
@@ -876,6 +878,7 @@ func TestApplyCandidateCommandReplacesV06ScalarAttributes(t *testing.T) {
 		"set security netconf ssh port 830",
 		"set protocols vrrp group 10 priority 100",
 		"set routing-instances BLUE route-distinguisher 65000:100",
+		"set routing-instances BLUE vrf-target target:65000:100",
 		"set class-of-service traffic-control-profile WAN shaping-rate 1000",
 	} {
 		if strings.Contains(updated, oldLine) {
@@ -889,10 +892,44 @@ func TestApplyCandidateCommandReplacesV06ScalarAttributes(t *testing.T) {
 		"set security netconf ssh port 1830",
 		"set protocols vrrp group 10 priority 120",
 		"set routing-instances BLUE route-distinguisher 65000:200",
+		"set routing-instances BLUE vrf-target target:65000:200",
 		"set class-of-service traffic-control-profile WAN shaping-rate 2000",
 	} {
 		if !strings.Contains(updated, want) {
 			t.Fatalf("updated candidate missing %q:\n%s", want, updated)
+		}
+	}
+}
+
+func TestApplyCandidateCommandPreservesRoutingInstancePolicyLists(t *testing.T) {
+	candidate := strings.Join([]string{
+		"set routing-instances BLUE vrf-import BLUE-IN",
+		"set routing-instances BLUE vrf-import BLUE-EXTRA",
+		"set routing-instances BLUE vrf-export BLUE-OUT",
+	}, "\n")
+
+	updated, err := applyCandidateCommand(candidate, strings.Join([]string{
+		"set routing-instances BLUE vrf-import BLUE-IN",
+		"set routing-instances BLUE vrf-import BLUE-NEW",
+		"set routing-instances BLUE vrf-export BLUE-OUT",
+		"set routing-instances BLUE vrf-export BLUE-NEW",
+	}, "\n"))
+	if err != nil {
+		t.Fatalf("applyCandidateCommand() error = %v", err)
+	}
+
+	for _, want := range []string{
+		"set routing-instances BLUE vrf-import BLUE-IN",
+		"set routing-instances BLUE vrf-import BLUE-EXTRA",
+		"set routing-instances BLUE vrf-import BLUE-NEW",
+		"set routing-instances BLUE vrf-export BLUE-OUT",
+		"set routing-instances BLUE vrf-export BLUE-NEW",
+	} {
+		if !strings.Contains(updated, want) {
+			t.Fatalf("updated candidate missing %q:\n%s", want, updated)
+		}
+		if got := strings.Count(updated, want); got != 1 {
+			t.Fatalf("updated candidate contains %q %d times, want 1:\n%s", want, got, updated)
 		}
 	}
 }

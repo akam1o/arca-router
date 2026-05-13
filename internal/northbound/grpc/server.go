@@ -807,7 +807,7 @@ func replacementPrefixes(path []string) []string {
 		switch path[2] {
 		case "instance-type", "route-distinguisher", "vrf-target":
 			return prefix(3)
-		case "interface":
+		case "interface", "vrf-import", "vrf-export":
 			return nil
 		}
 	}
