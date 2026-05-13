@@ -9,6 +9,7 @@
 - **Routing-instance policy hooks**: `vrf-import` and `vrf-export` reference configured policy statements in the v0.6 L3VPN service model
 - **Directional VRF targets**: routing instances support shared `vrf-target` and directional `vrf-target import` / `vrf-target export` extended-community targets
 - **NETCONF v0.6 XML model**: NETCONF get-config/edit-config and the embedded YANG model cover v0.6 system services, clustering, MPLS/VRRP, routing-instances, class-of-service, and non-sensitive security settings
+- **NETCONF YANG capability**: server hello advertises the arca-router YANG module capability once the embedded model matches the implemented v0.6 XML schema
 - **etcd datastore selection**: `arca-routerd` and embedded NETCONF can use the existing etcd-backed candidate/running datastore for clustered deployments
 - **Cluster sync guard**: `chassis cluster sync etcd` commits must match the daemon's active etcd datastore backend and endpoints
 - **Cluster observability**: `/api/status`, the Web UI, and Prometheus metrics expose datastore and cluster sync state

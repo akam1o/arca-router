@@ -612,6 +612,8 @@ set security netconf ssh port 830
 
 NETCONF XML の get-config/edit-config は、v0.6 management-plane model の `system services`、`chassis cluster`、`protocols mpls`、`protocols vrrp`、`routing-instances`、`class-of-service`、および非機密の `security netconf` / `security rate-limit` 設定に対応します。Security user の secret は NETCONF XML 応答には意図的に出力しません。
 
+server hello は arca-router YANG module capability として `urn:arca:router:config:1.0?module=arca-router&revision=2025-12-27` を広告します。
+
 <a id="user-management"></a>
 ### ユーザ管理
 
