@@ -251,20 +251,16 @@ func TestValidateChangesAllowsMPLSConfig(t *testing.T) {
 	}
 }
 
-func TestValidateChangesRejectsUnsupportedRoutingInstances(t *testing.T) {
+func TestValidateChangesAllowsRoutingInstances(t *testing.T) {
 	plugin := NewVPPPlugin(pkgvpp.NewMockClient(), &device.HardwareConfig{}, testLogger())
 	newCfg := model.NewRouterConfig()
 	newCfg.RoutingInstances = map[string]*model.RoutingInstance{
-		"BLUE": {InstanceType: "vrf"},
+		"BLUE": {InstanceType: "vrf", RouteDistinguisher: "65000:100"},
 	}
 	diff := engine.ComputeDiff(model.NewRouterConfig(), newCfg)
 
-	err := plugin.ValidateChanges(context.Background(), diff)
-	if err == nil {
-		t.Fatal("ValidateChanges() error = nil, want unsupported routing-instances error")
-	}
-	if !strings.Contains(err.Error(), "routing-instances") {
-		t.Fatalf("ValidateChanges() error = %v, want routing-instances", err)
+	if err := plugin.ValidateChanges(context.Background(), diff); err != nil {
+		t.Fatalf("ValidateChanges() error = %v, want nil", err)
 	}
 }
 
@@ -297,6 +293,76 @@ func TestValidateChangesAllowsRemovingUnsupportedV06VPPConfig(t *testing.T) {
 
 	if err := plugin.ValidateChanges(context.Background(), diff); err != nil {
 		t.Fatalf("ValidateChanges() error = %v, want nil", err)
+	}
+}
+
+func TestApplyChangesMapsRoutingInstanceTables(t *testing.T) {
+	ctx := context.Background()
+	client := pkgvpp.NewMockClient()
+	plugin := NewVPPPlugin(client, &device.HardwareConfig{
+		Interfaces: []device.PhysicalInterface{
+			{Name: "ge-0/0/0", PCI: "0000:03:00.0", Driver: "avf"},
+		},
+	}, testLogger())
+	if err := plugin.Init(ctx); err != nil {
+		t.Fatalf("Init() error = %v", err)
+	}
+	t.Cleanup(func() { _ = plugin.Close() })
+
+	newCfg := model.NewRouterConfig()
+	newCfg.Interfaces["ge-0/0/0"] = &model.InterfaceConfig{Units: map[int]*model.Unit{
+		0: {Family: map[string]*model.AddressFamily{
+			"inet": {Addresses: []string{"192.0.2.1/24"}},
+		}},
+	}}
+	newCfg.RoutingInstances = map[string]*model.RoutingInstance{
+		"BLUE": {
+			InstanceType:       "vrf",
+			RouteDistinguisher: "65000:100",
+			Interfaces:         []string{"ge-0/0/0"},
+		},
+	}
+
+	diff := engine.ComputeDiff(model.NewRouterConfig(), newCfg)
+	if err := plugin.ValidateChanges(ctx, diff); err != nil {
+		t.Fatalf("ValidateChanges() error = %v", err)
+	}
+	if err := plugin.ApplyChanges(ctx, diff); err != nil {
+		t.Fatalf("ApplyChanges() error = %v", err)
+	}
+
+	idx, ok := plugin.GetInterfaceIndex("ge-0/0/0")
+	if !ok {
+		t.Fatal("ApplyChanges() did not add interface index")
+	}
+	for _, isIPv6 := range []bool{false, true} {
+		if !client.IPTableExists(100, isIPv6) {
+			t.Fatalf("routing table 100 IPv6=%t was not created", isIPv6)
+		}
+		if got := client.InterfaceTableID(idx, isIPv6); got != 100 {
+			t.Fatalf("InterfaceTableID(IPv6=%t) = %d, want 100", isIPv6, got)
+		}
+	}
+	iface, err := client.GetInterface(ctx, idx)
+	if err != nil {
+		t.Fatalf("GetInterface() error = %v", err)
+	}
+	if len(iface.Addresses) != 1 || iface.Addresses[0].String() != "192.0.2.1/24" {
+		t.Fatalf("interface addresses = %#v, want 192.0.2.1/24", iface.Addresses)
+	}
+
+	withoutRI := model.NewRouterConfig()
+	withoutRI.Interfaces["ge-0/0/0"] = newCfg.Interfaces["ge-0/0/0"].Clone()
+	if err := plugin.ApplyChanges(ctx, engine.ComputeDiff(newCfg, withoutRI)); err != nil {
+		t.Fatalf("ApplyChanges() remove routing-instance error = %v", err)
+	}
+	for _, isIPv6 := range []bool{false, true} {
+		if got := client.InterfaceTableID(idx, isIPv6); got != 0 {
+			t.Fatalf("InterfaceTableID(IPv6=%t) after removal = %d, want 0", isIPv6, got)
+		}
+		if client.IPTableExists(100, isIPv6) {
+			t.Fatalf("routing table 100 IPv6=%t still exists after removal", isIPv6)
+		}
 	}
 }
 

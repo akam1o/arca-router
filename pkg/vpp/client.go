@@ -50,6 +50,15 @@ type Client interface {
 	// SetMPLSInterface enables or disables MPLS forwarding on an interface
 	SetMPLSInterface(ctx context.Context, ifIndex uint32, enabled bool) error
 
+	// AddIPTable creates an IPv4 or IPv6 FIB table.
+	AddIPTable(ctx context.Context, table IPTable) error
+
+	// DeleteIPTable deletes an IPv4 or IPv6 FIB table.
+	DeleteIPTable(ctx context.Context, table IPTable) error
+
+	// SetInterfaceTable binds an interface to an IPv4 or IPv6 FIB table.
+	SetInterfaceTable(ctx context.Context, ifIndex uint32, tableID uint32, isIPv6 bool) error
+
 	// GetInterface retrieves interface information by index
 	GetInterface(ctx context.Context, ifIndex uint32) (*Interface, error)
 
@@ -127,6 +136,13 @@ type Interface struct {
 	// PCIAddress is the PCI address (e.g., "0000:00:06.0") for hardware interfaces
 	// Empty for non-hardware interfaces (e.g., tap, loopback)
 	PCIAddress string
+}
+
+// IPTable represents a VPP IPv4 or IPv6 FIB table.
+type IPTable struct {
+	ID     uint32
+	IsIPv6 bool
+	Name   string
 }
 
 // InterfaceType represents the type of interface

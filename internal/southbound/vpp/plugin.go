@@ -5,9 +5,11 @@ package vpp
 import (
 	"context"
 	"fmt"
+	"hash/fnv"
 	"log/slog"
 	"net"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -115,8 +117,10 @@ func (p *VPPPlugin) ValidateChanges(ctx context.Context, diff *engine.ConfigDiff
 		}
 	}
 
-	if diff.RoutingInstancesChanged && len(diff.NewRoutingInstances) > 0 {
-		return fmt.Errorf("VPP southbound does not yet support v0.6 configuration: routing-instances")
+	if diff.RoutingInstancesChanged {
+		if _, err := routingInstancePlanMap(diff.NewRoutingInstances); err != nil {
+			return err
+		}
 	}
 	if diff.ClassOfServiceChanged && hasVPPClassOfServiceConfig(diff.NewClassOfService) {
 		return fmt.Errorf("VPP southbound does not yet support v0.6 configuration: class-of-service")
@@ -151,8 +155,36 @@ func (p *VPPPlugin) ApplyChanges(ctx context.Context, diff *engine.ConfigDiff) e
 		}
 	}
 
+	tableAddressHandled := make(map[string]bool)
+	if diff.RoutingInstancesChanged {
+		var err error
+		tableAddressHandled, err = p.applyRoutingInstanceChanges(ctx, diff, &rollbackOps)
+		if err != nil {
+			p.executeRollback(ctx, rollbackOps)
+			return fmt.Errorf("update routing instance tables: %w", err)
+		}
+	}
+
+	for name, ifaceCfg := range diff.InterfacesAdded {
+		if tableAddressHandled[name] {
+			continue
+		}
+		swIfIndex, ok := p.ifaceIndex[name]
+		if !ok {
+			p.executeRollback(ctx, rollbackOps)
+			return fmt.Errorf("interface %s not found in VPP", name)
+		}
+		if err := p.applyAddresses(ctx, swIfIndex, ifaceCfg, &rollbackOps); err != nil {
+			p.executeRollback(ctx, rollbackOps)
+			return fmt.Errorf("apply interface %s addresses: %w", name, err)
+		}
+	}
+
 	// 2. Apply address changes on existing interfaces
 	for _, change := range diff.InterfacesChanged {
+		if tableAddressHandled[change.Name] {
+			continue
+		}
 		if err := p.applyInterfaceChanges(ctx, change, &rollbackOps); err != nil {
 			p.executeRollback(ctx, rollbackOps)
 			return fmt.Errorf("update interface %s: %w", change.Name, err)
@@ -217,7 +249,24 @@ func (p *VPPPlugin) RollbackChanges(ctx context.Context, diff *engine.ConfigDiff
 		}
 	}
 
+	tableAddressHandled := make(map[string]bool)
+	if diff.RoutingInstancesChanged {
+		var err error
+		tableAddressHandled, err = p.applyRoutingInstanceChanges(ctx, &engine.ConfigDiff{
+			OldConfig:           diff.NewConfig,
+			NewConfig:           diff.OldConfig,
+			OldRoutingInstances: diff.NewRoutingInstances,
+			NewRoutingInstances: diff.OldRoutingInstances,
+		}, nil)
+		if err != nil && rollbackErr == nil {
+			rollbackErr = fmt.Errorf("restore routing instance tables: %w", err)
+		}
+	}
+
 	for _, change := range diff.InterfacesChanged {
+		if tableAddressHandled[change.Name] {
+			continue
+		}
 		swIfIndex, ok := p.ifaceIndex[change.Name]
 		if !ok {
 			continue
@@ -383,13 +432,6 @@ func (p *VPPPlugin) createInterface(ctx context.Context, name string, ifaceCfg *
 		}
 	}
 
-	// Apply addresses
-	if ifaceCfg != nil {
-		if err := p.applyAddresses(ctx, vppIface.SwIfIndex, ifaceCfg, rollback); err != nil {
-			return err
-		}
-	}
-
 	return nil
 }
 
@@ -500,6 +542,360 @@ func (p *VPPPlugin) setMPLSInterface(ctx context.Context, name string, enabled b
 		return err
 	}
 	return nil
+}
+
+type routingInstancePlan struct {
+	name       string
+	tableID    uint32
+	interfaces []string
+}
+
+func (p *VPPPlugin) applyRoutingInstanceChanges(ctx context.Context, diff *engine.ConfigDiff, rollback *[]func(context.Context) error) (map[string]bool, error) {
+	oldPlans, err := routingInstancePlanMap(diff.OldRoutingInstances)
+	if err != nil {
+		return nil, err
+	}
+	newPlans, err := routingInstancePlanMap(diff.NewRoutingInstances)
+	if err != nil {
+		return nil, err
+	}
+
+	for _, plan := range routingTablesToCreate(oldPlans, newPlans) {
+		if err := p.addIPTablePair(ctx, plan); err != nil {
+			return nil, fmt.Errorf("create routing-instance %s table %d: %w", plan.name, plan.tableID, err)
+		}
+		if rollback != nil {
+			planCopy := plan
+			*rollback = append(*rollback, func(ctx context.Context) error {
+				return p.deleteIPTablePair(ctx, planCopy)
+			})
+		}
+	}
+
+	handledAddresses := make(map[string]bool)
+	oldBindings := routingInterfaceBindings(oldPlans)
+	newBindings := routingInterfaceBindings(newPlans)
+	for _, binding := range routingBindingChanges(oldBindings, newBindings) {
+		if _, ok := p.ifaceIndex[binding.name]; !ok {
+			if binding.newTable == 0 {
+				handledAddresses[binding.name] = true
+				continue
+			}
+			return nil, fmt.Errorf("interface %s not found in VPP", binding.name)
+		}
+		if err := p.removeConfiguredAddresses(ctx, diff.OldConfig, binding.name, rollback); err != nil {
+			return nil, fmt.Errorf("remove addresses before binding %s to table %d: %w", binding.name, binding.newTable, err)
+		}
+		if err := p.setInterfaceTablePair(ctx, binding.name, binding.newTable, binding.oldTable); err != nil {
+			return nil, fmt.Errorf("bind interface %s to table %d: %w", binding.name, binding.newTable, err)
+		}
+		if rollback != nil {
+			bindingCopy := binding
+			*rollback = append(*rollback, func(ctx context.Context) error {
+				return p.setInterfaceTablePair(ctx, bindingCopy.name, bindingCopy.oldTable, bindingCopy.newTable)
+			})
+		}
+		if err := p.addConfiguredAddresses(ctx, diff.NewConfig, binding.name, rollback); err != nil {
+			return nil, fmt.Errorf("restore addresses after binding %s to table %d: %w", binding.name, binding.newTable, err)
+		}
+		handledAddresses[binding.name] = true
+	}
+
+	for _, plan := range routingTablesToDelete(oldPlans, newPlans) {
+		if err := p.deleteIPTablePair(ctx, plan); err != nil {
+			return nil, fmt.Errorf("delete routing-instance %s table %d: %w", plan.name, plan.tableID, err)
+		}
+		if rollback != nil {
+			planCopy := plan
+			*rollback = append(*rollback, func(ctx context.Context) error {
+				return p.addIPTablePair(ctx, planCopy)
+			})
+		}
+	}
+
+	return handledAddresses, nil
+}
+
+func routingInstancePlanMap(instances map[string]*model.RoutingInstance) (map[string]routingInstancePlan, error) {
+	plans := make(map[string]routingInstancePlan)
+	if len(instances) == 0 {
+		return plans, nil
+	}
+
+	names := make([]string, 0, len(instances))
+	for name := range instances {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+
+	usedTables := make(map[uint32]string)
+	for _, name := range names {
+		instance := instances[name]
+		if instance == nil {
+			continue
+		}
+		if instance.InstanceType != "" && instance.InstanceType != "vrf" {
+			return nil, fmt.Errorf("routing-instance %s: unsupported instance-type %q", name, instance.InstanceType)
+		}
+		tableID, explicit, err := routingInstanceTableID(name, instance)
+		if err != nil {
+			return nil, fmt.Errorf("routing-instance %s: %w", name, err)
+		}
+		for {
+			if owner, exists := usedTables[tableID]; exists {
+				if explicit {
+					return nil, fmt.Errorf("routing-instance %s: table ID %d collides with %s", name, tableID, owner)
+				}
+				tableID++
+				if tableID == 0 {
+					return nil, fmt.Errorf("routing-instance %s: no usable VPP table ID", name)
+				}
+				continue
+			}
+			break
+		}
+		usedTables[tableID] = name
+		plans[name] = routingInstancePlan{
+			name:       name,
+			tableID:    tableID,
+			interfaces: uniqueSortedStrings(instance.Interfaces),
+		}
+	}
+	return plans, nil
+}
+
+func routingInstanceTableID(name string, instance *model.RoutingInstance) (uint32, bool, error) {
+	if instance != nil && instance.RouteDistinguisher != "" {
+		parts := strings.Split(instance.RouteDistinguisher, ":")
+		if len(parts) != 2 {
+			return 0, true, fmt.Errorf("route-distinguisher %q must use ASN:number format", instance.RouteDistinguisher)
+		}
+		value, err := strconv.ParseUint(parts[1], 10, 32)
+		if err != nil || value == 0 {
+			return 0, true, fmt.Errorf("route-distinguisher %q does not provide a usable VPP table ID", instance.RouteDistinguisher)
+		}
+		return uint32(value), true, nil
+	}
+
+	hash := fnv.New32a()
+	_, _ = hash.Write([]byte(name))
+	return 100000 + hash.Sum32()%900000, false, nil
+}
+
+func uniqueSortedStrings(values []string) []string {
+	set := make(map[string]bool)
+	for _, value := range values {
+		if value != "" {
+			set[value] = true
+		}
+	}
+	result := make([]string, 0, len(set))
+	for value := range set {
+		result = append(result, value)
+	}
+	sort.Strings(result)
+	return result
+}
+
+func routingInterfaceBindings(plans map[string]routingInstancePlan) map[string]uint32 {
+	bindings := make(map[string]uint32)
+	for _, plan := range plans {
+		for _, name := range plan.interfaces {
+			bindings[name] = plan.tableID
+		}
+	}
+	return bindings
+}
+
+type routingBindingChange struct {
+	name     string
+	oldTable uint32
+	newTable uint32
+}
+
+func routingBindingChanges(oldBindings, newBindings map[string]uint32) []routingBindingChange {
+	namesSet := make(map[string]bool)
+	for name := range oldBindings {
+		namesSet[name] = true
+	}
+	for name := range newBindings {
+		namesSet[name] = true
+	}
+	names := make([]string, 0, len(namesSet))
+	for name := range namesSet {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+
+	changes := make([]routingBindingChange, 0, len(names))
+	for _, name := range names {
+		oldTable := oldBindings[name]
+		newTable := newBindings[name]
+		if oldTable != newTable {
+			changes = append(changes, routingBindingChange{name: name, oldTable: oldTable, newTable: newTable})
+		}
+	}
+	return changes
+}
+
+func routingTablesToCreate(oldPlans, newPlans map[string]routingInstancePlan) []routingInstancePlan {
+	var plans []routingInstancePlan
+	for name, newPlan := range newPlans {
+		oldPlan, exists := oldPlans[name]
+		if !exists || oldPlan.tableID != newPlan.tableID {
+			plans = append(plans, newPlan)
+		}
+	}
+	sort.Slice(plans, func(i, j int) bool { return plans[i].name < plans[j].name })
+	return plans
+}
+
+func routingTablesToDelete(oldPlans, newPlans map[string]routingInstancePlan) []routingInstancePlan {
+	var plans []routingInstancePlan
+	for name, oldPlan := range oldPlans {
+		newPlan, exists := newPlans[name]
+		if !exists || newPlan.tableID != oldPlan.tableID {
+			plans = append(plans, oldPlan)
+		}
+	}
+	sort.Slice(plans, func(i, j int) bool { return plans[i].name < plans[j].name })
+	return plans
+}
+
+func (p *VPPPlugin) addIPTablePair(ctx context.Context, plan routingInstancePlan) error {
+	table4 := pkgvpp.IPTable{ID: plan.tableID, Name: plan.name}
+	if err := p.client.AddIPTable(ctx, table4); err != nil {
+		return fmt.Errorf("add IPv4 table: %w", err)
+	}
+	table6 := pkgvpp.IPTable{ID: plan.tableID, IsIPv6: true, Name: plan.name}
+	if err := p.client.AddIPTable(ctx, table6); err != nil {
+		_ = p.client.DeleteIPTable(ctx, table4)
+		return fmt.Errorf("add IPv6 table: %w", err)
+	}
+	return nil
+}
+
+func (p *VPPPlugin) deleteIPTablePair(ctx context.Context, plan routingInstancePlan) error {
+	table4 := pkgvpp.IPTable{ID: plan.tableID, Name: plan.name}
+	table6 := pkgvpp.IPTable{ID: plan.tableID, IsIPv6: true, Name: plan.name}
+	var firstErr error
+	if err := p.client.DeleteIPTable(ctx, table6); err != nil {
+		firstErr = fmt.Errorf("delete IPv6 table: %w", err)
+	}
+	if err := p.client.DeleteIPTable(ctx, table4); err != nil && firstErr == nil {
+		firstErr = fmt.Errorf("delete IPv4 table: %w", err)
+	}
+	return firstErr
+}
+
+func (p *VPPPlugin) setInterfaceTablePair(ctx context.Context, name string, tableID uint32, rollbackTableID uint32) error {
+	swIfIndex, ok := p.ifaceIndex[name]
+	if !ok {
+		return fmt.Errorf("interface %s not found in VPP", name)
+	}
+	if err := p.client.SetInterfaceTable(ctx, swIfIndex, tableID, false); err != nil {
+		return fmt.Errorf("set IPv4 table: %w", err)
+	}
+	if err := p.client.SetInterfaceTable(ctx, swIfIndex, tableID, true); err != nil {
+		_ = p.client.SetInterfaceTable(ctx, swIfIndex, rollbackTableID, false)
+		return fmt.Errorf("set IPv6 table: %w", err)
+	}
+	return nil
+}
+
+func (p *VPPPlugin) removeConfiguredAddresses(ctx context.Context, cfg *model.RouterConfig, name string, rollback *[]func(context.Context) error) error {
+	swIfIndex, ok := p.ifaceIndex[name]
+	if !ok {
+		return fmt.Errorf("interface %s not found in VPP", name)
+	}
+	addresses, err := configuredInterfaceAddresses(cfg, name)
+	if err != nil {
+		return err
+	}
+	for _, address := range addresses {
+		if err := p.client.DeleteInterfaceAddress(ctx, swIfIndex, address); err != nil {
+			return err
+		}
+		if rollback != nil {
+			addressCopy := cloneIPNet(address)
+			*rollback = append(*rollback, func(ctx context.Context) error {
+				return p.client.SetInterfaceAddress(ctx, swIfIndex, addressCopy)
+			})
+		}
+	}
+	return nil
+}
+
+func (p *VPPPlugin) addConfiguredAddresses(ctx context.Context, cfg *model.RouterConfig, name string, rollback *[]func(context.Context) error) error {
+	swIfIndex, ok := p.ifaceIndex[name]
+	if !ok {
+		return fmt.Errorf("interface %s not found in VPP", name)
+	}
+	addresses, err := configuredInterfaceAddresses(cfg, name)
+	if err != nil {
+		return err
+	}
+	for _, address := range addresses {
+		if err := p.client.SetInterfaceAddress(ctx, swIfIndex, address); err != nil {
+			return err
+		}
+		if rollback != nil {
+			addressCopy := cloneIPNet(address)
+			*rollback = append(*rollback, func(ctx context.Context) error {
+				return p.client.DeleteInterfaceAddress(ctx, swIfIndex, addressCopy)
+			})
+		}
+	}
+	return nil
+}
+
+func configuredInterfaceAddresses(cfg *model.RouterConfig, name string) ([]*net.IPNet, error) {
+	if cfg == nil || cfg.Interfaces == nil {
+		return nil, nil
+	}
+	iface := cfg.Interfaces[name]
+	if iface == nil {
+		return nil, nil
+	}
+
+	type addressEntry struct {
+		unit    int
+		family  string
+		address string
+	}
+	var entries []addressEntry
+	for unitNum, unit := range iface.Units {
+		if unit == nil {
+			continue
+		}
+		for familyName, family := range unit.Family {
+			if family == nil {
+				continue
+			}
+			for _, address := range family.Addresses {
+				entries = append(entries, addressEntry{unit: unitNum, family: familyName, address: address})
+			}
+		}
+	}
+	sort.Slice(entries, func(i, j int) bool {
+		if entries[i].unit != entries[j].unit {
+			return entries[i].unit < entries[j].unit
+		}
+		if entries[i].family != entries[j].family {
+			return entries[i].family < entries[j].family
+		}
+		return entries[i].address < entries[j].address
+	})
+
+	addresses := make([]*net.IPNet, 0, len(entries))
+	for _, entry := range entries {
+		ipNet, err := pkgvpp.ParseCIDRAddress(entry.address)
+		if err != nil {
+			return nil, fmt.Errorf("parse CIDR %s: %w", entry.address, err)
+		}
+		addresses = append(addresses, ipNet)
+	}
+	return addresses, nil
 }
 
 func mplsAddedInterfaces(oldMPLS, newMPLS *model.MPLSConfig) []string {

@@ -16,6 +16,8 @@ type MockClient struct {
 	interfaces     map[uint32]*Interface
 	lcpInterfaces  map[uint32]*LCPInterface
 	mplsInterfaces map[uint32]bool
+	ipTables       map[ipTableKey]IPTable
+	interfaceTable map[interfaceTableKey]uint32
 	nextIfIdx      uint32
 
 	// Hooks for testing error scenarios
@@ -26,6 +28,9 @@ type MockClient struct {
 	SetInterfaceAddressError    error
 	DeleteInterfaceAddressError error
 	SetMPLSInterfaceError       error
+	AddIPTableError             error
+	DeleteIPTableError          error
+	SetInterfaceTableError      error
 	GetInterfaceError           error
 	ListInterfacesError         error
 	CreateLCPInterfaceError     error
@@ -40,8 +45,20 @@ func NewMockClient() *MockClient {
 		interfaces:     make(map[uint32]*Interface),
 		lcpInterfaces:  make(map[uint32]*LCPInterface),
 		mplsInterfaces: make(map[uint32]bool),
+		ipTables:       make(map[ipTableKey]IPTable),
+		interfaceTable: make(map[interfaceTableKey]uint32),
 		nextIfIdx:      1, // Start from 1 (0 is reserved for local0)
 	}
+}
+
+type ipTableKey struct {
+	id     uint32
+	isIPv6 bool
+}
+
+type interfaceTableKey struct {
+	ifIndex uint32
+	isIPv6  bool
 }
 
 // deepCopyInterface creates a deep copy of an Interface
@@ -461,6 +478,122 @@ func (m *MockClient) MPLSInterfaceEnabled(ifIndex uint32) bool {
 	return m.mplsInterfaces[ifIndex]
 }
 
+// AddIPTable creates an IPv4 or IPv6 FIB table in the mock state.
+func (m *MockClient) AddIPTable(ctx context.Context, table IPTable) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if m.AddIPTableError != nil {
+		return m.AddIPTableError
+	}
+
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	if !m.connected {
+		return errors.New(
+			errors.ErrCodeVPPConnection,
+			"Not connected to VPP",
+			"VPP connection not established",
+			"Connect to VPP before adding IP tables",
+		)
+	}
+	if table.ID == 0 {
+		return errors.New(
+			errors.ErrCodeVPPOperation,
+			"IP table ID 0 is reserved",
+			"Routing instances must use a non-default table",
+			"Use a non-zero table ID",
+		)
+	}
+
+	m.ipTables[ipTableKey{id: table.ID, isIPv6: table.IsIPv6}] = table
+	return nil
+}
+
+// DeleteIPTable deletes an IPv4 or IPv6 FIB table from the mock state.
+func (m *MockClient) DeleteIPTable(ctx context.Context, table IPTable) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if m.DeleteIPTableError != nil {
+		return m.DeleteIPTableError
+	}
+
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	if !m.connected {
+		return errors.New(
+			errors.ErrCodeVPPConnection,
+			"Not connected to VPP",
+			"VPP connection not established",
+			"Connect to VPP before deleting IP tables",
+		)
+	}
+
+	delete(m.ipTables, ipTableKey{id: table.ID, isIPv6: table.IsIPv6})
+	return nil
+}
+
+// SetInterfaceTable binds an interface to an IPv4 or IPv6 FIB table in the mock state.
+func (m *MockClient) SetInterfaceTable(ctx context.Context, ifIndex uint32, tableID uint32, isIPv6 bool) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if m.SetInterfaceTableError != nil {
+		return m.SetInterfaceTableError
+	}
+
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	if !m.connected {
+		return errors.New(
+			errors.ErrCodeVPPConnection,
+			"Not connected to VPP",
+			"VPP connection not established",
+			"Connect to VPP before setting interface tables",
+		)
+	}
+	if _, ok := m.interfaces[ifIndex]; !ok {
+		return errors.New(
+			errors.ErrCodeVPPOperation,
+			fmt.Sprintf("Interface with index %d not found", ifIndex),
+			"Interface does not exist",
+			"Create the interface before setting its table",
+		)
+	}
+	if tableID != 0 {
+		if _, ok := m.ipTables[ipTableKey{id: tableID, isIPv6: isIPv6}]; !ok {
+			return errors.New(
+				errors.ErrCodeVPPOperation,
+				fmt.Sprintf("IP table %d not found", tableID),
+				"IP table does not exist",
+				"Create the IP table before binding an interface",
+			)
+		}
+	}
+
+	m.interfaceTable[interfaceTableKey{ifIndex: ifIndex, isIPv6: isIPv6}] = tableID
+	return nil
+}
+
+// IPTableExists reports whether a mock IP table exists.
+func (m *MockClient) IPTableExists(tableID uint32, isIPv6 bool) bool {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	_, ok := m.ipTables[ipTableKey{id: tableID, isIPv6: isIPv6}]
+	return ok
+}
+
+// InterfaceTableID returns the table bound to a mock interface.
+func (m *MockClient) InterfaceTableID(ifIndex uint32, isIPv6 bool) uint32 {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	return m.interfaceTable[interfaceTableKey{ifIndex: ifIndex, isIPv6: isIPv6}]
+}
+
 // GetInterface retrieves mock interface information by index
 func (m *MockClient) GetInterface(ctx context.Context, ifIndex uint32) (*Interface, error) {
 	if m.GetInterfaceError != nil {
@@ -529,6 +662,8 @@ func (m *MockClient) Reset() {
 	m.interfaces = make(map[uint32]*Interface)
 	m.lcpInterfaces = make(map[uint32]*LCPInterface)
 	m.mplsInterfaces = make(map[uint32]bool)
+	m.ipTables = make(map[ipTableKey]IPTable)
+	m.interfaceTable = make(map[interfaceTableKey]uint32)
 	m.nextIfIdx = 1
 
 	m.ConnectError = nil
@@ -538,6 +673,9 @@ func (m *MockClient) Reset() {
 	m.SetInterfaceAddressError = nil
 	m.DeleteInterfaceAddressError = nil
 	m.SetMPLSInterfaceError = nil
+	m.AddIPTableError = nil
+	m.DeleteIPTableError = nil
+	m.SetInterfaceTableError = nil
 	m.GetInterfaceError = nil
 	m.ListInterfacesError = nil
 	m.CreateLCPInterfaceError = nil

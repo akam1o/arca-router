@@ -650,6 +650,77 @@ func (c *govppClient) SetMPLSInterface(ctx context.Context, ifIndex uint32, enab
 	return nil
 }
 
+// AddIPTable creates an IPv4 or IPv6 FIB table.
+func (c *govppClient) AddIPTable(ctx context.Context, table IPTable) error {
+	return c.setIPTable(ctx, table, true)
+}
+
+// DeleteIPTable deletes an IPv4 or IPv6 FIB table.
+func (c *govppClient) DeleteIPTable(ctx context.Context, table IPTable) error {
+	return c.setIPTable(ctx, table, false)
+}
+
+func (c *govppClient) setIPTable(ctx context.Context, table IPTable, add bool) error {
+	if c.ch == nil {
+		return fmt.Errorf("not connected to VPP")
+	}
+
+	select {
+	case <-ctx.Done():
+		return fmt.Errorf("operation cancelled: %w", ctx.Err())
+	default:
+	}
+
+	req := &vppip.IPTableAddDelV2{
+		Table: vppip.IPTable{
+			TableID: table.ID,
+			IsIP6:   table.IsIPv6,
+			Name:    table.Name,
+		},
+		CreateMfib: true,
+		IsAdd:      add,
+	}
+	reply := &vppip.IPTableAddDelV2Reply{}
+	if err := c.ch.SendRequest(req).ReceiveReply(reply); err != nil {
+		return fmt.Errorf("failed to configure IP table: %w", err)
+	}
+	if reply.Retval != 0 {
+		action := "add"
+		if !add {
+			action = "delete"
+		}
+		return fmt.Errorf("%s IP table returned error code: %d", action, reply.Retval)
+	}
+	return nil
+}
+
+// SetInterfaceTable binds an interface to an IPv4 or IPv6 FIB table.
+func (c *govppClient) SetInterfaceTable(ctx context.Context, ifIndex uint32, tableID uint32, isIPv6 bool) error {
+	if c.ch == nil {
+		return fmt.Errorf("not connected to VPP")
+	}
+
+	select {
+	case <-ctx.Done():
+		return fmt.Errorf("operation cancelled: %w", ctx.Err())
+	default:
+	}
+
+	req := &vppif.SwInterfaceSetTable{
+		SwIfIndex: interface_types.InterfaceIndex(ifIndex),
+		IsIPv6:    isIPv6,
+		VrfID:     tableID,
+	}
+	reply := &vppif.SwInterfaceSetTableReply{}
+	if err := c.ch.SendRequest(req).ReceiveReply(reply); err != nil {
+		return fmt.Errorf("failed to set interface table: %w", err)
+	}
+	if reply.Retval != 0 {
+		return fmt.Errorf("set interface table returned error code: %d", reply.Retval)
+	}
+	return nil
+}
+
 // GetInterface retrieves interface information by index
 func (c *govppClient) GetInterface(ctx context.Context, ifIndex uint32) (*Interface, error) {
 	if c.ch == nil {
