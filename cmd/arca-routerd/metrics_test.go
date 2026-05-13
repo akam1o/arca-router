@@ -22,6 +22,14 @@ func (s fakeVPPReconciliationSource) LCPReconciliationStatus() sbvpp.LCPReconcil
 	return s.status
 }
 
+type fakeConfigSyncRuntimeSource struct {
+	status configSyncStatus
+}
+
+func (s fakeConfigSyncRuntimeSource) ConfigSyncStatus() configSyncStatus {
+	return s.status
+}
+
 func TestEffectiveMetricsListenUsesFlagOverride(t *testing.T) {
 	cfg := model.NewRouterConfig()
 	cfg.System = &model.SystemConfig{
@@ -98,6 +106,15 @@ func TestMetricsEndpointExportsRouterMetrics(t *testing.T) {
 			Backend:       datastore.BackendEtcd,
 			EtcdEndpoints: []string{"https://etcd1:2379"},
 		},
+		configSync: fakeConfigSyncRuntimeSource{status: configSyncStatus{
+			Enabled:         true,
+			Healthy:         true,
+			EtcdRevision:    123,
+			RunningRevision: 120,
+			RunningCommitID: "commit-120",
+			LastCheck:       time.Unix(1700000100, 0),
+			LastApply:       time.Unix(1700000200, 0),
+		}},
 		vpp: fakeVPPReconciliationSource{status: sbvpp.LCPReconciliationStatus{
 			LastRun:         time.Unix(1700000000, 0),
 			PairCount:       2,
@@ -113,6 +130,13 @@ func TestMetricsEndpointExportsRouterMetrics(t *testing.T) {
 	for _, want := range []string{
 		"arca_routerd_up 1",
 		"arca_router_config_version 42",
+		"arca_router_config_sync_etcd_enabled 1",
+		"arca_router_config_sync_etcd_healthy 1",
+		"arca_router_config_sync_etcd_revision 123",
+		"arca_router_config_sync_running_revision 120",
+		"arca_router_config_sync_error 0",
+		"arca_router_config_sync_last_check_timestamp_seconds 1700000100",
+		"arca_router_config_sync_last_apply_timestamp_seconds 1700000200",
 		"arca_router_cluster_enabled 1",
 		"arca_router_cluster_nodes 2",
 		"arca_router_cluster_sync_etcd_configured 1",

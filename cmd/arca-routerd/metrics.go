@@ -27,6 +27,7 @@ type metricsSource struct {
 	netconfServer *netconf.SSHServer
 	datastore     *datastore.Config
 	configAPI     webConfigAPI
+	configSync    configSyncRuntimeSource
 	vpp           vppReconciliationSource
 }
 
@@ -35,26 +36,34 @@ type vppReconciliationSource interface {
 }
 
 type routerMetrics struct {
-	UptimeSeconds          float64
-	ConfigVersion          uint64
-	NETCONFActiveSessions  int
-	NETCONFActiveConns     int32
-	NETCONFTotalConns      uint64
-	NETCONFSuccess         uint64
-	NETCONFFailures        uint64
-	NETCONFListening       bool
-	RunningHostname        string
-	DatastoreBackend       string
-	DatastoreEtcdEndpoints []string
-	ClusterEnabled         bool
-	ClusterNodeCount       int
-	ClusterEtcdSync        bool
-	ClusterEtcdEndpoints   []string
-	ClusterSyncAligned     bool
-	VPPLCPReconcileLastRun time.Time
-	VPPLCPPairs            int
-	VPPLCPInconsistencies  []string
-	VPPLCPReconcileError   string
+	UptimeSeconds             float64
+	ConfigVersion             uint64
+	NETCONFActiveSessions     int
+	NETCONFActiveConns        int32
+	NETCONFTotalConns         uint64
+	NETCONFSuccess            uint64
+	NETCONFFailures           uint64
+	NETCONFListening          bool
+	RunningHostname           string
+	DatastoreBackend          string
+	DatastoreEtcdEndpoints    []string
+	ConfigSyncEnabled         bool
+	ConfigSyncHealthy         bool
+	ConfigSyncEtcdRevision    int64
+	ConfigSyncRunningRevision int64
+	ConfigSyncLastCheck       time.Time
+	ConfigSyncLastApply       time.Time
+	ConfigSyncLastError       string
+	ConfigSyncCommitID        string
+	ClusterEnabled            bool
+	ClusterNodeCount          int
+	ClusterEtcdSync           bool
+	ClusterEtcdEndpoints      []string
+	ClusterSyncAligned        bool
+	VPPLCPReconcileLastRun    time.Time
+	VPPLCPPairs               int
+	VPPLCPInconsistencies     []string
+	VPPLCPReconcileError      string
 }
 
 func (s metricsSource) snapshot(now time.Time) routerMetrics {
@@ -70,6 +79,17 @@ func (s metricsSource) snapshot(now time.Time) routerMetrics {
 			metrics.DatastoreBackend = string(s.datastore.Backend)
 		}
 		metrics.DatastoreEtcdEndpoints = normalizedEndpoints(s.datastore.EtcdEndpoints)
+	}
+	if s.configSync != nil {
+		status := s.configSync.ConfigSyncStatus()
+		metrics.ConfigSyncEnabled = status.Enabled
+		metrics.ConfigSyncHealthy = status.Healthy
+		metrics.ConfigSyncEtcdRevision = status.EtcdRevision
+		metrics.ConfigSyncRunningRevision = status.RunningRevision
+		metrics.ConfigSyncLastCheck = status.LastCheck
+		metrics.ConfigSyncLastApply = status.LastApply
+		metrics.ConfigSyncLastError = status.LastError
+		metrics.ConfigSyncCommitID = status.RunningCommitID
 	}
 
 	if s.engine != nil {
@@ -211,6 +231,28 @@ func (s metricsSource) handleMetrics(w http.ResponseWriter, r *http.Request) {
 	writeMetricHelp(&b, "arca_router_config_version", "Current running configuration version.")
 	writeMetricType(&b, "arca_router_config_version", "gauge")
 	writeMetricValue(&b, "arca_router_config_version", float64(metrics.ConfigVersion))
+
+	writeMetricHelp(&b, "arca_router_config_sync_etcd_enabled", "Whether etcd-backed running configuration synchronization is enabled.")
+	writeMetricType(&b, "arca_router_config_sync_etcd_enabled", "gauge")
+	writeMetricHelp(&b, "arca_router_config_sync_etcd_healthy", "Whether the latest etcd config synchronization check succeeded.")
+	writeMetricType(&b, "arca_router_config_sync_etcd_healthy", "gauge")
+	writeMetricHelp(&b, "arca_router_config_sync_etcd_revision", "Latest etcd cluster revision observed by the config synchronizer.")
+	writeMetricType(&b, "arca_router_config_sync_etcd_revision", "gauge")
+	writeMetricHelp(&b, "arca_router_config_sync_running_revision", "Latest etcd running configuration key revision observed by the config synchronizer.")
+	writeMetricType(&b, "arca_router_config_sync_running_revision", "gauge")
+	writeMetricHelp(&b, "arca_router_config_sync_error", "Whether the latest etcd config synchronization check failed.")
+	writeMetricType(&b, "arca_router_config_sync_error", "gauge")
+	writeMetricHelp(&b, "arca_router_config_sync_last_check_timestamp_seconds", "Unix timestamp of the latest etcd config synchronization check.")
+	writeMetricType(&b, "arca_router_config_sync_last_check_timestamp_seconds", "gauge")
+	writeMetricHelp(&b, "arca_router_config_sync_last_apply_timestamp_seconds", "Unix timestamp of the latest config applied from etcd.")
+	writeMetricType(&b, "arca_router_config_sync_last_apply_timestamp_seconds", "gauge")
+	writeMetricBool(&b, "arca_router_config_sync_etcd_enabled", metrics.ConfigSyncEnabled)
+	writeMetricBool(&b, "arca_router_config_sync_etcd_healthy", metrics.ConfigSyncHealthy)
+	writeMetricValue(&b, "arca_router_config_sync_etcd_revision", float64(metrics.ConfigSyncEtcdRevision))
+	writeMetricValue(&b, "arca_router_config_sync_running_revision", float64(metrics.ConfigSyncRunningRevision))
+	writeMetricBool(&b, "arca_router_config_sync_error", metrics.ConfigSyncLastError != "")
+	writeMetricValue(&b, "arca_router_config_sync_last_check_timestamp_seconds", unixTimestampSeconds(metrics.ConfigSyncLastCheck))
+	writeMetricValue(&b, "arca_router_config_sync_last_apply_timestamp_seconds", unixTimestampSeconds(metrics.ConfigSyncLastApply))
 
 	writeMetricHelp(&b, "arca_router_cluster_enabled", "Whether chassis clustering is enabled in the running configuration.")
 	writeMetricType(&b, "arca_router_cluster_enabled", "gauge")
