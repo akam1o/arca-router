@@ -32,7 +32,11 @@ func TestV06AdvancedConfigRoundTrip(t *testing.T) {
 		"set routing-instances BLUE instance-type vrf",
 		"set routing-instances BLUE route-distinguisher 65000:100",
 		"set routing-instances BLUE vrf-target target:65000:100",
+		"set routing-instances BLUE vrf-import BLUE-IN",
+		"set routing-instances BLUE vrf-export BLUE-OUT",
 		"set routing-instances BLUE interface ge-0/0/0",
+		"set policy-options policy-statement BLUE-IN term ACCEPT then accept",
+		"set policy-options policy-statement BLUE-OUT term ACCEPT then accept",
 		"set class-of-service forwarding-class expedited-forwarding queue 5",
 		"set class-of-service traffic-control-profile WAN shaping-rate 1000000000",
 		"set class-of-service traffic-control-profile WAN scheduler-map WAN-SCHED",
@@ -55,6 +59,12 @@ func TestV06AdvancedConfigRoundTrip(t *testing.T) {
 	}
 	if got := cfg.RoutingInstances["BLUE"].VRFTarget; got != "target:65000:100" {
 		t.Fatalf("VRF target = %q", got)
+	}
+	if got := cfg.RoutingInstances["BLUE"].VRFImport; len(got) != 1 || got[0] != "BLUE-IN" {
+		t.Fatalf("VRF import = %#v, want [BLUE-IN]", got)
+	}
+	if got := cfg.RoutingInstances["BLUE"].VRFExport; len(got) != 1 || got[0] != "BLUE-OUT" {
+		t.Fatalf("VRF export = %#v, want [BLUE-OUT]", got)
 	}
 	if got := cfg.ClassOfService.TrafficControlProfiles["WAN"].ShapingRate; got != 1000000000 {
 		t.Fatalf("shaping-rate = %d", got)
@@ -173,6 +183,50 @@ func TestV06AdvancedConfigValidationRejectsUnknownInterfaceReferences(t *testing
 	}
 }
 
+func TestV06AdvancedConfigValidationRejectsUnknownVRFPolicies(t *testing.T) {
+	tests := []struct {
+		name      string
+		configure func(*RoutingInstance)
+		want      string
+	}{
+		{
+			name: "vrf-import",
+			configure: func(instance *RoutingInstance) {
+				instance.VRFImport = []string{"MISSING-IN"}
+			},
+			want: "Routing instance BLUE vrf-import references unknown policy-statement MISSING-IN",
+		},
+		{
+			name: "vrf-export",
+			configure: func(instance *RoutingInstance) {
+				instance.VRFExport = []string{"MISSING-OUT"}
+			},
+			want: "Routing instance BLUE vrf-export references unknown policy-statement MISSING-OUT",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg := NewConfig()
+			cfg.RoutingInstances = map[string]*RoutingInstance{
+				"BLUE": {
+					Name:         "BLUE",
+					InstanceType: "vrf",
+				},
+			}
+			tt.configure(cfg.RoutingInstances["BLUE"])
+
+			err := cfg.Validate()
+			if err == nil {
+				t.Fatal("Validate() error = nil, want unknown policy-statement error")
+			}
+			if !strings.Contains(err.Error(), tt.want) {
+				t.Fatalf("Validate() error = %v, want substring %q", err, tt.want)
+			}
+		})
+	}
+}
+
 func TestRepeatedSetListValuesAreIdempotent(t *testing.T) {
 	input := strings.Join([]string{
 		"set chassis cluster sync etcd endpoint http://127.0.0.1:2379",
@@ -183,6 +237,10 @@ func TestRepeatedSetListValuesAreIdempotent(t *testing.T) {
 		"set protocols mpls interface ge-0/0/0",
 		"set routing-instances BLUE interface ge-0/0/0",
 		"set routing-instances BLUE interface ge-0/0/0",
+		"set routing-instances BLUE vrf-import BLUE-IN",
+		"set routing-instances BLUE vrf-import BLUE-IN",
+		"set routing-instances BLUE vrf-export BLUE-OUT",
+		"set routing-instances BLUE vrf-export BLUE-OUT",
 		"set policy-options prefix-list CUSTOMER 192.0.2.0/24",
 		"set policy-options prefix-list CUSTOMER 192.0.2.0/24",
 	}, "\n")
@@ -205,6 +263,12 @@ func TestRepeatedSetListValuesAreIdempotent(t *testing.T) {
 	if got := len(cfg.RoutingInstances["BLUE"].Interfaces); got != 1 {
 		t.Fatalf("routing-instance interfaces = %d, want 1", got)
 	}
+	if got := len(cfg.RoutingInstances["BLUE"].VRFImport); got != 1 {
+		t.Fatalf("routing-instance vrf-import = %d, want 1", got)
+	}
+	if got := len(cfg.RoutingInstances["BLUE"].VRFExport); got != 1 {
+		t.Fatalf("routing-instance vrf-export = %d, want 1", got)
+	}
 	if got := len(cfg.PolicyOptions.PrefixLists["CUSTOMER"].Prefixes); got != 1 {
 		t.Fatalf("prefix-list entries = %d, want 1", got)
 	}
@@ -215,6 +279,8 @@ func TestRepeatedSetListValuesAreIdempotent(t *testing.T) {
 		"set interfaces ge-0/0/0 unit 0 family inet address 192.0.2.1/24",
 		"set protocols mpls interface ge-0/0/0",
 		"set routing-instances BLUE interface ge-0/0/0",
+		"set routing-instances BLUE vrf-import BLUE-IN",
+		"set routing-instances BLUE vrf-export BLUE-OUT",
 		"set policy-options prefix-list CUSTOMER 192.0.2.0/24",
 	} {
 		if got := strings.Count(text, line); got != 1 {

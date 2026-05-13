@@ -183,6 +183,8 @@ func FromLegacyConfig(old *config.Config) *RouterConfig {
 				InstanceType:       instance.InstanceType,
 				RouteDistinguisher: instance.RouteDistinguisher,
 				VRFTarget:          instance.VRFTarget,
+				VRFImport:          append([]string{}, instance.VRFImport...),
+				VRFExport:          append([]string{}, instance.VRFExport...),
 				Interfaces:         append([]string{}, instance.Interfaces...),
 			}
 		}
@@ -457,6 +459,8 @@ func (c *RouterConfig) ToLegacyConfig() *config.Config {
 				InstanceType:       instance.InstanceType,
 				RouteDistinguisher: instance.RouteDistinguisher,
 				VRFTarget:          instance.VRFTarget,
+				VRFImport:          append([]string{}, instance.VRFImport...),
+				VRFExport:          append([]string{}, instance.VRFExport...),
 				Interfaces:         append([]string{}, instance.Interfaces...),
 			}
 		}

@@ -200,6 +200,8 @@ type RoutingInstance struct {
 	InstanceType       string   `json:"instance-type,omitempty"`
 	RouteDistinguisher string   `json:"route-distinguisher,omitempty"`
 	VRFTarget          string   `json:"vrf-target,omitempty"`
+	VRFImport          []string `json:"vrf-import,omitempty"`
+	VRFExport          []string `json:"vrf-export,omitempty"`
 	Interfaces         []string `json:"interfaces,omitempty"`
 }
 

@@ -578,6 +578,44 @@ func validateRoutingInstance(cfg *Config, name string, instance *RoutingInstance
 			return err
 		}
 	}
+	for _, policyName := range instance.VRFImport {
+		if err := validatePolicyStatementReference(cfg, fmt.Sprintf("Routing instance %s vrf-import", name), policyName); err != nil {
+			return err
+		}
+	}
+	for _, policyName := range instance.VRFExport {
+		if err := validatePolicyStatementReference(cfg, fmt.Sprintf("Routing instance %s vrf-export", name), policyName); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func validatePolicyStatementReference(cfg *Config, context, policyName string) error {
+	if strings.TrimSpace(policyName) == "" {
+		return errors.New(
+			errors.ErrCodeConfigValidation,
+			fmt.Sprintf("%s references an empty policy-statement", context),
+			"Policy statement name must be specified",
+			"Use a configured policy-options policy-statement name",
+		)
+	}
+	if cfg == nil || cfg.PolicyOptions == nil || cfg.PolicyOptions.PolicyStatements == nil {
+		return errors.New(
+			errors.ErrCodeConfigValidation,
+			fmt.Sprintf("%s references unknown policy-statement %s", context, policyName),
+			"Referenced policy-statement must exist before it is used",
+			fmt.Sprintf("Create policy-options policy-statement %s", policyName),
+		)
+	}
+	if _, ok := cfg.PolicyOptions.PolicyStatements[policyName]; !ok {
+		return errors.New(
+			errors.ErrCodeConfigValidation,
+			fmt.Sprintf("%s references unknown policy-statement %s", context, policyName),
+			"Referenced policy-statement must exist before it is used",
+			fmt.Sprintf("Create policy-options policy-statement %s", policyName),
+		)
+	}
 	return nil
 }
 

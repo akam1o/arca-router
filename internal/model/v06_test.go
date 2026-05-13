@@ -28,7 +28,11 @@ func TestV06ConfigConversionAndClone(t *testing.T) {
 		"set routing-instances BLUE instance-type vrf",
 		"set routing-instances BLUE route-distinguisher 65000:100",
 		"set routing-instances BLUE vrf-target target:65000:100",
+		"set routing-instances BLUE vrf-import BLUE-IN",
+		"set routing-instances BLUE vrf-export BLUE-OUT",
 		"set routing-instances BLUE interface ge-0/0/0",
+		"set policy-options policy-statement BLUE-IN term ACCEPT then accept",
+		"set policy-options policy-statement BLUE-OUT term ACCEPT then accept",
 		"set class-of-service traffic-control-profile WAN shaping-rate 1000",
 		"set class-of-service interfaces ge-0/0/0 output-traffic-control-profile WAN",
 	}, "\n")
@@ -45,13 +49,23 @@ func TestV06ConfigConversionAndClone(t *testing.T) {
 
 	clone := cfg.Clone()
 	clone.Protocols.VRRP.Groups["10"].VirtualAddress = "192.0.2.253"
+	clone.RoutingInstances["BLUE"].VRFImport[0] = "MUTATED"
 	if got := cfg.Protocols.VRRP.Groups["10"].VirtualAddress; got != "192.0.2.254" {
 		t.Fatalf("original VRRP virtual-address mutated to %q", got)
+	}
+	if got := cfg.RoutingInstances["BLUE"].VRFImport[0]; got != "BLUE-IN" {
+		t.Fatalf("original VRF import mutated to %q", got)
 	}
 
 	roundTrip := cfg.ToLegacyConfig()
 	if got := roundTrip.RoutingInstances["BLUE"].RouteDistinguisher; got != "65000:100" {
 		t.Fatalf("route distinguisher = %q", got)
+	}
+	if got := roundTrip.RoutingInstances["BLUE"].VRFImport; len(got) != 1 || got[0] != "BLUE-IN" {
+		t.Fatalf("VRF import = %#v, want [BLUE-IN]", got)
+	}
+	if got := roundTrip.RoutingInstances["BLUE"].VRFExport; len(got) != 1 || got[0] != "BLUE-OUT" {
+		t.Fatalf("VRF export = %#v, want [BLUE-OUT]", got)
 	}
 	if got := roundTrip.ClassOfService.Interfaces["ge-0/0/0"].OutputTrafficControlProfile; got != "WAN" {
 		t.Fatalf("CoS interface profile = %q", got)
@@ -160,6 +174,47 @@ func TestV06ModelValidationRejectsUnknownInterfaceReferences(t *testing.T) {
 			err := cfg.Validate()
 			if err == nil {
 				t.Fatal("Validate() error = nil, want unknown interface reference error")
+			}
+			if !strings.Contains(err.Error(), tt.want) {
+				t.Fatalf("Validate() error = %v, want substring %q", err, tt.want)
+			}
+		})
+	}
+}
+
+func TestV06ModelValidationRejectsUnknownRoutingInstancePolicies(t *testing.T) {
+	tests := []struct {
+		name      string
+		configure func(*RoutingInstance)
+		want      string
+	}{
+		{
+			name: "vrf-import",
+			configure: func(instance *RoutingInstance) {
+				instance.VRFImport = []string{"MISSING-IN"}
+			},
+			want: `routing-instance BLUE vrf-import: policy-statement "MISSING-IN" not found in policy-options`,
+		},
+		{
+			name: "vrf-export",
+			configure: func(instance *RoutingInstance) {
+				instance.VRFExport = []string{"MISSING-OUT"}
+			},
+			want: `routing-instance BLUE vrf-export: policy-statement "MISSING-OUT" not found in policy-options`,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg := NewRouterConfig()
+			cfg.RoutingInstances = map[string]*RoutingInstance{
+				"BLUE": {InstanceType: "vrf"},
+			}
+			tt.configure(cfg.RoutingInstances["BLUE"])
+
+			err := cfg.Validate()
+			if err == nil {
+				t.Fatal("Validate() error = nil, want unknown policy-statement error")
 			}
 			if !strings.Contains(err.Error(), tt.want) {
 				t.Fatalf("Validate() error = %v, want substring %q", err, tt.want)

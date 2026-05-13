@@ -243,6 +243,12 @@ func writeRoutingInstances(b *strings.Builder, instances map[string]*RoutingInst
 		if instance.VRFTarget != "" {
 			writeLine(b, "set routing-instances %s vrf-target %s", name, instance.VRFTarget)
 		}
+		for _, policy := range instance.VRFImport {
+			writeLine(b, "set routing-instances %s vrf-import %s", name, EscapeValue(policy))
+		}
+		for _, policy := range instance.VRFExport {
+			writeLine(b, "set routing-instances %s vrf-export %s", name, EscapeValue(policy))
+		}
 		interfaces := append([]string(nil), instance.Interfaces...)
 		sort.Strings(interfaces)
 		for _, iface := range interfaces {

@@ -168,6 +168,16 @@ func (c *RouterConfig) validateRoutingInstances() error {
 				return err
 			}
 		}
+		for _, policyName := range instance.VRFImport {
+			if err := c.validatePolicyStatementReference(fmt.Sprintf("routing-instance %s vrf-import", name), policyName); err != nil {
+				return err
+			}
+		}
+		for _, policyName := range instance.VRFExport {
+			if err := c.validatePolicyStatementReference(fmt.Sprintf("routing-instance %s vrf-export", name), policyName); err != nil {
+				return err
+			}
+		}
 	}
 	return nil
 }
@@ -313,6 +323,19 @@ func (c *RouterConfig) validateInterfaceReference(context, ifName string) error 
 	}
 	if _, ok := c.Interfaces[ifName]; !ok {
 		return fmt.Errorf("%s: interface %q is not configured", context, ifName)
+	}
+	return nil
+}
+
+func (c *RouterConfig) validatePolicyStatementReference(context, policyName string) error {
+	if strings.TrimSpace(policyName) == "" {
+		return fmt.Errorf("%s: empty policy-statement reference", context)
+	}
+	if c.Policy == nil {
+		return fmt.Errorf("%s: policy-statement %q not found in policy-options", context, policyName)
+	}
+	if _, ok := c.Policy.PolicyStatements[policyName]; !ok {
+		return fmt.Errorf("%s: policy-statement %q not found in policy-options", context, policyName)
 	}
 	return nil
 }

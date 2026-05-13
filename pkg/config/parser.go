@@ -694,6 +694,20 @@ func (p *Parser) parseRoutingInstances(config *Config) error {
 		instance.VRFTarget = p.current.Value
 		p.nextToken()
 		return nil
+	case "vrf-import":
+		if p.current.Type != TokenWord && p.current.Type != TokenString {
+			return p.error("expected vrf-import policy")
+		}
+		instance.VRFImport = appendUniqueString(instance.VRFImport, p.current.Value)
+		p.nextToken()
+		return nil
+	case "vrf-export":
+		if p.current.Type != TokenWord && p.current.Type != TokenString {
+			return p.error("expected vrf-export policy")
+		}
+		instance.VRFExport = appendUniqueString(instance.VRFExport, p.current.Value)
+		p.nextToken()
+		return nil
 	case "interface":
 		if p.current.Type != TokenWord {
 			return p.error("expected routing-instance interface")
