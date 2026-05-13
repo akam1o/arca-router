@@ -109,16 +109,16 @@ func TestValidateChangesAllowsMPLSConfig(t *testing.T) {
 	}
 }
 
-func TestValidateChangesRejectsRoutingInstances(t *testing.T) {
+func TestValidateChangesAllowsRoutingInstances(t *testing.T) {
 	newCfg := model.NewRouterConfig()
 	newCfg.RoutingInstances = map[string]*model.RoutingInstance{
-		"BLUE": {InstanceType: "vrf"},
+		"BLUE": {InstanceType: "vrf", RouteDistinguisher: "65000:100", VRFTarget: "target:65000:100"},
 	}
 	diff := engine.ComputeDiff(model.NewRouterConfig(), newCfg)
 
 	err := NewFRRPlugin(testLogger()).ValidateChanges(context.Background(), diff)
-	if err == nil {
-		t.Fatal("ValidateChanges() error = nil, want routing-instances error")
+	if err != nil {
+		t.Fatalf("ValidateChanges() error = %v, want nil", err)
 	}
 }
 
@@ -153,6 +153,39 @@ func TestApplyChangesPassesVRRPToTransactionalApplier(t *testing.T) {
 	status := plugin.VRRPOperationalStatus()
 	if status.ConfiguredGroups != 1 || status.ObservedGroups != 1 || status.ActiveGroups != 1 || len(status.Issues) != 0 {
 		t.Fatalf("VRRPOperationalStatus() = %#v, want converged group", status)
+	}
+}
+
+func TestApplyChangesPassesRoutingInstancesToApplier(t *testing.T) {
+	newCfg := model.NewRouterConfig()
+	newCfg.Routing = &model.RoutingConfig{AutonomousSystem: 65000}
+	newCfg.RoutingInstances = map[string]*model.RoutingInstance{
+		"BLUE": {
+			InstanceType:       "vrf",
+			RouteDistinguisher: "65000:100",
+			VRFTarget:          "target:65000:100",
+		},
+	}
+	diff := engine.ComputeDiff(model.NewRouterConfig(), newCfg)
+	applier := &recordingApplier{}
+	plugin := NewFRRPlugin(testLogger())
+	plugin.applier = applier
+
+	if err := plugin.ApplyChanges(context.Background(), diff); err != nil {
+		t.Fatalf("ApplyChanges() error = %v", err)
+	}
+	if applier.cfg == nil || len(applier.cfg.VRFs) != 1 {
+		t.Fatalf("applied VRFs = %#v, want one VRF", applier.cfg)
+	}
+	vrf := applier.cfg.VRFs[0]
+	if vrf.Name != "BLUE" || vrf.ASN != 65000 || vrf.RouteDistinguisher != "65000:100" {
+		t.Fatalf("applied VRF = %#v, want BLUE L3VPN config", vrf)
+	}
+	if len(vrf.ImportTargets) != 1 || vrf.ImportTargets[0] != "65000:100" {
+		t.Fatalf("ImportTargets = %#v, want 65000:100", vrf.ImportTargets)
+	}
+	if len(vrf.ExportTargets) != 1 || vrf.ExportTargets[0] != "65000:100" {
+		t.Fatalf("ExportTargets = %#v, want 65000:100", vrf.ExportTargets)
 	}
 }
 

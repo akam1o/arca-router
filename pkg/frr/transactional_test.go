@@ -76,6 +76,42 @@ func TestBuildMgmtOperationsVRRP(t *testing.T) {
 	}
 }
 
+func TestBuildMgmtOperationsVRFVPN(t *testing.T) {
+	ops, err := BuildMgmtOperations(&Config{
+		VRFs: []VRFConfig{
+			{
+				Name:               "BLUE",
+				ASN:                65000,
+				RouteDistinguisher: "65000:100",
+				ImportTargets:      []string{"65000:100", "65000:101"},
+				ExportTargets:      []string{"65000:100", "65000:102"},
+				ImportRouteMap:     "BLUE-IN",
+				ExportRouteMap:     "BLUE-OUT",
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("BuildMgmtOperations() error = %v", err)
+	}
+	commands := commandsFromOps(ops)
+	for _, want := range []string{
+		"mgmt delete-config /frr-vrf:lib",
+		"mgmt delete-config /frr-routing:routing/control-plane-protocols/control-plane-protocol[type='frr-bgp:bgp']",
+		"mgmt set-config /frr-vrf:lib/vrf[name='BLUE']/name BLUE",
+		"mgmt set-config /frr-routing:routing/control-plane-protocols/control-plane-protocol[type='frr-bgp:bgp'][name='bgp'][vrf='BLUE']/vrf BLUE",
+		"mgmt set-config /frr-routing:routing/control-plane-protocols/control-plane-protocol[type='frr-bgp:bgp'][name='bgp'][vrf='BLUE']/frr-bgp:bgp/global/local-as 65000",
+		"mgmt set-config /frr-routing:routing/control-plane-protocols/control-plane-protocol[type='frr-bgp:bgp'][name='bgp'][vrf='BLUE']/frr-bgp:bgp/global/afi-safis/afi-safi[afi-safi-name='frr-routing:ipv4-unicast']/ipv4-unicast/vpn-config/rd 65000:100",
+		"mgmt set-config /frr-routing:routing/control-plane-protocols/control-plane-protocol[type='frr-bgp:bgp'][name='bgp'][vrf='BLUE']/frr-bgp:bgp/global/afi-safis/afi-safi[afi-safi-name='frr-routing:ipv4-unicast']/ipv4-unicast/vpn-config/import-rt-list target:65000:101",
+		"mgmt set-config /frr-routing:routing/control-plane-protocols/control-plane-protocol[type='frr-bgp:bgp'][name='bgp'][vrf='BLUE']/frr-bgp:bgp/global/afi-safis/afi-safi[afi-safi-name='frr-routing:ipv4-unicast']/ipv4-unicast/vpn-config/export-rt-list target:65000:102",
+		"mgmt set-config /frr-routing:routing/control-plane-protocols/control-plane-protocol[type='frr-bgp:bgp'][name='bgp'][vrf='BLUE']/frr-bgp:bgp/global/afi-safis/afi-safi[afi-safi-name='frr-routing:ipv4-unicast']/ipv4-unicast/vpn-config/rmap-import BLUE-IN",
+		"mgmt set-config /frr-routing:routing/control-plane-protocols/control-plane-protocol[type='frr-bgp:bgp'][name='bgp'][vrf='BLUE']/frr-bgp:bgp/global/afi-safis/afi-safi[afi-safi-name='frr-routing:ipv6-unicast']/ipv6-unicast/vpn-config/rmap-export BLUE-OUT",
+	} {
+		if !strings.Contains(commands, want) {
+			t.Fatalf("commands missing %q:\n%s", want, commands)
+		}
+	}
+}
+
 func TestVtyshMgmtClientApplySequence(t *testing.T) {
 	var got []string
 	client := NewVtyshMgmtClientWithRunner(func(ctx context.Context, command string) ([]byte, error) {

@@ -6,7 +6,6 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
-	"strings"
 	"sync"
 
 	"github.com/akam1o/arca-router/internal/engine"
@@ -79,13 +78,6 @@ func (p *FRRPlugin) ValidateChanges(ctx context.Context, diff *engine.ConfigDiff
 	if diff == nil {
 		return nil
 	}
-	var unsupported []string
-	if diff.RoutingInstancesChanged && len(diff.NewRoutingInstances) > 0 {
-		unsupported = append(unsupported, "routing-instances")
-	}
-	if len(unsupported) > 0 {
-		return fmt.Errorf("FRR southbound does not yet support v0.6 configuration: %s", strings.Join(unsupported, ", "))
-	}
 	return nil
 }
 
@@ -98,6 +90,7 @@ func (p *FRRPlugin) ApplyChanges(ctx context.Context, diff *engine.ConfigDiff) e
 	// Only regenerate FRR config if routing-related changes occurred
 	if !diff.BGPChanged && !diff.OSPFChanged && !diff.StaticRoutesChanged &&
 		!diff.PolicyChanged && !diff.RoutingChanged && !diff.SystemChanged && !diff.VRRPChanged &&
+		!diff.RoutingInstancesChanged &&
 		!hasFRRRelevantInterfaceChanges(diff) {
 		p.log.Debug("No routing-related changes, skipping FRR reload")
 		return nil
@@ -241,6 +234,12 @@ func (p *FRRPlugin) buildFullConfig(diff *engine.ConfigDiff) *model.RouterConfig
 		cfg.Policy = diff.NewPolicy
 	} else if diff.OldPolicy != nil && !diff.PolicyChanged {
 		cfg.Policy = diff.OldPolicy
+	}
+
+	if diff.NewRoutingInstances != nil {
+		cfg.RoutingInstances = diff.NewRoutingInstances
+	} else if diff.OldRoutingInstances != nil && !diff.RoutingInstancesChanged {
+		cfg.RoutingInstances = diff.OldRoutingInstances
 	}
 
 	// Static routes

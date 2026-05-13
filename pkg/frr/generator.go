@@ -77,9 +77,25 @@ func GenerateFRRConfig(cfg *config.Config) (*Config, error) {
 		if err != nil {
 			return nil, NewGenerateError("failed to convert policy-options", err)
 		}
+		if len(cfg.RoutingInstances) > 0 {
+			vrfs, extraRouteMaps, err := convertVRFConfigWithPolicyChains(cfg, routeMaps)
+			if err != nil {
+				return nil, NewGenerateError("failed to convert routing-instance policy chains", err)
+			}
+			frrConfig.VRFs = vrfs
+			routeMaps = append(routeMaps, extraRouteMaps...)
+		}
 		frrConfig.PrefixLists = prefixLists
 		frrConfig.RouteMaps = routeMaps
 		frrConfig.ASPathAccessLists = asPathLists
+	}
+
+	if len(cfg.RoutingInstances) > 0 && frrConfig.VRFs == nil {
+		vrfs, err := convertVRFConfig(cfg, frrConfig.RouteMaps)
+		if err != nil {
+			return nil, NewGenerateError("failed to convert routing-instances", err)
+		}
+		frrConfig.VRFs = vrfs
 	}
 
 	return frrConfig, nil
@@ -174,6 +190,14 @@ func GenerateFRRConfigFile(frrConfig *Config) (string, error) {
 			return "", err
 		}
 		b.WriteString(vrrpConfig)
+	}
+
+	if len(frrConfig.VRFs) > 0 {
+		vrfConfig, err := GenerateVRFConfig(frrConfig.VRFs)
+		if err != nil {
+			return "", err
+		}
+		b.WriteString(vrfConfig)
 	}
 
 	// Footer

@@ -21,6 +21,9 @@ type Config struct {
 	// VRRP holds VRRP configuration
 	VRRP *VRRPConfig
 
+	// VRFs holds L3VPN routing-instance configuration
+	VRFs []VRFConfig
+
 	// StaticRoutes holds static route configurations
 	StaticRoutes []StaticRoute
 
@@ -135,6 +138,17 @@ type VRRPGroup struct {
 	VirtualAddress string
 	Priority       int
 	Preempt        bool
+}
+
+// VRFConfig represents FRR VRF/L3VPN route leaking configuration.
+type VRFConfig struct {
+	Name               string
+	ASN                uint32
+	RouteDistinguisher string
+	ImportTargets      []string
+	ExportTargets      []string
+	ImportRouteMap     string
+	ExportRouteMap     string
 }
 
 // StaticRoute represents a static route configuration in FRR format.
