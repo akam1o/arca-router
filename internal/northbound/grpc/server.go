@@ -36,6 +36,7 @@ type Server struct {
 	server         *googlegrpc.Server
 	stateCollector interfaceStateCollector
 	lcpSource      lcpReconciliationSource
+	haSource       haStatusSource
 }
 
 var (
@@ -51,6 +52,10 @@ type interfaceStateCollector interface {
 
 type lcpReconciliationSource interface {
 	LCPReconciliationInfo() LCPReconciliationInfo
+}
+
+type haStatusSource interface {
+	HAStatusInfo() HAStatusInfo
 }
 
 // NewServer creates a new gRPC server.
@@ -88,6 +93,11 @@ func (s *Server) SetInterfaceStateCollector(collector interfaceStateCollector) {
 // SetLCPReconciliationSource installs a VPP LCP reconciliation state source.
 func (s *Server) SetLCPReconciliationSource(source lcpReconciliationSource) {
 	s.lcpSource = source
+}
+
+// SetHAStatusSource installs a control-plane HA status source.
+func (s *Server) SetHAStatusSource(source haStatusSource) {
+	s.haSource = source
 }
 
 // --- ConfigService implementation ---
@@ -659,6 +669,15 @@ func (s *Server) GetLCPReconciliation(ctx context.Context) (*LCPReconciliationIn
 		return nil, unsupportedOperationalStateError("VPP LCP reconciliation state")
 	}
 	info := s.lcpSource.LCPReconciliationInfo()
+	return &info, nil
+}
+
+// GetHAStatus returns cached control-plane HA convergence state.
+func (s *Server) GetHAStatus(ctx context.Context) (*HAStatusInfo, error) {
+	if s.haSource == nil {
+		return nil, unsupportedOperationalStateError("control-plane HA state")
+	}
+	info := s.haSource.HAStatusInfo()
 	return &info, nil
 }
 

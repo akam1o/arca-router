@@ -326,6 +326,47 @@ func (c *Client) GetLCPReconciliation(ctx context.Context) (*LCPReconciliationIn
 	return info, nil
 }
 
+// GetHAStatus returns control-plane HA convergence state.
+func (c *Client) GetHAStatus(ctx context.Context) (*HAStatusInfo, error) {
+	ctx, cancel := contextWithDefaultTimeout(ctx)
+	defer cancel()
+	resp, err := c.state.GetHAStatus(ctx, &apiv1.GetHAStatusRequest{})
+	if err != nil {
+		return nil, err
+	}
+	info := &HAStatusInfo{
+		Configured:              resp.GetConfigured(),
+		Converged:               resp.GetConverged(),
+		VRRPGroups:              int(resp.GetVrrpGroups()),
+		Issues:                  append([]string(nil), resp.GetIssues()...),
+		ClusterEnabled:          resp.GetClusterEnabled(),
+		ClusterNodes:            int(resp.GetClusterNodes()),
+		ClusterEtcdSync:         resp.GetClusterEtcdSync(),
+		ClusterSyncAligned:      resp.GetClusterSyncAligned(),
+		FRRVRRPConfiguredGroups: int(resp.GetFrrVrrpConfiguredGroups()),
+		FRRVRRPObservedGroups:   int(resp.GetFrrVrrpObservedGroups()),
+		FRRVRRPActiveGroups:     int(resp.GetFrrVrrpActiveGroups()),
+		FRRVRRPIssues:           append([]string(nil), resp.GetFrrVrrpIssues()...),
+		FRRVRRPLastError:        resp.GetFrrVrrpLastError(),
+		VPPLCPPairs:             int(resp.GetVppLcpPairs()),
+		VPPLCPInconsistencies:   append([]string(nil), resp.GetVppLcpInconsistencies()...),
+		VPPLCPLastError:         resp.GetVppLcpLastError(),
+	}
+	if rawLastCheck := resp.GetFrrVrrpLastCheck(); rawLastCheck != "" {
+		parsed, err := time.Parse(time.RFC3339Nano, rawLastCheck)
+		if err == nil {
+			info.FRRVRRPLastCheck = parsed
+		}
+	}
+	if rawLastCheck := resp.GetVppLcpLastCheck(); rawLastCheck != "" {
+		parsed, err := time.Parse(time.RFC3339Nano, rawLastCheck)
+		if err == nil {
+			info.VPPLCPLastCheck = parsed
+		}
+	}
+	return info, nil
+}
+
 // GetSystemInfo returns system information.
 func (c *Client) GetSystemInfo(ctx context.Context) (*SystemInfo, error) {
 	ctx, cancel := contextWithDefaultTimeout(ctx)
@@ -494,6 +535,28 @@ type LCPReconciliationInfo struct {
 	PairCount       int
 	Inconsistencies []string
 	LastError       string
+}
+
+// HAStatusInfo represents control-plane HA convergence state.
+type HAStatusInfo struct {
+	Configured              bool
+	Converged               bool
+	VRRPGroups              int
+	Issues                  []string
+	ClusterEnabled          bool
+	ClusterNodes            int
+	ClusterEtcdSync         bool
+	ClusterSyncAligned      bool
+	FRRVRRPLastCheck        time.Time
+	FRRVRRPConfiguredGroups int
+	FRRVRRPObservedGroups   int
+	FRRVRRPActiveGroups     int
+	FRRVRRPIssues           []string
+	FRRVRRPLastError        string
+	VPPLCPLastCheck         time.Time
+	VPPLCPPairs             int
+	VPPLCPInconsistencies   []string
+	VPPLCPLastError         string
 }
 
 // RouteInfo represents a routing table entry.

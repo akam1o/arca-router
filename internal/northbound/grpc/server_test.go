@@ -59,6 +59,14 @@ func (f fakeLCPReconciliationSource) LCPReconciliationInfo() LCPReconciliationIn
 	return f.info
 }
 
+type fakeHAStatusSource struct {
+	info HAStatusInfo
+}
+
+func (f fakeHAStatusSource) HAStatusInfo() HAStatusInfo {
+	return f.info
+}
+
 func (f *fakeStore) GetLatestSnapshot(ctx context.Context) (*model.ConfigSnapshot, error) {
 	return f.saved, nil
 }
@@ -380,6 +388,34 @@ func TestGetLCPReconciliationUsesSource(t *testing.T) {
 	}
 	if info.LastRun != lastRun || info.PairCount != 2 || len(info.Inconsistencies) != 1 || info.Inconsistencies[0] != "missing pair" {
 		t.Fatalf("GetLCPReconciliation() = %#v, want source status", info)
+	}
+}
+
+func TestGetHAStatusUsesSource(t *testing.T) {
+	srv := NewServer(engine.NewEngine(nil, testLogger()), &fakeStore{}, testLogger())
+	lastRun := time.Unix(1700000300, 0).UTC()
+	srv.SetHAStatusSource(fakeHAStatusSource{info: HAStatusInfo{
+		Configured:              true,
+		Converged:               false,
+		VRRPGroups:              1,
+		Issues:                  []string{"FRR VRRP status has inactive groups"},
+		ClusterEnabled:          true,
+		ClusterNodes:            2,
+		ClusterEtcdSync:         true,
+		ClusterSyncAligned:      true,
+		FRRVRRPLastCheck:        lastRun,
+		FRRVRRPConfiguredGroups: 1,
+		FRRVRRPObservedGroups:   1,
+		FRRVRRPActiveGroups:     0,
+	}})
+
+	info, err := srv.GetHAStatus(context.Background())
+	if err != nil {
+		t.Fatalf("GetHAStatus() error = %v", err)
+	}
+	if !info.Configured || info.Converged || info.VRRPGroups != 1 || info.FRRVRRPLastCheck != lastRun ||
+		info.FRRVRRPActiveGroups != 0 || len(info.Issues) != 1 {
+		t.Fatalf("GetHAStatus() = %#v, want source status", info)
 	}
 }
 

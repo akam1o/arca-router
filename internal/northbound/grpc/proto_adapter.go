@@ -279,6 +279,38 @@ func (a *stateServiceAdapter) GetLCPReconciliation(ctx context.Context, _ *apiv1
 	return resp, nil
 }
 
+func (a *stateServiceAdapter) GetHAStatus(ctx context.Context, _ *apiv1.GetHAStatusRequest) (*apiv1.GetHAStatusResponse, error) {
+	info, err := a.server.GetHAStatus(ctx)
+	if err != nil {
+		return nil, err
+	}
+	resp := &apiv1.GetHAStatusResponse{
+		Configured:              info.Configured,
+		Converged:               info.Converged,
+		VrrpGroups:              uint32(info.VRRPGroups),
+		Issues:                  append([]string(nil), info.Issues...),
+		ClusterEnabled:          info.ClusterEnabled,
+		ClusterNodes:            uint32(info.ClusterNodes),
+		ClusterEtcdSync:         info.ClusterEtcdSync,
+		ClusterSyncAligned:      info.ClusterSyncAligned,
+		FrrVrrpConfiguredGroups: uint32(info.FRRVRRPConfiguredGroups),
+		FrrVrrpObservedGroups:   uint32(info.FRRVRRPObservedGroups),
+		FrrVrrpActiveGroups:     uint32(info.FRRVRRPActiveGroups),
+		FrrVrrpIssues:           append([]string(nil), info.FRRVRRPIssues...),
+		FrrVrrpLastError:        info.FRRVRRPLastError,
+		VppLcpPairs:             uint32(info.VPPLCPPairs),
+		VppLcpInconsistencies:   append([]string(nil), info.VPPLCPInconsistencies...),
+		VppLcpLastError:         info.VPPLCPLastError,
+	}
+	if !info.FRRVRRPLastCheck.IsZero() {
+		resp.FrrVrrpLastCheck = info.FRRVRRPLastCheck.UTC().Format(time.RFC3339Nano)
+	}
+	if !info.VPPLCPLastCheck.IsZero() {
+		resp.VppLcpLastCheck = info.VPPLCPLastCheck.UTC().Format(time.RFC3339Nano)
+	}
+	return resp, nil
+}
+
 func (a *stateServiceAdapter) GetSystemInfo(ctx context.Context, _ *apiv1.GetSystemInfoRequest) (*apiv1.GetSystemInfoResponse, error) {
 	info, err := a.server.GetSystemInfo(ctx)
 	if err != nil {

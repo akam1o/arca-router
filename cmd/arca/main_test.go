@@ -21,6 +21,7 @@ type fakeInteractiveClient struct {
 	ospfText        string
 	vrrpText        string
 	lcpInfo         *grpcclient.LCPReconciliationInfo
+	haInfo          *grpcclient.HAStatusInfo
 
 	acquireLockCalls int
 	discardCalls     int
@@ -136,6 +137,13 @@ func (f *fakeInteractiveClient) GetLCPReconciliation(ctx context.Context) (*grpc
 		return f.lcpInfo, nil
 	}
 	return &grpcclient.LCPReconciliationInfo{}, nil
+}
+
+func (f *fakeInteractiveClient) GetHAStatus(ctx context.Context) (*grpcclient.HAStatusInfo, error) {
+	if f.haInfo != nil {
+		return f.haInfo, nil
+	}
+	return &grpcclient.HAStatusInfo{}, nil
 }
 
 func TestCmdConfigureRequiresSession(t *testing.T) {
@@ -388,6 +396,26 @@ func TestCmdShowLCPReturnsOutput(t *testing.T) {
 	}
 }
 
+func TestCmdShowHAReturnsOutput(t *testing.T) {
+	ctx := context.Background()
+	client := &fakeInteractiveClient{haInfo: &grpcclient.HAStatusInfo{
+		Configured: true,
+		Converged:  true,
+		VRRPGroups: 1,
+	}}
+	sh := &interactiveShell{
+		client:    client,
+		hostname:  "router",
+		mode:      modeOperational,
+		sessionID: "session-1",
+	}
+
+	err := sh.cmdShow(ctx, []string{"ha"})
+	if err != nil {
+		t.Fatalf("cmdShow(ha) error = %v", err)
+	}
+}
+
 func TestInterfaceQueueSummary(t *testing.T) {
 	got := interfaceQueueSummary(grpcclient.InterfaceInfo{
 		RxQueues: []grpcclient.InterfaceRxQueueInfo{
@@ -438,6 +466,14 @@ func TestOneShotShowLCPReturnsSuccess(t *testing.T) {
 	}
 }
 
+func TestOneShotShowHAReturnsSuccess(t *testing.T) {
+	client := &fakeInteractiveClient{}
+	code := oneShotShow(context.Background(), client, []string{"ha"}, &cliFlags{})
+	if code != ExitSuccess {
+		t.Fatalf("oneShotShow(ha) = %d, want %d", code, ExitSuccess)
+	}
+}
+
 func TestLCPReconciliationState(t *testing.T) {
 	now := time.Now()
 	tests := []struct {
@@ -455,6 +491,26 @@ func TestLCPReconciliationState(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			if got := lcpReconciliationState(tt.info); got != tt.want {
 				t.Fatalf("lcpReconciliationState() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestHAState(t *testing.T) {
+	tests := []struct {
+		name string
+		info *grpcclient.HAStatusInfo
+		want string
+	}{
+		{name: "nil", info: nil, want: "not configured"},
+		{name: "disabled", info: &grpcclient.HAStatusInfo{}, want: "not configured"},
+		{name: "issues", info: &grpcclient.HAStatusInfo{Configured: true}, want: "issues"},
+		{name: "converged", info: &grpcclient.HAStatusInfo{Configured: true, Converged: true}, want: "converged"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := haState(tt.info); got != tt.want {
+				t.Fatalf("haState() = %q, want %q", got, tt.want)
 			}
 		})
 	}

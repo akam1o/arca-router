@@ -265,6 +265,15 @@ func oneShotShow(ctx context.Context, client showClient, args []string, f *cliFl
 		printLCPReconciliation(info)
 		return ExitSuccess
 
+	case "ha":
+		info, err := client.GetHAStatus(ctx)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+			return ExitOperationError
+		}
+		printHAStatus(info)
+		return ExitSuccess
+
 	case "route":
 		protoFilter, err := routeProtocolFilter(args[1:])
 		if err != nil {
@@ -323,6 +332,7 @@ type showClient interface {
 	GetOSPFNeighborsText(context.Context) (string, error)
 	GetVRRPText(context.Context) (string, error)
 	GetLCPReconciliation(context.Context) (*grpcclient.LCPReconciliationInfo, error)
+	GetHAStatus(context.Context) (*grpcclient.HAStatusInfo, error)
 }
 
 type cliMode int
@@ -684,6 +694,17 @@ func (sh *interactiveShell) cmdShow(ctx context.Context, args []string) error {
 		printLCPReconciliation(info)
 		return nil
 
+	case "ha":
+		if sh.mode == modeConfiguration {
+			return fmt.Errorf("'show ha' not available in configuration mode")
+		}
+		info, err := sh.client.GetHAStatus(ctx)
+		if err != nil {
+			return err
+		}
+		printHAStatus(info)
+		return nil
+
 	case "route":
 		if sh.mode == modeConfiguration {
 			return fmt.Errorf("'show route' not available in configuration mode")
@@ -903,6 +924,7 @@ func (sh *interactiveShell) showHelp() {
 		fmt.Println("  show ospf neighbor            Show OSPF neighbors")
 		fmt.Println("  show vrrp                     Show VRRP status")
 		fmt.Println("  show lcp                      Show VPP LCP reconciliation status")
+		fmt.Println("  show ha                       Show HA convergence status")
 		fmt.Println("  show route                    Show routing table")
 		fmt.Println("  show route protocol <proto>   Show routes by protocol")
 		fmt.Println("  exit, quit                    Exit interactive CLI")
@@ -1006,6 +1028,62 @@ func printLCPReconciliation(info *grpcclient.LCPReconciliationInfo) {
 	for _, issue := range info.Inconsistencies {
 		fmt.Printf("  - %s\n", issue)
 	}
+}
+
+func printHAStatus(info *grpcclient.HAStatusInfo) {
+	if info == nil {
+		fmt.Println("No HA status found")
+		return
+	}
+	fmt.Printf("%-18s %s\n", "State", haState(info))
+	fmt.Printf("%-18s %s\n", "Configured", yesNo(info.Configured))
+	fmt.Printf("%-18s %s\n", "Converged", yesNo(info.Converged))
+	fmt.Printf("%-18s %d\n", "VRRP groups", info.VRRPGroups)
+	fmt.Printf("%-18s %d\n", "Cluster nodes", info.ClusterNodes)
+	fmt.Printf("%-18s %s\n", "Cluster sync", clusterSyncState(info))
+	fmt.Printf("%-18s %d/%d\n", "FRR VRRP", info.FRRVRRPActiveGroups, info.FRRVRRPConfiguredGroups)
+	fmt.Printf("%-18s %s\n", "FRR last check", formatOptionalTime(info.FRRVRRPLastCheck))
+	fmt.Printf("%-18s %s\n", "VPP LCP", lcpReconciliationState(&grpcclient.LCPReconciliationInfo{
+		LastRun:         info.VPPLCPLastCheck,
+		PairCount:       info.VPPLCPPairs,
+		Inconsistencies: info.VPPLCPInconsistencies,
+		LastError:       info.VPPLCPLastError,
+	}))
+	fmt.Printf("%-18s %s\n", "LCP last check", formatOptionalTime(info.VPPLCPLastCheck))
+	if len(info.Issues) == 0 {
+		return
+	}
+	fmt.Println("Issues")
+	for _, issue := range info.Issues {
+		fmt.Printf("  - %s\n", issue)
+	}
+}
+
+func haState(info *grpcclient.HAStatusInfo) string {
+	if info == nil || !info.Configured {
+		return "not configured"
+	}
+	if info.Converged {
+		return "converged"
+	}
+	return "issues"
+}
+
+func clusterSyncState(info *grpcclient.HAStatusInfo) string {
+	if info == nil || !info.ClusterEtcdSync {
+		return "not configured"
+	}
+	if info.ClusterSyncAligned {
+		return "aligned"
+	}
+	return "mismatch"
+}
+
+func yesNo(value bool) string {
+	if value {
+		return "yes"
+	}
+	return "no"
 }
 
 func lcpReconciliationState(info *grpcclient.LCPReconciliationInfo) string {

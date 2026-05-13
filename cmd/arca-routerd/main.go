@@ -421,12 +421,7 @@ func run(ctx context.Context, f *daemonFlags, log *logger.Logger) error {
 	grpcServer := nbgrpc.NewServer(eng, configStore, slog.Default())
 	grpcServer.SetInterfaceStateCollector(vppPlugin)
 	grpcServer.SetLCPReconciliationSource(newGRPCLCPReconciliationSource(vppPlugin))
-	grpcErr := make(chan error, 1)
-	go func() {
-		grpcErr <- grpcServer.Serve(lis)
-	}()
 
-	// --- Step 10: Start metrics endpoint ---
 	observabilitySource := metricsSource{
 		startedAt:     time.Now(),
 		engine:        eng,
@@ -437,6 +432,14 @@ func run(ctx context.Context, f *daemonFlags, log *logger.Logger) error {
 		frr:           frrPlugin,
 		vpp:           vppPlugin,
 	}
+	grpcServer.SetHAStatusSource(newGRPCHAStatusSource(observabilitySource))
+
+	grpcErr := make(chan error, 1)
+	go func() {
+		grpcErr <- grpcServer.Serve(lis)
+	}()
+
+	// --- Step 10: Start metrics endpoint ---
 	var metricsErr <-chan error
 	if metricsListen := effectiveMetricsListen(f.metricsListen, eng.RunningSnapshot()); metricsListen != "" {
 		metricsErr, err = startMetricsServer(ctx, metricsListen, observabilitySource, log)

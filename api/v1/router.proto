@@ -80,6 +80,9 @@ service StateService {
   // GetLCPReconciliation returns VPP LCP reconciliation state.
   rpc GetLCPReconciliation(GetLCPReconciliationRequest) returns (GetLCPReconciliationResponse);
 
+  // GetHAStatus returns control-plane HA convergence state.
+  rpc GetHAStatus(GetHAStatusRequest) returns (GetHAStatusResponse);
+
   // GetSystemInfo returns system information.
   rpc GetSystemInfo(GetSystemInfoRequest) returns (GetSystemInfoResponse);
 }
@@ -313,6 +316,29 @@ message GetLCPReconciliationResponse {
   uint32 pair_count = 2;
   repeated string inconsistencies = 3;
   string last_error = 4;
+}
+
+message GetHAStatusRequest {}
+
+message GetHAStatusResponse {
+  bool configured = 1;
+  bool converged = 2;
+  uint32 vrrp_groups = 3;
+  repeated string issues = 4;
+  bool cluster_enabled = 5;
+  uint32 cluster_nodes = 6;
+  bool cluster_etcd_sync = 7;
+  bool cluster_sync_aligned = 8;
+  uint32 frr_vrrp_configured_groups = 9;
+  uint32 frr_vrrp_observed_groups = 10;
+  uint32 frr_vrrp_active_groups = 11;
+  string frr_vrrp_last_check = 12;
+  repeated string frr_vrrp_issues = 13;
+  string frr_vrrp_last_error = 14;
+  string vpp_lcp_last_check = 15;
+  uint32 vpp_lcp_pairs = 16;
+  repeated string vpp_lcp_inconsistencies = 17;
+  string vpp_lcp_last_error = 18;
 }
 
 message GetSystemInfoRequest {}
