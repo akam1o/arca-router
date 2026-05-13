@@ -52,6 +52,7 @@ type webStatus struct {
 	Datastore       webDatastore    `json:"datastore"`
 	ConfigSync      webConfigSync   `json:"config_sync"`
 	Cluster         webCluster      `json:"cluster"`
+	HA              webHAStats      `json:"ha"`
 	VPP             webVPPStats     `json:"vpp"`
 	NETCONF         webNETCONFStats `json:"netconf"`
 }
@@ -78,6 +79,14 @@ type webCluster struct {
 	EtcdSyncConfigured bool     `json:"etcd_sync_configured"`
 	EtcdEndpoints      []string `json:"etcd_endpoints,omitempty"`
 	SyncAligned        bool     `json:"sync_aligned"`
+}
+
+type webHAStats struct {
+	Configured bool     `json:"configured"`
+	Converged  bool     `json:"converged"`
+	VRRPGroups int      `json:"vrrp_groups"`
+	IssueCount int      `json:"issue_count"`
+	Issues     []string `json:"issues,omitempty"`
 }
 
 type webVPPStats struct {
@@ -159,6 +168,10 @@ type webIndexData struct {
 	ConfigSyncStateClass  string
 	ConfigSyncRevision    string
 	ConfigSyncLastApply   string
+	HAState               string
+	HAStateClass          string
+	HAVRPGroups           string
+	HAIssues              string
 	VPPLCPState           string
 	VPPLCPStateClass      string
 	VPPLCPPairs           string
@@ -428,6 +441,9 @@ var webIndexTemplate = template.Must(template.New("web-index").Parse(`<!doctype 
           <div class="row"><span>Config sync</span><strong><span class="pill {{.ConfigSyncStateClass}}">{{.ConfigSyncState}}</span></strong></div>
           <div class="row"><span>Running revision</span><strong>{{.ConfigSyncRevision}}</strong></div>
           <div class="row"><span>Last apply</span><strong>{{.ConfigSyncLastApply}}</strong></div>
+          <div class="row"><span>HA convergence</span><strong><span class="pill {{.HAStateClass}}">{{.HAState}}</span></strong></div>
+          <div class="row"><span>VRRP groups</span><strong>{{.HAVRPGroups}}</strong></div>
+          <div class="row"><span>HA issues</span><strong>{{.HAIssues}}</strong></div>
         </div>
       </article>
       <article class="panel span-2">
@@ -1097,6 +1113,13 @@ func newWebStatus(metrics routerMetrics) webStatus {
 			EtcdEndpoints:      metrics.ClusterEtcdEndpoints,
 			SyncAligned:        metrics.ClusterSyncAligned,
 		},
+		HA: webHAStats{
+			Configured: metrics.HAConfigured,
+			Converged:  metrics.HAConverged,
+			VRRPGroups: metrics.HAVRPGroups,
+			IssueCount: len(metrics.HAIssues),
+			Issues:     append([]string(nil), metrics.HAIssues...),
+		},
 		VPP: webVPPStats{
 			LCP: webLCPSyncStats{
 				LastReconcile:      formatWebOptionalTime(metrics.VPPLCPReconcileLastRun),
@@ -1156,6 +1179,16 @@ func newWebIndexData(status webStatus, now time.Time, runningConfig string, hist
 	if status.ConfigSync.RunningRevision > 0 {
 		configSyncRevision = strconv.FormatInt(status.ConfigSync.RunningRevision, 10)
 	}
+	haState := "Not configured"
+	haStateClass := "neutral"
+	if status.HA.Configured {
+		haState = "Converged"
+		haStateClass = "ok"
+		if !status.HA.Converged {
+			haState = "Issues"
+			haStateClass = "warn"
+		}
+	}
 	vppLCPState := "Consistent"
 	vppLCPStateClass := "ok"
 	if status.VPP.LCP.LastError != "" {
@@ -1184,6 +1217,10 @@ func newWebIndexData(status webStatus, now time.Time, runningConfig string, hist
 		ConfigSyncStateClass:  configSyncStateClass,
 		ConfigSyncRevision:    configSyncRevision,
 		ConfigSyncLastApply:   formatWebOptionalDisplayTime(status.ConfigSync.LastApply),
+		HAState:               haState,
+		HAStateClass:          haStateClass,
+		HAVRPGroups:           strconv.Itoa(status.HA.VRRPGroups),
+		HAIssues:              strconv.Itoa(status.HA.IssueCount),
 		VPPLCPState:           vppLCPState,
 		VPPLCPStateClass:      vppLCPStateClass,
 		VPPLCPPairs:           strconv.Itoa(status.VPP.LCP.PairCount),

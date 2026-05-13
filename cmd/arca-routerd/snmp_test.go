@@ -12,6 +12,7 @@ import (
 	"github.com/akam1o/arca-router/internal/engine"
 	"github.com/akam1o/arca-router/internal/model"
 	sbvpp "github.com/akam1o/arca-router/internal/southbound/vpp"
+	"github.com/akam1o/arca-router/pkg/datastore"
 )
 
 func TestEffectiveSNMPListenUsesFlagOverride(t *testing.T) {
@@ -95,15 +96,44 @@ func TestSNMPEndpointExportsRouterMetrics(t *testing.T) {
 	eng := engine.NewEngine(nil, slog.Default())
 	cfg := model.NewRouterConfig()
 	cfg.System = &model.SystemConfig{HostName: "router-snmp"}
+	cfg.Chassis = &model.ChassisConfig{
+		Cluster: &model.ClusterConfig{
+			Enabled: true,
+			Nodes: map[string]*model.ClusterNode{
+				"node0": {Address: "192.0.2.10"},
+				"node1": {Address: "192.0.2.11"},
+			},
+			Sync: &model.ClusterSyncConfig{
+				Etcd: &model.EtcdSyncConfig{Endpoints: []string{"https://etcd1:2379"}},
+			},
+		},
+	}
+	cfg.Protocols = &model.ProtocolsConfig{
+		VRRP: &model.VRRPConfig{Groups: map[string]*model.VRRPGroup{
+			"10": &model.VRRPGroup{Interface: "ge-0/0/0", VirtualAddress: "192.0.2.1", Priority: 110, Preempt: true},
+		}},
+	}
 	eng.InitializeRunning(cfg, 42)
 
 	server := newSNMPServer(metricsSource{
 		startedAt: time.Now().Add(-1 * time.Second),
 		engine:    eng,
+		datastore: &datastore.Config{
+			Backend:       datastore.BackendEtcd,
+			EtcdEndpoints: []string{"https://etcd1:2379"},
+		},
+		configSync: fakeConfigSyncRuntimeSource{status: configSyncStatus{
+			Enabled:         true,
+			Healthy:         true,
+			EtcdRevision:    123,
+			RunningRevision: 120,
+			RunningCommitID: "commit-120",
+			LastCheck:       time.Unix(1700000100, 0),
+			LastApply:       time.Unix(1700000200, 0),
+		}},
 		vpp: fakeVPPReconciliationSource{status: sbvpp.LCPReconciliationStatus{
-			LastRun:         time.Unix(1700000000, 0),
-			PairCount:       2,
-			Inconsistencies: []string{"Interface 7 exists in VPP but not in cache"},
+			LastRun:   time.Unix(1700000000, 0),
+			PairCount: 2,
 		}},
 	}, "test-community")
 	if err := server.ListenUDP("udp4", "127.0.0.1:0"); err != nil {
@@ -159,12 +189,16 @@ func TestSNMPEndpointExportsRouterMetrics(t *testing.T) {
 		snmpOIDVPPLCPMismatch,
 		snmpOIDVPPLCPError,
 		snmpOIDVPPLCPLastRun,
+		snmpOIDHAConfigured,
+		snmpOIDHAConverged,
+		snmpOIDHAVRPGroups,
+		snmpOIDHAIssues,
 	})
 	if err != nil {
 		t.Fatalf("SNMP Get() error = %v", err)
 	}
-	if len(packet.Variables) != 7 {
-		t.Fatalf("SNMP variables = %d, want 7", len(packet.Variables))
+	if len(packet.Variables) != 11 {
+		t.Fatalf("SNMP variables = %d, want 11", len(packet.Variables))
 	}
 	if got := snmpUintValue(t, packet.Variables[0].Value); got != 42 {
 		t.Fatalf("%s = %d, want 42", snmpOIDConfigVersion, got)
@@ -178,14 +212,26 @@ func TestSNMPEndpointExportsRouterMetrics(t *testing.T) {
 	if got := snmpUintValue(t, packet.Variables[3].Value); got != 2 {
 		t.Fatalf("%s = %d, want 2", snmpOIDVPPLCPPairs, got)
 	}
-	if got := snmpUintValue(t, packet.Variables[4].Value); got != 1 {
-		t.Fatalf("%s = %d, want 1", snmpOIDVPPLCPMismatch, got)
+	if got := snmpUintValue(t, packet.Variables[4].Value); got != 0 {
+		t.Fatalf("%s = %d, want 0", snmpOIDVPPLCPMismatch, got)
 	}
 	if got := snmpUintValue(t, packet.Variables[5].Value); got != 0 {
 		t.Fatalf("%s = %d, want 0", snmpOIDVPPLCPError, got)
 	}
 	if got := snmpUintValue(t, packet.Variables[6].Value); got != 1700000000 {
 		t.Fatalf("%s = %d, want 1700000000", snmpOIDVPPLCPLastRun, got)
+	}
+	if got := snmpUintValue(t, packet.Variables[7].Value); got != 1 {
+		t.Fatalf("%s = %d, want 1", snmpOIDHAConfigured, got)
+	}
+	if got := snmpUintValue(t, packet.Variables[8].Value); got != 1 {
+		t.Fatalf("%s = %d, want 1", snmpOIDHAConverged, got)
+	}
+	if got := snmpUintValue(t, packet.Variables[9].Value); got != 1 {
+		t.Fatalf("%s = %d, want 1", snmpOIDHAVRPGroups, got)
+	}
+	if got := snmpUintValue(t, packet.Variables[10].Value); got != 0 {
+		t.Fatalf("%s = %d, want 0", snmpOIDHAIssues, got)
 	}
 }
 

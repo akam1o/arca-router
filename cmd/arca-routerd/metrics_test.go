@@ -95,6 +95,11 @@ func TestMetricsEndpointExportsRouterMetrics(t *testing.T) {
 			},
 		},
 	}
+	cfg.Protocols = &model.ProtocolsConfig{
+		VRRP: &model.VRRPConfig{Groups: map[string]*model.VRRPGroup{
+			"10": &model.VRRPGroup{Interface: "ge-0/0/0", VirtualAddress: "192.0.2.1", Priority: 110, Preempt: true},
+		}},
+	}
 	eng.InitializeRunning(cfg, 42)
 
 	req := httptest.NewRequest("GET", "/metrics", nil)
@@ -141,6 +146,10 @@ func TestMetricsEndpointExportsRouterMetrics(t *testing.T) {
 		"arca_router_cluster_nodes 2",
 		"arca_router_cluster_sync_etcd_configured 1",
 		"arca_router_cluster_sync_aligned 1",
+		"arca_router_ha_configured 1",
+		"arca_router_ha_converged 0",
+		"arca_router_ha_vrrp_groups 1",
+		"arca_router_ha_convergence_issues 1",
 		"arca_router_vpp_lcp_pairs 2",
 		"arca_router_vpp_lcp_inconsistencies 1",
 		"arca_router_vpp_lcp_reconcile_error 0",

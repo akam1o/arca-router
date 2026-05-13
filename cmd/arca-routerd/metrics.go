@@ -60,6 +60,10 @@ type routerMetrics struct {
 	ClusterEtcdSync           bool
 	ClusterEtcdEndpoints      []string
 	ClusterSyncAligned        bool
+	HAConfigured              bool
+	HAConverged               bool
+	HAVRPGroups               int
+	HAIssues                  []string
 	VPPLCPReconcileLastRun    time.Time
 	VPPLCPPairs               int
 	VPPLCPInconsistencies     []string
@@ -71,6 +75,7 @@ func (s metricsSource) snapshot(now time.Time) routerMetrics {
 		DatastoreBackend:   string(datastore.BackendSQLite),
 		ClusterSyncAligned: true,
 	}
+	var runningConfig *model.RouterConfig
 	if !s.startedAt.IsZero() {
 		metrics.UptimeSeconds = now.Sub(s.startedAt).Seconds()
 	}
@@ -95,6 +100,7 @@ func (s metricsSource) snapshot(now time.Time) routerMetrics {
 	if s.engine != nil {
 		if running := s.engine.RunningSnapshot(); running != nil {
 			metrics.ConfigVersion = running.Version
+			runningConfig = running.Config
 			if running.Config != nil && running.Config.System != nil {
 				metrics.RunningHostname = running.Config.System.HostName
 			}
@@ -132,7 +138,58 @@ func (s metricsSource) snapshot(now time.Time) routerMetrics {
 		metrics.VPPLCPInconsistencies = append([]string(nil), lcp.Inconsistencies...)
 		metrics.VPPLCPReconcileError = lcp.LastError
 	}
+	applyHAConvergenceStatus(&metrics, runningConfig, s.vpp != nil)
 	return metrics
+}
+
+func applyHAConvergenceStatus(metrics *routerMetrics, cfg *model.RouterConfig, hasVPP bool) {
+	if metrics == nil || cfg == nil || cfg.Chassis == nil || cfg.Chassis.Cluster == nil ||
+		!cfg.Chassis.Cluster.Enabled {
+		return
+	}
+	vrrpGroups := vrrpGroupCount(cfg)
+	metrics.HAVRPGroups = vrrpGroups
+	if vrrpGroups == 0 {
+		return
+	}
+	metrics.HAConfigured = true
+
+	var issues []string
+	if metrics.ClusterNodeCount < 2 {
+		issues = append(issues, "cluster has fewer than two nodes")
+	}
+	if !metrics.ClusterEtcdSync {
+		issues = append(issues, "etcd cluster sync is not configured")
+	} else if !metrics.ClusterSyncAligned {
+		issues = append(issues, "cluster sync endpoints are not aligned with the datastore")
+	}
+	if metrics.ClusterEtcdSync {
+		if !metrics.ConfigSyncEnabled {
+			issues = append(issues, "etcd config synchronizer is not running")
+		} else if !metrics.ConfigSyncHealthy {
+			issues = append(issues, "etcd config synchronizer is unhealthy")
+		}
+	}
+	if !hasVPP {
+		issues = append(issues, "VPP LCP reconciliation status is unavailable")
+	} else if metrics.VPPLCPReconcileLastRun.IsZero() {
+		issues = append(issues, "VPP LCP reconciliation has not run")
+	}
+	if metrics.VPPLCPReconcileError != "" {
+		issues = append(issues, "VPP LCP reconciliation check failed")
+	}
+	if len(metrics.VPPLCPInconsistencies) > 0 {
+		issues = append(issues, "VPP LCP reconciliation found inconsistencies")
+	}
+	metrics.HAIssues = issues
+	metrics.HAConverged = len(issues) == 0
+}
+
+func vrrpGroupCount(cfg *model.RouterConfig) int {
+	if cfg == nil || cfg.Protocols == nil || cfg.Protocols.VRRP == nil {
+		return 0
+	}
+	return len(cfg.Protocols.VRRP.Groups)
 }
 
 func effectiveMetricsListen(flagValue string, snapshot *model.ConfigSnapshot) string {
@@ -266,6 +323,19 @@ func (s metricsSource) handleMetrics(w http.ResponseWriter, r *http.Request) {
 	writeMetricValue(&b, "arca_router_cluster_nodes", float64(metrics.ClusterNodeCount))
 	writeMetricBool(&b, "arca_router_cluster_sync_etcd_configured", metrics.ClusterEtcdSync)
 	writeMetricBool(&b, "arca_router_cluster_sync_aligned", metrics.ClusterSyncAligned)
+
+	writeMetricHelp(&b, "arca_router_ha_configured", "Whether control-plane HA is configured with chassis clustering and VRRP groups.")
+	writeMetricType(&b, "arca_router_ha_configured", "gauge")
+	writeMetricHelp(&b, "arca_router_ha_converged", "Whether configured control-plane HA has no detected config sync or VPP LCP convergence issues.")
+	writeMetricType(&b, "arca_router_ha_converged", "gauge")
+	writeMetricHelp(&b, "arca_router_ha_vrrp_groups", "Number of configured VRRP groups participating in control-plane HA.")
+	writeMetricType(&b, "arca_router_ha_vrrp_groups", "gauge")
+	writeMetricHelp(&b, "arca_router_ha_convergence_issues", "Number of detected control-plane HA convergence issues.")
+	writeMetricType(&b, "arca_router_ha_convergence_issues", "gauge")
+	writeMetricBool(&b, "arca_router_ha_configured", metrics.HAConfigured)
+	writeMetricBool(&b, "arca_router_ha_converged", metrics.HAConverged)
+	writeMetricValue(&b, "arca_router_ha_vrrp_groups", float64(metrics.HAVRPGroups))
+	writeMetricValue(&b, "arca_router_ha_convergence_issues", float64(len(metrics.HAIssues)))
 
 	writeMetricHelp(&b, "arca_router_vpp_lcp_pairs", "Number of VPP LCP pairs known after the latest reconciliation.")
 	writeMetricType(&b, "arca_router_vpp_lcp_pairs", "gauge")

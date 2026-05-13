@@ -84,6 +84,11 @@ func TestWebStatusEndpoint(t *testing.T) {
 			},
 		},
 	}
+	cfg.Protocols = &model.ProtocolsConfig{
+		VRRP: &model.VRRPConfig{Groups: map[string]*model.VRRPGroup{
+			"10": &model.VRRPGroup{Interface: "ge-0/0/0", VirtualAddress: "192.0.2.1", Priority: 110, Preempt: true},
+		}},
+	}
 	eng.InitializeRunning(cfg, 42)
 
 	req := httptest.NewRequest(http.MethodGet, "/api/status", nil)
@@ -136,6 +141,9 @@ func TestWebStatusEndpoint(t *testing.T) {
 	}
 	if !status.Cluster.Enabled || status.Cluster.NodeCount != 1 || !status.Cluster.EtcdSyncConfigured || !status.Cluster.SyncAligned {
 		t.Fatalf("Cluster status = %#v, want enabled aligned etcd sync", status.Cluster)
+	}
+	if !status.HA.Configured || status.HA.Converged || status.HA.VRRPGroups != 1 || status.HA.IssueCount != 2 {
+		t.Fatalf("HA status = %#v, want configured with cluster and VPP LCP issues", status.HA)
 	}
 	if status.VPP.LCP.PairCount != 2 || status.VPP.LCP.InconsistencyCount != 1 || status.VPP.LCP.LastReconcile == "" {
 		t.Fatalf("VPP LCP status = %#v, want pair count and inconsistency status", status.VPP.LCP)
