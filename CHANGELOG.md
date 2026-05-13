@@ -21,6 +21,7 @@
 - **Standard FRR VRRP daemon**: `vrrpd` is part of the documented required FRR daemon set for appliance-router HA deployments
 - **VPP MPLS interface forwarding**: `protocols mpls interface` enables or disables MPLS forwarding on managed VPP interfaces with rollback coverage
 - **VPP L3VPN table plumbing**: routing-instance interfaces are bound to deterministic VPP IPv4/IPv6 FIB tables derived from route distinguishers
+- **VPP interface counters**: operational interface state reads VPP stats socket counters for packet, byte, error, and drop visibility
 - **FRR L3VPN import/export**: routing instances render FRR VRF and BGP VPN import/export configuration, including route targets and ordered policy-chain route-maps
 - **VPP QoS profile binding**: class-of-service interface bindings apply output traffic-control profile intent to managed VPP interfaces with rollback coverage
 - **Prometheus service configuration**: `system services prometheus` can enable the Prometheus and health endpoint from running configuration
