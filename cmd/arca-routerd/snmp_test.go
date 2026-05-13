@@ -111,7 +111,7 @@ func TestSNMPEndpointExportsRouterMetrics(t *testing.T) {
 	}
 	cfg.Protocols = &model.ProtocolsConfig{
 		VRRP: &model.VRRPConfig{Groups: map[string]*model.VRRPGroup{
-			"10": &model.VRRPGroup{Interface: "ge-0/0/0", VirtualAddress: "192.0.2.1", Priority: 110, Preempt: true},
+			"10": {Interface: "ge-0/0/0", VirtualAddress: "192.0.2.1", Priority: 110, Preempt: true},
 		}},
 	}
 	cfg.ClassOfService = &model.ClassOfServiceConfig{
