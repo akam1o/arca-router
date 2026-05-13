@@ -22,6 +22,7 @@ type metricsSource struct {
 	engine        *engine.Engine
 	netconfServer *netconf.SSHServer
 	datastore     *datastore.Config
+	configAPI     webConfigAPI
 }
 
 type routerMetrics struct {

@@ -26,6 +26,20 @@ const webAuthRealm = `Basic realm="arca-router", charset="UTF-8"`
 
 const webDummyPasswordHash = "$argon2id$v=19$m=65536,t=3,p=4$AAAAAAAAAAAAAAAAAAAAAA$AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
 
+const webConfigEditBodyLimit = 1 << 20
+
+type webConfigAPI interface {
+	GetRunning(ctx context.Context) (string, uint64, error)
+	CreateSession(ctx context.Context, user string) (string, error)
+	CloseSession(ctx context.Context, sessionID string) error
+	AcquireLock(ctx context.Context, sessionID, user string) error
+	ReleaseLock(ctx context.Context, sessionID string) error
+	EditCandidate(ctx context.Context, sessionID, configText string) error
+	ValidateCandidate(ctx context.Context, sessionID string) error
+	Diff(ctx context.Context, sessionID string) (string, bool, error)
+	Commit(ctx context.Context, sessionID, user, message string) (string, uint64, error)
+}
+
 type webStatus struct {
 	Version         string          `json:"version"`
 	Commit          string          `json:"commit"`
@@ -63,6 +77,26 @@ type webNETCONFStats struct {
 type webConfig struct {
 	ConfigText string `json:"config_text"`
 	Version    uint64 `json:"version"`
+}
+
+type webConfigEditRequest struct {
+	ConfigText string `json:"config_text"`
+}
+
+type webConfigCommitRequest struct {
+	ConfigText string `json:"config_text"`
+	Message    string `json:"message"`
+}
+
+type webConfigValidateResponse struct {
+	Valid      bool   `json:"valid"`
+	HasChanges bool   `json:"has_changes"`
+	DiffText   string `json:"diff_text,omitempty"`
+}
+
+type webConfigCommitResponse struct {
+	CommitID string `json:"commit_id"`
+	Version  uint64 `json:"version"`
 }
 
 type webAuthUser struct {
@@ -357,7 +391,9 @@ func newWebMux(source metricsSource) *http.ServeMux {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/", source.handleWebIndex)
 	mux.HandleFunc("/api/config", source.handleWebConfig)
+	mux.HandleFunc("/api/config/commit", source.handleWebConfigCommit)
 	mux.HandleFunc("/api/status", source.handleWebStatus)
+	mux.HandleFunc("/api/config/validate", source.handleWebConfigValidate)
 	return mux
 }
 
@@ -394,6 +430,55 @@ func (s metricsSource) handleWebConfig(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+func (s metricsSource) handleWebConfigValidate(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	username, ok := s.authorizeWebWrite(w, r)
+	if !ok {
+		return
+	}
+	req, ok := decodeWebConfigEditRequest(w, r)
+	if !ok {
+		return
+	}
+	diff, hasChanges, err := s.validateWebConfig(r.Context(), username, req.ConfigText)
+	if err != nil {
+		writeWebJSONError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	writeWebJSON(w, http.StatusOK, webConfigValidateResponse{
+		Valid:      true,
+		HasChanges: hasChanges,
+		DiffText:   diff,
+	})
+}
+
+func (s metricsSource) handleWebConfigCommit(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	username, ok := s.authorizeWebWrite(w, r)
+	if !ok {
+		return
+	}
+	req, ok := decodeWebConfigCommitRequest(w, r)
+	if !ok {
+		return
+	}
+	commitID, version, err := s.commitWebConfig(r.Context(), username, req.ConfigText, req.Message)
+	if err != nil {
+		writeWebJSONError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	writeWebJSON(w, http.StatusOK, webConfigCommitResponse{
+		CommitID: commitID,
+		Version:  version,
+	})
+}
+
 func (s metricsSource) handleWebIndex(w http.ResponseWriter, r *http.Request) {
 	if r.URL.Path != "/" {
 		http.NotFound(w, r)
@@ -423,6 +508,16 @@ func (s metricsSource) handleWebIndex(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s metricsSource) runningConfig() (webConfig, error) {
+	if s.configAPI != nil {
+		text, version, err := s.configAPI.GetRunning(context.Background())
+		if err != nil {
+			return webConfig{}, fmt.Errorf("get running config: %w", err)
+		}
+		return webConfig{
+			ConfigText: text,
+			Version:    version,
+		}, nil
+	}
 	if s.engine == nil {
 		return webConfig{}, nil
 	}
@@ -440,16 +535,96 @@ func (s metricsSource) runningConfig() (webConfig, error) {
 	}, nil
 }
 
+func (s metricsSource) validateWebConfig(ctx context.Context, username, configText string) (string, bool, error) {
+	api := s.configAPI
+	if api == nil {
+		return "", false, fmt.Errorf("configuration API is unavailable")
+	}
+	if strings.TrimSpace(configText) == "" {
+		return "", false, fmt.Errorf("config_text is required")
+	}
+	sessionID, err := api.CreateSession(ctx, username)
+	if err != nil {
+		return "", false, err
+	}
+	defer func() { _ = api.CloseSession(context.Background(), sessionID) }()
+	if err := api.AcquireLock(ctx, sessionID, username); err != nil {
+		return "", false, err
+	}
+	defer func() { _ = api.ReleaseLock(context.Background(), sessionID) }()
+	if err := api.EditCandidate(ctx, sessionID, configText); err != nil {
+		return "", false, err
+	}
+	if err := api.ValidateCandidate(ctx, sessionID); err != nil {
+		return "", false, err
+	}
+	return api.Diff(ctx, sessionID)
+}
+
+func (s metricsSource) commitWebConfig(ctx context.Context, username, configText, message string) (string, uint64, error) {
+	api := s.configAPI
+	if api == nil {
+		return "", 0, fmt.Errorf("configuration API is unavailable")
+	}
+	if strings.TrimSpace(configText) == "" {
+		return "", 0, fmt.Errorf("config_text is required")
+	}
+	if strings.TrimSpace(message) == "" {
+		message = "web config commit"
+	}
+	sessionID, err := api.CreateSession(ctx, username)
+	if err != nil {
+		return "", 0, err
+	}
+	defer func() { _ = api.CloseSession(context.Background(), sessionID) }()
+	if err := api.AcquireLock(ctx, sessionID, username); err != nil {
+		return "", 0, err
+	}
+	defer func() { _ = api.ReleaseLock(context.Background(), sessionID) }()
+	if err := api.EditCandidate(ctx, sessionID, configText); err != nil {
+		return "", 0, err
+	}
+	return api.Commit(ctx, sessionID, username, message)
+}
+
 func (s metricsSource) authorizeWebRead(w http.ResponseWriter, r *http.Request) bool {
 	users := s.webAuthUsers()
 	if len(users) == 0 {
 		return true
 	}
+	_, role, ok := authenticateWebUser(w, r, users)
+	if !ok {
+		return false
+	}
+	if !webRoleCanRead(role) {
+		http.Error(w, "forbidden", http.StatusForbidden)
+		return false
+	}
+	return true
+}
 
+func (s metricsSource) authorizeWebWrite(w http.ResponseWriter, r *http.Request) (string, bool) {
+	users := s.webAuthUsers()
+	if len(users) == 0 {
+		http.Error(w, "web configuration writes require password-backed security users", http.StatusForbidden)
+		return "", false
+	}
+	username, role, ok := authenticateWebUser(w, r, users)
+	if !ok {
+		return "", false
+	}
+	if !webRoleCanWrite(role) {
+		http.Error(w, "forbidden", http.StatusForbidden)
+		return "", false
+	}
+	return username, true
+}
+
+func authenticateWebUser(w http.ResponseWriter, r *http.Request, users map[string]webAuthUser) (string, string, bool) {
 	username, password, ok := r.BasicAuth()
 	if !ok {
 		writeWebAuthChallenge(w)
-		return false
+		return "", "", false
 	}
 
 	user, found := users[username]
@@ -460,13 +635,9 @@ func (s metricsSource) authorizeWebRead(w http.ResponseWriter, r *http.Request) 
 	valid, err := auth.VerifyPassword(password, passwordHash)
 	if err != nil || !found || !valid {
 		writeWebAuthChallenge(w)
-		return false
+		return "", "", false
 	}
-	if !webRoleCanRead(user.Role) {
-		http.Error(w, "forbidden", http.StatusForbidden)
-		return false
-	}
-	return true
+	return username, user.Role, true
 }
 
 func (s metricsSource) webAuthUsers() map[string]webAuthUser {
@@ -506,9 +677,62 @@ func webRoleCanRead(role string) bool {
 	}
 }
 
+func webRoleCanWrite(role string) bool {
+	switch role {
+	case pkgnetconf.RoleOperator, pkgnetconf.RoleAdmin:
+		return true
+	default:
+		return false
+	}
+}
+
 func writeWebAuthChallenge(w http.ResponseWriter) {
 	w.Header().Set("WWW-Authenticate", webAuthRealm)
 	http.Error(w, "authentication required", http.StatusUnauthorized)
+}
+
+func decodeWebConfigEditRequest(w http.ResponseWriter, r *http.Request) (webConfigEditRequest, bool) {
+	var req webConfigEditRequest
+	if !decodeWebJSONRequest(w, r, &req) {
+		return req, false
+	}
+	if strings.TrimSpace(req.ConfigText) == "" {
+		writeWebJSONError(w, http.StatusBadRequest, "config_text is required")
+		return req, false
+	}
+	return req, true
+}
+
+func decodeWebConfigCommitRequest(w http.ResponseWriter, r *http.Request) (webConfigCommitRequest, bool) {
+	var req webConfigCommitRequest
+	if !decodeWebJSONRequest(w, r, &req) {
+		return req, false
+	}
+	if strings.TrimSpace(req.ConfigText) == "" {
+		writeWebJSONError(w, http.StatusBadRequest, "config_text is required")
+		return req, false
+	}
+	return req, true
+}
+
+func decodeWebJSONRequest(w http.ResponseWriter, r *http.Request, dst any) bool {
+	dec := json.NewDecoder(http.MaxBytesReader(w, r.Body, webConfigEditBodyLimit))
+	dec.DisallowUnknownFields()
+	if err := dec.Decode(dst); err != nil {
+		writeWebJSONError(w, http.StatusBadRequest, "decode request: "+err.Error())
+		return false
+	}
+	return true
+}
+
+func writeWebJSON(w http.ResponseWriter, status int, value any) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(status)
+	_ = json.NewEncoder(w).Encode(value)
+}
+
+func writeWebJSONError(w http.ResponseWriter, status int, message string) {
+	writeWebJSON(w, status, map[string]string{"error": message})
 }
 
 func newWebStatus(metrics routerMetrics) webStatus {

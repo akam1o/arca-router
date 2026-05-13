@@ -12,6 +12,7 @@ import (
 
 	"github.com/akam1o/arca-router/internal/engine"
 	"github.com/akam1o/arca-router/internal/model"
+	nbgrpc "github.com/akam1o/arca-router/internal/northbound/grpc"
 	pkgconfig "github.com/akam1o/arca-router/pkg/config"
 	"github.com/akam1o/arca-router/pkg/datastore"
 )
@@ -194,6 +195,67 @@ func TestWebEndpointRejectsInvalidRole(t *testing.T) {
 	}
 }
 
+func TestWebConfigValidateEndpointUsesConfigAPI(t *testing.T) {
+	source, _ := newWebConfigAPITestSource(t, "operator")
+
+	req := httptest.NewRequest(http.MethodPost, "/api/config/validate", strings.NewReader(`{"config_text":"set system host-name edge02"}`))
+	req.SetBasicAuth("operator", "secret")
+	rec := httptest.NewRecorder()
+	source.handleWebConfigValidate(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d: %s", rec.Code, http.StatusOK, rec.Body.String())
+	}
+	var resp webConfigValidateResponse
+	if err := json.NewDecoder(rec.Result().Body).Decode(&resp); err != nil {
+		t.Fatalf("Decode() error = %v", err)
+	}
+	if !resp.Valid || !resp.HasChanges {
+		t.Fatalf("validate response = %#v, want valid with changes", resp)
+	}
+	for _, want := range []string{"- set system host-name edge01", "+ set system host-name edge02"} {
+		if !strings.Contains(resp.DiffText, want) {
+			t.Fatalf("DiffText missing %q:\n%s", want, resp.DiffText)
+		}
+	}
+}
+
+func TestWebConfigCommitEndpointAppliesConfig(t *testing.T) {
+	source, eng := newWebConfigAPITestSource(t, "operator")
+
+	req := httptest.NewRequest(http.MethodPost, "/api/config/commit", strings.NewReader(`{"config_text":"set system host-name edge02","message":"web update"}`))
+	req.SetBasicAuth("operator", "secret")
+	rec := httptest.NewRecorder()
+	source.handleWebConfigCommit(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d: %s", rec.Code, http.StatusOK, rec.Body.String())
+	}
+	var resp webConfigCommitResponse
+	if err := json.NewDecoder(rec.Result().Body).Decode(&resp); err != nil {
+		t.Fatalf("Decode() error = %v", err)
+	}
+	if resp.Version != 43 {
+		t.Fatalf("Version = %d, want 43", resp.Version)
+	}
+	if got := eng.Running().System.HostName; got != "edge02" {
+		t.Fatalf("running hostname = %q, want edge02", got)
+	}
+}
+
+func TestWebConfigWriteEndpointRejectsReadOnlyRole(t *testing.T) {
+	source, _ := newWebConfigAPITestSource(t, "read-only")
+
+	req := httptest.NewRequest(http.MethodPost, "/api/config/validate", strings.NewReader(`{"config_text":"set system host-name edge02"}`))
+	req.SetBasicAuth("read-only", "secret")
+	rec := httptest.NewRecorder()
+	source.handleWebConfigValidate(rec, req)
+
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("status = %d, want %d", rec.Code, http.StatusForbidden)
+	}
+}
+
 func TestWebIndexEndpoint(t *testing.T) {
 	eng := engine.NewEngine(nil, slog.Default())
 	cfg := model.NewRouterConfig()
@@ -244,4 +306,31 @@ func newWebAuthTestSource(t *testing.T, username, password, role string) metrics
 		startedAt: time.Now().Add(-2 * time.Minute),
 		engine:    eng,
 	}
+}
+
+func newWebConfigAPITestSource(t *testing.T, role string) (metricsSource, *engine.Engine) {
+	t.Helper()
+	installParserHooks()
+	eng := engine.NewEngine(nil, slog.Default())
+	cfg := model.NewRouterConfig()
+	cfg.System = &model.SystemConfig{HostName: "edge01"}
+	hash, err := pkgconfig.NormalizePasswordForStorage("secret")
+	if err != nil {
+		t.Fatalf("NormalizePasswordForStorage() error = %v", err)
+	}
+	cfg.Security = &model.SecurityConfig{
+		Users: map[string]*model.UserConfig{
+			role: {
+				Password: hash,
+				Role:     role,
+			},
+		},
+	}
+	eng.InitializeRunning(cfg, 42)
+	configAPI := nbgrpc.NewServer(eng, nil, slog.Default())
+	return metricsSource{
+		startedAt: time.Now().Add(-2 * time.Minute),
+		engine:    eng,
+		configAPI: configAPI,
+	}, eng
 }

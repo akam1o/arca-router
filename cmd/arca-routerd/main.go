@@ -408,6 +408,7 @@ func run(ctx context.Context, f *daemonFlags, log *logger.Logger) error {
 		engine:        eng,
 		netconfServer: netconfServer,
 		datastore:     datastoreConfig,
+		configAPI:     grpcServer,
 	}
 	var metricsErr <-chan error
 	if f.metricsListen != "" {
