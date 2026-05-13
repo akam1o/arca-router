@@ -563,12 +563,14 @@ set protocols mpls interface ge-0/0/0
 set routing-instances BLUE instance-type vrf
 set routing-instances BLUE route-distinguisher 65000:100
 set routing-instances BLUE vrf-target target:65000:100
+set routing-instances BLUE vrf-target import target:65000:101
+set routing-instances BLUE vrf-target export target:65000:102
 set routing-instances BLUE vrf-import BLUE-IN
 set routing-instances BLUE vrf-export BLUE-OUT
 set routing-instances BLUE interface ge-0/0/1
 ```
 
-v0.6 では `instance-type vrf` のみ受け付けます。route distinguisher は `<asn>:<number>`、VRF target は `target:<asn>:<number>` 形式です。`vrf-import` と `vrf-export` は設定済みの `policy-options policy-statement` 名を参照し、複数回指定して順序付き policy chain を構成できます。
+v0.6 では `instance-type vrf` のみ受け付けます。route distinguisher は `<asn>:<number>` 形式です。共通および方向別 VRF target は `target:<asn>:<number>` 形式です。bare `vrf-target` は import/export の両方向に適用され、`vrf-target import` と `vrf-target export` は方向別の extended-community target を追加します。`vrf-import` と `vrf-export` は設定済みの `policy-options policy-statement` 名を参照し、複数回指定して順序付き policy chain を構成できます。
 
 `protocols mpls interface` は対応する managed VPP interface で MPLS forwarding を有効化します。stanza を削除すると、interface を VPP から削除する前に MPLS forwarding を無効化します。MPLS と routing-instance の interface 参照は設定済み interface に解決できる必要があります。Routing-instance/L3VPN southbound plumbing は引き続き v0.6 safety gate で保護されます。
 
