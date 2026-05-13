@@ -18,6 +18,7 @@ type fakeInteractiveClient struct {
 	bgpSummaryText  string
 	bgpNeighborText string
 	ospfText        string
+	vrrpText        string
 
 	acquireLockCalls int
 	discardCalls     int
@@ -119,6 +120,13 @@ func (f *fakeInteractiveClient) GetOSPFNeighborsText(ctx context.Context) (strin
 		return "ospf neighbor output\n", nil
 	}
 	return f.ospfText, nil
+}
+
+func (f *fakeInteractiveClient) GetVRRPText(ctx context.Context) (string, error) {
+	if f.vrrpText == "" {
+		return "vrrp output\n", nil
+	}
+	return f.vrrpText, nil
 }
 
 func TestCmdConfigureRequiresSession(t *testing.T) {
@@ -337,6 +345,22 @@ func TestCmdShowOSPFNeighborReturnsOutput(t *testing.T) {
 	}
 }
 
+func TestCmdShowVRRPReturnsOutput(t *testing.T) {
+	ctx := context.Background()
+	client := &fakeInteractiveClient{}
+	sh := &interactiveShell{
+		client:    client,
+		hostname:  "router",
+		mode:      modeOperational,
+		sessionID: "session-1",
+	}
+
+	err := sh.cmdShow(ctx, []string{"vrrp"})
+	if err != nil {
+		t.Fatalf("cmdShow(vrrp) error = %v", err)
+	}
+}
+
 func TestInterfaceQueueSummary(t *testing.T) {
 	got := interfaceQueueSummary(grpcclient.InterfaceInfo{
 		RxQueues: []grpcclient.InterfaceRxQueueInfo{
@@ -368,6 +392,14 @@ func TestOneShotShowOSPFNeighborReturnsSuccess(t *testing.T) {
 	code := oneShotShow(context.Background(), client, []string{"ospf", "neighbor"}, &cliFlags{})
 	if code != ExitSuccess {
 		t.Fatalf("oneShotShow(ospf neighbor) = %d, want %d", code, ExitSuccess)
+	}
+}
+
+func TestOneShotShowVRRPReturnsSuccess(t *testing.T) {
+	client := &fakeInteractiveClient{}
+	code := oneShotShow(context.Background(), client, []string{"vrrp"}, &cliFlags{})
+	if code != ExitSuccess {
+		t.Fatalf("oneShotShow(vrrp) = %d, want %d", code, ExitSuccess)
 	}
 }
 

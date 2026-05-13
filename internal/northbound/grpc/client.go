@@ -293,6 +293,17 @@ func (c *Client) GetOSPFNeighborsText(ctx context.Context) (string, error) {
 	return resp.GetOutput(), nil
 }
 
+// GetVRRPText returns FRR VRRP output.
+func (c *Client) GetVRRPText(ctx context.Context) (string, error) {
+	ctx, cancel := contextWithDefaultTimeout(ctx)
+	defer cancel()
+	resp, err := c.state.GetVRRPText(ctx, &apiv1.GetVRRPTextRequest{})
+	if err != nil {
+		return "", err
+	}
+	return resp.GetOutput(), nil
+}
+
 // GetSystemInfo returns system information.
 func (c *Client) GetSystemInfo(ctx context.Context) (*SystemInfo, error) {
 	ctx, cancel := contextWithDefaultTimeout(ctx)
