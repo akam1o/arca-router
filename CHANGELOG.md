@@ -16,6 +16,7 @@
 - **Cluster observability**: `/api/status`, the Web UI, and Prometheus metrics expose datastore and cluster sync state
 - **VPP LCP reconciliation observability**: VPP LCP cache reconciliation state is exposed through `/api/status`, the Web UI, Prometheus metrics, and SNMP OIDs
 - **Class-of-service observability**: `/api/status`, the Web UI, Prometheus metrics, and SNMP OIDs expose CoS configured state, forwarding-class/profile counts, interface binding count, and intent-only enforcement state
+- **Grafana class-of-service panels**: the packaged Grafana dashboard includes CoS configured, enforcement, forwarding-class, traffic-control profile, and interface binding panels
 - **NETCONF listen configuration**: `security netconf ssh port` provides the default embedded NETCONF listen port when `--netconf-listen` is omitted
 - **NETCONF interface operational state**: NETCONF `<get>` exposes live managed VPP interface status, MAC addresses, and counters when arca-routerd can collect them
 - **gRPC managed interface state**: the internal gRPC API and `arca show interfaces` use the daemon's managed VPP state collector, including configured interface names such as `ge-0/0/0`

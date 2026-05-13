@@ -989,6 +989,8 @@ The packaged Grafana dashboard is installed at:
 /usr/share/arca-router/grafana/arca-routerd-dashboard.json
 ```
 
+It includes daemon, NETCONF, config sync, HA, FRR VRRP, class-of-service intent, and VPP LCP panels backed by the Prometheus metrics endpoint.
+
 ### Web UI
 
 Start the read-only Web UI with:
