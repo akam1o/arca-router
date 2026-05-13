@@ -556,10 +556,12 @@ set protocols mpls interface ge-0/0/0
 set routing-instances BLUE instance-type vrf
 set routing-instances BLUE route-distinguisher 65000:100
 set routing-instances BLUE vrf-target target:65000:100
+set routing-instances BLUE vrf-import BLUE-IN
+set routing-instances BLUE vrf-export BLUE-OUT
 set routing-instances BLUE interface ge-0/0/1
 ```
 
-Only `instance-type vrf` is accepted in v0.6. Route distinguishers use `<asn>:<number>`, and VRF targets use `target:<asn>:<number>`.
+Only `instance-type vrf` is accepted in v0.6. Route distinguishers use `<asn>:<number>`, and VRF targets use `target:<asn>:<number>`. `vrf-import` and `vrf-export` reference configured `policy-options policy-statement` names and may be repeated to build ordered policy chains.
 
 `protocols mpls interface` enables MPLS forwarding on the corresponding managed VPP interface. Removing the stanza disables MPLS forwarding before the interface is removed from VPP. MPLS and routing-instance interface references must resolve to configured interfaces. Routing-instance/L3VPN southbound plumbing is still protected by the v0.6 safety gate.
 

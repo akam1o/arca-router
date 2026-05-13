@@ -498,9 +498,11 @@ set protocols bgp group external import PREFER-CUSTOMER
 <a id="advanced-v06-configuration"></a>
 ## Advanced v0.6 Configuration
 
-以下の hierarchy は v0.6 の management-plane model です。parser、serializer、validation、clone、conversion、diff、candidate command replacement は実装済みです。FRR VRRP 適用は実装済みで、MPLS forwarding、L3VPN plumbing、QoS enforcement の southbound 適用は段階的に実装します。
+以下の hierarchy は v0.6 の management-plane model です。parser、serializer、validation、clone、conversion、diff、candidate command replacement は実装済みです。FRR VRRP 適用と VPP MPLS interface forwarding は実装済みで、L3VPN plumbing と QoS enforcement の southbound 適用は段階的に実装します。
 
-対応する southbound apply path が実装されるまでは、未対応の MPLS、routing-instance、class-of-service 設定を active に残す commit は validation で失敗します。未対応 stanza の削除は許可します。VRRP は FRR file backend と標準の transactional FRR backend の両方で適用されます。
+対応する southbound apply path が実装されるまでは、未対応の routing-instance または class-of-service 設定を active に残す commit は validation で失敗します。未対応 stanza の削除は許可します。VRRP は FRR file backend と標準の transactional FRR backend の両方で適用されます。
+
+MPLS、VRRP、OSPF、routing-instance、class-of-service の interface 参照は `interfaces` 配下に定義された interface を指す必要があります。未知の interface 参照は southbound apply 前の validation で失敗します。
 
 ### Prometheus service
 
@@ -549,7 +551,7 @@ set protocols vrrp group 10 preempt
 
 `chassis cluster` を有効化し、`sync etcd endpoint` を設定する場合、daemon は `--datastore-backend=etcd` で動作している必要があります。また、設定内の sync endpoints は `--etcd-endpoints` と一致している必要があります。不一致の cluster sync 設定を active に残す commit は validation で失敗します。
 
-VRRP group ID は数値で `1` から `255` の範囲です。VRRP priority は設定する場合 `1` から `254` の範囲です。default 動作にする場合は省略します。
+VRRP group ID は数値で `1` から `255` の範囲です。VRRP priority は設定する場合 `1` から `254` の範囲です。default 動作にする場合は省略します。設定する VRRP interface は `interfaces` 配下に存在する必要があります。
 
 FRR VRRP 設定を適用する前に、arca-routerd は FRR `vrrpd` が前提にする Linux state を準備します。LCP interface 上に arca 管理の macvlan interface（`arv4-<id>-<hash>` または `arv6-<id>-<hash>`）を作成し、RFC VRRP virtual MAC を設定し、virtual address を `/32` または `/128` として付与して up にします。準備した interface 名は `/var/lib/arca-router/vrrp-interfaces.json` に保存されるため、daemon 再起動後も stale な arca 管理 macvlan interface を削除できます。この処理には `CAP_NET_ADMIN` が必要で、packaged systemd unit には含まれています。
 
@@ -561,10 +563,14 @@ set protocols mpls interface ge-0/0/0
 set routing-instances BLUE instance-type vrf
 set routing-instances BLUE route-distinguisher 65000:100
 set routing-instances BLUE vrf-target target:65000:100
+set routing-instances BLUE vrf-import BLUE-IN
+set routing-instances BLUE vrf-export BLUE-OUT
 set routing-instances BLUE interface ge-0/0/1
 ```
 
-v0.6 では `instance-type vrf` のみ受け付けます。route distinguisher は `<asn>:<number>`、VRF target は `target:<asn>:<number>` 形式です。
+v0.6 では `instance-type vrf` のみ受け付けます。route distinguisher は `<asn>:<number>`、VRF target は `target:<asn>:<number>` 形式です。`vrf-import` と `vrf-export` は設定済みの `policy-options policy-statement` 名を参照し、複数回指定して順序付き policy chain を構成できます。
+
+`protocols mpls interface` は対応する managed VPP interface で MPLS forwarding を有効化します。stanza を削除すると、interface を VPP から削除する前に MPLS forwarding を無効化します。MPLS と routing-instance の interface 参照は設定済み interface に解決できる必要があります。Routing-instance/L3VPN southbound plumbing は引き続き v0.6 safety gate で保護されます。
 
 ### Class of Service
 
@@ -575,7 +581,7 @@ set class-of-service traffic-control-profile WAN scheduler-map WAN-SCHED
 set class-of-service interfaces ge-0/0/0 output-traffic-control-profile WAN
 ```
 
-Forwarding class queue は `0` から `7` の範囲です。interface binding では既存の traffic-control profile を参照する必要があります。
+Forwarding class queue は `0` から `7` の範囲です。Interface binding は既存の traffic-control profile と設定済み interface を参照する必要があります。
 
 ---
 
