@@ -1071,11 +1071,14 @@ arca show ospf neighbor
 # VRRP status
 arca show vrrp
 
+# VPP LCP reconciliation status
+arca show lcp
+
 # Configuration
 arca show configuration
 ```
 
-`show interfaces` prints live managed VPP admin/oper status, bound QoS profile, packet counters, and RX/TX queue placement when available. Name filters use configured interface names such as `ge-0/0/0`. `show vrrp` prints FRR `show vrrp` output through arca-routerd for local HA inspection.
+`show interfaces` prints live managed VPP admin/oper status, bound QoS profile, packet counters, and RX/TX queue placement when available. Name filters use configured interface names such as `ge-0/0/0`. `show vrrp` prints FRR `show vrrp` output through arca-routerd for local HA inspection. `show lcp` prints the cached VPP LCP reconciliation state used by HA convergence checks.
 
 Interactive mode also supports `show history [N]` in configuration mode for commit history.
 

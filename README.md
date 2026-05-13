@@ -235,6 +235,7 @@ arca show route
 arca show bgp summary
 arca show ospf neighbor
 arca show vrrp
+arca show lcp
 
 # Check VPP/FRR directly (optional)
 sudo vppctl show interface
