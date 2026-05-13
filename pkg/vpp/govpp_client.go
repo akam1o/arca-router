@@ -20,6 +20,7 @@ import (
 	"github.com/akam1o/arca-router/pkg/vpp/binapi/rdma"
 	"github.com/akam1o/arca-router/pkg/vpp/binapi/vpe"
 	"go.fd.io/govpp/adapter/socketclient"
+	"go.fd.io/govpp/adapter/statsclient"
 	"go.fd.io/govpp/api"
 	"go.fd.io/govpp/core"
 )
@@ -27,6 +28,9 @@ import (
 const (
 	// Default VPP API socket path
 	defaultSocketPath = "/run/vpp/api.sock"
+
+	// Environment override for the VPP stats socket path.
+	statsSocketPathEnv = "VPP_STATS_SOCKET_PATH"
 
 	// Connection timeout
 	connectTimeout = 10 * time.Second
@@ -47,9 +51,11 @@ const (
 
 // govppClient is the production VPP client using govpp
 type govppClient struct {
-	socketPath string
-	conn       *core.Connection
-	ch         api.Channel
+	socketPath      string
+	statsSocketPath string
+	conn            *core.Connection
+	statsConn       *core.StatsConnection
+	ch              api.Channel
 }
 
 // NewGovppClient creates a new govpp-based VPP client
@@ -58,9 +64,14 @@ func NewGovppClient() Client {
 	if socketPath == "" {
 		socketPath = defaultSocketPath
 	}
+	statsSocketPath := os.Getenv(statsSocketPathEnv)
+	if statsSocketPath == "" {
+		statsSocketPath = statsclient.DefaultSocketName
+	}
 
 	return &govppClient{
-		socketPath: socketPath,
+		socketPath:      socketPath,
+		statsSocketPath: statsSocketPath,
 	}
 }
 
@@ -254,6 +265,10 @@ func (c *govppClient) Close() error {
 	if c.conn != nil {
 		c.conn.Disconnect()
 		c.conn = nil
+	}
+	if c.statsConn != nil {
+		c.statsConn.Disconnect()
+		c.statsConn = nil
 	}
 
 	return nil
@@ -776,6 +791,73 @@ func (c *govppClient) interfaceTagWithQoSProfile(ctx context.Context, ifIndex ui
 		return "", fmt.Errorf("get interface for QoS profile binding: %w", err)
 	}
 	return formatInterfaceTag(iface.PCIAddress, profileName)
+}
+
+// ListInterfaceCounters returns packet and byte counters by VPP interface index.
+func (c *govppClient) ListInterfaceCounters(ctx context.Context) (map[uint32]InterfaceCounters, error) {
+	statsConn, err := c.ensureStatsConnection(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, fmt.Errorf("operation cancelled: %w", err)
+	}
+
+	stats := &api.InterfaceStats{}
+	if err := statsConn.GetInterfaceStats(stats); err != nil {
+		c.closeStatsConnection()
+		return nil, fmt.Errorf("get VPP interface counters: %w", err)
+	}
+
+	counters := make(map[uint32]InterfaceCounters, len(stats.Interfaces))
+	for _, iface := range stats.Interfaces {
+		counters[iface.InterfaceIndex] = convertInterfaceCounters(iface)
+	}
+	return counters, nil
+}
+
+func (c *govppClient) ensureStatsConnection(ctx context.Context) (*core.StatsConnection, error) {
+	if c.statsConn != nil {
+		return c.statsConn, nil
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, fmt.Errorf("operation cancelled: %w", err)
+	}
+	statsSocketPath := c.statsSocketPath
+	if statsSocketPath == "" {
+		statsSocketPath = statsclient.DefaultSocketName
+	}
+
+	client := statsclient.NewStatsClient(
+		statsSocketPath,
+		statsclient.SetSocketRetryTimeout(apiTimeout),
+		statsclient.SetSocketRetryPeriod(100*time.Millisecond),
+	)
+	conn, err := core.ConnectStats(client)
+	if err != nil {
+		return nil, fmt.Errorf("connect to VPP stats socket %s: %w", statsSocketPath, err)
+	}
+	c.statsConn = conn
+	return conn, nil
+}
+
+func (c *govppClient) closeStatsConnection() {
+	if c.statsConn != nil {
+		c.statsConn.Disconnect()
+		c.statsConn = nil
+	}
+}
+
+func convertInterfaceCounters(iface api.InterfaceCounters) InterfaceCounters {
+	return InterfaceCounters{
+		RxPackets: iface.Rx.Packets,
+		TxPackets: iface.Tx.Packets,
+		RxBytes:   iface.Rx.Bytes,
+		TxBytes:   iface.Tx.Bytes,
+		RxErrors:  iface.RxErrors,
+		TxErrors:  iface.TxErrors,
+		Drops:     iface.Drops,
+	}
 }
 
 // GetInterface retrieves interface information by index

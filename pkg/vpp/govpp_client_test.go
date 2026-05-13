@@ -156,6 +156,20 @@ func TestConvertToInterface(t *testing.T) {
 	}
 }
 
+func TestConvertInterfaceCounters(t *testing.T) {
+	got := convertInterfaceCounters(api.InterfaceCounters{
+		Rx:       api.InterfaceCounterCombined{Packets: 10, Bytes: 1000},
+		Tx:       api.InterfaceCounterCombined{Packets: 20, Bytes: 2000},
+		RxErrors: 1,
+		TxErrors: 2,
+		Drops:    3,
+	})
+
+	if got.RxPackets != 10 || got.TxPackets != 20 || got.RxBytes != 1000 || got.TxBytes != 2000 || got.RxErrors != 1 || got.TxErrors != 2 || got.Drops != 3 {
+		t.Fatalf("convertInterfaceCounters() = %#v, want VPP stats counters", got)
+	}
+}
+
 // TestCheckSocketAccess tests socket access checking
 func TestCheckSocketAccess(t *testing.T) {
 	// Create a temporary directory for test socket in the current working directory.

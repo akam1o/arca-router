@@ -323,6 +323,10 @@ func (p *VPPPlugin) CollectState(ctx context.Context) (map[string]*model.Interfa
 	if err != nil {
 		return nil, fmt.Errorf("list interfaces: %w", err)
 	}
+	countersByIndex, err := p.client.ListInterfaceCounters(ctx)
+	if err != nil {
+		p.log.Warn("Failed to list VPP interface counters", slog.Any("error", err))
+	}
 
 	result := make(map[string]*model.InterfaceState)
 	for _, iface := range interfaces {
@@ -345,6 +349,17 @@ func (p *VPPPlugin) CollectState(ctx context.Context) (map[string]*model.Interfa
 			state.OperStatus = "up"
 		} else {
 			state.OperStatus = "down"
+		}
+		if counters, ok := countersByIndex[iface.SwIfIndex]; ok {
+			state.Counters = &model.InterfaceCounters{
+				RxPackets: counters.RxPackets,
+				TxPackets: counters.TxPackets,
+				RxBytes:   counters.RxBytes,
+				TxBytes:   counters.TxBytes,
+				RxErrors:  counters.RxErrors,
+				TxErrors:  counters.TxErrors,
+				Drops:     counters.Drops,
+			}
 		}
 		result[junosName] = state
 	}
