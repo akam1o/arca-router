@@ -16,6 +16,7 @@ import (
 	vppip "github.com/akam1o/arca-router/pkg/vpp/binapi/ip"
 	"github.com/akam1o/arca-router/pkg/vpp/binapi/ip_types"
 	"github.com/akam1o/arca-router/pkg/vpp/binapi/lcp"
+	"github.com/akam1o/arca-router/pkg/vpp/binapi/mpls"
 	"github.com/akam1o/arca-router/pkg/vpp/binapi/rdma"
 	"github.com/akam1o/arca-router/pkg/vpp/binapi/vpe"
 	"go.fd.io/govpp/adapter/socketclient"
@@ -620,6 +621,32 @@ func (c *govppClient) DeleteInterfaceAddress(ctx context.Context, ifIndex uint32
 		return fmt.Errorf("delete interface address returned error code: %d", reply.Retval)
 	}
 
+	return nil
+}
+
+// SetMPLSInterface enables or disables MPLS forwarding on an interface.
+func (c *govppClient) SetMPLSInterface(ctx context.Context, ifIndex uint32, enabled bool) error {
+	if c.ch == nil {
+		return fmt.Errorf("not connected to VPP")
+	}
+
+	select {
+	case <-ctx.Done():
+		return fmt.Errorf("operation cancelled: %w", ctx.Err())
+	default:
+	}
+
+	req := &mpls.SwInterfaceSetMplsEnable{
+		SwIfIndex: interface_types.InterfaceIndex(ifIndex),
+		Enable:    enabled,
+	}
+	reply := &mpls.SwInterfaceSetMplsEnableReply{}
+	if err := c.ch.SendRequest(req).ReceiveReply(reply); err != nil {
+		return fmt.Errorf("failed to set MPLS interface state: %w", err)
+	}
+	if reply.Retval != 0 {
+		return fmt.Errorf("set MPLS interface state returned error code: %d", reply.Retval)
+	}
 	return nil
 }
 

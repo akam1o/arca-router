@@ -47,6 +47,9 @@ type Client interface {
 	// DeleteInterfaceAddress removes an IP address from an interface
 	DeleteInterfaceAddress(ctx context.Context, ifIndex uint32, addr *net.IPNet) error
 
+	// SetMPLSInterface enables or disables MPLS forwarding on an interface
+	SetMPLSInterface(ctx context.Context, ifIndex uint32, enabled bool) error
+
 	// GetInterface retrieves interface information by index
 	GetInterface(ctx context.Context, ifIndex uint32) (*Interface, error)
 

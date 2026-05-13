@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -114,9 +115,6 @@ func (p *VPPPlugin) ValidateChanges(ctx context.Context, diff *engine.ConfigDiff
 		}
 	}
 
-	if diff.MPLSChanged && hasVPPMPLSConfig(diff.NewMPLS) {
-		return fmt.Errorf("VPP southbound does not yet support v0.6 configuration: protocols mpls")
-	}
 	if diff.RoutingInstancesChanged && len(diff.NewRoutingInstances) > 0 {
 		return fmt.Errorf("VPP southbound does not yet support v0.6 configuration: routing-instances")
 	}
@@ -161,7 +159,15 @@ func (p *VPPPlugin) ApplyChanges(ctx context.Context, diff *engine.ConfigDiff) e
 		}
 	}
 
-	// 3. Remove interfaces (remove addresses, LCP, then disable)
+	// 3. Apply MPLS forwarding state before interfaces are removed.
+	if diff.MPLSChanged {
+		if err := p.applyMPLSChanges(ctx, diff.OldMPLS, diff.NewMPLS, &rollbackOps); err != nil {
+			p.executeRollback(ctx, rollbackOps)
+			return fmt.Errorf("update MPLS interfaces: %w", err)
+		}
+	}
+
+	// 4. Remove interfaces (remove addresses, LCP, then disable)
 	for _, name := range diff.InterfacesRemoved {
 		if err := p.removeInterface(ctx, name, &rollbackOps); err != nil {
 			p.executeRollback(ctx, rollbackOps)
@@ -178,7 +184,16 @@ func (p *VPPPlugin) RollbackChanges(ctx context.Context, diff *engine.ConfigDiff
 	p.mu.Lock()
 	defer p.mu.Unlock()
 
-	// Reverse of ApplyChanges: remove added addresses, re-add removed addresses
+	var rollbackErr error
+	if diff.MPLSChanged {
+		for _, name := range mplsAddedInterfaces(diff.OldMPLS, diff.NewMPLS) {
+			if err := p.setMPLSInterface(ctx, name, false); err != nil && rollbackErr == nil {
+				rollbackErr = fmt.Errorf("disable MPLS interface %s: %w", name, err)
+			}
+		}
+	}
+
+	// Reverse of ApplyChanges: remove added addresses, re-add removed addresses.
 	for name, ifaceCfg := range diff.InterfacesAdded {
 		swIfIndex, ok := p.ifaceIndex[name]
 		if !ok {
@@ -225,8 +240,16 @@ func (p *VPPPlugin) RollbackChanges(ctx context.Context, diff *engine.ConfigDiff
 		}
 	}
 
+	if diff.MPLSChanged {
+		for _, name := range mplsRemovedInterfaces(diff.OldMPLS, diff.NewMPLS) {
+			if err := p.setMPLSInterface(ctx, name, true); err != nil && rollbackErr == nil {
+				rollbackErr = fmt.Errorf("enable MPLS interface %s: %w", name, err)
+			}
+		}
+	}
+
 	p.updateLCPReconciliationLocked(ctx)
-	return nil
+	return rollbackErr
 }
 
 // CollectState gathers live interface state from VPP.
@@ -280,10 +303,6 @@ func (p *VPPPlugin) hasHardwareConfig(name string) bool {
 		}
 	}
 	return false
-}
-
-func hasVPPMPLSConfig(cfg *model.MPLSConfig) bool {
-	return cfg != nil && len(cfg.Interfaces) > 0
 }
 
 func hasVPPClassOfServiceConfig(cfg *model.ClassOfServiceConfig) bool {
@@ -444,6 +463,77 @@ func (p *VPPPlugin) removeInterface(ctx context.Context, name string, rollback *
 
 	delete(p.ifaceIndex, name)
 	return nil
+}
+
+func (p *VPPPlugin) applyMPLSChanges(ctx context.Context, oldMPLS, newMPLS *model.MPLSConfig, rollback *[]func(context.Context) error) error {
+	for _, name := range mplsRemovedInterfaces(oldMPLS, newMPLS) {
+		if err := p.setMPLSInterface(ctx, name, false); err != nil {
+			return fmt.Errorf("disable %s: %w", name, err)
+		}
+		if rollback != nil {
+			ifName := name
+			*rollback = append(*rollback, func(ctx context.Context) error {
+				return p.setMPLSInterface(ctx, ifName, true)
+			})
+		}
+	}
+	for _, name := range mplsAddedInterfaces(oldMPLS, newMPLS) {
+		if err := p.setMPLSInterface(ctx, name, true); err != nil {
+			return fmt.Errorf("enable %s: %w", name, err)
+		}
+		if rollback != nil {
+			ifName := name
+			*rollback = append(*rollback, func(ctx context.Context) error {
+				return p.setMPLSInterface(ctx, ifName, false)
+			})
+		}
+	}
+	return nil
+}
+
+func (p *VPPPlugin) setMPLSInterface(ctx context.Context, name string, enabled bool) error {
+	swIfIndex, ok := p.ifaceIndex[name]
+	if !ok {
+		return fmt.Errorf("interface %s not found in VPP", name)
+	}
+	if err := p.client.SetMPLSInterface(ctx, swIfIndex, enabled); err != nil {
+		return err
+	}
+	return nil
+}
+
+func mplsAddedInterfaces(oldMPLS, newMPLS *model.MPLSConfig) []string {
+	return mplsDeltaInterfaces(oldMPLS, newMPLS)
+}
+
+func mplsRemovedInterfaces(oldMPLS, newMPLS *model.MPLSConfig) []string {
+	return mplsDeltaInterfaces(newMPLS, oldMPLS)
+}
+
+func mplsDeltaInterfaces(fromMPLS, toMPLS *model.MPLSConfig) []string {
+	fromSet := mplsInterfaceSet(fromMPLS)
+	toSet := mplsInterfaceSet(toMPLS)
+	var names []string
+	for name := range toSet {
+		if !fromSet[name] {
+			names = append(names, name)
+		}
+	}
+	sort.Strings(names)
+	return names
+}
+
+func mplsInterfaceSet(cfg *model.MPLSConfig) map[string]bool {
+	set := make(map[string]bool)
+	if cfg == nil {
+		return set
+	}
+	for _, name := range cfg.Interfaces {
+		if name != "" {
+			set[name] = true
+		}
+	}
+	return set
 }
 
 func (p *VPPPlugin) deleteLCPIfPresent(ctx context.Context, swIfIndex uint32) error {

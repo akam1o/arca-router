@@ -96,6 +96,32 @@ func TestValidateChangesAllowsVRRPWithFileBackend(t *testing.T) {
 	}
 }
 
+func TestValidateChangesAllowsMPLSConfig(t *testing.T) {
+	newCfg := model.NewRouterConfig()
+	newCfg.Protocols = &model.ProtocolsConfig{
+		MPLS: &model.MPLSConfig{Interfaces: []string{"ge-0/0/0"}},
+	}
+	diff := engine.ComputeDiff(model.NewRouterConfig(), newCfg)
+
+	err := NewFRRPlugin(testLogger()).ValidateChanges(context.Background(), diff)
+	if err != nil {
+		t.Fatalf("ValidateChanges() error = %v, want nil", err)
+	}
+}
+
+func TestValidateChangesRejectsRoutingInstances(t *testing.T) {
+	newCfg := model.NewRouterConfig()
+	newCfg.RoutingInstances = map[string]*model.RoutingInstance{
+		"BLUE": {InstanceType: "vrf"},
+	}
+	diff := engine.ComputeDiff(model.NewRouterConfig(), newCfg)
+
+	err := NewFRRPlugin(testLogger()).ValidateChanges(context.Background(), diff)
+	if err == nil {
+		t.Fatal("ValidateChanges() error = nil, want routing-instances error")
+	}
+}
+
 func TestApplyChangesPassesVRRPToTransactionalApplier(t *testing.T) {
 	newCfg := model.NewRouterConfig()
 	newCfg.Interfaces["ge-0/0/0"] = &model.InterfaceConfig{Units: map[int]*model.Unit{}}

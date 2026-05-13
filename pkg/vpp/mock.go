@@ -11,11 +11,12 @@ import (
 
 // MockClient is a mock implementation of the VPP Client interface for testing
 type MockClient struct {
-	mu            sync.RWMutex
-	connected     bool
-	interfaces    map[uint32]*Interface
-	lcpInterfaces map[uint32]*LCPInterface
-	nextIfIdx     uint32
+	mu             sync.RWMutex
+	connected      bool
+	interfaces     map[uint32]*Interface
+	lcpInterfaces  map[uint32]*LCPInterface
+	mplsInterfaces map[uint32]bool
+	nextIfIdx      uint32
 
 	// Hooks for testing error scenarios
 	ConnectError                error
@@ -24,6 +25,7 @@ type MockClient struct {
 	SetInterfaceDownError       error
 	SetInterfaceAddressError    error
 	DeleteInterfaceAddressError error
+	SetMPLSInterfaceError       error
 	GetInterfaceError           error
 	ListInterfacesError         error
 	CreateLCPInterfaceError     error
@@ -35,9 +37,10 @@ type MockClient struct {
 // NewMockClient creates a new mock VPP client
 func NewMockClient() *MockClient {
 	return &MockClient{
-		interfaces:    make(map[uint32]*Interface),
-		lcpInterfaces: make(map[uint32]*LCPInterface),
-		nextIfIdx:     1, // Start from 1 (0 is reserved for local0)
+		interfaces:     make(map[uint32]*Interface),
+		lcpInterfaces:  make(map[uint32]*LCPInterface),
+		mplsInterfaces: make(map[uint32]bool),
+		nextIfIdx:      1, // Start from 1 (0 is reserved for local0)
 	}
 }
 
@@ -414,6 +417,50 @@ func (m *MockClient) DeleteInterfaceAddress(ctx context.Context, ifIndex uint32,
 	)
 }
 
+// SetMPLSInterface enables or disables MPLS forwarding on a mock interface.
+func (m *MockClient) SetMPLSInterface(ctx context.Context, ifIndex uint32, enabled bool) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if m.SetMPLSInterfaceError != nil {
+		return m.SetMPLSInterfaceError
+	}
+
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	if !m.connected {
+		return errors.New(
+			errors.ErrCodeVPPConnection,
+			"Not connected to VPP",
+			"VPP connection not established",
+			"Connect to VPP before setting MPLS interface state",
+		)
+	}
+	if _, ok := m.interfaces[ifIndex]; !ok {
+		return errors.New(
+			errors.ErrCodeVPPOperation,
+			fmt.Sprintf("Interface with index %d not found", ifIndex),
+			"Interface does not exist",
+			"Create the interface before setting MPLS interface state",
+		)
+	}
+
+	if enabled {
+		m.mplsInterfaces[ifIndex] = true
+		return nil
+	}
+	delete(m.mplsInterfaces, ifIndex)
+	return nil
+}
+
+// MPLSInterfaceEnabled reports whether MPLS is enabled on a mock interface.
+func (m *MockClient) MPLSInterfaceEnabled(ifIndex uint32) bool {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	return m.mplsInterfaces[ifIndex]
+}
+
 // GetInterface retrieves mock interface information by index
 func (m *MockClient) GetInterface(ctx context.Context, ifIndex uint32) (*Interface, error) {
 	if m.GetInterfaceError != nil {
@@ -481,6 +528,7 @@ func (m *MockClient) Reset() {
 	m.connected = false
 	m.interfaces = make(map[uint32]*Interface)
 	m.lcpInterfaces = make(map[uint32]*LCPInterface)
+	m.mplsInterfaces = make(map[uint32]bool)
 	m.nextIfIdx = 1
 
 	m.ConnectError = nil
@@ -489,6 +537,7 @@ func (m *MockClient) Reset() {
 	m.SetInterfaceDownError = nil
 	m.SetInterfaceAddressError = nil
 	m.DeleteInterfaceAddressError = nil
+	m.SetMPLSInterfaceError = nil
 	m.GetInterfaceError = nil
 	m.ListInterfacesError = nil
 	m.CreateLCPInterfaceError = nil

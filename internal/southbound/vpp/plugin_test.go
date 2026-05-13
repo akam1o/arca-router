@@ -238,7 +238,7 @@ func TestInitRecordsLCPReconciliationStatus(t *testing.T) {
 	}
 }
 
-func TestValidateChangesRejectsUnsupportedV06VPPConfig(t *testing.T) {
+func TestValidateChangesAllowsMPLSConfig(t *testing.T) {
 	plugin := NewVPPPlugin(pkgvpp.NewMockClient(), &device.HardwareConfig{}, testLogger())
 	newCfg := model.NewRouterConfig()
 	newCfg.Protocols = &model.ProtocolsConfig{
@@ -246,12 +246,25 @@ func TestValidateChangesRejectsUnsupportedV06VPPConfig(t *testing.T) {
 	}
 	diff := engine.ComputeDiff(model.NewRouterConfig(), newCfg)
 
+	if err := plugin.ValidateChanges(context.Background(), diff); err != nil {
+		t.Fatalf("ValidateChanges() error = %v, want nil", err)
+	}
+}
+
+func TestValidateChangesRejectsUnsupportedRoutingInstances(t *testing.T) {
+	plugin := NewVPPPlugin(pkgvpp.NewMockClient(), &device.HardwareConfig{}, testLogger())
+	newCfg := model.NewRouterConfig()
+	newCfg.RoutingInstances = map[string]*model.RoutingInstance{
+		"BLUE": {InstanceType: "vrf"},
+	}
+	diff := engine.ComputeDiff(model.NewRouterConfig(), newCfg)
+
 	err := plugin.ValidateChanges(context.Background(), diff)
 	if err == nil {
-		t.Fatal("ValidateChanges() error = nil, want unsupported MPLS error")
+		t.Fatal("ValidateChanges() error = nil, want unsupported routing-instances error")
 	}
-	if !strings.Contains(err.Error(), "protocols mpls") {
-		t.Fatalf("ValidateChanges() error = %v, want protocols mpls", err)
+	if !strings.Contains(err.Error(), "routing-instances") {
+		t.Fatalf("ValidateChanges() error = %v, want routing-instances", err)
 	}
 }
 
@@ -277,12 +290,137 @@ func TestValidateChangesRejectsUnsupportedClassOfService(t *testing.T) {
 func TestValidateChangesAllowsRemovingUnsupportedV06VPPConfig(t *testing.T) {
 	plugin := NewVPPPlugin(pkgvpp.NewMockClient(), &device.HardwareConfig{}, testLogger())
 	oldCfg := model.NewRouterConfig()
-	oldCfg.Protocols = &model.ProtocolsConfig{
-		MPLS: &model.MPLSConfig{Interfaces: []string{"ge-0/0/0"}},
+	oldCfg.RoutingInstances = map[string]*model.RoutingInstance{
+		"BLUE": {InstanceType: "vrf"},
 	}
 	diff := engine.ComputeDiff(oldCfg, model.NewRouterConfig())
 
 	if err := plugin.ValidateChanges(context.Background(), diff); err != nil {
 		t.Fatalf("ValidateChanges() error = %v, want nil", err)
+	}
+}
+
+func TestApplyChangesEnablesMPLSInterfaces(t *testing.T) {
+	ctx := context.Background()
+	client := pkgvpp.NewMockClient()
+	plugin := NewVPPPlugin(client, &device.HardwareConfig{
+		Interfaces: []device.PhysicalInterface{
+			{Name: "ge-0/0/0", PCI: "0000:03:00.0", Driver: "avf"},
+		},
+	}, testLogger())
+	if err := plugin.Init(ctx); err != nil {
+		t.Fatalf("Init() error = %v", err)
+	}
+	t.Cleanup(func() { _ = plugin.Close() })
+
+	newCfg := model.NewRouterConfig()
+	newCfg.Interfaces["ge-0/0/0"] = &model.InterfaceConfig{Units: map[int]*model.Unit{}}
+	newCfg.Protocols = &model.ProtocolsConfig{
+		MPLS: &model.MPLSConfig{Interfaces: []string{"ge-0/0/0"}},
+	}
+	diff := engine.ComputeDiff(model.NewRouterConfig(), newCfg)
+	if err := plugin.ValidateChanges(ctx, diff); err != nil {
+		t.Fatalf("ValidateChanges() error = %v", err)
+	}
+	if err := plugin.ApplyChanges(ctx, diff); err != nil {
+		t.Fatalf("ApplyChanges() error = %v", err)
+	}
+	idx, ok := plugin.GetInterfaceIndex("ge-0/0/0")
+	if !ok {
+		t.Fatal("ApplyChanges() did not add interface index")
+	}
+	if !client.MPLSInterfaceEnabled(idx) {
+		t.Fatal("ApplyChanges() did not enable MPLS on interface")
+	}
+
+	withoutMPLS := model.NewRouterConfig()
+	withoutMPLS.Interfaces["ge-0/0/0"] = &model.InterfaceConfig{Units: map[int]*model.Unit{}}
+	if err := plugin.ApplyChanges(ctx, engine.ComputeDiff(newCfg, withoutMPLS)); err != nil {
+		t.Fatalf("ApplyChanges() disable MPLS error = %v", err)
+	}
+	if client.MPLSInterfaceEnabled(idx) {
+		t.Fatal("ApplyChanges() left MPLS enabled after removing MPLS config")
+	}
+}
+
+func TestApplyChangesRollsBackMPLSOnLaterFailure(t *testing.T) {
+	ctx := context.Background()
+	client := pkgvpp.NewMockClient()
+	plugin := NewVPPPlugin(client, &device.HardwareConfig{
+		Interfaces: []device.PhysicalInterface{
+			{Name: "ge-0/0/0", PCI: "0000:03:00.0", Driver: "avf"},
+			{Name: "ge-0/0/1", PCI: "0000:03:00.1", Driver: "avf"},
+		},
+	}, testLogger())
+	if err := plugin.Init(ctx); err != nil {
+		t.Fatalf("Init() error = %v", err)
+	}
+	t.Cleanup(func() { _ = plugin.Close() })
+
+	oldCfg := model.NewRouterConfig()
+	oldCfg.Interfaces["ge-0/0/0"] = &model.InterfaceConfig{Units: map[int]*model.Unit{}}
+	oldCfg.Interfaces["ge-0/0/1"] = &model.InterfaceConfig{Units: map[int]*model.Unit{}}
+	if err := plugin.ApplyChanges(ctx, engine.ComputeDiff(model.NewRouterConfig(), oldCfg)); err != nil {
+		t.Fatalf("initial ApplyChanges() error = %v", err)
+	}
+
+	newCfg := model.NewRouterConfig()
+	newCfg.Interfaces["ge-0/0/0"] = &model.InterfaceConfig{Units: map[int]*model.Unit{}}
+	newCfg.Protocols = &model.ProtocolsConfig{
+		MPLS: &model.MPLSConfig{Interfaces: []string{"ge-0/0/0"}},
+	}
+	idx, ok := plugin.GetInterfaceIndex("ge-0/0/0")
+	if !ok {
+		t.Fatal("initial ApplyChanges() did not add interface index")
+	}
+	client.SetInterfaceDownError = errors.New("down failed")
+	if err := plugin.ApplyChanges(ctx, engine.ComputeDiff(oldCfg, newCfg)); err == nil {
+		t.Fatal("ApplyChanges() error = nil, want remove interface failure")
+	}
+	if client.MPLSInterfaceEnabled(idx) {
+		t.Fatal("ApplyChanges() left MPLS enabled after rollback")
+	}
+}
+
+func TestRollbackChangesRestoresMPLSInterfaces(t *testing.T) {
+	ctx := context.Background()
+	client := pkgvpp.NewMockClient()
+	plugin := NewVPPPlugin(client, &device.HardwareConfig{
+		Interfaces: []device.PhysicalInterface{
+			{Name: "ge-0/0/0", PCI: "0000:03:00.0", Driver: "avf"},
+		},
+	}, testLogger())
+	if err := plugin.Init(ctx); err != nil {
+		t.Fatalf("Init() error = %v", err)
+	}
+	t.Cleanup(func() { _ = plugin.Close() })
+
+	oldCfg := model.NewRouterConfig()
+	oldCfg.Interfaces["ge-0/0/0"] = &model.InterfaceConfig{Units: map[int]*model.Unit{}}
+	oldCfg.Protocols = &model.ProtocolsConfig{
+		MPLS: &model.MPLSConfig{Interfaces: []string{"ge-0/0/0"}},
+	}
+	if err := plugin.ApplyChanges(ctx, engine.ComputeDiff(model.NewRouterConfig(), oldCfg)); err != nil {
+		t.Fatalf("initial ApplyChanges() error = %v", err)
+	}
+	idx, ok := plugin.GetInterfaceIndex("ge-0/0/0")
+	if !ok {
+		t.Fatal("initial ApplyChanges() did not add interface index")
+	}
+
+	newCfg := model.NewRouterConfig()
+	newCfg.Interfaces["ge-0/0/0"] = &model.InterfaceConfig{Units: map[int]*model.Unit{}}
+	diff := engine.ComputeDiff(oldCfg, newCfg)
+	if err := plugin.ApplyChanges(ctx, diff); err != nil {
+		t.Fatalf("ApplyChanges() error = %v", err)
+	}
+	if client.MPLSInterfaceEnabled(idx) {
+		t.Fatal("ApplyChanges() left MPLS enabled after removing MPLS config")
+	}
+	if err := plugin.RollbackChanges(ctx, diff); err != nil {
+		t.Fatalf("RollbackChanges() error = %v", err)
+	}
+	if !client.MPLSInterfaceEnabled(idx) {
+		t.Fatal("RollbackChanges() did not restore MPLS on interface")
 	}
 }
