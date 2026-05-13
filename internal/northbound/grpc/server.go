@@ -656,8 +656,8 @@ func applyCandidateCommand(candidate, commandText string) (string, error) {
 				return "", fmt.Errorf("'set' requires arguments")
 			}
 			line := "set " + cli.NormalizeConfigPath(parts[1:])
-			if prefixes := replacementPrefixes(parts[1:]); len(prefixes) > 0 {
-				lines = removeMatchingPrefixes(lines, prefixes)
+			if rules := replacementRules(parts[1:]); len(rules) > 0 {
+				lines = removeMatchingRules(lines, rules)
 			}
 			if containsLine(lines, line) {
 				continue
@@ -682,12 +682,14 @@ func applyCandidateCommand(candidate, commandText string) (string, error) {
 	return strings.Join(lines, "\n"), nil
 }
 
-func removeMatchingPrefixes(lines []string, prefixes []string) []string {
+type replacementRule func(line string) bool
+
+func removeMatchingRules(lines []string, rules []replacementRule) []string {
 	filtered := lines[:0]
 	for _, line := range lines {
 		matched := false
-		for _, prefix := range prefixes {
-			if cli.MatchesPrefix(line, prefix) {
+		for _, rule := range rules {
+			if rule(line) {
 				matched = true
 				break
 			}
@@ -706,6 +708,39 @@ func containsLine(lines []string, target string) bool {
 		}
 	}
 	return false
+}
+
+func replacementRules(path []string) []replacementRule {
+	if len(path) >= 3 && path[0] == "routing-instances" && path[2] == "vrf-target" {
+		if len(path) >= 4 && (path[3] == "import" || path[3] == "export") {
+			return nil
+		}
+		instanceName := path[1]
+		return []replacementRule{func(line string) bool {
+			parts, err := cli.TokenizeCommand(line)
+			if err != nil {
+				return false
+			}
+			return len(parts) == 5 &&
+				parts[0] == "set" &&
+				parts[1] == "routing-instances" &&
+				parts[2] == instanceName &&
+				parts[3] == "vrf-target"
+		}}
+	}
+
+	prefixes := replacementPrefixes(path)
+	if len(prefixes) == 0 {
+		return nil
+	}
+	rules := make([]replacementRule, 0, len(prefixes))
+	for _, prefix := range prefixes {
+		prefix := prefix
+		rules = append(rules, func(line string) bool {
+			return cli.MatchesPrefix(line, prefix)
+		})
+	}
+	return rules
 }
 
 func replacementPrefixes(path []string) []string {

@@ -855,6 +855,8 @@ func TestApplyCandidateCommandReplacesV06ScalarAttributes(t *testing.T) {
 		"set protocols vrrp group 10 priority 100",
 		"set routing-instances BLUE route-distinguisher 65000:100",
 		"set routing-instances BLUE vrf-target target:65000:100",
+		"set routing-instances BLUE vrf-target import target:65000:101",
+		"set routing-instances BLUE vrf-target export target:65000:102",
 		"set class-of-service traffic-control-profile WAN shaping-rate 1000",
 	}, "\n")
 
@@ -893,6 +895,8 @@ func TestApplyCandidateCommandReplacesV06ScalarAttributes(t *testing.T) {
 		"set protocols vrrp group 10 priority 120",
 		"set routing-instances BLUE route-distinguisher 65000:200",
 		"set routing-instances BLUE vrf-target target:65000:200",
+		"set routing-instances BLUE vrf-target import target:65000:101",
+		"set routing-instances BLUE vrf-target export target:65000:102",
 		"set class-of-service traffic-control-profile WAN shaping-rate 2000",
 	} {
 		if !strings.Contains(updated, want) {
@@ -903,12 +907,18 @@ func TestApplyCandidateCommandReplacesV06ScalarAttributes(t *testing.T) {
 
 func TestApplyCandidateCommandPreservesRoutingInstancePolicyLists(t *testing.T) {
 	candidate := strings.Join([]string{
+		"set routing-instances BLUE vrf-target import target:65000:101",
+		"set routing-instances BLUE vrf-target export target:65000:102",
 		"set routing-instances BLUE vrf-import BLUE-IN",
 		"set routing-instances BLUE vrf-import BLUE-EXTRA",
 		"set routing-instances BLUE vrf-export BLUE-OUT",
 	}, "\n")
 
 	updated, err := applyCandidateCommand(candidate, strings.Join([]string{
+		"set routing-instances BLUE vrf-target import target:65000:101",
+		"set routing-instances BLUE vrf-target import target:65000:111",
+		"set routing-instances BLUE vrf-target export target:65000:102",
+		"set routing-instances BLUE vrf-target export target:65000:112",
 		"set routing-instances BLUE vrf-import BLUE-IN",
 		"set routing-instances BLUE vrf-import BLUE-NEW",
 		"set routing-instances BLUE vrf-export BLUE-OUT",
@@ -919,6 +929,10 @@ func TestApplyCandidateCommandPreservesRoutingInstancePolicyLists(t *testing.T) 
 	}
 
 	for _, want := range []string{
+		"set routing-instances BLUE vrf-target import target:65000:101",
+		"set routing-instances BLUE vrf-target import target:65000:111",
+		"set routing-instances BLUE vrf-target export target:65000:102",
+		"set routing-instances BLUE vrf-target export target:65000:112",
 		"set routing-instances BLUE vrf-import BLUE-IN",
 		"set routing-instances BLUE vrf-import BLUE-EXTRA",
 		"set routing-instances BLUE vrf-import BLUE-NEW",

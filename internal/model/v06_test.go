@@ -28,6 +28,8 @@ func TestV06ConfigConversionAndClone(t *testing.T) {
 		"set routing-instances BLUE instance-type vrf",
 		"set routing-instances BLUE route-distinguisher 65000:100",
 		"set routing-instances BLUE vrf-target target:65000:100",
+		"set routing-instances BLUE vrf-target import target:65000:101",
+		"set routing-instances BLUE vrf-target export target:65000:102",
 		"set routing-instances BLUE vrf-import BLUE-IN",
 		"set routing-instances BLUE vrf-export BLUE-OUT",
 		"set routing-instances BLUE interface ge-0/0/0",
@@ -49,9 +51,13 @@ func TestV06ConfigConversionAndClone(t *testing.T) {
 
 	clone := cfg.Clone()
 	clone.Protocols.VRRP.Groups["10"].VirtualAddress = "192.0.2.253"
+	clone.RoutingInstances["BLUE"].VRFTargetImport[0] = "target:65000:999"
 	clone.RoutingInstances["BLUE"].VRFImport[0] = "MUTATED"
 	if got := cfg.Protocols.VRRP.Groups["10"].VirtualAddress; got != "192.0.2.254" {
 		t.Fatalf("original VRRP virtual-address mutated to %q", got)
+	}
+	if got := cfg.RoutingInstances["BLUE"].VRFTargetImport[0]; got != "target:65000:101" {
+		t.Fatalf("original VRF target import mutated to %q", got)
 	}
 	if got := cfg.RoutingInstances["BLUE"].VRFImport[0]; got != "BLUE-IN" {
 		t.Fatalf("original VRF import mutated to %q", got)
@@ -60,6 +66,12 @@ func TestV06ConfigConversionAndClone(t *testing.T) {
 	roundTrip := cfg.ToLegacyConfig()
 	if got := roundTrip.RoutingInstances["BLUE"].RouteDistinguisher; got != "65000:100" {
 		t.Fatalf("route distinguisher = %q", got)
+	}
+	if got := roundTrip.RoutingInstances["BLUE"].VRFTargetImport; len(got) != 1 || got[0] != "target:65000:101" {
+		t.Fatalf("VRF target import = %#v, want [target:65000:101]", got)
+	}
+	if got := roundTrip.RoutingInstances["BLUE"].VRFTargetExport; len(got) != 1 || got[0] != "target:65000:102" {
+		t.Fatalf("VRF target export = %#v, want [target:65000:102]", got)
 	}
 	if got := roundTrip.RoutingInstances["BLUE"].VRFImport; len(got) != 1 || got[0] != "BLUE-IN" {
 		t.Fatalf("VRF import = %#v, want [BLUE-IN]", got)
@@ -174,6 +186,54 @@ func TestV06ModelValidationRejectsUnknownInterfaceReferences(t *testing.T) {
 			err := cfg.Validate()
 			if err == nil {
 				t.Fatal("Validate() error = nil, want unknown interface reference error")
+			}
+			if !strings.Contains(err.Error(), tt.want) {
+				t.Fatalf("Validate() error = %v, want substring %q", err, tt.want)
+			}
+		})
+	}
+}
+
+func TestV06ModelValidationRejectsInvalidVRFTargets(t *testing.T) {
+	tests := []struct {
+		name      string
+		configure func(*RoutingInstance)
+		want      string
+	}{
+		{
+			name: "common",
+			configure: func(instance *RoutingInstance) {
+				instance.VRFTarget = "invalid"
+			},
+			want: `routing-instance BLUE vrf-target: invalid vrf-target "invalid"`,
+		},
+		{
+			name: "import",
+			configure: func(instance *RoutingInstance) {
+				instance.VRFTargetImport = []string{"invalid"}
+			},
+			want: `routing-instance BLUE vrf-target import: invalid vrf-target "invalid"`,
+		},
+		{
+			name: "export",
+			configure: func(instance *RoutingInstance) {
+				instance.VRFTargetExport = []string{"invalid"}
+			},
+			want: `routing-instance BLUE vrf-target export: invalid vrf-target "invalid"`,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg := NewRouterConfig()
+			cfg.RoutingInstances = map[string]*RoutingInstance{
+				"BLUE": {InstanceType: "vrf"},
+			}
+			tt.configure(cfg.RoutingInstances["BLUE"])
+
+			err := cfg.Validate()
+			if err == nil {
+				t.Fatal("Validate() error = nil, want invalid vrf-target error")
 			}
 			if !strings.Contains(err.Error(), tt.want) {
 				t.Fatalf("Validate() error = %v, want substring %q", err, tt.want)
