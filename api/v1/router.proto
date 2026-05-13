@@ -74,6 +74,9 @@ service StateService {
   // GetOSPFNeighborsText returns FRR OSPF neighbor output for CLI display.
   rpc GetOSPFNeighborsText(GetOSPFNeighborsTextRequest) returns (GetOSPFNeighborsTextResponse);
 
+  // GetVRRPText returns FRR VRRP output for CLI display.
+  rpc GetVRRPText(GetVRRPTextRequest) returns (GetVRRPTextResponse);
+
   // GetSystemInfo returns system information.
   rpc GetSystemInfo(GetSystemInfoRequest) returns (GetSystemInfoResponse);
 }
@@ -291,6 +294,12 @@ message GetBGPNeighborTextResponse {
 message GetOSPFNeighborsTextRequest {}
 
 message GetOSPFNeighborsTextResponse {
+  string output = 1;
+}
+
+message GetVRRPTextRequest {}
+
+message GetVRRPTextResponse {
   string output = 1;
 }
 

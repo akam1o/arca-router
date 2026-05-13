@@ -255,6 +255,14 @@ func (a *stateServiceAdapter) GetOSPFNeighborsText(ctx context.Context, _ *apiv1
 	return &apiv1.GetOSPFNeighborsTextResponse{Output: output}, nil
 }
 
+func (a *stateServiceAdapter) GetVRRPText(ctx context.Context, _ *apiv1.GetVRRPTextRequest) (*apiv1.GetVRRPTextResponse, error) {
+	output, err := a.server.GetVRRPText(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return &apiv1.GetVRRPTextResponse{Output: output}, nil
+}
+
 func (a *stateServiceAdapter) GetSystemInfo(ctx context.Context, _ *apiv1.GetSystemInfoRequest) (*apiv1.GetSystemInfoResponse, error) {
 	info, err := a.server.GetSystemInfo(ctx)
 	if err != nil {

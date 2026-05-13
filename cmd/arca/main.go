@@ -246,6 +246,15 @@ func oneShotShow(ctx context.Context, client showClient, args []string, f *cliFl
 		printCommandOutput(output)
 		return ExitSuccess
 
+	case "vrrp":
+		output, err := client.GetVRRPText(ctx)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+			return ExitOperationError
+		}
+		printCommandOutput(output)
+		return ExitSuccess
+
 	case "route":
 		protoFilter, err := routeProtocolFilter(args[1:])
 		if err != nil {
@@ -302,6 +311,7 @@ type showClient interface {
 	GetBGPSummaryText(context.Context) (string, error)
 	GetBGPNeighborText(context.Context, string) (string, error)
 	GetOSPFNeighborsText(context.Context) (string, error)
+	GetVRRPText(context.Context) (string, error)
 }
 
 type cliMode int
@@ -641,6 +651,17 @@ func (sh *interactiveShell) cmdShow(ctx context.Context, args []string) error {
 		printCommandOutput(output)
 		return nil
 
+	case "vrrp":
+		if sh.mode == modeConfiguration {
+			return fmt.Errorf("'show vrrp' not available in configuration mode")
+		}
+		output, err := sh.client.GetVRRPText(ctx)
+		if err != nil {
+			return err
+		}
+		printCommandOutput(output)
+		return nil
+
 	case "route":
 		if sh.mode == modeConfiguration {
 			return fmt.Errorf("'show route' not available in configuration mode")
@@ -858,6 +879,7 @@ func (sh *interactiveShell) showHelp() {
 		fmt.Println("  show bgp summary              Show BGP summary")
 		fmt.Println("  show bgp neighbor <ip>        Show BGP neighbor details")
 		fmt.Println("  show ospf neighbor            Show OSPF neighbors")
+		fmt.Println("  show vrrp                     Show VRRP status")
 		fmt.Println("  show route                    Show routing table")
 		fmt.Println("  show route protocol <proto>   Show routes by protocol")
 		fmt.Println("  exit, quit                    Exit interactive CLI")

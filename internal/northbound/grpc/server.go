@@ -638,6 +638,11 @@ func (s *Server) GetOSPFNeighborsText(ctx context.Context) (string, error) {
 	return runOperationalVtyshCommand(ctx, "show ip ospf neighbor")
 }
 
+// GetVRRPText returns FRR VRRP output.
+func (s *Server) GetVRRPText(ctx context.Context) (string, error) {
+	return runOperationalVtyshCommand(ctx, "show vrrp")
+}
+
 // GetSystemInfo returns basic system information.
 func (s *Server) GetSystemInfo(ctx context.Context) (*SystemInfo, error) {
 	cfg := s.engine.Running()

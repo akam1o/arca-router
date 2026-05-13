@@ -281,8 +281,11 @@ func TestOperationalStateEndpointsReadVPPAndFRR(t *testing.T) {
 	if output, err := srv.GetOSPFNeighborsText(ctx); err != nil || output != "show ip ospf neighbor\n" {
 		t.Fatalf("GetOSPFNeighborsText() = %q, %v", output, err)
 	}
-	if len(commands) != 4 {
-		t.Fatalf("vtysh commands = %v, want 4 commands", commands)
+	if output, err := srv.GetVRRPText(ctx); err != nil || output != "show vrrp\n" {
+		t.Fatalf("GetVRRPText() = %q, %v", output, err)
+	}
+	if len(commands) != 5 {
+		t.Fatalf("vtysh commands = %v, want 5 commands", commands)
 	}
 	if _, err := srv.GetRouteText(ctx, "rip"); err == nil || !strings.Contains(err.Error(), "invalid route protocol") {
 		t.Fatalf("GetRouteText(invalid) error = %v, want invalid protocol", err)
