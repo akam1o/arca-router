@@ -952,7 +952,7 @@ Endpoints:
 - `GET /metrics`
 - `GET /healthz`
 
-The metrics endpoint exports daemon uptime, running config version, NETCONF counters, and cluster sync gauges for enabled state, node count, etcd sync configuration, and datastore alignment.
+The metrics endpoint exports daemon uptime, running config version, NETCONF counters, cluster sync gauges for enabled state, node count, etcd sync configuration, datastore alignment, and VPP LCP reconciliation gauges for pair count, inconsistency count, check failures, and latest check timestamp.
 
 The packaged Grafana dashboard is installed at:
 
@@ -985,7 +985,7 @@ Endpoints:
 - `POST /api/config/validate`
 - `POST /api/config/commit`
 
-`/api/status` includes build metadata, uptime, running config version, datastore backend, cluster sync state, and NETCONF counters.
+`/api/status` includes build metadata, uptime, running config version, datastore backend, cluster sync state, VPP LCP reconciliation state, and NETCONF counters.
 `/api/config` returns the running configuration as set-command text with the running config version. The dashboard renders the same running configuration in the browser editor.
 `/api/config/history` returns recent configuration commits and backs the dashboard commit history panel.
 
@@ -1015,7 +1015,7 @@ The packaged systemd unit grants `CAP_NET_BIND_SERVICE`, so the standard UDP por
 arca-routerd --snmp-listen=:161 --snmp-community=<read-only-community>
 ```
 
-SNMP is intended for monitoring only and should not be exposed on untrusted networks.
+SNMP is intended for monitoring only and should not be exposed on untrusted networks. The custom arca-router OID subtree exposes daemon, config, NETCONF, and VPP LCP reconciliation counters.
 
 ---
 

@@ -32,6 +32,10 @@ Exported metrics:
 - `arca_router_cluster_nodes`
 - `arca_router_cluster_sync_etcd_configured`
 - `arca_router_cluster_sync_aligned`
+- `arca_router_vpp_lcp_pairs`
+- `arca_router_vpp_lcp_inconsistencies`
+- `arca_router_vpp_lcp_reconcile_error`
+- `arca_router_vpp_lcp_last_reconcile_timestamp_seconds`
 - `arca_router_netconf_active_sessions`
 - `arca_router_netconf_active_connections`
 - `arca_router_netconf_total_connections`
@@ -76,7 +80,7 @@ Endpoints:
 - `POST /api/config/validate`
 - `POST /api/config/commit`
 
-The Web UI is intended for trusted management networks. It exposes the same daemon status used by the metrics endpoint, including datastore backend and cluster sync alignment. It also exposes the running configuration in set-command format through `/api/config`, renders it in the dashboard editor, shows recent commit history from `/api/config/history`, and can validate or commit edited set-command text.
+The Web UI is intended for trusted management networks. It exposes the same daemon status used by the metrics endpoint, including datastore backend, cluster sync alignment, and VPP LCP reconciliation state. It also exposes the running configuration in set-command format through `/api/config`, renders it in the dashboard editor, shows recent commit history from `/api/config/history`, and can validate or commit edited set-command text.
 
 When the running configuration contains password-backed `security users`, the Web UI requires HTTP Basic authentication. The `read-only`, `operator`, and `admin` roles can access the read-only dashboard and API endpoints.
 
@@ -148,6 +152,10 @@ arca-router custom OIDs currently use the provisional experimental base `1.3.6.1
 | `1.3.6.1.3.9950.1.8.0` | `arcaRouterNetconfSuccessfulHandshakes` |
 | `1.3.6.1.3.9950.1.9.0` | `arcaRouterNetconfFailedHandshakes` |
 | `1.3.6.1.3.9950.1.10.0` | `arcaRouterdVersion` |
+| `1.3.6.1.3.9950.1.11.0` | `arcaRouterVppLcpPairs` |
+| `1.3.6.1.3.9950.1.12.0` | `arcaRouterVppLcpInconsistencies` |
+| `1.3.6.1.3.9950.1.13.0` | `arcaRouterVppLcpReconcileError` |
+| `1.3.6.1.3.9950.1.14.0` | `arcaRouterVppLcpLastReconcile` |
 
 Example:
 

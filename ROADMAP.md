@@ -13,9 +13,10 @@ Focus: expand the hardened unified daemon into higher-level router features.
   - Commit-time consistency guard between cluster sync config and the active etcd datastore backend
   - Cluster sync observability through Web UI status and Prometheus metrics
   - FRR VRRP config generation through the file apply backend
+  - VPP LCP cache reconciliation status through Web UI, Prometheus, and SNMP
   - Control-plane HA using FRR and VRRP
   - Config synchronization through etcd
-  - Failover reconciliation for local daemon state
+  - Post-failover FRR/VPP convergence validation
 - **MPLS / VPN**
   - Management-plane config model for MPLS interfaces and L3VPN service stanzas
   - Commit-time safety gates for unsupported MPLS and routing-instance southbound apply
@@ -32,6 +33,7 @@ Focus: expand the hardened unified daemon into higher-level router features.
   - Config-driven NETCONF listen port from `security netconf ssh port`
   - Config-driven Prometheus service enablement for metrics and health checks
   - Config-driven SNMP service enablement for read-only SNMPv2c monitoring
+  - VPP LCP reconciliation gauges in Prometheus, Web UI, and SNMP
 - **Web UI**
   - Read-only browser-based monitoring and JSON status endpoint
   - Read-only running configuration API and dashboard preview
