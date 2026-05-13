@@ -109,6 +109,18 @@ func TestMetricsEndpointExportsRouterMetrics(t *testing.T) {
 			"10": &model.VRRPGroup{Interface: "ge-0/0/0", VirtualAddress: "192.0.2.1", Priority: 110, Preempt: true},
 		}},
 	}
+	cfg.ClassOfService = &model.ClassOfServiceConfig{
+		ForwardingClasses: map[string]*model.ForwardingClass{
+			"best-effort":          {Queue: 0},
+			"expedited-forwarding": {Queue: 5},
+		},
+		TrafficControlProfiles: map[string]*model.TrafficControlProfile{
+			"WAN": {ShapingRate: 1000000000, SchedulerMap: "WAN-SCHED"},
+		},
+		Interfaces: map[string]*model.CoSInterface{
+			"ge-0/0/0": {OutputTrafficControlProfile: "WAN"},
+		},
+	}
 	eng.InitializeRunning(cfg, 42)
 
 	req := httptest.NewRequest("GET", "/metrics", nil)
@@ -175,6 +187,11 @@ func TestMetricsEndpointExportsRouterMetrics(t *testing.T) {
 		"arca_router_vpp_lcp_inconsistencies 1",
 		"arca_router_vpp_lcp_reconcile_error 0",
 		"arca_router_vpp_lcp_last_reconcile_timestamp_seconds 1700000000",
+		"arca_router_class_of_service_configured 1",
+		"arca_router_class_of_service_forwarding_classes 2",
+		"arca_router_class_of_service_traffic_control_profiles 1",
+		"arca_router_class_of_service_interface_bindings 1",
+		"arca_router_class_of_service_intent_only 1",
 		"arca_router_netconf_listening 0",
 	} {
 		if !strings.Contains(text, want) {

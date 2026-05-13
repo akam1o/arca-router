@@ -90,6 +90,18 @@ func TestWebStatusEndpoint(t *testing.T) {
 			"10": &model.VRRPGroup{Interface: "ge-0/0/0", VirtualAddress: "192.0.2.1", Priority: 110, Preempt: true},
 		}},
 	}
+	cfg.ClassOfService = &model.ClassOfServiceConfig{
+		ForwardingClasses: map[string]*model.ForwardingClass{
+			"best-effort":          {Queue: 0},
+			"expedited-forwarding": {Queue: 5},
+		},
+		TrafficControlProfiles: map[string]*model.TrafficControlProfile{
+			"WAN": {ShapingRate: 1000000000, SchedulerMap: "WAN-SCHED"},
+		},
+		Interfaces: map[string]*model.CoSInterface{
+			"ge-0/0/0": {OutputTrafficControlProfile: "WAN"},
+		},
+	}
 	eng.InitializeRunning(cfg, 42)
 
 	req := httptest.NewRequest(http.MethodGet, "/api/status", nil)
@@ -165,6 +177,13 @@ func TestWebStatusEndpoint(t *testing.T) {
 	}
 	if status.VPP.LCP.PairCount != 2 || status.VPP.LCP.InconsistencyCount != 1 || status.VPP.LCP.LastReconcile == "" {
 		t.Fatalf("VPP LCP status = %#v, want pair count and inconsistency status", status.VPP.LCP)
+	}
+	if !status.ClassOfService.Configured || status.ClassOfService.EnforcementStatus != "intent-only" ||
+		status.ClassOfService.ForwardingClasses != 2 ||
+		status.ClassOfService.TrafficControlProfiles != 1 ||
+		status.ClassOfService.InterfaceBindings != 1 ||
+		!status.ClassOfService.IntentOnly {
+		t.Fatalf("ClassOfService status = %#v, want configured intent-only status", status.ClassOfService)
 	}
 }
 
@@ -367,6 +386,7 @@ func TestWebIndexEndpoint(t *testing.T) {
 		"NETCONF",
 		"Datastore",
 		"Cluster sync",
+		"Class of service",
 		"VPP LCP",
 		"Commit history",
 		`id="commit-history"`,

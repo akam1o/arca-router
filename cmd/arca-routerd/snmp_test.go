@@ -114,6 +114,18 @@ func TestSNMPEndpointExportsRouterMetrics(t *testing.T) {
 			"10": &model.VRRPGroup{Interface: "ge-0/0/0", VirtualAddress: "192.0.2.1", Priority: 110, Preempt: true},
 		}},
 	}
+	cfg.ClassOfService = &model.ClassOfServiceConfig{
+		ForwardingClasses: map[string]*model.ForwardingClass{
+			"best-effort":          {Queue: 0},
+			"expedited-forwarding": {Queue: 5},
+		},
+		TrafficControlProfiles: map[string]*model.TrafficControlProfile{
+			"WAN": {ShapingRate: 1000000000, SchedulerMap: "WAN-SCHED"},
+		},
+		Interfaces: map[string]*model.CoSInterface{
+			"ge-0/0/0": {OutputTrafficControlProfile: "WAN"},
+		},
+	}
 	eng.InitializeRunning(cfg, 42)
 
 	server := newSNMPServer(metricsSource{
@@ -206,12 +218,17 @@ func TestSNMPEndpointExportsRouterMetrics(t *testing.T) {
 		snmpOIDFRRVRRPIssues,
 		snmpOIDFRRVRRPError,
 		snmpOIDFRRVRRPLastRun,
+		snmpOIDCoSConfigured,
+		snmpOIDCoSClasses,
+		snmpOIDCoSProfiles,
+		snmpOIDCoSBindings,
+		snmpOIDCoSIntentOnly,
 	})
 	if err != nil {
 		t.Fatalf("SNMP Get() error = %v", err)
 	}
-	if len(packet.Variables) != 17 {
-		t.Fatalf("SNMP variables = %d, want 17", len(packet.Variables))
+	if len(packet.Variables) != 22 {
+		t.Fatalf("SNMP variables = %d, want 22", len(packet.Variables))
 	}
 	if got := snmpUintValue(t, packet.Variables[0].Value); got != 42 {
 		t.Fatalf("%s = %d, want 42", snmpOIDConfigVersion, got)
@@ -263,6 +280,21 @@ func TestSNMPEndpointExportsRouterMetrics(t *testing.T) {
 	}
 	if got := snmpUintValue(t, packet.Variables[16].Value); got != 1700000300 {
 		t.Fatalf("%s = %d, want 1700000300", snmpOIDFRRVRRPLastRun, got)
+	}
+	if got := snmpUintValue(t, packet.Variables[17].Value); got != 1 {
+		t.Fatalf("%s = %d, want 1", snmpOIDCoSConfigured, got)
+	}
+	if got := snmpUintValue(t, packet.Variables[18].Value); got != 2 {
+		t.Fatalf("%s = %d, want 2", snmpOIDCoSClasses, got)
+	}
+	if got := snmpUintValue(t, packet.Variables[19].Value); got != 1 {
+		t.Fatalf("%s = %d, want 1", snmpOIDCoSProfiles, got)
+	}
+	if got := snmpUintValue(t, packet.Variables[20].Value); got != 1 {
+		t.Fatalf("%s = %d, want 1", snmpOIDCoSBindings, got)
+	}
+	if got := snmpUintValue(t, packet.Variables[21].Value); got != 1 {
+		t.Fatalf("%s = %d, want 1", snmpOIDCoSIntentOnly, got)
 	}
 }
 

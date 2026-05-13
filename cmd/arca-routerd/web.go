@@ -54,6 +54,7 @@ type webStatus struct {
 	ConfigSync      webConfigSync   `json:"config_sync"`
 	Cluster         webCluster      `json:"cluster"`
 	HA              webHAStats      `json:"ha"`
+	ClassOfService  webCoSStats     `json:"class_of_service"`
 	FRR             webFRRStats     `json:"frr"`
 	VPP             webVPPStats     `json:"vpp"`
 	NETCONF         webNETCONFStats `json:"netconf"`
@@ -89,6 +90,15 @@ type webHAStats struct {
 	VRRPGroups int      `json:"vrrp_groups"`
 	IssueCount int      `json:"issue_count"`
 	Issues     []string `json:"issues,omitempty"`
+}
+
+type webCoSStats struct {
+	Configured             bool   `json:"configured"`
+	EnforcementStatus      string `json:"enforcement_status"`
+	ForwardingClasses      int    `json:"forwarding_classes"`
+	TrafficControlProfiles int    `json:"traffic_control_profiles"`
+	InterfaceBindings      int    `json:"interface_bindings"`
+	IntentOnly             bool   `json:"intent_only"`
 }
 
 type webFRRStats struct {
@@ -180,38 +190,43 @@ type webAuthUser struct {
 }
 
 type webIndexData struct {
-	Status                webStatus
-	Uptime                string
-	NETCONFState          string
-	NETCONFStateClass     string
-	NETCONFConnections    string
-	ClusterState          string
-	ClusterStateClass     string
-	ClusterSyncState      string
-	ClusterSyncAlignment  string
-	ClusterNodeCount      string
-	ConfigSyncState       string
-	ConfigSyncStateClass  string
-	ConfigSyncRevision    string
-	ConfigSyncLastApply   string
-	HAState               string
-	HAStateClass          string
-	HAVRPGroups           string
-	HAIssues              string
-	FRRVRRPState          string
-	FRRVRRPStateClass     string
-	FRRVRRPActiveGroups   string
-	FRRVRRPGroups         []webVRRPGroupView
-	VPPLCPState           string
-	VPPLCPStateClass      string
-	VPPLCPPairs           string
-	VPPLCPInconsistencies string
-	VPPLCPLastReconcile   string
-	DatastoreBackend      string
-	GeneratedAt           string
-	ConfigVersionString   string
-	RunningConfig         string
-	History               []webCommitEntry
+	Status                 webStatus
+	Uptime                 string
+	NETCONFState           string
+	NETCONFStateClass      string
+	NETCONFConnections     string
+	ClusterState           string
+	ClusterStateClass      string
+	ClusterSyncState       string
+	ClusterSyncAlignment   string
+	ClusterNodeCount       string
+	ConfigSyncState        string
+	ConfigSyncStateClass   string
+	ConfigSyncRevision     string
+	ConfigSyncLastApply    string
+	HAState                string
+	HAStateClass           string
+	HAVRPGroups            string
+	HAIssues               string
+	ClassOfServiceState    string
+	ClassOfServiceClass    string
+	ClassOfServiceProfiles string
+	ClassOfServiceBindings string
+	ClassOfServiceClasses  string
+	FRRVRRPState           string
+	FRRVRRPStateClass      string
+	FRRVRRPActiveGroups    string
+	FRRVRRPGroups          []webVRRPGroupView
+	VPPLCPState            string
+	VPPLCPStateClass       string
+	VPPLCPPairs            string
+	VPPLCPInconsistencies  string
+	VPPLCPLastReconcile    string
+	DatastoreBackend       string
+	GeneratedAt            string
+	ConfigVersionString    string
+	RunningConfig          string
+	History                []webCommitEntry
 }
 
 type webVRRPGroupView struct {
@@ -451,6 +466,10 @@ var webIndexTemplate = template.Must(template.New("web-index").Parse(`<!doctype 
         <span class="label">Cluster</span>
         <span class="pill {{.ClusterStateClass}}">{{.ClusterState}}</span>
       </article>
+      <article class="panel metric">
+        <span class="label">Class of service</span>
+        <span class="pill {{.ClassOfServiceClass}}">{{.ClassOfServiceState}}</span>
+      </article>
 
       <article class="panel span-2">
         <h2>NETCONF sessions</h2>
@@ -480,6 +499,15 @@ var webIndexTemplate = template.Must(template.New("web-index").Parse(`<!doctype 
           <div class="row"><span>HA convergence</span><strong><span class="pill {{.HAStateClass}}">{{.HAState}}</span></strong></div>
           <div class="row"><span>VRRP groups</span><strong>{{.HAVRPGroups}}</strong></div>
           <div class="row"><span>HA issues</span><strong>{{.HAIssues}}</strong></div>
+        </div>
+      </article>
+      <article class="panel span-2">
+        <h2>Class of service</h2>
+        <div class="rows">
+          <div class="row"><span>Enforcement</span><strong><span class="pill {{.ClassOfServiceClass}}">{{.ClassOfServiceState}}</span></strong></div>
+          <div class="row"><span>Traffic-control profiles</span><strong>{{.ClassOfServiceProfiles}}</strong></div>
+          <div class="row"><span>Forwarding classes</span><strong>{{.ClassOfServiceClasses}}</strong></div>
+          <div class="row"><span>Interface bindings</span><strong>{{.ClassOfServiceBindings}}</strong></div>
         </div>
       </article>
       <article class="panel span-2">
@@ -1203,6 +1231,14 @@ func newWebStatus(metrics routerMetrics) webStatus {
 			IssueCount: len(metrics.HAIssues),
 			Issues:     append([]string(nil), metrics.HAIssues...),
 		},
+		ClassOfService: webCoSStats{
+			Configured:             metrics.ClassOfServiceConfigured,
+			EnforcementStatus:      metrics.ClassOfServiceStatus,
+			ForwardingClasses:      metrics.ClassOfServiceClasses,
+			TrafficControlProfiles: metrics.ClassOfServiceProfiles,
+			InterfaceBindings:      metrics.ClassOfServiceBindings,
+			IntentOnly:             metrics.ClassOfServiceIntentOnly,
+		},
 		FRR: webFRRStats{
 			VRRP: webVRRPStats{
 				LastCheck:        formatWebOptionalTime(metrics.FRRVRRPLastRun),
@@ -1299,6 +1335,15 @@ func newWebIndexData(status webStatus, now time.Time, runningConfig string, hist
 			haStateClass = "warn"
 		}
 	}
+	cosState := "Not configured"
+	cosStateClass := "neutral"
+	if status.ClassOfService.Configured {
+		cosState = status.ClassOfService.EnforcementStatus
+		cosStateClass = "ok"
+		if status.ClassOfService.IntentOnly {
+			cosStateClass = "neutral"
+		}
+	}
 	frrVRRPState := "Not configured"
 	frrVRRPStateClass := "neutral"
 	if status.FRR.VRRP.ConfiguredGroups > 0 {
@@ -1327,38 +1372,43 @@ func newWebIndexData(status webStatus, now time.Time, runningConfig string, hist
 	}
 
 	return webIndexData{
-		Status:                status,
-		Uptime:                formatWebUptime(status.UptimeSeconds),
-		NETCONFState:          state,
-		NETCONFStateClass:     stateClass,
-		NETCONFConnections:    strconv.FormatUint(status.NETCONF.TotalConnections, 10),
-		ClusterState:          clusterState,
-		ClusterStateClass:     clusterStateClass,
-		ClusterSyncState:      clusterSyncState,
-		ClusterSyncAlignment:  clusterSyncAlignment,
-		ClusterNodeCount:      strconv.Itoa(status.Cluster.NodeCount),
-		ConfigSyncState:       configSyncState,
-		ConfigSyncStateClass:  configSyncStateClass,
-		ConfigSyncRevision:    configSyncRevision,
-		ConfigSyncLastApply:   formatWebOptionalDisplayTime(status.ConfigSync.LastApply),
-		HAState:               haState,
-		HAStateClass:          haStateClass,
-		HAVRPGroups:           strconv.Itoa(status.HA.VRRPGroups),
-		HAIssues:              strconv.Itoa(status.HA.IssueCount),
-		FRRVRRPState:          frrVRRPState,
-		FRRVRRPStateClass:     frrVRRPStateClass,
-		FRRVRRPActiveGroups:   fmt.Sprintf("%d/%d", status.FRR.VRRP.ActiveGroups, status.FRR.VRRP.ConfiguredGroups),
-		FRRVRRPGroups:         webVRRPGroupViews(status.FRR.VRRP.Groups),
-		VPPLCPState:           vppLCPState,
-		VPPLCPStateClass:      vppLCPStateClass,
-		VPPLCPPairs:           strconv.Itoa(status.VPP.LCP.PairCount),
-		VPPLCPInconsistencies: strconv.Itoa(status.VPP.LCP.InconsistencyCount),
-		VPPLCPLastReconcile:   formatWebOptionalDisplayTime(status.VPP.LCP.LastReconcile),
-		DatastoreBackend:      status.Datastore.Backend,
-		GeneratedAt:           now.UTC().Format(time.RFC3339),
-		ConfigVersionString:   strconv.FormatUint(status.ConfigVersion, 10),
-		RunningConfig:         runningConfig,
-		History:               history,
+		Status:                 status,
+		Uptime:                 formatWebUptime(status.UptimeSeconds),
+		NETCONFState:           state,
+		NETCONFStateClass:      stateClass,
+		NETCONFConnections:     strconv.FormatUint(status.NETCONF.TotalConnections, 10),
+		ClusterState:           clusterState,
+		ClusterStateClass:      clusterStateClass,
+		ClusterSyncState:       clusterSyncState,
+		ClusterSyncAlignment:   clusterSyncAlignment,
+		ClusterNodeCount:       strconv.Itoa(status.Cluster.NodeCount),
+		ConfigSyncState:        configSyncState,
+		ConfigSyncStateClass:   configSyncStateClass,
+		ConfigSyncRevision:     configSyncRevision,
+		ConfigSyncLastApply:    formatWebOptionalDisplayTime(status.ConfigSync.LastApply),
+		HAState:                haState,
+		HAStateClass:           haStateClass,
+		HAVRPGroups:            strconv.Itoa(status.HA.VRRPGroups),
+		HAIssues:               strconv.Itoa(status.HA.IssueCount),
+		ClassOfServiceState:    cosState,
+		ClassOfServiceClass:    cosStateClass,
+		ClassOfServiceProfiles: strconv.Itoa(status.ClassOfService.TrafficControlProfiles),
+		ClassOfServiceBindings: strconv.Itoa(status.ClassOfService.InterfaceBindings),
+		ClassOfServiceClasses:  strconv.Itoa(status.ClassOfService.ForwardingClasses),
+		FRRVRRPState:           frrVRRPState,
+		FRRVRRPStateClass:      frrVRRPStateClass,
+		FRRVRRPActiveGroups:    fmt.Sprintf("%d/%d", status.FRR.VRRP.ActiveGroups, status.FRR.VRRP.ConfiguredGroups),
+		FRRVRRPGroups:          webVRRPGroupViews(status.FRR.VRRP.Groups),
+		VPPLCPState:            vppLCPState,
+		VPPLCPStateClass:       vppLCPStateClass,
+		VPPLCPPairs:            strconv.Itoa(status.VPP.LCP.PairCount),
+		VPPLCPInconsistencies:  strconv.Itoa(status.VPP.LCP.InconsistencyCount),
+		VPPLCPLastReconcile:    formatWebOptionalDisplayTime(status.VPP.LCP.LastReconcile),
+		DatastoreBackend:       status.Datastore.Backend,
+		GeneratedAt:            now.UTC().Format(time.RFC3339),
+		ConfigVersionString:    strconv.FormatUint(status.ConfigVersion, 10),
+		RunningConfig:          runningConfig,
+		History:                history,
 	}
 }
 

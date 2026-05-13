@@ -48,6 +48,11 @@ const (
 	snmpOIDFRRVRRPIssues     = arcaSNMPBaseOID + ".22.0"
 	snmpOIDFRRVRRPError      = arcaSNMPBaseOID + ".23.0"
 	snmpOIDFRRVRRPLastRun    = arcaSNMPBaseOID + ".24.0"
+	snmpOIDCoSConfigured     = arcaSNMPBaseOID + ".25.0"
+	snmpOIDCoSClasses        = arcaSNMPBaseOID + ".26.0"
+	snmpOIDCoSProfiles       = arcaSNMPBaseOID + ".27.0"
+	snmpOIDCoSBindings       = arcaSNMPBaseOID + ".28.0"
+	snmpOIDCoSIntentOnly     = arcaSNMPBaseOID + ".29.0"
 
 	defaultSNMPPort      = 161
 	defaultSNMPCommunity = "public"
@@ -361,6 +366,52 @@ func snmpOIDs(source metricsSource) []*snmpserver.PDUValueControlItem {
 				return snmpserver.Asn1Gauge32Wrap(uint(unixTimestampSeconds(source.snapshot(time.Now()).FRRVRRPLastRun))), nil
 			},
 			Document: "arcaRouterFrrVrrpLastCheck",
+		},
+		{
+			OID:  snmpOIDCoSConfigured,
+			Type: gosnmp.Integer,
+			OnGet: func() (interface{}, error) {
+				if source.snapshot(time.Now()).ClassOfServiceConfigured {
+					return snmpserver.Asn1IntegerWrap(1), nil
+				}
+				return snmpserver.Asn1IntegerWrap(0), nil
+			},
+			Document: "arcaRouterClassOfServiceConfigured",
+		},
+		{
+			OID:  snmpOIDCoSClasses,
+			Type: gosnmp.Gauge32,
+			OnGet: func() (interface{}, error) {
+				return snmpserver.Asn1Gauge32Wrap(uint(source.snapshot(time.Now()).ClassOfServiceClasses)), nil
+			},
+			Document: "arcaRouterClassOfServiceForwardingClasses",
+		},
+		{
+			OID:  snmpOIDCoSProfiles,
+			Type: gosnmp.Gauge32,
+			OnGet: func() (interface{}, error) {
+				return snmpserver.Asn1Gauge32Wrap(uint(source.snapshot(time.Now()).ClassOfServiceProfiles)), nil
+			},
+			Document: "arcaRouterClassOfServiceTrafficControlProfiles",
+		},
+		{
+			OID:  snmpOIDCoSBindings,
+			Type: gosnmp.Gauge32,
+			OnGet: func() (interface{}, error) {
+				return snmpserver.Asn1Gauge32Wrap(uint(source.snapshot(time.Now()).ClassOfServiceBindings)), nil
+			},
+			Document: "arcaRouterClassOfServiceInterfaceBindings",
+		},
+		{
+			OID:  snmpOIDCoSIntentOnly,
+			Type: gosnmp.Integer,
+			OnGet: func() (interface{}, error) {
+				if source.snapshot(time.Now()).ClassOfServiceIntentOnly {
+					return snmpserver.Asn1IntegerWrap(1), nil
+				}
+				return snmpserver.Asn1IntegerWrap(0), nil
+			},
+			Document: "arcaRouterClassOfServiceIntentOnly",
 		},
 	}
 }

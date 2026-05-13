@@ -22,6 +22,11 @@ import (
 
 const defaultPrometheusPort = 9090
 
+const (
+	classOfServiceIntentOnlyStatus    = "intent-only"
+	classOfServiceNotConfiguredStatus = "not configured"
+)
+
 type metricsSource struct {
 	startedAt     time.Time
 	engine        *engine.Engine
@@ -81,12 +86,20 @@ type routerMetrics struct {
 	VPPLCPPairs               int
 	VPPLCPInconsistencies     []string
 	VPPLCPReconcileError      string
+	ClassOfServiceConfigured  bool
+	ClassOfServiceStatus      string
+	ClassOfServiceClasses     int
+	ClassOfServiceProfiles    int
+	ClassOfServiceBindings    int
+	ClassOfServiceIntentOnly  bool
 }
 
 func (s metricsSource) snapshot(now time.Time) routerMetrics {
 	metrics := routerMetrics{
-		DatastoreBackend:   string(datastore.BackendSQLite),
-		ClusterSyncAligned: true,
+		DatastoreBackend:         string(datastore.BackendSQLite),
+		ClusterSyncAligned:       true,
+		ClassOfServiceStatus:     classOfServiceNotConfiguredStatus,
+		ClassOfServiceIntentOnly: false,
 	}
 	var runningConfig *model.RouterConfig
 	if !s.startedAt.IsZero() {
@@ -117,6 +130,7 @@ func (s metricsSource) snapshot(now time.Time) routerMetrics {
 			if running.Config != nil && running.Config.System != nil {
 				metrics.RunningHostname = running.Config.System.HostName
 			}
+			applyClassOfServiceStatus(&metrics, running.Config)
 			if running.Config != nil && running.Config.Chassis != nil && running.Config.Chassis.Cluster != nil {
 				cluster := running.Config.Chassis.Cluster
 				metrics.ClusterEnabled = cluster.Enabled
@@ -163,6 +177,52 @@ func (s metricsSource) snapshot(now time.Time) routerMetrics {
 	}
 	applyHAConvergenceStatus(&metrics, runningConfig, s.vpp != nil)
 	return metrics
+}
+
+func applyClassOfServiceStatus(metrics *routerMetrics, cfg *model.RouterConfig) {
+	if metrics == nil {
+		return
+	}
+	metrics.ClassOfServiceStatus = classOfServiceNotConfiguredStatus
+	if cfg == nil || cfg.ClassOfService == nil {
+		return
+	}
+	metrics.ClassOfServiceConfigured = true
+	metrics.ClassOfServiceStatus = classOfServiceIntentOnlyStatus
+	metrics.ClassOfServiceIntentOnly = true
+	metrics.ClassOfServiceClasses = countForwardingClasses(cfg.ClassOfService.ForwardingClasses)
+	metrics.ClassOfServiceProfiles = countTrafficControlProfiles(cfg.ClassOfService.TrafficControlProfiles)
+	metrics.ClassOfServiceBindings = countClassOfServiceBindings(cfg.ClassOfService.Interfaces)
+}
+
+func countForwardingClasses(classes map[string]*model.ForwardingClass) int {
+	count := 0
+	for _, class := range classes {
+		if class != nil {
+			count++
+		}
+	}
+	return count
+}
+
+func countTrafficControlProfiles(profiles map[string]*model.TrafficControlProfile) int {
+	count := 0
+	for _, profile := range profiles {
+		if profile != nil {
+			count++
+		}
+	}
+	return count
+}
+
+func countClassOfServiceBindings(interfaces map[string]*model.CoSInterface) int {
+	count := 0
+	for _, iface := range interfaces {
+		if iface != nil && iface.OutputTrafficControlProfile != "" {
+			count++
+		}
+	}
+	return count
 }
 
 func applyHAConvergenceStatus(metrics *routerMetrics, cfg *model.RouterConfig, hasVPP bool) {
@@ -406,6 +466,22 @@ func (s metricsSource) handleMetrics(w http.ResponseWriter, r *http.Request) {
 	writeMetricValue(&b, "arca_router_vpp_lcp_inconsistencies", float64(len(metrics.VPPLCPInconsistencies)))
 	writeMetricBool(&b, "arca_router_vpp_lcp_reconcile_error", metrics.VPPLCPReconcileError != "")
 	writeMetricValue(&b, "arca_router_vpp_lcp_last_reconcile_timestamp_seconds", unixTimestampSeconds(metrics.VPPLCPReconcileLastRun))
+
+	writeMetricHelp(&b, "arca_router_class_of_service_configured", "Whether class-of-service is configured in the running configuration.")
+	writeMetricType(&b, "arca_router_class_of_service_configured", "gauge")
+	writeMetricHelp(&b, "arca_router_class_of_service_forwarding_classes", "Number of configured class-of-service forwarding classes.")
+	writeMetricType(&b, "arca_router_class_of_service_forwarding_classes", "gauge")
+	writeMetricHelp(&b, "arca_router_class_of_service_traffic_control_profiles", "Number of configured class-of-service traffic-control profiles.")
+	writeMetricType(&b, "arca_router_class_of_service_traffic_control_profiles", "gauge")
+	writeMetricHelp(&b, "arca_router_class_of_service_interface_bindings", "Number of configured class-of-service interface bindings.")
+	writeMetricType(&b, "arca_router_class_of_service_interface_bindings", "gauge")
+	writeMetricHelp(&b, "arca_router_class_of_service_intent_only", "Whether class-of-service enforcement is currently stored as intent-only VPP interface metadata.")
+	writeMetricType(&b, "arca_router_class_of_service_intent_only", "gauge")
+	writeMetricBool(&b, "arca_router_class_of_service_configured", metrics.ClassOfServiceConfigured)
+	writeMetricValue(&b, "arca_router_class_of_service_forwarding_classes", float64(metrics.ClassOfServiceClasses))
+	writeMetricValue(&b, "arca_router_class_of_service_traffic_control_profiles", float64(metrics.ClassOfServiceProfiles))
+	writeMetricValue(&b, "arca_router_class_of_service_interface_bindings", float64(metrics.ClassOfServiceBindings))
+	writeMetricBool(&b, "arca_router_class_of_service_intent_only", metrics.ClassOfServiceIntentOnly)
 
 	writeMetricHelp(&b, "arca_router_netconf_active_sessions", "Current active NETCONF sessions.")
 	writeMetricType(&b, "arca_router_netconf_active_sessions", "gauge")
