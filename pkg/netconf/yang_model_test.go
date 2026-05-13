@@ -112,13 +112,33 @@ func TestYANGValidator_ValidateElementPath(t *testing.T) {
 			wantErr: false,
 		},
 		{
+			name:    "valid chassis path",
+			path:    "/chassis",
+			wantErr: false,
+		},
+		{
 			name:    "valid routing-options path",
 			path:    "/routing-options",
 			wantErr: false,
 		},
 		{
+			name:    "valid routing-instances path",
+			path:    "/routing-instances",
+			wantErr: false,
+		},
+		{
 			name:    "valid protocols path",
 			path:    "/protocols",
+			wantErr: false,
+		},
+		{
+			name:    "valid class-of-service path",
+			path:    "/class-of-service",
+			wantErr: false,
+		},
+		{
+			name:    "valid security path",
+			path:    "/security",
 			wantErr: false,
 		},
 		{

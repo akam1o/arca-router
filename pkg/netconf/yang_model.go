@@ -157,17 +157,25 @@ func (v *YANGValidator) ValidateElementPath(path string) error {
 	// Phase 3: Basic allowlist validation
 	// Accept paths matching top-level containers:
 	// - /system
+	// - /chassis
 	// - /interfaces
 	// - /routing-options
+	// - /routing-instances
 	// - /protocols
+	// - /class-of-service
+	// - /security
 	// - /state (read-only)
 
 	allowedPaths := map[string]bool{
-		"/system":          true,
-		"/interfaces":      true,
-		"/routing-options": true,
-		"/protocols":       true,
-		"/state":           true,
+		"/system":            true,
+		"/chassis":           true,
+		"/interfaces":        true,
+		"/routing-options":   true,
+		"/routing-instances": true,
+		"/protocols":         true,
+		"/class-of-service":  true,
+		"/security":          true,
+		"/state":             true,
 	}
 
 	// For Phase 3, we only validate the first path segment
