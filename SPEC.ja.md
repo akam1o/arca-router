@@ -610,6 +610,8 @@ set security netconf ssh port 830
 
 **注**: NETCONF サーバは `arca-routerd` に統合されています。`--netconf-listen` を省略した場合、daemon は `security netconf ssh port` の設定ポートで listen します。未設定の場合は `:830` を使用します。`--netconf-listen` は明示的な runtime override として残り、listen address も含めて指定できます。
 
+NETCONF XML の get-config/edit-config は、v0.6 management-plane model の `system services`、`chassis cluster`、`protocols mpls`、`protocols vrrp`、`routing-instances`、`class-of-service`、および非機密の `security netconf` / `security rate-limit` 設定に対応します。Security user の secret は NETCONF XML 応答には意図的に出力しません。
+
 <a id="user-management"></a>
 ### ユーザ管理
 
