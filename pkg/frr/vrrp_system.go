@@ -2,18 +2,25 @@ package frr
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"hash/crc32"
 	"net"
+	"os"
 	"os/exec"
+	"path/filepath"
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 )
 
 const (
-	vrrpIPv4Family = 4
-	vrrpIPv6Family = 6
+	vrrpIPv4Family          = 4
+	vrrpIPv6Family          = 6
+	defaultVRRPStatePath    = "/var/lib/arca-router/vrrp-interfaces.json"
+	defaultVRRPStatePerm    = 0600
+	defaultVRRPStateDirPerm = 0750
 )
 
 // VRRPSystemPreparer prepares Linux interfaces required by FRR vrrpd.
@@ -26,8 +33,11 @@ type IPCommandRunner func(ctx context.Context, args ...string) ([]byte, error)
 
 // IPVRRPSystemPreparer reconciles arca-owned macvlan interfaces for VRRP.
 type IPVRRPSystemPreparer struct {
-	run        IPCommandRunner
-	knownNames map[string]bool
+	mu          sync.Mutex
+	run         IPCommandRunner
+	statePath   string
+	stateLoaded bool
+	knownNames  map[string]bool
 }
 
 type vrrpSystemInterface struct {
@@ -41,17 +51,36 @@ type vrrpSystemInterface struct {
 func NewIPVRRPSystemPreparer(run IPCommandRunner) *IPVRRPSystemPreparer {
 	if run == nil {
 		run = runIPCommand
+		return NewIPVRRPSystemPreparerWithState(run, defaultVRRPStatePath)
 	}
 	return &IPVRRPSystemPreparer{run: run, knownNames: make(map[string]bool)}
 }
 
+// NewIPVRRPSystemPreparerWithState creates an iproute2-backed preparer with state persistence.
+func NewIPVRRPSystemPreparerWithState(run IPCommandRunner, statePath string) *IPVRRPSystemPreparer {
+	if run == nil {
+		run = runIPCommand
+	}
+	return &IPVRRPSystemPreparer{
+		run:        run,
+		statePath:  statePath,
+		knownNames: make(map[string]bool),
+	}
+}
+
 // Prepare creates or updates arca-owned macvlan interfaces used by FRR VRRP.
 func (p *IPVRRPSystemPreparer) Prepare(ctx context.Context, cfg *Config) error {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+
 	if p.run == nil {
 		p.run = runIPCommand
 	}
 	if p.knownNames == nil {
 		p.knownNames = make(map[string]bool)
+	}
+	if err := p.loadState(); err != nil {
+		return NewApplyError("load VRRP interface state", err)
 	}
 	var vrrpConfig *VRRPConfig
 	if cfg != nil {
@@ -77,6 +106,9 @@ func (p *IPVRRPSystemPreparer) Prepare(ctx context.Context, cfg *Config) error {
 		}
 	}
 	p.knownNames = desired
+	if err := p.saveState(); err != nil {
+		return NewApplyError("save VRRP interface state", err)
+	}
 	return nil
 }
 
@@ -113,6 +145,60 @@ func (p *IPVRRPSystemPreparer) ensureInterface(ctx context.Context, iface vrrpSy
 		}
 	}
 	return nil
+}
+
+func (p *IPVRRPSystemPreparer) loadState() error {
+	if p.stateLoaded || p.statePath == "" {
+		p.stateLoaded = true
+		return nil
+	}
+	data, err := os.ReadFile(p.statePath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			p.stateLoaded = true
+			return nil
+		}
+		return err
+	}
+	var names []string
+	if len(data) > 0 {
+		if err := json.Unmarshal(data, &names); err != nil {
+			return err
+		}
+	}
+	for _, name := range names {
+		if isArcaVRRPInterfaceName(name) {
+			p.knownNames[name] = true
+		}
+	}
+	p.stateLoaded = true
+	return nil
+}
+
+func (p *IPVRRPSystemPreparer) saveState() error {
+	if p.statePath == "" {
+		return nil
+	}
+	if len(p.knownNames) == 0 {
+		if err := os.Remove(p.statePath); err != nil && !os.IsNotExist(err) {
+			return err
+		}
+		return nil
+	}
+	names := make([]string, 0, len(p.knownNames))
+	for name := range p.knownNames {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	data, err := json.MarshalIndent(names, "", "  ")
+	if err != nil {
+		return err
+	}
+	data = append(data, '\n')
+	if err := os.MkdirAll(filepath.Dir(p.statePath), defaultVRRPStateDirPerm); err != nil {
+		return err
+	}
+	return os.WriteFile(p.statePath, data, defaultVRRPStatePerm)
 }
 
 func vrrpSystemInterfaces(cfg *VRRPConfig) ([]vrrpSystemInterface, error) {
