@@ -253,7 +253,7 @@ jobs:
       uses: softprops/action-gh-release@v2
       with:
         tag_name: ${{ needs.prepare.outputs.tag }}
-        name: arca-router ${{ needs.prepare.outputs.tag }}
+        name: ${{ needs.prepare.outputs.tag }}
         generate_release_notes: true
         files: |
           dist/*.deb
