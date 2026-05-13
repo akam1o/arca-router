@@ -39,6 +39,10 @@ Exported metrics:
 - `arca_router_cluster_nodes`
 - `arca_router_cluster_sync_etcd_configured`
 - `arca_router_cluster_sync_aligned`
+- `arca_router_ha_configured`
+- `arca_router_ha_converged`
+- `arca_router_ha_vrrp_groups`
+- `arca_router_ha_convergence_issues`
 - `arca_router_vpp_lcp_pairs`
 - `arca_router_vpp_lcp_inconsistencies`
 - `arca_router_vpp_lcp_reconcile_error`
@@ -87,7 +91,9 @@ Endpoints:
 - `POST /api/config/validate`
 - `POST /api/config/commit`
 
-The Web UI is intended for trusted management networks. It exposes the same daemon status used by the metrics endpoint, including datastore backend, etcd config sync health, cluster sync alignment, and VPP LCP reconciliation state. It also exposes the running configuration in set-command format through `/api/config`, renders it in the dashboard editor, shows recent commit history from `/api/config/history`, and can validate or commit edited set-command text.
+The Web UI is intended for trusted management networks. It exposes the same daemon status used by the metrics endpoint, including datastore backend, etcd config sync health, cluster sync alignment, HA convergence, and VPP LCP reconciliation state. It also exposes the running configuration in set-command format through `/api/config`, renders it in the dashboard editor, shows recent commit history from `/api/config/history`, and can validate or commit edited set-command text.
+
+HA convergence is evaluated when chassis clustering is enabled and at least one VRRP group is configured. The status is converged only when there are at least two cluster nodes, etcd cluster sync is configured and aligned with the daemon datastore, the etcd config synchronizer is healthy, and VPP LCP reconciliation has run without errors or inconsistencies.
 
 When the running configuration contains password-backed `security users`, the Web UI requires HTTP Basic authentication. The `read-only`, `operator`, and `admin` roles can access the read-only dashboard and API endpoints.
 
@@ -163,6 +169,10 @@ arca-router custom OIDs currently use the provisional experimental base `1.3.6.1
 | `1.3.6.1.3.9950.1.12.0` | `arcaRouterVppLcpInconsistencies` |
 | `1.3.6.1.3.9950.1.13.0` | `arcaRouterVppLcpReconcileError` |
 | `1.3.6.1.3.9950.1.14.0` | `arcaRouterVppLcpLastReconcile` |
+| `1.3.6.1.3.9950.1.15.0` | `arcaRouterHaConfigured` |
+| `1.3.6.1.3.9950.1.16.0` | `arcaRouterHaConverged` |
+| `1.3.6.1.3.9950.1.17.0` | `arcaRouterHaVrrpGroups` |
+| `1.3.6.1.3.9950.1.18.0` | `arcaRouterHaConvergenceIssues` |
 
 Example:
 
