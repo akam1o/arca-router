@@ -3,6 +3,8 @@ package frr
 import (
 	"context"
 	"errors"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -122,6 +124,53 @@ func TestIPVRRPSystemPreparerCleansKnownInterfacesOnRemoval(t *testing.T) {
 	}
 	if !containsCommand(commands, "link delete "+name) {
 		t.Fatalf("commands missing cleanup for %q:\n%s", name, strings.Join(commands, "\n"))
+	}
+}
+
+func TestIPVRRPSystemPreparerPersistsCleanupAcrossRestart(t *testing.T) {
+	statePath := filepath.Join(t.TempDir(), "vrrp-interfaces.json")
+	name := vrrpMacvlanName(vrrpIPv4Family, "ge0-0-0", 10)
+	var commands []string
+	run := func(ctx context.Context, args ...string) ([]byte, error) {
+		command := strings.Join(args, " ")
+		commands = append(commands, command)
+		switch command {
+		case "link show":
+			return []byte("9: " + name + "@ge0-0-0: <BROADCAST,MULTICAST>\n"), nil
+		case "link show dev " + name:
+			return nil, errors.New("link missing")
+		default:
+			return nil, nil
+		}
+	}
+
+	preparer := NewIPVRRPSystemPreparerWithState(run, statePath)
+	err := preparer.Prepare(context.Background(), &Config{
+		VRRP: &VRRPConfig{Groups: []VRRPGroup{
+			{ID: 10, Interface: "ge0-0-0", VirtualAddress: "192.0.2.254"},
+		}},
+	})
+	if err != nil {
+		t.Fatalf("initial Prepare() error = %v", err)
+	}
+	data, err := os.ReadFile(statePath)
+	if err != nil {
+		t.Fatalf("ReadFile(%q) error = %v", statePath, err)
+	}
+	if !strings.Contains(string(data), name) {
+		t.Fatalf("state file missing %q:\n%s", name, data)
+	}
+
+	commands = nil
+	restarted := NewIPVRRPSystemPreparerWithState(run, statePath)
+	if err := restarted.Prepare(context.Background(), &Config{}); err != nil {
+		t.Fatalf("restarted Prepare() error = %v", err)
+	}
+	if !containsCommand(commands, "link delete "+name) {
+		t.Fatalf("commands missing cleanup for %q after restart:\n%s", name, strings.Join(commands, "\n"))
+	}
+	if _, err := os.Stat(statePath); !os.IsNotExist(err) {
+		t.Fatalf("state file still exists after cleanup: %v", err)
 	}
 }
 
