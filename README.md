@@ -229,7 +229,7 @@ sudo journalctl -u arca-routerd -n 50
 # View running configuration with arca
 arca show configuration
 
-# Check operational state, interface counters, and queue placement through arca-routerd
+# Check operational state, interface counters, QoS profile, and queue placement through arca-routerd
 arca show interfaces
 arca show route
 arca show bgp summary

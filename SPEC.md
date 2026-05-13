@@ -487,7 +487,7 @@ set protocols bgp group external import PREFER-CUSTOMER
 <a id="advanced-v06-configuration"></a>
 ## Advanced v0.6 Configuration
 
-The following hierarchies are part of the v0.6 management-plane model. Parser, serializer, validation, clone, conversion, diff, and candidate command replacement support are implemented. FRR VRRP application, VPP MPLS interface forwarding, VPP routing-instance table plumbing, FRR L3VPN import/export control, VPP class-of-service profile binding, NETCONF live interface state, and VPP queue placement telemetry are implemented; queue scheduler/policer enforcement and operational QoS counters are staged separately.
+The following hierarchies are part of the v0.6 management-plane model. Parser, serializer, validation, clone, conversion, diff, and candidate command replacement support are implemented. FRR VRRP application, VPP MPLS interface forwarding, VPP routing-instance table plumbing, FRR L3VPN import/export control, VPP class-of-service profile binding and operational visibility, NETCONF live interface state, and VPP queue placement telemetry are implemented; queue scheduler/policer enforcement and operational QoS counters are staged separately.
 
 Class-of-service interface bindings are applied to managed VPP interfaces as output traffic-control profile intent. VRRP and L3VPN control-plane configuration are applied by the FRR file backend and the default transactional FRR backend.
 
@@ -607,9 +607,9 @@ set security netconf ssh port 830
 
 NETCONF XML get-config/edit-config supports the v0.6 management-plane model for `system services`, `chassis cluster`, `protocols mpls`, `protocols vrrp`, `routing-instances`, `class-of-service`, and non-sensitive `security netconf` / `security rate-limit` settings. Security user secrets are intentionally not emitted in NETCONF XML replies.
 
-NETCONF `<get>` returns config-derived system/routing state and, when arca-routerd can collect VPP state, live managed interface admin/oper status, physical address, counters (`rx-packets`, `tx-packets`, `rx-bytes`, `tx-bytes`, `rx-errors`, `tx-errors`, `drops`), and VPP RX/TX queue placement. If live collection fails, interface output falls back to configured addresses with unknown operational status.
+NETCONF `<get>` returns config-derived system/routing state and, when arca-routerd can collect VPP state, live managed interface admin/oper status, physical address, bound `qos-profile`, counters (`rx-packets`, `tx-packets`, `rx-bytes`, `tx-bytes`, `rx-errors`, `tx-errors`, `drops`), and VPP RX/TX queue placement. If live collection fails, interface output falls back to configured addresses with unknown operational status.
 
-The internal gRPC interface state API and `arca show interfaces` expose the same packet counters and queue placement summary for local operators.
+The internal gRPC interface state API and `arca show interfaces` expose the same bound QoS profile, packet counters, and queue placement summary for local operators.
 
 The server hello advertises the arca-router YANG module capability as `urn:arca:router:config:1.0?module=arca-router&revision=2025-12-27`.
 
@@ -1071,7 +1071,7 @@ arca show ospf neighbor
 arca show configuration
 ```
 
-`show interfaces` prints live VPP admin/oper status, packet counters, and RX/TX queue placement when available.
+`show interfaces` prints live VPP admin/oper status, bound QoS profile, packet counters, and RX/TX queue placement when available.
 
 Interactive mode also supports `show history [N]` in configuration mode for commit history.
 
