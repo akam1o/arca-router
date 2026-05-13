@@ -442,6 +442,10 @@ func (s *Server) GetInterfaces(ctx context.Context, nameFilter string) ([]Interf
 	if err != nil {
 		s.log.Debug("failed to list VPP interface counters", slog.Any("error", err))
 	}
+	queuesByIndex, err := client.ListInterfaceQueuePlacements(ctx)
+	if err != nil {
+		s.log.Debug("failed to list VPP interface queue placements", slog.Any("error", err))
+	}
 
 	out := make([]InterfaceInfo, 0, len(ifaces))
 	for _, iface := range ifaces {
@@ -465,12 +469,40 @@ func (s *Server) GetInterfaces(ctx context.Context, nameFilter string) ([]Interf
 			info.RxErrors = counters.RxErrors
 			info.TxErrors = counters.TxErrors
 		}
+		if queues, ok := queuesByIndex[iface.SwIfIndex]; ok {
+			info.RxQueues = rxQueueInfosFromVPP(queues.Rx)
+			info.TxQueues = txQueueInfosFromVPP(queues.Tx)
+		}
 		out = append(out, info)
 	}
 	sort.Slice(out, func(i, j int) bool {
 		return out[i].Name < out[j].Name
 	})
 	return out, nil
+}
+
+func rxQueueInfosFromVPP(queues []pkgvpp.InterfaceRxQueuePlacement) []InterfaceRxQueueInfo {
+	infos := make([]InterfaceRxQueueInfo, 0, len(queues))
+	for _, queue := range queues {
+		infos = append(infos, InterfaceRxQueueInfo{
+			QueueID:  queue.QueueID,
+			WorkerID: queue.WorkerID,
+			Mode:     queue.Mode,
+		})
+	}
+	return infos
+}
+
+func txQueueInfosFromVPP(queues []pkgvpp.InterfaceTxQueuePlacement) []InterfaceTxQueueInfo {
+	infos := make([]InterfaceTxQueueInfo, 0, len(queues))
+	for _, queue := range queues {
+		infos = append(infos, InterfaceTxQueueInfo{
+			QueueID: queue.QueueID,
+			Shared:  queue.Shared,
+			Threads: append([]uint32(nil), queue.Threads...),
+		})
+	}
+	return infos
 }
 
 // GetRoutes returns routing table entries.

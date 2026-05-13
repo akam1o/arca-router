@@ -216,6 +216,20 @@ message InterfaceState {
   uint64 tx_bytes = 10;
   uint64 rx_errors = 11;
   uint64 tx_errors = 12;
+  repeated InterfaceRxQueue rx_queues = 13;
+  repeated InterfaceTxQueue tx_queues = 14;
+}
+
+message InterfaceRxQueue {
+  uint32 queue_id = 1;
+  uint32 worker_id = 2;
+  string mode = 3;
+}
+
+message InterfaceTxQueue {
+  uint32 queue_id = 1;
+  bool shared = 2;
+  repeated uint32 threads = 3;
 }
 
 message GetRoutesRequest {

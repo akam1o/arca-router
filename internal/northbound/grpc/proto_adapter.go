@@ -153,9 +153,35 @@ func (a *stateServiceAdapter) GetInterfaces(ctx context.Context, req *apiv1.GetI
 			TxBytes:     iface.TxBytes,
 			RxErrors:    iface.RxErrors,
 			TxErrors:    iface.TxErrors,
+			RxQueues:    rxQueuesToProto(iface.RxQueues),
+			TxQueues:    txQueuesToProto(iface.TxQueues),
 		})
 	}
 	return resp, nil
+}
+
+func rxQueuesToProto(queues []InterfaceRxQueueInfo) []*apiv1.InterfaceRxQueue {
+	out := make([]*apiv1.InterfaceRxQueue, 0, len(queues))
+	for _, queue := range queues {
+		out = append(out, &apiv1.InterfaceRxQueue{
+			QueueId:  queue.QueueID,
+			WorkerId: queue.WorkerID,
+			Mode:     queue.Mode,
+		})
+	}
+	return out
+}
+
+func txQueuesToProto(queues []InterfaceTxQueueInfo) []*apiv1.InterfaceTxQueue {
+	out := make([]*apiv1.InterfaceTxQueue, 0, len(queues))
+	for _, queue := range queues {
+		out = append(out, &apiv1.InterfaceTxQueue{
+			QueueId: queue.QueueID,
+			Shared:  queue.Shared,
+			Threads: append([]uint32(nil), queue.Threads...),
+		})
+	}
+	return out
 }
 
 func (a *stateServiceAdapter) GetRoutes(ctx context.Context, req *apiv1.GetRoutesRequest) (*apiv1.GetRoutesResponse, error) {

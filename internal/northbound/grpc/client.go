@@ -349,6 +349,32 @@ func interfaceInfosFromProto(interfaces []*apiv1.InterfaceState) []InterfaceInfo
 			TxBytes:     iface.GetTxBytes(),
 			RxErrors:    iface.GetRxErrors(),
 			TxErrors:    iface.GetTxErrors(),
+			RxQueues:    rxQueueInfosFromProto(iface.GetRxQueues()),
+			TxQueues:    txQueueInfosFromProto(iface.GetTxQueues()),
+		})
+	}
+	return infos
+}
+
+func rxQueueInfosFromProto(queues []*apiv1.InterfaceRxQueue) []InterfaceRxQueueInfo {
+	infos := make([]InterfaceRxQueueInfo, 0, len(queues))
+	for _, queue := range queues {
+		infos = append(infos, InterfaceRxQueueInfo{
+			QueueID:  queue.GetQueueId(),
+			WorkerID: queue.GetWorkerId(),
+			Mode:     queue.GetMode(),
+		})
+	}
+	return infos
+}
+
+func txQueueInfosFromProto(queues []*apiv1.InterfaceTxQueue) []InterfaceTxQueueInfo {
+	infos := make([]InterfaceTxQueueInfo, 0, len(queues))
+	for _, queue := range queues {
+		infos = append(infos, InterfaceTxQueueInfo{
+			QueueID: queue.GetQueueId(),
+			Shared:  queue.GetShared(),
+			Threads: append([]uint32(nil), queue.GetThreads()...),
 		})
 	}
 	return infos
@@ -409,6 +435,22 @@ type InterfaceInfo struct {
 	TxBytes     uint64
 	RxErrors    uint64
 	TxErrors    uint64
+	RxQueues    []InterfaceRxQueueInfo
+	TxQueues    []InterfaceTxQueueInfo
+}
+
+// InterfaceRxQueueInfo maps an RX queue to a VPP worker.
+type InterfaceRxQueueInfo struct {
+	QueueID  uint32
+	WorkerID uint32
+	Mode     string
+}
+
+// InterfaceTxQueueInfo maps a TX queue to VPP worker threads.
+type InterfaceTxQueueInfo struct {
+	QueueID uint32
+	Shared  bool
+	Threads []uint32
 }
 
 // RouteInfo represents a routing table entry.

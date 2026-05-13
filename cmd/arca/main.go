@@ -893,14 +893,47 @@ func printInterfaces(ifaces []grpcclient.InterfaceInfo) {
 		fmt.Println("No interfaces found")
 		return
 	}
-	fmt.Printf("%-20s %-8s %-8s %-6s %-18s %-10s %-12s %s\n",
-		"Interface", "Admin", "Oper", "MTU", "MAC", "Speed", "RX-Packets", "TX-Packets")
-	fmt.Println(strings.Repeat("-", 106))
+	fmt.Printf("%-20s %-8s %-8s %-6s %-18s %-10s %-12s %-12s %s\n",
+		"Interface", "Admin", "Oper", "MTU", "MAC", "Speed", "RX-Packets", "TX-Packets", "Queues")
+	fmt.Println(strings.Repeat("-", 126))
 	for _, iface := range ifaces {
-		fmt.Printf("%-20s %-8s %-8s %-6d %-18s %-10d %-12d %d\n",
+		fmt.Printf("%-20s %-8s %-8s %-6d %-18s %-10d %-12d %-12d %s\n",
 			iface.Name, iface.AdminStatus, iface.OperStatus,
-			iface.MTU, iface.MAC, iface.Speed, iface.RxPackets, iface.TxPackets)
+			iface.MTU, iface.MAC, iface.Speed, iface.RxPackets, iface.TxPackets, interfaceQueueSummary(iface))
 	}
+}
+
+func interfaceQueueSummary(iface grpcclient.InterfaceInfo) string {
+	var parts []string
+	for _, queue := range iface.RxQueues {
+		mode := queue.Mode
+		if mode == "" {
+			mode = "unknown"
+		}
+		parts = append(parts, fmt.Sprintf("rx%d:w%d/%s", queue.QueueID, queue.WorkerID, mode))
+	}
+	for _, queue := range iface.TxQueues {
+		suffix := ""
+		if queue.Shared {
+			suffix = "*"
+		}
+		parts = append(parts, fmt.Sprintf("tx%d:%s%s", queue.QueueID, formatQueueThreads(queue.Threads), suffix))
+	}
+	if len(parts) == 0 {
+		return "-"
+	}
+	return strings.Join(parts, " ")
+}
+
+func formatQueueThreads(threads []uint32) string {
+	if len(threads) == 0 {
+		return "[]"
+	}
+	parts := make([]string, 0, len(threads))
+	for _, thread := range threads {
+		parts = append(parts, strconv.FormatUint(uint64(thread), 10))
+	}
+	return "[" + strings.Join(parts, ",") + "]"
 }
 
 func printCommandOutput(output string) {

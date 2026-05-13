@@ -337,6 +337,23 @@ func TestCmdShowOSPFNeighborReturnsOutput(t *testing.T) {
 	}
 }
 
+func TestInterfaceQueueSummary(t *testing.T) {
+	got := interfaceQueueSummary(grpcclient.InterfaceInfo{
+		RxQueues: []grpcclient.InterfaceRxQueueInfo{
+			{QueueID: 0, WorkerID: 1, Mode: "polling"},
+		},
+		TxQueues: []grpcclient.InterfaceTxQueueInfo{
+			{QueueID: 0, Shared: true, Threads: []uint32{0, 2}},
+		},
+	})
+	if got != "rx0:w1/polling tx0:[0,2]*" {
+		t.Fatalf("interfaceQueueSummary() = %q", got)
+	}
+	if got := interfaceQueueSummary(grpcclient.InterfaceInfo{}); got != "-" {
+		t.Fatalf("interfaceQueueSummary(empty) = %q, want -", got)
+	}
+}
+
 func TestOneShotShowOSPFNeighborReturnsSuccess(t *testing.T) {
 	client := &fakeInteractiveClient{}
 	code := oneShotShow(context.Background(), client, []string{"ospf", "neighbor"}, &cliFlags{})
