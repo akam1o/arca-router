@@ -438,6 +438,10 @@ func (s *Server) GetInterfaces(ctx context.Context, nameFilter string) ([]Interf
 	if err != nil {
 		return nil, fmt.Errorf("list VPP interfaces: %w", err)
 	}
+	countersByIndex, err := client.ListInterfaceCounters(ctx)
+	if err != nil {
+		s.log.Debug("failed to list VPP interface counters", slog.Any("error", err))
+	}
 
 	out := make([]InterfaceInfo, 0, len(ifaces))
 	for _, iface := range ifaces {
@@ -447,12 +451,21 @@ func (s *Server) GetInterfaces(ctx context.Context, nameFilter string) ([]Interf
 		if nameFilter != "" && iface.Name != nameFilter {
 			continue
 		}
-		out = append(out, InterfaceInfo{
+		info := InterfaceInfo{
 			Name:        iface.Name,
 			AdminStatus: upDown(iface.AdminUp),
 			OperStatus:  upDown(iface.LinkUp),
 			MAC:         iface.MAC.String(),
-		})
+		}
+		if counters, ok := countersByIndex[iface.SwIfIndex]; ok {
+			info.RxPackets = counters.RxPackets
+			info.TxPackets = counters.TxPackets
+			info.RxBytes = counters.RxBytes
+			info.TxBytes = counters.TxBytes
+			info.RxErrors = counters.RxErrors
+			info.TxErrors = counters.TxErrors
+		}
+		out = append(out, info)
 	}
 	sort.Slice(out, func(i, j int) bool {
 		return out[i].Name < out[j].Name

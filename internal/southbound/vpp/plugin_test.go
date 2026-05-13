@@ -194,6 +194,50 @@ func TestApplyChangesRemovesInterfaceWithoutLCPPair(t *testing.T) {
 	}
 }
 
+func TestCollectStateIncludesInterfaceCounters(t *testing.T) {
+	ctx := context.Background()
+	client := pkgvpp.NewMockClient()
+	plugin := NewVPPPlugin(client, &device.HardwareConfig{
+		Interfaces: []device.PhysicalInterface{
+			{Name: "ge-0/0/0", PCI: "0000:03:00.0", Driver: "avf"},
+		},
+	}, testLogger())
+	if err := plugin.Init(ctx); err != nil {
+		t.Fatalf("Init() error = %v", err)
+	}
+	t.Cleanup(func() { _ = plugin.Close() })
+
+	cfg := model.NewRouterConfig()
+	cfg.Interfaces["ge-0/0/0"] = &model.InterfaceConfig{Units: map[int]*model.Unit{}}
+	if err := plugin.ApplyChanges(ctx, engine.ComputeDiff(model.NewRouterConfig(), cfg)); err != nil {
+		t.Fatalf("ApplyChanges() error = %v", err)
+	}
+	idx, ok := plugin.GetInterfaceIndex("ge-0/0/0")
+	if !ok {
+		t.Fatal("ApplyChanges() did not add interface index")
+	}
+	client.SetInterfaceCounters(idx, pkgvpp.InterfaceCounters{
+		RxPackets: 10,
+		TxPackets: 20,
+		RxBytes:   1000,
+		TxBytes:   2000,
+		RxErrors:  1,
+		TxErrors:  2,
+		Drops:     3,
+	})
+
+	state, err := plugin.CollectState(ctx)
+	if err != nil {
+		t.Fatalf("CollectState() error = %v", err)
+	}
+	if state["ge-0/0/0"].Counters == nil {
+		t.Fatal("CollectState() did not include counters")
+	}
+	if got := *state["ge-0/0/0"].Counters; got.RxPackets != 10 || got.TxPackets != 20 || got.RxBytes != 1000 || got.TxBytes != 2000 || got.RxErrors != 1 || got.TxErrors != 2 || got.Drops != 3 {
+		t.Fatalf("CollectState() counters = %#v, want VPP counters", got)
+	}
+}
+
 func TestInitRecordsLCPReconciliationStatus(t *testing.T) {
 	ctx := context.Background()
 	client := pkgvpp.NewMockClient()

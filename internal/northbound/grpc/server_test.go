@@ -197,6 +197,14 @@ func TestOperationalStateEndpointsReadVPPAndFRR(t *testing.T) {
 	if err := vppClient.SetInterfaceUp(ctx, iface.SwIfIndex); err != nil {
 		t.Fatalf("mock VPP SetInterfaceUp() error = %v", err)
 	}
+	vppClient.SetInterfaceCounters(iface.SwIfIndex, pkgvpp.InterfaceCounters{
+		RxPackets: 100,
+		TxPackets: 200,
+		RxBytes:   1000,
+		TxBytes:   2000,
+		RxErrors:  1,
+		TxErrors:  2,
+	})
 	if err := vppClient.Close(); err != nil {
 		t.Fatalf("mock VPP Close() error = %v", err)
 	}
@@ -214,6 +222,9 @@ func TestOperationalStateEndpointsReadVPPAndFRR(t *testing.T) {
 	}
 	if ifaces[0].Name != iface.Name || ifaces[0].AdminStatus != "up" || ifaces[0].OperStatus != "up" {
 		t.Fatalf("GetInterfaces()[0] = %#v, want operational VPP state", ifaces[0])
+	}
+	if ifaces[0].RxPackets != 100 || ifaces[0].TxPackets != 200 || ifaces[0].RxBytes != 1000 || ifaces[0].TxBytes != 2000 || ifaces[0].RxErrors != 1 || ifaces[0].TxErrors != 2 {
+		t.Fatalf("GetInterfaces()[0] counters = %#v, want VPP counters", ifaces[0])
 	}
 
 	var commands []string

@@ -19,6 +19,7 @@ type MockClient struct {
 	ipTables       map[ipTableKey]IPTable
 	interfaceTable map[interfaceTableKey]uint32
 	qosProfiles    map[uint32]QoSProfile
+	counters       map[uint32]InterfaceCounters
 	nextIfIdx      uint32
 
 	// Hooks for testing error scenarios
@@ -34,6 +35,7 @@ type MockClient struct {
 	SetInterfaceTableError      error
 	SetQoSProfileError          error
 	ClearQoSProfileError        error
+	ListInterfaceCountersError  error
 	GetInterfaceError           error
 	ListInterfacesError         error
 	CreateLCPInterfaceError     error
@@ -51,6 +53,7 @@ func NewMockClient() *MockClient {
 		ipTables:       make(map[ipTableKey]IPTable),
 		interfaceTable: make(map[interfaceTableKey]uint32),
 		qosProfiles:    make(map[uint32]QoSProfile),
+		counters:       make(map[uint32]InterfaceCounters),
 		nextIfIdx:      1, // Start from 1 (0 is reserved for local0)
 	}
 }
@@ -677,6 +680,41 @@ func cloneQoSProfile(profile QoSProfile) QoSProfile {
 	return profile
 }
 
+// ListInterfaceCounters returns mock packet and byte counters by interface index.
+func (m *MockClient) ListInterfaceCounters(ctx context.Context) (map[uint32]InterfaceCounters, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	if m.ListInterfaceCountersError != nil {
+		return nil, m.ListInterfaceCountersError
+	}
+
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	if !m.connected {
+		return nil, errors.New(
+			errors.ErrCodeVPPConnection,
+			"Not connected to VPP",
+			"VPP connection not established",
+			"Connect to VPP before listing interface counters",
+		)
+	}
+
+	counters := make(map[uint32]InterfaceCounters, len(m.counters))
+	for ifIndex, value := range m.counters {
+		counters[ifIndex] = value
+	}
+	return counters, nil
+}
+
+// SetInterfaceCounters sets mock counters for a VPP interface.
+func (m *MockClient) SetInterfaceCounters(ifIndex uint32, counters InterfaceCounters) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.counters[ifIndex] = counters
+}
+
 // GetInterface retrieves mock interface information by index
 func (m *MockClient) GetInterface(ctx context.Context, ifIndex uint32) (*Interface, error) {
 	if m.GetInterfaceError != nil {
@@ -748,6 +786,7 @@ func (m *MockClient) Reset() {
 	m.ipTables = make(map[ipTableKey]IPTable)
 	m.interfaceTable = make(map[interfaceTableKey]uint32)
 	m.qosProfiles = make(map[uint32]QoSProfile)
+	m.counters = make(map[uint32]InterfaceCounters)
 	m.nextIfIdx = 1
 
 	m.ConnectError = nil
@@ -762,6 +801,7 @@ func (m *MockClient) Reset() {
 	m.SetInterfaceTableError = nil
 	m.SetQoSProfileError = nil
 	m.ClearQoSProfileError = nil
+	m.ListInterfaceCountersError = nil
 	m.GetInterfaceError = nil
 	m.ListInterfacesError = nil
 	m.CreateLCPInterfaceError = nil

@@ -893,13 +893,13 @@ func printInterfaces(ifaces []grpcclient.InterfaceInfo) {
 		fmt.Println("No interfaces found")
 		return
 	}
-	fmt.Printf("%-20s %-8s %-8s %-6s %-18s %s\n",
-		"Interface", "Admin", "Oper", "MTU", "MAC", "Speed")
-	fmt.Println(strings.Repeat("-", 78))
+	fmt.Printf("%-20s %-8s %-8s %-6s %-18s %-10s %-12s %s\n",
+		"Interface", "Admin", "Oper", "MTU", "MAC", "Speed", "RX-Packets", "TX-Packets")
+	fmt.Println(strings.Repeat("-", 106))
 	for _, iface := range ifaces {
-		fmt.Printf("%-20s %-8s %-8s %-6d %-18s %d\n",
+		fmt.Printf("%-20s %-8s %-8s %-6d %-18s %-10d %-12d %d\n",
 			iface.Name, iface.AdminStatus, iface.OperStatus,
-			iface.MTU, iface.MAC, iface.Speed)
+			iface.MTU, iface.MAC, iface.Speed, iface.RxPackets, iface.TxPackets)
 	}
 }
 

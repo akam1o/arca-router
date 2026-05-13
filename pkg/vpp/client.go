@@ -65,6 +65,9 @@ type Client interface {
 	// ClearQoSProfile removes output QoS policy intent from an interface.
 	ClearQoSProfile(ctx context.Context, ifIndex uint32) error
 
+	// ListInterfaceCounters returns packet and byte counters by VPP interface index.
+	ListInterfaceCounters(ctx context.Context) (map[uint32]InterfaceCounters, error)
+
 	// GetInterface retrieves interface information by index
 	GetInterface(ctx context.Context, ifIndex uint32) (*Interface, error)
 
@@ -163,6 +166,17 @@ type QoSProfile struct {
 type QoSQueue struct {
 	ForwardingClass string
 	Queue           uint8
+}
+
+// InterfaceCounters holds VPP packet, byte, error, and drop counters.
+type InterfaceCounters struct {
+	RxPackets uint64
+	TxPackets uint64
+	RxBytes   uint64
+	TxBytes   uint64
+	RxErrors  uint64
+	TxErrors  uint64
+	Drops     uint64
 }
 
 // InterfaceType represents the type of interface
