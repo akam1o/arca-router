@@ -162,8 +162,8 @@ func parseFlags() *daemonFlags {
 		"Web UI listen address (overrides system services web-ui config; disabled when empty and config disabled)")
 	flag.StringVar(&f.snmpListen, "snmp-listen", "",
 		"SNMPv2c UDP listen address (disabled when empty)")
-	flag.StringVar(&f.snmpCommunity, "snmp-community", "public",
-		"SNMPv2c read-only community")
+	flag.StringVar(&f.snmpCommunity, "snmp-community", "",
+		"SNMPv2c read-only community (overrides system services snmp config; default: public)")
 	flag.StringVar(&f.frrApplyMode, "frr-apply-mode", string(pkgfrr.BackendModeTransactional),
 		"FRR apply backend: transactional or file")
 
@@ -431,8 +431,8 @@ func run(ctx context.Context, f *daemonFlags, log *logger.Logger) error {
 
 	// --- Step 12: Start SNMP endpoint ---
 	var snmpErr <-chan error
-	if f.snmpListen != "" {
-		snmpErr, err = startSNMPServer(ctx, f.snmpListen, f.snmpCommunity, observabilitySource, log)
+	if snmpListen := effectiveSNMPListen(f.snmpListen, eng.RunningSnapshot()); snmpListen != "" {
+		snmpErr, err = startSNMPServer(ctx, snmpListen, effectiveSNMPCommunity(f.snmpCommunity, eng.RunningSnapshot()), observabilitySource, log)
 		if err != nil {
 			grpcServer.Stop()
 			return err

@@ -141,9 +141,10 @@ func (p *Parser) parseSystem(config *Config) error {
 }
 
 func (p *Parser) parseSystemServices(config *Config) error {
-	if p.current.Type != TokenWord || p.current.Value != "web-ui" {
+	if p.current.Type != TokenWord {
 		return p.error("expected system service name")
 	}
+	service := p.current.Value
 	p.nextToken()
 
 	if config.System == nil {
@@ -152,10 +153,22 @@ func (p *Parser) parseSystemServices(config *Config) error {
 	if config.System.Services == nil {
 		config.System.Services = &SystemServicesConfig{}
 	}
-	if config.System.Services.WebUI == nil {
-		config.System.Services.WebUI = &WebUIConfig{}
+
+	switch service {
+	case "web-ui":
+		return p.parseWebUIService(config.System.Services)
+	case "snmp":
+		return p.parseSNMPService(config.System.Services)
+	default:
+		return p.error(fmt.Sprintf("unsupported system service: %s", service))
 	}
-	web := config.System.Services.WebUI
+}
+
+func (p *Parser) parseWebUIService(services *SystemServicesConfig) error {
+	if services.WebUI == nil {
+		services.WebUI = &WebUIConfig{}
+	}
+	web := services.WebUI
 
 	if p.current.Type != TokenWord {
 		return p.error("expected web-ui parameter")
@@ -191,6 +204,56 @@ func (p *Parser) parseSystemServices(config *Config) error {
 		return nil
 	default:
 		return p.error(fmt.Sprintf("unsupported web-ui parameter: %s", param))
+	}
+}
+
+func (p *Parser) parseSNMPService(services *SystemServicesConfig) error {
+	if services.SNMP == nil {
+		services.SNMP = &SNMPConfig{}
+	}
+	snmp := services.SNMP
+
+	if p.current.Type != TokenWord {
+		return p.error("expected snmp parameter")
+	}
+	param := p.current.Value
+	p.nextToken()
+
+	switch param {
+	case "enabled":
+		enabled, err := p.parseBool()
+		if err != nil {
+			return err
+		}
+		snmp.Enabled = enabled
+		return nil
+	case "listen-address":
+		if p.current.Type != TokenWord && p.current.Type != TokenString {
+			return p.error("expected snmp listen address")
+		}
+		snmp.ListenAddress = p.current.Value
+		p.nextToken()
+		return nil
+	case "port":
+		if p.current.Type != TokenNumber {
+			return p.error("expected snmp port")
+		}
+		port, err := strconv.Atoi(p.current.Value)
+		if err != nil {
+			return p.error(fmt.Sprintf("invalid snmp port: %s", p.current.Value))
+		}
+		snmp.Port = port
+		p.nextToken()
+		return nil
+	case "community":
+		if p.current.Type != TokenWord && p.current.Type != TokenString {
+			return p.error("expected snmp community")
+		}
+		snmp.Community = p.current.Value
+		p.nextToken()
+		return nil
+	default:
+		return p.error(fmt.Sprintf("unsupported snmp parameter: %s", param))
 	}
 }
 

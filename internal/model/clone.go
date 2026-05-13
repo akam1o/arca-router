@@ -59,11 +59,23 @@ func (c *SystemServicesConfig) Clone() *SystemServicesConfig {
 	if c == nil {
 		return nil
 	}
-	return &SystemServicesConfig{WebUI: c.WebUI.Clone()}
+	return &SystemServicesConfig{
+		WebUI: c.WebUI.Clone(),
+		SNMP:  c.SNMP.Clone(),
+	}
 }
 
 // Clone returns a deep copy of the Web UI configuration.
 func (c *WebUIConfig) Clone() *WebUIConfig {
+	if c == nil {
+		return nil
+	}
+	clone := *c
+	return &clone
+}
+
+// Clone returns a deep copy of the SNMP configuration.
+func (c *SNMPConfig) Clone() *SNMPConfig {
 	if c == nil {
 		return nil
 	}

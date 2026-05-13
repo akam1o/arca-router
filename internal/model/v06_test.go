@@ -12,6 +12,10 @@ func TestV06ConfigConversionAndClone(t *testing.T) {
 		"set system services web-ui enabled true",
 		"set system services web-ui listen-address 127.0.0.1",
 		"set system services web-ui port 8443",
+		"set system services snmp enabled true",
+		"set system services snmp listen-address 127.0.0.1",
+		"set system services snmp port 1161",
+		"set system services snmp community public",
 		"set chassis cluster node node0 address 192.0.2.10",
 		"set interfaces ge-0/0/0 unit 0 family inet address 192.0.2.1/24",
 		"set protocols mpls interface ge-0/0/0",
@@ -48,6 +52,9 @@ func TestV06ConfigConversionAndClone(t *testing.T) {
 	if got := roundTrip.ClassOfService.Interfaces["ge-0/0/0"].OutputTrafficControlProfile; got != "WAN" {
 		t.Fatalf("CoS interface profile = %q", got)
 	}
+	if got := roundTrip.System.Services.SNMP.Community; got != "public" {
+		t.Fatalf("snmp community = %q", got)
+	}
 }
 
 func TestV06ModelValidationRejectsInvalidQueue(t *testing.T) {
@@ -76,5 +83,21 @@ func TestV06ModelValidationRejectsInvalidWebUI(t *testing.T) {
 
 	if err := cfg.Validate(); err == nil {
 		t.Fatal("Validate() error = nil, want invalid web-ui listen-address error")
+	}
+}
+
+func TestV06ModelValidationRejectsInvalidSNMP(t *testing.T) {
+	cfg := NewRouterConfig()
+	cfg.System = &SystemConfig{
+		Services: &SystemServicesConfig{
+			SNMP: &SNMPConfig{
+				Enabled:       true,
+				ListenAddress: "not an address",
+			},
+		},
+	}
+
+	if err := cfg.Validate(); err == nil {
+		t.Fatal("Validate() error = nil, want invalid snmp listen-address error")
 	}
 }

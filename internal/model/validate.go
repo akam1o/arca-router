@@ -46,15 +46,24 @@ func (c *RouterConfig) Validate() error {
 }
 
 func (c *RouterConfig) validateSystem() error {
-	if c.System == nil || c.System.Services == nil || c.System.Services.WebUI == nil {
+	if c.System == nil || c.System.Services == nil {
 		return nil
 	}
-	web := c.System.Services.WebUI
-	if web.Port < 0 || web.Port > 65535 {
-		return fmt.Errorf("system services web-ui: port must be 0-65535, got %d", web.Port)
+	if web := c.System.Services.WebUI; web != nil {
+		if web.Port < 0 || web.Port > 65535 {
+			return fmt.Errorf("system services web-ui: port must be 0-65535, got %d", web.Port)
+		}
+		if web.ListenAddress != "" && web.ListenAddress != "localhost" && net.ParseIP(web.ListenAddress) == nil {
+			return fmt.Errorf("system services web-ui: invalid listen-address %q", web.ListenAddress)
+		}
 	}
-	if web.ListenAddress != "" && web.ListenAddress != "localhost" && net.ParseIP(web.ListenAddress) == nil {
-		return fmt.Errorf("system services web-ui: invalid listen-address %q", web.ListenAddress)
+	if snmp := c.System.Services.SNMP; snmp != nil {
+		if snmp.Port < 0 || snmp.Port > 65535 {
+			return fmt.Errorf("system services snmp: port must be 0-65535, got %d", snmp.Port)
+		}
+		if snmp.ListenAddress != "" && snmp.ListenAddress != "localhost" && net.ParseIP(snmp.ListenAddress) == nil {
+			return fmt.Errorf("system services snmp: invalid listen-address %q", snmp.ListenAddress)
+		}
 	}
 	return nil
 }

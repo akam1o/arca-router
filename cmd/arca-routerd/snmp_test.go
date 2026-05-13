@@ -13,6 +13,79 @@ import (
 	"github.com/akam1o/arca-router/internal/model"
 )
 
+func TestEffectiveSNMPListenUsesFlagOverride(t *testing.T) {
+	cfg := model.NewRouterConfig()
+	cfg.System = &model.SystemConfig{
+		Services: &model.SystemServicesConfig{
+			SNMP: &model.SNMPConfig{
+				Enabled:       true,
+				ListenAddress: "127.0.0.1",
+				Port:          1161,
+			},
+		},
+	}
+
+	got := effectiveSNMPListen(":2161", model.NewSnapshot(cfg, 1, "test", "test"))
+	if got != ":2161" {
+		t.Fatalf("effectiveSNMPListen() = %q, want %q", got, ":2161")
+	}
+}
+
+func TestEffectiveSNMPListenUsesConfig(t *testing.T) {
+	cfg := model.NewRouterConfig()
+	cfg.System = &model.SystemConfig{
+		Services: &model.SystemServicesConfig{
+			SNMP: &model.SNMPConfig{
+				Enabled:       true,
+				ListenAddress: "127.0.0.1",
+				Port:          1161,
+			},
+		},
+	}
+
+	got := effectiveSNMPListen("", model.NewSnapshot(cfg, 1, "test", "test"))
+	if got != "127.0.0.1:1161" {
+		t.Fatalf("effectiveSNMPListen() = %q, want %q", got, "127.0.0.1:1161")
+	}
+}
+
+func TestEffectiveSNMPListenUsesConfigDefaults(t *testing.T) {
+	cfg := model.NewRouterConfig()
+	cfg.System = &model.SystemConfig{
+		Services: &model.SystemServicesConfig{
+			SNMP: &model.SNMPConfig{Enabled: true},
+		},
+	}
+
+	got := effectiveSNMPListen("", model.NewSnapshot(cfg, 1, "test", "test"))
+	if got != "127.0.0.1:161" {
+		t.Fatalf("effectiveSNMPListen() = %q, want %q", got, "127.0.0.1:161")
+	}
+}
+
+func TestEffectiveSNMPCommunityUsesConfig(t *testing.T) {
+	cfg := model.NewRouterConfig()
+	cfg.System = &model.SystemConfig{
+		Services: &model.SystemServicesConfig{
+			SNMP: &model.SNMPConfig{
+				Enabled:   true,
+				Community: "monitoring",
+			},
+		},
+	}
+
+	got := effectiveSNMPCommunity("", model.NewSnapshot(cfg, 1, "test", "test"))
+	if got != "monitoring" {
+		t.Fatalf("effectiveSNMPCommunity() = %q, want %q", got, "monitoring")
+	}
+}
+
+func TestEffectiveSNMPCommunityUsesDefault(t *testing.T) {
+	if got := effectiveSNMPCommunity("", nil); got != "public" {
+		t.Fatalf("effectiveSNMPCommunity() = %q, want public", got)
+	}
+}
+
 func TestSNMPEndpointExportsRouterMetrics(t *testing.T) {
 	oldVersion := Version
 	Version = "test-version"

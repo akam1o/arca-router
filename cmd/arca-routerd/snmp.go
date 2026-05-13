@@ -5,8 +5,12 @@ import (
 	"fmt"
 	"log/slog"
 	"math"
+	"net"
+	"strconv"
+	"strings"
 	"time"
 
+	"github.com/akam1o/arca-router/internal/model"
 	"github.com/gosnmp/gosnmp"
 	snmpserver "github.com/slayercat/GoSNMPServer"
 
@@ -30,7 +34,47 @@ const (
 	snmpOIDNETCONFSuccess  = arcaSNMPBaseOID + ".8.0"
 	snmpOIDNETCONFFailures = arcaSNMPBaseOID + ".9.0"
 	snmpOIDDaemonVersion   = arcaSNMPBaseOID + ".10.0"
+
+	defaultSNMPPort      = 161
+	defaultSNMPCommunity = "public"
 )
+
+func effectiveSNMPListen(flagValue string, snapshot *model.ConfigSnapshot) string {
+	if listen := strings.TrimSpace(flagValue); listen != "" {
+		return listen
+	}
+	snmp := snapshotSNMPConfig(snapshot)
+	if snmp == nil || !snmp.Enabled {
+		return ""
+	}
+	addr := strings.TrimSpace(snmp.ListenAddress)
+	if addr == "" {
+		addr = "127.0.0.1"
+	}
+	port := snmp.Port
+	if port == 0 {
+		port = defaultSNMPPort
+	}
+	return net.JoinHostPort(addr, strconv.Itoa(port))
+}
+
+func effectiveSNMPCommunity(flagValue string, snapshot *model.ConfigSnapshot) string {
+	if community := strings.TrimSpace(flagValue); community != "" {
+		return community
+	}
+	if snmp := snapshotSNMPConfig(snapshot); snmp != nil && strings.TrimSpace(snmp.Community) != "" {
+		return strings.TrimSpace(snmp.Community)
+	}
+	return defaultSNMPCommunity
+}
+
+func snapshotSNMPConfig(snapshot *model.ConfigSnapshot) *model.SNMPConfig {
+	if snapshot == nil || snapshot.Config == nil || snapshot.Config.System == nil ||
+		snapshot.Config.System.Services == nil {
+		return nil
+	}
+	return snapshot.Config.System.Services.SNMP
+}
 
 func startSNMPServer(ctx context.Context, listenAddr, community string, source metricsSource, log *logger.Logger) (<-chan error, error) {
 	if community == "" {

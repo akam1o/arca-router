@@ -68,18 +68,33 @@ func ToSetCommandsWithError(cfg *Config) (string, error) {
 }
 
 func writeSystemServices(b *strings.Builder, system *SystemConfig) {
-	if system == nil || system.Services == nil || system.Services.WebUI == nil {
+	if system == nil || system.Services == nil {
 		return
 	}
-	web := system.Services.WebUI
-	if web.Enabled {
-		writeLine(b, "set system services web-ui enabled true")
+	if web := system.Services.WebUI; web != nil {
+		if web.Enabled {
+			writeLine(b, "set system services web-ui enabled true")
+		}
+		if web.ListenAddress != "" {
+			writeLine(b, "set system services web-ui listen-address %s", EscapeValue(web.ListenAddress))
+		}
+		if web.Port != 0 {
+			writeLine(b, "set system services web-ui port %d", web.Port)
+		}
 	}
-	if web.ListenAddress != "" {
-		writeLine(b, "set system services web-ui listen-address %s", EscapeValue(web.ListenAddress))
-	}
-	if web.Port != 0 {
-		writeLine(b, "set system services web-ui port %d", web.Port)
+	if snmp := system.Services.SNMP; snmp != nil {
+		if snmp.Enabled {
+			writeLine(b, "set system services snmp enabled true")
+		}
+		if snmp.ListenAddress != "" {
+			writeLine(b, "set system services snmp listen-address %s", EscapeValue(snmp.ListenAddress))
+		}
+		if snmp.Port != 0 {
+			writeLine(b, "set system services snmp port %d", snmp.Port)
+		}
+		if snmp.Community != "" {
+			writeLine(b, "set system services snmp community %s", EscapeValue(snmp.Community))
+		}
 	}
 }
 

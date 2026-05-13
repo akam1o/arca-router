@@ -34,6 +34,7 @@ type SystemConfig struct {
 // SystemServicesConfig holds system service settings.
 type SystemServicesConfig struct {
 	WebUI *WebUIConfig `json:"web-ui,omitempty"`
+	SNMP  *SNMPConfig  `json:"snmp,omitempty"`
 }
 
 // WebUIConfig holds browser UI service settings.
@@ -41,6 +42,14 @@ type WebUIConfig struct {
 	Enabled       bool   `json:"enabled,omitempty"`
 	ListenAddress string `json:"listen-address,omitempty"`
 	Port          int    `json:"port,omitempty"`
+}
+
+// SNMPConfig holds read-only SNMP service settings.
+type SNMPConfig struct {
+	Enabled       bool   `json:"enabled,omitempty"`
+	ListenAddress string `json:"listen-address,omitempty"`
+	Port          int    `json:"port,omitempty"`
+	Community     string `json:"community,omitempty"`
 }
 
 // ChassisConfig holds chassis-level settings.

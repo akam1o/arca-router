@@ -17,13 +17,25 @@ func FromLegacyConfig(old *config.Config) *RouterConfig {
 	// System
 	if old.System != nil {
 		c.System = &SystemConfig{HostName: old.System.HostName}
-		if old.System.Services != nil && old.System.Services.WebUI != nil {
-			c.System.Services = &SystemServicesConfig{
-				WebUI: &WebUIConfig{
+		if old.System.Services != nil {
+			services := &SystemServicesConfig{}
+			if old.System.Services.WebUI != nil {
+				services.WebUI = &WebUIConfig{
 					Enabled:       old.System.Services.WebUI.Enabled,
 					ListenAddress: old.System.Services.WebUI.ListenAddress,
 					Port:          old.System.Services.WebUI.Port,
-				},
+				}
+			}
+			if old.System.Services.SNMP != nil {
+				services.SNMP = &SNMPConfig{
+					Enabled:       old.System.Services.SNMP.Enabled,
+					ListenAddress: old.System.Services.SNMP.ListenAddress,
+					Port:          old.System.Services.SNMP.Port,
+					Community:     old.System.Services.SNMP.Community,
+				}
+			}
+			if services.WebUI != nil || services.SNMP != nil {
+				c.System.Services = services
 			}
 		}
 	}
@@ -275,13 +287,25 @@ func (c *RouterConfig) ToLegacyConfig() *config.Config {
 	// System
 	if c.System != nil {
 		old.System = &config.SystemConfig{HostName: c.System.HostName}
-		if c.System.Services != nil && c.System.Services.WebUI != nil {
-			old.System.Services = &config.SystemServicesConfig{
-				WebUI: &config.WebUIConfig{
+		if c.System.Services != nil {
+			services := &config.SystemServicesConfig{}
+			if c.System.Services.WebUI != nil {
+				services.WebUI = &config.WebUIConfig{
 					Enabled:       c.System.Services.WebUI.Enabled,
 					ListenAddress: c.System.Services.WebUI.ListenAddress,
 					Port:          c.System.Services.WebUI.Port,
-				},
+				}
+			}
+			if c.System.Services.SNMP != nil {
+				services.SNMP = &config.SNMPConfig{
+					Enabled:       c.System.Services.SNMP.Enabled,
+					ListenAddress: c.System.Services.SNMP.ListenAddress,
+					Port:          c.System.Services.SNMP.Port,
+					Community:     c.System.Services.SNMP.Community,
+				}
+			}
+			if services.WebUI != nil || services.SNMP != nil {
+				old.System.Services = services
 			}
 		}
 	}

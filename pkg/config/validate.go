@@ -133,6 +133,11 @@ func (s *SystemConfig) Validate() error {
 			return err
 		}
 	}
+	if s.Services != nil && s.Services.SNMP != nil {
+		if err := validateSNMP(s.Services.SNMP); err != nil {
+			return err
+		}
+	}
 
 	return nil
 }
@@ -151,6 +156,26 @@ func validateWebUI(web *WebUIConfig) error {
 			errors.ErrCodeConfigValidation,
 			fmt.Sprintf("Invalid web-ui listen-address: %s", web.ListenAddress),
 			"Web UI listen-address must be an IP address or localhost",
+			"Use a valid listen address",
+		)
+	}
+	return nil
+}
+
+func validateSNMP(snmp *SNMPConfig) error {
+	if snmp.Port < 0 || snmp.Port > 65535 {
+		return errors.New(
+			errors.ErrCodeConfigValidation,
+			fmt.Sprintf("Invalid snmp port: %d", snmp.Port),
+			"SNMP port must be between 0 and 65535",
+			"Use a valid UDP port",
+		)
+	}
+	if snmp.ListenAddress != "" && net.ParseIP(snmp.ListenAddress) == nil && snmp.ListenAddress != "localhost" {
+		return errors.New(
+			errors.ErrCodeConfigValidation,
+			fmt.Sprintf("Invalid snmp listen-address: %s", snmp.ListenAddress),
+			"SNMP listen-address must be an IP address or localhost",
 			"Use a valid listen address",
 		)
 	}

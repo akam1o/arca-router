@@ -849,6 +849,7 @@ func TestApplyCandidateCommandPreservesOSPFInterfaceAttributes(t *testing.T) {
 func TestApplyCandidateCommandReplacesV06ScalarAttributes(t *testing.T) {
 	candidate := strings.Join([]string{
 		"set system services web-ui port 8080",
+		"set system services snmp community public",
 		"set protocols vrrp group 10 priority 100",
 		"set routing-instances BLUE route-distinguisher 65000:100",
 		"set class-of-service traffic-control-profile WAN shaping-rate 1000",
@@ -856,6 +857,7 @@ func TestApplyCandidateCommandReplacesV06ScalarAttributes(t *testing.T) {
 
 	updated, err := applyCandidateCommand(candidate, strings.Join([]string{
 		"set system services web-ui port 8443",
+		"set system services snmp community monitoring",
 		"set protocols vrrp group 10 priority 120",
 		"set routing-instances BLUE route-distinguisher 65000:200",
 		"set class-of-service traffic-control-profile WAN shaping-rate 2000",
@@ -865,6 +867,7 @@ func TestApplyCandidateCommandReplacesV06ScalarAttributes(t *testing.T) {
 	}
 	for _, oldLine := range []string{
 		"set system services web-ui port 8080",
+		"set system services snmp community public",
 		"set protocols vrrp group 10 priority 100",
 		"set routing-instances BLUE route-distinguisher 65000:100",
 		"set class-of-service traffic-control-profile WAN shaping-rate 1000",
@@ -875,6 +878,7 @@ func TestApplyCandidateCommandReplacesV06ScalarAttributes(t *testing.T) {
 	}
 	for _, want := range []string{
 		"set system services web-ui port 8443",
+		"set system services snmp community monitoring",
 		"set protocols vrrp group 10 priority 120",
 		"set routing-instances BLUE route-distinguisher 65000:200",
 		"set class-of-service traffic-control-profile WAN shaping-rate 2000",
