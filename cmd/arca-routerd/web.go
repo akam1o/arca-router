@@ -181,6 +181,7 @@ var webIndexTemplate = template.Must(template.New("web-index").Parse(`<!doctype 
       min-height: 116px;
     }
     .span-2 { grid-column: span 2; }
+    .span-4 { grid-column: span 4; }
     .metric {
       display: flex;
       flex-direction: column;
@@ -235,6 +236,60 @@ var webIndexTemplate = template.Must(template.New("web-index").Parse(`<!doctype 
       font-size: 12px;
       line-height: 1.5;
     }
+    .config-editor {
+      display: block;
+      width: 100%;
+      min-height: 320px;
+      max-height: none;
+      resize: vertical;
+    }
+    .actions {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+      margin-top: 12px;
+    }
+    .message-input {
+      flex: 1 1 260px;
+      min-height: 36px;
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      padding: 8px 10px;
+      color: var(--text);
+      font: inherit;
+    }
+    .button {
+      min-height: 36px;
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      background: #ffffff;
+      color: var(--text);
+      padding: 8px 14px;
+      font: inherit;
+      font-weight: 650;
+      cursor: pointer;
+    }
+    .button.primary {
+      border-color: var(--accent);
+      background: var(--accent);
+      color: #ffffff;
+    }
+    .button:disabled,
+    .message-input:disabled,
+    .config-editor:disabled {
+      cursor: wait;
+      opacity: 0.65;
+    }
+    .status-line {
+      display: block;
+      min-height: 20px;
+      margin-top: 12px;
+      color: var(--muted);
+      font-size: 13px;
+    }
+    .status-line[data-state="ok"] { color: var(--accent); }
+    .status-line[data-state="warn"] { color: var(--warn); }
+    .diff[hidden] { display: none; }
     footer {
       display: flex;
       justify-content: space-between;
@@ -252,6 +307,7 @@ var webIndexTemplate = template.Must(template.New("web-index").Parse(`<!doctype 
     @media (max-width: 560px) {
       .grid { grid-template-columns: 1fr; }
       .span-2 { grid-column: auto; }
+      .span-4 { grid-column: auto; }
       footer { flex-direction: column; }
     }
   </style>
@@ -316,17 +372,112 @@ var webIndexTemplate = template.Must(template.New("web-index").Parse(`<!doctype 
           <div class="row"><span>Backend alignment</span><strong>{{.ClusterSyncAlignment}}</strong></div>
         </div>
       </article>
-      <article class="panel span-2">
-        <h2>Running configuration</h2>
-        <pre class="config">{{.RunningConfig}}</pre>
+      <article class="panel span-4">
+        <h2>Configuration editor</h2>
+        <textarea id="config-editor" class="config config-editor" spellcheck="false">{{.RunningConfig}}</textarea>
+        <div class="actions">
+          <input id="commit-message" class="message-input" type="text" placeholder="Commit message" autocomplete="off">
+          <button id="validate-config" class="button" type="button">Validate</button>
+          <button id="commit-config" class="button primary" type="button">Commit</button>
+        </div>
+        <output id="config-result" class="status-line"></output>
+        <pre id="config-diff" class="config diff" hidden></pre>
       </article>
     </section>
 
     <footer>
       <span>Generated {{.GeneratedAt}}</span>
-      <span>/api/status | /api/config</span>
+      <span>/api/status | /api/config | /api/config/validate | /api/config/commit</span>
     </footer>
   </main>
+  <script>
+    (() => {
+      const editor = document.getElementById("config-editor");
+      const message = document.getElementById("commit-message");
+      const validateButton = document.getElementById("validate-config");
+      const commitButton = document.getElementById("commit-config");
+      const result = document.getElementById("config-result");
+      const diff = document.getElementById("config-diff");
+      if (!editor || !message || !validateButton || !commitButton || !result || !diff) {
+        return;
+      }
+
+      const setBusy = (busy) => {
+        editor.disabled = busy;
+        message.disabled = busy;
+        validateButton.disabled = busy;
+        commitButton.disabled = busy;
+      };
+      const setResult = (text, state) => {
+        result.textContent = text;
+        result.dataset.state = state || "neutral";
+      };
+      const requestJSON = async (path, payload) => {
+        const response = await fetch(path, {
+          method: "POST",
+          credentials: "same-origin",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload),
+        });
+        let data = {};
+        try {
+          data = await response.json();
+        } catch (_) {
+          data = {};
+        }
+        if (!response.ok) {
+          throw new Error(data.error || "HTTP " + response.status);
+        }
+        return data;
+      };
+      const refreshConfig = async () => {
+        const response = await fetch("/api/config", { credentials: "same-origin" });
+        if (!response.ok) {
+          return;
+        }
+        const data = await response.json();
+        if (typeof data.config_text === "string") {
+          editor.value = data.config_text;
+        }
+      };
+
+      validateButton.addEventListener("click", async () => {
+        setBusy(true);
+        setResult("Validating", "neutral");
+        diff.hidden = true;
+        diff.textContent = "";
+        try {
+          const data = await requestJSON("/api/config/validate", { config_text: editor.value });
+          diff.textContent = data.diff_text || "";
+          diff.hidden = !data.diff_text;
+          setResult(data.has_changes ? "Valid" : "No changes", "ok");
+        } catch (err) {
+          setResult(err.message, "warn");
+        } finally {
+          setBusy(false);
+        }
+      });
+
+      commitButton.addEventListener("click", async () => {
+        setBusy(true);
+        setResult("Committing", "neutral");
+        diff.hidden = true;
+        diff.textContent = "";
+        try {
+          const data = await requestJSON("/api/config/commit", {
+            config_text: editor.value,
+            message: message.value,
+          });
+          await refreshConfig();
+          setResult("Committed version " + data.version, "ok");
+        } catch (err) {
+          setResult(err.message, "warn");
+        } finally {
+          setBusy(false);
+        }
+      });
+    })();
+  </script>
 </body>
 </html>
 `))
