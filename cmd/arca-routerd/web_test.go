@@ -277,7 +277,21 @@ func TestWebIndexEndpoint(t *testing.T) {
 		t.Fatalf("ReadAll() error = %v", err)
 	}
 	text := string(body)
-	for _, want := range []string{"edge01", "Config version", "NETCONF", "Datastore", "Cluster sync", "Running configuration", "set system host-name edge01", "/api/status", "/api/config"} {
+	for _, want := range []string{
+		"edge01",
+		"Config version",
+		"NETCONF",
+		"Datastore",
+		"Cluster sync",
+		"Configuration editor",
+		"set system host-name edge01",
+		"/api/status",
+		"/api/config",
+		"/api/config/validate",
+		"/api/config/commit",
+		"validate-config",
+		"commit-config",
+	} {
 		if !strings.Contains(text, want) {
 			t.Fatalf("index missing %q:\n%s", want, text)
 		}
