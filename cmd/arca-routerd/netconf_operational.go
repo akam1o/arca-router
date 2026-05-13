@@ -45,6 +45,7 @@ func (p *netconfOperationalStateProvider) InterfaceStates(ctx context.Context) (
 			AdminStatus: state.AdminStatus,
 			OperStatus:  state.OperStatus,
 			MAC:         state.MAC,
+			QoSProfile:  state.QoSProfile,
 		}
 		if state.Counters != nil {
 			converted.Counters = &netconf.InterfaceOperationalCounters{

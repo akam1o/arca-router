@@ -19,6 +19,7 @@ type InterfaceState struct {
 	Speed       uint64             `json:"speed,omitempty"`
 	MTU         uint32             `json:"mtu,omitempty"`
 	MAC         string             `json:"mac,omitempty"`
+	QoSProfile  string             `json:"qos-profile,omitempty"`
 	Counters    *InterfaceCounters `json:"counters,omitempty"`
 	Queues      *InterfaceQueues   `json:"queues,omitempty"`
 	LastChange  time.Time          `json:"last-change,omitempty"`

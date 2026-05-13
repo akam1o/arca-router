@@ -78,10 +78,12 @@ func deepCopyInterface(iface *Interface) *Interface {
 	}
 
 	copy := &Interface{
-		SwIfIndex: iface.SwIfIndex,
-		Name:      iface.Name,
-		AdminUp:   iface.AdminUp,
-		LinkUp:    iface.LinkUp,
+		SwIfIndex:  iface.SwIfIndex,
+		Name:       iface.Name,
+		AdminUp:    iface.AdminUp,
+		LinkUp:     iface.LinkUp,
+		PCIAddress: iface.PCIAddress,
+		QoSProfile: iface.QoSProfile,
 	}
 
 	// Deep copy MAC address
@@ -624,7 +626,8 @@ func (m *MockClient) SetQoSProfile(ctx context.Context, ifIndex uint32, profile 
 			"Connect to VPP before setting QoS profiles",
 		)
 	}
-	if _, ok := m.interfaces[ifIndex]; !ok {
+	iface, ok := m.interfaces[ifIndex]
+	if !ok {
 		return errors.New(
 			errors.ErrCodeVPPOperation,
 			fmt.Sprintf("Interface with index %d not found", ifIndex),
@@ -634,6 +637,7 @@ func (m *MockClient) SetQoSProfile(ctx context.Context, ifIndex uint32, profile 
 	}
 
 	m.qosProfiles[ifIndex] = cloneQoSProfile(profile)
+	iface.QoSProfile = profile.Name
 	return nil
 }
 
@@ -657,7 +661,8 @@ func (m *MockClient) ClearQoSProfile(ctx context.Context, ifIndex uint32) error 
 			"Connect to VPP before clearing QoS profiles",
 		)
 	}
-	if _, ok := m.interfaces[ifIndex]; !ok {
+	iface, ok := m.interfaces[ifIndex]
+	if !ok {
 		return errors.New(
 			errors.ErrCodeVPPOperation,
 			fmt.Sprintf("Interface with index %d not found", ifIndex),
@@ -667,6 +672,7 @@ func (m *MockClient) ClearQoSProfile(ctx context.Context, ifIndex uint32) error 
 	}
 
 	delete(m.qosProfiles, ifIndex)
+	iface.QoSProfile = ""
 	return nil
 }
 

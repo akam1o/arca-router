@@ -148,6 +148,9 @@ type Interface struct {
 	// PCIAddress is the PCI address (e.g., "0000:00:06.0") for hardware interfaces
 	// Empty for non-hardware interfaces (e.g., tap, loopback)
 	PCIAddress string
+
+	// QoSProfile is the bound output QoS profile name, if any.
+	QoSProfile string
 }
 
 // IPTable represents a VPP IPv4 or IPv6 FIB table.

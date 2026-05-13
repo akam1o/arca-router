@@ -147,6 +147,7 @@ func (a *stateServiceAdapter) GetInterfaces(ctx context.Context, req *apiv1.GetI
 			Speed:       iface.Speed,
 			Mtu:         iface.MTU,
 			Mac:         iface.MAC,
+			QosProfile:  iface.QoSProfile,
 			RxPackets:   iface.RxPackets,
 			TxPackets:   iface.TxPackets,
 			RxBytes:     iface.RxBytes,

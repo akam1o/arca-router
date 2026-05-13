@@ -1183,8 +1183,12 @@ func convertToInterface(msg *vppif.SwInterfaceDetails) *Interface {
 	}
 
 	// Extract PCI address from interface tag if available.
-	if fields := parseInterfaceTag(msg.Tag); fields["pci"] != "" {
+	fields := parseInterfaceTag(msg.Tag)
+	if fields["pci"] != "" {
 		iface.PCIAddress = fields["pci"]
+	}
+	if fields["qos"] != "" {
+		iface.QoSProfile = fields["qos"]
 	}
 
 	return iface
