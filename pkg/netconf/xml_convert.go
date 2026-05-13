@@ -5,6 +5,7 @@ import (
 	"encoding/xml"
 	"fmt"
 	"io"
+	"sort"
 	"strings"
 
 	"github.com/akam1o/arca-router/pkg/config"
@@ -199,7 +200,8 @@ func writeChassisXML(buf *bytes.Buffer, chassis *config.ChassisConfig) error {
 		buf.WriteString(`      <enabled>true</enabled>`)
 		buf.WriteString("\n")
 	}
-	for name, node := range cluster.Nodes {
+	for _, name := range sortedStringKeys(cluster.Nodes) {
+		node := cluster.Nodes[name]
 		if node == nil {
 			continue
 		}
@@ -255,7 +257,8 @@ func writeInterfacesXML(buf *bytes.Buffer, interfaces map[string]*config.Interfa
 	buf.WriteString(`  <interfaces xmlns="` + IETFInterfacesNS + `">`)
 	buf.WriteString("\n")
 
-	for name, iface := range interfaces {
+	for _, name := range sortedStringKeys(interfaces) {
+		iface := interfaces[name]
 		buf.WriteString(`    <interface>`)
 		buf.WriteString("\n")
 
@@ -277,7 +280,8 @@ func writeInterfacesXML(buf *bytes.Buffer, interfaces map[string]*config.Interfa
 
 		// Units (sub-interfaces)
 		if len(iface.Units) > 0 {
-			for unitNum, unit := range iface.Units {
+			for _, unitNum := range sortedIntKeys(iface.Units) {
+				unit := iface.Units[unitNum]
 				buf.WriteString(`      <unit>`)
 				buf.WriteString("\n")
 
@@ -285,7 +289,8 @@ func writeInterfacesXML(buf *bytes.Buffer, interfaces map[string]*config.Interfa
 
 				// Address families
 				if len(unit.Family) > 0 {
-					for familyName, family := range unit.Family {
+					for _, familyName := range sortedStringKeys(unit.Family) {
+						family := unit.Family[familyName]
 						buf.WriteString(`        <family>`)
 						buf.WriteString("\n")
 
@@ -389,7 +394,8 @@ func writeRoutingInstancesXML(buf *bytes.Buffer, instances map[string]*config.Ro
 	buf.WriteString(`  <routing-instances xmlns="` + ArcaConfigNS + `">`)
 	buf.WriteString("\n")
 
-	for name, instance := range instances {
+	for _, name := range sortedStringKeys(instances) {
+		instance := instances[name]
 		if instance == nil {
 			continue
 		}
@@ -461,6 +467,24 @@ func writeStringListXML(buf *bytes.Buffer, element string, values []string, inde
 	return nil
 }
 
+func sortedStringKeys[V any](m map[string]V) []string {
+	keys := make([]string, 0, len(m))
+	for key := range m {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	return keys
+}
+
+func sortedIntKeys[V any](m map[int]V) []int {
+	keys := make([]int, 0, len(m))
+	for key := range m {
+		keys = append(keys, key)
+	}
+	sort.Ints(keys)
+	return keys
+}
+
 // writeProtocolsXML writes protocol configuration to XML
 func writeProtocolsXML(buf *bytes.Buffer, protocols *config.ProtocolConfig) error {
 	buf.WriteString(`  <protocols xmlns="` + ArcaConfigNS + `">`)
@@ -503,7 +527,11 @@ func writeBGPXML(buf *bytes.Buffer, bgp *config.BGPConfig) error {
 	buf.WriteString("\n")
 
 	if len(bgp.Groups) > 0 {
-		for groupName, group := range bgp.Groups {
+		for _, groupName := range sortedStringKeys(bgp.Groups) {
+			group := bgp.Groups[groupName]
+			if group == nil {
+				continue
+			}
 			buf.WriteString(`      <group>`)
 			buf.WriteString("\n")
 
@@ -543,7 +571,11 @@ func writeBGPXML(buf *bytes.Buffer, bgp *config.BGPConfig) error {
 
 			// Neighbors
 			if len(group.Neighbors) > 0 {
-				for _, neighbor := range group.Neighbors {
+				for _, neighborIP := range sortedStringKeys(group.Neighbors) {
+					neighbor := group.Neighbors[neighborIP]
+					if neighbor == nil {
+						continue
+					}
 					buf.WriteString(`        <neighbor>`)
 					buf.WriteString("\n")
 
@@ -604,7 +636,11 @@ func writeOSPFXML(buf *bytes.Buffer, ospf *config.OSPFConfig) error {
 	}
 
 	if len(ospf.Areas) > 0 {
-		for areaName, area := range ospf.Areas {
+		for _, areaName := range sortedStringKeys(ospf.Areas) {
+			area := ospf.Areas[areaName]
+			if area == nil {
+				continue
+			}
 			buf.WriteString(`      <area>`)
 			buf.WriteString("\n")
 
@@ -624,7 +660,11 @@ func writeOSPFXML(buf *bytes.Buffer, ospf *config.OSPFConfig) error {
 
 			// Interfaces
 			if len(area.Interfaces) > 0 {
-				for _, ospfIface := range area.Interfaces {
+				for _, ifaceName := range sortedStringKeys(area.Interfaces) {
+					ospfIface := area.Interfaces[ifaceName]
+					if ospfIface == nil {
+						continue
+					}
 					buf.WriteString(`        <interface>`)
 					buf.WriteString("\n")
 
@@ -683,7 +723,8 @@ func writeVRRPXML(buf *bytes.Buffer, vrrp *config.VRRPConfig) error {
 	}
 	buf.WriteString(`    <vrrp>`)
 	buf.WriteString("\n")
-	for name, group := range vrrp.Groups {
+	for _, name := range sortedStringKeys(vrrp.Groups) {
+		group := vrrp.Groups[name]
 		if group == nil {
 			continue
 		}
@@ -733,7 +774,8 @@ func writeClassOfServiceXML(buf *bytes.Buffer, cos *config.ClassOfServiceConfig)
 	if len(cos.ForwardingClasses) > 0 {
 		buf.WriteString(`    <forwarding-classes>`)
 		buf.WriteString("\n")
-		for name, fc := range cos.ForwardingClasses {
+		for _, name := range sortedStringKeys(cos.ForwardingClasses) {
+			fc := cos.ForwardingClasses[name]
 			if fc == nil {
 				continue
 			}
@@ -756,7 +798,8 @@ func writeClassOfServiceXML(buf *bytes.Buffer, cos *config.ClassOfServiceConfig)
 	if len(cos.TrafficControlProfiles) > 0 {
 		buf.WriteString(`    <traffic-control-profiles>`)
 		buf.WriteString("\n")
-		for name, profile := range cos.TrafficControlProfiles {
+		for _, name := range sortedStringKeys(cos.TrafficControlProfiles) {
+			profile := cos.TrafficControlProfiles[name]
 			if profile == nil {
 				continue
 			}
@@ -789,7 +832,8 @@ func writeClassOfServiceXML(buf *bytes.Buffer, cos *config.ClassOfServiceConfig)
 	if len(cos.Interfaces) > 0 {
 		buf.WriteString(`    <interfaces>`)
 		buf.WriteString("\n")
-		for name, iface := range cos.Interfaces {
+		for _, name := range sortedStringKeys(cos.Interfaces) {
+			iface := cos.Interfaces[name]
 			if iface == nil {
 				continue
 			}
