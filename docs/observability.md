@@ -67,7 +67,7 @@ Endpoints:
 - `POST /api/config/validate`
 - `POST /api/config/commit`
 
-The Web UI is intended for trusted management networks. It exposes the same daemon status used by the metrics endpoint, including datastore backend and cluster sync alignment. It also exposes the running configuration in set-command format through `/api/config` and the dashboard preview.
+The Web UI is intended for trusted management networks. It exposes the same daemon status used by the metrics endpoint, including datastore backend and cluster sync alignment. It also exposes the running configuration in set-command format through `/api/config`, renders it in the dashboard editor, and can validate or commit edited set-command text.
 
 When the running configuration contains password-backed `security users`, the Web UI requires HTTP Basic authentication. The `read-only`, `operator`, and `admin` roles can access the read-only dashboard and API endpoints.
 
