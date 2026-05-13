@@ -17,6 +17,7 @@
 - **VPP LCP reconciliation observability**: VPP LCP cache reconciliation state is exposed through `/api/status`, the Web UI, Prometheus metrics, and SNMP OIDs
 - **NETCONF listen configuration**: `security netconf ssh port` provides the default embedded NETCONF listen port when `--netconf-listen` is omitted
 - **NETCONF interface operational state**: NETCONF `<get>` exposes live managed VPP interface status, MAC addresses, and counters when arca-routerd can collect them
+- **gRPC managed interface state**: the internal gRPC API and `arca show interfaces` use the daemon's managed VPP state collector, including configured interface names such as `ge-0/0/0`
 - **VPP queue placement telemetry**: managed interface operational state in gRPC, `arca show interfaces`, and NETCONF includes VPP RX/TX queue-to-worker placement when available
 - **VPP QoS profile state**: managed interface operational state in gRPC, `arca show interfaces`, and NETCONF includes the bound class-of-service profile intent when available
 - **FRR VRRP generation**: `--frr-apply-mode=file` can render `protocols vrrp` groups into FRR integrated interface configuration
