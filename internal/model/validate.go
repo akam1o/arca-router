@@ -57,6 +57,14 @@ func (c *RouterConfig) validateSystem() error {
 			return fmt.Errorf("system services web-ui: invalid listen-address %q", web.ListenAddress)
 		}
 	}
+	if prometheus := c.System.Services.Prometheus; prometheus != nil {
+		if prometheus.Port < 0 || prometheus.Port > 65535 {
+			return fmt.Errorf("system services prometheus: port must be 0-65535, got %d", prometheus.Port)
+		}
+		if prometheus.ListenAddress != "" && prometheus.ListenAddress != "localhost" && net.ParseIP(prometheus.ListenAddress) == nil {
+			return fmt.Errorf("system services prometheus: invalid listen-address %q", prometheus.ListenAddress)
+		}
+	}
 	if snmp := c.System.Services.SNMP; snmp != nil {
 		if snmp.Port < 0 || snmp.Port > 65535 {
 			return fmt.Errorf("system services snmp: port must be 0-65535, got %d", snmp.Port)

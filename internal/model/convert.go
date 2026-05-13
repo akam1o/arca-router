@@ -26,6 +26,13 @@ func FromLegacyConfig(old *config.Config) *RouterConfig {
 					Port:          old.System.Services.WebUI.Port,
 				}
 			}
+			if old.System.Services.Prometheus != nil {
+				services.Prometheus = &PrometheusConfig{
+					Enabled:       old.System.Services.Prometheus.Enabled,
+					ListenAddress: old.System.Services.Prometheus.ListenAddress,
+					Port:          old.System.Services.Prometheus.Port,
+				}
+			}
 			if old.System.Services.SNMP != nil {
 				services.SNMP = &SNMPConfig{
 					Enabled:       old.System.Services.SNMP.Enabled,
@@ -34,7 +41,7 @@ func FromLegacyConfig(old *config.Config) *RouterConfig {
 					Community:     old.System.Services.SNMP.Community,
 				}
 			}
-			if services.WebUI != nil || services.SNMP != nil {
+			if services.WebUI != nil || services.Prometheus != nil || services.SNMP != nil {
 				c.System.Services = services
 			}
 		}
@@ -296,6 +303,13 @@ func (c *RouterConfig) ToLegacyConfig() *config.Config {
 					Port:          c.System.Services.WebUI.Port,
 				}
 			}
+			if c.System.Services.Prometheus != nil {
+				services.Prometheus = &config.PrometheusConfig{
+					Enabled:       c.System.Services.Prometheus.Enabled,
+					ListenAddress: c.System.Services.Prometheus.ListenAddress,
+					Port:          c.System.Services.Prometheus.Port,
+				}
+			}
 			if c.System.Services.SNMP != nil {
 				services.SNMP = &config.SNMPConfig{
 					Enabled:       c.System.Services.SNMP.Enabled,
@@ -304,7 +318,7 @@ func (c *RouterConfig) ToLegacyConfig() *config.Config {
 					Community:     c.System.Services.SNMP.Community,
 				}
 			}
-			if services.WebUI != nil || services.SNMP != nil {
+			if services.WebUI != nil || services.Prometheus != nil || services.SNMP != nil {
 				old.System.Services = services
 			}
 		}

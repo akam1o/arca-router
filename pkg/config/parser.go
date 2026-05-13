@@ -157,6 +157,8 @@ func (p *Parser) parseSystemServices(config *Config) error {
 	switch service {
 	case "web-ui":
 		return p.parseWebUIService(config.System.Services)
+	case "prometheus":
+		return p.parsePrometheusService(config.System.Services)
 	case "snmp":
 		return p.parseSNMPService(config.System.Services)
 	default:
@@ -204,6 +206,49 @@ func (p *Parser) parseWebUIService(services *SystemServicesConfig) error {
 		return nil
 	default:
 		return p.error(fmt.Sprintf("unsupported web-ui parameter: %s", param))
+	}
+}
+
+func (p *Parser) parsePrometheusService(services *SystemServicesConfig) error {
+	if services.Prometheus == nil {
+		services.Prometheus = &PrometheusConfig{}
+	}
+	prometheus := services.Prometheus
+
+	if p.current.Type != TokenWord {
+		return p.error("expected prometheus parameter")
+	}
+	param := p.current.Value
+	p.nextToken()
+
+	switch param {
+	case "enabled":
+		enabled, err := p.parseBool()
+		if err != nil {
+			return err
+		}
+		prometheus.Enabled = enabled
+		return nil
+	case "listen-address":
+		if p.current.Type != TokenWord && p.current.Type != TokenString {
+			return p.error("expected prometheus listen address")
+		}
+		prometheus.ListenAddress = p.current.Value
+		p.nextToken()
+		return nil
+	case "port":
+		if p.current.Type != TokenNumber {
+			return p.error("expected prometheus port")
+		}
+		port, err := strconv.Atoi(p.current.Value)
+		if err != nil {
+			return p.error(fmt.Sprintf("invalid prometheus port: %s", p.current.Value))
+		}
+		prometheus.Port = port
+		p.nextToken()
+		return nil
+	default:
+		return p.error(fmt.Sprintf("unsupported prometheus parameter: %s", param))
 	}
 }
 

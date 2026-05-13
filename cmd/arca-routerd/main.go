@@ -157,7 +157,7 @@ func parseFlags() *daemonFlags {
 	flag.StringVar(&f.grpcSocket, "grpc-socket", "/run/arca-router/routerd.sock",
 		"Path to internal gRPC Unix socket")
 	flag.StringVar(&f.metricsListen, "metrics-listen", "",
-		"Prometheus metrics listen address (disabled when empty)")
+		"Prometheus metrics listen address (overrides system services prometheus config; disabled when empty and config disabled)")
 	flag.StringVar(&f.webListen, "web-listen", "",
 		"Web UI listen address (overrides system services web-ui config; disabled when empty and config disabled)")
 	flag.StringVar(&f.snmpListen, "snmp-listen", "",
@@ -411,8 +411,8 @@ func run(ctx context.Context, f *daemonFlags, log *logger.Logger) error {
 		configAPI:     grpcServer,
 	}
 	var metricsErr <-chan error
-	if f.metricsListen != "" {
-		metricsErr, err = startMetricsServer(ctx, f.metricsListen, observabilitySource, log)
+	if metricsListen := effectiveMetricsListen(f.metricsListen, eng.RunningSnapshot()); metricsListen != "" {
+		metricsErr, err = startMetricsServer(ctx, metricsListen, observabilitySource, log)
 		if err != nil {
 			grpcServer.Stop()
 			return err

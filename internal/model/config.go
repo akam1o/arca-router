@@ -33,12 +33,20 @@ type SystemConfig struct {
 
 // SystemServicesConfig holds system service settings.
 type SystemServicesConfig struct {
-	WebUI *WebUIConfig `json:"web-ui,omitempty"`
-	SNMP  *SNMPConfig  `json:"snmp,omitempty"`
+	WebUI      *WebUIConfig      `json:"web-ui,omitempty"`
+	Prometheus *PrometheusConfig `json:"prometheus,omitempty"`
+	SNMP       *SNMPConfig       `json:"snmp,omitempty"`
 }
 
 // WebUIConfig holds browser UI service settings.
 type WebUIConfig struct {
+	Enabled       bool   `json:"enabled,omitempty"`
+	ListenAddress string `json:"listen-address,omitempty"`
+	Port          int    `json:"port,omitempty"`
+}
+
+// PrometheusConfig holds Prometheus metrics service settings.
+type PrometheusConfig struct {
 	Enabled       bool   `json:"enabled,omitempty"`
 	ListenAddress string `json:"listen-address,omitempty"`
 	Port          int    `json:"port,omitempty"`

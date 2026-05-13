@@ -12,10 +12,13 @@ import (
 	"time"
 
 	"github.com/akam1o/arca-router/internal/engine"
+	"github.com/akam1o/arca-router/internal/model"
 	"github.com/akam1o/arca-router/pkg/datastore"
 	"github.com/akam1o/arca-router/pkg/logger"
 	"github.com/akam1o/arca-router/pkg/netconf"
 )
+
+const defaultPrometheusPort = 9090
 
 type metricsSource struct {
 	startedAt     time.Time
@@ -93,6 +96,33 @@ func (s metricsSource) snapshot(now time.Time) routerMetrics {
 		metrics.NETCONFListening = nc.IsListening
 	}
 	return metrics
+}
+
+func effectiveMetricsListen(flagValue string, snapshot *model.ConfigSnapshot) string {
+	if listen := strings.TrimSpace(flagValue); listen != "" {
+		return listen
+	}
+	prometheus := snapshotPrometheusConfig(snapshot)
+	if prometheus == nil || !prometheus.Enabled {
+		return ""
+	}
+	addr := strings.TrimSpace(prometheus.ListenAddress)
+	if addr == "" {
+		addr = "127.0.0.1"
+	}
+	port := prometheus.Port
+	if port == 0 {
+		port = defaultPrometheusPort
+	}
+	return net.JoinHostPort(addr, strconv.Itoa(port))
+}
+
+func snapshotPrometheusConfig(snapshot *model.ConfigSnapshot) *model.PrometheusConfig {
+	if snapshot == nil || snapshot.Config == nil || snapshot.Config.System == nil ||
+		snapshot.Config.System.Services == nil {
+		return nil
+	}
+	return snapshot.Config.System.Services.Prometheus
 }
 
 func startMetricsServer(ctx context.Context, listenAddr string, source metricsSource, log *logger.Logger) (<-chan error, error) {

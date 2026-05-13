@@ -721,6 +721,12 @@ func replacementPrefixes(path []string) []string {
 			return prefix(4)
 		}
 	}
+	if len(path) >= 5 && path[0] == "system" && path[1] == "services" && path[2] == "prometheus" {
+		switch path[3] {
+		case "enabled", "listen-address", "port":
+			return prefix(4)
+		}
+	}
 	if len(path) >= 5 && path[0] == "system" && path[1] == "services" && path[2] == "snmp" {
 		switch path[3] {
 		case "enabled", "listen-address", "port", "community":

@@ -82,6 +82,17 @@ func writeSystemServices(b *strings.Builder, system *SystemConfig) {
 			writeLine(b, "set system services web-ui port %d", web.Port)
 		}
 	}
+	if prometheus := system.Services.Prometheus; prometheus != nil {
+		if prometheus.Enabled {
+			writeLine(b, "set system services prometheus enabled true")
+		}
+		if prometheus.ListenAddress != "" {
+			writeLine(b, "set system services prometheus listen-address %s", EscapeValue(prometheus.ListenAddress))
+		}
+		if prometheus.Port != 0 {
+			writeLine(b, "set system services prometheus port %d", prometheus.Port)
+		}
+	}
 	if snmp := system.Services.SNMP; snmp != nil {
 		if snmp.Enabled {
 			writeLine(b, "set system services snmp enabled true")

@@ -13,6 +13,56 @@ import (
 	"github.com/akam1o/arca-router/pkg/datastore"
 )
 
+func TestEffectiveMetricsListenUsesFlagOverride(t *testing.T) {
+	cfg := model.NewRouterConfig()
+	cfg.System = &model.SystemConfig{
+		Services: &model.SystemServicesConfig{
+			Prometheus: &model.PrometheusConfig{
+				Enabled:       true,
+				ListenAddress: "127.0.0.1",
+				Port:          9090,
+			},
+		},
+	}
+
+	got := effectiveMetricsListen(":19090", model.NewSnapshot(cfg, 1, "test", "test"))
+	if got != ":19090" {
+		t.Fatalf("effectiveMetricsListen() = %q, want %q", got, ":19090")
+	}
+}
+
+func TestEffectiveMetricsListenUsesConfig(t *testing.T) {
+	cfg := model.NewRouterConfig()
+	cfg.System = &model.SystemConfig{
+		Services: &model.SystemServicesConfig{
+			Prometheus: &model.PrometheusConfig{
+				Enabled:       true,
+				ListenAddress: "127.0.0.1",
+				Port:          9090,
+			},
+		},
+	}
+
+	got := effectiveMetricsListen("", model.NewSnapshot(cfg, 1, "test", "test"))
+	if got != "127.0.0.1:9090" {
+		t.Fatalf("effectiveMetricsListen() = %q, want %q", got, "127.0.0.1:9090")
+	}
+}
+
+func TestEffectiveMetricsListenUsesConfigDefaults(t *testing.T) {
+	cfg := model.NewRouterConfig()
+	cfg.System = &model.SystemConfig{
+		Services: &model.SystemServicesConfig{
+			Prometheus: &model.PrometheusConfig{Enabled: true},
+		},
+	}
+
+	got := effectiveMetricsListen("", model.NewSnapshot(cfg, 1, "test", "test"))
+	if got != "127.0.0.1:9090" {
+		t.Fatalf("effectiveMetricsListen() = %q, want %q", got, "127.0.0.1:9090")
+	}
+}
+
 func TestMetricsEndpointExportsRouterMetrics(t *testing.T) {
 	eng := engine.NewEngine(nil, slog.Default())
 	cfg := model.NewRouterConfig()

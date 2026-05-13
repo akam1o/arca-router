@@ -60,13 +60,23 @@ func (c *SystemServicesConfig) Clone() *SystemServicesConfig {
 		return nil
 	}
 	return &SystemServicesConfig{
-		WebUI: c.WebUI.Clone(),
-		SNMP:  c.SNMP.Clone(),
+		WebUI:      c.WebUI.Clone(),
+		Prometheus: c.Prometheus.Clone(),
+		SNMP:       c.SNMP.Clone(),
 	}
 }
 
 // Clone returns a deep copy of the Web UI configuration.
 func (c *WebUIConfig) Clone() *WebUIConfig {
+	if c == nil {
+		return nil
+	}
+	clone := *c
+	return &clone
+}
+
+// Clone returns a deep copy of the Prometheus configuration.
+func (c *PrometheusConfig) Clone() *PrometheusConfig {
 	if c == nil {
 		return nil
 	}

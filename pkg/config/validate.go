@@ -133,6 +133,11 @@ func (s *SystemConfig) Validate() error {
 			return err
 		}
 	}
+	if s.Services != nil && s.Services.Prometheus != nil {
+		if err := validatePrometheus(s.Services.Prometheus); err != nil {
+			return err
+		}
+	}
 	if s.Services != nil && s.Services.SNMP != nil {
 		if err := validateSNMP(s.Services.SNMP); err != nil {
 			return err
@@ -156,6 +161,26 @@ func validateWebUI(web *WebUIConfig) error {
 			errors.ErrCodeConfigValidation,
 			fmt.Sprintf("Invalid web-ui listen-address: %s", web.ListenAddress),
 			"Web UI listen-address must be an IP address or localhost",
+			"Use a valid listen address",
+		)
+	}
+	return nil
+}
+
+func validatePrometheus(prometheus *PrometheusConfig) error {
+	if prometheus.Port < 0 || prometheus.Port > 65535 {
+		return errors.New(
+			errors.ErrCodeConfigValidation,
+			fmt.Sprintf("Invalid prometheus port: %d", prometheus.Port),
+			"Prometheus port must be between 0 and 65535",
+			"Use a valid TCP port",
+		)
+	}
+	if prometheus.ListenAddress != "" && net.ParseIP(prometheus.ListenAddress) == nil && prometheus.ListenAddress != "localhost" {
+		return errors.New(
+			errors.ErrCodeConfigValidation,
+			fmt.Sprintf("Invalid prometheus listen-address: %s", prometheus.ListenAddress),
+			"Prometheus listen-address must be an IP address or localhost",
 			"Use a valid listen address",
 		)
 	}

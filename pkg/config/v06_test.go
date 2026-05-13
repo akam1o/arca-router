@@ -11,6 +11,9 @@ func TestV06AdvancedConfigRoundTrip(t *testing.T) {
 		"set system services web-ui enabled true",
 		"set system services web-ui listen-address 127.0.0.1",
 		"set system services web-ui port 8443",
+		"set system services prometheus enabled true",
+		"set system services prometheus listen-address 127.0.0.1",
+		"set system services prometheus port 9090",
 		"set system services snmp enabled true",
 		"set system services snmp listen-address 127.0.0.1",
 		"set system services snmp port 1161",
@@ -54,6 +57,9 @@ func TestV06AdvancedConfigRoundTrip(t *testing.T) {
 	}
 	if got := cfg.ClassOfService.TrafficControlProfiles["WAN"].ShapingRate; got != 1000000000 {
 		t.Fatalf("shaping-rate = %d", got)
+	}
+	if got := cfg.System.Services.Prometheus.Port; got != 9090 {
+		t.Fatalf("prometheus port = %d", got)
 	}
 	if got := cfg.System.Services.SNMP.Port; got != 1161 {
 		t.Fatalf("snmp port = %d", got)

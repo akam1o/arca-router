@@ -12,6 +12,9 @@ func TestV06ConfigConversionAndClone(t *testing.T) {
 		"set system services web-ui enabled true",
 		"set system services web-ui listen-address 127.0.0.1",
 		"set system services web-ui port 8443",
+		"set system services prometheus enabled true",
+		"set system services prometheus listen-address 127.0.0.1",
+		"set system services prometheus port 9090",
 		"set system services snmp enabled true",
 		"set system services snmp listen-address 127.0.0.1",
 		"set system services snmp port 1161",
@@ -51,6 +54,9 @@ func TestV06ConfigConversionAndClone(t *testing.T) {
 	}
 	if got := roundTrip.ClassOfService.Interfaces["ge-0/0/0"].OutputTrafficControlProfile; got != "WAN" {
 		t.Fatalf("CoS interface profile = %q", got)
+	}
+	if got := roundTrip.System.Services.Prometheus.Port; got != 9090 {
+		t.Fatalf("prometheus port = %d", got)
 	}
 	if got := roundTrip.System.Services.SNMP.Community; got != "public" {
 		t.Fatalf("snmp community = %q", got)
@@ -99,5 +105,21 @@ func TestV06ModelValidationRejectsInvalidSNMP(t *testing.T) {
 
 	if err := cfg.Validate(); err == nil {
 		t.Fatal("Validate() error = nil, want invalid snmp listen-address error")
+	}
+}
+
+func TestV06ModelValidationRejectsInvalidPrometheus(t *testing.T) {
+	cfg := NewRouterConfig()
+	cfg.System = &SystemConfig{
+		Services: &SystemServicesConfig{
+			Prometheus: &PrometheusConfig{
+				Enabled:       true,
+				ListenAddress: "not an address",
+			},
+		},
+	}
+
+	if err := cfg.Validate(); err == nil {
+		t.Fatal("Validate() error = nil, want invalid prometheus listen-address error")
 	}
 }
