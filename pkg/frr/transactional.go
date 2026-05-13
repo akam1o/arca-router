@@ -101,19 +101,28 @@ func runVtyshMgmtCommand(ctx context.Context, command string) ([]byte, error) {
 
 // TransactionalApplier applies FRR config through the management candidate datastore.
 type TransactionalApplier struct {
-	client MgmtClient
+	client       MgmtClient
+	vrrpPreparer VRRPSystemPreparer
 }
 
 // NewTransactionalApplier creates a transactional FRR applier.
 func NewTransactionalApplier(client MgmtClient) *TransactionalApplier {
+	return NewTransactionalApplierWithPreparer(client, NewIPVRRPSystemPreparer(nil))
+}
+
+// NewTransactionalApplierWithPreparer creates an applier with a custom VRRP preparer.
+func NewTransactionalApplierWithPreparer(client MgmtClient, preparer VRRPSystemPreparer) *TransactionalApplier {
 	if client == nil {
 		client = NewVtyshMgmtClient()
 	}
-	return &TransactionalApplier{client: client}
+	return &TransactionalApplier{client: client, vrrpPreparer: preparer}
 }
 
 // ApplyConfig converts the generated FRR config into management operations and commits them.
 func (a *TransactionalApplier) ApplyConfig(ctx context.Context, _ string, cfg *Config) error {
+	if err := prepareVRRPSystem(ctx, a.vrrpPreparer, cfg); err != nil {
+		return err
+	}
 	ops, err := BuildMgmtOperations(cfg)
 	if err != nil {
 		return err
