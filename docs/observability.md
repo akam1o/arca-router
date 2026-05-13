@@ -10,6 +10,14 @@ Start the daemon with a Prometheus listen address:
 arca-routerd --metrics-listen=:9090
 ```
 
+Prometheus can also be enabled from running configuration:
+
+```text
+set system services prometheus enabled true
+set system services prometheus listen-address 127.0.0.1
+set system services prometheus port 9090
+```
+
 Endpoints:
 
 - `GET /metrics`

@@ -502,6 +502,16 @@ set protocols bgp group external import PREFER-CUSTOMER
 
 対応する southbound apply path が実装されるまでは、未対応の MPLS、routing-instance、class-of-service 設定を active に残す commit は validation で失敗します。未対応 stanza の削除は許可します。VRRP は現時点では FRR file backend（`--frr-apply-mode=file`）のみ対応し、transactional FRR backend では active な VRRP 設定を引き続き拒否します。
 
+### Prometheus service
+
+```
+set system services prometheus enabled true
+set system services prometheus listen-address 127.0.0.1
+set system services prometheus port 9090
+```
+
+`listen-address` は IP address または `localhost` を指定します。port を明示せずに有効化した場合、daemon は `9090` を使用します。
+
 ### Web UI service
 
 ```
@@ -926,7 +936,7 @@ set security rate-limit per-user 20
 --host-key <path>          NETCONF SSH host key path
 --user-db <path>           NETCONF user database path
 --frr-apply-mode <mode>    FRR backend: transactional または file（デフォルト: transactional）
---metrics-listen <addr>    Prometheus listen address。空の場合は無効
+--metrics-listen <addr>    Prometheus listen address。system services prometheus config より優先
 --web-listen <addr>        Web UI listen address。system services web-ui config より優先
 --snmp-listen <addr>       SNMPv2c UDP listen address。空の場合は無効
 --snmp-community <value>   SNMPv2c read-only community。system services snmp config より優先（デフォルト: public）
@@ -945,6 +955,14 @@ metrics endpoint は次のように起動します。
 
 ```bash
 arca-routerd --metrics-listen=:9090
+```
+
+running configuration からも有効化できます。
+
+```
+set system services prometheus enabled true
+set system services prometheus listen-address 127.0.0.1
+set system services prometheus port 9090
 ```
 
 Endpoints:
@@ -1157,7 +1175,7 @@ sudo vtysh -c "show running-config"
 ### Observability endpoint の確認
 
 ```
-# --metrics-listen 有効時の Prometheus / health
+# --metrics-listen または system services prometheus 有効時の Prometheus / health
 curl http://127.0.0.1:9090/healthz
 curl http://127.0.0.1:9090/metrics
 
@@ -1165,7 +1183,7 @@ curl http://127.0.0.1:9090/metrics
 curl http://127.0.0.1:8080/api/status
 curl http://127.0.0.1:8080/api/config
 
-# --snmp-listen 有効時の SNMP
+# --snmp-listen または system services snmp 有効時の SNMP
 snmpget -v 2c -c public 127.0.0.1:1161 1.3.6.1.3.9950.1.3.0
 ```
 
