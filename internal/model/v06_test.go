@@ -19,6 +19,7 @@ func TestV06ConfigConversionAndClone(t *testing.T) {
 		"set system services snmp listen-address 127.0.0.1",
 		"set system services snmp port 1161",
 		"set system services snmp community public",
+		"set security netconf ssh port 1830",
 		"set chassis cluster node node0 address 192.0.2.10",
 		"set interfaces ge-0/0/0 unit 0 family inet address 192.0.2.1/24",
 		"set protocols mpls interface ge-0/0/0",
@@ -60,6 +61,9 @@ func TestV06ConfigConversionAndClone(t *testing.T) {
 	}
 	if got := roundTrip.System.Services.SNMP.Community; got != "public" {
 		t.Fatalf("snmp community = %q", got)
+	}
+	if got := roundTrip.Security.NETCONF.SSH.Port; got != 1830 {
+		t.Fatalf("netconf ssh port = %d", got)
 	}
 }
 
@@ -121,5 +125,18 @@ func TestV06ModelValidationRejectsInvalidPrometheus(t *testing.T) {
 
 	if err := cfg.Validate(); err == nil {
 		t.Fatal("Validate() error = nil, want invalid prometheus listen-address error")
+	}
+}
+
+func TestV06ModelValidationRejectsInvalidNETCONFPort(t *testing.T) {
+	cfg := NewRouterConfig()
+	cfg.Security = &SecurityConfig{
+		NETCONF: &NETCONFSecurityConfig{
+			SSH: &NETCONFSSHConfig{Port: 70000},
+		},
+	}
+
+	if err := cfg.Validate(); err == nil {
+		t.Fatal("Validate() error = nil, want invalid netconf ssh port error")
 	}
 }

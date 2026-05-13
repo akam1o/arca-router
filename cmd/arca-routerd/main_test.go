@@ -244,6 +244,40 @@ func TestBuildDatastoreConfigEtcdRejectsPartialTLS(t *testing.T) {
 	}
 }
 
+func TestEffectiveNETCONFListenUsesFlagOverride(t *testing.T) {
+	cfg := model.NewRouterConfig()
+	cfg.Security = &model.SecurityConfig{
+		NETCONF: &model.NETCONFSecurityConfig{
+			SSH: &model.NETCONFSSHConfig{Port: 1830},
+		},
+	}
+
+	got := effectiveNETCONFListen(":2830", model.NewSnapshot(cfg, 1, "test", "test"))
+	if got != ":2830" {
+		t.Fatalf("effectiveNETCONFListen() = %q, want %q", got, ":2830")
+	}
+}
+
+func TestEffectiveNETCONFListenUsesConfigPort(t *testing.T) {
+	cfg := model.NewRouterConfig()
+	cfg.Security = &model.SecurityConfig{
+		NETCONF: &model.NETCONFSecurityConfig{
+			SSH: &model.NETCONFSSHConfig{Port: 1830},
+		},
+	}
+
+	got := effectiveNETCONFListen("", model.NewSnapshot(cfg, 1, "test", "test"))
+	if got != ":1830" {
+		t.Fatalf("effectiveNETCONFListen() = %q, want %q", got, ":1830")
+	}
+}
+
+func TestEffectiveNETCONFListenUsesDefault(t *testing.T) {
+	if got := effectiveNETCONFListen("", nil); got != ":830" {
+		t.Fatalf("effectiveNETCONFListen() = %q, want :830", got)
+	}
+}
+
 func TestPrepareGRPCSocketPathRejectsInsecureDirectory(t *testing.T) {
 	dir := filepath.Join(t.TempDir(), "open")
 	if err := os.Mkdir(dir, 0777); err != nil {

@@ -42,6 +42,9 @@ func (c *RouterConfig) Validate() error {
 	if err := c.validateClassOfService(); err != nil {
 		return err
 	}
+	if err := c.validateSecurity(); err != nil {
+		return err
+	}
 	return nil
 }
 
@@ -288,6 +291,17 @@ func (c *RouterConfig) validateClassOfService() error {
 				return fmt.Errorf("class-of-service interface %s: output traffic-control-profile %q not found", name, iface.OutputTrafficControlProfile)
 			}
 		}
+	}
+	return nil
+}
+
+func (c *RouterConfig) validateSecurity() error {
+	if c.Security == nil || c.Security.NETCONF == nil || c.Security.NETCONF.SSH == nil {
+		return nil
+	}
+	port := c.Security.NETCONF.SSH.Port
+	if port < 0 || port > 65535 {
+		return fmt.Errorf("security netconf ssh port must be 0-65535, got %d", port)
 	}
 	return nil
 }
