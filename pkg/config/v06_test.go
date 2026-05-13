@@ -94,3 +94,53 @@ func TestV06AdvancedConfigValidationRejectsInvalidReferences(t *testing.T) {
 		t.Fatal("Validate() error = nil, want missing traffic-control-profile error")
 	}
 }
+
+func TestRepeatedSetListValuesAreIdempotent(t *testing.T) {
+	input := strings.Join([]string{
+		"set chassis cluster sync etcd endpoint http://127.0.0.1:2379",
+		"set chassis cluster sync etcd endpoint http://127.0.0.1:2379",
+		"set interfaces ge-0/0/0 unit 0 family inet address 192.0.2.1/24",
+		"set interfaces ge-0/0/0 unit 0 family inet address 192.0.2.1/24",
+		"set protocols mpls interface ge-0/0/0",
+		"set protocols mpls interface ge-0/0/0",
+		"set routing-instances BLUE interface ge-0/0/0",
+		"set routing-instances BLUE interface ge-0/0/0",
+		"set policy-options prefix-list CUSTOMER 192.0.2.0/24",
+		"set policy-options prefix-list CUSTOMER 192.0.2.0/24",
+	}, "\n")
+
+	cfg, err := NewParser(strings.NewReader(input)).Parse()
+	if err != nil {
+		t.Fatalf("Parse() error = %v", err)
+	}
+
+	if got := len(cfg.Chassis.Cluster.Sync.Etcd.Endpoints); got != 1 {
+		t.Fatalf("etcd endpoints = %d, want 1", got)
+	}
+	addresses := cfg.Interfaces["ge-0/0/0"].Units[0].Family["inet"].Addresses
+	if got := len(addresses); got != 1 {
+		t.Fatalf("interface addresses = %d, want 1", got)
+	}
+	if got := len(cfg.Protocols.MPLS.Interfaces); got != 1 {
+		t.Fatalf("MPLS interfaces = %d, want 1", got)
+	}
+	if got := len(cfg.RoutingInstances["BLUE"].Interfaces); got != 1 {
+		t.Fatalf("routing-instance interfaces = %d, want 1", got)
+	}
+	if got := len(cfg.PolicyOptions.PrefixLists["CUSTOMER"].Prefixes); got != 1 {
+		t.Fatalf("prefix-list entries = %d, want 1", got)
+	}
+
+	text := ToSetCommands(cfg)
+	for _, line := range []string{
+		"set chassis cluster sync etcd endpoint http://127.0.0.1:2379",
+		"set interfaces ge-0/0/0 unit 0 family inet address 192.0.2.1/24",
+		"set protocols mpls interface ge-0/0/0",
+		"set routing-instances BLUE interface ge-0/0/0",
+		"set policy-options prefix-list CUSTOMER 192.0.2.0/24",
+	} {
+		if got := strings.Count(text, line); got != 1 {
+			t.Fatalf("%q appears %d times in set output, want 1\n%s", line, got, text)
+		}
+	}
+}

@@ -421,7 +421,7 @@ func (p *Parser) parseClusterSync(cluster *ClusterConfig) error {
 	if cluster.Sync.Etcd == nil {
 		cluster.Sync.Etcd = &EtcdSyncConfig{}
 	}
-	cluster.Sync.Etcd.Endpoints = append(cluster.Sync.Etcd.Endpoints, p.current.Value)
+	cluster.Sync.Etcd.Endpoints = appendUniqueString(cluster.Sync.Etcd.Endpoints, p.current.Value)
 	p.nextToken()
 	return nil
 }
@@ -510,7 +510,7 @@ func (p *Parser) parseInterfaceUnit(iface *Interface) error {
 	}
 
 	address := p.current.Value
-	family.Addresses = append(family.Addresses, address)
+	family.Addresses = appendUniqueString(family.Addresses, address)
 	p.nextToken()
 
 	return nil
@@ -698,7 +698,7 @@ func (p *Parser) parseRoutingInstances(config *Config) error {
 		if p.current.Type != TokenWord {
 			return p.error("expected routing-instance interface")
 		}
-		instance.Interfaces = append(instance.Interfaces, p.current.Value)
+		instance.Interfaces = appendUniqueString(instance.Interfaces, p.current.Value)
 		p.nextToken()
 		return nil
 	default:
@@ -744,7 +744,7 @@ func (p *Parser) parseMPLS(pc *ProtocolConfig) error {
 	if p.current.Type != TokenWord {
 		return p.error("expected MPLS interface name")
 	}
-	pc.MPLS.Interfaces = append(pc.MPLS.Interfaces, p.current.Value)
+	pc.MPLS.Interfaces = appendUniqueString(pc.MPLS.Interfaces, p.current.Value)
 	p.nextToken()
 	return nil
 }
@@ -1132,10 +1132,8 @@ func (p *Parser) parsePrefixList(config *Config) error {
 	}
 
 	// Add prefix to list
-	config.PolicyOptions.PrefixLists[listName].Prefixes = append(
-		config.PolicyOptions.PrefixLists[listName].Prefixes,
-		prefix,
-	)
+	list := config.PolicyOptions.PrefixLists[listName]
+	list.Prefixes = appendUniqueString(list.Prefixes, prefix)
 
 	return nil
 }
@@ -1754,4 +1752,13 @@ func (p *Parser) parseSecurityRateLimit(config *Config) error {
 
 	p.nextToken()
 	return nil
+}
+
+func appendUniqueString(values []string, value string) []string {
+	for _, existing := range values {
+		if existing == value {
+			return values
+		}
+	}
+	return append(values, value)
 }
