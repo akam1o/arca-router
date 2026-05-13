@@ -14,11 +14,17 @@ import (
 	"time"
 
 	"github.com/akam1o/arca-router/internal/model"
+	"github.com/akam1o/arca-router/pkg/auth"
 	pkgconfig "github.com/akam1o/arca-router/pkg/config"
 	"github.com/akam1o/arca-router/pkg/logger"
+	pkgnetconf "github.com/akam1o/arca-router/pkg/netconf"
 )
 
 const defaultWebUIPort = 8080
+
+const webAuthRealm = `Basic realm="arca-router", charset="UTF-8"`
+
+const webDummyPasswordHash = "$argon2id$v=19$m=65536,t=3,p=4$AAAAAAAAAAAAAAAAAAAAAA$AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
 
 type webStatus struct {
 	Version         string          `json:"version"`
@@ -57,6 +63,11 @@ type webNETCONFStats struct {
 type webConfig struct {
 	ConfigText string `json:"config_text"`
 	Version    uint64 `json:"version"`
+}
+
+type webAuthUser struct {
+	PasswordHash string
+	Role         string
 }
 
 type webIndexData struct {
@@ -355,6 +366,9 @@ func (s metricsSource) handleWebStatus(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
+	if !s.authorizeWebRead(w, r) {
+		return
+	}
 	w.Header().Set("Content-Type", "application/json")
 	if err := json.NewEncoder(w).Encode(newWebStatus(s.snapshot(time.Now()))); err != nil {
 		http.Error(w, "encode status: "+err.Error(), http.StatusInternalServerError)
@@ -364,6 +378,9 @@ func (s metricsSource) handleWebStatus(w http.ResponseWriter, r *http.Request) {
 func (s metricsSource) handleWebConfig(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	if !s.authorizeWebRead(w, r) {
 		return
 	}
 	cfg, err := s.runningConfig()
@@ -384,6 +401,9 @@ func (s metricsSource) handleWebIndex(w http.ResponseWriter, r *http.Request) {
 	}
 	if r.Method != http.MethodGet && r.Method != http.MethodHead {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	if !s.authorizeWebRead(w, r) {
 		return
 	}
 
@@ -418,6 +438,77 @@ func (s metricsSource) runningConfig() (webConfig, error) {
 		ConfigText: text,
 		Version:    snap.Version,
 	}, nil
+}
+
+func (s metricsSource) authorizeWebRead(w http.ResponseWriter, r *http.Request) bool {
+	users := s.webAuthUsers()
+	if len(users) == 0 {
+		return true
+	}
+
+	username, password, ok := r.BasicAuth()
+	if !ok {
+		writeWebAuthChallenge(w)
+		return false
+	}
+
+	user, found := users[username]
+	passwordHash := webDummyPasswordHash
+	if found {
+		passwordHash = user.PasswordHash
+	}
+	valid, err := auth.VerifyPassword(password, passwordHash)
+	if err != nil || !found || !valid {
+		writeWebAuthChallenge(w)
+		return false
+	}
+	if !webRoleCanRead(user.Role) {
+		http.Error(w, "forbidden", http.StatusForbidden)
+		return false
+	}
+	return true
+}
+
+func (s metricsSource) webAuthUsers() map[string]webAuthUser {
+	if s.engine == nil {
+		return nil
+	}
+	snap := s.engine.RunningSnapshot()
+	if snap == nil || snap.Config == nil || snap.Config.Security == nil {
+		return nil
+	}
+	users := make(map[string]webAuthUser, len(snap.Config.Security.Users))
+	for username, user := range snap.Config.Security.Users {
+		if user == nil || user.Password == "" {
+			continue
+		}
+		role := strings.TrimSpace(user.Role)
+		if role == "" {
+			role = pkgnetconf.RoleReadOnly
+		}
+		users[username] = webAuthUser{
+			PasswordHash: user.Password,
+			Role:         role,
+		}
+	}
+	if len(users) == 0 {
+		return nil
+	}
+	return users
+}
+
+func webRoleCanRead(role string) bool {
+	switch role {
+	case pkgnetconf.RoleReadOnly, pkgnetconf.RoleOperator, pkgnetconf.RoleAdmin:
+		return true
+	default:
+		return false
+	}
+}
+
+func writeWebAuthChallenge(w http.ResponseWriter) {
+	w.Header().Set("WWW-Authenticate", webAuthRealm)
+	http.Error(w, "authentication required", http.StatusUnauthorized)
 }
 
 func newWebStatus(metrics routerMetrics) webStatus {

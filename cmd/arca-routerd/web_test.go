@@ -12,6 +12,7 @@ import (
 
 	"github.com/akam1o/arca-router/internal/engine"
 	"github.com/akam1o/arca-router/internal/model"
+	pkgconfig "github.com/akam1o/arca-router/pkg/config"
 	"github.com/akam1o/arca-router/pkg/datastore"
 )
 
@@ -145,6 +146,54 @@ func TestWebConfigEndpoint(t *testing.T) {
 	}
 }
 
+func TestWebEndpointRequiresAuthWhenPasswordUsersConfigured(t *testing.T) {
+	source := newWebAuthTestSource(t, "monitor", "secret", "read-only")
+
+	req := httptest.NewRequest(http.MethodGet, "/api/status", nil)
+	rec := httptest.NewRecorder()
+	source.handleWebStatus(rec, req)
+
+	if rec.Code != http.StatusUnauthorized {
+		t.Fatalf("status = %d, want %d", rec.Code, http.StatusUnauthorized)
+	}
+	if got := rec.Header().Get("WWW-Authenticate"); got != webAuthRealm {
+		t.Fatalf("WWW-Authenticate = %q, want %q", got, webAuthRealm)
+	}
+}
+
+func TestWebEndpointAcceptsReadOnlyBasicAuth(t *testing.T) {
+	source := newWebAuthTestSource(t, "monitor", "secret", "read-only")
+
+	req := httptest.NewRequest(http.MethodGet, "/api/config", nil)
+	req.SetBasicAuth("monitor", "secret")
+	rec := httptest.NewRecorder()
+	source.handleWebConfig(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d: %s", rec.Code, http.StatusOK, rec.Body.String())
+	}
+	var cfgResp webConfig
+	if err := json.NewDecoder(rec.Result().Body).Decode(&cfgResp); err != nil {
+		t.Fatalf("Decode() error = %v", err)
+	}
+	if !strings.Contains(cfgResp.ConfigText, "set system host-name edge01") {
+		t.Fatalf("ConfigText missing hostname:\n%s", cfgResp.ConfigText)
+	}
+}
+
+func TestWebEndpointRejectsInvalidRole(t *testing.T) {
+	source := newWebAuthTestSource(t, "monitor", "secret", "invalid")
+
+	req := httptest.NewRequest(http.MethodGet, "/api/status", nil)
+	req.SetBasicAuth("monitor", "secret")
+	rec := httptest.NewRecorder()
+	source.handleWebStatus(rec, req)
+
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("status = %d, want %d", rec.Code, http.StatusForbidden)
+	}
+}
+
 func TestWebIndexEndpoint(t *testing.T) {
 	eng := engine.NewEngine(nil, slog.Default())
 	cfg := model.NewRouterConfig()
@@ -170,5 +219,29 @@ func TestWebIndexEndpoint(t *testing.T) {
 		if !strings.Contains(text, want) {
 			t.Fatalf("index missing %q:\n%s", want, text)
 		}
+	}
+}
+
+func newWebAuthTestSource(t *testing.T, username, password, role string) metricsSource {
+	t.Helper()
+	hash, err := pkgconfig.NormalizePasswordForStorage(password)
+	if err != nil {
+		t.Fatalf("NormalizePasswordForStorage() error = %v", err)
+	}
+	eng := engine.NewEngine(nil, slog.Default())
+	cfg := model.NewRouterConfig()
+	cfg.System = &model.SystemConfig{HostName: "edge01"}
+	cfg.Security = &model.SecurityConfig{
+		Users: map[string]*model.UserConfig{
+			username: {
+				Password: hash,
+				Role:     role,
+			},
+		},
+	}
+	eng.InitializeRunning(cfg, 42)
+	return metricsSource{
+		startedAt: time.Now().Add(-2 * time.Minute),
+		engine:    eng,
 	}
 }
