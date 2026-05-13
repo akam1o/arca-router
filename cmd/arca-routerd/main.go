@@ -411,6 +411,7 @@ func run(ctx context.Context, f *daemonFlags, log *logger.Logger) error {
 		netconfServer: netconfServer,
 		datastore:     datastoreConfig,
 		configAPI:     grpcServer,
+		vpp:           vppPlugin,
 	}
 	var metricsErr <-chan error
 	if metricsListen := effectiveMetricsListen(f.metricsListen, eng.RunningSnapshot()); metricsListen != "" {

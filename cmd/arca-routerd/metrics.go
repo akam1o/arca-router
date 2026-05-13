@@ -13,6 +13,7 @@ import (
 
 	"github.com/akam1o/arca-router/internal/engine"
 	"github.com/akam1o/arca-router/internal/model"
+	sbvpp "github.com/akam1o/arca-router/internal/southbound/vpp"
 	"github.com/akam1o/arca-router/pkg/datastore"
 	"github.com/akam1o/arca-router/pkg/logger"
 	"github.com/akam1o/arca-router/pkg/netconf"
@@ -26,6 +27,11 @@ type metricsSource struct {
 	netconfServer *netconf.SSHServer
 	datastore     *datastore.Config
 	configAPI     webConfigAPI
+	vpp           vppReconciliationSource
+}
+
+type vppReconciliationSource interface {
+	LCPReconciliationStatus() sbvpp.LCPReconciliationStatus
 }
 
 type routerMetrics struct {
@@ -45,6 +51,10 @@ type routerMetrics struct {
 	ClusterEtcdSync        bool
 	ClusterEtcdEndpoints   []string
 	ClusterSyncAligned     bool
+	VPPLCPReconcileLastRun time.Time
+	VPPLCPPairs            int
+	VPPLCPInconsistencies  []string
+	VPPLCPReconcileError   string
 }
 
 func (s metricsSource) snapshot(now time.Time) routerMetrics {
@@ -94,6 +104,13 @@ func (s metricsSource) snapshot(now time.Time) routerMetrics {
 		metrics.NETCONFSuccess = nc.SuccessfulHandshakes
 		metrics.NETCONFFailures = nc.FailedHandshakes
 		metrics.NETCONFListening = nc.IsListening
+	}
+	if s.vpp != nil {
+		lcp := s.vpp.LCPReconciliationStatus()
+		metrics.VPPLCPReconcileLastRun = lcp.LastRun
+		metrics.VPPLCPPairs = lcp.PairCount
+		metrics.VPPLCPInconsistencies = append([]string(nil), lcp.Inconsistencies...)
+		metrics.VPPLCPReconcileError = lcp.LastError
 	}
 	return metrics
 }
@@ -208,6 +225,19 @@ func (s metricsSource) handleMetrics(w http.ResponseWriter, r *http.Request) {
 	writeMetricBool(&b, "arca_router_cluster_sync_etcd_configured", metrics.ClusterEtcdSync)
 	writeMetricBool(&b, "arca_router_cluster_sync_aligned", metrics.ClusterSyncAligned)
 
+	writeMetricHelp(&b, "arca_router_vpp_lcp_pairs", "Number of VPP LCP pairs known after the latest reconciliation.")
+	writeMetricType(&b, "arca_router_vpp_lcp_pairs", "gauge")
+	writeMetricHelp(&b, "arca_router_vpp_lcp_inconsistencies", "Number of VPP LCP reconciliation inconsistencies detected.")
+	writeMetricType(&b, "arca_router_vpp_lcp_inconsistencies", "gauge")
+	writeMetricHelp(&b, "arca_router_vpp_lcp_reconcile_error", "Whether the latest VPP LCP reconciliation check failed.")
+	writeMetricType(&b, "arca_router_vpp_lcp_reconcile_error", "gauge")
+	writeMetricHelp(&b, "arca_router_vpp_lcp_last_reconcile_timestamp_seconds", "Unix timestamp of the latest VPP LCP reconciliation check.")
+	writeMetricType(&b, "arca_router_vpp_lcp_last_reconcile_timestamp_seconds", "gauge")
+	writeMetricValue(&b, "arca_router_vpp_lcp_pairs", float64(metrics.VPPLCPPairs))
+	writeMetricValue(&b, "arca_router_vpp_lcp_inconsistencies", float64(len(metrics.VPPLCPInconsistencies)))
+	writeMetricBool(&b, "arca_router_vpp_lcp_reconcile_error", metrics.VPPLCPReconcileError != "")
+	writeMetricValue(&b, "arca_router_vpp_lcp_last_reconcile_timestamp_seconds", unixTimestampSeconds(metrics.VPPLCPReconcileLastRun))
+
 	writeMetricHelp(&b, "arca_router_netconf_active_sessions", "Current active NETCONF sessions.")
 	writeMetricType(&b, "arca_router_netconf_active_sessions", "gauge")
 	writeMetricHelp(&b, "arca_router_netconf_active_connections", "Current active NETCONF SSH connections.")
@@ -260,4 +290,11 @@ func writeMetricBool(b *strings.Builder, name string, value bool) {
 		return
 	}
 	writeMetricValue(b, name, 0)
+}
+
+func unixTimestampSeconds(ts time.Time) float64 {
+	if ts.IsZero() {
+		return 0
+	}
+	return float64(ts.Unix())
 }

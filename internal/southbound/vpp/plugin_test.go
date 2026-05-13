@@ -195,6 +195,49 @@ func TestApplyChangesRemovesInterfaceWithoutLCPPair(t *testing.T) {
 	}
 }
 
+func TestInitRecordsLCPReconciliationStatus(t *testing.T) {
+	ctx := context.Background()
+	client := pkgvpp.NewMockClient()
+	if err := client.Connect(ctx); err != nil {
+		t.Fatalf("Connect() error = %v", err)
+	}
+	iface, err := client.CreateInterface(ctx, &pkgvpp.CreateInterfaceRequest{
+		Type:           pkgvpp.InterfaceTypeAVF,
+		DeviceInstance: "0000:03:00.0",
+		PCIAddress:     "0000:03:00.0",
+		Name:           "ge-0/0/0",
+	})
+	if err != nil {
+		t.Fatalf("CreateInterface() error = %v", err)
+	}
+	if err := client.CreateLCPInterface(ctx, iface.SwIfIndex, "ge000"); err != nil {
+		t.Fatalf("CreateLCPInterface() error = %v", err)
+	}
+	if err := client.Close(); err != nil {
+		t.Fatalf("Close() error = %v", err)
+	}
+
+	plugin := NewVPPPlugin(client, &device.HardwareConfig{}, testLogger())
+	if err := plugin.Init(ctx); err != nil {
+		t.Fatalf("Init() error = %v", err)
+	}
+	t.Cleanup(func() { _ = plugin.Close() })
+
+	status := plugin.LCPReconciliationStatus()
+	if status.LastRun.IsZero() {
+		t.Fatal("LCPReconciliationStatus().LastRun is zero")
+	}
+	if status.PairCount != 1 {
+		t.Fatalf("LCPReconciliationStatus().PairCount = %d, want 1", status.PairCount)
+	}
+	if len(status.Inconsistencies) != 0 {
+		t.Fatalf("LCPReconciliationStatus().Inconsistencies = %#v, want none", status.Inconsistencies)
+	}
+	if status.LastError != "" {
+		t.Fatalf("LCPReconciliationStatus().LastError = %q, want empty", status.LastError)
+	}
+}
+
 func TestValidateChangesRejectsUnsupportedV06VPPConfig(t *testing.T) {
 	plugin := NewVPPPlugin(pkgvpp.NewMockClient(), &device.HardwareConfig{}, testLogger())
 	newCfg := model.NewRouterConfig()

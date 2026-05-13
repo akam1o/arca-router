@@ -14,6 +14,7 @@ import (
 	"github.com/akam1o/arca-router/internal/engine"
 	"github.com/akam1o/arca-router/internal/model"
 	nbgrpc "github.com/akam1o/arca-router/internal/northbound/grpc"
+	sbvpp "github.com/akam1o/arca-router/internal/southbound/vpp"
 	pkgconfig "github.com/akam1o/arca-router/pkg/config"
 	"github.com/akam1o/arca-router/pkg/datastore"
 )
@@ -94,6 +95,11 @@ func TestWebStatusEndpoint(t *testing.T) {
 			Backend:       datastore.BackendEtcd,
 			EtcdEndpoints: []string{"https://etcd1:2379"},
 		},
+		vpp: fakeVPPReconciliationSource{status: sbvpp.LCPReconciliationStatus{
+			LastRun:         time.Unix(1700000000, 0),
+			PairCount:       2,
+			Inconsistencies: []string{"Interface 7 exists in VPP but not in cache"},
+		}},
 	}.handleWebStatus(rec, req)
 
 	if rec.Code != http.StatusOK {
@@ -117,6 +123,9 @@ func TestWebStatusEndpoint(t *testing.T) {
 	}
 	if !status.Cluster.Enabled || status.Cluster.NodeCount != 1 || !status.Cluster.EtcdSyncConfigured || !status.Cluster.SyncAligned {
 		t.Fatalf("Cluster status = %#v, want enabled aligned etcd sync", status.Cluster)
+	}
+	if status.VPP.LCP.PairCount != 2 || status.VPP.LCP.InconsistencyCount != 1 || status.VPP.LCP.LastReconcile == "" {
+		t.Fatalf("VPP LCP status = %#v, want pair count and inconsistency status", status.VPP.LCP)
 	}
 }
 
@@ -319,6 +328,7 @@ func TestWebIndexEndpoint(t *testing.T) {
 		"NETCONF",
 		"Datastore",
 		"Cluster sync",
+		"VPP LCP",
 		"Commit history",
 		"Configuration editor",
 		"set system host-name edge01",

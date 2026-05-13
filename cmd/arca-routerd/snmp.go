@@ -34,6 +34,10 @@ const (
 	snmpOIDNETCONFSuccess  = arcaSNMPBaseOID + ".8.0"
 	snmpOIDNETCONFFailures = arcaSNMPBaseOID + ".9.0"
 	snmpOIDDaemonVersion   = arcaSNMPBaseOID + ".10.0"
+	snmpOIDVPPLCPPairs     = arcaSNMPBaseOID + ".11.0"
+	snmpOIDVPPLCPMismatch  = arcaSNMPBaseOID + ".12.0"
+	snmpOIDVPPLCPError     = arcaSNMPBaseOID + ".13.0"
+	snmpOIDVPPLCPLastRun   = arcaSNMPBaseOID + ".14.0"
 
 	defaultSNMPPort      = 161
 	defaultSNMPCommunity = "public"
@@ -223,6 +227,41 @@ func snmpOIDs(source metricsSource) []*snmpserver.PDUValueControlItem {
 			Type:     gosnmp.OctetString,
 			OnGet:    func() (interface{}, error) { return snmpserver.Asn1OctetStringWrap(Version), nil },
 			Document: "arcaRouterdVersion",
+		},
+		{
+			OID:  snmpOIDVPPLCPPairs,
+			Type: gosnmp.Gauge32,
+			OnGet: func() (interface{}, error) {
+				return snmpserver.Asn1Gauge32Wrap(uint(source.snapshot(time.Now()).VPPLCPPairs)), nil
+			},
+			Document: "arcaRouterVppLcpPairs",
+		},
+		{
+			OID:  snmpOIDVPPLCPMismatch,
+			Type: gosnmp.Gauge32,
+			OnGet: func() (interface{}, error) {
+				return snmpserver.Asn1Gauge32Wrap(uint(len(source.snapshot(time.Now()).VPPLCPInconsistencies))), nil
+			},
+			Document: "arcaRouterVppLcpInconsistencies",
+		},
+		{
+			OID:  snmpOIDVPPLCPError,
+			Type: gosnmp.Integer,
+			OnGet: func() (interface{}, error) {
+				if source.snapshot(time.Now()).VPPLCPReconcileError != "" {
+					return snmpserver.Asn1IntegerWrap(1), nil
+				}
+				return snmpserver.Asn1IntegerWrap(0), nil
+			},
+			Document: "arcaRouterVppLcpReconcileError",
+		},
+		{
+			OID:  snmpOIDVPPLCPLastRun,
+			Type: gosnmp.Gauge32,
+			OnGet: func() (interface{}, error) {
+				return snmpserver.Asn1Gauge32Wrap(uint(unixTimestampSeconds(source.snapshot(time.Now()).VPPLCPReconcileLastRun))), nil
+			},
+			Document: "arcaRouterVppLcpLastReconcile",
 		},
 	}
 }

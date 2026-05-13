@@ -9,6 +9,7 @@ import (
 	"net"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/akam1o/arca-router/internal/engine"
 	"github.com/akam1o/arca-router/internal/model"
@@ -32,6 +33,16 @@ type VPPPlugin struct {
 
 	// removedInterfaces tracks interfaces disabled during the last apply.
 	removedInterfaces map[string]uint32
+
+	lcpReconciliation LCPReconciliationStatus
+}
+
+// LCPReconciliationStatus is the latest VPP LCP cache reconciliation result.
+type LCPReconciliationStatus struct {
+	LastRun         time.Time
+	PairCount       int
+	Inconsistencies []string
+	LastError       string
 }
 
 // NewVPPPlugin creates a new VPP plugin.
@@ -76,6 +87,8 @@ func (p *VPPPlugin) Init(ctx context.Context) error {
 			}
 		}
 	}
+
+	p.updateLCPReconciliation(ctx)
 
 	return nil
 }
@@ -156,6 +169,7 @@ func (p *VPPPlugin) ApplyChanges(ctx context.Context, diff *engine.ConfigDiff) e
 		}
 	}
 
+	p.updateLCPReconciliationLocked(ctx)
 	return nil
 }
 
@@ -211,6 +225,7 @@ func (p *VPPPlugin) RollbackChanges(ctx context.Context, diff *engine.ConfigDiff
 		}
 	}
 
+	p.updateLCPReconciliationLocked(ctx)
 	return nil
 }
 
@@ -247,6 +262,13 @@ func (p *VPPPlugin) CollectState(ctx context.Context) (map[string]*model.Interfa
 	}
 
 	return result, nil
+}
+
+// LCPReconciliationStatus returns a copy of the latest LCP reconciliation result.
+func (p *VPPPlugin) LCPReconciliationStatus() LCPReconciliationStatus {
+	p.mu.RLock()
+	defer p.mu.RUnlock()
+	return cloneLCPReconciliationStatus(p.lcpReconciliation)
 }
 
 // --- Internal helpers ---
@@ -518,6 +540,53 @@ func (p *VPPPlugin) executeRollback(ctx context.Context, ops []func(context.Cont
 			p.log.Error("Rollback operation failed", slog.Any("error", err))
 		}
 	}
+}
+
+func (p *VPPPlugin) updateLCPReconciliation(ctx context.Context) {
+	status := p.checkLCPReconciliation(ctx)
+	p.mu.Lock()
+	p.lcpReconciliation = status
+	p.mu.Unlock()
+	p.logLCPReconciliation(status)
+}
+
+func (p *VPPPlugin) updateLCPReconciliationLocked(ctx context.Context) {
+	status := p.checkLCPReconciliation(ctx)
+	p.lcpReconciliation = status
+	p.logLCPReconciliation(status)
+}
+
+func (p *VPPPlugin) checkLCPReconciliation(ctx context.Context) LCPReconciliationStatus {
+	status := LCPReconciliationStatus{
+		LastRun:   time.Now(),
+		PairCount: len(p.lcpManager.List()),
+	}
+	inconsistencies, err := p.lcpManager.CheckConsistency(ctx)
+	if err != nil {
+		status.LastError = err.Error()
+		return status
+	}
+	status.Inconsistencies = append([]string(nil), inconsistencies...)
+	return status
+}
+
+func (p *VPPPlugin) logLCPReconciliation(status LCPReconciliationStatus) {
+	if status.LastError != "" {
+		p.log.Warn("LCP reconciliation check failed", slog.String("error", status.LastError))
+		return
+	}
+	if len(status.Inconsistencies) > 0 {
+		p.log.Warn("LCP reconciliation found inconsistencies",
+			slog.Int("pairs", status.PairCount),
+			slog.Int("inconsistencies", len(status.Inconsistencies)))
+		return
+	}
+	p.log.Info("LCP reconciliation complete", slog.Int("pairs", status.PairCount))
+}
+
+func cloneLCPReconciliationStatus(status LCPReconciliationStatus) LCPReconciliationStatus {
+	status.Inconsistencies = append([]string(nil), status.Inconsistencies...)
+	return status
 }
 
 // GetInterfaceIndex returns the VPP sw_if_index for a Junos interface name.

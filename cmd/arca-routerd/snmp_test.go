@@ -11,6 +11,7 @@ import (
 
 	"github.com/akam1o/arca-router/internal/engine"
 	"github.com/akam1o/arca-router/internal/model"
+	sbvpp "github.com/akam1o/arca-router/internal/southbound/vpp"
 )
 
 func TestEffectiveSNMPListenUsesFlagOverride(t *testing.T) {
@@ -99,6 +100,11 @@ func TestSNMPEndpointExportsRouterMetrics(t *testing.T) {
 	server := newSNMPServer(metricsSource{
 		startedAt: time.Now().Add(-1 * time.Second),
 		engine:    eng,
+		vpp: fakeVPPReconciliationSource{status: sbvpp.LCPReconciliationStatus{
+			LastRun:         time.Unix(1700000000, 0),
+			PairCount:       2,
+			Inconsistencies: []string{"Interface 7 exists in VPP but not in cache"},
+		}},
 	}, "test-community")
 	if err := server.ListenUDP("udp4", "127.0.0.1:0"); err != nil {
 		t.Fatalf("ListenUDP() error = %v", err)
@@ -145,12 +151,20 @@ func TestSNMPEndpointExportsRouterMetrics(t *testing.T) {
 		}
 	})
 
-	packet, err := client.Get([]string{snmpOIDConfigVersion, snmpOIDSysName, snmpOIDDaemonVersion})
+	packet, err := client.Get([]string{
+		snmpOIDConfigVersion,
+		snmpOIDSysName,
+		snmpOIDDaemonVersion,
+		snmpOIDVPPLCPPairs,
+		snmpOIDVPPLCPMismatch,
+		snmpOIDVPPLCPError,
+		snmpOIDVPPLCPLastRun,
+	})
 	if err != nil {
 		t.Fatalf("SNMP Get() error = %v", err)
 	}
-	if len(packet.Variables) != 3 {
-		t.Fatalf("SNMP variables = %d, want 3", len(packet.Variables))
+	if len(packet.Variables) != 7 {
+		t.Fatalf("SNMP variables = %d, want 7", len(packet.Variables))
 	}
 	if got := snmpUintValue(t, packet.Variables[0].Value); got != 42 {
 		t.Fatalf("%s = %d, want 42", snmpOIDConfigVersion, got)
@@ -160,6 +174,18 @@ func TestSNMPEndpointExportsRouterMetrics(t *testing.T) {
 	}
 	if got := string(packet.Variables[2].Value.([]byte)); got != "test-version" {
 		t.Fatalf("%s = %q, want test-version", snmpOIDDaemonVersion, got)
+	}
+	if got := snmpUintValue(t, packet.Variables[3].Value); got != 2 {
+		t.Fatalf("%s = %d, want 2", snmpOIDVPPLCPPairs, got)
+	}
+	if got := snmpUintValue(t, packet.Variables[4].Value); got != 1 {
+		t.Fatalf("%s = %d, want 1", snmpOIDVPPLCPMismatch, got)
+	}
+	if got := snmpUintValue(t, packet.Variables[5].Value); got != 0 {
+		t.Fatalf("%s = %d, want 0", snmpOIDVPPLCPError, got)
+	}
+	if got := snmpUintValue(t, packet.Variables[6].Value); got != 1700000000 {
+		t.Fatalf("%s = %d, want 1700000000", snmpOIDVPPLCPLastRun, got)
 	}
 }
 

@@ -51,6 +51,7 @@ type webStatus struct {
 	RunningHostname string          `json:"running_hostname"`
 	Datastore       webDatastore    `json:"datastore"`
 	Cluster         webCluster      `json:"cluster"`
+	VPP             webVPPStats     `json:"vpp"`
 	NETCONF         webNETCONFStats `json:"netconf"`
 }
 
@@ -65,6 +66,18 @@ type webCluster struct {
 	EtcdSyncConfigured bool     `json:"etcd_sync_configured"`
 	EtcdEndpoints      []string `json:"etcd_endpoints,omitempty"`
 	SyncAligned        bool     `json:"sync_aligned"`
+}
+
+type webVPPStats struct {
+	LCP webLCPSyncStats `json:"lcp"`
+}
+
+type webLCPSyncStats struct {
+	LastReconcile      string   `json:"last_reconcile,omitempty"`
+	PairCount          int      `json:"pair_count"`
+	InconsistencyCount int      `json:"inconsistency_count"`
+	Inconsistencies    []string `json:"inconsistencies,omitempty"`
+	LastError          string   `json:"last_error,omitempty"`
 }
 
 type webNETCONFStats struct {
@@ -120,21 +133,26 @@ type webAuthUser struct {
 }
 
 type webIndexData struct {
-	Status               webStatus
-	Uptime               string
-	NETCONFState         string
-	NETCONFStateClass    string
-	NETCONFConnections   string
-	ClusterState         string
-	ClusterStateClass    string
-	ClusterSyncState     string
-	ClusterSyncAlignment string
-	ClusterNodeCount     string
-	DatastoreBackend     string
-	GeneratedAt          string
-	ConfigVersionString  string
-	RunningConfig        string
-	History              []webCommitEntry
+	Status                webStatus
+	Uptime                string
+	NETCONFState          string
+	NETCONFStateClass     string
+	NETCONFConnections    string
+	ClusterState          string
+	ClusterStateClass     string
+	ClusterSyncState      string
+	ClusterSyncAlignment  string
+	ClusterNodeCount      string
+	VPPLCPState           string
+	VPPLCPStateClass      string
+	VPPLCPPairs           string
+	VPPLCPInconsistencies string
+	VPPLCPLastReconcile   string
+	DatastoreBackend      string
+	GeneratedAt           string
+	ConfigVersionString   string
+	RunningConfig         string
+	History               []webCommitEntry
 }
 
 var webIndexTemplate = template.Must(template.New("web-index").Parse(`<!doctype html>
@@ -391,6 +409,15 @@ var webIndexTemplate = template.Must(template.New("web-index").Parse(`<!doctype 
           <div class="row"><span>Configured nodes</span><strong>{{.ClusterNodeCount}}</strong></div>
           <div class="row"><span>etcd sync</span><strong>{{.ClusterSyncState}}</strong></div>
           <div class="row"><span>Backend alignment</span><strong>{{.ClusterSyncAlignment}}</strong></div>
+        </div>
+      </article>
+      <article class="panel span-2">
+        <h2>VPP LCP</h2>
+        <div class="rows">
+          <div class="row"><span>State</span><strong><span class="pill {{.VPPLCPStateClass}}">{{.VPPLCPState}}</span></strong></div>
+          <div class="row"><span>Pairs</span><strong>{{.VPPLCPPairs}}</strong></div>
+          <div class="row"><span>Inconsistencies</span><strong>{{.VPPLCPInconsistencies}}</strong></div>
+          <div class="row"><span>Last check</span><strong>{{.VPPLCPLastReconcile}}</strong></div>
         </div>
       </article>
       <article class="panel span-2">
@@ -1008,6 +1035,20 @@ func formatWebCommitTime(ts time.Time) string {
 	return ts.UTC().Format(time.RFC3339)
 }
 
+func formatWebOptionalTime(ts time.Time) string {
+	if ts.IsZero() {
+		return ""
+	}
+	return ts.UTC().Format(time.RFC3339)
+}
+
+func formatWebOptionalDisplayTime(value string) string {
+	if value == "" {
+		return "Never"
+	}
+	return value
+}
+
 func newWebStatus(metrics routerMetrics) webStatus {
 	return webStatus{
 		Version:         Version,
@@ -1026,6 +1067,15 @@ func newWebStatus(metrics routerMetrics) webStatus {
 			EtcdSyncConfigured: metrics.ClusterEtcdSync,
 			EtcdEndpoints:      metrics.ClusterEtcdEndpoints,
 			SyncAligned:        metrics.ClusterSyncAligned,
+		},
+		VPP: webVPPStats{
+			LCP: webLCPSyncStats{
+				LastReconcile:      formatWebOptionalTime(metrics.VPPLCPReconcileLastRun),
+				PairCount:          metrics.VPPLCPPairs,
+				InconsistencyCount: len(metrics.VPPLCPInconsistencies),
+				Inconsistencies:    metrics.VPPLCPInconsistencies,
+				LastError:          metrics.VPPLCPReconcileError,
+			},
 		},
 		NETCONF: webNETCONFStats{
 			Listening:         metrics.NETCONFListening,
@@ -1060,23 +1110,40 @@ func newWebIndexData(status webStatus, now time.Time, runningConfig string, hist
 			clusterSyncAlignment = "Mismatch"
 		}
 	}
+	vppLCPState := "Consistent"
+	vppLCPStateClass := "ok"
+	if status.VPP.LCP.LastError != "" {
+		vppLCPState = "Check failed"
+		vppLCPStateClass = "warn"
+	} else if status.VPP.LCP.InconsistencyCount > 0 {
+		vppLCPState = "Mismatch"
+		vppLCPStateClass = "warn"
+	} else if status.VPP.LCP.LastReconcile == "" {
+		vppLCPState = "Unknown"
+		vppLCPStateClass = "neutral"
+	}
 
 	return webIndexData{
-		Status:               status,
-		Uptime:               formatWebUptime(status.UptimeSeconds),
-		NETCONFState:         state,
-		NETCONFStateClass:    stateClass,
-		NETCONFConnections:   strconv.FormatUint(status.NETCONF.TotalConnections, 10),
-		ClusterState:         clusterState,
-		ClusterStateClass:    clusterStateClass,
-		ClusterSyncState:     clusterSyncState,
-		ClusterSyncAlignment: clusterSyncAlignment,
-		ClusterNodeCount:     strconv.Itoa(status.Cluster.NodeCount),
-		DatastoreBackend:     status.Datastore.Backend,
-		GeneratedAt:          now.UTC().Format(time.RFC3339),
-		ConfigVersionString:  strconv.FormatUint(status.ConfigVersion, 10),
-		RunningConfig:        runningConfig,
-		History:              history,
+		Status:                status,
+		Uptime:                formatWebUptime(status.UptimeSeconds),
+		NETCONFState:          state,
+		NETCONFStateClass:     stateClass,
+		NETCONFConnections:    strconv.FormatUint(status.NETCONF.TotalConnections, 10),
+		ClusterState:          clusterState,
+		ClusterStateClass:     clusterStateClass,
+		ClusterSyncState:      clusterSyncState,
+		ClusterSyncAlignment:  clusterSyncAlignment,
+		ClusterNodeCount:      strconv.Itoa(status.Cluster.NodeCount),
+		VPPLCPState:           vppLCPState,
+		VPPLCPStateClass:      vppLCPStateClass,
+		VPPLCPPairs:           strconv.Itoa(status.VPP.LCP.PairCount),
+		VPPLCPInconsistencies: strconv.Itoa(status.VPP.LCP.InconsistencyCount),
+		VPPLCPLastReconcile:   formatWebOptionalDisplayTime(status.VPP.LCP.LastReconcile),
+		DatastoreBackend:      status.Datastore.Backend,
+		GeneratedAt:           now.UTC().Format(time.RFC3339),
+		ConfigVersionString:   strconv.FormatUint(status.ConfigVersion, 10),
+		RunningConfig:         runningConfig,
+		History:               history,
 	}
 }
 
