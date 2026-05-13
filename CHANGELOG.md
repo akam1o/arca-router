@@ -20,6 +20,7 @@
 - **VRRP Linux interface preparation**: FRR apply reconciles arca-owned macvlan interfaces with virtual MACs and host-prefix VIPs before applying VRRP configuration
 - **Standard FRR VRRP daemon**: `vrrpd` is part of the documented required FRR daemon set for appliance-router HA deployments
 - **VPP MPLS interface forwarding**: `protocols mpls interface` enables or disables MPLS forwarding on managed VPP interfaces with rollback coverage
+- **VPP L3VPN table plumbing**: routing-instance interfaces are bound to deterministic VPP IPv4/IPv6 FIB tables derived from route distinguishers
 - **v0.6 southbound safety gates**: unsupported routing-instance and class-of-service southbound changes fail validation instead of being silently ignored
 - **Prometheus service configuration**: `system services prometheus` can enable the Prometheus and health endpoint from running configuration
 - **SNMP service configuration**: `system services snmp` can enable the read-only SNMPv2c endpoint and set listen address, port, and community from running configuration

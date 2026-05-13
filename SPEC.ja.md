@@ -498,7 +498,7 @@ set protocols bgp group external import PREFER-CUSTOMER
 <a id="advanced-v06-configuration"></a>
 ## Advanced v0.6 Configuration
 
-以下の hierarchy は v0.6 の management-plane model です。parser、serializer、validation、clone、conversion、diff、candidate command replacement は実装済みです。FRR VRRP 適用と VPP MPLS interface forwarding は実装済みで、L3VPN plumbing と QoS enforcement の southbound 適用は段階的に実装します。
+以下の hierarchy は v0.6 の management-plane model です。parser、serializer、validation、clone、conversion、diff、candidate command replacement は実装済みです。FRR VRRP 適用、VPP MPLS interface forwarding、VPP routing-instance table plumbing は実装済みで、FRR L3VPN import/export 制御と QoS enforcement の southbound 適用は段階的に実装します。
 
 対応する southbound apply path が実装されるまでは、未対応の routing-instance または class-of-service 設定を active に残す commit は validation で失敗します。未対応 stanza の削除は許可します。VRRP は FRR file backend と標準の transactional FRR backend の両方で適用されます。
 
@@ -572,7 +572,9 @@ set routing-instances BLUE interface ge-0/0/1
 
 v0.6 では `instance-type vrf` のみ受け付けます。route distinguisher は `<asn>:<number>` 形式です。共通および方向別 VRF target は `target:<asn>:<number>` 形式です。bare `vrf-target` は import/export の両方向に適用され、`vrf-target import` と `vrf-target export` は方向別の extended-community target を追加します。`vrf-import` と `vrf-export` は設定済みの `policy-options policy-statement` 名を参照し、複数回指定して順序付き policy chain を構成できます。
 
-`protocols mpls interface` は対応する managed VPP interface で MPLS forwarding を有効化します。stanza を削除すると、interface を VPP から削除する前に MPLS forwarding を無効化します。MPLS と routing-instance の interface 参照は設定済み interface に解決できる必要があります。Routing-instance/L3VPN southbound plumbing は引き続き v0.6 safety gate で保護されます。
+`protocols mpls interface` は対応する managed VPP interface で MPLS forwarding を有効化します。stanza を削除すると、interface を VPP から削除する前に MPLS forwarding を無効化します。MPLS と routing-instance の interface 参照は設定済み interface に解決できる必要があります。
+
+VPP dataplane plumbing では、routing instance ごとに IPv4 / IPv6 FIB table を作成します。`route-distinguisher <asn>:<number>` が設定されている場合は `<number>` を deterministic な VPP table ID として使い、未設定の場合は routing-instance 名から stable な non-zero table ID を導出します。routing instance 配下の interface はその table に bind され、既存 address は table 変更の前後で外して戻すため、address は binding と一緒に移動します。FRR L3VPN import/export 制御は引き続き v0.6 safety gate で保護されます。
 
 ### Class of Service
 
