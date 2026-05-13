@@ -96,6 +96,8 @@ By default, `arca-router` applies FRR changes, including VRRP groups, through th
 
 When VRRP is configured, arca-routerd also prepares arca-owned Linux macvlan interfaces on the LCP interface before applying FRR. It stores prepared interface names in `/var/lib/arca-router/vrrp-interfaces.json` so cleanup survives daemon restarts. The packaged systemd unit grants `CAP_NET_ADMIN`, which is required for this macvlan and virtual-address reconciliation.
 
+arca-routerd polls FRR VRRP operational state with `vtysh -c "show vrrp json"` for HA convergence status. The `arca-router` service user must retain `frrvty` group access so this read-only command works in addition to transactional configuration applies.
+
 If you plan to use the recovery backend `--frr-apply-mode=file`, also allow the `frr` group to write `/etc/frr/frr.conf`:
 
 ```bash
