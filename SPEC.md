@@ -585,7 +585,7 @@ set security netconf ssh port <port>
 set security netconf ssh port 830
 ```
 
-**Note**: The NETCONF server is built into `arca-routerd`. The runtime bind address is controlled by the daemon flag `--netconf-listen` (default `:830`); this configuration value is retained in the model and should match the deployed NETCONF port.
+**Note**: The NETCONF server is built into `arca-routerd`. When `--netconf-listen` is omitted, the daemon listens on the configured `security netconf ssh port`; if that is also unset, it uses `:830`. `--netconf-listen` remains the explicit runtime override and can include a listen address.
 
 ### User Management
 
@@ -914,7 +914,7 @@ Common options:
 --etcd-key <path>          etcd TLS client key
 --etcd-ca <path>           etcd TLS CA certificate
 --grpc-socket <path>       Internal gRPC Unix socket (default: /run/arca-router/routerd.sock)
---netconf-listen <addr>    NETCONF/SSH listen address (default: :830)
+--netconf-listen <addr>    NETCONF/SSH listen address; overrides security netconf ssh port (default: :830)
 --host-key <path>          NETCONF SSH host key path
 --user-db <path>           NETCONF user database path
 --frr-apply-mode <mode>    FRR backend: transactional or file (default: transactional)

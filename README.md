@@ -211,7 +211,7 @@ set security rate-limit per-ip 10
 set security rate-limit per-user 20
 ```
 
-> NETCONF is built into `arca-routerd`; no separate NETCONF daemon is needed. The daemon listens on port 830 when security/netconf is configured.
+> NETCONF is built into `arca-routerd`; no separate NETCONF daemon is needed. When `--netconf-listen` is omitted, the daemon listens on the configured NETCONF port and falls back to `:830`.
 
 **Test NETCONF connection**:
 

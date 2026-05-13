@@ -598,7 +598,7 @@ set security netconf ssh port <port>
 set security netconf ssh port 830
 ```
 
-**注**: NETCONF サーバは `arca-routerd` に統合されています。実際の bind address はデーモンの `--netconf-listen`（デフォルト `:830`）で制御します。この設定値はモデル上に保持されるため、配備時の NETCONF ポートと一致させてください。
+**注**: NETCONF サーバは `arca-routerd` に統合されています。`--netconf-listen` を省略した場合、daemon は `security netconf ssh port` の設定ポートで listen します。未設定の場合は `:830` を使用します。`--netconf-listen` は明示的な runtime override として残り、listen address も含めて指定できます。
 
 <a id="user-management"></a>
 ### ユーザ管理
@@ -932,7 +932,7 @@ set security rate-limit per-user 20
 --etcd-key <path>          etcd TLS client key
 --etcd-ca <path>           etcd TLS CA certificate
 --grpc-socket <path>       内部 gRPC Unix socket（デフォルト: /run/arca-router/routerd.sock）
---netconf-listen <addr>    NETCONF/SSH listen address（デフォルト: :830）
+--netconf-listen <addr>    NETCONF/SSH listen address。security netconf ssh port より優先（デフォルト: :830）
 --host-key <path>          NETCONF SSH host key path
 --user-db <path>           NETCONF user database path
 --frr-apply-mode <mode>    FRR backend: transactional または file（デフォルト: transactional）
