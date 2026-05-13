@@ -6,7 +6,6 @@ import (
 	"io"
 	"log/slog"
 	"net"
-	"strings"
 	"testing"
 
 	"github.com/akam1o/arca-router/internal/engine"
@@ -264,22 +263,29 @@ func TestValidateChangesAllowsRoutingInstances(t *testing.T) {
 	}
 }
 
-func TestValidateChangesRejectsUnsupportedClassOfService(t *testing.T) {
-	plugin := NewVPPPlugin(pkgvpp.NewMockClient(), &device.HardwareConfig{}, testLogger())
+func TestValidateChangesAllowsClassOfService(t *testing.T) {
+	plugin := NewVPPPlugin(pkgvpp.NewMockClient(), &device.HardwareConfig{
+		Interfaces: []device.PhysicalInterface{
+			{Name: "ge-0/0/0", PCI: "0000:03:00.0", Driver: "avf"},
+		},
+	}, testLogger())
 	newCfg := model.NewRouterConfig()
+	newCfg.Interfaces["ge-0/0/0"] = &model.InterfaceConfig{Units: map[int]*model.Unit{}}
 	newCfg.ClassOfService = &model.ClassOfServiceConfig{
 		ForwardingClasses: map[string]*model.ForwardingClass{
 			"expedited-forwarding": {Queue: 5},
 		},
+		TrafficControlProfiles: map[string]*model.TrafficControlProfile{
+			"WAN": {ShapingRate: 1000000000, SchedulerMap: "WAN-SCHED"},
+		},
+		Interfaces: map[string]*model.CoSInterface{
+			"ge-0/0/0": {OutputTrafficControlProfile: "WAN"},
+		},
 	}
 	diff := engine.ComputeDiff(model.NewRouterConfig(), newCfg)
 
-	err := plugin.ValidateChanges(context.Background(), diff)
-	if err == nil {
-		t.Fatal("ValidateChanges() error = nil, want unsupported class-of-service error")
-	}
-	if !strings.Contains(err.Error(), "class-of-service") {
-		t.Fatalf("ValidateChanges() error = %v, want class-of-service", err)
+	if err := plugin.ValidateChanges(context.Background(), diff); err != nil {
+		t.Fatalf("ValidateChanges() error = %v, want nil", err)
 	}
 }
 
@@ -409,6 +415,65 @@ func TestApplyChangesEnablesMPLSInterfaces(t *testing.T) {
 	}
 }
 
+func TestApplyChangesAppliesClassOfServiceProfiles(t *testing.T) {
+	ctx := context.Background()
+	client := pkgvpp.NewMockClient()
+	plugin := NewVPPPlugin(client, &device.HardwareConfig{
+		Interfaces: []device.PhysicalInterface{
+			{Name: "ge-0/0/0", PCI: "0000:03:00.0", Driver: "avf"},
+		},
+	}, testLogger())
+	if err := plugin.Init(ctx); err != nil {
+		t.Fatalf("Init() error = %v", err)
+	}
+	t.Cleanup(func() { _ = plugin.Close() })
+
+	newCfg := model.NewRouterConfig()
+	newCfg.Interfaces["ge-0/0/0"] = &model.InterfaceConfig{Units: map[int]*model.Unit{}}
+	newCfg.ClassOfService = &model.ClassOfServiceConfig{
+		ForwardingClasses: map[string]*model.ForwardingClass{
+			"best-effort":          {Queue: 0},
+			"expedited-forwarding": {Queue: 5},
+		},
+		TrafficControlProfiles: map[string]*model.TrafficControlProfile{
+			"WAN": {ShapingRate: 1000000000, SchedulerMap: "WAN-SCHED"},
+		},
+		Interfaces: map[string]*model.CoSInterface{
+			"ge-0/0/0": {OutputTrafficControlProfile: "WAN"},
+		},
+	}
+	diff := engine.ComputeDiff(model.NewRouterConfig(), newCfg)
+	if err := plugin.ValidateChanges(ctx, diff); err != nil {
+		t.Fatalf("ValidateChanges() error = %v", err)
+	}
+	if err := plugin.ApplyChanges(ctx, diff); err != nil {
+		t.Fatalf("ApplyChanges() error = %v", err)
+	}
+	idx, ok := plugin.GetInterfaceIndex("ge-0/0/0")
+	if !ok {
+		t.Fatal("ApplyChanges() did not add interface index")
+	}
+	profile, ok := client.QoSProfile(idx)
+	if !ok {
+		t.Fatal("ApplyChanges() did not bind QoS profile")
+	}
+	if profile.Name != "WAN" || profile.ShapingRate != 1000000000 || profile.SchedulerMap != "WAN-SCHED" {
+		t.Fatalf("QoSProfile() = %#v, want WAN shaping profile", profile)
+	}
+	if len(profile.Queues) != 2 || profile.Queues[0].ForwardingClass != "best-effort" || profile.Queues[0].Queue != 0 || profile.Queues[1].ForwardingClass != "expedited-forwarding" || profile.Queues[1].Queue != 5 {
+		t.Fatalf("QoSProfile().Queues = %#v, want sorted forwarding-class queues", profile.Queues)
+	}
+
+	withoutCoS := model.NewRouterConfig()
+	withoutCoS.Interfaces["ge-0/0/0"] = newCfg.Interfaces["ge-0/0/0"].Clone()
+	if err := plugin.ApplyChanges(ctx, engine.ComputeDiff(newCfg, withoutCoS)); err != nil {
+		t.Fatalf("ApplyChanges() clear class-of-service error = %v", err)
+	}
+	if _, ok := client.QoSProfile(idx); ok {
+		t.Fatal("ApplyChanges() left QoS profile bound after removing class-of-service config")
+	}
+}
+
 func TestApplyChangesRollsBackMPLSOnLaterFailure(t *testing.T) {
 	ctx := context.Background()
 	client := pkgvpp.NewMockClient()
@@ -488,5 +553,60 @@ func TestRollbackChangesRestoresMPLSInterfaces(t *testing.T) {
 	}
 	if !client.MPLSInterfaceEnabled(idx) {
 		t.Fatal("RollbackChanges() did not restore MPLS on interface")
+	}
+}
+
+func TestRollbackChangesRestoresClassOfServiceProfiles(t *testing.T) {
+	ctx := context.Background()
+	client := pkgvpp.NewMockClient()
+	plugin := NewVPPPlugin(client, &device.HardwareConfig{
+		Interfaces: []device.PhysicalInterface{
+			{Name: "ge-0/0/0", PCI: "0000:03:00.0", Driver: "avf"},
+		},
+	}, testLogger())
+	if err := plugin.Init(ctx); err != nil {
+		t.Fatalf("Init() error = %v", err)
+	}
+	t.Cleanup(func() { _ = plugin.Close() })
+
+	oldCfg := model.NewRouterConfig()
+	oldCfg.Interfaces["ge-0/0/0"] = &model.InterfaceConfig{Units: map[int]*model.Unit{}}
+	oldCfg.ClassOfService = &model.ClassOfServiceConfig{
+		ForwardingClasses: map[string]*model.ForwardingClass{
+			"expedited-forwarding": {Queue: 5},
+		},
+		TrafficControlProfiles: map[string]*model.TrafficControlProfile{
+			"WAN": {ShapingRate: 1000000000, SchedulerMap: "WAN-SCHED"},
+		},
+		Interfaces: map[string]*model.CoSInterface{
+			"ge-0/0/0": {OutputTrafficControlProfile: "WAN"},
+		},
+	}
+	if err := plugin.ApplyChanges(ctx, engine.ComputeDiff(model.NewRouterConfig(), oldCfg)); err != nil {
+		t.Fatalf("initial ApplyChanges() error = %v", err)
+	}
+	idx, ok := plugin.GetInterfaceIndex("ge-0/0/0")
+	if !ok {
+		t.Fatal("initial ApplyChanges() did not add interface index")
+	}
+
+	newCfg := model.NewRouterConfig()
+	newCfg.Interfaces["ge-0/0/0"] = &model.InterfaceConfig{Units: map[int]*model.Unit{}}
+	diff := engine.ComputeDiff(oldCfg, newCfg)
+	if err := plugin.ApplyChanges(ctx, diff); err != nil {
+		t.Fatalf("ApplyChanges() error = %v", err)
+	}
+	if _, ok := client.QoSProfile(idx); ok {
+		t.Fatal("ApplyChanges() left QoS profile bound after removing class-of-service config")
+	}
+	if err := plugin.RollbackChanges(ctx, diff); err != nil {
+		t.Fatalf("RollbackChanges() error = %v", err)
+	}
+	profile, ok := client.QoSProfile(idx)
+	if !ok {
+		t.Fatal("RollbackChanges() did not restore QoS profile")
+	}
+	if profile.Name != "WAN" || profile.ShapingRate != 1000000000 || profile.SchedulerMap != "WAN-SCHED" {
+		t.Fatalf("QoSProfile() after rollback = %#v, want WAN shaping profile", profile)
 	}
 }

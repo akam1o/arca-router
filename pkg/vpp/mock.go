@@ -18,6 +18,7 @@ type MockClient struct {
 	mplsInterfaces map[uint32]bool
 	ipTables       map[ipTableKey]IPTable
 	interfaceTable map[interfaceTableKey]uint32
+	qosProfiles    map[uint32]QoSProfile
 	nextIfIdx      uint32
 
 	// Hooks for testing error scenarios
@@ -31,6 +32,8 @@ type MockClient struct {
 	AddIPTableError             error
 	DeleteIPTableError          error
 	SetInterfaceTableError      error
+	SetQoSProfileError          error
+	ClearQoSProfileError        error
 	GetInterfaceError           error
 	ListInterfacesError         error
 	CreateLCPInterfaceError     error
@@ -47,6 +50,7 @@ func NewMockClient() *MockClient {
 		mplsInterfaces: make(map[uint32]bool),
 		ipTables:       make(map[ipTableKey]IPTable),
 		interfaceTable: make(map[interfaceTableKey]uint32),
+		qosProfiles:    make(map[uint32]QoSProfile),
 		nextIfIdx:      1, // Start from 1 (0 is reserved for local0)
 	}
 }
@@ -594,6 +598,85 @@ func (m *MockClient) InterfaceTableID(ifIndex uint32, isIPv6 bool) uint32 {
 	return m.interfaceTable[interfaceTableKey{ifIndex: ifIndex, isIPv6: isIPv6}]
 }
 
+// SetQoSProfile binds output QoS policy intent to a mock interface.
+func (m *MockClient) SetQoSProfile(ctx context.Context, ifIndex uint32, profile QoSProfile) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if m.SetQoSProfileError != nil {
+		return m.SetQoSProfileError
+	}
+
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	if !m.connected {
+		return errors.New(
+			errors.ErrCodeVPPConnection,
+			"Not connected to VPP",
+			"VPP connection not established",
+			"Connect to VPP before setting QoS profiles",
+		)
+	}
+	if _, ok := m.interfaces[ifIndex]; !ok {
+		return errors.New(
+			errors.ErrCodeVPPOperation,
+			fmt.Sprintf("Interface with index %d not found", ifIndex),
+			"Interface does not exist",
+			"Create the interface before setting its QoS profile",
+		)
+	}
+
+	m.qosProfiles[ifIndex] = cloneQoSProfile(profile)
+	return nil
+}
+
+// ClearQoSProfile removes output QoS policy intent from a mock interface.
+func (m *MockClient) ClearQoSProfile(ctx context.Context, ifIndex uint32) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if m.ClearQoSProfileError != nil {
+		return m.ClearQoSProfileError
+	}
+
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	if !m.connected {
+		return errors.New(
+			errors.ErrCodeVPPConnection,
+			"Not connected to VPP",
+			"VPP connection not established",
+			"Connect to VPP before clearing QoS profiles",
+		)
+	}
+	if _, ok := m.interfaces[ifIndex]; !ok {
+		return errors.New(
+			errors.ErrCodeVPPOperation,
+			fmt.Sprintf("Interface with index %d not found", ifIndex),
+			"Interface does not exist",
+			"Create the interface before clearing its QoS profile",
+		)
+	}
+
+	delete(m.qosProfiles, ifIndex)
+	return nil
+}
+
+// QoSProfile returns the mock QoS profile bound to an interface.
+func (m *MockClient) QoSProfile(ifIndex uint32) (QoSProfile, bool) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	profile, ok := m.qosProfiles[ifIndex]
+	return cloneQoSProfile(profile), ok
+}
+
+func cloneQoSProfile(profile QoSProfile) QoSProfile {
+	profile.Queues = append([]QoSQueue(nil), profile.Queues...)
+	return profile
+}
+
 // GetInterface retrieves mock interface information by index
 func (m *MockClient) GetInterface(ctx context.Context, ifIndex uint32) (*Interface, error) {
 	if m.GetInterfaceError != nil {
@@ -664,6 +747,7 @@ func (m *MockClient) Reset() {
 	m.mplsInterfaces = make(map[uint32]bool)
 	m.ipTables = make(map[ipTableKey]IPTable)
 	m.interfaceTable = make(map[interfaceTableKey]uint32)
+	m.qosProfiles = make(map[uint32]QoSProfile)
 	m.nextIfIdx = 1
 
 	m.ConnectError = nil
@@ -676,6 +760,8 @@ func (m *MockClient) Reset() {
 	m.AddIPTableError = nil
 	m.DeleteIPTableError = nil
 	m.SetInterfaceTableError = nil
+	m.SetQoSProfileError = nil
+	m.ClearQoSProfileError = nil
 	m.GetInterfaceError = nil
 	m.ListInterfacesError = nil
 	m.CreateLCPInterfaceError = nil

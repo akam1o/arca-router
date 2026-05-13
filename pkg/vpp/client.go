@@ -59,6 +59,12 @@ type Client interface {
 	// SetInterfaceTable binds an interface to an IPv4 or IPv6 FIB table.
 	SetInterfaceTable(ctx context.Context, ifIndex uint32, tableID uint32, isIPv6 bool) error
 
+	// SetQoSProfile binds output QoS policy intent to an interface.
+	SetQoSProfile(ctx context.Context, ifIndex uint32, profile QoSProfile) error
+
+	// ClearQoSProfile removes output QoS policy intent from an interface.
+	ClearQoSProfile(ctx context.Context, ifIndex uint32) error
+
 	// GetInterface retrieves interface information by index
 	GetInterface(ctx context.Context, ifIndex uint32) (*Interface, error)
 
@@ -143,6 +149,20 @@ type IPTable struct {
 	ID     uint32
 	IsIPv6 bool
 	Name   string
+}
+
+// QoSProfile represents output QoS policy intent for a VPP interface.
+type QoSProfile struct {
+	Name         string
+	ShapingRate  uint64
+	SchedulerMap string
+	Queues       []QoSQueue
+}
+
+// QoSQueue maps an arca forwarding class to a VPP output queue.
+type QoSQueue struct {
+	ForwardingClass string
+	Queue           uint8
 }
 
 // InterfaceType represents the type of interface
