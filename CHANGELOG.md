@@ -15,6 +15,7 @@
 - **Web UI authentication**: password-backed `security users` enable HTTP Basic authentication and read-only RBAC for the dashboard APIs
 - **Web configuration API**: `/api/config/validate` and `/api/config/commit` use the internal gRPC candidate workflow for authenticated operator/admin configuration changes
 - **Browser configuration editor**: the Web UI can edit running config text, validate changes, show diffs, and commit through the Web configuration API
+- **Web commit history**: `/api/config/history` and the dashboard expose recent configuration commits from the internal gRPC history API
 - **Web UI configuration**: `system services web-ui` can enable the dashboard without a command-line flag
 
 ## v0.5.x – Production Hardening (previous)
