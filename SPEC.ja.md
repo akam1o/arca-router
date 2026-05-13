@@ -498,9 +498,9 @@ set protocols bgp group external import PREFER-CUSTOMER
 <a id="advanced-v06-configuration"></a>
 ## Advanced v0.6 Configuration
 
-以下の hierarchy は v0.6 の management-plane model です。parser、serializer、validation、clone、conversion、diff、candidate command replacement は実装済みです。FRR VRRP 適用、VPP MPLS interface forwarding、VPP routing-instance table plumbing、FRR L3VPN import/export 制御は実装済みで、QoS enforcement の southbound 適用は段階的に実装します。
+以下の hierarchy は v0.6 の management-plane model です。parser、serializer、validation、clone、conversion、diff、candidate command replacement は実装済みです。FRR VRRP 適用、VPP MPLS interface forwarding、VPP routing-instance table plumbing、FRR L3VPN import/export 制御、VPP class-of-service profile binding は実装済みで、queue scheduler/policer enforcement と operational QoS counters は段階的に実装します。
 
-対応する southbound apply path が実装されるまでは、未対応の class-of-service 設定を active に残す commit は validation で失敗します。未対応 class-of-service stanza の削除は許可します。VRRP と L3VPN control-plane configuration は FRR file backend と標準の transactional FRR backend の両方で適用されます。
+Class-of-service interface binding は、managed VPP interface に output traffic-control profile intent として適用されます。VRRP と L3VPN control-plane configuration は FRR file backend と標準の transactional FRR backend の両方で適用されます。
 
 MPLS、VRRP、OSPF、routing-instance、class-of-service の interface 参照は `interfaces` 配下に定義された interface を指す必要があります。未知の interface 参照は southbound apply 前の validation で失敗します。
 

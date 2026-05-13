@@ -487,9 +487,9 @@ set protocols bgp group external import PREFER-CUSTOMER
 <a id="advanced-v06-configuration"></a>
 ## Advanced v0.6 Configuration
 
-The following hierarchies are part of the v0.6 management-plane model. Parser, serializer, validation, clone, conversion, diff, and candidate command replacement support are implemented. FRR VRRP application, VPP MPLS interface forwarding, VPP routing-instance table plumbing, and FRR L3VPN import/export control are implemented; QoS enforcement is staged separately.
+The following hierarchies are part of the v0.6 management-plane model. Parser, serializer, validation, clone, conversion, diff, and candidate command replacement support are implemented. FRR VRRP application, VPP MPLS interface forwarding, VPP routing-instance table plumbing, FRR L3VPN import/export control, and VPP class-of-service profile binding are implemented; queue scheduler/policer enforcement and operational QoS counters are staged separately.
 
-Until the corresponding southbound apply path is implemented, commits that leave unsupported class-of-service configuration active fail validation instead of being silently accepted. Removing unsupported class-of-service stanzas is allowed. VRRP and L3VPN control-plane configuration are applied by the FRR file backend and the default transactional FRR backend.
+Class-of-service interface bindings are applied to managed VPP interfaces as output traffic-control profile intent. VRRP and L3VPN control-plane configuration are applied by the FRR file backend and the default transactional FRR backend.
 
 MPLS, VRRP, OSPF, routing-instance, and class-of-service interface references must point to interfaces defined under `interfaces`. Unknown interface references fail validation before southbound apply.
 

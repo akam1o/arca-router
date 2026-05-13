@@ -27,9 +27,8 @@ Focus: expand the hardened unified daemon into higher-level router features.
   - Junos-like config model for VPN services
 - **QoS / Traffic Engineering**
   - Management-plane config model for forwarding classes, traffic-control profiles, and interface bindings
-  - Commit-time safety gates for unsupported QoS southbound apply
-  - VPP QoS policy configuration
-  - Traffic shaping and policing
+  - VPP class-of-service profile binding for managed interfaces
+  - Queue scheduler and policer enforcement
   - Operational counters for queues and schedulers
 - **Observability services**
   - Config-driven NETCONF listen port from `security netconf ssh port`
