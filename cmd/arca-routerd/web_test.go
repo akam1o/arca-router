@@ -117,6 +117,34 @@ func TestWebStatusEndpoint(t *testing.T) {
 	}
 }
 
+func TestWebConfigEndpoint(t *testing.T) {
+	eng := engine.NewEngine(nil, slog.Default())
+	cfg := model.NewRouterConfig()
+	cfg.System = &model.SystemConfig{HostName: "edge01"}
+	eng.InitializeRunning(cfg, 42)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/config", nil)
+	rec := httptest.NewRecorder()
+	metricsSource{
+		startedAt: time.Now().Add(-2 * time.Minute),
+		engine:    eng,
+	}.handleWebConfig(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d", rec.Code, http.StatusOK)
+	}
+	var cfgResp webConfig
+	if err := json.NewDecoder(rec.Result().Body).Decode(&cfgResp); err != nil {
+		t.Fatalf("Decode() error = %v", err)
+	}
+	if cfgResp.Version != 42 {
+		t.Fatalf("Version = %d, want 42", cfgResp.Version)
+	}
+	if !strings.Contains(cfgResp.ConfigText, "set system host-name edge01") {
+		t.Fatalf("ConfigText missing hostname:\n%s", cfgResp.ConfigText)
+	}
+}
+
 func TestWebIndexEndpoint(t *testing.T) {
 	eng := engine.NewEngine(nil, slog.Default())
 	cfg := model.NewRouterConfig()
@@ -138,7 +166,7 @@ func TestWebIndexEndpoint(t *testing.T) {
 		t.Fatalf("ReadAll() error = %v", err)
 	}
 	text := string(body)
-	for _, want := range []string{"edge01", "Config version", "NETCONF", "Datastore", "Cluster sync", "/api/status"} {
+	for _, want := range []string{"edge01", "Config version", "NETCONF", "Datastore", "Cluster sync", "Running configuration", "set system host-name edge01", "/api/status", "/api/config"} {
 		if !strings.Contains(text, want) {
 			t.Fatalf("index missing %q:\n%s", want, text)
 		}

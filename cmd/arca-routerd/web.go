@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/akam1o/arca-router/internal/model"
+	pkgconfig "github.com/akam1o/arca-router/pkg/config"
 	"github.com/akam1o/arca-router/pkg/logger"
 )
 
@@ -53,6 +54,11 @@ type webNETCONFStats struct {
 	FailedAuth        uint64 `json:"failed_auth"`
 }
 
+type webConfig struct {
+	ConfigText string `json:"config_text"`
+	Version    uint64 `json:"version"`
+}
+
 type webIndexData struct {
 	Status               webStatus
 	Uptime               string
@@ -67,6 +73,7 @@ type webIndexData struct {
 	DatastoreBackend     string
 	GeneratedAt          string
 	ConfigVersionString  string
+	RunningConfig        string
 }
 
 var webIndexTemplate = template.Must(template.New("web-index").Parse(`<!doctype html>
@@ -168,6 +175,21 @@ var webIndexTemplate = template.Must(template.New("web-index").Parse(`<!doctype 
     .pill.ok { background: var(--ok-bg); color: var(--accent); }
     .pill.warn { background: var(--warn-bg); color: var(--warn); }
     .pill.neutral { background: var(--neutral-bg); color: var(--neutral); }
+    .config {
+      max-height: 300px;
+      margin: 14px 0 0;
+      overflow: auto;
+      overflow-wrap: anywhere;
+      white-space: pre-wrap;
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      background: #f8fafc;
+      padding: 12px;
+      color: var(--text);
+      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+      font-size: 12px;
+      line-height: 1.5;
+    }
     footer {
       display: flex;
       justify-content: space-between;
@@ -249,11 +271,15 @@ var webIndexTemplate = template.Must(template.New("web-index").Parse(`<!doctype 
           <div class="row"><span>Backend alignment</span><strong>{{.ClusterSyncAlignment}}</strong></div>
         </div>
       </article>
+      <article class="panel span-2">
+        <h2>Running configuration</h2>
+        <pre class="config">{{.RunningConfig}}</pre>
+      </article>
     </section>
 
     <footer>
       <span>Generated {{.GeneratedAt}}</span>
-      <span>/api/status</span>
+      <span>/api/status | /api/config</span>
     </footer>
   </main>
 </body>
@@ -319,6 +345,7 @@ func startWebServer(ctx context.Context, listenAddr string, source metricsSource
 func newWebMux(source metricsSource) *http.ServeMux {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/", source.handleWebIndex)
+	mux.HandleFunc("/api/config", source.handleWebConfig)
 	mux.HandleFunc("/api/status", source.handleWebStatus)
 	return mux
 }
@@ -331,6 +358,22 @@ func (s metricsSource) handleWebStatus(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	if err := json.NewEncoder(w).Encode(newWebStatus(s.snapshot(time.Now()))); err != nil {
 		http.Error(w, "encode status: "+err.Error(), http.StatusInternalServerError)
+	}
+}
+
+func (s metricsSource) handleWebConfig(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	cfg, err := s.runningConfig()
+	if err != nil {
+		http.Error(w, "render config: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	if err := json.NewEncoder(w).Encode(cfg); err != nil {
+		http.Error(w, "encode config: "+err.Error(), http.StatusInternalServerError)
 	}
 }
 
@@ -349,9 +392,32 @@ func (s metricsSource) handleWebIndex(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	status := newWebStatus(s.snapshot(time.Now()))
-	if err := webIndexTemplate.Execute(w, newWebIndexData(status, time.Now())); err != nil {
+	cfg, err := s.runningConfig()
+	if err != nil {
+		http.Error(w, "render config: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+	if err := webIndexTemplate.Execute(w, newWebIndexData(status, time.Now(), cfg.ConfigText)); err != nil {
 		http.Error(w, "render index: "+err.Error(), http.StatusInternalServerError)
 	}
+}
+
+func (s metricsSource) runningConfig() (webConfig, error) {
+	if s.engine == nil {
+		return webConfig{}, nil
+	}
+	snap := s.engine.RunningSnapshot()
+	if snap == nil || snap.Config == nil {
+		return webConfig{}, nil
+	}
+	text, err := pkgconfig.ToSetCommandsWithError(snap.Config.ToLegacyConfig())
+	if err != nil {
+		return webConfig{}, fmt.Errorf("serialize running config: %w", err)
+	}
+	return webConfig{
+		ConfigText: text,
+		Version:    snap.Version,
+	}, nil
 }
 
 func newWebStatus(metrics routerMetrics) webStatus {
@@ -384,7 +450,7 @@ func newWebStatus(metrics routerMetrics) webStatus {
 	}
 }
 
-func newWebIndexData(status webStatus, now time.Time) webIndexData {
+func newWebIndexData(status webStatus, now time.Time, runningConfig string) webIndexData {
 	state := "Stopped"
 	stateClass := "warn"
 	if status.NETCONF.Listening {
@@ -421,6 +487,7 @@ func newWebIndexData(status webStatus, now time.Time) webIndexData {
 		DatastoreBackend:     status.Datastore.Backend,
 		GeneratedAt:          now.UTC().Format(time.RFC3339),
 		ConfigVersionString:  strconv.FormatUint(status.ConfigVersion, 10),
+		RunningConfig:        runningConfig,
 	}
 }
 
