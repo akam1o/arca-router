@@ -236,6 +236,7 @@ arca show bgp summary
 arca show ospf neighbor
 arca show vrrp
 arca show lcp
+arca show ha
 
 # Check VPP/FRR directly (optional)
 sudo vppctl show interface
