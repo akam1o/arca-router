@@ -721,6 +721,63 @@ func (c *govppClient) SetInterfaceTable(ctx context.Context, ifIndex uint32, tab
 	return nil
 }
 
+// SetQoSProfile binds output QoS policy intent to an interface.
+func (c *govppClient) SetQoSProfile(ctx context.Context, ifIndex uint32, profile QoSProfile) error {
+	if profile.Name == "" {
+		return fmt.Errorf("QoS profile name is required")
+	}
+
+	// The bundled VPP 24.10 binapi set does not expose scheduler/policer
+	// services, so keep the arca profile binding in the interface tag.
+	tag, err := c.interfaceTagWithQoSProfile(ctx, ifIndex, profile.Name)
+	if err != nil {
+		return err
+	}
+	if err := c.setInterfaceTag(ctx, ifIndex, tag); err != nil {
+		return fmt.Errorf("set QoS profile tag: %w", err)
+	}
+	return nil
+}
+
+// ClearQoSProfile removes output QoS policy intent from an interface.
+func (c *govppClient) ClearQoSProfile(ctx context.Context, ifIndex uint32) error {
+	if c.ch == nil {
+		return fmt.Errorf("not connected to VPP")
+	}
+
+	iface, err := c.GetInterface(ctx, ifIndex)
+	if err != nil {
+		return fmt.Errorf("get interface for QoS profile clear: %w", err)
+	}
+	if iface.PCIAddress == "" {
+		if err := c.clearInterfaceTag(ctx, ifIndex); err != nil {
+			return fmt.Errorf("clear QoS profile tag: %w", err)
+		}
+		return nil
+	}
+
+	tag, err := formatInterfaceTag(iface.PCIAddress, "")
+	if err != nil {
+		return err
+	}
+	if err := c.setInterfaceTag(ctx, ifIndex, tag); err != nil {
+		return fmt.Errorf("clear QoS profile tag: %w", err)
+	}
+	return nil
+}
+
+func (c *govppClient) interfaceTagWithQoSProfile(ctx context.Context, ifIndex uint32, profileName string) (string, error) {
+	if c.ch == nil {
+		return "", fmt.Errorf("not connected to VPP")
+	}
+
+	iface, err := c.GetInterface(ctx, ifIndex)
+	if err != nil {
+		return "", fmt.Errorf("get interface for QoS profile binding: %w", err)
+	}
+	return formatInterfaceTag(iface.PCIAddress, profileName)
+}
+
 // GetInterface retrieves interface information by index
 func (c *govppClient) GetInterface(ctx context.Context, ifIndex uint32) (*Interface, error) {
 	if c.ch == nil {
@@ -928,9 +985,9 @@ func convertToInterface(msg *vppif.SwInterfaceDetails) *Interface {
 		Addresses: nil, // IP addresses will be populated by separate API calls
 	}
 
-	// Extract PCI address from interface tag if available (format: "pci=0000:03:00.0")
-	if msg.Tag != "" && strings.HasPrefix(msg.Tag, "pci=") {
-		iface.PCIAddress = strings.TrimPrefix(msg.Tag, "pci=")
+	// Extract PCI address from interface tag if available.
+	if fields := parseInterfaceTag(msg.Tag); fields["pci"] != "" {
+		iface.PCIAddress = fields["pci"]
 	}
 
 	return iface
@@ -940,6 +997,11 @@ func convertToInterface(msg *vppif.SwInterfaceDetails) *Interface {
 func (c *govppClient) setInterfaceTag(ctx context.Context, ifIndex uint32, tag string) error {
 	if c.ch == nil {
 		return fmt.Errorf("not connected to VPP")
+	}
+	select {
+	case <-ctx.Done():
+		return fmt.Errorf("operation cancelled: %w", ctx.Err())
+	default:
 	}
 
 	req := &vppif.SwInterfaceTagAddDel{
@@ -958,6 +1020,72 @@ func (c *govppClient) setInterfaceTag(ctx context.Context, ifIndex uint32, tag s
 	}
 
 	return nil
+}
+
+func (c *govppClient) clearInterfaceTag(ctx context.Context, ifIndex uint32) error {
+	if c.ch == nil {
+		return fmt.Errorf("not connected to VPP")
+	}
+	select {
+	case <-ctx.Done():
+		return fmt.Errorf("operation cancelled: %w", ctx.Err())
+	default:
+	}
+
+	req := &vppif.SwInterfaceTagAddDel{
+		IsAdd:     false,
+		SwIfIndex: interface_types.InterfaceIndex(ifIndex),
+	}
+
+	reply := &vppif.SwInterfaceTagAddDelReply{}
+	if err := c.ch.SendRequest(req).ReceiveReply(reply); err != nil {
+		return fmt.Errorf("failed to clear interface tag: %w", err)
+	}
+	if reply.Retval != 0 {
+		return fmt.Errorf("clear interface tag returned error code: %d", reply.Retval)
+	}
+	return nil
+}
+
+func formatInterfaceTag(pciAddress, qosProfile string) (string, error) {
+	fields := make([]string, 0, 2)
+	if pciAddress != "" {
+		if err := validateInterfaceTagValue("PCI address", pciAddress); err != nil {
+			return "", err
+		}
+		fields = append(fields, "pci="+pciAddress)
+	}
+	if qosProfile != "" {
+		if err := validateInterfaceTagValue("QoS profile", qosProfile); err != nil {
+			return "", err
+		}
+		fields = append(fields, "qos="+qosProfile)
+	}
+
+	tag := strings.Join(fields, ";")
+	if len(tag) > 64 {
+		return "", fmt.Errorf("interface tag %q exceeds VPP 64 byte limit", tag)
+	}
+	return tag, nil
+}
+
+func validateInterfaceTagValue(field, value string) error {
+	if strings.ContainsAny(value, ";=") {
+		return fmt.Errorf("%s %q contains unsupported interface tag delimiter", field, value)
+	}
+	return nil
+}
+
+func parseInterfaceTag(tag string) map[string]string {
+	fields := make(map[string]string)
+	for _, part := range strings.Split(tag, ";") {
+		key, value, ok := strings.Cut(part, "=")
+		if !ok || key == "" {
+			continue
+		}
+		fields[key] = value
+	}
+	return fields
 }
 
 // checkSocketAccess verifies socket accessibility

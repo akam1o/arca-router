@@ -122,8 +122,10 @@ func (p *VPPPlugin) ValidateChanges(ctx context.Context, diff *engine.ConfigDiff
 			return err
 		}
 	}
-	if diff.ClassOfServiceChanged && hasVPPClassOfServiceConfig(diff.NewClassOfService) {
-		return fmt.Errorf("VPP southbound does not yet support v0.6 configuration: class-of-service")
+	if diff.ClassOfServiceChanged {
+		if _, err := classOfServiceBindingMap(diff.NewClassOfService); err != nil {
+			return err
+		}
 	}
 
 	// Validate addresses on changed interfaces
@@ -199,7 +201,15 @@ func (p *VPPPlugin) ApplyChanges(ctx context.Context, diff *engine.ConfigDiff) e
 		}
 	}
 
-	// 4. Remove interfaces (remove addresses, LCP, then disable)
+	// 4. Apply class-of-service profile bindings before interfaces are removed.
+	if diff.ClassOfServiceChanged {
+		if err := p.applyClassOfServiceChanges(ctx, diff.OldClassOfService, diff.NewClassOfService, &rollbackOps); err != nil {
+			p.executeRollback(ctx, rollbackOps)
+			return fmt.Errorf("update class-of-service interfaces: %w", err)
+		}
+	}
+
+	// 5. Remove interfaces (remove addresses, LCP, then disable)
 	for _, name := range diff.InterfacesRemoved {
 		if err := p.removeInterface(ctx, name, &rollbackOps); err != nil {
 			p.executeRollback(ctx, rollbackOps)
@@ -225,18 +235,6 @@ func (p *VPPPlugin) RollbackChanges(ctx context.Context, diff *engine.ConfigDiff
 		}
 	}
 
-	// Reverse of ApplyChanges: remove added addresses, re-add removed addresses.
-	for name, ifaceCfg := range diff.InterfacesAdded {
-		swIfIndex, ok := p.ifaceIndex[name]
-		if !ok {
-			continue
-		}
-		p.deleteConfiguredAddresses(ctx, swIfIndex, ifaceCfg)
-		_ = p.client.DeleteLCPInterface(ctx, swIfIndex)
-		_ = p.client.SetInterfaceDown(ctx, swIfIndex)
-		delete(p.ifaceIndex, name)
-	}
-
 	for _, name := range diff.InterfacesRemoved {
 		swIfIndex, ok := p.removedInterfaces[name]
 		if !ok {
@@ -247,6 +245,24 @@ func (p *VPPPlugin) RollbackChanges(ctx context.Context, diff *engine.ConfigDiff
 		if linuxName, err := pkgvpp.ConvertJunosToLinuxName(name); err == nil {
 			_ = p.lcpManager.Create(ctx, swIfIndex, linuxName, name)
 		}
+	}
+
+	if diff.ClassOfServiceChanged {
+		if err := p.applyClassOfServiceChanges(ctx, diff.NewClassOfService, diff.OldClassOfService, nil); err != nil && rollbackErr == nil {
+			rollbackErr = fmt.Errorf("restore class-of-service interfaces: %w", err)
+		}
+	}
+
+	// Reverse of ApplyChanges: remove added addresses, re-add removed addresses.
+	for name, ifaceCfg := range diff.InterfacesAdded {
+		swIfIndex, ok := p.ifaceIndex[name]
+		if !ok {
+			continue
+		}
+		p.deleteConfiguredAddresses(ctx, swIfIndex, ifaceCfg)
+		_ = p.client.DeleteLCPInterface(ctx, swIfIndex)
+		_ = p.client.SetInterfaceDown(ctx, swIfIndex)
+		delete(p.ifaceIndex, name)
 	}
 
 	tableAddressHandled := make(map[string]bool)
@@ -352,15 +368,6 @@ func (p *VPPPlugin) hasHardwareConfig(name string) bool {
 		}
 	}
 	return false
-}
-
-func hasVPPClassOfServiceConfig(cfg *model.ClassOfServiceConfig) bool {
-	if cfg == nil {
-		return false
-	}
-	return len(cfg.ForwardingClasses) > 0 ||
-		len(cfg.TrafficControlProfiles) > 0 ||
-		len(cfg.Interfaces) > 0
 }
 
 func (p *VPPPlugin) getHardwareConfig(name string) *device.PhysicalInterface {
@@ -542,6 +549,161 @@ func (p *VPPPlugin) setMPLSInterface(ctx context.Context, name string, enabled b
 		return err
 	}
 	return nil
+}
+
+type classOfServiceBindingChange struct {
+	name       string
+	oldProfile pkgvpp.QoSProfile
+	oldSet     bool
+	newProfile pkgvpp.QoSProfile
+	newSet     bool
+}
+
+func (p *VPPPlugin) applyClassOfServiceChanges(ctx context.Context, oldCoS, newCoS *model.ClassOfServiceConfig, rollback *[]func(context.Context) error) error {
+	oldBindings, err := classOfServiceBindingMap(oldCoS)
+	if err != nil {
+		return fmt.Errorf("old class-of-service: %w", err)
+	}
+	newBindings, err := classOfServiceBindingMap(newCoS)
+	if err != nil {
+		return fmt.Errorf("new class-of-service: %w", err)
+	}
+
+	for _, change := range classOfServiceBindingChanges(oldBindings, newBindings) {
+		swIfIndex, ok := p.ifaceIndex[change.name]
+		if !ok {
+			if change.newSet {
+				return fmt.Errorf("interface %s not found in VPP", change.name)
+			}
+			continue
+		}
+		if change.newSet {
+			if err := p.client.SetQoSProfile(ctx, swIfIndex, change.newProfile); err != nil {
+				return fmt.Errorf("set %s QoS profile %s: %w", change.name, change.newProfile.Name, err)
+			}
+		} else {
+			if err := p.client.ClearQoSProfile(ctx, swIfIndex); err != nil {
+				return fmt.Errorf("clear %s QoS profile: %w", change.name, err)
+			}
+		}
+		if rollback != nil {
+			swIfIndexCopy := swIfIndex
+			changeCopy := change
+			*rollback = append(*rollback, func(ctx context.Context) error {
+				if changeCopy.oldSet {
+					return p.client.SetQoSProfile(ctx, swIfIndexCopy, changeCopy.oldProfile)
+				}
+				return p.client.ClearQoSProfile(ctx, swIfIndexCopy)
+			})
+		}
+	}
+	return nil
+}
+
+func classOfServiceBindingMap(cfg *model.ClassOfServiceConfig) (map[string]pkgvpp.QoSProfile, error) {
+	bindings := make(map[string]pkgvpp.QoSProfile)
+	if cfg == nil {
+		return bindings, nil
+	}
+	for name, fc := range cfg.ForwardingClasses {
+		if fc == nil {
+			return nil, fmt.Errorf("forwarding-class %s is nil", name)
+		}
+		if fc.Queue < 0 || fc.Queue > 7 {
+			return nil, fmt.Errorf("forwarding-class %s: queue must be 0-7, got %d", name, fc.Queue)
+		}
+	}
+
+	interfaceNames := make([]string, 0, len(cfg.Interfaces))
+	for name := range cfg.Interfaces {
+		interfaceNames = append(interfaceNames, name)
+	}
+	sort.Strings(interfaceNames)
+
+	for _, name := range interfaceNames {
+		iface := cfg.Interfaces[name]
+		if iface == nil {
+			return nil, fmt.Errorf("interface %s is nil", name)
+		}
+		profileName := iface.OutputTrafficControlProfile
+		if profileName == "" {
+			continue
+		}
+		profileCfg := cfg.TrafficControlProfiles[profileName]
+		if profileCfg == nil {
+			return nil, fmt.Errorf("interface %s: output traffic-control-profile %q not found", name, profileName)
+		}
+		bindings[name] = classOfServiceQoSProfile(profileName, profileCfg, cfg.ForwardingClasses)
+	}
+	return bindings, nil
+}
+
+func classOfServiceQoSProfile(name string, profile *model.TrafficControlProfile, forwardingClasses map[string]*model.ForwardingClass) pkgvpp.QoSProfile {
+	result := pkgvpp.QoSProfile{
+		Name:         name,
+		ShapingRate:  profile.ShapingRate,
+		SchedulerMap: profile.SchedulerMap,
+	}
+
+	classNames := make([]string, 0, len(forwardingClasses))
+	for className := range forwardingClasses {
+		classNames = append(classNames, className)
+	}
+	sort.Strings(classNames)
+	for _, className := range classNames {
+		fc := forwardingClasses[className]
+		if fc == nil {
+			continue
+		}
+		result.Queues = append(result.Queues, pkgvpp.QoSQueue{
+			ForwardingClass: className,
+			Queue:           uint8(fc.Queue),
+		})
+	}
+	return result
+}
+
+func classOfServiceBindingChanges(oldBindings, newBindings map[string]pkgvpp.QoSProfile) []classOfServiceBindingChange {
+	namesSet := make(map[string]bool)
+	for name := range oldBindings {
+		namesSet[name] = true
+	}
+	for name := range newBindings {
+		namesSet[name] = true
+	}
+	names := make([]string, 0, len(namesSet))
+	for name := range namesSet {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+
+	changes := make([]classOfServiceBindingChange, 0, len(names))
+	for _, name := range names {
+		oldProfile, oldSet := oldBindings[name]
+		newProfile, newSet := newBindings[name]
+		if oldSet != newSet || !qosProfileEqual(oldProfile, newProfile) {
+			changes = append(changes, classOfServiceBindingChange{
+				name:       name,
+				oldProfile: oldProfile,
+				oldSet:     oldSet,
+				newProfile: newProfile,
+				newSet:     newSet,
+			})
+		}
+	}
+	return changes
+}
+
+func qosProfileEqual(a, b pkgvpp.QoSProfile) bool {
+	if a.Name != b.Name || a.ShapingRate != b.ShapingRate || a.SchedulerMap != b.SchedulerMap || len(a.Queues) != len(b.Queues) {
+		return false
+	}
+	for i := range a.Queues {
+		if a.Queues[i] != b.Queues[i] {
+			return false
+		}
+	}
+	return true
 }
 
 type routingInstancePlan struct {
