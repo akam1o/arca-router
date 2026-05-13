@@ -179,6 +179,12 @@ arca-router custom OIDs currently use the provisional experimental base `1.3.6.1
 | `1.3.6.1.3.9950.1.16.0` | `arcaRouterHaConverged` |
 | `1.3.6.1.3.9950.1.17.0` | `arcaRouterHaVrrpGroups` |
 | `1.3.6.1.3.9950.1.18.0` | `arcaRouterHaConvergenceIssues` |
+| `1.3.6.1.3.9950.1.19.0` | `arcaRouterFrrVrrpConfiguredGroups` |
+| `1.3.6.1.3.9950.1.20.0` | `arcaRouterFrrVrrpObservedGroups` |
+| `1.3.6.1.3.9950.1.21.0` | `arcaRouterFrrVrrpActiveGroups` |
+| `1.3.6.1.3.9950.1.22.0` | `arcaRouterFrrVrrpConvergenceIssues` |
+| `1.3.6.1.3.9950.1.23.0` | `arcaRouterFrrVrrpStatusError` |
+| `1.3.6.1.3.9950.1.24.0` | `arcaRouterFrrVrrpLastCheck` |
 
 Example:
 
