@@ -160,10 +160,14 @@ func (c *RouterConfig) validateRoutingInstances() error {
 		if instance.RouteDistinguisher != "" && !regexp.MustCompile(`^\d+:\d+$`).MatchString(instance.RouteDistinguisher) {
 			return fmt.Errorf("routing-instance %s: invalid route-distinguisher %q", name, instance.RouteDistinguisher)
 		}
+		importTargetCount := 0
+		exportTargetCount := 0
 		if instance.VRFTarget != "" {
 			if err := validateVRFTargetValue(fmt.Sprintf("routing-instance %s vrf-target", name), instance.VRFTarget); err != nil {
 				return err
 			}
+			importTargetCount++
+			exportTargetCount++
 		}
 		for _, ifName := range instance.Interfaces {
 			if err := c.validateInterfaceReference(fmt.Sprintf("routing-instance %s", name), ifName); err != nil {
@@ -174,11 +178,13 @@ func (c *RouterConfig) validateRoutingInstances() error {
 			if err := validateVRFTargetValue(fmt.Sprintf("routing-instance %s vrf-target import", name), target); err != nil {
 				return err
 			}
+			importTargetCount++
 		}
 		for _, target := range instance.VRFTargetExport {
 			if err := validateVRFTargetValue(fmt.Sprintf("routing-instance %s vrf-target export", name), target); err != nil {
 				return err
 			}
+			exportTargetCount++
 		}
 		for _, policyName := range instance.VRFImport {
 			if err := c.validatePolicyStatementReference(fmt.Sprintf("routing-instance %s vrf-import", name), policyName); err != nil {
@@ -189,6 +195,19 @@ func (c *RouterConfig) validateRoutingInstances() error {
 			if err := c.validatePolicyStatementReference(fmt.Sprintf("routing-instance %s vrf-export", name), policyName); err != nil {
 				return err
 			}
+		}
+		if len(instance.VRFImport) > 0 && importTargetCount == 0 {
+			return fmt.Errorf("routing-instance %s: vrf-import requires an import vrf-target", name)
+		}
+		if len(instance.VRFExport) > 0 && exportTargetCount == 0 {
+			return fmt.Errorf("routing-instance %s: vrf-export requires an export vrf-target", name)
+		}
+		if exportTargetCount > 0 && instance.RouteDistinguisher == "" {
+			return fmt.Errorf("routing-instance %s: route-distinguisher is required for VPN export", name)
+		}
+		if (importTargetCount > 0 || exportTargetCount > 0 || len(instance.VRFImport) > 0 || len(instance.VRFExport) > 0) &&
+			(c.Routing == nil || c.Routing.AutonomousSystem == 0) {
+			return fmt.Errorf("routing-instance %s: routing-options autonomous-system is required for VPN import/export", name)
 		}
 	}
 	return nil

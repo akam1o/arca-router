@@ -570,10 +570,14 @@ func validateRoutingInstance(cfg *Config, name string, instance *RoutingInstance
 	if instance.RouteDistinguisher != "" && !regexp.MustCompile(`^\d+:\d+$`).MatchString(instance.RouteDistinguisher) {
 		return errors.New(errors.ErrCodeConfigValidation, fmt.Sprintf("Invalid route-distinguisher for %s: %s", name, instance.RouteDistinguisher), "Route distinguisher must use ASN:number format", "Use a value like 65000:100")
 	}
+	importTargetCount := 0
+	exportTargetCount := 0
 	if instance.VRFTarget != "" {
 		if err := validateVRFTargetValue(fmt.Sprintf("routing-instance %s vrf-target", name), instance.VRFTarget); err != nil {
 			return err
 		}
+		importTargetCount++
+		exportTargetCount++
 	}
 	for _, ifName := range instance.Interfaces {
 		if err := validateConfiguredInterfaceReference(cfg, fmt.Sprintf("Routing instance %s", name), ifName); err != nil {
@@ -584,11 +588,13 @@ func validateRoutingInstance(cfg *Config, name string, instance *RoutingInstance
 		if err := validateVRFTargetValue(fmt.Sprintf("routing-instance %s vrf-target import", name), target); err != nil {
 			return err
 		}
+		importTargetCount++
 	}
 	for _, target := range instance.VRFTargetExport {
 		if err := validateVRFTargetValue(fmt.Sprintf("routing-instance %s vrf-target export", name), target); err != nil {
 			return err
 		}
+		exportTargetCount++
 	}
 	for _, policyName := range instance.VRFImport {
 		if err := validatePolicyStatementReference(cfg, fmt.Sprintf("Routing instance %s vrf-import", name), policyName); err != nil {
@@ -599,6 +605,19 @@ func validateRoutingInstance(cfg *Config, name string, instance *RoutingInstance
 		if err := validatePolicyStatementReference(cfg, fmt.Sprintf("Routing instance %s vrf-export", name), policyName); err != nil {
 			return err
 		}
+	}
+	if len(instance.VRFImport) > 0 && importTargetCount == 0 {
+		return errors.New(errors.ErrCodeConfigValidation, fmt.Sprintf("Routing instance %s vrf-import requires an import vrf-target", name), "VRF import policy requires at least one import target", "Configure 'vrf-target import target:<asn>:<number>' or a shared 'vrf-target'")
+	}
+	if len(instance.VRFExport) > 0 && exportTargetCount == 0 {
+		return errors.New(errors.ErrCodeConfigValidation, fmt.Sprintf("Routing instance %s vrf-export requires an export vrf-target", name), "VRF export policy requires at least one export target", "Configure 'vrf-target export target:<asn>:<number>' or a shared 'vrf-target'")
+	}
+	if exportTargetCount > 0 && instance.RouteDistinguisher == "" {
+		return errors.New(errors.ErrCodeConfigValidation, fmt.Sprintf("Routing instance %s route-distinguisher is required for VPN export", name), "VPN export requires a route distinguisher", "Configure 'route-distinguisher <asn>:<number>'")
+	}
+	if (importTargetCount > 0 || exportTargetCount > 0 || len(instance.VRFImport) > 0 || len(instance.VRFExport) > 0) &&
+		(cfg.RoutingOptions == nil || cfg.RoutingOptions.AutonomousSystem == 0) {
+		return errors.New(errors.ErrCodeConfigValidation, fmt.Sprintf("Routing instance %s routing-options autonomous-system is required for VPN import/export", name), "VPN import/export requires a local autonomous-system", "Configure 'set routing-options autonomous-system <asn>'")
 	}
 	return nil
 }
