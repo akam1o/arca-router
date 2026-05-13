@@ -95,6 +95,84 @@ func TestV06AdvancedConfigValidationRejectsInvalidReferences(t *testing.T) {
 	}
 }
 
+func TestV06AdvancedConfigValidationRejectsUnknownInterfaceReferences(t *testing.T) {
+	tests := []struct {
+		name      string
+		configure func(*Config)
+		want      string
+	}{
+		{
+			name: "mpls",
+			configure: func(cfg *Config) {
+				cfg.Protocols = &ProtocolConfig{
+					MPLS: &MPLSConfig{Interfaces: []string{"ge-0/0/0"}},
+				}
+			},
+			want: "MPLS references non-existent interface ge-0/0/0",
+		},
+		{
+			name: "vrrp",
+			configure: func(cfg *Config) {
+				cfg.Protocols = &ProtocolConfig{
+					VRRP: &VRRPConfig{Groups: map[string]*VRRPGroup{
+						"10": {
+							Name:           "10",
+							Interface:      "ge-0/0/0",
+							VirtualAddress: "192.0.2.254",
+						},
+					}},
+				}
+			},
+			want: "VRRP group 10 references non-existent interface ge-0/0/0",
+		},
+		{
+			name: "routing-instance",
+			configure: func(cfg *Config) {
+				cfg.RoutingInstances = map[string]*RoutingInstance{
+					"BLUE": {
+						Name:         "BLUE",
+						InstanceType: "vrf",
+						Interfaces:   []string{"ge-0/0/0"},
+					},
+				}
+			},
+			want: "Routing instance BLUE references non-existent interface ge-0/0/0",
+		},
+		{
+			name: "class-of-service",
+			configure: func(cfg *Config) {
+				cfg.ClassOfService = &ClassOfServiceConfig{
+					TrafficControlProfiles: map[string]*TrafficControlProfile{
+						"WAN": {Name: "WAN"},
+					},
+					Interfaces: map[string]*CoSInterface{
+						"ge-0/0/0": {
+							Name:                        "ge-0/0/0",
+							OutputTrafficControlProfile: "WAN",
+						},
+					},
+				}
+			},
+			want: "Class-of-service references non-existent interface ge-0/0/0",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg := NewConfig()
+			tt.configure(cfg)
+
+			err := cfg.Validate()
+			if err == nil {
+				t.Fatal("Validate() error = nil, want unknown interface reference error")
+			}
+			if !strings.Contains(err.Error(), tt.want) {
+				t.Fatalf("Validate() error = %v, want substring %q", err, tt.want)
+			}
+		})
+	}
+}
+
 func TestRepeatedSetListValuesAreIdempotent(t *testing.T) {
 	input := strings.Join([]string{
 		"set chassis cluster sync etcd endpoint http://127.0.0.1:2379",

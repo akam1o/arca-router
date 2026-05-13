@@ -164,8 +164,8 @@ func (c *RouterConfig) validateRoutingInstances() error {
 			return fmt.Errorf("routing-instance %s: invalid vrf-target %q", name, instance.VRFTarget)
 		}
 		for _, ifName := range instance.Interfaces {
-			if !junosIfacePattern.MatchString(ifName) {
-				return fmt.Errorf("routing-instance %s: invalid interface name %q", name, ifName)
+			if err := c.validateInterfaceReference(fmt.Sprintf("routing-instance %s", name), ifName); err != nil {
+				return err
 			}
 		}
 	}
@@ -187,11 +187,21 @@ func (c *RouterConfig) validateProtocols() error {
 				return fmt.Errorf("ospf: invalid router-id %q", ospf.RouterID)
 			}
 		}
+		for areaName, area := range ospf.Areas {
+			if area == nil {
+				return fmt.Errorf("ospf area %s is nil", areaName)
+			}
+			for ifName := range area.Interfaces {
+				if err := c.validateInterfaceReference(fmt.Sprintf("ospf area %s", areaName), ifName); err != nil {
+					return err
+				}
+			}
+		}
 	}
 	if mpls := c.Protocols.MPLS; mpls != nil {
 		for _, ifName := range mpls.Interfaces {
-			if !junosIfacePattern.MatchString(ifName) {
-				return fmt.Errorf("mpls: invalid interface name %q", ifName)
+			if err := c.validateInterfaceReference("mpls", ifName); err != nil {
+				return err
 			}
 		}
 	}
@@ -204,8 +214,10 @@ func (c *RouterConfig) validateProtocols() error {
 			if err != nil || id < 1 || id > 255 {
 				return fmt.Errorf("vrrp group %s: id must be numeric 1-255", name)
 			}
-			if group.Interface != "" && !junosIfacePattern.MatchString(group.Interface) {
-				return fmt.Errorf("vrrp group %s: invalid interface name %q", name, group.Interface)
+			if group.Interface != "" {
+				if err := c.validateInterfaceReference(fmt.Sprintf("vrrp group %s", name), group.Interface); err != nil {
+					return err
+				}
 			}
 			if group.VirtualAddress != "" && net.ParseIP(group.VirtualAddress) == nil {
 				return fmt.Errorf("vrrp group %s: invalid virtual-address %q", name, group.VirtualAddress)
@@ -280,8 +292,8 @@ func (c *RouterConfig) validateClassOfService() error {
 		}
 	}
 	for name, iface := range c.ClassOfService.Interfaces {
-		if !junosIfacePattern.MatchString(name) {
-			return fmt.Errorf("class-of-service interface %s: invalid interface name", name)
+		if err := c.validateInterfaceReference("class-of-service", name); err != nil {
+			return err
 		}
 		if iface == nil {
 			return fmt.Errorf("class-of-service interface %s is nil", name)
@@ -291,6 +303,16 @@ func (c *RouterConfig) validateClassOfService() error {
 				return fmt.Errorf("class-of-service interface %s: output traffic-control-profile %q not found", name, iface.OutputTrafficControlProfile)
 			}
 		}
+	}
+	return nil
+}
+
+func (c *RouterConfig) validateInterfaceReference(context, ifName string) error {
+	if !junosIfacePattern.MatchString(ifName) {
+		return fmt.Errorf("%s: invalid interface name %q", context, ifName)
+	}
+	if _, ok := c.Interfaces[ifName]; !ok {
+		return fmt.Errorf("%s: interface %q is not configured", context, ifName)
 	}
 	return nil
 }

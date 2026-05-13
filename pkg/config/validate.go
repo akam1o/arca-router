@@ -74,7 +74,7 @@ func (c *Config) Validate() error {
 	}
 
 	for name, instance := range c.RoutingInstances {
-		if err := validateRoutingInstance(name, instance); err != nil {
+		if err := validateRoutingInstance(c, name, instance); err != nil {
 			return err
 		}
 	}
@@ -88,6 +88,9 @@ func (c *Config) Validate() error {
 
 	if c.ClassOfService != nil {
 		if err := c.ClassOfService.Validate(); err != nil {
+			return err
+		}
+		if err := c.validateClassOfServiceInterfaceReferences(); err != nil {
 			return err
 		}
 	}
@@ -336,6 +339,29 @@ func validateInterfaceName(name string) error {
 	return nil
 }
 
+func validateConfiguredInterfaceReference(cfg *Config, context, ifName string) error {
+	if err := validateInterfaceName(ifName); err != nil {
+		return err
+	}
+	if cfg == nil {
+		return errors.New(
+			errors.ErrCodeConfigValidation,
+			fmt.Sprintf("%s references interface %s without a configuration context", context, ifName),
+			"Internal validation error",
+			"Report this issue to the maintainers",
+		)
+	}
+	if _, exists := cfg.Interfaces[ifName]; !exists {
+		return errors.New(
+			errors.ErrCodeConfigValidation,
+			fmt.Sprintf("%s references non-existent interface %s", context, ifName),
+			"Interface must be defined before it is referenced",
+			fmt.Sprintf("Add interface configuration for %s", ifName),
+		)
+	}
+	return nil
+}
+
 // validateAddress validates a CIDR address
 func validateAddress(addr, familyName, ifaceName string, unitNum int) error {
 	if addr == "" {
@@ -534,7 +560,7 @@ func validateStaticRoute(sr *StaticRoute) error {
 	return nil
 }
 
-func validateRoutingInstance(name string, instance *RoutingInstance) error {
+func validateRoutingInstance(cfg *Config, name string, instance *RoutingInstance) error {
 	if instance == nil {
 		return errors.New(errors.ErrCodeConfigValidation, fmt.Sprintf("Routing instance %s is nil", name), "Routing instance is invalid", "Remove or recreate the routing instance")
 	}
@@ -548,7 +574,7 @@ func validateRoutingInstance(name string, instance *RoutingInstance) error {
 		return errors.New(errors.ErrCodeConfigValidation, fmt.Sprintf("Invalid vrf-target for %s: %s", name, instance.VRFTarget), "VRF target must use target:ASN:number format", "Use a value like target:65000:100")
 	}
 	for _, ifName := range instance.Interfaces {
-		if err := validateInterfaceName(ifName); err != nil {
+		if err := validateConfiguredInterfaceReference(cfg, fmt.Sprintf("Routing instance %s", name), ifName); err != nil {
 			return err
 		}
 	}
@@ -577,7 +603,7 @@ func (pc *ProtocolConfig) Validate(cfg *Config) error {
 
 	if pc.MPLS != nil {
 		for _, ifName := range pc.MPLS.Interfaces {
-			if err := validateInterfaceName(ifName); err != nil {
+			if err := validateConfiguredInterfaceReference(cfg, "MPLS", ifName); err != nil {
 				return err
 			}
 		}
@@ -586,6 +612,13 @@ func (pc *ProtocolConfig) Validate(cfg *Config) error {
 	if pc.VRRP != nil {
 		if err := pc.VRRP.Validate(); err != nil {
 			return err
+		}
+		for name, group := range pc.VRRP.Groups {
+			if group != nil && group.Interface != "" {
+				if err := validateConfiguredInterfaceReference(cfg, fmt.Sprintf("VRRP group %s", name), group.Interface); err != nil {
+					return err
+				}
+			}
 		}
 	}
 
@@ -882,16 +915,8 @@ func validateOSPFInterface(areaID, ifName string, ospfIf *OSPFInterface, cfg *Co
 		)
 	}
 
-	// Check if interface exists in configuration
-	if cfg.Interfaces != nil {
-		if _, exists := cfg.Interfaces[ifName]; !exists {
-			return errors.New(
-				errors.ErrCodeConfigValidation,
-				fmt.Sprintf("OSPF references non-existent interface %s in area %s", ifName, areaID),
-				"Interface must be defined before being used in OSPF",
-				fmt.Sprintf("Add interface configuration for %s", ifName),
-			)
-		}
+	if err := validateConfiguredInterfaceReference(cfg, fmt.Sprintf("OSPF area %s", areaID), ifName); err != nil {
+		return err
 	}
 
 	// Validate metric
@@ -943,6 +968,15 @@ func (c *ClassOfServiceConfig) Validate() error {
 			if _, ok := c.TrafficControlProfiles[iface.OutputTrafficControlProfile]; !ok {
 				return errors.New(errors.ErrCodeConfigValidation, fmt.Sprintf("Class-of-service interface %s references unknown profile %s", ifName, iface.OutputTrafficControlProfile), "Referenced traffic-control-profile must exist", "Create the profile before binding it to an interface")
 			}
+		}
+	}
+	return nil
+}
+
+func (c *Config) validateClassOfServiceInterfaceReferences() error {
+	for ifName := range c.ClassOfService.Interfaces {
+		if err := validateConfiguredInterfaceReference(c, "Class-of-service", ifName); err != nil {
+			return err
 		}
 	}
 	return nil
