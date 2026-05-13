@@ -16,9 +16,9 @@ Focus: expand the hardened unified daemon into higher-level router features.
   - FRR VRRP config generation through the file apply backend
   - FRR VRRP transactional apply through the management candidate datastore
   - VRRP Linux macvlan preparation for FRR vrrpd
+  - FRR VRRP operational state polling for control-plane HA
   - VPP LCP cache reconciliation status through Web UI, Prometheus, and SNMP
   - Post-failover FRR/VPP convergence validation through Web UI, Prometheus, and SNMP
-  - Control-plane HA using FRR and VRRP
 - **MPLS / VPN**
   - Management-plane config model for MPLS interfaces and L3VPN service stanzas
   - Commit-time safety gates for unsupported MPLS and routing-instance southbound apply
