@@ -487,9 +487,9 @@ set protocols bgp group external import PREFER-CUSTOMER
 <a id="advanced-v06-configuration"></a>
 ## Advanced v0.6 Configuration
 
-The following hierarchies are part of the v0.6 management-plane model. Parser, serializer, validation, clone, conversion, diff, and candidate command replacement support are implemented. FRR VRRP application, VPP MPLS interface forwarding, and VPP routing-instance table plumbing are implemented; FRR L3VPN import/export control and QoS enforcement are staged separately.
+The following hierarchies are part of the v0.6 management-plane model. Parser, serializer, validation, clone, conversion, diff, and candidate command replacement support are implemented. FRR VRRP application, VPP MPLS interface forwarding, VPP routing-instance table plumbing, and FRR L3VPN import/export control are implemented; QoS enforcement is staged separately.
 
-Until the corresponding southbound apply path is implemented, commits that leave unsupported routing-instance or class-of-service configuration active fail validation instead of being silently accepted. Removing those unsupported stanzas is allowed. VRRP is applied by the FRR file backend and the default transactional FRR backend.
+Until the corresponding southbound apply path is implemented, commits that leave unsupported class-of-service configuration active fail validation instead of being silently accepted. Removing unsupported class-of-service stanzas is allowed. VRRP and L3VPN control-plane configuration are applied by the FRR file backend and the default transactional FRR backend.
 
 MPLS, VRRP, OSPF, routing-instance, and class-of-service interface references must point to interfaces defined under `interfaces`. Unknown interface references fail validation before southbound apply.
 
@@ -567,7 +567,9 @@ Only `instance-type vrf` is accepted in v0.6. Route distinguishers use `<asn>:<n
 
 `protocols mpls interface` enables MPLS forwarding on the corresponding managed VPP interface. Removing the stanza disables MPLS forwarding before the interface is removed from VPP. MPLS and routing-instance interface references must resolve to configured interfaces.
 
-For VPP dataplane plumbing, each routing instance gets IPv4 and IPv6 FIB tables. When `route-distinguisher <asn>:<number>` is configured, `<number>` is used as the deterministic VPP table ID; otherwise arca-router derives a stable non-zero table ID from the routing-instance name. Interfaces listed under the routing instance are rebound to those tables, and configured addresses are removed and restored around table changes so existing addresses move with the binding. FRR L3VPN import/export control is still protected by the v0.6 safety gate.
+For VPP dataplane plumbing, each routing instance gets IPv4 and IPv6 FIB tables. When `route-distinguisher <asn>:<number>` is configured, `<number>` is used as the deterministic VPP table ID; otherwise arca-router derives a stable non-zero table ID from the routing-instance name. Interfaces listed under the routing instance are rebound to those tables, and configured addresses are removed and restored around table changes so existing addresses move with the binding.
+
+For FRR control-plane plumbing, routing instances render FRR VRF entries and per-VRF BGP VPN import/export configuration. Bare `vrf-target` applies to both `rt vpn import` and `rt vpn export`; directional targets apply only to their direction. Export requires `route-distinguisher` and automatically enables `label vpn export auto`. `vrf-import` and `vrf-export` are applied as `route-map vpn import` and `route-map vpn export`; when multiple policies are configured, arca-router generates an ordered synthetic route-map for FRR's single route-map slot.
 
 ### Class of Service
 
