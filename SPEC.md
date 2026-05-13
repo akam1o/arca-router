@@ -540,6 +540,8 @@ When `chassis cluster` is enabled with `sync etcd endpoint` values, the daemon m
 
 VRRP group IDs must be numeric and between `1` and `255`. VRRP priority must be between `1` and `254` when configured; omit it for default behavior.
 
+Before applying FRR VRRP configuration, arca-routerd prepares the Linux state expected by FRR `vrrpd`: arca-owned macvlan interfaces named `arv4-<id>-<hash>` or `arv6-<id>-<hash>` are created on the LCP interface, assigned the RFC VRRP virtual MAC, configured with the virtual address as `/32` or `/128`, and brought up. This requires `CAP_NET_ADMIN`, which is included in the packaged systemd unit.
+
 ### MPLS and Routing Instances
 
 ```

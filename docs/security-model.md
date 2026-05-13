@@ -64,7 +64,7 @@ usermod -aG frr arca-router
 | VPP API socket接続 (`/run/vpp/api.sock`) | `vpp`グループ所属 | VPP APIアクセス |
 | FRR設定適用 (`vtysh` management commit) | `frrvty`グループ所属 | FRR設定管理 |
 | FRR設定ファイル書き込み (`/etc/frr/frr.conf`) | `frr`グループ所属 | 復旧用 `--frr-apply-mode=file` のみ |
-| LCP (Linux Control Plane) 操作 | `CAP_NET_ADMIN` | netlink/TAP操作 |
+| LCP (Linux Control Plane) / VRRP macvlan 操作 | `CAP_NET_ADMIN` | netlink/TAP/macvlan操作 |
 | VPP FIB操作（経路同期） | `CAP_NET_ADMIN` | Kernel routing table操作 |
 | NETCONF/SNMP privileged port bind | `CAP_NET_BIND_SERVICE` | 830/TCP と任意の 161/UDP |
 
@@ -80,7 +80,7 @@ usermod -aG frr arca-router
 
 | Capability | 用途 | 必須/推奨 |
 |-----------|------|----------|
-| `CAP_NET_ADMIN` | netlink操作、LCP、VPP FIB同期 | **必須** |
+| `CAP_NET_ADMIN` | netlink操作、LCP、VRRP macvlan、VPP FIB同期 | **必須** |
 | `CAP_NET_BIND_SERVICE` | NETCONF/SSHの830番ポート、任意のSNMP 161番ポート | **必須** |
 | `CAP_NET_RAW` | Raw socket操作（将来のBFD/LLDP用） | 推奨 (Phase 3以降) |
 

@@ -11,6 +11,7 @@
 - **NETCONF listen configuration**: `security netconf ssh port` provides the default embedded NETCONF listen port when `--netconf-listen` is omitted
 - **FRR VRRP generation**: `--frr-apply-mode=file` can render `protocols vrrp` groups into FRR integrated interface configuration
 - **Transactional FRR VRRP apply**: the default transactional backend renders `protocols vrrp` into FRR `frr-vrrpd` management candidate operations
+- **VRRP Linux interface preparation**: FRR apply reconciles arca-owned macvlan interfaces with virtual MACs and host-prefix VIPs before applying VRRP configuration
 - **Standard FRR VRRP daemon**: `vrrpd` is part of the documented required FRR daemon set for appliance-router HA deployments
 - **v0.6 southbound safety gates**: unsupported MPLS, routing-instance, and class-of-service southbound changes fail validation instead of being silently ignored
 - **Prometheus service configuration**: `system services prometheus` can enable the Prometheus and health endpoint from running configuration

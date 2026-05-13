@@ -18,7 +18,7 @@ Group=arca-router
 SupplementaryGroups=vpp frrvty
 
 # Required capabilities for VPP, NETCONF/SNMP, and network operations
-# CAP_NET_ADMIN: LCP operations, netlink, VPP FIB synchronization
+# CAP_NET_ADMIN: LCP operations, VRRP macvlan preparation, netlink, VPP FIB synchronization
 # CAP_NET_BIND_SERVICE: Bind NETCONF/SSH on port 830 and optional SNMP on port 161
 AmbientCapabilities=CAP_NET_ADMIN CAP_NET_BIND_SERVICE
 CapabilityBoundingSet=CAP_NET_ADMIN CAP_NET_BIND_SERVICE

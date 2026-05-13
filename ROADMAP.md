@@ -14,6 +14,7 @@ Focus: expand the hardened unified daemon into higher-level router features.
   - Cluster sync observability through Web UI status and Prometheus metrics
   - FRR VRRP config generation through the file apply backend
   - FRR VRRP transactional apply through the management candidate datastore
+  - VRRP Linux macvlan preparation for FRR vrrpd
   - VPP LCP cache reconciliation status through Web UI, Prometheus, and SNMP
   - Control-plane HA using FRR and VRRP
   - Config synchronization through etcd
