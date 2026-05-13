@@ -38,6 +38,10 @@ const (
 	snmpOIDVPPLCPMismatch  = arcaSNMPBaseOID + ".12.0"
 	snmpOIDVPPLCPError     = arcaSNMPBaseOID + ".13.0"
 	snmpOIDVPPLCPLastRun   = arcaSNMPBaseOID + ".14.0"
+	snmpOIDHAConfigured    = arcaSNMPBaseOID + ".15.0"
+	snmpOIDHAConverged     = arcaSNMPBaseOID + ".16.0"
+	snmpOIDHAVRPGroups     = arcaSNMPBaseOID + ".17.0"
+	snmpOIDHAIssues        = arcaSNMPBaseOID + ".18.0"
 
 	defaultSNMPPort      = 161
 	defaultSNMPCommunity = "public"
@@ -262,6 +266,44 @@ func snmpOIDs(source metricsSource) []*snmpserver.PDUValueControlItem {
 				return snmpserver.Asn1Gauge32Wrap(uint(unixTimestampSeconds(source.snapshot(time.Now()).VPPLCPReconcileLastRun))), nil
 			},
 			Document: "arcaRouterVppLcpLastReconcile",
+		},
+		{
+			OID:  snmpOIDHAConfigured,
+			Type: gosnmp.Integer,
+			OnGet: func() (interface{}, error) {
+				if source.snapshot(time.Now()).HAConfigured {
+					return snmpserver.Asn1IntegerWrap(1), nil
+				}
+				return snmpserver.Asn1IntegerWrap(0), nil
+			},
+			Document: "arcaRouterHaConfigured",
+		},
+		{
+			OID:  snmpOIDHAConverged,
+			Type: gosnmp.Integer,
+			OnGet: func() (interface{}, error) {
+				if source.snapshot(time.Now()).HAConverged {
+					return snmpserver.Asn1IntegerWrap(1), nil
+				}
+				return snmpserver.Asn1IntegerWrap(0), nil
+			},
+			Document: "arcaRouterHaConverged",
+		},
+		{
+			OID:  snmpOIDHAVRPGroups,
+			Type: gosnmp.Gauge32,
+			OnGet: func() (interface{}, error) {
+				return snmpserver.Asn1Gauge32Wrap(uint(source.snapshot(time.Now()).HAVRPGroups)), nil
+			},
+			Document: "arcaRouterHaVrrpGroups",
+		},
+		{
+			OID:  snmpOIDHAIssues,
+			Type: gosnmp.Gauge32,
+			OnGet: func() (interface{}, error) {
+				return snmpserver.Asn1Gauge32Wrap(uint(len(source.snapshot(time.Now()).HAIssues))), nil
+			},
+			Document: "arcaRouterHaConvergenceIssues",
 		},
 	}
 }
