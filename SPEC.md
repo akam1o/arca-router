@@ -491,7 +491,7 @@ The following hierarchies are part of the v0.6 management-plane model. Parser, s
 
 Class-of-service interface bindings are applied to managed VPP interfaces as output traffic-control profile intent. VRRP and L3VPN control-plane configuration are applied by the FRR file backend and the default transactional FRR backend.
 
-MPLS, VRRP, OSPF, routing-instance, and class-of-service interface references must point to interfaces defined under `interfaces`. Unknown interface references fail validation before southbound apply.
+MPLS, VRRP, OSPF, routing-instance, and class-of-service interface references must point to interfaces defined under `interfaces`. Unknown interface references fail validation before southbound apply. Routing-instance VPN import/export settings also fail validation before apply when required import/export targets, route distinguishers, or `routing-options autonomous-system` are missing.
 
 ### Prometheus Service
 
@@ -553,6 +553,7 @@ arca-routerd reads FRR VRRP operational state through `vtysh -c "show vrrp json"
 ```
 set protocols mpls interface ge-0/0/0
 
+set routing-options autonomous-system 65000
 set routing-instances BLUE instance-type vrf
 set routing-instances BLUE route-distinguisher 65000:100
 set routing-instances BLUE vrf-target target:65000:100

@@ -6,6 +6,7 @@
 - **Candidate command replacement**: v0.6 scalar settings replace existing candidate lines instead of accumulating duplicates
 - **Set-command idempotence**: repeated list-style set commands for interfaces, MPLS, routing-instances, cluster endpoints, and prefix-lists are deduplicated during parsing
 - **Interface reference validation**: MPLS, VRRP, routing-instance, OSPF, and class-of-service interface references must point to configured interfaces before commit
+- **L3VPN safety validation**: routing-instance VPN import/export settings fail commit validation before southbound apply when required route-targets, route distinguishers, or local AS settings are missing
 - **Routing-instance policy hooks**: `vrf-import` and `vrf-export` reference configured policy statements in the v0.6 L3VPN service model
 - **Directional VRF targets**: routing instances support shared `vrf-target` and directional `vrf-target import` / `vrf-target export` extended-community targets
 - **NETCONF v0.6 XML model**: NETCONF get-config/edit-config and the embedded YANG model cover v0.6 system services, clustering, MPLS/VRRP, routing-instances, class-of-service, and non-sensitive security settings
