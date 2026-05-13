@@ -10,6 +10,7 @@ import (
 
 	"github.com/akam1o/arca-router/internal/engine"
 	"github.com/akam1o/arca-router/internal/model"
+	sbfrr "github.com/akam1o/arca-router/internal/southbound/frr"
 	sbvpp "github.com/akam1o/arca-router/internal/southbound/vpp"
 	"github.com/akam1o/arca-router/pkg/datastore"
 )
@@ -27,6 +28,14 @@ type fakeConfigSyncRuntimeSource struct {
 }
 
 func (s fakeConfigSyncRuntimeSource) ConfigSyncStatus() configSyncStatus {
+	return s.status
+}
+
+type fakeFRRVRRPSource struct {
+	status sbfrr.VRRPOperationalStatus
+}
+
+func (s fakeFRRVRRPSource) VRRPOperationalStatus() sbfrr.VRRPOperationalStatus {
 	return s.status
 }
 
@@ -120,6 +129,12 @@ func TestMetricsEndpointExportsRouterMetrics(t *testing.T) {
 			LastCheck:       time.Unix(1700000100, 0),
 			LastApply:       time.Unix(1700000200, 0),
 		}},
+		frr: fakeFRRVRRPSource{status: sbfrr.VRRPOperationalStatus{
+			LastRun:          time.Unix(1700000300, 0),
+			ConfiguredGroups: 1,
+			ObservedGroups:   1,
+			ActiveGroups:     1,
+		}},
 		vpp: fakeVPPReconciliationSource{status: sbvpp.LCPReconciliationStatus{
 			LastRun:         time.Unix(1700000000, 0),
 			PairCount:       2,
@@ -150,6 +165,12 @@ func TestMetricsEndpointExportsRouterMetrics(t *testing.T) {
 		"arca_router_ha_converged 0",
 		"arca_router_ha_vrrp_groups 1",
 		"arca_router_ha_convergence_issues 1",
+		"arca_router_frr_vrrp_configured_groups 1",
+		"arca_router_frr_vrrp_observed_groups 1",
+		"arca_router_frr_vrrp_active_groups 1",
+		"arca_router_frr_vrrp_issues 0",
+		"arca_router_frr_vrrp_error 0",
+		"arca_router_frr_vrrp_last_check_timestamp_seconds 1700000300",
 		"arca_router_vpp_lcp_pairs 2",
 		"arca_router_vpp_lcp_inconsistencies 1",
 		"arca_router_vpp_lcp_reconcile_error 0",

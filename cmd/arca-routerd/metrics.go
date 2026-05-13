@@ -13,6 +13,7 @@ import (
 
 	"github.com/akam1o/arca-router/internal/engine"
 	"github.com/akam1o/arca-router/internal/model"
+	sbfrr "github.com/akam1o/arca-router/internal/southbound/frr"
 	sbvpp "github.com/akam1o/arca-router/internal/southbound/vpp"
 	"github.com/akam1o/arca-router/pkg/datastore"
 	"github.com/akam1o/arca-router/pkg/logger"
@@ -28,7 +29,12 @@ type metricsSource struct {
 	datastore     *datastore.Config
 	configAPI     webConfigAPI
 	configSync    configSyncRuntimeSource
+	frr           frrVRRPSource
 	vpp           vppReconciliationSource
+}
+
+type frrVRRPSource interface {
+	VRRPOperationalStatus() sbfrr.VRRPOperationalStatus
 }
 
 type vppReconciliationSource interface {
@@ -64,6 +70,12 @@ type routerMetrics struct {
 	HAConverged               bool
 	HAVRPGroups               int
 	HAIssues                  []string
+	FRRVRRPLastRun            time.Time
+	FRRVRRPConfiguredGroups   int
+	FRRVRRPObservedGroups     int
+	FRRVRRPActiveGroups       int
+	FRRVRRPIssues             []string
+	FRRVRRPError              string
 	VPPLCPReconcileLastRun    time.Time
 	VPPLCPPairs               int
 	VPPLCPInconsistencies     []string
@@ -131,6 +143,15 @@ func (s metricsSource) snapshot(now time.Time) routerMetrics {
 		metrics.NETCONFFailures = nc.FailedHandshakes
 		metrics.NETCONFListening = nc.IsListening
 	}
+	if s.frr != nil {
+		vrrp := s.frr.VRRPOperationalStatus()
+		metrics.FRRVRRPLastRun = vrrp.LastRun
+		metrics.FRRVRRPConfiguredGroups = vrrp.ConfiguredGroups
+		metrics.FRRVRRPObservedGroups = vrrp.ObservedGroups
+		metrics.FRRVRRPActiveGroups = vrrp.ActiveGroups
+		metrics.FRRVRRPIssues = append([]string(nil), vrrp.Issues...)
+		metrics.FRRVRRPError = vrrp.LastError
+	}
 	if s.vpp != nil {
 		lcp := s.vpp.LCPReconciliationStatus()
 		metrics.VPPLCPReconcileLastRun = lcp.LastRun
@@ -169,6 +190,21 @@ func applyHAConvergenceStatus(metrics *routerMetrics, cfg *model.RouterConfig, h
 		} else if !metrics.ConfigSyncHealthy {
 			issues = append(issues, "etcd config synchronizer is unhealthy")
 		}
+	}
+	if metrics.FRRVRRPLastRun.IsZero() {
+		issues = append(issues, "FRR VRRP status has not run")
+	}
+	if metrics.FRRVRRPError != "" {
+		issues = append(issues, "FRR VRRP status check failed")
+	}
+	if metrics.FRRVRRPObservedGroups < metrics.HAVRPGroups {
+		issues = append(issues, "FRR VRRP status is missing configured groups")
+	}
+	if metrics.FRRVRRPActiveGroups < metrics.HAVRPGroups {
+		issues = append(issues, "FRR VRRP status has inactive groups")
+	}
+	if len(metrics.FRRVRRPIssues) > 0 {
+		issues = append(issues, "FRR VRRP status found convergence issues")
 	}
 	if !hasVPP {
 		issues = append(issues, "VPP LCP reconciliation status is unavailable")
@@ -336,6 +372,25 @@ func (s metricsSource) handleMetrics(w http.ResponseWriter, r *http.Request) {
 	writeMetricBool(&b, "arca_router_ha_converged", metrics.HAConverged)
 	writeMetricValue(&b, "arca_router_ha_vrrp_groups", float64(metrics.HAVRPGroups))
 	writeMetricValue(&b, "arca_router_ha_convergence_issues", float64(len(metrics.HAIssues)))
+
+	writeMetricHelp(&b, "arca_router_frr_vrrp_configured_groups", "Number of VRRP groups configured for FRR.")
+	writeMetricType(&b, "arca_router_frr_vrrp_configured_groups", "gauge")
+	writeMetricHelp(&b, "arca_router_frr_vrrp_observed_groups", "Number of configured VRRP groups observed in FRR operational state.")
+	writeMetricType(&b, "arca_router_frr_vrrp_observed_groups", "gauge")
+	writeMetricHelp(&b, "arca_router_frr_vrrp_active_groups", "Number of configured VRRP groups in an active FRR state.")
+	writeMetricType(&b, "arca_router_frr_vrrp_active_groups", "gauge")
+	writeMetricHelp(&b, "arca_router_frr_vrrp_issues", "Number of detected FRR VRRP operational convergence issues.")
+	writeMetricType(&b, "arca_router_frr_vrrp_issues", "gauge")
+	writeMetricHelp(&b, "arca_router_frr_vrrp_error", "Whether the latest FRR VRRP operational status check failed.")
+	writeMetricType(&b, "arca_router_frr_vrrp_error", "gauge")
+	writeMetricHelp(&b, "arca_router_frr_vrrp_last_check_timestamp_seconds", "Unix timestamp of the latest FRR VRRP operational status check.")
+	writeMetricType(&b, "arca_router_frr_vrrp_last_check_timestamp_seconds", "gauge")
+	writeMetricValue(&b, "arca_router_frr_vrrp_configured_groups", float64(metrics.FRRVRRPConfiguredGroups))
+	writeMetricValue(&b, "arca_router_frr_vrrp_observed_groups", float64(metrics.FRRVRRPObservedGroups))
+	writeMetricValue(&b, "arca_router_frr_vrrp_active_groups", float64(metrics.FRRVRRPActiveGroups))
+	writeMetricValue(&b, "arca_router_frr_vrrp_issues", float64(len(metrics.FRRVRRPIssues)))
+	writeMetricBool(&b, "arca_router_frr_vrrp_error", metrics.FRRVRRPError != "")
+	writeMetricValue(&b, "arca_router_frr_vrrp_last_check_timestamp_seconds", unixTimestampSeconds(metrics.FRRVRRPLastRun))
 
 	writeMetricHelp(&b, "arca_router_vpp_lcp_pairs", "Number of VPP LCP pairs known after the latest reconciliation.")
 	writeMetricType(&b, "arca_router_vpp_lcp_pairs", "gauge")

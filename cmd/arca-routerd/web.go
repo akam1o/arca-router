@@ -53,6 +53,7 @@ type webStatus struct {
 	ConfigSync      webConfigSync   `json:"config_sync"`
 	Cluster         webCluster      `json:"cluster"`
 	HA              webHAStats      `json:"ha"`
+	FRR             webFRRStats     `json:"frr"`
 	VPP             webVPPStats     `json:"vpp"`
 	NETCONF         webNETCONFStats `json:"netconf"`
 }
@@ -87,6 +88,20 @@ type webHAStats struct {
 	VRRPGroups int      `json:"vrrp_groups"`
 	IssueCount int      `json:"issue_count"`
 	Issues     []string `json:"issues,omitempty"`
+}
+
+type webFRRStats struct {
+	VRRP webVRRPStats `json:"vrrp"`
+}
+
+type webVRRPStats struct {
+	LastCheck        string   `json:"last_check,omitempty"`
+	ConfiguredGroups int      `json:"configured_groups"`
+	ObservedGroups   int      `json:"observed_groups"`
+	ActiveGroups     int      `json:"active_groups"`
+	IssueCount       int      `json:"issue_count"`
+	Issues           []string `json:"issues,omitempty"`
+	LastError        string   `json:"last_error,omitempty"`
 }
 
 type webVPPStats struct {
@@ -172,6 +187,9 @@ type webIndexData struct {
 	HAStateClass          string
 	HAVRPGroups           string
 	HAIssues              string
+	FRRVRRPState          string
+	FRRVRRPStateClass     string
+	FRRVRRPActiveGroups   string
 	VPPLCPState           string
 	VPPLCPStateClass      string
 	VPPLCPPairs           string
@@ -447,9 +465,11 @@ var webIndexTemplate = template.Must(template.New("web-index").Parse(`<!doctype 
         </div>
       </article>
       <article class="panel span-2">
-        <h2>VPP LCP</h2>
+        <h2>HA southbound</h2>
         <div class="rows">
-          <div class="row"><span>State</span><strong><span class="pill {{.VPPLCPStateClass}}">{{.VPPLCPState}}</span></strong></div>
+          <div class="row"><span>FRR VRRP</span><strong><span class="pill {{.FRRVRRPStateClass}}">{{.FRRVRRPState}}</span></strong></div>
+          <div class="row"><span>Active VRRP groups</span><strong>{{.FRRVRRPActiveGroups}}</strong></div>
+          <div class="row"><span>VPP LCP</span><strong><span class="pill {{.VPPLCPStateClass}}">{{.VPPLCPState}}</span></strong></div>
           <div class="row"><span>Pairs</span><strong>{{.VPPLCPPairs}}</strong></div>
           <div class="row"><span>Inconsistencies</span><strong>{{.VPPLCPInconsistencies}}</strong></div>
           <div class="row"><span>Last check</span><strong>{{.VPPLCPLastReconcile}}</strong></div>
@@ -1120,6 +1140,17 @@ func newWebStatus(metrics routerMetrics) webStatus {
 			IssueCount: len(metrics.HAIssues),
 			Issues:     append([]string(nil), metrics.HAIssues...),
 		},
+		FRR: webFRRStats{
+			VRRP: webVRRPStats{
+				LastCheck:        formatWebOptionalTime(metrics.FRRVRRPLastRun),
+				ConfiguredGroups: metrics.FRRVRRPConfiguredGroups,
+				ObservedGroups:   metrics.FRRVRRPObservedGroups,
+				ActiveGroups:     metrics.FRRVRRPActiveGroups,
+				IssueCount:       len(metrics.FRRVRRPIssues),
+				Issues:           append([]string(nil), metrics.FRRVRRPIssues...),
+				LastError:        metrics.FRRVRRPError,
+			},
+		},
 		VPP: webVPPStats{
 			LCP: webLCPSyncStats{
 				LastReconcile:      formatWebOptionalTime(metrics.VPPLCPReconcileLastRun),
@@ -1189,6 +1220,20 @@ func newWebIndexData(status webStatus, now time.Time, runningConfig string, hist
 			haStateClass = "warn"
 		}
 	}
+	frrVRRPState := "Not configured"
+	frrVRRPStateClass := "neutral"
+	if status.FRR.VRRP.ConfiguredGroups > 0 {
+		frrVRRPState = "Converged"
+		frrVRRPStateClass = "ok"
+		if status.FRR.VRRP.LastError != "" || status.FRR.VRRP.IssueCount > 0 ||
+			status.FRR.VRRP.ActiveGroups < status.FRR.VRRP.ConfiguredGroups {
+			frrVRRPState = "Issues"
+			frrVRRPStateClass = "warn"
+		} else if status.FRR.VRRP.LastCheck == "" {
+			frrVRRPState = "Unknown"
+			frrVRRPStateClass = "neutral"
+		}
+	}
 	vppLCPState := "Consistent"
 	vppLCPStateClass := "ok"
 	if status.VPP.LCP.LastError != "" {
@@ -1221,6 +1266,9 @@ func newWebIndexData(status webStatus, now time.Time, runningConfig string, hist
 		HAStateClass:          haStateClass,
 		HAVRPGroups:           strconv.Itoa(status.HA.VRRPGroups),
 		HAIssues:              strconv.Itoa(status.HA.IssueCount),
+		FRRVRRPState:          frrVRRPState,
+		FRRVRRPStateClass:     frrVRRPStateClass,
+		FRRVRRPActiveGroups:   fmt.Sprintf("%d/%d", status.FRR.VRRP.ActiveGroups, status.FRR.VRRP.ConfiguredGroups),
 		VPPLCPState:           vppLCPState,
 		VPPLCPStateClass:      vppLCPStateClass,
 		VPPLCPPairs:           strconv.Itoa(status.VPP.LCP.PairCount),

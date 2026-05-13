@@ -2,6 +2,7 @@ package frr
 
 import (
 	"context"
+	"errors"
 	"io"
 	"log/slog"
 	"testing"
@@ -107,6 +108,11 @@ func TestApplyChangesPassesVRRPToTransactionalApplier(t *testing.T) {
 	applier := &recordingApplier{}
 	plugin := NewFRRPlugin(testLogger())
 	plugin.applier = applier
+	plugin.statusReader = fakeVRRPStatusReader{status: &pkgfrr.VRRPStatus{
+		Groups: []pkgfrr.VRRPRouterStatus{
+			{Interface: "ge0-0-0", VRID: 10, IPv4State: "Master"},
+		},
+	}}
 
 	if err := plugin.ApplyChanges(context.Background(), diff); err != nil {
 		t.Fatalf("ApplyChanges() error = %v", err)
@@ -117,6 +123,10 @@ func TestApplyChangesPassesVRRPToTransactionalApplier(t *testing.T) {
 	group := applier.cfg.VRRP.Groups[0]
 	if group.Interface != "ge0-0-0" || group.ID != 10 || group.VirtualAddress != "192.0.2.254" {
 		t.Fatalf("applied VRRP group = %#v, want converted group", group)
+	}
+	status := plugin.VRRPOperationalStatus()
+	if status.ConfiguredGroups != 1 || status.ObservedGroups != 1 || status.ActiveGroups != 1 || len(status.Issues) != 0 {
+		t.Fatalf("VRRPOperationalStatus() = %#v, want converged group", status)
 	}
 }
 
@@ -134,6 +144,35 @@ func TestValidateChangesAllowsRemovingUnsupportedV06FRRConfig(t *testing.T) {
 	}
 }
 
+func TestCheckVRRPOperationalStatusReportsMissingGroup(t *testing.T) {
+	plugin := NewFRRPlugin(testLogger())
+	plugin.statusReader = fakeVRRPStatusReader{status: &pkgfrr.VRRPStatus{}}
+
+	status := plugin.checkVRRPOperationalStatus(context.Background(), &pkgfrr.Config{
+		VRRP: &pkgfrr.VRRPConfig{Groups: []pkgfrr.VRRPGroup{
+			{ID: 10, Interface: "ge0-0-0", VirtualAddress: "192.0.2.254"},
+		}},
+	})
+	if status.ConfiguredGroups != 1 || status.ObservedGroups != 0 || status.ActiveGroups != 0 ||
+		len(status.Issues) != 1 || status.LastError != "" {
+		t.Fatalf("checkVRRPOperationalStatus() = %#v, want one missing group issue", status)
+	}
+}
+
+func TestCheckVRRPOperationalStatusRecordsReaderError(t *testing.T) {
+	plugin := NewFRRPlugin(testLogger())
+	plugin.statusReader = fakeVRRPStatusReader{err: errors.New("vtysh failed")}
+
+	status := plugin.checkVRRPOperationalStatus(context.Background(), &pkgfrr.Config{
+		VRRP: &pkgfrr.VRRPConfig{Groups: []pkgfrr.VRRPGroup{
+			{ID: 10, Interface: "ge0-0-0", VirtualAddress: "192.0.2.254"},
+		}},
+	})
+	if status.LastError == "" || len(status.Issues) != 1 {
+		t.Fatalf("checkVRRPOperationalStatus() = %#v, want reader error issue", status)
+	}
+}
+
 type recordingApplier struct {
 	configContent string
 	cfg           *pkgfrr.Config
@@ -143,4 +182,19 @@ func (a *recordingApplier) ApplyConfig(ctx context.Context, configContent string
 	a.configContent = configContent
 	a.cfg = cfg
 	return nil
+}
+
+type fakeVRRPStatusReader struct {
+	status *pkgfrr.VRRPStatus
+	err    error
+}
+
+func (r fakeVRRPStatusReader) ReadVRRPStatus(ctx context.Context) (*pkgfrr.VRRPStatus, error) {
+	if r.err != nil {
+		return nil, r.err
+	}
+	if r.status == nil {
+		return &pkgfrr.VRRPStatus{}, nil
+	}
+	return r.status, nil
 }

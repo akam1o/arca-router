@@ -14,6 +14,7 @@ import (
 	"github.com/akam1o/arca-router/internal/engine"
 	"github.com/akam1o/arca-router/internal/model"
 	nbgrpc "github.com/akam1o/arca-router/internal/northbound/grpc"
+	sbfrr "github.com/akam1o/arca-router/internal/southbound/frr"
 	sbvpp "github.com/akam1o/arca-router/internal/southbound/vpp"
 	pkgconfig "github.com/akam1o/arca-router/pkg/config"
 	"github.com/akam1o/arca-router/pkg/datastore"
@@ -109,6 +110,12 @@ func TestWebStatusEndpoint(t *testing.T) {
 			LastCheck:       time.Unix(1700000100, 0),
 			LastApply:       time.Unix(1700000200, 0),
 		}},
+		frr: fakeFRRVRRPSource{status: sbfrr.VRRPOperationalStatus{
+			LastRun:          time.Unix(1700000300, 0),
+			ConfiguredGroups: 1,
+			ObservedGroups:   1,
+			ActiveGroups:     1,
+		}},
 		vpp: fakeVPPReconciliationSource{status: sbvpp.LCPReconciliationStatus{
 			LastRun:         time.Unix(1700000000, 0),
 			PairCount:       2,
@@ -144,6 +151,10 @@ func TestWebStatusEndpoint(t *testing.T) {
 	}
 	if !status.HA.Configured || status.HA.Converged || status.HA.VRRPGroups != 1 || status.HA.IssueCount != 2 {
 		t.Fatalf("HA status = %#v, want configured with cluster and VPP LCP issues", status.HA)
+	}
+	if status.FRR.VRRP.ConfiguredGroups != 1 || status.FRR.VRRP.ActiveGroups != 1 ||
+		status.FRR.VRRP.LastCheck == "" {
+		t.Fatalf("FRR VRRP status = %#v, want active group status", status.FRR.VRRP)
 	}
 	if status.VPP.LCP.PairCount != 2 || status.VPP.LCP.InconsistencyCount != 1 || status.VPP.LCP.LastReconcile == "" {
 		t.Fatalf("VPP LCP status = %#v, want pair count and inconsistency status", status.VPP.LCP)

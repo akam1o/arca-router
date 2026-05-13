@@ -21,6 +21,10 @@ type FRRPlugin struct {
 	mode    pkgfrr.BackendMode
 	log     *slog.Logger
 
+	statusReader pkgfrr.VRRPStatusReader
+	statusCancel context.CancelFunc
+	vrrpStatus   VRRPOperationalStatus
+
 	currentConfig     string
 	rollbackConfig    string
 	currentFRRConfig  *pkgfrr.Config
@@ -35,9 +39,10 @@ func NewFRRPlugin(log *slog.Logger) *FRRPlugin {
 // NewFRRPluginWithApplyMode creates a new FRR plugin with an explicit apply backend.
 func NewFRRPluginWithApplyMode(log *slog.Logger, mode pkgfrr.BackendMode) *FRRPlugin {
 	return &FRRPlugin{
-		applier: pkgfrr.NewApplier(mode),
-		mode:    mode,
-		log:     log.With("plugin", "frr", "apply_mode", string(mode)),
+		applier:      pkgfrr.NewApplier(mode),
+		mode:         mode,
+		log:          log.With("plugin", "frr", "apply_mode", string(mode)),
+		statusReader: pkgfrr.NewVtyshVRRPStatusReader(),
 	}
 }
 
@@ -45,10 +50,22 @@ func (p *FRRPlugin) Name() string { return "frr" }
 
 func (p *FRRPlugin) Init(ctx context.Context) error {
 	// FRR apply backends are command-driven, so no persistent connection is needed.
+	statusCtx, cancel := context.WithCancel(ctx)
+	p.mu.Lock()
+	p.statusCancel = cancel
+	p.mu.Unlock()
+	go p.runVRRPStatusLoop(statusCtx)
 	return nil
 }
 
 func (p *FRRPlugin) Close() error {
+	p.mu.Lock()
+	cancel := p.statusCancel
+	p.statusCancel = nil
+	p.mu.Unlock()
+	if cancel != nil {
+		cancel()
+	}
 	return nil
 }
 
@@ -116,14 +133,23 @@ func (p *FRRPlugin) ApplyChanges(ctx context.Context, diff *engine.ConfigDiff) e
 	p.rollbackFRRConfig = previousFRRConfig
 	p.currentConfig = configContent
 	p.currentFRRConfig = frrConfig
+	p.vrrpStatus = p.checkVRRPOperationalStatus(ctx, frrConfig)
 
 	p.log.Info("FRR configuration applied",
 		slog.Int("config_length", len(configContent)),
 		slog.Bool("bgp_changed", diff.BGPChanged),
 		slog.Bool("ospf_changed", diff.OSPFChanged),
 	)
+	p.logVRRPStatus(p.vrrpStatus)
 
 	return nil
+}
+
+// VRRPOperationalStatus returns the latest observed FRR VRRP runtime status.
+func (p *FRRPlugin) VRRPOperationalStatus() VRRPOperationalStatus {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return cloneVRRPOperationalStatus(p.vrrpStatus)
 }
 
 func generateFRRArtifacts(cfg *model.RouterConfig) (*pkgfrr.Config, string, error) {
@@ -165,8 +191,10 @@ func (p *FRRPlugin) RollbackChanges(ctx context.Context, diff *engine.ConfigDiff
 	}
 	p.currentConfig = rollbackConfig
 	p.currentFRRConfig = rollbackFRRConfig
+	p.vrrpStatus = p.checkVRRPOperationalStatus(ctx, rollbackFRRConfig)
 
 	p.log.Info("FRR configuration rolled back")
+	p.logVRRPStatus(p.vrrpStatus)
 	return nil
 }
 

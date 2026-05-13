@@ -424,6 +424,7 @@ func run(ctx context.Context, f *daemonFlags, log *logger.Logger) error {
 		datastore:     datastoreConfig,
 		configAPI:     grpcServer,
 		configSync:    configSync,
+		frr:           frrPlugin,
 		vpp:           vppPlugin,
 	}
 	var metricsErr <-chan error

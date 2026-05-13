@@ -11,6 +11,7 @@ import (
 
 	"github.com/akam1o/arca-router/internal/engine"
 	"github.com/akam1o/arca-router/internal/model"
+	sbfrr "github.com/akam1o/arca-router/internal/southbound/frr"
 	sbvpp "github.com/akam1o/arca-router/internal/southbound/vpp"
 	"github.com/akam1o/arca-router/pkg/datastore"
 )
@@ -130,6 +131,12 @@ func TestSNMPEndpointExportsRouterMetrics(t *testing.T) {
 			RunningCommitID: "commit-120",
 			LastCheck:       time.Unix(1700000100, 0),
 			LastApply:       time.Unix(1700000200, 0),
+		}},
+		frr: fakeFRRVRRPSource{status: sbfrr.VRRPOperationalStatus{
+			LastRun:          time.Unix(1700000300, 0),
+			ConfiguredGroups: 1,
+			ObservedGroups:   1,
+			ActiveGroups:     1,
 		}},
 		vpp: fakeVPPReconciliationSource{status: sbvpp.LCPReconciliationStatus{
 			LastRun:   time.Unix(1700000000, 0),
