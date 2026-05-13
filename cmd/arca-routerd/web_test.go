@@ -115,6 +115,9 @@ func TestWebStatusEndpoint(t *testing.T) {
 			ConfiguredGroups: 1,
 			ObservedGroups:   1,
 			ActiveGroups:     1,
+			Groups: []sbfrr.VRRPGroupOperationalStatus{
+				{Interface: "ge0-0-0", ID: 10, VirtualAddress: "192.0.2.1", State: "Master", Observed: true, Active: true},
+			},
 		}},
 		vpp: fakeVPPReconciliationSource{status: sbvpp.LCPReconciliationStatus{
 			LastRun:         time.Unix(1700000000, 0),
@@ -155,6 +158,10 @@ func TestWebStatusEndpoint(t *testing.T) {
 	if status.FRR.VRRP.ConfiguredGroups != 1 || status.FRR.VRRP.ActiveGroups != 1 ||
 		status.FRR.VRRP.LastCheck == "" {
 		t.Fatalf("FRR VRRP status = %#v, want active group status", status.FRR.VRRP)
+	}
+	if len(status.FRR.VRRP.Groups) != 1 || status.FRR.VRRP.Groups[0].State != "Master" ||
+		!status.FRR.VRRP.Groups[0].Observed || !status.FRR.VRRP.Groups[0].Active {
+		t.Fatalf("FRR VRRP groups = %#v, want active group detail", status.FRR.VRRP.Groups)
 	}
 	if status.VPP.LCP.PairCount != 2 || status.VPP.LCP.InconsistencyCount != 1 || status.VPP.LCP.LastReconcile == "" {
 		t.Fatalf("VPP LCP status = %#v, want pair count and inconsistency status", status.VPP.LCP)

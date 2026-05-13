@@ -18,8 +18,19 @@ type VRRPOperationalStatus struct {
 	ConfiguredGroups int
 	ObservedGroups   int
 	ActiveGroups     int
+	Groups           []VRRPGroupOperationalStatus
 	Issues           []string
 	LastError        string
+}
+
+// VRRPGroupOperationalStatus is the observed state for one configured VRRP group.
+type VRRPGroupOperationalStatus struct {
+	Interface      string
+	ID             int
+	VirtualAddress string
+	State          string
+	Observed       bool
+	Active         bool
 }
 
 func (p *FRRPlugin) runVRRPStatusLoop(ctx context.Context) {
@@ -84,9 +95,16 @@ func fillVRRPConvergenceStatus(status *VRRPOperationalStatus, cfg *pkgfrr.Config
 	}
 
 	for _, expected := range cfg.VRRP.Groups {
+		groupStatus := VRRPGroupOperationalStatus{
+			Interface:      expected.Interface,
+			ID:             expected.ID,
+			VirtualAddress: expected.VirtualAddress,
+			State:          "missing",
+		}
 		key := vrrpOperationalKey(expected.Interface, expected.ID)
 		group, ok := observedByKey[key]
 		if !ok {
+			status.Groups = append(status.Groups, groupStatus)
 			status.Issues = append(status.Issues,
 				fmt.Sprintf("FRR VRRP group %d on %s is missing", expected.ID, expected.Interface))
 			continue
@@ -94,12 +112,19 @@ func fillVRRPConvergenceStatus(status *VRRPOperationalStatus, cfg *pkgfrr.Config
 		status.ObservedGroups++
 		state := observedStateForExpectedFamily(group, expected.VirtualAddress)
 		if isActiveVRRPState(state) {
+			groupStatus.Observed = true
+			groupStatus.Active = true
+			groupStatus.State = state
+			status.Groups = append(status.Groups, groupStatus)
 			status.ActiveGroups++
 			continue
 		}
+		groupStatus.Observed = true
 		if state == "" {
 			state = "unknown"
 		}
+		groupStatus.State = state
+		status.Groups = append(status.Groups, groupStatus)
 		status.Issues = append(status.Issues,
 			fmt.Sprintf("FRR VRRP group %d on %s is not active: %s", expected.ID, expected.Interface, state))
 	}
@@ -161,6 +186,7 @@ func (p *FRRPlugin) logVRRPStatus(status VRRPOperationalStatus) {
 }
 
 func cloneVRRPOperationalStatus(status VRRPOperationalStatus) VRRPOperationalStatus {
+	status.Groups = append([]VRRPGroupOperationalStatus(nil), status.Groups...)
 	status.Issues = append([]string(nil), status.Issues...)
 	return status
 }
