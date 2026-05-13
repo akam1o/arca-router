@@ -25,7 +25,7 @@ arca-router は現在 v0.6.x の advanced features フェーズです。この R
 - 構造体ファースト設定モデル、差分ベース 2 フェーズコミット、ロールバック
 - FRR management candidate datastore 経由の transactional apply
 - clustering、VRRP、MPLS、routing instances、QoS 向け v0.6 設定基盤
-- Prometheus、health、SNMP、Web UI、Grafana によるオブザーバビリティ
+- Prometheus、health、SNMP、Web UI、Grafana によるオブザーバビリティと認証付き Web 設定ワークフロー
 - SQLite または etcd ベースの candidate/running datastore とコミット履歴
 
 ---
@@ -211,7 +211,7 @@ set security rate-limit per-ip 10
 set security rate-limit per-user 20
 ```
 
-> NETCONF は `arca-routerd` に統合されています。別プロセスの NETCONF デーモンは不要です。security/netconf が設定されると、デーモンが 830 番ポートで待ち受けます。
+> NETCONF は `arca-routerd` に統合されています。別プロセスの NETCONF デーモンは不要です。`--netconf-listen` を省略した場合、デーモンは設定された NETCONF ポートで待ち受け、未設定時は `:830` を使用します。
 
 **NETCONF 接続のテスト**:
 
@@ -229,11 +229,15 @@ sudo journalctl -u arca-routerd -n 50
 # arca で running configuration を確認
 arca show configuration
 
-# arca-routerd 経由で operational state を確認
+# arca-routerd 経由で interface state、counter、QoS profile、queue placement を確認
 arca show interfaces
 arca show route
 arca show bgp summary
 arca show ospf neighbor
+arca show vrrp
+arca show lcp
+arca show ha
+arca show class-of-service
 
 # VPP/FRR を直接確認（任意）
 sudo vppctl show interface
@@ -331,11 +335,11 @@ arca-router/
 │   └── v1/
 │       └── router.proto        # gRPC API 定義（Config/Session/State）
 ├── cmd/
-│   ├── arca-routerd/           # 統合デーモン（v0.5.x）
+│   ├── arca-routerd/           # 統合デーモン
 │   │   └── main.go             # 単一プロセス: VPP + FRR + NETCONF + gRPC
-│   └── arca/                   # シン gRPC CLI クライアント（v0.5.x）
+│   └── arca/                   # シン gRPC CLI クライアント
 │       └── main.go             # Unix ソケット経由で通信
-├── internal/                   # v0.5.x コアパッケージ
+├── internal/                   # v0.6.x コアパッケージ
 │   ├── model/                  # 正準的な設定 & 状態型
 │   │   ├── config.go           # RouterConfig（構造体ファーストモデル）
 │   │   ├── state.go            # OperationalState

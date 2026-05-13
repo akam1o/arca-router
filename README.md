@@ -25,7 +25,7 @@ Current capabilities:
 - Struct-first configuration model with diff-based 2-phase commit and rollback
 - FRR transactional apply through the management candidate datastore
 - v0.6 config foundations for clustering, VRRP, MPLS, routing instances, and QoS
-- Prometheus, health, SNMP, Web UI, and Grafana observability assets
+- Prometheus, health, SNMP, Web UI, Grafana observability, and authenticated Web config workflow
 - SQLite or etcd-backed candidate/running datastore with commit history and etcd config sync
 
 ---
@@ -335,11 +335,11 @@ arca-router/
 │   └── v1/
 │       └── router.proto        # gRPC API definitions (Config/Session/State)
 ├── cmd/
-│   ├── arca-routerd/           # Unified daemon (v0.5.x)
+│   ├── arca-routerd/           # Unified daemon
 │   │   └── main.go             # Single process: VPP + FRR + NETCONF + gRPC
-│   └── arca/                   # Thin gRPC CLI client (v0.5.x)
+│   └── arca/                   # Thin gRPC CLI client
 │       └── main.go             # Communicates via Unix socket
-├── internal/                   # v0.5.x core packages
+├── internal/                   # v0.6.x core packages
 │   ├── model/                  # Canonical config & state types
 │   │   ├── config.go           # RouterConfig (struct-first model)
 │   │   ├── state.go            # OperationalState

@@ -27,7 +27,7 @@ The v0.6.x line extends the unified daemon path:
 - **2-phase commit**: Validate all plugins → apply all plugins → rollback on any failure.
 - **Advanced configuration model**: Clustering, MPLS, VRRP, routing instances, class of service, and Web UI service settings are represented in the struct-first model and diff engine.
 - **Cluster datastore selection**: `arca-routerd` and embedded NETCONF share the same SQLite or etcd datastore backend.
-- **Observability**: Optional Prometheus `/metrics`, `/healthz`, read-only Web UI, read-only SNMPv2c, and a packaged Grafana dashboard.
+- **Observability**: Optional Prometheus `/metrics`, `/healthz`, Web UI dashboard with authenticated config validate/commit APIs, read-only SNMPv2c, and a packaged Grafana dashboard.
 
 Only the current command names are part of this specification: `arca-routerd` and `arca`. Obsolete command entrypoints are not maintained.
 
@@ -993,7 +993,7 @@ It includes daemon, NETCONF, config sync, HA, FRR VRRP, class-of-service intent,
 
 ### Web UI
 
-Start the read-only Web UI with:
+Start the Web UI with:
 
 ```bash
 arca-routerd --web-listen=127.0.0.1:8080
@@ -1248,7 +1248,7 @@ sudo vppctl show interface addr
 - **v0.6.x**: Advanced feature foundations
   - Management-plane config model for clustering, MPLS, VRRP, routing instances, class of service, and Web UI
   - etcd datastore backend selection for clustered candidate/running configuration
-  - Read-only Web UI dashboard, JSON status endpoint, and running config endpoint
+  - Web UI dashboard, JSON status/config endpoints, authenticated validate/commit API, and commit history panel
   - v0.6 config diff and candidate replacement coverage
 
 - **v0.5.x**: Production hardening
