@@ -1068,11 +1068,14 @@ arca show bgp neighbor <ip>
 # OSPF neighbors
 arca show ospf neighbor
 
+# VRRP status
+arca show vrrp
+
 # Configuration
 arca show configuration
 ```
 
-`show interfaces` prints live managed VPP admin/oper status, bound QoS profile, packet counters, and RX/TX queue placement when available. Name filters use configured interface names such as `ge-0/0/0`.
+`show interfaces` prints live managed VPP admin/oper status, bound QoS profile, packet counters, and RX/TX queue placement when available. Name filters use configured interface names such as `ge-0/0/0`. `show vrrp` prints FRR `show vrrp` output through arca-routerd for local HA inspection.
 
 Interactive mode also supports `show history [N]` in configuration mode for commit history.
 
