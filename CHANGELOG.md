@@ -15,6 +15,7 @@
 - **Cluster observability**: `/api/status`, the Web UI, and Prometheus metrics expose datastore and cluster sync state
 - **VPP LCP reconciliation observability**: VPP LCP cache reconciliation state is exposed through `/api/status`, the Web UI, Prometheus metrics, and SNMP OIDs
 - **NETCONF listen configuration**: `security netconf ssh port` provides the default embedded NETCONF listen port when `--netconf-listen` is omitted
+- **NETCONF interface operational state**: NETCONF `<get>` exposes live managed VPP interface status, MAC addresses, and counters when arca-routerd can collect them
 - **FRR VRRP generation**: `--frr-apply-mode=file` can render `protocols vrrp` groups into FRR integrated interface configuration
 - **Transactional FRR VRRP apply**: the default transactional backend renders `protocols vrrp` into FRR `frr-vrrpd` management candidate operations
 - **VRRP Linux interface preparation**: FRR apply reconciles arca-owned macvlan interfaces with virtual MACs and host-prefix VIPs before applying VRRP configuration

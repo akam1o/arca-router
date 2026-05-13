@@ -32,6 +32,7 @@ Focus: expand the hardened unified daemon into higher-level router features.
   - Operational counters for queues and schedulers
 - **Observability services**
   - Config-driven NETCONF listen port from `security netconf ssh port`
+  - Live managed VPP interface status and counters in NETCONF `<get>`
   - Config-driven Prometheus service enablement for metrics and health checks
   - Config-driven SNMP service enablement for read-only SNMPv2c monitoring
   - VPP LCP reconciliation gauges in Prometheus, Web UI, and SNMP
