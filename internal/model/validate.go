@@ -160,11 +160,23 @@ func (c *RouterConfig) validateRoutingInstances() error {
 		if instance.RouteDistinguisher != "" && !regexp.MustCompile(`^\d+:\d+$`).MatchString(instance.RouteDistinguisher) {
 			return fmt.Errorf("routing-instance %s: invalid route-distinguisher %q", name, instance.RouteDistinguisher)
 		}
-		if instance.VRFTarget != "" && !regexp.MustCompile(`^target:\d+:\d+$`).MatchString(instance.VRFTarget) {
-			return fmt.Errorf("routing-instance %s: invalid vrf-target %q", name, instance.VRFTarget)
+		if instance.VRFTarget != "" {
+			if err := validateVRFTargetValue(fmt.Sprintf("routing-instance %s vrf-target", name), instance.VRFTarget); err != nil {
+				return err
+			}
 		}
 		for _, ifName := range instance.Interfaces {
 			if err := c.validateInterfaceReference(fmt.Sprintf("routing-instance %s", name), ifName); err != nil {
+				return err
+			}
+		}
+		for _, target := range instance.VRFTargetImport {
+			if err := validateVRFTargetValue(fmt.Sprintf("routing-instance %s vrf-target import", name), target); err != nil {
+				return err
+			}
+		}
+		for _, target := range instance.VRFTargetExport {
+			if err := validateVRFTargetValue(fmt.Sprintf("routing-instance %s vrf-target export", name), target); err != nil {
 				return err
 			}
 		}
@@ -178,6 +190,13 @@ func (c *RouterConfig) validateRoutingInstances() error {
 				return err
 			}
 		}
+	}
+	return nil
+}
+
+func validateVRFTargetValue(context, target string) error {
+	if !regexp.MustCompile(`^target:\d+:\d+$`).MatchString(target) {
+		return fmt.Errorf("%s: invalid vrf-target %q", context, target)
 	}
 	return nil
 }

@@ -32,6 +32,8 @@ func TestV06AdvancedConfigRoundTrip(t *testing.T) {
 		"set routing-instances BLUE instance-type vrf",
 		"set routing-instances BLUE route-distinguisher 65000:100",
 		"set routing-instances BLUE vrf-target target:65000:100",
+		"set routing-instances BLUE vrf-target import target:65000:101",
+		"set routing-instances BLUE vrf-target export target:65000:102",
 		"set routing-instances BLUE vrf-import BLUE-IN",
 		"set routing-instances BLUE vrf-export BLUE-OUT",
 		"set routing-instances BLUE interface ge-0/0/0",
@@ -59,6 +61,12 @@ func TestV06AdvancedConfigRoundTrip(t *testing.T) {
 	}
 	if got := cfg.RoutingInstances["BLUE"].VRFTarget; got != "target:65000:100" {
 		t.Fatalf("VRF target = %q", got)
+	}
+	if got := cfg.RoutingInstances["BLUE"].VRFTargetImport; len(got) != 1 || got[0] != "target:65000:101" {
+		t.Fatalf("VRF target import = %#v, want [target:65000:101]", got)
+	}
+	if got := cfg.RoutingInstances["BLUE"].VRFTargetExport; len(got) != 1 || got[0] != "target:65000:102" {
+		t.Fatalf("VRF target export = %#v, want [target:65000:102]", got)
 	}
 	if got := cfg.RoutingInstances["BLUE"].VRFImport; len(got) != 1 || got[0] != "BLUE-IN" {
 		t.Fatalf("VRF import = %#v, want [BLUE-IN]", got)
@@ -183,6 +191,57 @@ func TestV06AdvancedConfigValidationRejectsUnknownInterfaceReferences(t *testing
 	}
 }
 
+func TestV06AdvancedConfigValidationRejectsInvalidVRFTargets(t *testing.T) {
+	tests := []struct {
+		name      string
+		configure func(*RoutingInstance)
+		want      string
+	}{
+		{
+			name: "common",
+			configure: func(instance *RoutingInstance) {
+				instance.VRFTarget = "invalid"
+			},
+			want: "Invalid routing-instance BLUE vrf-target: invalid",
+		},
+		{
+			name: "import",
+			configure: func(instance *RoutingInstance) {
+				instance.VRFTargetImport = []string{"invalid"}
+			},
+			want: "Invalid routing-instance BLUE vrf-target import: invalid",
+		},
+		{
+			name: "export",
+			configure: func(instance *RoutingInstance) {
+				instance.VRFTargetExport = []string{"invalid"}
+			},
+			want: "Invalid routing-instance BLUE vrf-target export: invalid",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg := NewConfig()
+			cfg.RoutingInstances = map[string]*RoutingInstance{
+				"BLUE": {
+					Name:         "BLUE",
+					InstanceType: "vrf",
+				},
+			}
+			tt.configure(cfg.RoutingInstances["BLUE"])
+
+			err := cfg.Validate()
+			if err == nil {
+				t.Fatal("Validate() error = nil, want invalid vrf-target error")
+			}
+			if !strings.Contains(err.Error(), tt.want) {
+				t.Fatalf("Validate() error = %v, want substring %q", err, tt.want)
+			}
+		})
+	}
+}
+
 func TestV06AdvancedConfigValidationRejectsUnknownVRFPolicies(t *testing.T) {
 	tests := []struct {
 		name      string
@@ -237,6 +296,10 @@ func TestRepeatedSetListValuesAreIdempotent(t *testing.T) {
 		"set protocols mpls interface ge-0/0/0",
 		"set routing-instances BLUE interface ge-0/0/0",
 		"set routing-instances BLUE interface ge-0/0/0",
+		"set routing-instances BLUE vrf-target import target:65000:101",
+		"set routing-instances BLUE vrf-target import target:65000:101",
+		"set routing-instances BLUE vrf-target export target:65000:102",
+		"set routing-instances BLUE vrf-target export target:65000:102",
 		"set routing-instances BLUE vrf-import BLUE-IN",
 		"set routing-instances BLUE vrf-import BLUE-IN",
 		"set routing-instances BLUE vrf-export BLUE-OUT",
@@ -263,6 +326,12 @@ func TestRepeatedSetListValuesAreIdempotent(t *testing.T) {
 	if got := len(cfg.RoutingInstances["BLUE"].Interfaces); got != 1 {
 		t.Fatalf("routing-instance interfaces = %d, want 1", got)
 	}
+	if got := len(cfg.RoutingInstances["BLUE"].VRFTargetImport); got != 1 {
+		t.Fatalf("routing-instance vrf-target import = %d, want 1", got)
+	}
+	if got := len(cfg.RoutingInstances["BLUE"].VRFTargetExport); got != 1 {
+		t.Fatalf("routing-instance vrf-target export = %d, want 1", got)
+	}
 	if got := len(cfg.RoutingInstances["BLUE"].VRFImport); got != 1 {
 		t.Fatalf("routing-instance vrf-import = %d, want 1", got)
 	}
@@ -279,6 +348,8 @@ func TestRepeatedSetListValuesAreIdempotent(t *testing.T) {
 		"set interfaces ge-0/0/0 unit 0 family inet address 192.0.2.1/24",
 		"set protocols mpls interface ge-0/0/0",
 		"set routing-instances BLUE interface ge-0/0/0",
+		"set routing-instances BLUE vrf-target import target:65000:101",
+		"set routing-instances BLUE vrf-target export target:65000:102",
 		"set routing-instances BLUE vrf-import BLUE-IN",
 		"set routing-instances BLUE vrf-export BLUE-OUT",
 		"set policy-options prefix-list CUSTOMER 192.0.2.0/24",

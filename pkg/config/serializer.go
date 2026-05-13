@@ -243,6 +243,12 @@ func writeRoutingInstances(b *strings.Builder, instances map[string]*RoutingInst
 		if instance.VRFTarget != "" {
 			writeLine(b, "set routing-instances %s vrf-target %s", name, instance.VRFTarget)
 		}
+		for _, target := range instance.VRFTargetImport {
+			writeLine(b, "set routing-instances %s vrf-target import %s", name, target)
+		}
+		for _, target := range instance.VRFTargetExport {
+			writeLine(b, "set routing-instances %s vrf-target export %s", name, target)
+		}
 		for _, policy := range instance.VRFImport {
 			writeLine(b, "set routing-instances %s vrf-import %s", name, EscapeValue(policy))
 		}

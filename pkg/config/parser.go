@@ -691,6 +691,21 @@ func (p *Parser) parseRoutingInstances(config *Config) error {
 		if p.current.Type != TokenWord {
 			return p.error("expected vrf-target")
 		}
+		if p.current.Value == "import" || p.current.Value == "export" {
+			direction := p.current.Value
+			p.nextToken()
+			if p.current.Type != TokenWord {
+				return p.error(fmt.Sprintf("expected vrf-target %s value", direction))
+			}
+			switch direction {
+			case "import":
+				instance.VRFTargetImport = appendUniqueString(instance.VRFTargetImport, p.current.Value)
+			case "export":
+				instance.VRFTargetExport = appendUniqueString(instance.VRFTargetExport, p.current.Value)
+			}
+			p.nextToken()
+			return nil
+		}
 		instance.VRFTarget = p.current.Value
 		p.nextToken()
 		return nil

@@ -570,11 +570,23 @@ func validateRoutingInstance(cfg *Config, name string, instance *RoutingInstance
 	if instance.RouteDistinguisher != "" && !regexp.MustCompile(`^\d+:\d+$`).MatchString(instance.RouteDistinguisher) {
 		return errors.New(errors.ErrCodeConfigValidation, fmt.Sprintf("Invalid route-distinguisher for %s: %s", name, instance.RouteDistinguisher), "Route distinguisher must use ASN:number format", "Use a value like 65000:100")
 	}
-	if instance.VRFTarget != "" && !regexp.MustCompile(`^target:\d+:\d+$`).MatchString(instance.VRFTarget) {
-		return errors.New(errors.ErrCodeConfigValidation, fmt.Sprintf("Invalid vrf-target for %s: %s", name, instance.VRFTarget), "VRF target must use target:ASN:number format", "Use a value like target:65000:100")
+	if instance.VRFTarget != "" {
+		if err := validateVRFTargetValue(fmt.Sprintf("routing-instance %s vrf-target", name), instance.VRFTarget); err != nil {
+			return err
+		}
 	}
 	for _, ifName := range instance.Interfaces {
 		if err := validateConfiguredInterfaceReference(cfg, fmt.Sprintf("Routing instance %s", name), ifName); err != nil {
+			return err
+		}
+	}
+	for _, target := range instance.VRFTargetImport {
+		if err := validateVRFTargetValue(fmt.Sprintf("routing-instance %s vrf-target import", name), target); err != nil {
+			return err
+		}
+	}
+	for _, target := range instance.VRFTargetExport {
+		if err := validateVRFTargetValue(fmt.Sprintf("routing-instance %s vrf-target export", name), target); err != nil {
 			return err
 		}
 	}
@@ -587,6 +599,13 @@ func validateRoutingInstance(cfg *Config, name string, instance *RoutingInstance
 		if err := validatePolicyStatementReference(cfg, fmt.Sprintf("Routing instance %s vrf-export", name), policyName); err != nil {
 			return err
 		}
+	}
+	return nil
+}
+
+func validateVRFTargetValue(context, target string) error {
+	if !regexp.MustCompile(`^target:\d+:\d+$`).MatchString(target) {
+		return errors.New(errors.ErrCodeConfigValidation, fmt.Sprintf("Invalid %s: %s", context, target), "VRF target must use target:ASN:number format", "Use a value like target:65000:100")
 	}
 	return nil
 }

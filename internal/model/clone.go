@@ -336,6 +336,8 @@ func (c *RoutingInstance) Clone() *RoutingInstance {
 	}
 	clone := *c
 	clone.Interfaces = append([]string(nil), c.Interfaces...)
+	clone.VRFTargetImport = append([]string(nil), c.VRFTargetImport...)
+	clone.VRFTargetExport = append([]string(nil), c.VRFTargetExport...)
 	clone.VRFImport = append([]string(nil), c.VRFImport...)
 	clone.VRFExport = append([]string(nil), c.VRFExport...)
 	return &clone
