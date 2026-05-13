@@ -507,7 +507,7 @@ module arca-router {
   }
 
   // ==================================================================
-  // Operational State (Future: Phase 4)
+  // Operational State
   // ==================================================================
 
   container state {
@@ -515,13 +515,13 @@ module arca-router {
     description "Operational state data (read-only)";
 
     container interfaces {
-      description "Interface operational state";
-      // TODO: Phase 4 - VPP interface state retrieval
+      description
+        "Arca-specific interface operational state. NETCONF <get> also
+         exposes live interface status and counters through ietf-interfaces.";
     }
 
     container protocols {
-      description "Protocol operational state";
-      // TODO: Phase 4 - FRR state retrieval (BGP/OSPF)
+      description "Reserved for protocol operational state.";
     }
   }
 }

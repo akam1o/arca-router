@@ -10,9 +10,10 @@ import (
 
 // Server represents NETCONF server with RPC dispatch
 type Server struct {
-	datastore  datastore.Datastore
-	sessions   *SessionManager
-	commitHook CommitHook
+	datastore           datastore.Datastore
+	sessions            *SessionManager
+	commitHook          CommitHook
+	operationalProvider OperationalStateProvider
 }
 
 // CommitHookRequest contains the data needed to apply a NETCONF candidate
@@ -40,6 +41,11 @@ func NewServer(ds datastore.Datastore, sm *SessionManager) *Server {
 // SetCommitHook installs a commit coordinator for NETCONF commits.
 func (s *Server) SetCommitHook(h CommitHook) {
 	s.commitHook = h
+}
+
+// SetOperationalStateProvider installs a live-state source for <get> replies.
+func (s *Server) SetOperationalStateProvider(provider OperationalStateProvider) {
+	s.operationalProvider = provider
 }
 
 // HandleRPC dispatches RPC to appropriate handler with RBAC enforcement

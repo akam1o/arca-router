@@ -1,0 +1,62 @@
+package main
+
+import (
+	"context"
+	"testing"
+
+	"github.com/akam1o/arca-router/internal/model"
+)
+
+type fakeInterfaceStateCollector struct {
+	states map[string]*model.InterfaceState
+	err    error
+}
+
+func (c fakeInterfaceStateCollector) CollectState(ctx context.Context) (map[string]*model.InterfaceState, error) {
+	return c.states, c.err
+}
+
+func TestNewNETCONFOperationalStateProviderNilCollector(t *testing.T) {
+	if provider := newNETCONFOperationalStateProvider(nil); provider != nil {
+		t.Fatalf("newNETCONFOperationalStateProvider(nil) = %#v, want nil", provider)
+	}
+}
+
+func TestNETCONFOperationalStateProviderConvertsInterfaceState(t *testing.T) {
+	provider := newNETCONFOperationalStateProvider(fakeInterfaceStateCollector{
+		states: map[string]*model.InterfaceState{
+			"ge-0/0/0": {
+				Name:        "ge-0/0/0",
+				AdminStatus: "up",
+				OperStatus:  "down",
+				MAC:         "02:00:00:00:00:01",
+				Counters: &model.InterfaceCounters{
+					RxPackets: 10,
+					TxPackets: 20,
+					RxBytes:   1000,
+					TxBytes:   2000,
+					RxErrors:  1,
+					TxErrors:  2,
+					Drops:     3,
+				},
+			},
+		},
+	})
+
+	states, err := provider.InterfaceStates(context.Background())
+	if err != nil {
+		t.Fatalf("InterfaceStates() error = %v", err)
+	}
+	state := states["ge-0/0/0"]
+	if state == nil {
+		t.Fatal("InterfaceStates() missing ge-0/0/0")
+	}
+	if state.AdminStatus != "up" || state.OperStatus != "down" || state.MAC != "02:00:00:00:00:01" {
+		t.Fatalf("state = %#v", state)
+	}
+	if state.Counters == nil || state.Counters.RxPackets != 10 || state.Counters.TxPackets != 20 ||
+		state.Counters.RxBytes != 1000 || state.Counters.TxBytes != 2000 ||
+		state.Counters.RxErrors != 1 || state.Counters.TxErrors != 2 || state.Counters.Drops != 3 {
+		t.Fatalf("counters = %#v", state.Counters)
+	}
+}
