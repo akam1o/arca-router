@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/akam1o/arca-router/internal/model"
+	nbgrpc "github.com/akam1o/arca-router/internal/northbound/grpc"
 	"github.com/akam1o/arca-router/pkg/auth"
 	pkgconfig "github.com/akam1o/arca-router/pkg/config"
 	"github.com/akam1o/arca-router/pkg/logger"
@@ -38,6 +39,7 @@ type webConfigAPI interface {
 	ValidateCandidate(ctx context.Context, sessionID string) error
 	Diff(ctx context.Context, sessionID string) (string, bool, error)
 	Commit(ctx context.Context, sessionID, user, message string) (string, uint64, error)
+	ListHistory(ctx context.Context, limit, offset int) ([]nbgrpc.CommitInfo, error)
 }
 
 type webStatus struct {
@@ -99,6 +101,19 @@ type webConfigCommitResponse struct {
 	Version  uint64 `json:"version"`
 }
 
+type webConfigHistoryResponse struct {
+	Entries []webCommitEntry `json:"entries"`
+}
+
+type webCommitEntry struct {
+	CommitID      string `json:"commit_id"`
+	ShortCommitID string `json:"short_commit_id"`
+	User          string `json:"user"`
+	Timestamp     string `json:"timestamp"`
+	Message       string `json:"message"`
+	IsRollback    bool   `json:"is_rollback"`
+}
+
 type webAuthUser struct {
 	PasswordHash string
 	Role         string
@@ -119,6 +134,7 @@ type webIndexData struct {
 	GeneratedAt          string
 	ConfigVersionString  string
 	RunningConfig        string
+	History              []webCommitEntry
 }
 
 var webIndexTemplate = template.Must(template.New("web-index").Parse(`<!doctype html>
@@ -235,6 +251,11 @@ var webIndexTemplate = template.Must(template.New("web-index").Parse(`<!doctype 
       font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
       font-size: 12px;
       line-height: 1.5;
+    }
+    .history-message {
+      max-width: 70%;
+      overflow-wrap: anywhere;
+      color: var(--text);
     }
     .config-editor {
       display: block;
@@ -372,6 +393,16 @@ var webIndexTemplate = template.Must(template.New("web-index").Parse(`<!doctype 
           <div class="row"><span>Backend alignment</span><strong>{{.ClusterSyncAlignment}}</strong></div>
         </div>
       </article>
+      <article class="panel span-2">
+        <h2>Commit history</h2>
+        <div class="rows">
+          {{range .History}}
+          <div class="row"><span class="history-message">{{.Message}}</span><strong>{{.ShortCommitID}}</strong></div>
+          {{else}}
+          <div class="row"><span>No commits</span><strong>0</strong></div>
+          {{end}}
+        </div>
+      </article>
       <article class="panel span-4">
         <h2>Configuration editor</h2>
         <textarea id="config-editor" class="config config-editor" spellcheck="false">{{.RunningConfig}}</textarea>
@@ -387,7 +418,7 @@ var webIndexTemplate = template.Must(template.New("web-index").Parse(`<!doctype 
 
     <footer>
       <span>Generated {{.GeneratedAt}}</span>
-      <span>/api/status | /api/config | /api/config/validate | /api/config/commit</span>
+      <span>/api/status | /api/config | /api/config/history | /api/config/validate | /api/config/commit</span>
     </footer>
   </main>
   <script>
@@ -543,6 +574,7 @@ func newWebMux(source metricsSource) *http.ServeMux {
 	mux.HandleFunc("/", source.handleWebIndex)
 	mux.HandleFunc("/api/config", source.handleWebConfig)
 	mux.HandleFunc("/api/config/commit", source.handleWebConfigCommit)
+	mux.HandleFunc("/api/config/history", source.handleWebConfigHistory)
 	mux.HandleFunc("/api/status", source.handleWebStatus)
 	mux.HandleFunc("/api/config/validate", source.handleWebConfigValidate)
 	return mux
@@ -579,6 +611,22 @@ func (s metricsSource) handleWebConfig(w http.ResponseWriter, r *http.Request) {
 	if err := json.NewEncoder(w).Encode(cfg); err != nil {
 		http.Error(w, "encode config: "+err.Error(), http.StatusInternalServerError)
 	}
+}
+
+func (s metricsSource) handleWebConfigHistory(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	if !s.authorizeWebRead(w, r) {
+		return
+	}
+	history, err := s.configHistory(r.Context(), webHistoryLimit(r), webHistoryOffset(r))
+	if err != nil {
+		writeWebJSONError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeWebJSON(w, http.StatusOK, webConfigHistoryResponse{Entries: history})
 }
 
 func (s metricsSource) handleWebConfigValidate(w http.ResponseWriter, r *http.Request) {
@@ -653,7 +701,12 @@ func (s metricsSource) handleWebIndex(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "render config: "+err.Error(), http.StatusInternalServerError)
 		return
 	}
-	if err := webIndexTemplate.Execute(w, newWebIndexData(status, time.Now(), cfg.ConfigText)); err != nil {
+	history, err := s.configHistory(r.Context(), 5, 0)
+	if err != nil {
+		http.Error(w, "render history: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+	if err := webIndexTemplate.Execute(w, newWebIndexData(status, time.Now(), cfg.ConfigText, history)); err != nil {
 		http.Error(w, "render index: "+err.Error(), http.StatusInternalServerError)
 	}
 }
@@ -736,6 +789,21 @@ func (s metricsSource) commitWebConfig(ctx context.Context, username, configText
 		return "", 0, err
 	}
 	return api.Commit(ctx, sessionID, username, message)
+}
+
+func (s metricsSource) configHistory(ctx context.Context, limit, offset int) ([]webCommitEntry, error) {
+	if s.configAPI == nil {
+		return nil, nil
+	}
+	entries, err := s.configAPI.ListHistory(ctx, limit, offset)
+	if err != nil {
+		return nil, fmt.Errorf("list config history: %w", err)
+	}
+	history := make([]webCommitEntry, 0, len(entries))
+	for _, entry := range entries {
+		history = append(history, newWebCommitEntry(entry))
+	}
+	return history, nil
 }
 
 func (s metricsSource) authorizeWebRead(w http.ResponseWriter, r *http.Request) bool {
@@ -886,6 +954,60 @@ func writeWebJSONError(w http.ResponseWriter, status int, message string) {
 	writeWebJSON(w, status, map[string]string{"error": message})
 }
 
+func webHistoryLimit(r *http.Request) int {
+	limit := 20
+	if raw := strings.TrimSpace(r.URL.Query().Get("limit")); raw != "" {
+		if parsed, err := strconv.Atoi(raw); err == nil && parsed > 0 {
+			limit = parsed
+		}
+	}
+	if limit > 100 {
+		return 100
+	}
+	return limit
+}
+
+func webHistoryOffset(r *http.Request) int {
+	raw := strings.TrimSpace(r.URL.Query().Get("offset"))
+	if raw == "" {
+		return 0
+	}
+	offset, err := strconv.Atoi(raw)
+	if err != nil || offset < 0 {
+		return 0
+	}
+	return offset
+}
+
+func newWebCommitEntry(entry nbgrpc.CommitInfo) webCommitEntry {
+	message := entry.Message
+	if strings.TrimSpace(message) == "" {
+		message = "(no message)"
+	}
+	return webCommitEntry{
+		CommitID:      entry.CommitID,
+		ShortCommitID: shortCommitID(entry.CommitID),
+		User:          entry.User,
+		Timestamp:     formatWebCommitTime(entry.Timestamp),
+		Message:       message,
+		IsRollback:    entry.IsRollback,
+	}
+}
+
+func shortCommitID(commitID string) string {
+	if len(commitID) <= 12 {
+		return commitID
+	}
+	return commitID[:12]
+}
+
+func formatWebCommitTime(ts time.Time) string {
+	if ts.IsZero() {
+		return ""
+	}
+	return ts.UTC().Format(time.RFC3339)
+}
+
 func newWebStatus(metrics routerMetrics) webStatus {
 	return webStatus{
 		Version:         Version,
@@ -916,7 +1038,7 @@ func newWebStatus(metrics routerMetrics) webStatus {
 	}
 }
 
-func newWebIndexData(status webStatus, now time.Time, runningConfig string) webIndexData {
+func newWebIndexData(status webStatus, now time.Time, runningConfig string, history []webCommitEntry) webIndexData {
 	state := "Stopped"
 	stateClass := "warn"
 	if status.NETCONF.Listening {
@@ -954,6 +1076,7 @@ func newWebIndexData(status webStatus, now time.Time, runningConfig string) webI
 		GeneratedAt:          now.UTC().Format(time.RFC3339),
 		ConfigVersionString:  strconv.FormatUint(status.ConfigVersion, 10),
 		RunningConfig:        runningConfig,
+		History:              history,
 	}
 }
 

@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"io"
 	"log/slog"
@@ -256,6 +257,41 @@ func TestWebConfigWriteEndpointRejectsReadOnlyRole(t *testing.T) {
 	}
 }
 
+func TestWebConfigHistoryEndpointUsesConfigAPI(t *testing.T) {
+	source := newWebAuthTestSource(t, "monitor", "secret", "read-only")
+	source.configAPI = webHistoryTestAPI{history: []nbgrpc.CommitInfo{
+		{
+			CommitID:  "abcdef1234567890",
+			User:      "operator",
+			Timestamp: time.Date(2026, 5, 13, 9, 10, 11, 0, time.UTC),
+			Message:   "web update",
+		},
+	}}
+
+	req := httptest.NewRequest(http.MethodGet, "/api/config/history?limit=1", nil)
+	req.SetBasicAuth("monitor", "secret")
+	rec := httptest.NewRecorder()
+	source.handleWebConfigHistory(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d: %s", rec.Code, http.StatusOK, rec.Body.String())
+	}
+	var resp webConfigHistoryResponse
+	if err := json.NewDecoder(rec.Result().Body).Decode(&resp); err != nil {
+		t.Fatalf("Decode() error = %v", err)
+	}
+	if len(resp.Entries) != 1 {
+		t.Fatalf("entries = %d, want 1", len(resp.Entries))
+	}
+	entry := resp.Entries[0]
+	if entry.ShortCommitID != "abcdef123456" || entry.User != "operator" || entry.Message != "web update" {
+		t.Fatalf("entry = %#v, want shortened operator web update", entry)
+	}
+	if entry.Timestamp != "2026-05-13T09:10:11Z" {
+		t.Fatalf("Timestamp = %q, want RFC3339 UTC", entry.Timestamp)
+	}
+}
+
 func TestWebIndexEndpoint(t *testing.T) {
 	eng := engine.NewEngine(nil, slog.Default())
 	cfg := model.NewRouterConfig()
@@ -283,10 +319,12 @@ func TestWebIndexEndpoint(t *testing.T) {
 		"NETCONF",
 		"Datastore",
 		"Cluster sync",
+		"Commit history",
 		"Configuration editor",
 		"set system host-name edge01",
 		"/api/status",
 		"/api/config",
+		"/api/config/history",
 		"/api/config/validate",
 		"/api/config/commit",
 		"validate-config",
@@ -347,4 +385,20 @@ func newWebConfigAPITestSource(t *testing.T, role string) (metricsSource, *engin
 		engine:    eng,
 		configAPI: configAPI,
 	}, eng
+}
+
+type webHistoryTestAPI struct {
+	webConfigAPI
+	history []nbgrpc.CommitInfo
+}
+
+func (a webHistoryTestAPI) ListHistory(ctx context.Context, limit, offset int) ([]nbgrpc.CommitInfo, error) {
+	if offset >= len(a.history) {
+		return nil, nil
+	}
+	history := a.history[offset:]
+	if limit > 0 && limit < len(history) {
+		history = history[:limit]
+	}
+	return history, nil
 }
