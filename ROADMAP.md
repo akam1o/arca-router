@@ -29,6 +29,7 @@ Focus: expand the hardened unified daemon into higher-level router features.
   - Traffic shaping and policing
   - Operational counters for queues and schedulers
 - **Observability services**
+  - Config-driven Prometheus service enablement for metrics and health checks
   - Config-driven SNMP service enablement for read-only SNMPv2c monitoring
 - **Web UI**
   - Read-only browser-based monitoring and JSON status endpoint

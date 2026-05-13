@@ -491,6 +491,16 @@ The following hierarchies are part of the v0.6 management-plane model. Parser, s
 
 Until the corresponding southbound apply path is implemented, commits that leave unsupported MPLS, routing-instance, or class-of-service configuration active fail validation instead of being silently accepted. Removing those unsupported stanzas is allowed. VRRP is currently supported only by the FRR file backend (`--frr-apply-mode=file`); the transactional FRR backend still rejects active VRRP configuration.
 
+### Prometheus Service
+
+```
+set system services prometheus enabled true
+set system services prometheus listen-address 127.0.0.1
+set system services prometheus port 9090
+```
+
+`listen-address` must be an IP address or `localhost`. When enabled without an explicit port, the daemon uses port `9090`.
+
 ### Web UI Service
 
 ```
@@ -908,7 +918,7 @@ Common options:
 --host-key <path>          NETCONF SSH host key path
 --user-db <path>           NETCONF user database path
 --frr-apply-mode <mode>    FRR backend: transactional or file (default: transactional)
---metrics-listen <addr>    Prometheus listen address; disabled when empty
+--metrics-listen <addr>    Prometheus listen address; overrides system services prometheus config
 --web-listen <addr>        Web UI listen address; overrides system services web-ui config
 --snmp-listen <addr>       SNMPv2c UDP listen address; disabled when empty
 --snmp-community <value>   SNMPv2c read-only community; overrides system services snmp config (default: public)
@@ -927,6 +937,14 @@ Start the metrics endpoint with:
 
 ```bash
 arca-routerd --metrics-listen=:9090
+```
+
+It can also be enabled from running configuration:
+
+```
+set system services prometheus enabled true
+set system services prometheus listen-address 127.0.0.1
+set system services prometheus port 9090
 ```
 
 Endpoints:
@@ -1138,7 +1156,7 @@ sudo vtysh -c "show running-config"
 ### Check Observability Endpoints
 
 ```
-# Prometheus and health, when --metrics-listen is enabled
+# Prometheus and health, when --metrics-listen or system services prometheus is enabled
 curl http://127.0.0.1:9090/healthz
 curl http://127.0.0.1:9090/metrics
 
@@ -1146,7 +1164,7 @@ curl http://127.0.0.1:9090/metrics
 curl http://127.0.0.1:8080/api/status
 curl http://127.0.0.1:8080/api/config
 
-# SNMP, when --snmp-listen is enabled
+# SNMP, when --snmp-listen or system services snmp is enabled
 snmpget -v 2c -c public 127.0.0.1:1161 1.3.6.1.3.9950.1.3.0
 ```
 
