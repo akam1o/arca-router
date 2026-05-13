@@ -609,6 +609,8 @@ NETCONF XML get-config/edit-config supports the v0.6 management-plane model for 
 
 NETCONF `<get>` returns config-derived system/routing state and, when arca-routerd can collect VPP state, live managed interface admin/oper status, physical address, counters (`rx-packets`, `tx-packets`, `rx-bytes`, `tx-bytes`, `rx-errors`, `tx-errors`, `drops`), and VPP RX/TX queue placement. If live collection fails, interface output falls back to configured addresses with unknown operational status.
 
+The internal gRPC interface state API and `arca show interfaces` expose the same packet counters and queue placement summary for local operators.
+
 The server hello advertises the arca-router YANG module capability as `urn:arca:router:config:1.0?module=arca-router&revision=2025-12-27`.
 
 ### User Management
@@ -1068,6 +1070,8 @@ arca show ospf neighbor
 # Configuration
 arca show configuration
 ```
+
+`show interfaces` prints live VPP admin/oper status, packet counters, and RX/TX queue placement when available.
 
 Interactive mode also supports `show history [N]` in configuration mode for commit history.
 

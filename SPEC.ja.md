@@ -618,6 +618,8 @@ NETCONF XML の get-config/edit-config は、v0.6 management-plane model の `sy
 
 NETCONF `<get>` は config 由来の system/routing state に加えて、arca-routerd が VPP state を取得できる場合は managed interface の admin/oper status、physical address、counter（`rx-packets`、`tx-packets`、`rx-bytes`、`tx-bytes`、`rx-errors`、`tx-errors`、`drops`）、VPP RX/TX queue placement を返します。live collection に失敗した場合、interface output は設定済み address と unknown operational status にフォールバックします。
 
+internal gRPC の interface state API と `arca show interfaces` も、同じ packet counter と queue placement summary を local operator 向けに表示します。
+
 server hello は arca-router YANG module capability として `urn:arca:router:config:1.0?module=arca-router&revision=2025-12-27` を広告します。
 
 <a id="user-management"></a>
@@ -1083,6 +1085,8 @@ arca show ospf neighbor
 # Configuration
 arca show configuration
 ```
+
+`show interfaces` は live VPP admin/oper status、packet counter、RX/TX queue placement を取得できる場合に表示します。
 
 対話型の設定モードでは、`show history [N]` で commit history も表示できます。
 
