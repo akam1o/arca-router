@@ -5,6 +5,7 @@ import (
 	"errors"
 	"io"
 	"log/slog"
+	"strings"
 	"testing"
 
 	"github.com/akam1o/arca-router/internal/engine"
@@ -66,6 +67,25 @@ func TestFRRRelevantInterfaceChangesIncludesAddressChanges(t *testing.T) {
 	}
 }
 
+func TestBuildFullConfigPreservesOSPF3FromDiffFields(t *testing.T) {
+	diff := &engine.ConfigDiff{
+		NewOSPF3: &model.OSPFConfig{
+			Areas: map[string]*model.OSPFArea{
+				"0.0.0.0": {
+					Interfaces: map[string]*model.OSPFInterface{
+						"ge-0/0/0": {},
+					},
+				},
+			},
+		},
+	}
+
+	got := NewFRRPlugin(testLogger()).buildFullConfig(diff)
+	if got.Protocols == nil || got.Protocols.OSPF3 == nil {
+		t.Fatalf("buildFullConfig() dropped OSPF3: %#v", got.Protocols)
+	}
+}
+
 func TestValidateChangesAllowsTransactionalVRRP(t *testing.T) {
 	newCfg := model.NewRouterConfig()
 	newCfg.Protocols = &model.ProtocolsConfig{
@@ -104,6 +124,44 @@ func TestValidateChangesAllowsMPLSConfig(t *testing.T) {
 	diff := engine.ComputeDiff(model.NewRouterConfig(), newCfg)
 
 	err := NewFRRPlugin(testLogger()).ValidateChanges(context.Background(), diff)
+	if err != nil {
+		t.Fatalf("ValidateChanges() error = %v, want nil", err)
+	}
+}
+
+func TestValidateChangesRejectsOSPF3WithTransactionalBackend(t *testing.T) {
+	newCfg := model.NewRouterConfig()
+	newCfg.Protocols = &model.ProtocolsConfig{
+		OSPF3: &model.OSPFConfig{Areas: map[string]*model.OSPFArea{
+			"0.0.0.0": {
+				Interfaces: map[string]*model.OSPFInterface{
+					"ge-0/0/0": {},
+				},
+			},
+		}},
+	}
+	diff := engine.ComputeDiff(model.NewRouterConfig(), newCfg)
+
+	err := NewFRRPlugin(testLogger()).ValidateChanges(context.Background(), diff)
+	if err == nil || !strings.Contains(err.Error(), "OSPFv3 requires FRR file backend") {
+		t.Fatalf("ValidateChanges() error = %v, want OSPF3 transactional rejection", err)
+	}
+}
+
+func TestValidateChangesAllowsOSPF3WithFileBackend(t *testing.T) {
+	newCfg := model.NewRouterConfig()
+	newCfg.Protocols = &model.ProtocolsConfig{
+		OSPF3: &model.OSPFConfig{Areas: map[string]*model.OSPFArea{
+			"0.0.0.0": {
+				Interfaces: map[string]*model.OSPFInterface{
+					"ge-0/0/0": {},
+				},
+			},
+		}},
+	}
+	diff := engine.ComputeDiff(model.NewRouterConfig(), newCfg)
+
+	err := NewFRRPluginWithApplyMode(testLogger(), pkgfrr.BackendModeFile).ValidateChanges(context.Background(), diff)
 	if err != nil {
 		t.Fatalf("ValidateChanges() error = %v, want nil", err)
 	}

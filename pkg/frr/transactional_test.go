@@ -112,6 +112,20 @@ func TestBuildMgmtOperationsVRFVPN(t *testing.T) {
 	}
 }
 
+func TestBuildMgmtOperationsRejectsOSPF3(t *testing.T) {
+	_, err := BuildMgmtOperations(&Config{
+		OSPF3: &OSPFConfig{
+			IsOSPFv3: true,
+			Interfaces: []OSPFInterface{
+				{Name: "ge0-0-0", AreaID: "0.0.0.0"},
+			},
+		},
+	})
+	if err == nil || !strings.Contains(err.Error(), "OSPFv3 is not supported") {
+		t.Fatalf("BuildMgmtOperations() error = %v, want OSPFv3 unsupported", err)
+	}
+}
+
 func TestVtyshMgmtClientApplySequence(t *testing.T) {
 	var got []string
 	client := NewVtyshMgmtClientWithRunner(func(ctx context.Context, command string) ([]byte, error) {

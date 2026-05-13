@@ -67,8 +67,12 @@ func GenerateOSPFConfig(cfg *OSPFConfig) (string, error) {
 			return "", err
 		}
 
-		// Only generate interface section if there are non-default settings
+		// OSPFv3 carries area membership on the interface itself, so a plain
+		// area binding still needs an interface section.
 		hasConfig := iface.Passive || iface.Metric > 0 || iface.Priority != nil
+		if cfg.IsOSPFv3 {
+			hasConfig = hasConfig || iface.AreaID != ""
+		}
 		if hasConfig {
 			fmt.Fprintf(&b, "interface %s\n", iface.Name)
 

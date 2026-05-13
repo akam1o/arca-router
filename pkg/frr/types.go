@@ -18,6 +18,9 @@ type Config struct {
 	// OSPF holds OSPF configuration
 	OSPF *OSPFConfig
 
+	// OSPF3 holds OSPFv3 configuration
+	OSPF3 *OSPFConfig
+
 	// VRRP holds VRRP configuration
 	VRRP *VRRPConfig
 

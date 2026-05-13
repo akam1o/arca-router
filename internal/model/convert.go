@@ -132,27 +132,10 @@ func FromLegacyConfig(old *config.Config) *RouterConfig {
 		}
 
 		if old.Protocols.OSPF != nil {
-			c.Protocols.OSPF = &OSPFConfig{
-				RouterID: old.Protocols.OSPF.RouterID,
-				Areas:    make(map[string]*OSPFArea),
-			}
-			for aID, a := range old.Protocols.OSPF.Areas {
-				area := &OSPFArea{
-					Interfaces: make(map[string]*OSPFInterface),
-				}
-				for iName, i := range a.Interfaces {
-					oi := &OSPFInterface{
-						Passive: i.Passive,
-						Metric:  i.Metric,
-					}
-					if i.PrioritySet || i.Priority != 0 {
-						p := i.Priority
-						oi.Priority = &p
-					}
-					area.Interfaces[iName] = oi
-				}
-				c.Protocols.OSPF.Areas[aID] = area
-			}
+			c.Protocols.OSPF = ospfFromLegacy(old.Protocols.OSPF)
+		}
+		if old.Protocols.OSPF3 != nil {
+			c.Protocols.OSPF3 = ospfFromLegacy(old.Protocols.OSPF3)
 		}
 		if old.Protocols.MPLS != nil {
 			c.Protocols.MPLS = &MPLSConfig{Interfaces: append([]string{}, old.Protocols.MPLS.Interfaces...)}
@@ -286,6 +269,42 @@ func FromLegacyConfig(old *config.Config) *RouterConfig {
 	return c
 }
 
+func ospfFromLegacy(old *config.OSPFConfig) *OSPFConfig {
+	if old == nil {
+		return nil
+	}
+	ospf := &OSPFConfig{
+		RouterID: old.RouterID,
+		Areas:    make(map[string]*OSPFArea),
+	}
+	for aID, a := range old.Areas {
+		if a == nil {
+			ospf.Areas[aID] = nil
+			continue
+		}
+		area := &OSPFArea{
+			Interfaces: make(map[string]*OSPFInterface),
+		}
+		for iName, i := range a.Interfaces {
+			if i == nil {
+				area.Interfaces[iName] = nil
+				continue
+			}
+			oi := &OSPFInterface{
+				Passive: i.Passive,
+				Metric:  i.Metric,
+			}
+			if i.PrioritySet || i.Priority != 0 {
+				p := i.Priority
+				oi.Priority = &p
+			}
+			area.Interfaces[iName] = oi
+		}
+		ospf.Areas[aID] = area
+	}
+	return ospf
+}
+
 // ToLegacyConfig converts the new internal model back to the legacy pkg/config.Config.
 // This is used during the migration period when some subsystems still expect the old type.
 func (c *RouterConfig) ToLegacyConfig() *config.Config {
@@ -406,29 +425,10 @@ func (c *RouterConfig) ToLegacyConfig() *config.Config {
 			}
 		}
 		if c.Protocols.OSPF != nil {
-			old.Protocols.OSPF = &config.OSPFConfig{
-				RouterID: c.Protocols.OSPF.RouterID,
-				Areas:    make(map[string]*config.OSPFArea),
-			}
-			for aID, a := range c.Protocols.OSPF.Areas {
-				area := &config.OSPFArea{
-					AreaID:     aID,
-					Interfaces: make(map[string]*config.OSPFInterface),
-				}
-				for iName, i := range a.Interfaces {
-					oi := &config.OSPFInterface{
-						Name:    iName,
-						Passive: i.Passive,
-						Metric:  i.Metric,
-					}
-					if i.Priority != nil {
-						oi.Priority = *i.Priority
-						oi.PrioritySet = true
-					}
-					area.Interfaces[iName] = oi
-				}
-				old.Protocols.OSPF.Areas[aID] = area
-			}
+			old.Protocols.OSPF = ospfToLegacy(c.Protocols.OSPF)
+		}
+		if c.Protocols.OSPF3 != nil {
+			old.Protocols.OSPF3 = ospfToLegacy(c.Protocols.OSPF3)
 		}
 		if c.Protocols.MPLS != nil {
 			old.Protocols.MPLS = &config.MPLSConfig{Interfaces: append([]string{}, c.Protocols.MPLS.Interfaces...)}
@@ -571,4 +571,42 @@ func (c *RouterConfig) ToLegacyConfig() *config.Config {
 	}
 
 	return old
+}
+
+func ospfToLegacy(c *OSPFConfig) *config.OSPFConfig {
+	if c == nil {
+		return nil
+	}
+	ospf := &config.OSPFConfig{
+		RouterID: c.RouterID,
+		Areas:    make(map[string]*config.OSPFArea),
+	}
+	for aID, a := range c.Areas {
+		if a == nil {
+			ospf.Areas[aID] = nil
+			continue
+		}
+		area := &config.OSPFArea{
+			AreaID:     aID,
+			Interfaces: make(map[string]*config.OSPFInterface),
+		}
+		for iName, i := range a.Interfaces {
+			if i == nil {
+				area.Interfaces[iName] = nil
+				continue
+			}
+			oi := &config.OSPFInterface{
+				Name:    iName,
+				Passive: i.Passive,
+				Metric:  i.Metric,
+			}
+			if i.Priority != nil {
+				oi.Priority = *i.Priority
+				oi.PrioritySet = true
+			}
+			area.Interfaces[iName] = oi
+		}
+		ospf.Areas[aID] = area
+	}
+	return ospf
 }

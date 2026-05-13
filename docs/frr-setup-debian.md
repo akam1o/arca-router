@@ -49,17 +49,17 @@ sudo vi /etc/frr/daemons
 **Enable the following daemons**:
 
 ```bash
-# /etc/frr/daemons - REQUIRED for arca-router v0.6+
+# /etc/frr/daemons - REQUIRED for arca-router v0.7+
 
 bgpd=yes
 ospfd=yes
+ospf6d=yes
 zebra=yes
 staticd=yes
 mgmtd=yes
 vrrpd=yes
 
 # Optional daemons (set to 'no' if not needed)
-ospf6d=no
 ripd=no
 ripngd=no
 isisd=no
@@ -176,6 +176,7 @@ sudo vtysh -c 'show running-config'
    - Enabled with `--frr-apply-mode=file`
    - Writes `/etc/frr/frr.conf`
    - Uses `/usr/lib/frr/frr-reload.py --reload`, then falls back to `vtysh -f /etc/frr/frr.conf`
+   - Required for OSPFv3 until FRR exposes core `ospf6d` management YANG paths
    - Packaged systemd units do not grant `/etc/frr` write access by default; add a local drop-in with the `frr` group and `ReadWritePaths=/etc/frr` before using this backend.
 
 **Validation**:

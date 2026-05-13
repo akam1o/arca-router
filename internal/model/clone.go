@@ -194,10 +194,11 @@ func (c *ProtocolsConfig) Clone() *ProtocolsConfig {
 		return nil
 	}
 	return &ProtocolsConfig{
-		BGP:  c.BGP.Clone(),
-		OSPF: c.OSPF.Clone(),
-		MPLS: c.MPLS.Clone(),
-		VRRP: c.VRRP.Clone(),
+		BGP:   c.BGP.Clone(),
+		OSPF:  c.OSPF.Clone(),
+		OSPF3: c.OSPF3.Clone(),
+		MPLS:  c.MPLS.Clone(),
+		VRRP:  c.VRRP.Clone(),
 	}
 }
 

@@ -99,6 +99,24 @@ func TestGenerateOSPFConfig(t *testing.T) {
 			wantErr: false,
 		},
 		{
+			name: "OSPFv3 with area binding only",
+			cfg: &OSPFConfig{
+				IsOSPFv3: true,
+				Interfaces: []OSPFInterface{
+					{
+						Name:   "ge0-0-0",
+						AreaID: "0.0.0.0",
+					},
+				},
+			},
+			want: []string{
+				"router ospf6",
+				"interface ge0-0-0",
+				"ipv6 ospf6 area 0.0.0.0",
+			},
+			wantErr: false,
+		},
+		{
 			name: "OSPF with passive interface only",
 			cfg: &OSPFConfig{
 				RouterID: "10.0.1.1",

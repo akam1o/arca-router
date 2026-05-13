@@ -677,6 +677,13 @@ func (pc *ProtocolConfig) Validate(cfg *Config) error {
 		}
 	}
 
+	// Validate OSPFv3
+	if pc.OSPF3 != nil {
+		if err := pc.OSPF3.ValidateOSPF3(cfg); err != nil {
+			return err
+		}
+	}
+
 	if pc.MPLS != nil {
 		for _, ifName := range pc.MPLS.Interfaces {
 			if err := validateConfiguredInterfaceReference(cfg, "MPLS", ifName); err != nil {
@@ -868,6 +875,15 @@ func validateBGPNeighbor(groupName, neighborIP string, neighbor *BGPNeighbor) er
 
 // Validate validates OSPF configuration
 func (ospf *OSPFConfig) Validate(cfg *Config) error {
+	return ospf.validate(cfg, "OSPF", "ospf", true)
+}
+
+// ValidateOSPF3 validates OSPFv3 configuration.
+func (ospf *OSPFConfig) ValidateOSPF3(cfg *Config) error {
+	return ospf.validate(cfg, "OSPF3", "ospf3", false)
+}
+
+func (ospf *OSPFConfig) validate(cfg *Config, protocolLabel, protocolCommand string, requireRouterID bool) error {
 	if ospf == nil {
 		return nil
 	}
@@ -878,29 +894,29 @@ func (ospf *OSPFConfig) Validate(cfg *Config) error {
 		routerID = cfg.RoutingOptions.RouterID
 	}
 
-	if routerID == "" {
+	if routerID == "" && requireRouterID {
 		return errors.New(
 			errors.ErrCodeConfigValidation,
-			"OSPF configured but no router-id set",
-			"OSPF requires a router ID",
-			"Set 'routing-options router-id <ip>' or 'protocols ospf router-id <ip>'",
+			fmt.Sprintf("%s configured but no router-id set", protocolLabel),
+			fmt.Sprintf("%s requires a router ID", protocolLabel),
+			fmt.Sprintf("Set 'routing-options router-id <ip>' or 'protocols %s router-id <ip>'", protocolCommand),
 		)
 	}
 
 	// Validate router-id format
-	if net.ParseIP(routerID) == nil {
+	if routerID != "" && net.ParseIP(routerID) == nil {
 		return errors.New(
 			errors.ErrCodeConfigValidation,
-			fmt.Sprintf("Invalid OSPF router-id: %s", routerID),
+			fmt.Sprintf("Invalid %s router-id: %s", protocolLabel, routerID),
 			"Router ID must be a valid IPv4 address",
 			"Use a valid IPv4 address",
 		)
 	}
 
-	if net.ParseIP(routerID).To4() == nil {
+	if routerID != "" && net.ParseIP(routerID).To4() == nil {
 		return errors.New(
 			errors.ErrCodeConfigValidation,
-			fmt.Sprintf("OSPF router-id must be IPv4: %s", routerID),
+			fmt.Sprintf("%s router-id must be IPv4: %s", protocolLabel, routerID),
 			"Router ID must be an IPv4 address, not IPv6",
 			"Use an IPv4 address",
 		)
@@ -910,14 +926,14 @@ func (ospf *OSPFConfig) Validate(cfg *Config) error {
 	if len(ospf.Areas) == 0 {
 		return errors.New(
 			errors.ErrCodeConfigValidation,
-			"OSPF configured but no areas defined",
-			"OSPF requires at least one area",
-			"Add an area using 'set protocols ospf area <area-id> interface <name>'",
+			fmt.Sprintf("%s configured but no areas defined", protocolLabel),
+			fmt.Sprintf("%s requires at least one area", protocolLabel),
+			fmt.Sprintf("Add an area using 'set protocols %s area <area-id> interface <name>'", protocolCommand),
 		)
 	}
 
 	for areaID, area := range ospf.Areas {
-		if err := validateOSPFArea(areaID, area, cfg); err != nil {
+		if err := validateOSPFArea(protocolLabel, protocolCommand, areaID, area, cfg); err != nil {
 			return err
 		}
 	}
@@ -926,12 +942,12 @@ func (ospf *OSPFConfig) Validate(cfg *Config) error {
 }
 
 // validateOSPFArea validates an OSPF area
-func validateOSPFArea(areaID string, area *OSPFArea, cfg *Config) error {
+func validateOSPFArea(protocolLabel, protocolCommand, areaID string, area *OSPFArea, cfg *Config) error {
 	if area == nil {
 		return errors.New(
 			errors.ErrCodeConfigValidation,
-			fmt.Sprintf("OSPF area %s is nil", areaID),
-			"Internal error: OSPF area object is nil",
+			fmt.Sprintf("%s area %s is nil", protocolLabel, areaID),
+			fmt.Sprintf("Internal error: %s area object is nil", protocolLabel),
 			"Report this issue to the maintainers",
 		)
 	}
@@ -943,7 +959,7 @@ func validateOSPFArea(areaID string, area *OSPFArea, cfg *Config) error {
 		if parsedIP.To4() == nil {
 			return errors.New(
 				errors.ErrCodeConfigValidation,
-				fmt.Sprintf("Invalid OSPF area ID: %s", areaID),
+				fmt.Sprintf("Invalid %s area ID: %s", protocolLabel, areaID),
 				"Area ID must be in dotted decimal IPv4 format (e.g., 0.0.0.0), not IPv6",
 				"Use an IPv4 address or integer format",
 			)
@@ -954,7 +970,7 @@ func validateOSPFArea(areaID string, area *OSPFArea, cfg *Config) error {
 		if areaID != "0" && !regexp.MustCompile(`^\d+$`).MatchString(areaID) {
 			return errors.New(
 				errors.ErrCodeConfigValidation,
-				fmt.Sprintf("Invalid OSPF area ID: %s", areaID),
+				fmt.Sprintf("Invalid %s area ID: %s", protocolLabel, areaID),
 				"Area ID must be in dotted decimal format (e.g., 0.0.0.0) or integer (e.g., 0)",
 				"Use a valid area ID format",
 			)
@@ -965,14 +981,14 @@ func validateOSPFArea(areaID string, area *OSPFArea, cfg *Config) error {
 	if len(area.Interfaces) == 0 {
 		return errors.New(
 			errors.ErrCodeConfigValidation,
-			fmt.Sprintf("OSPF area %s has no interfaces", areaID),
-			"OSPF area must have at least one interface",
-			"Add an interface using 'set protocols ospf area <area-id> interface <name>'",
+			fmt.Sprintf("%s area %s has no interfaces", protocolLabel, areaID),
+			fmt.Sprintf("%s area must have at least one interface", protocolLabel),
+			fmt.Sprintf("Add an interface using 'set protocols %s area <area-id> interface <name>'", protocolCommand),
 		)
 	}
 
 	for ifName, ospfIf := range area.Interfaces {
-		if err := validateOSPFInterface(areaID, ifName, ospfIf, cfg); err != nil {
+		if err := validateOSPFInterface(protocolLabel, areaID, ifName, ospfIf, cfg); err != nil {
 			return err
 		}
 	}
@@ -981,17 +997,17 @@ func validateOSPFArea(areaID string, area *OSPFArea, cfg *Config) error {
 }
 
 // validateOSPFInterface validates an OSPF interface
-func validateOSPFInterface(areaID, ifName string, ospfIf *OSPFInterface, cfg *Config) error {
+func validateOSPFInterface(protocolLabel, areaID, ifName string, ospfIf *OSPFInterface, cfg *Config) error {
 	if ospfIf == nil {
 		return errors.New(
 			errors.ErrCodeConfigValidation,
-			fmt.Sprintf("OSPF interface %s in area %s is nil", ifName, areaID),
-			"Internal error: OSPF interface object is nil",
+			fmt.Sprintf("%s interface %s in area %s is nil", protocolLabel, ifName, areaID),
+			fmt.Sprintf("Internal error: %s interface object is nil", protocolLabel),
 			"Report this issue to the maintainers",
 		)
 	}
 
-	if err := validateConfiguredInterfaceReference(cfg, fmt.Sprintf("OSPF area %s", areaID), ifName); err != nil {
+	if err := validateConfiguredInterfaceReference(cfg, fmt.Sprintf("%s area %s", protocolLabel, areaID), ifName); err != nil {
 		return err
 	}
 
@@ -999,8 +1015,8 @@ func validateOSPFInterface(areaID, ifName string, ospfIf *OSPFInterface, cfg *Co
 	if ospfIf.Metric < 0 || ospfIf.Metric > 65535 {
 		return errors.New(
 			errors.ErrCodeConfigValidation,
-			fmt.Sprintf("Invalid OSPF metric for interface %s in area %s: %d", ifName, areaID, ospfIf.Metric),
-			"OSPF metric must be between 0 and 65535",
+			fmt.Sprintf("Invalid %s metric for interface %s in area %s: %d", protocolLabel, ifName, areaID, ospfIf.Metric),
+			fmt.Sprintf("%s metric must be between 0 and 65535", protocolLabel),
 			"Use a valid metric value",
 		)
 	}
@@ -1009,8 +1025,8 @@ func validateOSPFInterface(areaID, ifName string, ospfIf *OSPFInterface, cfg *Co
 	if ospfIf.Priority < 0 || ospfIf.Priority > 255 {
 		return errors.New(
 			errors.ErrCodeConfigValidation,
-			fmt.Sprintf("Invalid OSPF priority for interface %s in area %s: %d", ifName, areaID, ospfIf.Priority),
-			"OSPF priority must be between 0 and 255",
+			fmt.Sprintf("Invalid %s priority for interface %s in area %s: %d", protocolLabel, ifName, areaID, ospfIf.Priority),
+			fmt.Sprintf("%s priority must be between 0 and 255", protocolLabel),
 			"Use a valid priority value",
 		)
 	}

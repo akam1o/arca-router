@@ -268,7 +268,8 @@ func writeProtocols(b *strings.Builder, pc *ProtocolConfig) {
 		return
 	}
 	writeBGP(b, pc.BGP)
-	writeOSPF(b, pc.OSPF)
+	writeOSPF(b, "ospf", pc.OSPF)
+	writeOSPF(b, "ospf3", pc.OSPF3)
 	writeMPLS(b, pc.MPLS)
 	writeVRRP(b, pc.VRRP)
 }
@@ -347,12 +348,12 @@ func writeBGP(b *strings.Builder, bgp *BGPConfig) {
 	}
 }
 
-func writeOSPF(b *strings.Builder, ospf *OSPFConfig) {
+func writeOSPF(b *strings.Builder, protocol string, ospf *OSPFConfig) {
 	if ospf == nil {
 		return
 	}
 	if ospf.RouterID != "" {
-		writeLine(b, "set protocols ospf router-id %s", ospf.RouterID)
+		writeLine(b, "set protocols %s router-id %s", protocol, ospf.RouterID)
 	}
 	for _, areaName := range sortedKeys(ospf.Areas) {
 		area := ospf.Areas[areaName]
@@ -364,7 +365,7 @@ func writeOSPF(b *strings.Builder, ospf *OSPFConfig) {
 			if ospfIface == nil {
 				continue
 			}
-			base := fmt.Sprintf("set protocols ospf area %s interface %s", areaName, ifaceName)
+			base := fmt.Sprintf("set protocols %s area %s interface %s", protocol, areaName, ifaceName)
 			wrote := false
 			if ospfIface.Passive {
 				writeLine(b, "%s passive", base)

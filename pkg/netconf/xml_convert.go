@@ -499,7 +499,12 @@ func writeProtocolsXML(buf *bytes.Buffer, protocols *config.ProtocolConfig) erro
 
 	// OSPF
 	if protocols.OSPF != nil {
-		if err := writeOSPFXML(buf, protocols.OSPF); err != nil {
+		if err := writeOSPFXML(buf, "ospf", protocols.OSPF); err != nil {
+			return err
+		}
+	}
+	if protocols.OSPF3 != nil {
+		if err := writeOSPFXML(buf, "ospf3", protocols.OSPF3); err != nil {
 			return err
 		}
 	}
@@ -622,8 +627,8 @@ func writeBGPXML(buf *bytes.Buffer, bgp *config.BGPConfig) error {
 }
 
 // writeOSPFXML writes OSPF configuration to XML
-func writeOSPFXML(buf *bytes.Buffer, ospf *config.OSPFConfig) error {
-	buf.WriteString(`    <ospf>`)
+func writeOSPFXML(buf *bytes.Buffer, element string, ospf *config.OSPFConfig) error {
+	fmt.Fprintf(buf, "    <%s>", element)
 	buf.WriteString("\n")
 
 	if ospf.RouterID != "" {
@@ -698,7 +703,7 @@ func writeOSPFXML(buf *bytes.Buffer, ospf *config.OSPFConfig) error {
 		}
 	}
 
-	buf.WriteString(`    </ospf>`)
+	fmt.Fprintf(buf, "    </%s>", element)
 	buf.WriteString("\n")
 	return nil
 }
@@ -903,6 +908,53 @@ func writeSecurityXML(buf *bytes.Buffer, security *config.SecurityConfig) error 
 // filterMatches is now implemented in xpath_filter.go
 // This placeholder is kept for reference only
 
+type xmlOSPFProtocol struct {
+	RouterID string `xml:"router-id"`
+	Areas    []struct {
+		Name       string `xml:"name"`
+		AreaID     string `xml:"area-id"`
+		Interfaces []struct {
+			Name     string `xml:"name"`
+			Passive  bool   `xml:"passive"`
+			Metric   int    `xml:"metric"`
+			Priority *int   `xml:"priority"`
+		} `xml:"interface"`
+	} `xml:"area"`
+}
+
+func ospfConfigFromXML(ospf *xmlOSPFProtocol) *config.OSPFConfig {
+	if ospf == nil {
+		return nil
+	}
+	cfgOSPF := &config.OSPFConfig{
+		RouterID: ospf.RouterID,
+		Areas:    make(map[string]*config.OSPFArea),
+	}
+	for _, area := range ospf.Areas {
+		cfgArea := &config.OSPFArea{
+			AreaID:     area.AreaID,
+			Interfaces: make(map[string]*config.OSPFInterface),
+		}
+		for _, ospfIface := range area.Interfaces {
+			priority := 0
+			prioritySet := false
+			if ospfIface.Priority != nil {
+				priority = *ospfIface.Priority
+				prioritySet = true
+			}
+			cfgArea.Interfaces[ospfIface.Name] = &config.OSPFInterface{
+				Name:        ospfIface.Name,
+				Passive:     ospfIface.Passive,
+				Metric:      ospfIface.Metric,
+				Priority:    priority,
+				PrioritySet: prioritySet,
+			}
+		}
+		cfgOSPF.Areas[area.Name] = cfgArea
+	}
+	return cfgOSPF
+}
+
 // XMLToConfig converts NETCONF XML to internal config structure.
 func XMLToConfig(xmlData []byte, defaultOp DefaultOperation) (*config.Config, error) {
 	// Security: Validate size
@@ -1011,20 +1063,9 @@ func XMLToConfig(xmlData []byte, defaultOp DefaultOperation) (*config.Config, er
 					} `xml:"neighbor"`
 				} `xml:"group"`
 			} `xml:"bgp"`
-			OSPF *struct {
-				RouterID string `xml:"router-id"`
-				Areas    []struct {
-					Name       string `xml:"name"`
-					AreaID     string `xml:"area-id"`
-					Interfaces []struct {
-						Name     string `xml:"name"`
-						Passive  bool   `xml:"passive"`
-						Metric   int    `xml:"metric"`
-						Priority *int   `xml:"priority"`
-					} `xml:"interface"`
-				} `xml:"area"`
-			} `xml:"ospf"`
-			MPLS *struct {
+			OSPF  *xmlOSPFProtocol `xml:"ospf"`
+			OSPF3 *xmlOSPFProtocol `xml:"ospf3"`
+			MPLS  *struct {
 				Interfaces []string `xml:"interface"`
 			} `xml:"mpls"`
 			VRRP *struct {
@@ -1218,35 +1259,10 @@ func XMLToConfig(xmlData []byte, defaultOp DefaultOperation) (*config.Config, er
 
 		// OSPF
 		if root.Protocols.OSPF != nil {
-			cfg.Protocols.OSPF = &config.OSPFConfig{
-				RouterID: root.Protocols.OSPF.RouterID,
-				Areas:    make(map[string]*config.OSPFArea),
-			}
-
-			for _, area := range root.Protocols.OSPF.Areas {
-				cfgArea := &config.OSPFArea{
-					AreaID:     area.AreaID,
-					Interfaces: make(map[string]*config.OSPFInterface),
-				}
-
-				for _, ospfIface := range area.Interfaces {
-					priority := 0
-					prioritySet := false
-					if ospfIface.Priority != nil {
-						priority = *ospfIface.Priority
-						prioritySet = true
-					}
-					cfgArea.Interfaces[ospfIface.Name] = &config.OSPFInterface{
-						Name:        ospfIface.Name,
-						Passive:     ospfIface.Passive,
-						Metric:      ospfIface.Metric,
-						Priority:    priority,
-						PrioritySet: prioritySet,
-					}
-				}
-
-				cfg.Protocols.OSPF.Areas[area.Name] = cfgArea
-			}
+			cfg.Protocols.OSPF = ospfConfigFromXML(root.Protocols.OSPF)
+		}
+		if root.Protocols.OSPF3 != nil {
+			cfg.Protocols.OSPF3 = ospfConfigFromXML(root.Protocols.OSPF3)
 		}
 
 		// MPLS
@@ -1410,6 +1426,16 @@ var allowedConfigElementPaths = map[string]struct{}{
 	"config/protocols/ospf/area/interface/passive":      {},
 	"config/protocols/ospf/area/interface/metric":       {},
 	"config/protocols/ospf/area/interface/priority":     {},
+	"config/protocols/ospf3":                            {},
+	"config/protocols/ospf3/router-id":                  {},
+	"config/protocols/ospf3/area":                       {},
+	"config/protocols/ospf3/area/name":                  {},
+	"config/protocols/ospf3/area/area-id":               {},
+	"config/protocols/ospf3/area/interface":             {},
+	"config/protocols/ospf3/area/interface/name":        {},
+	"config/protocols/ospf3/area/interface/passive":     {},
+	"config/protocols/ospf3/area/interface/metric":      {},
+	"config/protocols/ospf3/area/interface/priority":    {},
 	"config/protocols/mpls":                             {},
 	"config/protocols/mpls/interface":                   {},
 	"config/protocols/vrrp":                             {},
@@ -1493,19 +1519,26 @@ var configTextContentPaths = map[string]struct{}{
 	"config/protocols/bgp/group/neighbor/description":   {},
 	"config/protocols/bgp/group/neighbor/local-address": {},
 
-	"config/protocols/ospf/router-id":               {},
-	"config/protocols/ospf/area/name":               {},
-	"config/protocols/ospf/area/area-id":            {},
-	"config/protocols/ospf/area/interface/name":     {},
-	"config/protocols/ospf/area/interface/passive":  {},
-	"config/protocols/ospf/area/interface/metric":   {},
-	"config/protocols/ospf/area/interface/priority": {},
-	"config/protocols/mpls/interface":               {},
-	"config/protocols/vrrp/group/name":              {},
-	"config/protocols/vrrp/group/interface":         {},
-	"config/protocols/vrrp/group/virtual-address":   {},
-	"config/protocols/vrrp/group/priority":          {},
-	"config/protocols/vrrp/group/preempt":           {},
+	"config/protocols/ospf/router-id":                {},
+	"config/protocols/ospf/area/name":                {},
+	"config/protocols/ospf/area/area-id":             {},
+	"config/protocols/ospf/area/interface/name":      {},
+	"config/protocols/ospf/area/interface/passive":   {},
+	"config/protocols/ospf/area/interface/metric":    {},
+	"config/protocols/ospf/area/interface/priority":  {},
+	"config/protocols/ospf3/router-id":               {},
+	"config/protocols/ospf3/area/name":               {},
+	"config/protocols/ospf3/area/area-id":            {},
+	"config/protocols/ospf3/area/interface/name":     {},
+	"config/protocols/ospf3/area/interface/passive":  {},
+	"config/protocols/ospf3/area/interface/metric":   {},
+	"config/protocols/ospf3/area/interface/priority": {},
+	"config/protocols/mpls/interface":                {},
+	"config/protocols/vrrp/group/name":               {},
+	"config/protocols/vrrp/group/interface":          {},
+	"config/protocols/vrrp/group/virtual-address":    {},
+	"config/protocols/vrrp/group/priority":           {},
+	"config/protocols/vrrp/group/preempt":            {},
 
 	"config/class-of-service/forwarding-classes/forwarding-class/name":                       {},
 	"config/class-of-service/forwarding-classes/forwarding-class/queue":                      {},
@@ -1883,20 +1916,10 @@ func mergeConfigs(existing, edit *config.Config) (*config.Config, error) {
 
 		// Merge OSPF
 		if edit.Protocols.OSPF != nil {
-			if existing.Protocols.OSPF == nil {
-				existing.Protocols.OSPF = &config.OSPFConfig{
-					Areas: make(map[string]*config.OSPFArea),
-				}
-			}
-			if edit.Protocols.OSPF.RouterID != "" {
-				existing.Protocols.OSPF.RouterID = edit.Protocols.OSPF.RouterID
-			}
-			if existing.Protocols.OSPF.Areas == nil {
-				existing.Protocols.OSPF.Areas = make(map[string]*config.OSPFArea)
-			}
-			for areaName, editArea := range edit.Protocols.OSPF.Areas {
-				existing.Protocols.OSPF.Areas[areaName] = editArea
-			}
+			mergeOSPFConfig(&existing.Protocols.OSPF, edit.Protocols.OSPF)
+		}
+		if edit.Protocols.OSPF3 != nil {
+			mergeOSPFConfig(&existing.Protocols.OSPF3, edit.Protocols.OSPF3)
 		}
 
 		if edit.Protocols.MPLS != nil {
@@ -1984,6 +2007,26 @@ func mergeSystemServices(system *config.SystemConfig, editServices *config.Syste
 	}
 	if editServices.SNMP != nil {
 		system.Services.SNMP = editServices.SNMP
+	}
+}
+
+func mergeOSPFConfig(existing **config.OSPFConfig, edit *config.OSPFConfig) {
+	if edit == nil {
+		return
+	}
+	if *existing == nil {
+		*existing = &config.OSPFConfig{
+			Areas: make(map[string]*config.OSPFArea),
+		}
+	}
+	if edit.RouterID != "" {
+		(*existing).RouterID = edit.RouterID
+	}
+	if (*existing).Areas == nil {
+		(*existing).Areas = make(map[string]*config.OSPFArea)
+	}
+	for areaName, editArea := range edit.Areas {
+		(*existing).Areas[areaName] = editArea
 	}
 }
 
@@ -2097,6 +2140,9 @@ func calculateConfigDepth(cfg *config.Config) int {
 			maxDepth = max(maxDepth, 5)
 		}
 		if cfg.Protocols.OSPF != nil && len(cfg.Protocols.OSPF.Areas) > 0 {
+			maxDepth = max(maxDepth, 5)
+		}
+		if cfg.Protocols.OSPF3 != nil && len(cfg.Protocols.OSPF3.Areas) > 0 {
 			maxDepth = max(maxDepth, 5)
 		}
 		if cfg.Protocols.MPLS != nil && len(cfg.Protocols.MPLS.Interfaces) > 0 {
@@ -2257,6 +2303,27 @@ func countConfigElements(cfg *config.Config) int {
 				count++
 			}
 			for _, area := range cfg.Protocols.OSPF.Areas {
+				count += 3 // <area> + <name> + <area-id>
+				for _, ospfIface := range area.Interfaces {
+					count += 2 // <interface> + <name>
+					if ospfIface.Passive {
+						count++
+					}
+					if ospfIface.Metric > 0 {
+						count++
+					}
+					if ospfIface.PrioritySet || ospfIface.Priority > 0 {
+						count++
+					}
+				}
+			}
+		}
+		if cfg.Protocols.OSPF3 != nil {
+			count++ // <ospf3>
+			if cfg.Protocols.OSPF3.RouterID != "" {
+				count++
+			}
+			for _, area := range cfg.Protocols.OSPF3.Areas {
 				count += 3 // <area> + <name> + <area-id>
 				for _, ospfIface := range area.Interfaces {
 					count += 2 // <interface> + <name>

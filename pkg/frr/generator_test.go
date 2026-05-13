@@ -140,6 +140,51 @@ func TestGenerateFRRConfig(t *testing.T) {
 			},
 		},
 		{
+			name: "OSPFv3 only",
+			cfg: &config.Config{
+				Interfaces: map[string]*config.Interface{
+					"ge-0/0/0": {
+						Units: map[int]*config.Unit{
+							0: {
+								Family: map[string]*config.Family{
+									"inet6": {
+										Addresses: []string{"2001:db8::1/64"},
+									},
+								},
+							},
+						},
+					},
+				},
+				Protocols: &config.ProtocolConfig{
+					OSPF3: &config.OSPFConfig{
+						Areas: map[string]*config.OSPFArea{
+							"0.0.0.0": {
+								AreaID: "0.0.0.0",
+								Interfaces: map[string]*config.OSPFInterface{
+									"ge-0/0/0": {Name: "ge-0/0/0", Metric: 20},
+								},
+							},
+						},
+					},
+				},
+			},
+			wantErr: false,
+			checks: func(t *testing.T, frrCfg *Config) {
+				if frrCfg.OSPF3 == nil {
+					t.Fatal("OSPF3 config is nil")
+				}
+				if !frrCfg.OSPF3.IsOSPFv3 {
+					t.Fatal("OSPF3 IsOSPFv3 = false, want true")
+				}
+				if len(frrCfg.OSPF3.Networks) != 0 {
+					t.Fatalf("OSPF3 networks = %d, want 0", len(frrCfg.OSPF3.Networks))
+				}
+				if len(frrCfg.OSPF3.Interfaces) != 1 || frrCfg.OSPF3.Interfaces[0].Name != "ge0-0-0" {
+					t.Fatalf("OSPF3 interfaces = %#v, want ge0-0-0", frrCfg.OSPF3.Interfaces)
+				}
+			},
+		},
+		{
 			name:    "nil config",
 			cfg:     nil,
 			wantErr: true,
@@ -229,6 +274,23 @@ func TestGenerateFRRConfigFile(t *testing.T) {
 			want: []string{
 				"hostname minimal",
 				"line vty",
+			},
+			wantErr: false,
+		},
+		{
+			name: "OSPFv3 config file",
+			cfg: &Config{
+				OSPF3: &OSPFConfig{
+					IsOSPFv3: true,
+					Interfaces: []OSPFInterface{
+						{Name: "ge0-0-0", AreaID: "0.0.0.0"},
+					},
+				},
+			},
+			want: []string{
+				"router ospf6",
+				"interface ge0-0-0",
+				"ipv6 ospf6 area 0.0.0.0",
 			},
 			wantErr: false,
 		},

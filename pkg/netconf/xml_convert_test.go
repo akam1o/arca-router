@@ -33,6 +33,34 @@ func TestConfigToXMLWritesExplicitOSPFPriorityZero(t *testing.T) {
 	}
 }
 
+func TestConfigToXMLWritesOSPF3(t *testing.T) {
+	cfg := &config.Config{
+		Protocols: &config.ProtocolConfig{
+			OSPF3: &config.OSPFConfig{
+				Areas: map[string]*config.OSPFArea{
+					"0.0.0.0": {
+						AreaID: "0.0.0.0",
+						Interfaces: map[string]*config.OSPFInterface{
+							"ge-0/0/0": {Name: "ge-0/0/0", Metric: 20},
+						},
+					},
+				},
+			},
+		},
+	}
+
+	xmlData, err := ConfigToXML(cfg, nil)
+	if err != nil {
+		t.Fatalf("ConfigToXML() error = %v", err)
+	}
+	xmlStr := string(xmlData)
+	for _, want := range []string{"<ospf3>", "<metric>20</metric>", "</ospf3>"} {
+		if !strings.Contains(xmlStr, want) {
+			t.Fatalf("ConfigToXML() missing %q:\n%s", want, xmlStr)
+		}
+	}
+}
+
 func TestConfigToXMLMarshalsAsSingleDataReply(t *testing.T) {
 	cfg := &config.Config{
 		System:     &config.SystemConfig{HostName: "router1"},
@@ -349,6 +377,42 @@ func TestXMLToConfigPreservesExplicitOSPFPriorityZero(t *testing.T) {
 
 	setCommands := config.ToSetCommands(cfg)
 	want := "set protocols ospf area 0.0.0.0 interface ge-0/0/0 priority 0"
+	if !strings.Contains(setCommands, want) {
+		t.Fatalf("ToSetCommands() = %q, want %q", setCommands, want)
+	}
+}
+
+func TestXMLToConfigParsesOSPF3(t *testing.T) {
+	xmlData := []byte(`
+<config>
+  <protocols>
+    <ospf3>
+      <router-id>10.0.1.2</router-id>
+      <area>
+        <name>0.0.0.0</name>
+        <area-id>0.0.0.0</area-id>
+        <interface>
+          <name>ge-0/0/0</name>
+          <metric>20</metric>
+        </interface>
+      </area>
+    </ospf3>
+  </protocols>
+</config>`)
+
+	cfg, err := XMLToConfig(xmlData, DefaultOpMerge)
+	if err != nil {
+		t.Fatalf("XMLToConfig() error = %v", err)
+	}
+	if cfg.Protocols == nil || cfg.Protocols.OSPF3 == nil {
+		t.Fatalf("XMLToConfig() OSPF3 = nil: %#v", cfg.Protocols)
+	}
+	if cfg.Protocols.OSPF3.RouterID != "10.0.1.2" {
+		t.Fatalf("OSPF3 router-id = %q, want 10.0.1.2", cfg.Protocols.OSPF3.RouterID)
+	}
+
+	setCommands := config.ToSetCommands(cfg)
+	want := "set protocols ospf3 area 0.0.0.0 interface ge-0/0/0 metric 20"
 	if !strings.Contains(setCommands, want) {
 		t.Fatalf("ToSetCommands() = %q, want %q", setCommands, want)
 	}

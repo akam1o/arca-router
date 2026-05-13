@@ -117,6 +117,7 @@ func (e *Engine) Apply(ctx context.Context, candidate *model.RouterConfig, autho
 		slog.Int("interfaces_changed", len(diff.InterfacesChanged)),
 		slog.Bool("bgp_changed", diff.BGPChanged),
 		slog.Bool("ospf_changed", diff.OSPFChanged),
+		slog.Bool("ospf3_changed", diff.OSPF3Changed),
 		slog.Bool("policy_changed", diff.PolicyChanged),
 		slog.Bool("static_routes_changed", diff.StaticRoutesChanged),
 	)

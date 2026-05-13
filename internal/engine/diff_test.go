@@ -91,3 +91,26 @@ func TestComputeDiffDetectsV06AdvancedChanges(t *testing.T) {
 		t.Fatalf("v0.6 flags not set: %#v", diff)
 	}
 }
+
+func TestComputeDiffDetectsOSPF3Changes(t *testing.T) {
+	newCfg := model.NewRouterConfig()
+	newCfg.Protocols = &model.ProtocolsConfig{
+		OSPF3: &model.OSPFConfig{
+			Areas: map[string]*model.OSPFArea{
+				"0.0.0.0": {
+					Interfaces: map[string]*model.OSPFInterface{
+						"ge-0/0/0": {Metric: 20},
+					},
+				},
+			},
+		},
+	}
+
+	diff := ComputeDiff(model.NewRouterConfig(), newCfg)
+	if !diff.OSPF3Changed || diff.NewOSPF3 == nil {
+		t.Fatalf("OSPF3 change not detected: %#v", diff)
+	}
+	if !diff.HasChanges() {
+		t.Fatal("HasChanges() = false, want true")
+	}
+}

@@ -753,6 +753,8 @@ func (p *Parser) parseProtocols(config *Config) error {
 		return p.parseBGP(config.Protocols)
 	case "ospf":
 		return p.parseOSPF(config.Protocols)
+	case "ospf3":
+		return p.parseOSPF3(config.Protocols)
 	case "mpls":
 		return p.parseMPLS(config.Protocols)
 	case "vrrp":
@@ -994,13 +996,28 @@ func (p *Parser) parseBGPGroupExport(group *BGPGroup) error {
 // parseOSPF parses OSPF protocol configuration
 func (p *Parser) parseOSPF(pc *ProtocolConfig) error {
 	if pc.OSPF == nil {
-		pc.OSPF = &OSPFConfig{
-			Areas: make(map[string]*OSPFArea),
-		}
+		pc.OSPF = newOSPFConfig()
 	}
+	return p.parseOSPFConfig(pc.OSPF, "OSPF")
+}
 
+// parseOSPF3 parses OSPFv3 protocol configuration
+func (p *Parser) parseOSPF3(pc *ProtocolConfig) error {
+	if pc.OSPF3 == nil {
+		pc.OSPF3 = newOSPFConfig()
+	}
+	return p.parseOSPFConfig(pc.OSPF3, "OSPF3")
+}
+
+func newOSPFConfig() *OSPFConfig {
+	return &OSPFConfig{
+		Areas: make(map[string]*OSPFArea),
+	}
+}
+
+func (p *Parser) parseOSPFConfig(ospf *OSPFConfig, protocolName string) error {
 	if p.current.Type != TokenWord {
-		return p.error("expected OSPF parameter")
+		return p.error(fmt.Sprintf("expected %s parameter", protocolName))
 	}
 
 	param := p.current.Value
@@ -1008,11 +1025,11 @@ func (p *Parser) parseOSPF(pc *ProtocolConfig) error {
 
 	switch param {
 	case "area":
-		return p.parseOSPFArea(pc.OSPF)
+		return p.parseOSPFArea(ospf)
 	case "router-id":
-		return p.parseOSPFRouterID(pc.OSPF)
+		return p.parseOSPFRouterID(ospf)
 	default:
-		return p.error(fmt.Sprintf("unsupported OSPF parameter: %s", param))
+		return p.error(fmt.Sprintf("unsupported %s parameter: %s", protocolName, param))
 	}
 }
 

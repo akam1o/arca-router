@@ -1078,7 +1078,7 @@ func replacementPrefixes(path []string) []string {
 					return prefix(5)
 				}
 			}
-		case "ospf":
+		case "ospf", "ospf3":
 			if path[2] == "router-id" {
 				return prefix(3)
 			}

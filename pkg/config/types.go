@@ -215,6 +215,9 @@ type ProtocolConfig struct {
 	// OSPF holds OSPF protocol configuration
 	OSPF *OSPFConfig `json:"ospf,omitempty"`
 
+	// OSPF3 holds OSPFv3 protocol configuration
+	OSPF3 *OSPFConfig `json:"ospf3,omitempty"`
+
 	// MPLS holds MPLS protocol configuration
 	MPLS *MPLSConfig `json:"mpls,omitempty"`
 

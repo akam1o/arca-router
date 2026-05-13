@@ -230,20 +230,13 @@ func (c *RouterConfig) validateProtocols() error {
 		}
 	}
 	if ospf := c.Protocols.OSPF; ospf != nil {
-		if ospf.RouterID != "" {
-			if net.ParseIP(ospf.RouterID) == nil {
-				return fmt.Errorf("ospf: invalid router-id %q", ospf.RouterID)
-			}
+		if err := c.validateOSPF("ospf", ospf); err != nil {
+			return err
 		}
-		for areaName, area := range ospf.Areas {
-			if area == nil {
-				return fmt.Errorf("ospf area %s is nil", areaName)
-			}
-			for ifName := range area.Interfaces {
-				if err := c.validateInterfaceReference(fmt.Sprintf("ospf area %s", areaName), ifName); err != nil {
-					return err
-				}
-			}
+	}
+	if ospf3 := c.Protocols.OSPF3; ospf3 != nil {
+		if err := c.validateOSPF("ospf3", ospf3); err != nil {
+			return err
 		}
 	}
 	if mpls := c.Protocols.MPLS; mpls != nil {
@@ -272,6 +265,25 @@ func (c *RouterConfig) validateProtocols() error {
 			}
 			if group.Priority < 0 || group.Priority > 254 {
 				return fmt.Errorf("vrrp group %s: priority must be 1-254 when configured, got %d", name, group.Priority)
+			}
+		}
+	}
+	return nil
+}
+
+func (c *RouterConfig) validateOSPF(protocol string, ospf *OSPFConfig) error {
+	if ospf.RouterID != "" {
+		if net.ParseIP(ospf.RouterID) == nil {
+			return fmt.Errorf("%s: invalid router-id %q", protocol, ospf.RouterID)
+		}
+	}
+	for areaName, area := range ospf.Areas {
+		if area == nil {
+			return fmt.Errorf("%s area %s is nil", protocol, areaName)
+		}
+		for ifName := range area.Interfaces {
+			if err := c.validateInterfaceReference(fmt.Sprintf("%s area %s", protocol, areaName), ifName); err != nil {
+				return err
 			}
 		}
 	}
@@ -396,6 +408,10 @@ func (c *RouterConfig) ResolveRouterID(protocol string) string {
 	case "ospf":
 		if c.Protocols != nil && c.Protocols.OSPF != nil && c.Protocols.OSPF.RouterID != "" {
 			return c.Protocols.OSPF.RouterID
+		}
+	case "ospf3":
+		if c.Protocols != nil && c.Protocols.OSPF3 != nil && c.Protocols.OSPF3.RouterID != "" {
+			return c.Protocols.OSPF3.RouterID
 		}
 	}
 	if c.Routing != nil && c.Routing.RouterID != "" {

@@ -20,18 +20,21 @@ type ConfigDiff struct {
 	InterfacesChanged map[string]*InterfaceChange
 
 	// Protocol changes
-	BGPChanged  bool
-	OldBGP      *model.BGPConfig
-	NewBGP      *model.BGPConfig
-	OSPFChanged bool
-	OldOSPF     *model.OSPFConfig
-	NewOSPF     *model.OSPFConfig
-	MPLSChanged bool
-	OldMPLS     *model.MPLSConfig
-	NewMPLS     *model.MPLSConfig
-	VRRPChanged bool
-	OldVRRP     *model.VRRPConfig
-	NewVRRP     *model.VRRPConfig
+	BGPChanged   bool
+	OldBGP       *model.BGPConfig
+	NewBGP       *model.BGPConfig
+	OSPFChanged  bool
+	OldOSPF      *model.OSPFConfig
+	NewOSPF      *model.OSPFConfig
+	OSPF3Changed bool
+	OldOSPF3     *model.OSPFConfig
+	NewOSPF3     *model.OSPFConfig
+	MPLSChanged  bool
+	OldMPLS      *model.MPLSConfig
+	NewMPLS      *model.MPLSConfig
+	VRRPChanged  bool
+	OldVRRP      *model.VRRPConfig
+	NewVRRP      *model.VRRPConfig
 
 	// Routing changes
 	StaticRoutesChanged     bool
@@ -92,6 +95,7 @@ func (d *ConfigDiff) HasChanges() bool {
 		len(d.InterfacesChanged) > 0 ||
 		d.BGPChanged ||
 		d.OSPFChanged ||
+		d.OSPF3Changed ||
 		d.MPLSChanged ||
 		d.VRRPChanged ||
 		d.StaticRoutesChanged ||
@@ -237,6 +241,14 @@ func computeProtocolDiff(old, new *model.RouterConfig, diff *ConfigDiff) {
 		diff.NewOSPF = newOSPF
 	}
 
+	oldOSPF3 := getOSPF3(old)
+	newOSPF3 := getOSPF3(new)
+	if !ospfEqual(oldOSPF3, newOSPF3) {
+		diff.OSPF3Changed = true
+		diff.OldOSPF3 = oldOSPF3
+		diff.NewOSPF3 = newOSPF3
+	}
+
 	oldMPLS := getMPLS(old)
 	newMPLS := getMPLS(new)
 	if !reflect.DeepEqual(oldMPLS, newMPLS) {
@@ -326,6 +338,13 @@ func getOSPF(c *model.RouterConfig) *model.OSPFConfig {
 		return nil
 	}
 	return c.Protocols.OSPF
+}
+
+func getOSPF3(c *model.RouterConfig) *model.OSPFConfig {
+	if c.Protocols == nil {
+		return nil
+	}
+	return c.Protocols.OSPF3
 }
 
 func getMPLS(c *model.RouterConfig) *model.MPLSConfig {

@@ -106,10 +106,11 @@ type AddressFamily struct {
 
 // ProtocolsConfig holds routing protocol configurations.
 type ProtocolsConfig struct {
-	BGP  *BGPConfig  `json:"bgp,omitempty"`
-	OSPF *OSPFConfig `json:"ospf,omitempty"`
-	MPLS *MPLSConfig `json:"mpls,omitempty"`
-	VRRP *VRRPConfig `json:"vrrp,omitempty"`
+	BGP   *BGPConfig  `json:"bgp,omitempty"`
+	OSPF  *OSPFConfig `json:"ospf,omitempty"`
+	OSPF3 *OSPFConfig `json:"ospf3,omitempty"`
+	MPLS  *MPLSConfig `json:"mpls,omitempty"`
+	VRRP  *VRRPConfig `json:"vrrp,omitempty"`
 }
 
 // MPLSConfig represents MPLS forwarding configuration.

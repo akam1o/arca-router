@@ -136,6 +136,9 @@ func BuildMgmtOperations(cfg *Config) ([]MgmtOperation, error) {
 	if cfg == nil {
 		return nil, NewInvalidConfigError("FRR config is nil")
 	}
+	if cfg.OSPF3 != nil {
+		return nil, NewInvalidConfigError("OSPFv3 is not supported by the transactional FRR backend because FRR does not expose core ospf6d YANG paths")
+	}
 	var ops []MgmtOperation
 	ops = append(ops,
 		deleteOp(staticProtocolBase()),
