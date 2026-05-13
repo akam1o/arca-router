@@ -22,6 +22,7 @@ type fakeInteractiveClient struct {
 	vrrpText        string
 	lcpInfo         *grpcclient.LCPReconciliationInfo
 	haInfo          *grpcclient.HAStatusInfo
+	cosInfo         *grpcclient.ClassOfServiceInfo
 
 	acquireLockCalls int
 	discardCalls     int
@@ -144,6 +145,13 @@ func (f *fakeInteractiveClient) GetHAStatus(ctx context.Context) (*grpcclient.HA
 		return f.haInfo, nil
 	}
 	return &grpcclient.HAStatusInfo{}, nil
+}
+
+func (f *fakeInteractiveClient) GetClassOfService(ctx context.Context) (*grpcclient.ClassOfServiceInfo, error) {
+	if f.cosInfo != nil {
+		return f.cosInfo, nil
+	}
+	return &grpcclient.ClassOfServiceInfo{}, nil
 }
 
 func TestCmdConfigureRequiresSession(t *testing.T) {
@@ -416,6 +424,27 @@ func TestCmdShowHAReturnsOutput(t *testing.T) {
 	}
 }
 
+func TestCmdShowClassOfServiceReturnsOutput(t *testing.T) {
+	ctx := context.Background()
+	client := &fakeInteractiveClient{cosInfo: &grpcclient.ClassOfServiceInfo{
+		EnforcementStatus: "intent-only",
+		ForwardingClasses: []grpcclient.ClassOfServiceForwardingClassInfo{
+			{Name: "expedited-forwarding", Queue: 5},
+		},
+	}}
+	sh := &interactiveShell{
+		client:    client,
+		hostname:  "router",
+		mode:      modeOperational,
+		sessionID: "session-1",
+	}
+
+	err := sh.cmdShow(ctx, []string{"class-of-service"})
+	if err != nil {
+		t.Fatalf("cmdShow(class-of-service) error = %v", err)
+	}
+}
+
 func TestInterfaceQueueSummary(t *testing.T) {
 	got := interfaceQueueSummary(grpcclient.InterfaceInfo{
 		RxQueues: []grpcclient.InterfaceRxQueueInfo{
@@ -471,6 +500,14 @@ func TestOneShotShowHAReturnsSuccess(t *testing.T) {
 	code := oneShotShow(context.Background(), client, []string{"ha"}, &cliFlags{})
 	if code != ExitSuccess {
 		t.Fatalf("oneShotShow(ha) = %d, want %d", code, ExitSuccess)
+	}
+}
+
+func TestOneShotShowClassOfServiceReturnsSuccess(t *testing.T) {
+	client := &fakeInteractiveClient{}
+	code := oneShotShow(context.Background(), client, []string{"class-of-service"}, &cliFlags{})
+	if code != ExitSuccess {
+		t.Fatalf("oneShotShow(class-of-service) = %d, want %d", code, ExitSuccess)
 	}
 }
 

@@ -367,6 +367,41 @@ func (c *Client) GetHAStatus(ctx context.Context) (*HAStatusInfo, error) {
 	return info, nil
 }
 
+// GetClassOfService returns running class-of-service intent.
+func (c *Client) GetClassOfService(ctx context.Context) (*ClassOfServiceInfo, error) {
+	ctx, cancel := contextWithDefaultTimeout(ctx)
+	defer cancel()
+	resp, err := c.state.GetClassOfService(ctx, &apiv1.GetClassOfServiceRequest{})
+	if err != nil {
+		return nil, err
+	}
+	info := &ClassOfServiceInfo{
+		EnforcementStatus: resp.GetEnforcementStatus(),
+	}
+	for _, fc := range resp.GetForwardingClasses() {
+		info.ForwardingClasses = append(info.ForwardingClasses, ClassOfServiceForwardingClassInfo{
+			Name:  fc.GetName(),
+			Queue: int(fc.GetQueue()),
+		})
+	}
+	for _, profile := range resp.GetTrafficControlProfiles() {
+		info.TrafficControlProfiles = append(info.TrafficControlProfiles, ClassOfServiceTrafficControlProfileInfo{
+			Name:              profile.GetName(),
+			ShapingRate:       profile.GetShapingRate(),
+			SchedulerMap:      profile.GetSchedulerMap(),
+			EnforcementStatus: profile.GetEnforcementStatus(),
+		})
+	}
+	for _, iface := range resp.GetInterfaces() {
+		info.Interfaces = append(info.Interfaces, ClassOfServiceInterfaceInfo{
+			Name:                        iface.GetName(),
+			OutputTrafficControlProfile: iface.GetOutputTrafficControlProfile(),
+			EnforcementStatus:           iface.GetEnforcementStatus(),
+		})
+	}
+	return info, nil
+}
+
 // GetSystemInfo returns system information.
 func (c *Client) GetSystemInfo(ctx context.Context) (*SystemInfo, error) {
 	ctx, cancel := contextWithDefaultTimeout(ctx)
@@ -557,6 +592,35 @@ type HAStatusInfo struct {
 	VPPLCPPairs             int
 	VPPLCPInconsistencies   []string
 	VPPLCPLastError         string
+}
+
+// ClassOfServiceInfo represents running class-of-service intent.
+type ClassOfServiceInfo struct {
+	ForwardingClasses      []ClassOfServiceForwardingClassInfo
+	TrafficControlProfiles []ClassOfServiceTrafficControlProfileInfo
+	Interfaces             []ClassOfServiceInterfaceInfo
+	EnforcementStatus      string
+}
+
+// ClassOfServiceForwardingClassInfo maps a forwarding class to a queue.
+type ClassOfServiceForwardingClassInfo struct {
+	Name  string
+	Queue int
+}
+
+// ClassOfServiceTrafficControlProfileInfo describes a traffic-control profile.
+type ClassOfServiceTrafficControlProfileInfo struct {
+	Name              string
+	ShapingRate       uint64
+	SchedulerMap      string
+	EnforcementStatus string
+}
+
+// ClassOfServiceInterfaceInfo describes a class-of-service interface binding.
+type ClassOfServiceInterfaceInfo struct {
+	Name                        string
+	OutputTrafficControlProfile string
+	EnforcementStatus           string
 }
 
 // RouteInfo represents a routing table entry.

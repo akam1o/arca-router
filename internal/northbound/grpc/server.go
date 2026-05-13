@@ -46,6 +46,11 @@ var (
 	runOperationalVtyshCommand = runVtyshCommandReal
 )
 
+const (
+	classOfServiceEnforcementIntentOnly    = "intent-only"
+	classOfServiceEnforcementNotConfigured = "not configured"
+)
+
 type interfaceStateCollector interface {
 	CollectState(ctx context.Context) (map[string]*model.InterfaceState, error)
 }
@@ -681,6 +686,59 @@ func (s *Server) GetHAStatus(ctx context.Context) (*HAStatusInfo, error) {
 	return &info, nil
 }
 
+// GetClassOfService returns running class-of-service intent.
+func (s *Server) GetClassOfService(ctx context.Context) (*ClassOfServiceInfo, error) {
+	info := &ClassOfServiceInfo{EnforcementStatus: classOfServiceEnforcementNotConfigured}
+	if s.engine == nil {
+		return info, nil
+	}
+	cfg := s.engine.Running()
+	if cfg == nil || cfg.ClassOfService == nil {
+		return info, nil
+	}
+
+	cos := cfg.ClassOfService
+	info.EnforcementStatus = classOfServiceEnforcementIntentOnly
+
+	for _, name := range sortedForwardingClassNames(cos.ForwardingClasses) {
+		fc := cos.ForwardingClasses[name]
+		if fc == nil {
+			continue
+		}
+		info.ForwardingClasses = append(info.ForwardingClasses, ClassOfServiceForwardingClassInfo{
+			Name:  name,
+			Queue: fc.Queue,
+		})
+	}
+
+	for _, name := range sortedTrafficControlProfileNames(cos.TrafficControlProfiles) {
+		profile := cos.TrafficControlProfiles[name]
+		if profile == nil {
+			continue
+		}
+		info.TrafficControlProfiles = append(info.TrafficControlProfiles, ClassOfServiceTrafficControlProfileInfo{
+			Name:              name,
+			ShapingRate:       profile.ShapingRate,
+			SchedulerMap:      profile.SchedulerMap,
+			EnforcementStatus: classOfServiceEnforcementIntentOnly,
+		})
+	}
+
+	for _, name := range sortedClassOfServiceInterfaceNames(cos.Interfaces) {
+		iface := cos.Interfaces[name]
+		if iface == nil {
+			continue
+		}
+		info.Interfaces = append(info.Interfaces, ClassOfServiceInterfaceInfo{
+			Name:                        name,
+			OutputTrafficControlProfile: iface.OutputTrafficControlProfile,
+			EnforcementStatus:           classOfServiceEnforcementIntentOnly,
+		})
+	}
+
+	return info, nil
+}
+
 // GetSystemInfo returns basic system information.
 func (s *Server) GetSystemInfo(ctx context.Context) (*SystemInfo, error) {
 	cfg := s.engine.Running()
@@ -701,6 +759,33 @@ var validRouteProtocols = map[string]bool{
 	"static":    true,
 	"connected": true,
 	"kernel":    true,
+}
+
+func sortedForwardingClassNames(classes map[string]*model.ForwardingClass) []string {
+	names := make([]string, 0, len(classes))
+	for name := range classes {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	return names
+}
+
+func sortedTrafficControlProfileNames(profiles map[string]*model.TrafficControlProfile) []string {
+	names := make([]string, 0, len(profiles))
+	for name := range profiles {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	return names
+}
+
+func sortedClassOfServiceInterfaceNames(interfaces map[string]*model.CoSInterface) []string {
+	names := make([]string, 0, len(interfaces))
+	for name := range interfaces {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	return names
 }
 
 func upDown(up bool) string {

@@ -274,6 +274,15 @@ func oneShotShow(ctx context.Context, client showClient, args []string, f *cliFl
 		printHAStatus(info)
 		return ExitSuccess
 
+	case "class-of-service":
+		info, err := client.GetClassOfService(ctx)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+			return ExitOperationError
+		}
+		printClassOfService(info)
+		return ExitSuccess
+
 	case "route":
 		protoFilter, err := routeProtocolFilter(args[1:])
 		if err != nil {
@@ -333,6 +342,7 @@ type showClient interface {
 	GetVRRPText(context.Context) (string, error)
 	GetLCPReconciliation(context.Context) (*grpcclient.LCPReconciliationInfo, error)
 	GetHAStatus(context.Context) (*grpcclient.HAStatusInfo, error)
+	GetClassOfService(context.Context) (*grpcclient.ClassOfServiceInfo, error)
 }
 
 type cliMode int
@@ -705,6 +715,17 @@ func (sh *interactiveShell) cmdShow(ctx context.Context, args []string) error {
 		printHAStatus(info)
 		return nil
 
+	case "class-of-service":
+		if sh.mode == modeConfiguration {
+			return fmt.Errorf("'show class-of-service' not available in configuration mode")
+		}
+		info, err := sh.client.GetClassOfService(ctx)
+		if err != nil {
+			return err
+		}
+		printClassOfService(info)
+		return nil
+
 	case "route":
 		if sh.mode == modeConfiguration {
 			return fmt.Errorf("'show route' not available in configuration mode")
@@ -925,6 +946,7 @@ func (sh *interactiveShell) showHelp() {
 		fmt.Println("  show vrrp                     Show VRRP status")
 		fmt.Println("  show lcp                      Show VPP LCP reconciliation status")
 		fmt.Println("  show ha                       Show HA convergence status")
+		fmt.Println("  show class-of-service         Show class-of-service intent")
 		fmt.Println("  show route                    Show routing table")
 		fmt.Println("  show route protocol <proto>   Show routes by protocol")
 		fmt.Println("  exit, quit                    Exit interactive CLI")
@@ -1057,6 +1079,67 @@ func printHAStatus(info *grpcclient.HAStatusInfo) {
 	for _, issue := range info.Issues {
 		fmt.Printf("  - %s\n", issue)
 	}
+}
+
+func printClassOfService(info *grpcclient.ClassOfServiceInfo) {
+	if info == nil || (len(info.ForwardingClasses) == 0 && len(info.TrafficControlProfiles) == 0 && len(info.Interfaces) == 0) {
+		fmt.Println("No class-of-service configuration found")
+		return
+	}
+	fmt.Printf("%-18s %s\n", "Enforcement", formatCoSValue(info.EnforcementStatus))
+
+	if len(info.ForwardingClasses) > 0 {
+		fmt.Println()
+		fmt.Println("Forwarding classes")
+		fmt.Printf("%-32s %-8s\n", "Name", "Queue")
+		fmt.Println(strings.Repeat("-", 41))
+		for _, fc := range info.ForwardingClasses {
+			fmt.Printf("%-32s %-8d\n", fc.Name, fc.Queue)
+		}
+	}
+
+	if len(info.TrafficControlProfiles) > 0 {
+		fmt.Println()
+		fmt.Println("Traffic-control profiles")
+		fmt.Printf("%-32s %-16s %-24s %-14s\n", "Name", "Shaping rate", "Scheduler map", "Enforcement")
+		fmt.Println(strings.Repeat("-", 88))
+		for _, profile := range info.TrafficControlProfiles {
+			fmt.Printf("%-32s %-16s %-24s %-14s\n",
+				profile.Name,
+				formatCoSRate(profile.ShapingRate),
+				formatCoSValue(profile.SchedulerMap),
+				formatCoSValue(profile.EnforcementStatus),
+			)
+		}
+	}
+
+	if len(info.Interfaces) > 0 {
+		fmt.Println()
+		fmt.Println("Interfaces")
+		fmt.Printf("%-24s %-32s %-14s\n", "Interface", "Output profile", "Enforcement")
+		fmt.Println(strings.Repeat("-", 72))
+		for _, iface := range info.Interfaces {
+			fmt.Printf("%-24s %-32s %-14s\n",
+				iface.Name,
+				formatCoSValue(iface.OutputTrafficControlProfile),
+				formatCoSValue(iface.EnforcementStatus),
+			)
+		}
+	}
+}
+
+func formatCoSValue(value string) string {
+	if value == "" {
+		return "-"
+	}
+	return value
+}
+
+func formatCoSRate(value uint64) string {
+	if value == 0 {
+		return "-"
+	}
+	return strconv.FormatUint(value, 10)
 }
 
 func haState(info *grpcclient.HAStatusInfo) string {
@@ -1206,6 +1289,10 @@ func createCompleter() *readline.PrefixCompleter {
 			readline.PcItem("ospf",
 				readline.PcItem("neighbor"),
 			),
+			readline.PcItem("vrrp"),
+			readline.PcItem("lcp"),
+			readline.PcItem("ha"),
+			readline.PcItem("class-of-service"),
 			readline.PcItem("route",
 				readline.PcItem("protocol"),
 			),

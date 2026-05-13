@@ -83,6 +83,9 @@ service StateService {
   // GetHAStatus returns control-plane HA convergence state.
   rpc GetHAStatus(GetHAStatusRequest) returns (GetHAStatusResponse);
 
+  // GetClassOfService returns running class-of-service intent.
+  rpc GetClassOfService(GetClassOfServiceRequest) returns (GetClassOfServiceResponse);
+
   // GetSystemInfo returns system information.
   rpc GetSystemInfo(GetSystemInfoRequest) returns (GetSystemInfoResponse);
 }
@@ -339,6 +342,33 @@ message GetHAStatusResponse {
   uint32 vpp_lcp_pairs = 16;
   repeated string vpp_lcp_inconsistencies = 17;
   string vpp_lcp_last_error = 18;
+}
+
+message GetClassOfServiceRequest {}
+
+message GetClassOfServiceResponse {
+  repeated ClassOfServiceForwardingClass forwarding_classes = 1;
+  repeated ClassOfServiceTrafficControlProfile traffic_control_profiles = 2;
+  repeated ClassOfServiceInterface interfaces = 3;
+  string enforcement_status = 4;
+}
+
+message ClassOfServiceForwardingClass {
+  string name = 1;
+  uint32 queue = 2;
+}
+
+message ClassOfServiceTrafficControlProfile {
+  string name = 1;
+  uint64 shaping_rate = 2;
+  string scheduler_map = 3;
+  string enforcement_status = 4;
+}
+
+message ClassOfServiceInterface {
+  string name = 1;
+  string output_traffic_control_profile = 2;
+  string enforcement_status = 3;
 }
 
 message GetSystemInfoRequest {}

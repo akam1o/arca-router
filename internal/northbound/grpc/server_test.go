@@ -419,6 +419,50 @@ func TestGetHAStatusUsesSource(t *testing.T) {
 	}
 }
 
+func TestGetClassOfServiceReturnsRunningConfig(t *testing.T) {
+	eng := engine.NewEngine(nil, testLogger())
+	eng.InitializeRunning(&model.RouterConfig{
+		ClassOfService: &model.ClassOfServiceConfig{
+			ForwardingClasses: map[string]*model.ForwardingClass{
+				"best-effort":          {Queue: 0},
+				"expedited-forwarding": {Queue: 5},
+			},
+			TrafficControlProfiles: map[string]*model.TrafficControlProfile{
+				"WAN": {
+					ShapingRate:  1000000000,
+					SchedulerMap: "WAN-SCHED",
+				},
+			},
+			Interfaces: map[string]*model.CoSInterface{
+				"ge-0/0/0": {OutputTrafficControlProfile: "WAN"},
+			},
+		},
+	}, 1)
+	srv := NewServer(eng, &fakeStore{}, testLogger())
+
+	info, err := srv.GetClassOfService(context.Background())
+	if err != nil {
+		t.Fatalf("GetClassOfService() error = %v", err)
+	}
+	if info.EnforcementStatus != "intent-only" {
+		t.Fatalf("EnforcementStatus = %q, want intent-only", info.EnforcementStatus)
+	}
+	if len(info.ForwardingClasses) != 2 || info.ForwardingClasses[0].Name != "best-effort" || info.ForwardingClasses[1].Name != "expedited-forwarding" {
+		t.Fatalf("ForwardingClasses = %#v, want sorted class list", info.ForwardingClasses)
+	}
+	if len(info.TrafficControlProfiles) != 1 || info.TrafficControlProfiles[0].Name != "WAN" ||
+		info.TrafficControlProfiles[0].ShapingRate != 1000000000 ||
+		info.TrafficControlProfiles[0].SchedulerMap != "WAN-SCHED" ||
+		info.TrafficControlProfiles[0].EnforcementStatus != "intent-only" {
+		t.Fatalf("TrafficControlProfiles = %#v, want WAN profile", info.TrafficControlProfiles)
+	}
+	if len(info.Interfaces) != 1 || info.Interfaces[0].Name != "ge-0/0/0" ||
+		info.Interfaces[0].OutputTrafficControlProfile != "WAN" ||
+		info.Interfaces[0].EnforcementStatus != "intent-only" {
+		t.Fatalf("Interfaces = %#v, want interface binding", info.Interfaces)
+	}
+}
+
 func TestReleaseLockWaitsForInFlightCommit(t *testing.T) {
 	parserEntered := make(chan struct{})
 	unblockParser := make(chan struct{})

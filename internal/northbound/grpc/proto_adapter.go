@@ -311,6 +311,42 @@ func (a *stateServiceAdapter) GetHAStatus(ctx context.Context, _ *apiv1.GetHASta
 	return resp, nil
 }
 
+func (a *stateServiceAdapter) GetClassOfService(ctx context.Context, _ *apiv1.GetClassOfServiceRequest) (*apiv1.GetClassOfServiceResponse, error) {
+	info, err := a.server.GetClassOfService(ctx)
+	if err != nil {
+		return nil, err
+	}
+	resp := &apiv1.GetClassOfServiceResponse{
+		EnforcementStatus: info.EnforcementStatus,
+	}
+	for _, fc := range info.ForwardingClasses {
+		queue := uint32(0)
+		if fc.Queue > 0 {
+			queue = uint32(fc.Queue)
+		}
+		resp.ForwardingClasses = append(resp.ForwardingClasses, &apiv1.ClassOfServiceForwardingClass{
+			Name:  fc.Name,
+			Queue: queue,
+		})
+	}
+	for _, profile := range info.TrafficControlProfiles {
+		resp.TrafficControlProfiles = append(resp.TrafficControlProfiles, &apiv1.ClassOfServiceTrafficControlProfile{
+			Name:              profile.Name,
+			ShapingRate:       profile.ShapingRate,
+			SchedulerMap:      profile.SchedulerMap,
+			EnforcementStatus: profile.EnforcementStatus,
+		})
+	}
+	for _, iface := range info.Interfaces {
+		resp.Interfaces = append(resp.Interfaces, &apiv1.ClassOfServiceInterface{
+			Name:                        iface.Name,
+			OutputTrafficControlProfile: iface.OutputTrafficControlProfile,
+			EnforcementStatus:           iface.EnforcementStatus,
+		})
+	}
+	return resp, nil
+}
+
 func (a *stateServiceAdapter) GetSystemInfo(ctx context.Context, _ *apiv1.GetSystemInfoRequest) (*apiv1.GetSystemInfoResponse, error) {
 	info, err := a.server.GetSystemInfo(ctx)
 	if err != nil {
