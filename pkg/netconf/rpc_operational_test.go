@@ -79,6 +79,14 @@ func TestBuildOperationalDataUsesLiveInterfaceState(t *testing.T) {
 				TxErrors:  2,
 				Drops:     3,
 			},
+			Queues: &InterfaceOperationalQueues{
+				Rx: []InterfaceOperationalRxQueue{
+					{QueueID: 0, WorkerID: 1, Mode: "polling"},
+				},
+				Tx: []InterfaceOperationalTxQueue{
+					{QueueID: 0, Shared: true, Threads: []uint32{0, 2}},
+				},
+			},
 		},
 	})
 	if err != nil {
@@ -97,6 +105,13 @@ func TestBuildOperationalDataUsesLiveInterfaceState(t *testing.T) {
 		"<rx-errors>1</rx-errors>",
 		"<tx-errors>2</tx-errors>",
 		"<drops>3</drops>",
+		"<queue-placements>",
+		"<rx-queue>",
+		"<worker-id>1</worker-id>",
+		"<mode>polling</mode>",
+		"<tx-queue>",
+		"<shared>true</shared>",
+		"<thread>2</thread>",
 		"<ip>192.0.2.1/24</ip>",
 	} {
 		if !bytes.Contains(data, []byte(want)) {

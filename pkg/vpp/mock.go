@@ -20,6 +20,7 @@ type MockClient struct {
 	interfaceTable map[interfaceTableKey]uint32
 	qosProfiles    map[uint32]QoSProfile
 	counters       map[uint32]InterfaceCounters
+	queuePlacement map[uint32]InterfaceQueuePlacements
 	nextIfIdx      uint32
 
 	// Hooks for testing error scenarios
@@ -36,6 +37,7 @@ type MockClient struct {
 	SetQoSProfileError          error
 	ClearQoSProfileError        error
 	ListInterfaceCountersError  error
+	ListInterfaceQueuesError    error
 	GetInterfaceError           error
 	ListInterfacesError         error
 	CreateLCPInterfaceError     error
@@ -54,6 +56,7 @@ func NewMockClient() *MockClient {
 		interfaceTable: make(map[interfaceTableKey]uint32),
 		qosProfiles:    make(map[uint32]QoSProfile),
 		counters:       make(map[uint32]InterfaceCounters),
+		queuePlacement: make(map[uint32]InterfaceQueuePlacements),
 		nextIfIdx:      1, // Start from 1 (0 is reserved for local0)
 	}
 }
@@ -715,6 +718,50 @@ func (m *MockClient) SetInterfaceCounters(ifIndex uint32, counters InterfaceCoun
 	m.counters[ifIndex] = counters
 }
 
+// ListInterfaceQueuePlacements returns mock RX/TX queue placements by interface index.
+func (m *MockClient) ListInterfaceQueuePlacements(ctx context.Context) (map[uint32]InterfaceQueuePlacements, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	if m.ListInterfaceQueuesError != nil {
+		return nil, m.ListInterfaceQueuesError
+	}
+
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	if !m.connected {
+		return nil, errors.New(
+			errors.ErrCodeVPPConnection,
+			"Not connected to VPP",
+			"VPP connection not established",
+			"Connect to VPP before listing interface queue placements",
+		)
+	}
+
+	placements := make(map[uint32]InterfaceQueuePlacements, len(m.queuePlacement))
+	for ifIndex, value := range m.queuePlacement {
+		placements[ifIndex] = cloneInterfaceQueuePlacements(value)
+	}
+	return placements, nil
+}
+
+// SetInterfaceQueuePlacements sets mock RX/TX queue placements for a VPP interface.
+func (m *MockClient) SetInterfaceQueuePlacements(ifIndex uint32, placements InterfaceQueuePlacements) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.queuePlacement[ifIndex] = cloneInterfaceQueuePlacements(placements)
+}
+
+func cloneInterfaceQueuePlacements(placements InterfaceQueuePlacements) InterfaceQueuePlacements {
+	placements.Rx = append([]InterfaceRxQueuePlacement(nil), placements.Rx...)
+	placements.Tx = append([]InterfaceTxQueuePlacement(nil), placements.Tx...)
+	for i := range placements.Tx {
+		placements.Tx[i].Threads = append([]uint32(nil), placements.Tx[i].Threads...)
+	}
+	return placements
+}
+
 // GetInterface retrieves mock interface information by index
 func (m *MockClient) GetInterface(ctx context.Context, ifIndex uint32) (*Interface, error) {
 	if m.GetInterfaceError != nil {
@@ -787,6 +834,7 @@ func (m *MockClient) Reset() {
 	m.interfaceTable = make(map[interfaceTableKey]uint32)
 	m.qosProfiles = make(map[uint32]QoSProfile)
 	m.counters = make(map[uint32]InterfaceCounters)
+	m.queuePlacement = make(map[uint32]InterfaceQueuePlacements)
 	m.nextIfIdx = 1
 
 	m.ConnectError = nil
@@ -802,6 +850,7 @@ func (m *MockClient) Reset() {
 	m.SetQoSProfileError = nil
 	m.ClearQoSProfileError = nil
 	m.ListInterfaceCountersError = nil
+	m.ListInterfaceQueuesError = nil
 	m.GetInterfaceError = nil
 	m.ListInterfacesError = nil
 	m.CreateLCPInterfaceError = nil

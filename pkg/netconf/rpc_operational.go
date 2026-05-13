@@ -216,6 +216,11 @@ func writeInterfaceStateXML(buf *bytes.Buffer, interfaces map[string]*config.Int
 		if state != nil && state.Counters != nil {
 			writeInterfaceCountersXML(buf, state.Counters)
 		}
+		if state != nil && state.Queues != nil {
+			if err := writeInterfaceQueuesXML(buf, state.Queues); err != nil {
+				return err
+			}
+		}
 		if iface != nil && len(iface.Units) > 0 {
 			buf.WriteString("      <addresses>\n")
 			for _, unitNum := range sortedUnitKeys(iface.Units) {
@@ -291,6 +296,44 @@ func writeInterfaceCountersXML(buf *bytes.Buffer, counters *InterfaceOperational
 	fmt.Fprintf(buf, "        <tx-errors>%d</tx-errors>\n", counters.TxErrors)
 	fmt.Fprintf(buf, "        <drops>%d</drops>\n", counters.Drops)
 	buf.WriteString("      </statistics>\n")
+}
+
+func writeInterfaceQueuesXML(buf *bytes.Buffer, queues *InterfaceOperationalQueues) error {
+	buf.WriteString("      <queue-placements>\n")
+	if len(queues.Rx) > 0 {
+		buf.WriteString("        <rx-queues>\n")
+		for _, queue := range queues.Rx {
+			buf.WriteString("          <rx-queue>\n")
+			fmt.Fprintf(buf, "            <queue-id>%d</queue-id>\n", queue.QueueID)
+			fmt.Fprintf(buf, "            <worker-id>%d</worker-id>\n", queue.WorkerID)
+			if queue.Mode != "" {
+				if err := writeEscapedElement(buf, "            ", "mode", queue.Mode); err != nil {
+					return err
+				}
+			}
+			buf.WriteString("          </rx-queue>\n")
+		}
+		buf.WriteString("        </rx-queues>\n")
+	}
+	if len(queues.Tx) > 0 {
+		buf.WriteString("        <tx-queues>\n")
+		for _, queue := range queues.Tx {
+			buf.WriteString("          <tx-queue>\n")
+			fmt.Fprintf(buf, "            <queue-id>%d</queue-id>\n", queue.QueueID)
+			fmt.Fprintf(buf, "            <shared>%t</shared>\n", queue.Shared)
+			if len(queue.Threads) > 0 {
+				buf.WriteString("            <threads>\n")
+				for _, thread := range queue.Threads {
+					fmt.Fprintf(buf, "              <thread>%d</thread>\n", thread)
+				}
+				buf.WriteString("            </threads>\n")
+			}
+			buf.WriteString("          </tx-queue>\n")
+		}
+		buf.WriteString("        </tx-queues>\n")
+	}
+	buf.WriteString("      </queue-placements>\n")
+	return nil
 }
 
 func writeRoutingStateXML(buf *bytes.Buffer, cfg *config.Config) error {

@@ -170,6 +170,24 @@ func TestConvertInterfaceCounters(t *testing.T) {
 	}
 }
 
+func TestRxModeName(t *testing.T) {
+	tests := []struct {
+		mode interface_types.RxMode
+		want string
+	}{
+		{mode: interface_types.RX_MODE_API_POLLING, want: "polling"},
+		{mode: interface_types.RX_MODE_API_INTERRUPT, want: "interrupt"},
+		{mode: interface_types.RX_MODE_API_ADAPTIVE, want: "adaptive"},
+		{mode: interface_types.RX_MODE_API_DEFAULT, want: "default"},
+		{mode: interface_types.RX_MODE_API_UNKNOWN, want: "unknown"},
+	}
+	for _, tt := range tests {
+		if got := rxModeName(tt.mode); got != tt.want {
+			t.Fatalf("rxModeName(%s) = %q, want %q", tt.mode, got, tt.want)
+		}
+	}
+}
+
 // TestCheckSocketAccess tests socket access checking
 func TestCheckSocketAccess(t *testing.T) {
 	// Create a temporary directory for test socket in the current working directory.

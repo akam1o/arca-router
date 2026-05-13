@@ -225,6 +225,14 @@ func TestCollectStateIncludesInterfaceCounters(t *testing.T) {
 		TxErrors:  2,
 		Drops:     3,
 	})
+	client.SetInterfaceQueuePlacements(idx, pkgvpp.InterfaceQueuePlacements{
+		Rx: []pkgvpp.InterfaceRxQueuePlacement{
+			{QueueID: 0, WorkerID: 1, Mode: "polling"},
+		},
+		Tx: []pkgvpp.InterfaceTxQueuePlacement{
+			{QueueID: 0, Shared: true, Threads: []uint32{0, 2}},
+		},
+	})
 
 	state, err := plugin.CollectState(ctx)
 	if err != nil {
@@ -235,6 +243,15 @@ func TestCollectStateIncludesInterfaceCounters(t *testing.T) {
 	}
 	if got := *state["ge-0/0/0"].Counters; got.RxPackets != 10 || got.TxPackets != 20 || got.RxBytes != 1000 || got.TxBytes != 2000 || got.RxErrors != 1 || got.TxErrors != 2 || got.Drops != 3 {
 		t.Fatalf("CollectState() counters = %#v, want VPP counters", got)
+	}
+	if state["ge-0/0/0"].Queues == nil {
+		t.Fatal("CollectState() did not include queue placements")
+	}
+	if got := state["ge-0/0/0"].Queues.Rx[0]; got.QueueID != 0 || got.WorkerID != 1 || got.Mode != "polling" {
+		t.Fatalf("CollectState() RX queue = %#v, want VPP queue placement", got)
+	}
+	if got := state["ge-0/0/0"].Queues.Tx[0]; got.QueueID != 0 || !got.Shared || len(got.Threads) != 2 || got.Threads[1] != 2 {
+		t.Fatalf("CollectState() TX queue = %#v, want VPP queue placement", got)
 	}
 }
 

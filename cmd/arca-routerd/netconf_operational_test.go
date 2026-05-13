@@ -39,6 +39,14 @@ func TestNETCONFOperationalStateProviderConvertsInterfaceState(t *testing.T) {
 					TxErrors:  2,
 					Drops:     3,
 				},
+				Queues: &model.InterfaceQueues{
+					Rx: []model.InterfaceRxQueue{
+						{QueueID: 0, WorkerID: 1, Mode: "polling"},
+					},
+					Tx: []model.InterfaceTxQueue{
+						{QueueID: 0, Shared: true, Threads: []uint32{0, 2}},
+					},
+				},
 			},
 		},
 	})
@@ -58,5 +66,14 @@ func TestNETCONFOperationalStateProviderConvertsInterfaceState(t *testing.T) {
 		state.Counters.RxBytes != 1000 || state.Counters.TxBytes != 2000 ||
 		state.Counters.RxErrors != 1 || state.Counters.TxErrors != 2 || state.Counters.Drops != 3 {
 		t.Fatalf("counters = %#v", state.Counters)
+	}
+	if state.Queues == nil || len(state.Queues.Rx) != 1 || len(state.Queues.Tx) != 1 {
+		t.Fatalf("queues = %#v", state.Queues)
+	}
+	if got := state.Queues.Rx[0]; got.QueueID != 0 || got.WorkerID != 1 || got.Mode != "polling" {
+		t.Fatalf("rx queue = %#v", got)
+	}
+	if got := state.Queues.Tx[0]; got.QueueID != 0 || !got.Shared || len(got.Threads) != 2 || got.Threads[0] != 0 || got.Threads[1] != 2 {
+		t.Fatalf("tx queue = %#v", got)
 	}
 }

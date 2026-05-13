@@ -517,7 +517,8 @@ module arca-router {
     container interfaces {
       description
         "Arca-specific interface operational state. NETCONF <get> also
-         exposes live interface status and counters through ietf-interfaces.";
+         exposes live interface status, counters, and VPP queue placement
+         through ietf-interfaces.";
     }
 
     container protocols {

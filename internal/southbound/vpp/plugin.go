@@ -327,6 +327,10 @@ func (p *VPPPlugin) CollectState(ctx context.Context) (map[string]*model.Interfa
 	if err != nil {
 		p.log.Warn("Failed to list VPP interface counters", slog.Any("error", err))
 	}
+	queuesByIndex, err := p.client.ListInterfaceQueuePlacements(ctx)
+	if err != nil {
+		p.log.Warn("Failed to list VPP interface queue placements", slog.Any("error", err))
+	}
 
 	result := make(map[string]*model.InterfaceState)
 	for _, iface := range interfaces {
@@ -361,10 +365,38 @@ func (p *VPPPlugin) CollectState(ctx context.Context) (map[string]*model.Interfa
 				Drops:     counters.Drops,
 			}
 		}
+		if queues, ok := queuesByIndex[iface.SwIfIndex]; ok {
+			state.Queues = modelInterfaceQueues(queues)
+		}
 		result[junosName] = state
 	}
 
 	return result, nil
+}
+
+func modelInterfaceQueues(queues pkgvpp.InterfaceQueuePlacements) *model.InterfaceQueues {
+	if len(queues.Rx) == 0 && len(queues.Tx) == 0 {
+		return nil
+	}
+	result := &model.InterfaceQueues{
+		Rx: make([]model.InterfaceRxQueue, 0, len(queues.Rx)),
+		Tx: make([]model.InterfaceTxQueue, 0, len(queues.Tx)),
+	}
+	for _, queue := range queues.Rx {
+		result.Rx = append(result.Rx, model.InterfaceRxQueue{
+			QueueID:  queue.QueueID,
+			WorkerID: queue.WorkerID,
+			Mode:     queue.Mode,
+		})
+	}
+	for _, queue := range queues.Tx {
+		result.Tx = append(result.Tx, model.InterfaceTxQueue{
+			QueueID: queue.QueueID,
+			Shared:  queue.Shared,
+			Threads: append([]uint32(nil), queue.Threads...),
+		})
+	}
+	return result
 }
 
 // LCPReconciliationStatus returns a copy of the latest LCP reconciliation result.

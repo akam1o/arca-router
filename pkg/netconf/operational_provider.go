@@ -15,6 +15,7 @@ type InterfaceOperationalState struct {
 	OperStatus  string
 	MAC         string
 	Counters    *InterfaceOperationalCounters
+	Queues      *InterfaceOperationalQueues
 }
 
 // InterfaceOperationalCounters holds live interface counters.
@@ -26,4 +27,24 @@ type InterfaceOperationalCounters struct {
 	RxErrors  uint64
 	TxErrors  uint64
 	Drops     uint64
+}
+
+// InterfaceOperationalQueues holds RX/TX queue placement for an interface.
+type InterfaceOperationalQueues struct {
+	Rx []InterfaceOperationalRxQueue
+	Tx []InterfaceOperationalTxQueue
+}
+
+// InterfaceOperationalRxQueue maps an RX queue to a VPP worker.
+type InterfaceOperationalRxQueue struct {
+	QueueID  uint32
+	WorkerID uint32
+	Mode     string
+}
+
+// InterfaceOperationalTxQueue maps a TX queue to VPP worker threads.
+type InterfaceOperationalTxQueue struct {
+	QueueID uint32
+	Shared  bool
+	Threads []uint32
 }

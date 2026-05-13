@@ -68,6 +68,9 @@ type Client interface {
 	// ListInterfaceCounters returns packet and byte counters by VPP interface index.
 	ListInterfaceCounters(ctx context.Context) (map[uint32]InterfaceCounters, error)
 
+	// ListInterfaceQueuePlacements returns RX/TX queue placement by VPP interface index.
+	ListInterfaceQueuePlacements(ctx context.Context) (map[uint32]InterfaceQueuePlacements, error)
+
 	// GetInterface retrieves interface information by index
 	GetInterface(ctx context.Context, ifIndex uint32) (*Interface, error)
 
@@ -166,6 +169,26 @@ type QoSProfile struct {
 type QoSQueue struct {
 	ForwardingClass string
 	Queue           uint8
+}
+
+// InterfaceQueuePlacements holds VPP RX/TX queue placement for an interface.
+type InterfaceQueuePlacements struct {
+	Rx []InterfaceRxQueuePlacement
+	Tx []InterfaceTxQueuePlacement
+}
+
+// InterfaceRxQueuePlacement maps an RX queue to a VPP worker.
+type InterfaceRxQueuePlacement struct {
+	QueueID  uint32
+	WorkerID uint32
+	Mode     string
+}
+
+// InterfaceTxQueuePlacement maps a TX queue to VPP worker threads.
+type InterfaceTxQueuePlacement struct {
+	QueueID uint32
+	Shared  bool
+	Threads []uint32
 }
 
 // InterfaceCounters holds VPP packet, byte, error, and drop counters.

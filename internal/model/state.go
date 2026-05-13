@@ -20,6 +20,7 @@ type InterfaceState struct {
 	MTU         uint32             `json:"mtu,omitempty"`
 	MAC         string             `json:"mac,omitempty"`
 	Counters    *InterfaceCounters `json:"counters,omitempty"`
+	Queues      *InterfaceQueues   `json:"queues,omitempty"`
 	LastChange  time.Time          `json:"last-change,omitempty"`
 }
 
@@ -32,6 +33,26 @@ type InterfaceCounters struct {
 	RxErrors  uint64 `json:"rx-errors"`
 	TxErrors  uint64 `json:"tx-errors"`
 	Drops     uint64 `json:"drops"`
+}
+
+// InterfaceQueues holds RX/TX queue placement for an interface.
+type InterfaceQueues struct {
+	Rx []InterfaceRxQueue `json:"rx,omitempty"`
+	Tx []InterfaceTxQueue `json:"tx,omitempty"`
+}
+
+// InterfaceRxQueue maps an RX queue to a VPP worker.
+type InterfaceRxQueue struct {
+	QueueID  uint32 `json:"queue-id"`
+	WorkerID uint32 `json:"worker-id"`
+	Mode     string `json:"mode,omitempty"`
+}
+
+// InterfaceTxQueue maps a TX queue to VPP worker threads.
+type InterfaceTxQueue struct {
+	QueueID uint32   `json:"queue-id"`
+	Shared  bool     `json:"shared,omitempty"`
+	Threads []uint32 `json:"threads,omitempty"`
 }
 
 // BGPState holds live BGP state.

@@ -3,6 +3,7 @@ package vpp
 import (
 	"context"
 	"fmt"
+	"io"
 	"net"
 	"os"
 	"path/filepath"
@@ -814,6 +815,120 @@ func (c *govppClient) ListInterfaceCounters(ctx context.Context) (map[uint32]Int
 		counters[iface.InterfaceIndex] = convertInterfaceCounters(iface)
 	}
 	return counters, nil
+}
+
+// ListInterfaceQueuePlacements returns RX/TX queue placement by VPP interface index.
+func (c *govppClient) ListInterfaceQueuePlacements(ctx context.Context) (map[uint32]InterfaceQueuePlacements, error) {
+	if c.conn == nil {
+		return nil, fmt.Errorf("not connected to VPP")
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, fmt.Errorf("operation cancelled: %w", err)
+	}
+
+	svc := vppif.NewServiceClient(c.conn)
+	placements := make(map[uint32]InterfaceQueuePlacements)
+	if err := c.collectRxQueuePlacements(ctx, svc, placements); err != nil {
+		return nil, err
+	}
+	if err := c.collectTxQueuePlacements(ctx, svc, placements); err != nil {
+		return nil, err
+	}
+	return placements, nil
+}
+
+func (c *govppClient) collectRxQueuePlacements(ctx context.Context, svc vppif.RPCService, placements map[uint32]InterfaceQueuePlacements) error {
+	stream, err := svc.SwInterfaceRxPlacementDump(ctx, &vppif.SwInterfaceRxPlacementDump{
+		SwIfIndex: interface_types.InterfaceIndex(^uint32(0)),
+	})
+	if err != nil {
+		return fmt.Errorf("dump RX queue placements: %w", err)
+	}
+
+	for {
+		if err := ctx.Err(); err != nil {
+			return fmt.Errorf("operation cancelled: %w", err)
+		}
+		detail, err := stream.Recv()
+		if err == io.EOF {
+			return nil
+		}
+		if err != nil {
+			return fmt.Errorf("receive RX queue placement: %w", err)
+		}
+		if detail == nil {
+			continue
+		}
+		ifIndex := uint32(detail.SwIfIndex)
+		placement := placements[ifIndex]
+		placement.Rx = append(placement.Rx, InterfaceRxQueuePlacement{
+			QueueID:  detail.QueueID,
+			WorkerID: detail.WorkerID,
+			Mode:     rxModeName(detail.Mode),
+		})
+		placements[ifIndex] = placement
+	}
+}
+
+func (c *govppClient) collectTxQueuePlacements(ctx context.Context, svc vppif.RPCService, placements map[uint32]InterfaceQueuePlacements) error {
+	cursor := uint32(0)
+	for {
+		stream, err := svc.SwInterfaceTxPlacementGet(ctx, &vppif.SwInterfaceTxPlacementGet{
+			Cursor:    cursor,
+			SwIfIndex: interface_types.InterfaceIndex(^uint32(0)),
+		})
+		if err != nil {
+			return fmt.Errorf("get TX queue placements: %w", err)
+		}
+
+		nextCursor := uint32(0)
+		for {
+			if err := ctx.Err(); err != nil {
+				return fmt.Errorf("operation cancelled: %w", err)
+			}
+			detail, reply, err := stream.Recv()
+			if err == io.EOF {
+				if reply != nil {
+					nextCursor = reply.Cursor
+				}
+				break
+			}
+			if err != nil {
+				return fmt.Errorf("receive TX queue placement: %w", err)
+			}
+			if detail == nil {
+				continue
+			}
+			ifIndex := uint32(detail.SwIfIndex)
+			threads := append([]uint32(nil), detail.Threads...)
+			placement := placements[ifIndex]
+			placement.Tx = append(placement.Tx, InterfaceTxQueuePlacement{
+				QueueID: detail.QueueID,
+				Shared:  detail.Shared != 0,
+				Threads: threads,
+			})
+			placements[ifIndex] = placement
+		}
+		if nextCursor == 0 {
+			return nil
+		}
+		cursor = nextCursor
+	}
+}
+
+func rxModeName(mode interface_types.RxMode) string {
+	switch mode {
+	case interface_types.RX_MODE_API_POLLING:
+		return "polling"
+	case interface_types.RX_MODE_API_INTERRUPT:
+		return "interrupt"
+	case interface_types.RX_MODE_API_ADAPTIVE:
+		return "adaptive"
+	case interface_types.RX_MODE_API_DEFAULT:
+		return "default"
+	default:
+		return "unknown"
+	}
 }
 
 func (c *govppClient) ensureStatsConnection(ctx context.Context) (*core.StatsConnection, error) {
