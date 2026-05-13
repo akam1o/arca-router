@@ -956,6 +956,8 @@ Endpoints:
 `/api/status` includes build metadata, uptime, running config version, datastore backend, cluster sync state, and NETCONF counters.
 `/api/config` returns the running configuration as set-command text with the running config version. The dashboard renders the same running configuration as a read-only preview.
 
+When password-backed `security users` exist in running configuration, the Web UI requires HTTP Basic authentication. The built-in `read-only`, `operator`, and `admin` roles are authorized for the read-only dashboard and API endpoints.
+
 ### SNMP
 
 Start the read-only SNMPv2c endpoint with:
