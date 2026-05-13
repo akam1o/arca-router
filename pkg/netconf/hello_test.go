@@ -19,6 +19,7 @@ func TestServerHello(t *testing.T) {
 		CapabilityBase11,
 		CapabilityCandidate,
 		CapabilityValidate,
+		CapabilityArcaRouter,
 	}
 
 	for _, cap := range requiredCaps {
@@ -26,8 +27,8 @@ func TestServerHello(t *testing.T) {
 			t.Errorf("Missing required capability: %s", cap)
 		}
 	}
-	if hello.HasCapability(CapabilityArcaRouter) {
-		t.Errorf("ServerHello() advertised stale arca-router YANG capability")
+	if !strings.Contains(CapabilityArcaRouter, "revision=2025-12-27") {
+		t.Errorf("CapabilityArcaRouter = %q, want current YANG revision", CapabilityArcaRouter)
 	}
 }
 
