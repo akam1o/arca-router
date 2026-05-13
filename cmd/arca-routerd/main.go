@@ -387,7 +387,15 @@ func run(ctx context.Context, f *daemonFlags, log *logger.Logger) error {
 	// --- Step 8: Start NETCONF server ---
 	var netconfServer *netconf.SSHServer
 	if f.hostKeyPath != "" {
-		netconfServer, err = startNETCONFServer(ctx, f, datastoreConfig, eng, log, effectiveNETCONFListen(f.netconfListen, eng.RunningSnapshot()))
+		netconfServer, err = startNETCONFServer(
+			ctx,
+			f,
+			datastoreConfig,
+			eng,
+			newNETCONFOperationalStateProvider(vppPlugin),
+			log,
+			effectiveNETCONFListen(f.netconfListen, eng.RunningSnapshot()),
+		)
 		if err != nil {
 			return err
 		}
@@ -502,7 +510,15 @@ func snapshotNETCONFPort(snapshot *model.ConfigSnapshot) int {
 	return snapshot.Config.Security.NETCONF.SSH.Port
 }
 
-func startNETCONFServer(ctx context.Context, f *daemonFlags, datastoreConfig *datastore.Config, eng *engine.Engine, log *logger.Logger, listenAddr string) (*netconf.SSHServer, error) {
+func startNETCONFServer(
+	ctx context.Context,
+	f *daemonFlags,
+	datastoreConfig *datastore.Config,
+	eng *engine.Engine,
+	stateProvider netconf.OperationalStateProvider,
+	log *logger.Logger,
+	listenAddr string,
+) (*netconf.SSHServer, error) {
 	log.Info("Starting NETCONF server", slog.String("listen", listenAddr))
 	ncConfig := netconf.DefaultSSHConfig()
 	ncConfig.ListenAddr = listenAddr
@@ -517,6 +533,7 @@ func startNETCONFServer(ctx context.Context, f *daemonFlags, datastoreConfig *da
 		return nil, fmt.Errorf("create NETCONF server: %w", err)
 	}
 	server.SetCommitHook(newNETCONFCommitHook(eng))
+	server.SetOperationalStateProvider(stateProvider)
 	if err := server.Start(ctx); err != nil {
 		_ = server.Stop()
 		return nil, fmt.Errorf("start NETCONF server: %w", err)

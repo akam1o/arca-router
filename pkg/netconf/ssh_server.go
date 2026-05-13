@@ -195,6 +195,13 @@ func (s *SSHServer) SetCommitHook(h CommitHook) {
 	}
 }
 
+// SetOperationalStateProvider installs a live-state source for <get> replies.
+func (s *SSHServer) SetOperationalStateProvider(provider OperationalStateProvider) {
+	if s.netconfServer != nil {
+		s.netconfServer.SetOperationalStateProvider(provider)
+	}
+}
+
 // Start starts the SSH server
 func (s *SSHServer) Start(ctx context.Context) error {
 	s.mu.Lock()
