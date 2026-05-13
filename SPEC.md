@@ -487,9 +487,9 @@ set protocols bgp group external import PREFER-CUSTOMER
 <a id="advanced-v06-configuration"></a>
 ## Advanced v0.6 Configuration
 
-The following hierarchies are part of the v0.6 management-plane model. Parser, serializer, validation, clone, conversion, diff, and candidate command replacement support are implemented. Southbound application for data-plane HA, MPLS forwarding, L3VPN plumbing, and QoS enforcement is staged separately.
+The following hierarchies are part of the v0.6 management-plane model. Parser, serializer, validation, clone, conversion, diff, and candidate command replacement support are implemented. FRR VRRP application is implemented; southbound application for MPLS forwarding, L3VPN plumbing, and QoS enforcement is staged separately.
 
-Until the corresponding southbound apply path is implemented, commits that leave unsupported MPLS, routing-instance, or class-of-service configuration active fail validation instead of being silently accepted. Removing those unsupported stanzas is allowed. VRRP is currently supported only by the FRR file backend (`--frr-apply-mode=file`); the transactional FRR backend still rejects active VRRP configuration.
+Until the corresponding southbound apply path is implemented, commits that leave unsupported MPLS, routing-instance, or class-of-service configuration active fail validation instead of being silently accepted. Removing those unsupported stanzas is allowed. VRRP is applied by the FRR file backend and the default transactional FRR backend.
 
 ### Prometheus Service
 
@@ -929,7 +929,7 @@ Common options:
 
 The default backend is `transactional`. It requires FRR `mgmtd=yes` in `/etc/frr/daemons` and `vtysh` access for the `arca-router` service user, typically through the `frrvty` group.
 
-The standard FRR daemon set for arca-router is `bgpd`, `ospfd`, `zebra`, `staticd`, `mgmtd`, and `vrrpd`. The `file` backend writes a full FRR config and applies it with `frr-reload.py`. It is retained for recovery and compatibility; deployments that use it must grant the service user the additional permissions needed to write `/etc/frr/frr.conf`.
+The standard FRR daemon set for arca-router is `bgpd`, `ospfd`, `zebra`, `staticd`, `mgmtd`, and `vrrpd`. The transactional backend applies VRRP through the FRR `frr-vrrpd` YANG model under the interface tree. The `file` backend writes a full FRR config and applies it with `frr-reload.py`. It is retained for recovery and compatibility; deployments that use it must grant the service user the additional permissions needed to write `/etc/frr/frr.conf`.
 
 ### Prometheus and Health
 

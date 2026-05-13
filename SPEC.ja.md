@@ -498,9 +498,9 @@ set protocols bgp group external import PREFER-CUSTOMER
 <a id="advanced-v06-configuration"></a>
 ## Advanced v0.6 Configuration
 
-以下の hierarchy は v0.6 の management-plane model です。parser、serializer、validation、clone、conversion、diff、candidate command replacement は実装済みです。data-plane HA、MPLS forwarding、L3VPN plumbing、QoS enforcement の southbound 適用は段階的に実装します。
+以下の hierarchy は v0.6 の management-plane model です。parser、serializer、validation、clone、conversion、diff、candidate command replacement は実装済みです。FRR VRRP 適用は実装済みで、MPLS forwarding、L3VPN plumbing、QoS enforcement の southbound 適用は段階的に実装します。
 
-対応する southbound apply path が実装されるまでは、未対応の MPLS、routing-instance、class-of-service 設定を active に残す commit は validation で失敗します。未対応 stanza の削除は許可します。VRRP は現時点では FRR file backend（`--frr-apply-mode=file`）のみ対応し、transactional FRR backend では active な VRRP 設定を引き続き拒否します。
+対応する southbound apply path が実装されるまでは、未対応の MPLS、routing-instance、class-of-service 設定を active に残す commit は validation で失敗します。未対応 stanza の削除は許可します。VRRP は FRR file backend と標準の transactional FRR backend の両方で適用されます。
 
 ### Prometheus service
 
@@ -947,7 +947,7 @@ set security rate-limit per-user 20
 
 標準 backend は `transactional` です。FRR 側で `/etc/frr/daemons` の `mgmtd=yes` と、`arca-router` service user からの `vtysh` access（通常は `frrvty` group）が必要です。
 
-arca-router 標準の FRR daemon set は `bgpd`、`ospfd`、`zebra`、`staticd`、`mgmtd`、`vrrpd` です。`file` backend は full FRR config を書き出し、`frr-reload.py` で適用します。復旧・互換用途として保持しており、利用する場合は service user が `/etc/frr/frr.conf` に書き込むための追加権限が必要です。
+arca-router 標準の FRR daemon set は `bgpd`、`ospfd`、`zebra`、`staticd`、`mgmtd`、`vrrpd` です。transactional backend は FRR の interface tree 配下にある `frr-vrrpd` YANG model を使って VRRP を適用します。`file` backend は full FRR config を書き出し、`frr-reload.py` で適用します。復旧・互換用途として保持しており、利用する場合は service user が `/etc/frr/frr.conf` に書き込むための追加権限が必要です。
 
 ### Prometheus と health
 

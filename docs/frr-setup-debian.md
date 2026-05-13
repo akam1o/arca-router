@@ -92,7 +92,7 @@ staticd_options=""
 
 ### 3. Configure FRR Apply Access
 
-By default, `arca-router` applies FRR changes through the FRR management candidate datastore via `vtysh`. This requires `mgmtd=yes`, the standard `vrrpd=yes` HA daemon, and `frrvty` group access, but does not require direct writes to `/etc/frr/frr.conf`.
+By default, `arca-router` applies FRR changes, including VRRP groups, through the FRR management candidate datastore via `vtysh`. This requires `mgmtd=yes`, the standard `vrrpd=yes` HA daemon, and `frrvty` group access, but does not require direct writes to `/etc/frr/frr.conf`.
 
 If you plan to use the recovery backend `--frr-apply-mode=file`, also allow the `frr` group to write `/etc/frr/frr.conf`:
 
