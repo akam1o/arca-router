@@ -99,7 +99,7 @@ func (v *YANGValidator) ValidateConfig(xmlData []byte) error {
 	// Phase 3 implementation: Basic structural validation
 	// We validate:
 	// 1. XML is well-formed (already done by xml.Unmarshal in xml_convert.go)
-	// 2. Top-level elements match YANG schema (system, interfaces, routing-options, protocols)
+	// 2. Top-level elements match the currently implemented YANG schema roots
 	// 3. Size and depth limits (already enforced in xml_convert.go)
 
 	// For Phase 3, we accept the parse validation done during NewYANGValidator

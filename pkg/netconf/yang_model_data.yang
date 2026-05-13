@@ -91,7 +91,6 @@ module arca-router {
         }
       }
     }
-
   }
 
   // ==================================================================
@@ -467,10 +466,8 @@ module arca-router {
   augment "/if:interfaces/if:interface" {
     description "Extend IETF interfaces with Arca-specific attributes";
 
-    leaf description {
-      type string;
-      description "Interface description";
-    }
+    // Note: 'description' is already defined in ietf-interfaces, so we don't redeclare it
+    // Instead, we rely on the IETF model's description leaf
 
     container units {
       description "Logical units (sub-interfaces) for this interface";
