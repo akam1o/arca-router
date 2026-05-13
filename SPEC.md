@@ -487,9 +487,9 @@ set protocols bgp group external import PREFER-CUSTOMER
 <a id="advanced-v06-configuration"></a>
 ## Advanced v0.6 Configuration
 
-The following hierarchies are part of the v0.6 management-plane model. Parser, serializer, validation, clone, conversion, diff, and candidate command replacement support are implemented. FRR VRRP application is implemented; southbound application for MPLS forwarding, L3VPN plumbing, and QoS enforcement is staged separately.
+The following hierarchies are part of the v0.6 management-plane model. Parser, serializer, validation, clone, conversion, diff, and candidate command replacement support are implemented. FRR VRRP application and VPP MPLS interface forwarding are implemented; southbound application for L3VPN plumbing and QoS enforcement is staged separately.
 
-Until the corresponding southbound apply path is implemented, commits that leave unsupported MPLS, routing-instance, or class-of-service configuration active fail validation instead of being silently accepted. Removing those unsupported stanzas is allowed. VRRP is applied by the FRR file backend and the default transactional FRR backend.
+Until the corresponding southbound apply path is implemented, commits that leave unsupported routing-instance or class-of-service configuration active fail validation instead of being silently accepted. Removing those unsupported stanzas is allowed. VRRP is applied by the FRR file backend and the default transactional FRR backend.
 
 ### Prometheus Service
 
@@ -558,6 +558,8 @@ set routing-instances BLUE interface ge-0/0/1
 ```
 
 Only `instance-type vrf` is accepted in v0.6. Route distinguishers use `<asn>:<number>`, and VRF targets use `target:<asn>:<number>`.
+
+`protocols mpls interface` enables MPLS forwarding on the corresponding managed VPP interface. Removing the stanza disables MPLS forwarding before the interface is removed from VPP. Routing-instance/L3VPN southbound plumbing is still protected by the v0.6 safety gate.
 
 ### Class of Service
 
