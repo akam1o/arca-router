@@ -28,6 +28,7 @@ Focus: expand the hardened unified daemon into higher-level router features.
 - **QoS / Traffic Engineering**
   - Management-plane config model for forwarding classes, traffic-control profiles, and interface bindings
   - VPP class-of-service profile binding for managed interfaces
+  - VPP RX/TX queue placement telemetry for managed interfaces
   - Queue scheduler and policer enforcement
   - Operational counters for queues and schedulers
 - **Observability services**

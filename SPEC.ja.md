@@ -498,7 +498,7 @@ set protocols bgp group external import PREFER-CUSTOMER
 <a id="advanced-v06-configuration"></a>
 ## Advanced v0.6 Configuration
 
-以下の hierarchy は v0.6 の management-plane model です。parser、serializer、validation、clone、conversion、diff、candidate command replacement は実装済みです。FRR VRRP 適用、VPP MPLS interface forwarding、VPP routing-instance table plumbing、FRR L3VPN import/export 制御、VPP class-of-service profile binding、NETCONF live interface state は実装済みで、queue scheduler/policer enforcement と operational QoS counters は段階的に実装します。
+以下の hierarchy は v0.6 の management-plane model です。parser、serializer、validation、clone、conversion、diff、candidate command replacement は実装済みです。FRR VRRP 適用、VPP MPLS interface forwarding、VPP routing-instance table plumbing、FRR L3VPN import/export 制御、VPP class-of-service profile binding、NETCONF live interface state、VPP queue placement telemetry は実装済みで、queue scheduler/policer enforcement と operational QoS counters は段階的に実装します。
 
 Class-of-service interface binding は、managed VPP interface に output traffic-control profile intent として適用されます。VRRP と L3VPN control-plane configuration は FRR file backend と標準の transactional FRR backend の両方で適用されます。
 
@@ -616,7 +616,7 @@ set security netconf ssh port 830
 
 NETCONF XML の get-config/edit-config は、v0.6 management-plane model の `system services`、`chassis cluster`、`protocols mpls`、`protocols vrrp`、`routing-instances`、`class-of-service`、および非機密の `security netconf` / `security rate-limit` 設定に対応します。Security user の secret は NETCONF XML 応答には意図的に出力しません。
 
-NETCONF `<get>` は config 由来の system/routing state に加えて、arca-routerd が VPP state を取得できる場合は managed interface の admin/oper status、physical address、counter（`rx-packets`、`tx-packets`、`rx-bytes`、`tx-bytes`、`rx-errors`、`tx-errors`、`drops`）を返します。live collection に失敗した場合、interface output は設定済み address と unknown operational status にフォールバックします。
+NETCONF `<get>` は config 由来の system/routing state に加えて、arca-routerd が VPP state を取得できる場合は managed interface の admin/oper status、physical address、counter（`rx-packets`、`tx-packets`、`rx-bytes`、`tx-bytes`、`rx-errors`、`tx-errors`、`drops`）、VPP RX/TX queue placement を返します。live collection に失敗した場合、interface output は設定済み address と unknown operational status にフォールバックします。
 
 server hello は arca-router YANG module capability として `urn:arca:router:config:1.0?module=arca-router&revision=2025-12-27` を広告します。
 
