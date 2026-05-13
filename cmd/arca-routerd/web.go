@@ -477,7 +477,7 @@ var webIndexTemplate = template.Must(template.New("web-index").Parse(`<!doctype 
       </article>
       <article class="panel span-2">
         <h2>Commit history</h2>
-        <div class="rows">
+        <div id="commit-history" class="rows">
           {{range .History}}
           <div class="row"><span class="history-message">{{.Message}}</span><strong>{{.ShortCommitID}}</strong></div>
           {{else}}
@@ -511,6 +511,7 @@ var webIndexTemplate = template.Must(template.New("web-index").Parse(`<!doctype 
       const commitButton = document.getElementById("commit-config");
       const result = document.getElementById("config-result");
       const diff = document.getElementById("config-diff");
+      const history = document.getElementById("commit-history");
       if (!editor || !message || !validateButton || !commitButton || !result || !diff) {
         return;
       }
@@ -553,6 +554,46 @@ var webIndexTemplate = template.Must(template.New("web-index").Parse(`<!doctype 
           editor.value = data.config_text;
         }
       };
+      const renderHistory = (entries) => {
+        if (!history) {
+          return;
+        }
+        history.replaceChildren();
+        if (!Array.isArray(entries) || entries.length === 0) {
+          const row = document.createElement("div");
+          row.className = "row";
+          const label = document.createElement("span");
+          label.textContent = "No commits";
+          const value = document.createElement("strong");
+          value.textContent = "0";
+          row.append(label, value);
+          history.append(row);
+          return;
+        }
+        for (const entry of entries) {
+          const row = document.createElement("div");
+          row.className = "row";
+          const messageText = typeof entry.message === "string" && entry.message.trim() ? entry.message : "(no message)";
+          const messageNode = document.createElement("span");
+          messageNode.className = "history-message";
+          messageNode.textContent = messageText;
+          const idNode = document.createElement("strong");
+          idNode.textContent = entry.short_commit_id || entry.commit_id || "";
+          row.append(messageNode, idNode);
+          history.append(row);
+        }
+      };
+      const refreshHistory = async () => {
+        if (!history) {
+          return;
+        }
+        const response = await fetch("/api/config/history?limit=5", { credentials: "same-origin" });
+        if (!response.ok) {
+          return;
+        }
+        const data = await response.json();
+        renderHistory(data.entries);
+      };
 
       validateButton.addEventListener("click", async () => {
         setBusy(true);
@@ -582,6 +623,7 @@ var webIndexTemplate = template.Must(template.New("web-index").Parse(`<!doctype 
             message: message.value,
           });
           await refreshConfig();
+          await refreshHistory();
           setResult("Committed version " + data.version, "ok");
         } catch (err) {
           setResult(err.message, "warn");
