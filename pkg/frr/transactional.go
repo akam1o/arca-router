@@ -139,8 +139,9 @@ func BuildMgmtOperations(cfg *Config) ([]MgmtOperation, error) {
 	var ops []MgmtOperation
 	ops = append(ops,
 		deleteOp(staticProtocolBase()),
-		deleteOp(bgpProtocolBase()),
+		deleteOp(bgpProtocolDeleteBase()),
 		deleteOp(ospfProtocolBase()),
+		deleteOp("/frr-vrf:lib"),
 		deleteOp("/frr-filter:lib"),
 		deleteOp("/frr-route-map:lib"),
 		deleteOp(vrrpConfigBase()),
@@ -150,6 +151,7 @@ func BuildMgmtOperations(cfg *Config) ([]MgmtOperation, error) {
 	ops = append(ops, buildOSPFOps(cfg.OSPF)...)
 	ops = append(ops, buildPrefixListOps(cfg.PrefixLists)...)
 	ops = append(ops, buildRouteMapOps(cfg.RouteMaps)...)
+	ops = append(ops, buildVRFOps(cfg.VRFs)...)
 	vrrpOps, err := buildVRRPOps(cfg.VRRP)
 	if err != nil {
 		return nil, err
@@ -415,6 +417,71 @@ func buildVRRPOps(cfg *VRRPConfig) ([]MgmtOperation, error) {
 
 const defaultVRFName = "default"
 
+func buildVRFOps(vrfs []VRFConfig) []MgmtOperation {
+	if len(vrfs) == 0 {
+		return nil
+	}
+	sorted := append([]VRFConfig(nil), vrfs...)
+	sort.Slice(sorted, func(i, j int) bool { return sorted[i].Name < sorted[j].Name })
+
+	var ops []MgmtOperation
+	for _, vrf := range sorted {
+		if vrf.Name == "" {
+			continue
+		}
+		vrfBase := "/frr-vrf:lib/vrf" + keyPred("name", vrf.Name)
+		ops = append(ops, setOp(vrfBase+"/name", vrf.Name))
+		if !vrfHasVPNConfig(vrf) {
+			continue
+		}
+		base := bgpProtocolBaseForVRF(vrf.Name)
+		ops = append(ops, protocolCreateOpsForVRF(base, "frr-bgp:bgp", "bgp", vrf.Name)...)
+		ops = append(ops, setOp(base+"/frr-bgp:bgp/global/local-as", strconv.FormatUint(uint64(vrf.ASN), 10)))
+		ops = append(ops, buildVRFAFIOps(base, "frr-routing:ipv4-unicast", "ipv4-unicast", vrf)...)
+		ops = append(ops, buildVRFAFIOps(base, "frr-routing:ipv6-unicast", "ipv6-unicast", vrf)...)
+	}
+	return ops
+}
+
+func buildVRFAFIOps(base, afiName, afiContainer string, vrf VRFConfig) []MgmtOperation {
+	afiBase := base + "/frr-bgp:bgp/global/afi-safis/afi-safi" + keyPred("afi-safi-name", afiName)
+	vpnBase := afiBase + "/" + afiContainer + "/vpn-config"
+	ops := []MgmtOperation{
+		setOp(afiBase+"/afi-safi-name", afiName),
+		setOp(afiBase+"/enabled", "true"),
+	}
+	if len(vrf.ExportTargets) > 0 {
+		ops = append(ops,
+			setOp(vpnBase+"/rd", vrf.RouteDistinguisher),
+			setOp(vpnBase+"/export-vpn", "true"),
+			setOp(vpnBase+"/label-auto", "true"),
+		)
+		for _, target := range vrf.ExportTargets {
+			ops = append(ops, setOp(vpnBase+"/export-rt-list", routeTargetYANGValue(target)))
+		}
+	}
+	if len(vrf.ImportTargets) > 0 {
+		ops = append(ops, setOp(vpnBase+"/import-vpn", "true"))
+		for _, target := range vrf.ImportTargets {
+			ops = append(ops, setOp(vpnBase+"/import-rt-list", routeTargetYANGValue(target)))
+		}
+	}
+	if vrf.ImportRouteMap != "" {
+		ops = append(ops, setOp(vpnBase+"/rmap-import", vrf.ImportRouteMap))
+	}
+	if vrf.ExportRouteMap != "" {
+		ops = append(ops, setOp(vpnBase+"/rmap-export", vrf.ExportRouteMap))
+	}
+	return ops
+}
+
+func routeTargetYANGValue(target string) string {
+	if strings.HasPrefix(target, "target:") {
+		return target
+	}
+	return "target:" + target
+}
+
 func staticProtocolBase() string {
 	return protocolBase("frr-staticd:staticd", "staticd")
 }
@@ -423,20 +490,37 @@ func bgpProtocolBase() string {
 	return protocolBase("frr-bgp:bgp", "bgp")
 }
 
+func bgpProtocolBaseForVRF(vrf string) string {
+	return protocolBaseForVRF("frr-bgp:bgp", "bgp", vrf)
+}
+
+func bgpProtocolDeleteBase() string {
+	return "/frr-routing:routing/control-plane-protocols/control-plane-protocol" +
+		keyPred("type", "frr-bgp:bgp")
+}
+
 func ospfProtocolBase() string {
 	return protocolBase("frr-ospfd:ospf", "ospf")
 }
 
 func protocolBase(protocolType, name string) string {
+	return protocolBaseForVRF(protocolType, name, defaultVRFName)
+}
+
+func protocolBaseForVRF(protocolType, name, vrf string) string {
 	return "/frr-routing:routing/control-plane-protocols/control-plane-protocol" +
-		keyPred("type", protocolType) + keyPred("name", name) + keyPred("vrf", defaultVRFName)
+		keyPred("type", protocolType) + keyPred("name", name) + keyPred("vrf", vrf)
 }
 
 func protocolCreateOps(base, protocolType, name string) []MgmtOperation {
+	return protocolCreateOpsForVRF(base, protocolType, name, defaultVRFName)
+}
+
+func protocolCreateOpsForVRF(base, protocolType, name, vrf string) []MgmtOperation {
 	return []MgmtOperation{
 		setOp(base+"/type", protocolType),
 		setOp(base+"/name", name),
-		setOp(base+"/vrf", defaultVRFName),
+		setOp(base+"/vrf", vrf),
 	}
 }
 
