@@ -491,6 +491,8 @@ The following hierarchies are part of the v0.6 management-plane model. Parser, s
 
 Until the corresponding southbound apply path is implemented, commits that leave unsupported routing-instance or class-of-service configuration active fail validation instead of being silently accepted. Removing those unsupported stanzas is allowed. VRRP is applied by the FRR file backend and the default transactional FRR backend.
 
+MPLS, VRRP, OSPF, routing-instance, and class-of-service interface references must point to interfaces defined under `interfaces`. Unknown interface references fail validation before southbound apply.
+
 ### Prometheus Service
 
 ```
@@ -540,7 +542,7 @@ When `chassis cluster` is enabled with `sync etcd endpoint` values, the daemon m
 
 When `--datastore-backend=etcd` is active, arca-routerd polls the etcd running configuration revision. If another chassis commits a newer running configuration, the daemon reloads the latest snapshot from etcd and applies it through the same engine and southbound plugins used by local commits. The sync loop only reacts to changes in the etcd `running/current` key revision, so a local commit that has updated the engine but has not yet persisted its new running revision is not overwritten by an older snapshot.
 
-VRRP group IDs must be numeric and between `1` and `255`. VRRP priority must be between `1` and `254` when configured; omit it for default behavior.
+VRRP group IDs must be numeric and between `1` and `255`. VRRP priority must be between `1` and `254` when configured; omit it for default behavior. The configured VRRP interface must exist under `interfaces`.
 
 Before applying FRR VRRP configuration, arca-routerd prepares the Linux state expected by FRR `vrrpd`: arca-owned macvlan interfaces named `arv4-<id>-<hash>` or `arv6-<id>-<hash>` are created on the LCP interface, assigned the RFC VRRP virtual MAC, configured with the virtual address as `/32` or `/128`, and brought up. The prepared interface names are persisted in `/var/lib/arca-router/vrrp-interfaces.json` so stale arca-owned macvlan interfaces can be removed after daemon restart. This requires `CAP_NET_ADMIN`, which is included in the packaged systemd unit.
 
@@ -559,7 +561,7 @@ set routing-instances BLUE interface ge-0/0/1
 
 Only `instance-type vrf` is accepted in v0.6. Route distinguishers use `<asn>:<number>`, and VRF targets use `target:<asn>:<number>`.
 
-`protocols mpls interface` enables MPLS forwarding on the corresponding managed VPP interface. Removing the stanza disables MPLS forwarding before the interface is removed from VPP. Routing-instance/L3VPN southbound plumbing is still protected by the v0.6 safety gate.
+`protocols mpls interface` enables MPLS forwarding on the corresponding managed VPP interface. Removing the stanza disables MPLS forwarding before the interface is removed from VPP. MPLS and routing-instance interface references must resolve to configured interfaces. Routing-instance/L3VPN southbound plumbing is still protected by the v0.6 safety gate.
 
 ### Class of Service
 
@@ -570,7 +572,7 @@ set class-of-service traffic-control-profile WAN scheduler-map WAN-SCHED
 set class-of-service interfaces ge-0/0/0 output-traffic-control-profile WAN
 ```
 
-Forwarding class queues must be between `0` and `7`. Interface bindings must reference an existing traffic-control profile.
+Forwarding class queues must be between `0` and `7`. Interface bindings must reference an existing traffic-control profile and a configured interface.
 
 ---
 

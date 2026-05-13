@@ -5,6 +5,7 @@
 - **Advanced configuration model**: parser, serializer, validation, clone, conversion, and diff support for clustering, MPLS, VRRP, routing instances, class of service, and Web UI service settings
 - **Candidate command replacement**: v0.6 scalar settings replace existing candidate lines instead of accumulating duplicates
 - **Set-command idempotence**: repeated list-style set commands for interfaces, MPLS, routing-instances, cluster endpoints, and prefix-lists are deduplicated during parsing
+- **Interface reference validation**: MPLS, VRRP, routing-instance, OSPF, and class-of-service interface references must point to configured interfaces before commit
 - **etcd datastore selection**: `arca-routerd` and embedded NETCONF can use the existing etcd-backed candidate/running datastore for clustered deployments
 - **Cluster sync guard**: `chassis cluster sync etcd` commits must match the daemon's active etcd datastore backend and endpoints
 - **Cluster observability**: `/api/status`, the Web UI, and Prometheus metrics expose datastore and cluster sync state
