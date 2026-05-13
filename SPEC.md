@@ -952,11 +952,14 @@ Endpoints:
 - `GET /`
 - `GET /api/config`
 - `GET /api/status`
+- `POST /api/config/validate`
+- `POST /api/config/commit`
 
 `/api/status` includes build metadata, uptime, running config version, datastore backend, cluster sync state, and NETCONF counters.
 `/api/config` returns the running configuration as set-command text with the running config version. The dashboard renders the same running configuration as a read-only preview.
 
 When password-backed `security users` exist in running configuration, the Web UI requires HTTP Basic authentication. The built-in `read-only`, `operator`, and `admin` roles are authorized for the read-only dashboard and API endpoints.
+Configuration writes require `operator` or `admin`. `/api/config/validate` accepts `{ "config_text": "set ..." }` and returns validation status plus diff text. `/api/config/commit` accepts `{ "config_text": "set ...", "message": "..." }` and commits through the same internal gRPC candidate workflow used by the CLI.
 
 ### SNMP
 

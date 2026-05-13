@@ -64,6 +64,8 @@ Endpoints:
 - `GET /`
 - `GET /api/config`
 - `GET /api/status`
+- `POST /api/config/validate`
+- `POST /api/config/commit`
 
 The Web UI is intended for trusted management networks. It exposes the same daemon status used by the metrics endpoint, including datastore backend and cluster sync alignment. It also exposes the running configuration in set-command format through `/api/config` and the dashboard preview.
 
@@ -72,6 +74,20 @@ When the running configuration contains password-backed `security users`, the We
 ```bash
 curl -u monitor:ReadOnly789 http://127.0.0.1:8080/api/status
 curl -u monitor:ReadOnly789 http://127.0.0.1:8080/api/config
+```
+
+Configuration writes require an `operator` or `admin` role. The Web API uses the same internal gRPC candidate workflow as the CLI: create a session, acquire the candidate lock, edit candidate text, validate, diff, and commit.
+
+```bash
+curl -u operator:OpPass456 \
+  -H 'Content-Type: application/json' \
+  -d '{"config_text":"set system host-name edge02"}' \
+  http://127.0.0.1:8080/api/config/validate
+
+curl -u operator:OpPass456 \
+  -H 'Content-Type: application/json' \
+  -d '{"config_text":"set system host-name edge02","message":"web update"}' \
+  http://127.0.0.1:8080/api/config/commit
 ```
 
 ## SNMP

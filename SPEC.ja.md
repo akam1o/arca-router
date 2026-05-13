@@ -970,11 +970,14 @@ Endpoints:
 - `GET /`
 - `GET /api/config`
 - `GET /api/status`
+- `POST /api/config/validate`
+- `POST /api/config/commit`
 
 `/api/status` は build metadata、uptime、running config version、datastore backend、cluster sync state、NETCONF counters を返します。
 `/api/config` は running configuration を set-command text と running config version として返します。dashboard でも同じ running configuration を read-only preview として表示します。
 
 running configuration に password 付きの `security users` が存在する場合、Web UI は HTTP Basic authentication を要求します。built-in の `read-only`、`operator`、`admin` role は read-only dashboard と API endpoints へのアクセスを許可されます。
+configuration write には `operator` または `admin` が必要です。`/api/config/validate` は `{ "config_text": "set ..." }` を受け取り、validation status と diff text を返します。`/api/config/commit` は `{ "config_text": "set ...", "message": "..." }` を受け取り、CLI と同じ internal gRPC candidate workflow で commit します。
 
 ### SNMP
 

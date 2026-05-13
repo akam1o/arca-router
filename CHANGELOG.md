@@ -13,6 +13,7 @@
 - **Read-only Web UI**: optional `--web-listen` HTTP dashboard and `/api/status` JSON endpoint backed by daemon observability state
 - **Read-only config API**: Web UI exposes `/api/config` and a running configuration preview in set-command format
 - **Web UI authentication**: password-backed `security users` enable HTTP Basic authentication and read-only RBAC for the dashboard APIs
+- **Web configuration API**: `/api/config/validate` and `/api/config/commit` use the internal gRPC candidate workflow for authenticated operator/admin configuration changes
 - **Web UI configuration**: `system services web-ui` can enable the dashboard without a command-line flag
 
 ## v0.5.x – Production Hardening (previous)

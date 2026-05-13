@@ -31,8 +31,8 @@ Focus: expand the hardened unified daemon into higher-level router features.
 - **Web UI**
   - Read-only browser-based monitoring and JSON status endpoint
   - Read-only running configuration API and dashboard preview
+  - gRPC-backed validate and commit API integration
   - Browser-based configuration
-  - gRPC-backed API integration
   - Authentication and RBAC integration
 
 ## v0.7.x - Core Router Parity
