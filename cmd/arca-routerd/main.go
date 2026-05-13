@@ -40,6 +40,8 @@ var (
 	BuildDate = "unknown"
 )
 
+const defaultNETCONFListen = ":830"
+
 const (
 	secureGRPCSocketDirPerms  os.FileMode = 0750
 	secureGRPCSocketFilePerms os.FileMode = 0660
@@ -148,8 +150,8 @@ func parseFlags() *daemonFlags {
 		"Use mock VPP client for testing")
 
 	// NETCONF flags
-	flag.StringVar(&f.netconfListen, "netconf-listen", ":830",
-		"NETCONF/SSH listen address")
+	flag.StringVar(&f.netconfListen, "netconf-listen", "",
+		"NETCONF/SSH listen address (overrides security netconf ssh port; default: :830)")
 	flag.StringVar(&f.hostKeyPath, "host-key", "/var/lib/arca-router/ssh_host_ed25519_key",
 		"Path to SSH host key")
 	flag.StringVar(&f.userDBPath, "user-db", "/var/lib/arca-router/users.db",
@@ -373,7 +375,7 @@ func run(ctx context.Context, f *daemonFlags, log *logger.Logger) error {
 	// --- Step 8: Start NETCONF server ---
 	var netconfServer *netconf.SSHServer
 	if f.hostKeyPath != "" {
-		netconfServer, err = startNETCONFServer(ctx, f, datastoreConfig, eng, log)
+		netconfServer, err = startNETCONFServer(ctx, f, datastoreConfig, eng, log, effectiveNETCONFListen(f.netconfListen, eng.RunningSnapshot()))
 		if err != nil {
 			return err
 		}
@@ -467,10 +469,28 @@ func run(ctx context.Context, f *daemonFlags, log *logger.Logger) error {
 	return nil
 }
 
-func startNETCONFServer(ctx context.Context, f *daemonFlags, datastoreConfig *datastore.Config, eng *engine.Engine, log *logger.Logger) (*netconf.SSHServer, error) {
-	log.Info("Starting NETCONF server", slog.String("listen", f.netconfListen))
+func effectiveNETCONFListen(flagValue string, snapshot *model.ConfigSnapshot) string {
+	if listen := strings.TrimSpace(flagValue); listen != "" {
+		return listen
+	}
+	if port := snapshotNETCONFPort(snapshot); port != 0 {
+		return fmt.Sprintf(":%d", port)
+	}
+	return defaultNETCONFListen
+}
+
+func snapshotNETCONFPort(snapshot *model.ConfigSnapshot) int {
+	if snapshot == nil || snapshot.Config == nil || snapshot.Config.Security == nil ||
+		snapshot.Config.Security.NETCONF == nil || snapshot.Config.Security.NETCONF.SSH == nil {
+		return 0
+	}
+	return snapshot.Config.Security.NETCONF.SSH.Port
+}
+
+func startNETCONFServer(ctx context.Context, f *daemonFlags, datastoreConfig *datastore.Config, eng *engine.Engine, log *logger.Logger, listenAddr string) (*netconf.SSHServer, error) {
+	log.Info("Starting NETCONF server", slog.String("listen", listenAddr))
 	ncConfig := netconf.DefaultSSHConfig()
-	ncConfig.ListenAddr = f.netconfListen
+	ncConfig.ListenAddr = listenAddr
 	ncConfig.HostKeyPath = f.hostKeyPath
 	ncConfig.UserDBPath = f.userDBPath
 	ncConfig.DatastorePath = f.datastorePath

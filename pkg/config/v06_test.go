@@ -18,6 +18,7 @@ func TestV06AdvancedConfigRoundTrip(t *testing.T) {
 		"set system services snmp listen-address 127.0.0.1",
 		"set system services snmp port 1161",
 		"set system services snmp community public",
+		"set security netconf ssh port 1830",
 		"set chassis cluster enabled true",
 		"set chassis cluster node node0 address 192.0.2.10",
 		"set chassis cluster node node0 priority 120",
@@ -63,6 +64,9 @@ func TestV06AdvancedConfigRoundTrip(t *testing.T) {
 	}
 	if got := cfg.System.Services.SNMP.Port; got != 1161 {
 		t.Fatalf("snmp port = %d", got)
+	}
+	if got := cfg.Security.NETCONF.SSH.Port; got != 1830 {
+		t.Fatalf("netconf ssh port = %d", got)
 	}
 
 	text := ToSetCommands(cfg)

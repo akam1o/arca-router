@@ -733,6 +733,9 @@ func replacementPrefixes(path []string) []string {
 			return prefix(4)
 		}
 	}
+	if len(path) >= 4 && path[0] == "security" && path[1] == "netconf" && path[2] == "ssh" && path[3] == "port" {
+		return prefix(4)
+	}
 	if len(path) >= 4 && path[0] == "chassis" && path[1] == "cluster" {
 		switch path[2] {
 		case "enabled":
