@@ -35,6 +35,7 @@ type Server struct {
 	log            *slog.Logger
 	server         *googlegrpc.Server
 	stateCollector interfaceStateCollector
+	lcpSource      lcpReconciliationSource
 }
 
 var (
@@ -46,6 +47,10 @@ var (
 
 type interfaceStateCollector interface {
 	CollectState(ctx context.Context) (map[string]*model.InterfaceState, error)
+}
+
+type lcpReconciliationSource interface {
+	LCPReconciliationInfo() LCPReconciliationInfo
 }
 
 // NewServer creates a new gRPC server.
@@ -78,6 +83,11 @@ func (s *Server) Stop() {
 // SetInterfaceStateCollector installs a managed interface state source.
 func (s *Server) SetInterfaceStateCollector(collector interfaceStateCollector) {
 	s.stateCollector = collector
+}
+
+// SetLCPReconciliationSource installs a VPP LCP reconciliation state source.
+func (s *Server) SetLCPReconciliationSource(source lcpReconciliationSource) {
+	s.lcpSource = source
 }
 
 // --- ConfigService implementation ---
@@ -641,6 +651,15 @@ func (s *Server) GetOSPFNeighborsText(ctx context.Context) (string, error) {
 // GetVRRPText returns FRR VRRP output.
 func (s *Server) GetVRRPText(ctx context.Context) (string, error) {
 	return runOperationalVtyshCommand(ctx, "show vrrp")
+}
+
+// GetLCPReconciliation returns cached VPP LCP reconciliation state.
+func (s *Server) GetLCPReconciliation(ctx context.Context) (*LCPReconciliationInfo, error) {
+	if s.lcpSource == nil {
+		return nil, unsupportedOperationalStateError("VPP LCP reconciliation state")
+	}
+	info := s.lcpSource.LCPReconciliationInfo()
+	return &info, nil
 }
 
 // GetSystemInfo returns basic system information.

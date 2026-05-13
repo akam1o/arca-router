@@ -263,6 +263,22 @@ func (a *stateServiceAdapter) GetVRRPText(ctx context.Context, _ *apiv1.GetVRRPT
 	return &apiv1.GetVRRPTextResponse{Output: output}, nil
 }
 
+func (a *stateServiceAdapter) GetLCPReconciliation(ctx context.Context, _ *apiv1.GetLCPReconciliationRequest) (*apiv1.GetLCPReconciliationResponse, error) {
+	info, err := a.server.GetLCPReconciliation(ctx)
+	if err != nil {
+		return nil, err
+	}
+	resp := &apiv1.GetLCPReconciliationResponse{
+		PairCount:       uint32(info.PairCount),
+		Inconsistencies: append([]string(nil), info.Inconsistencies...),
+		LastError:       info.LastError,
+	}
+	if !info.LastRun.IsZero() {
+		resp.LastRun = info.LastRun.UTC().Format(time.RFC3339Nano)
+	}
+	return resp, nil
+}
+
 func (a *stateServiceAdapter) GetSystemInfo(ctx context.Context, _ *apiv1.GetSystemInfoRequest) (*apiv1.GetSystemInfoResponse, error) {
 	info, err := a.server.GetSystemInfo(ctx)
 	if err != nil {

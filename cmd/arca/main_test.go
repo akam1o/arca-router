@@ -5,6 +5,7 @@ import (
 	"errors"
 	"strings"
 	"testing"
+	"time"
 
 	grpcclient "github.com/akam1o/arca-router/internal/northbound/grpc"
 )
@@ -19,6 +20,7 @@ type fakeInteractiveClient struct {
 	bgpNeighborText string
 	ospfText        string
 	vrrpText        string
+	lcpInfo         *grpcclient.LCPReconciliationInfo
 
 	acquireLockCalls int
 	discardCalls     int
@@ -127,6 +129,13 @@ func (f *fakeInteractiveClient) GetVRRPText(ctx context.Context) (string, error)
 		return "vrrp output\n", nil
 	}
 	return f.vrrpText, nil
+}
+
+func (f *fakeInteractiveClient) GetLCPReconciliation(ctx context.Context) (*grpcclient.LCPReconciliationInfo, error) {
+	if f.lcpInfo != nil {
+		return f.lcpInfo, nil
+	}
+	return &grpcclient.LCPReconciliationInfo{}, nil
 }
 
 func TestCmdConfigureRequiresSession(t *testing.T) {
@@ -361,6 +370,24 @@ func TestCmdShowVRRPReturnsOutput(t *testing.T) {
 	}
 }
 
+func TestCmdShowLCPReturnsOutput(t *testing.T) {
+	ctx := context.Background()
+	client := &fakeInteractiveClient{lcpInfo: &grpcclient.LCPReconciliationInfo{
+		PairCount: 1,
+	}}
+	sh := &interactiveShell{
+		client:    client,
+		hostname:  "router",
+		mode:      modeOperational,
+		sessionID: "session-1",
+	}
+
+	err := sh.cmdShow(ctx, []string{"lcp"})
+	if err != nil {
+		t.Fatalf("cmdShow(lcp) error = %v", err)
+	}
+}
+
 func TestInterfaceQueueSummary(t *testing.T) {
 	got := interfaceQueueSummary(grpcclient.InterfaceInfo{
 		RxQueues: []grpcclient.InterfaceRxQueueInfo{
@@ -400,6 +427,36 @@ func TestOneShotShowVRRPReturnsSuccess(t *testing.T) {
 	code := oneShotShow(context.Background(), client, []string{"vrrp"}, &cliFlags{})
 	if code != ExitSuccess {
 		t.Fatalf("oneShotShow(vrrp) = %d, want %d", code, ExitSuccess)
+	}
+}
+
+func TestOneShotShowLCPReturnsSuccess(t *testing.T) {
+	client := &fakeInteractiveClient{}
+	code := oneShotShow(context.Background(), client, []string{"lcp"}, &cliFlags{})
+	if code != ExitSuccess {
+		t.Fatalf("oneShotShow(lcp) = %d, want %d", code, ExitSuccess)
+	}
+}
+
+func TestLCPReconciliationState(t *testing.T) {
+	now := time.Now()
+	tests := []struct {
+		name string
+		info *grpcclient.LCPReconciliationInfo
+		want string
+	}{
+		{name: "nil", info: nil, want: "unknown"},
+		{name: "never", info: &grpcclient.LCPReconciliationInfo{}, want: "unknown"},
+		{name: "error", info: &grpcclient.LCPReconciliationInfo{LastRun: now, LastError: "failed"}, want: "check failed"},
+		{name: "mismatch", info: &grpcclient.LCPReconciliationInfo{LastRun: now, Inconsistencies: []string{"missing pair"}}, want: "mismatch"},
+		{name: "consistent", info: &grpcclient.LCPReconciliationInfo{LastRun: now}, want: "consistent"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := lcpReconciliationState(tt.info); got != tt.want {
+				t.Fatalf("lcpReconciliationState() = %q, want %q", got, tt.want)
+			}
+		})
 	}
 }
 

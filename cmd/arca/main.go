@@ -12,6 +12,7 @@ import (
 	"os/signal"
 	"strconv"
 	"strings"
+	"time"
 
 	grpcclient "github.com/akam1o/arca-router/internal/northbound/grpc"
 	configcli "github.com/akam1o/arca-router/pkg/cli"
@@ -255,6 +256,15 @@ func oneShotShow(ctx context.Context, client showClient, args []string, f *cliFl
 		printCommandOutput(output)
 		return ExitSuccess
 
+	case "lcp":
+		info, err := client.GetLCPReconciliation(ctx)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+			return ExitOperationError
+		}
+		printLCPReconciliation(info)
+		return ExitSuccess
+
 	case "route":
 		protoFilter, err := routeProtocolFilter(args[1:])
 		if err != nil {
@@ -312,6 +322,7 @@ type showClient interface {
 	GetBGPNeighborText(context.Context, string) (string, error)
 	GetOSPFNeighborsText(context.Context) (string, error)
 	GetVRRPText(context.Context) (string, error)
+	GetLCPReconciliation(context.Context) (*grpcclient.LCPReconciliationInfo, error)
 }
 
 type cliMode int
@@ -662,6 +673,17 @@ func (sh *interactiveShell) cmdShow(ctx context.Context, args []string) error {
 		printCommandOutput(output)
 		return nil
 
+	case "lcp":
+		if sh.mode == modeConfiguration {
+			return fmt.Errorf("'show lcp' not available in configuration mode")
+		}
+		info, err := sh.client.GetLCPReconciliation(ctx)
+		if err != nil {
+			return err
+		}
+		printLCPReconciliation(info)
+		return nil
+
 	case "route":
 		if sh.mode == modeConfiguration {
 			return fmt.Errorf("'show route' not available in configuration mode")
@@ -880,6 +902,7 @@ func (sh *interactiveShell) showHelp() {
 		fmt.Println("  show bgp neighbor <ip>        Show BGP neighbor details")
 		fmt.Println("  show ospf neighbor            Show OSPF neighbors")
 		fmt.Println("  show vrrp                     Show VRRP status")
+		fmt.Println("  show lcp                      Show VPP LCP reconciliation status")
 		fmt.Println("  show route                    Show routing table")
 		fmt.Println("  show route protocol <proto>   Show routes by protocol")
 		fmt.Println("  exit, quit                    Exit interactive CLI")
@@ -963,6 +986,46 @@ func formatQueueThreads(threads []uint32) string {
 		parts = append(parts, strconv.FormatUint(uint64(thread), 10))
 	}
 	return "[" + strings.Join(parts, ",") + "]"
+}
+
+func printLCPReconciliation(info *grpcclient.LCPReconciliationInfo) {
+	if info == nil {
+		fmt.Println("No LCP reconciliation status found")
+		return
+	}
+	fmt.Printf("%-18s %s\n", "State", lcpReconciliationState(info))
+	fmt.Printf("%-18s %s\n", "Last check", formatOptionalTime(info.LastRun))
+	fmt.Printf("%-18s %d\n", "Pairs", info.PairCount)
+	if info.LastError != "" {
+		fmt.Printf("%-18s %s\n", "Last error", info.LastError)
+	}
+	if len(info.Inconsistencies) == 0 {
+		return
+	}
+	fmt.Println("Inconsistencies")
+	for _, issue := range info.Inconsistencies {
+		fmt.Printf("  - %s\n", issue)
+	}
+}
+
+func lcpReconciliationState(info *grpcclient.LCPReconciliationInfo) string {
+	if info == nil || info.LastRun.IsZero() {
+		return "unknown"
+	}
+	if info.LastError != "" {
+		return "check failed"
+	}
+	if len(info.Inconsistencies) > 0 {
+		return "mismatch"
+	}
+	return "consistent"
+}
+
+func formatOptionalTime(ts time.Time) string {
+	if ts.IsZero() {
+		return "never"
+	}
+	return ts.Local().Format(time.RFC3339)
 }
 
 func printCommandOutput(output string) {

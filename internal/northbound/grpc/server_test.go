@@ -51,6 +51,14 @@ func (f *fakeInterfaceStateCollector) CollectState(ctx context.Context) (map[str
 	return f.states, nil
 }
 
+type fakeLCPReconciliationSource struct {
+	info LCPReconciliationInfo
+}
+
+func (f fakeLCPReconciliationSource) LCPReconciliationInfo() LCPReconciliationInfo {
+	return f.info
+}
+
 func (f *fakeStore) GetLatestSnapshot(ctx context.Context) (*model.ConfigSnapshot, error) {
 	return f.saved, nil
 }
@@ -354,6 +362,24 @@ func TestGetInterfacesUsesManagedStateCollector(t *testing.T) {
 	}
 	if len(got.TxQueues) != 1 || got.TxQueues[0].QueueID != 1 || !got.TxQueues[0].Shared || len(got.TxQueues[0].Threads) != 2 || got.TxQueues[0].Threads[1] != 3 {
 		t.Fatalf("GetInterfaces()[0] TX queues = %#v, want collector queue placement", got.TxQueues)
+	}
+}
+
+func TestGetLCPReconciliationUsesSource(t *testing.T) {
+	srv := NewServer(engine.NewEngine(nil, testLogger()), &fakeStore{}, testLogger())
+	lastRun := time.Unix(1700000000, 0).UTC()
+	srv.SetLCPReconciliationSource(fakeLCPReconciliationSource{info: LCPReconciliationInfo{
+		LastRun:         lastRun,
+		PairCount:       2,
+		Inconsistencies: []string{"missing pair"},
+	}})
+
+	info, err := srv.GetLCPReconciliation(context.Background())
+	if err != nil {
+		t.Fatalf("GetLCPReconciliation() error = %v", err)
+	}
+	if info.LastRun != lastRun || info.PairCount != 2 || len(info.Inconsistencies) != 1 || info.Inconsistencies[0] != "missing pair" {
+		t.Fatalf("GetLCPReconciliation() = %#v, want source status", info)
 	}
 }
 

@@ -304,6 +304,28 @@ func (c *Client) GetVRRPText(ctx context.Context) (string, error) {
 	return resp.GetOutput(), nil
 }
 
+// GetLCPReconciliation returns cached VPP LCP reconciliation state.
+func (c *Client) GetLCPReconciliation(ctx context.Context) (*LCPReconciliationInfo, error) {
+	ctx, cancel := contextWithDefaultTimeout(ctx)
+	defer cancel()
+	resp, err := c.state.GetLCPReconciliation(ctx, &apiv1.GetLCPReconciliationRequest{})
+	if err != nil {
+		return nil, err
+	}
+	info := &LCPReconciliationInfo{
+		PairCount:       int(resp.GetPairCount()),
+		Inconsistencies: append([]string(nil), resp.GetInconsistencies()...),
+		LastError:       resp.GetLastError(),
+	}
+	if rawLastRun := resp.GetLastRun(); rawLastRun != "" {
+		parsed, err := time.Parse(time.RFC3339Nano, rawLastRun)
+		if err == nil {
+			info.LastRun = parsed
+		}
+	}
+	return info, nil
+}
+
 // GetSystemInfo returns system information.
 func (c *Client) GetSystemInfo(ctx context.Context) (*SystemInfo, error) {
 	ctx, cancel := contextWithDefaultTimeout(ctx)
@@ -464,6 +486,14 @@ type InterfaceTxQueueInfo struct {
 	QueueID uint32
 	Shared  bool
 	Threads []uint32
+}
+
+// LCPReconciliationInfo represents VPP LCP cache reconciliation state.
+type LCPReconciliationInfo struct {
+	LastRun         time.Time
+	PairCount       int
+	Inconsistencies []string
+	LastError       string
 }
 
 // RouteInfo represents a routing table entry.
