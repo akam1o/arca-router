@@ -21,8 +21,8 @@ Focus: expand the hardened unified daemon into higher-level router features.
   - Post-failover FRR/VPP convergence validation through Web UI, Prometheus, and SNMP
 - **MPLS / VPN**
   - Management-plane config model for MPLS interfaces and L3VPN service stanzas
-  - Commit-time safety gates for unsupported MPLS and routing-instance southbound apply
-  - MPLS label switching through VPP
+  - Commit-time safety gates for unsupported routing-instance southbound apply
+  - MPLS interface label forwarding through VPP
   - L3VPN integration across FRR and VPP
   - Junos-like config model for VPN services
 - **QoS / Traffic Engineering**
