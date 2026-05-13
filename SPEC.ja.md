@@ -502,7 +502,7 @@ set protocols bgp group external import PREFER-CUSTOMER
 
 Class-of-service interface binding は、managed VPP interface に output traffic-control profile intent として適用されます。VRRP と L3VPN control-plane configuration は FRR file backend と標準の transactional FRR backend の両方で適用されます。
 
-MPLS、VRRP、OSPF、routing-instance、class-of-service の interface 参照は `interfaces` 配下に定義された interface を指す必要があります。未知の interface 参照は southbound apply 前の validation で失敗します。
+MPLS、VRRP、OSPF、routing-instance、class-of-service の interface 参照は `interfaces` 配下に定義された interface を指す必要があります。未知の interface 参照は southbound apply 前の validation で失敗します。Routing-instance の VPN import/export 設定は、必要な import/export target、route distinguisher、または `routing-options autonomous-system` が不足している場合も apply 前の validation で失敗します。
 
 ### Prometheus service
 
@@ -560,6 +560,7 @@ FRR VRRP 設定を適用する前に、arca-routerd は FRR `vrrpd` が前提に
 ```
 set protocols mpls interface ge-0/0/0
 
+set routing-options autonomous-system 65000
 set routing-instances BLUE instance-type vrf
 set routing-instances BLUE route-distinguisher 65000:100
 set routing-instances BLUE vrf-target target:65000:100
