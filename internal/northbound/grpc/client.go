@@ -343,6 +343,7 @@ func interfaceInfosFromProto(interfaces []*apiv1.InterfaceState) []InterfaceInfo
 			Speed:       iface.GetSpeed(),
 			MTU:         iface.GetMtu(),
 			MAC:         iface.GetMac(),
+			QoSProfile:  iface.GetQosProfile(),
 			RxPackets:   iface.GetRxPackets(),
 			TxPackets:   iface.GetTxPackets(),
 			RxBytes:     iface.GetRxBytes(),
@@ -429,6 +430,7 @@ type InterfaceInfo struct {
 	Speed       uint64
 	MTU         uint32
 	MAC         string
+	QoSProfile  string
 	RxPackets   uint64
 	TxPackets   uint64
 	RxBytes     uint64

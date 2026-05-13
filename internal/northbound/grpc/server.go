@@ -460,6 +460,7 @@ func (s *Server) GetInterfaces(ctx context.Context, nameFilter string) ([]Interf
 			AdminStatus: upDown(iface.AdminUp),
 			OperStatus:  upDown(iface.LinkUp),
 			MAC:         iface.MAC.String(),
+			QoSProfile:  iface.QoSProfile,
 		}
 		if counters, ok := countersByIndex[iface.SwIfIndex]; ok {
 			info.RxPackets = counters.RxPackets

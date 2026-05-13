@@ -354,6 +354,15 @@ func TestInterfaceQueueSummary(t *testing.T) {
 	}
 }
 
+func TestInterfaceQoSProfile(t *testing.T) {
+	if got := interfaceQoSProfile(grpcclient.InterfaceInfo{QoSProfile: "WAN"}); got != "WAN" {
+		t.Fatalf("interfaceQoSProfile() = %q, want WAN", got)
+	}
+	if got := interfaceQoSProfile(grpcclient.InterfaceInfo{}); got != "-" {
+		t.Fatalf("interfaceQoSProfile(empty) = %q, want -", got)
+	}
+}
+
 func TestOneShotShowOSPFNeighborReturnsSuccess(t *testing.T) {
 	client := &fakeInteractiveClient{}
 	code := oneShotShow(context.Background(), client, []string{"ospf", "neighbor"}, &cliFlags{})

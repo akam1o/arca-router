@@ -70,6 +70,7 @@ func TestBuildOperationalDataUsesLiveInterfaceState(t *testing.T) {
 			AdminStatus: "up",
 			OperStatus:  "down",
 			MAC:         "02:00:00:00:00:01",
+			QoSProfile:  "WAN",
 			Counters: &InterfaceOperationalCounters{
 				RxPackets: 10,
 				TxPackets: 20,
@@ -98,6 +99,7 @@ func TestBuildOperationalDataUsesLiveInterfaceState(t *testing.T) {
 		"<admin-status>up</admin-status>",
 		"<oper-status>down</oper-status>",
 		"<phys-address>02:00:00:00:00:01</phys-address>",
+		"<qos-profile>WAN</qos-profile>",
 		"<rx-packets>10</rx-packets>",
 		"<tx-packets>20</tx-packets>",
 		"<rx-bytes>1000</rx-bytes>",

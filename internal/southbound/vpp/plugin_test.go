@@ -233,6 +233,9 @@ func TestCollectStateIncludesInterfaceCounters(t *testing.T) {
 			{QueueID: 0, Shared: true, Threads: []uint32{0, 2}},
 		},
 	})
+	if err := client.SetQoSProfile(ctx, idx, pkgvpp.QoSProfile{Name: "WAN"}); err != nil {
+		t.Fatalf("SetQoSProfile() error = %v", err)
+	}
 
 	state, err := plugin.CollectState(ctx)
 	if err != nil {
@@ -243,6 +246,9 @@ func TestCollectStateIncludesInterfaceCounters(t *testing.T) {
 	}
 	if got := *state["ge-0/0/0"].Counters; got.RxPackets != 10 || got.TxPackets != 20 || got.RxBytes != 1000 || got.TxBytes != 2000 || got.RxErrors != 1 || got.TxErrors != 2 || got.Drops != 3 {
 		t.Fatalf("CollectState() counters = %#v, want VPP counters", got)
+	}
+	if got := state["ge-0/0/0"].QoSProfile; got != "WAN" {
+		t.Fatalf("CollectState() QoSProfile = %q, want WAN", got)
 	}
 	if state["ge-0/0/0"].Queues == nil {
 		t.Fatal("CollectState() did not include queue placements")

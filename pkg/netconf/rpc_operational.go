@@ -213,6 +213,11 @@ func writeInterfaceStateXML(buf *bytes.Buffer, interfaces map[string]*config.Int
 				return err
 			}
 		}
+		if state != nil && state.QoSProfile != "" {
+			if err := writeEscapedElement(buf, "      ", "qos-profile", state.QoSProfile); err != nil {
+				return err
+			}
+		}
 		if state != nil && state.Counters != nil {
 			writeInterfaceCountersXML(buf, state.Counters)
 		}

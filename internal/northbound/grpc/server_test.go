@@ -213,6 +213,9 @@ func TestOperationalStateEndpointsReadVPPAndFRR(t *testing.T) {
 			{QueueID: 0, Shared: true, Threads: []uint32{0, 2}},
 		},
 	})
+	if err := vppClient.SetQoSProfile(ctx, iface.SwIfIndex, pkgvpp.QoSProfile{Name: "WAN"}); err != nil {
+		t.Fatalf("mock VPP SetQoSProfile() error = %v", err)
+	}
 	if err := vppClient.Close(); err != nil {
 		t.Fatalf("mock VPP Close() error = %v", err)
 	}
@@ -233,6 +236,9 @@ func TestOperationalStateEndpointsReadVPPAndFRR(t *testing.T) {
 	}
 	if ifaces[0].RxPackets != 100 || ifaces[0].TxPackets != 200 || ifaces[0].RxBytes != 1000 || ifaces[0].TxBytes != 2000 || ifaces[0].RxErrors != 1 || ifaces[0].TxErrors != 2 {
 		t.Fatalf("GetInterfaces()[0] counters = %#v, want VPP counters", ifaces[0])
+	}
+	if ifaces[0].QoSProfile != "WAN" {
+		t.Fatalf("GetInterfaces()[0] QoSProfile = %q, want WAN", ifaces[0].QoSProfile)
 	}
 	if len(ifaces[0].RxQueues) != 1 || ifaces[0].RxQueues[0].WorkerID != 1 || ifaces[0].RxQueues[0].Mode != "polling" {
 		t.Fatalf("GetInterfaces()[0] RX queues = %#v, want VPP queue placement", ifaces[0].RxQueues)

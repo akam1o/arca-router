@@ -341,8 +341,9 @@ func (p *VPPPlugin) CollectState(ctx context.Context) (map[string]*model.Interfa
 		}
 
 		state := &model.InterfaceState{
-			Name: junosName,
-			MAC:  iface.MAC.String(),
+			Name:       junosName,
+			MAC:        iface.MAC.String(),
+			QoSProfile: iface.QoSProfile,
 		}
 		if iface.AdminUp {
 			state.AdminStatus = "up"
