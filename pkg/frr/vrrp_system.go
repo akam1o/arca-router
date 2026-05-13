@@ -274,7 +274,7 @@ func arcaVRRPInterfaceNames(output string) []string {
 }
 
 func isArcaVRRPInterfaceName(name string) bool {
-	if !(strings.HasPrefix(name, "arv4-") || strings.HasPrefix(name, "arv6-")) {
+	if !strings.HasPrefix(name, "arv4-") && !strings.HasPrefix(name, "arv6-") {
 		return false
 	}
 	parts := strings.Split(name, "-")
