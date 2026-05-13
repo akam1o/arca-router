@@ -13,7 +13,7 @@ arca-router is a software router with Junos-compatible configuration syntax, pow
 
 ## Status
 
-arca-router is currently in the v0.5.x production hardening phase. This README
+arca-router is currently in the v0.6.x advanced features phase. This README
 describes the current unified daemon path; detailed release history is kept in
 [`CHANGELOG.md`](CHANGELOG.md), and future scope is tracked in
 [`ROADMAP.md`](ROADMAP.md).
@@ -24,8 +24,9 @@ Current capabilities:
 - Junos-like `set` configuration syntax with a thin `arca` client
 - Struct-first configuration model with diff-based 2-phase commit and rollback
 - FRR transactional apply through the management candidate datastore
-- Prometheus, health, SNMP, and Grafana observability assets
-- SQLite-backed candidate/running datastore with commit history
+- v0.6 config foundations for clustering, VRRP, MPLS, routing instances, and QoS
+- Prometheus, health, SNMP, Web UI, Grafana observability, and authenticated Web config workflow
+- SQLite or etcd-backed candidate/running datastore with commit history and etcd config sync
 
 ---
 
@@ -45,14 +46,15 @@ Current capabilities:
 
 - **FRR 8.0+**: Free Range Routing for dynamic routing protocols
   - See [FRR Setup Guide (Debian)](docs/frr-setup-debian.md) and [FRR Setup Guide (RHEL9)](docs/frr-setup-rhel9.md)
+  - Enable `bgpd`, `ospfd`, `zebra`, `staticd`, `mgmtd`, and `vrrpd` in `/etc/frr/daemons`
 
 - **Go 1.25+**: For building from source (optional)
 
 ---
 
-## Quick Start (v0.5.x)
+## Quick Start (v0.6.x)
 
-Requires VPP 24.10+ and FRR 8.0+.
+Requires VPP 24.10+ and FRR 8.0+ with the standard arca-router FRR daemon set enabled.
 
 ### 1. Install Prerequisites
 
@@ -209,7 +211,7 @@ set security rate-limit per-ip 10
 set security rate-limit per-user 20
 ```
 
-> NETCONF is built into `arca-routerd`; no separate NETCONF daemon is needed. The daemon listens on port 830 when security/netconf is configured.
+> NETCONF is built into `arca-routerd`; no separate NETCONF daemon is needed. When `--netconf-listen` is omitted, the daemon listens on the configured NETCONF port and falls back to `:830`.
 
 **Test NETCONF connection**:
 
@@ -227,11 +229,15 @@ sudo journalctl -u arca-routerd -n 50
 # View running configuration with arca
 arca show configuration
 
-# Check operational state through arca-routerd
+# Check managed interface state, counters, QoS profile, and queue placement through arca-routerd
 arca show interfaces
 arca show route
 arca show bgp summary
 arca show ospf neighbor
+arca show vrrp
+arca show lcp
+arca show ha
+arca show class-of-service
 
 # Check VPP/FRR directly (optional)
 sudo vppctl show interface
@@ -329,11 +335,11 @@ arca-router/
 │   └── v1/
 │       └── router.proto        # gRPC API definitions (Config/Session/State)
 ├── cmd/
-│   ├── arca-routerd/           # Unified daemon (v0.5.x)
+│   ├── arca-routerd/           # Unified daemon
 │   │   └── main.go             # Single process: VPP + FRR + NETCONF + gRPC
-│   └── arca/                   # Thin gRPC CLI client (v0.5.x)
+│   └── arca/                   # Thin gRPC CLI client
 │       └── main.go             # Communicates via Unix socket
-├── internal/                   # v0.5.x core packages
+├── internal/                   # v0.6.x core packages
 │   ├── model/                  # Canonical config & state types
 │   │   ├── config.go           # RouterConfig (struct-first model)
 │   │   ├── state.go            # OperationalState

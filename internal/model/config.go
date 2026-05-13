@@ -14,17 +14,78 @@ import (
 // This is the primary data structure — not text. Diff, merge, and validate
 // operations work directly on this struct.
 type RouterConfig struct {
-	System     *SystemConfig               `json:"system,omitempty"`
-	Interfaces map[string]*InterfaceConfig `json:"interfaces,omitempty"`
-	Protocols  *ProtocolsConfig            `json:"protocols,omitempty"`
-	Routing    *RoutingConfig              `json:"routing-options,omitempty"`
-	Policy     *PolicyConfig               `json:"policy-options,omitempty"`
-	Security   *SecurityConfig             `json:"security,omitempty"`
+	System           *SystemConfig               `json:"system,omitempty"`
+	Chassis          *ChassisConfig              `json:"chassis,omitempty"`
+	Interfaces       map[string]*InterfaceConfig `json:"interfaces,omitempty"`
+	Protocols        *ProtocolsConfig            `json:"protocols,omitempty"`
+	Routing          *RoutingConfig              `json:"routing-options,omitempty"`
+	RoutingInstances map[string]*RoutingInstance `json:"routing-instances,omitempty"`
+	Policy           *PolicyConfig               `json:"policy-options,omitempty"`
+	ClassOfService   *ClassOfServiceConfig       `json:"class-of-service,omitempty"`
+	Security         *SecurityConfig             `json:"security,omitempty"`
 }
 
 // SystemConfig holds system-level settings.
 type SystemConfig struct {
-	HostName string `json:"host-name,omitempty"`
+	HostName string                `json:"host-name,omitempty"`
+	Services *SystemServicesConfig `json:"services,omitempty"`
+}
+
+// SystemServicesConfig holds system service settings.
+type SystemServicesConfig struct {
+	WebUI      *WebUIConfig      `json:"web-ui,omitempty"`
+	Prometheus *PrometheusConfig `json:"prometheus,omitempty"`
+	SNMP       *SNMPConfig       `json:"snmp,omitempty"`
+}
+
+// WebUIConfig holds browser UI service settings.
+type WebUIConfig struct {
+	Enabled       bool   `json:"enabled,omitempty"`
+	ListenAddress string `json:"listen-address,omitempty"`
+	Port          int    `json:"port,omitempty"`
+}
+
+// PrometheusConfig holds Prometheus metrics service settings.
+type PrometheusConfig struct {
+	Enabled       bool   `json:"enabled,omitempty"`
+	ListenAddress string `json:"listen-address,omitempty"`
+	Port          int    `json:"port,omitempty"`
+}
+
+// SNMPConfig holds read-only SNMP service settings.
+type SNMPConfig struct {
+	Enabled       bool   `json:"enabled,omitempty"`
+	ListenAddress string `json:"listen-address,omitempty"`
+	Port          int    `json:"port,omitempty"`
+	Community     string `json:"community,omitempty"`
+}
+
+// ChassisConfig holds chassis-level settings.
+type ChassisConfig struct {
+	Cluster *ClusterConfig `json:"cluster,omitempty"`
+}
+
+// ClusterConfig holds multi-chassis clustering settings.
+type ClusterConfig struct {
+	Enabled bool                    `json:"enabled,omitempty"`
+	Nodes   map[string]*ClusterNode `json:"nodes,omitempty"`
+	Sync    *ClusterSyncConfig      `json:"sync,omitempty"`
+}
+
+// ClusterNode represents one HA cluster node.
+type ClusterNode struct {
+	Address  string `json:"address,omitempty"`
+	Priority int    `json:"priority,omitempty"`
+}
+
+// ClusterSyncConfig holds cluster synchronization settings.
+type ClusterSyncConfig struct {
+	Etcd *EtcdSyncConfig `json:"etcd,omitempty"`
+}
+
+// EtcdSyncConfig holds etcd-backed synchronization settings.
+type EtcdSyncConfig struct {
+	Endpoints []string `json:"endpoints,omitempty"`
 }
 
 // InterfaceConfig represents a physical or logical interface.
@@ -47,6 +108,26 @@ type AddressFamily struct {
 type ProtocolsConfig struct {
 	BGP  *BGPConfig  `json:"bgp,omitempty"`
 	OSPF *OSPFConfig `json:"ospf,omitempty"`
+	MPLS *MPLSConfig `json:"mpls,omitempty"`
+	VRRP *VRRPConfig `json:"vrrp,omitempty"`
+}
+
+// MPLSConfig represents MPLS forwarding configuration.
+type MPLSConfig struct {
+	Interfaces []string `json:"interfaces,omitempty"`
+}
+
+// VRRPConfig represents VRRP groups.
+type VRRPConfig struct {
+	Groups map[string]*VRRPGroup `json:"groups,omitempty"`
+}
+
+// VRRPGroup represents a VRRP group.
+type VRRPGroup struct {
+	Interface      string `json:"interface,omitempty"`
+	VirtualAddress string `json:"virtual-address,omitempty"`
+	Priority       int    `json:"priority,omitempty"`
+	Preempt        bool   `json:"preempt,omitempty"`
 }
 
 // BGPConfig represents BGP configuration.
@@ -99,6 +180,18 @@ type StaticRoute struct {
 	Prefix   string `json:"prefix"`
 	NextHop  string `json:"next-hop"`
 	Distance int    `json:"distance,omitempty"`
+}
+
+// RoutingInstance represents a routing instance, initially focused on VRF/L3VPN.
+type RoutingInstance struct {
+	InstanceType       string   `json:"instance-type,omitempty"`
+	RouteDistinguisher string   `json:"route-distinguisher,omitempty"`
+	VRFTarget          string   `json:"vrf-target,omitempty"`
+	VRFTargetImport    []string `json:"vrf-target-import,omitempty"`
+	VRFTargetExport    []string `json:"vrf-target-export,omitempty"`
+	VRFImport          []string `json:"vrf-import,omitempty"`
+	VRFExport          []string `json:"vrf-export,omitempty"`
+	Interfaces         []string `json:"interfaces,omitempty"`
 }
 
 // PolicyConfig holds policy-options.
@@ -167,6 +260,29 @@ type UserConfig struct {
 type RateLimitConfig struct {
 	PerIP   int `json:"per-ip,omitempty"`
 	PerUser int `json:"per-user,omitempty"`
+}
+
+// ClassOfServiceConfig represents QoS and traffic-control configuration.
+type ClassOfServiceConfig struct {
+	ForwardingClasses      map[string]*ForwardingClass       `json:"forwarding-classes,omitempty"`
+	TrafficControlProfiles map[string]*TrafficControlProfile `json:"traffic-control-profiles,omitempty"`
+	Interfaces             map[string]*CoSInterface          `json:"interfaces,omitempty"`
+}
+
+// ForwardingClass maps a forwarding class to a queue.
+type ForwardingClass struct {
+	Queue int `json:"queue"`
+}
+
+// TrafficControlProfile represents shaping and scheduler settings.
+type TrafficControlProfile struct {
+	ShapingRate  uint64 `json:"shaping-rate,omitempty"`
+	SchedulerMap string `json:"scheduler-map,omitempty"`
+}
+
+// CoSInterface binds QoS profiles to interfaces.
+type CoSInterface struct {
+	OutputTrafficControlProfile string `json:"output-traffic-control-profile,omitempty"`
 }
 
 // NewRouterConfig creates an empty RouterConfig with initialized maps.

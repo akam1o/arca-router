@@ -7,8 +7,10 @@ func (c *RouterConfig) Clone() *RouterConfig {
 	}
 	clone := &RouterConfig{}
 	if c.System != nil {
-		system := *c.System
-		clone.System = &system
+		clone.System = c.System.Clone()
+	}
+	if c.Chassis != nil {
+		clone.Chassis = c.Chassis.Clone()
 	}
 	if c.Interfaces != nil {
 		clone.Interfaces = make(map[string]*InterfaceConfig, len(c.Interfaces))
@@ -22,13 +24,120 @@ func (c *RouterConfig) Clone() *RouterConfig {
 	if c.Routing != nil {
 		clone.Routing = c.Routing.Clone()
 	}
+	if c.RoutingInstances != nil {
+		clone.RoutingInstances = make(map[string]*RoutingInstance, len(c.RoutingInstances))
+		for name, instance := range c.RoutingInstances {
+			clone.RoutingInstances[name] = instance.Clone()
+		}
+	}
 	if c.Policy != nil {
 		clone.Policy = c.Policy.Clone()
+	}
+	if c.ClassOfService != nil {
+		clone.ClassOfService = c.ClassOfService.Clone()
 	}
 	if c.Security != nil {
 		clone.Security = c.Security.Clone()
 	}
 	return clone
+}
+
+// Clone returns a deep copy of the system configuration.
+func (c *SystemConfig) Clone() *SystemConfig {
+	if c == nil {
+		return nil
+	}
+	clone := &SystemConfig{HostName: c.HostName}
+	if c.Services != nil {
+		clone.Services = c.Services.Clone()
+	}
+	return clone
+}
+
+// Clone returns a deep copy of the system services configuration.
+func (c *SystemServicesConfig) Clone() *SystemServicesConfig {
+	if c == nil {
+		return nil
+	}
+	return &SystemServicesConfig{
+		WebUI:      c.WebUI.Clone(),
+		Prometheus: c.Prometheus.Clone(),
+		SNMP:       c.SNMP.Clone(),
+	}
+}
+
+// Clone returns a deep copy of the Web UI configuration.
+func (c *WebUIConfig) Clone() *WebUIConfig {
+	if c == nil {
+		return nil
+	}
+	clone := *c
+	return &clone
+}
+
+// Clone returns a deep copy of the Prometheus configuration.
+func (c *PrometheusConfig) Clone() *PrometheusConfig {
+	if c == nil {
+		return nil
+	}
+	clone := *c
+	return &clone
+}
+
+// Clone returns a deep copy of the SNMP configuration.
+func (c *SNMPConfig) Clone() *SNMPConfig {
+	if c == nil {
+		return nil
+	}
+	clone := *c
+	return &clone
+}
+
+// Clone returns a deep copy of the chassis configuration.
+func (c *ChassisConfig) Clone() *ChassisConfig {
+	if c == nil {
+		return nil
+	}
+	return &ChassisConfig{Cluster: c.Cluster.Clone()}
+}
+
+// Clone returns a deep copy of the cluster configuration.
+func (c *ClusterConfig) Clone() *ClusterConfig {
+	if c == nil {
+		return nil
+	}
+	clone := &ClusterConfig{Enabled: c.Enabled}
+	if c.Nodes != nil {
+		clone.Nodes = make(map[string]*ClusterNode, len(c.Nodes))
+		for name, node := range c.Nodes {
+			if node == nil {
+				clone.Nodes[name] = nil
+				continue
+			}
+			n := *node
+			clone.Nodes[name] = &n
+		}
+	}
+	if c.Sync != nil {
+		clone.Sync = c.Sync.Clone()
+	}
+	return clone
+}
+
+// Clone returns a deep copy of the cluster sync configuration.
+func (c *ClusterSyncConfig) Clone() *ClusterSyncConfig {
+	if c == nil {
+		return nil
+	}
+	return &ClusterSyncConfig{Etcd: c.Etcd.Clone()}
+}
+
+// Clone returns a deep copy of the etcd sync configuration.
+func (c *EtcdSyncConfig) Clone() *EtcdSyncConfig {
+	if c == nil {
+		return nil
+	}
+	return &EtcdSyncConfig{Endpoints: append([]string(nil), c.Endpoints...)}
 }
 
 // Clone returns a deep copy of the snapshot.
@@ -87,7 +196,37 @@ func (c *ProtocolsConfig) Clone() *ProtocolsConfig {
 	return &ProtocolsConfig{
 		BGP:  c.BGP.Clone(),
 		OSPF: c.OSPF.Clone(),
+		MPLS: c.MPLS.Clone(),
+		VRRP: c.VRRP.Clone(),
 	}
+}
+
+// Clone returns a deep copy of the MPLS configuration.
+func (c *MPLSConfig) Clone() *MPLSConfig {
+	if c == nil {
+		return nil
+	}
+	return &MPLSConfig{Interfaces: append([]string(nil), c.Interfaces...)}
+}
+
+// Clone returns a deep copy of the VRRP configuration.
+func (c *VRRPConfig) Clone() *VRRPConfig {
+	if c == nil {
+		return nil
+	}
+	clone := &VRRPConfig{}
+	if c.Groups != nil {
+		clone.Groups = make(map[string]*VRRPGroup, len(c.Groups))
+		for name, group := range c.Groups {
+			if group == nil {
+				clone.Groups[name] = nil
+				continue
+			}
+			g := *group
+			clone.Groups[name] = &g
+		}
+	}
+	return clone
 }
 
 // Clone returns a deep copy of the BGP configuration.
@@ -188,6 +327,20 @@ func (c *RoutingConfig) Clone() *RoutingConfig {
 		}
 	}
 	return clone
+}
+
+// Clone returns a deep copy of the routing instance.
+func (c *RoutingInstance) Clone() *RoutingInstance {
+	if c == nil {
+		return nil
+	}
+	clone := *c
+	clone.Interfaces = append([]string(nil), c.Interfaces...)
+	clone.VRFTargetImport = append([]string(nil), c.VRFTargetImport...)
+	clone.VRFTargetExport = append([]string(nil), c.VRFTargetExport...)
+	clone.VRFImport = append([]string(nil), c.VRFImport...)
+	clone.VRFExport = append([]string(nil), c.VRFExport...)
+	return &clone
 }
 
 // Clone returns a deep copy of the policy configuration.
@@ -312,6 +465,48 @@ func (c *NETCONFSecurityConfig) Clone() *NETCONFSecurityConfig {
 	if c.SSH != nil {
 		ssh := *c.SSH
 		clone.SSH = &ssh
+	}
+	return clone
+}
+
+// Clone returns a deep copy of the class-of-service configuration.
+func (c *ClassOfServiceConfig) Clone() *ClassOfServiceConfig {
+	if c == nil {
+		return nil
+	}
+	clone := &ClassOfServiceConfig{}
+	if c.ForwardingClasses != nil {
+		clone.ForwardingClasses = make(map[string]*ForwardingClass, len(c.ForwardingClasses))
+		for name, fc := range c.ForwardingClasses {
+			if fc == nil {
+				clone.ForwardingClasses[name] = nil
+				continue
+			}
+			f := *fc
+			clone.ForwardingClasses[name] = &f
+		}
+	}
+	if c.TrafficControlProfiles != nil {
+		clone.TrafficControlProfiles = make(map[string]*TrafficControlProfile, len(c.TrafficControlProfiles))
+		for name, profile := range c.TrafficControlProfiles {
+			if profile == nil {
+				clone.TrafficControlProfiles[name] = nil
+				continue
+			}
+			p := *profile
+			clone.TrafficControlProfiles[name] = &p
+		}
+	}
+	if c.Interfaces != nil {
+		clone.Interfaces = make(map[string]*CoSInterface, len(c.Interfaces))
+		for name, iface := range c.Interfaces {
+			if iface == nil {
+				clone.Interfaces[name] = nil
+				continue
+			}
+			i := *iface
+			clone.Interfaces[name] = &i
+		}
 	}
 	return clone
 }

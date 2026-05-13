@@ -101,19 +101,28 @@ func runVtyshMgmtCommand(ctx context.Context, command string) ([]byte, error) {
 
 // TransactionalApplier applies FRR config through the management candidate datastore.
 type TransactionalApplier struct {
-	client MgmtClient
+	client       MgmtClient
+	vrrpPreparer VRRPSystemPreparer
 }
 
 // NewTransactionalApplier creates a transactional FRR applier.
 func NewTransactionalApplier(client MgmtClient) *TransactionalApplier {
+	return NewTransactionalApplierWithPreparer(client, NewIPVRRPSystemPreparer(nil))
+}
+
+// NewTransactionalApplierWithPreparer creates an applier with a custom VRRP preparer.
+func NewTransactionalApplierWithPreparer(client MgmtClient, preparer VRRPSystemPreparer) *TransactionalApplier {
 	if client == nil {
 		client = NewVtyshMgmtClient()
 	}
-	return &TransactionalApplier{client: client}
+	return &TransactionalApplier{client: client, vrrpPreparer: preparer}
 }
 
 // ApplyConfig converts the generated FRR config into management operations and commits them.
 func (a *TransactionalApplier) ApplyConfig(ctx context.Context, _ string, cfg *Config) error {
+	if err := prepareVRRPSystem(ctx, a.vrrpPreparer, cfg); err != nil {
+		return err
+	}
 	ops, err := BuildMgmtOperations(cfg)
 	if err != nil {
 		return err
@@ -130,16 +139,24 @@ func BuildMgmtOperations(cfg *Config) ([]MgmtOperation, error) {
 	var ops []MgmtOperation
 	ops = append(ops,
 		deleteOp(staticProtocolBase()),
-		deleteOp(bgpProtocolBase()),
+		deleteOp(bgpProtocolDeleteBase()),
 		deleteOp(ospfProtocolBase()),
+		deleteOp("/frr-vrf:lib"),
 		deleteOp("/frr-filter:lib"),
 		deleteOp("/frr-route-map:lib"),
+		deleteOp(vrrpConfigBase()),
 	)
 	ops = append(ops, buildStaticRouteOps(cfg.StaticRoutes)...)
 	ops = append(ops, buildBGPOps(cfg.BGP)...)
 	ops = append(ops, buildOSPFOps(cfg.OSPF)...)
 	ops = append(ops, buildPrefixListOps(cfg.PrefixLists)...)
 	ops = append(ops, buildRouteMapOps(cfg.RouteMaps)...)
+	ops = append(ops, buildVRFOps(cfg.VRFs)...)
+	vrrpOps, err := buildVRRPOps(cfg.VRRP)
+	if err != nil {
+		return nil, err
+	}
+	ops = append(ops, vrrpOps...)
 	return ops, nil
 }
 
@@ -345,7 +362,125 @@ func buildRouteMapOps(routeMaps []RouteMap) []MgmtOperation {
 	return ops
 }
 
+func buildVRRPOps(cfg *VRRPConfig) ([]MgmtOperation, error) {
+	if cfg == nil || len(cfg.Groups) == 0 {
+		return nil, nil
+	}
+	groups := append([]VRRPGroup(nil), cfg.Groups...)
+	sort.Slice(groups, func(i, j int) bool {
+		if groups[i].Interface != groups[j].Interface {
+			return groups[i].Interface < groups[j].Interface
+		}
+		return groups[i].ID < groups[j].ID
+	})
+
+	var ops []MgmtOperation
+	createdInterfaces := make(map[string]bool)
+	for _, group := range groups {
+		if group.Interface == "" {
+			return nil, NewInvalidConfigError(fmt.Sprintf("VRRP group %d missing interface", group.ID))
+		}
+		if group.ID < 1 || group.ID > 255 {
+			return nil, NewInvalidConfigError(fmt.Sprintf("VRRP group id must be 1-255, got %d", group.ID))
+		}
+		virtualAddress := net.ParseIP(group.VirtualAddress)
+		if virtualAddress == nil {
+			return nil, NewInvalidConfigError(fmt.Sprintf("VRRP group %d has invalid virtual address %q", group.ID, group.VirtualAddress))
+		}
+		if group.Priority < 0 || group.Priority > 254 {
+			return nil, NewInvalidConfigError(fmt.Sprintf("VRRP group %d priority must be 1-254 when configured, got %d", group.ID, group.Priority))
+		}
+		if !createdInterfaces[group.Interface] {
+			ops = append(ops, setOp(interfaceBase(group.Interface)+"/name", group.Interface))
+			createdInterfaces[group.Interface] = true
+		}
+		id := strconv.Itoa(group.ID)
+		groupBase := vrrpGroupBase(group.Interface, id)
+		ops = append(ops,
+			setOp(groupBase+"/virtual-router-id", id),
+			setOp(groupBase+"/version", "3"),
+		)
+		if group.Priority != 0 {
+			ops = append(ops, setOp(groupBase+"/priority", strconv.Itoa(group.Priority)))
+		}
+		if group.Preempt {
+			ops = append(ops, setOp(groupBase+"/preempt", "true"))
+		}
+		addressFamily := "v4"
+		if virtualAddress.To4() == nil {
+			addressFamily = "v6"
+		}
+		ops = append(ops, setOp(groupBase+"/"+addressFamily+"/virtual-address", group.VirtualAddress))
+	}
+	return ops, nil
+}
+
 const defaultVRFName = "default"
+
+func buildVRFOps(vrfs []VRFConfig) []MgmtOperation {
+	if len(vrfs) == 0 {
+		return nil
+	}
+	sorted := append([]VRFConfig(nil), vrfs...)
+	sort.Slice(sorted, func(i, j int) bool { return sorted[i].Name < sorted[j].Name })
+
+	var ops []MgmtOperation
+	for _, vrf := range sorted {
+		if vrf.Name == "" {
+			continue
+		}
+		vrfBase := "/frr-vrf:lib/vrf" + keyPred("name", vrf.Name)
+		ops = append(ops, setOp(vrfBase+"/name", vrf.Name))
+		if !vrfHasVPNConfig(vrf) {
+			continue
+		}
+		base := bgpProtocolBaseForVRF(vrf.Name)
+		ops = append(ops, protocolCreateOpsForVRF(base, "frr-bgp:bgp", "bgp", vrf.Name)...)
+		ops = append(ops, setOp(base+"/frr-bgp:bgp/global/local-as", strconv.FormatUint(uint64(vrf.ASN), 10)))
+		ops = append(ops, buildVRFAFIOps(base, "frr-routing:ipv4-unicast", "ipv4-unicast", vrf)...)
+		ops = append(ops, buildVRFAFIOps(base, "frr-routing:ipv6-unicast", "ipv6-unicast", vrf)...)
+	}
+	return ops
+}
+
+func buildVRFAFIOps(base, afiName, afiContainer string, vrf VRFConfig) []MgmtOperation {
+	afiBase := base + "/frr-bgp:bgp/global/afi-safis/afi-safi" + keyPred("afi-safi-name", afiName)
+	vpnBase := afiBase + "/" + afiContainer + "/vpn-config"
+	ops := []MgmtOperation{
+		setOp(afiBase+"/afi-safi-name", afiName),
+		setOp(afiBase+"/enabled", "true"),
+	}
+	if len(vrf.ExportTargets) > 0 {
+		ops = append(ops,
+			setOp(vpnBase+"/rd", vrf.RouteDistinguisher),
+			setOp(vpnBase+"/export-vpn", "true"),
+			setOp(vpnBase+"/label-auto", "true"),
+		)
+		for _, target := range vrf.ExportTargets {
+			ops = append(ops, setOp(vpnBase+"/export-rt-list", routeTargetYANGValue(target)))
+		}
+	}
+	if len(vrf.ImportTargets) > 0 {
+		ops = append(ops, setOp(vpnBase+"/import-vpn", "true"))
+		for _, target := range vrf.ImportTargets {
+			ops = append(ops, setOp(vpnBase+"/import-rt-list", routeTargetYANGValue(target)))
+		}
+	}
+	if vrf.ImportRouteMap != "" {
+		ops = append(ops, setOp(vpnBase+"/rmap-import", vrf.ImportRouteMap))
+	}
+	if vrf.ExportRouteMap != "" {
+		ops = append(ops, setOp(vpnBase+"/rmap-export", vrf.ExportRouteMap))
+	}
+	return ops
+}
+
+func routeTargetYANGValue(target string) string {
+	if strings.HasPrefix(target, "target:") {
+		return target
+	}
+	return "target:" + target
+}
 
 func staticProtocolBase() string {
 	return protocolBase("frr-staticd:staticd", "staticd")
@@ -355,21 +490,50 @@ func bgpProtocolBase() string {
 	return protocolBase("frr-bgp:bgp", "bgp")
 }
 
+func bgpProtocolBaseForVRF(vrf string) string {
+	return protocolBaseForVRF("frr-bgp:bgp", "bgp", vrf)
+}
+
+func bgpProtocolDeleteBase() string {
+	return "/frr-routing:routing/control-plane-protocols/control-plane-protocol" +
+		keyPred("type", "frr-bgp:bgp")
+}
+
 func ospfProtocolBase() string {
 	return protocolBase("frr-ospfd:ospf", "ospf")
 }
 
 func protocolBase(protocolType, name string) string {
+	return protocolBaseForVRF(protocolType, name, defaultVRFName)
+}
+
+func protocolBaseForVRF(protocolType, name, vrf string) string {
 	return "/frr-routing:routing/control-plane-protocols/control-plane-protocol" +
-		keyPred("type", protocolType) + keyPred("name", name) + keyPred("vrf", defaultVRFName)
+		keyPred("type", protocolType) + keyPred("name", name) + keyPred("vrf", vrf)
 }
 
 func protocolCreateOps(base, protocolType, name string) []MgmtOperation {
+	return protocolCreateOpsForVRF(base, protocolType, name, defaultVRFName)
+}
+
+func protocolCreateOpsForVRF(base, protocolType, name, vrf string) []MgmtOperation {
 	return []MgmtOperation{
 		setOp(base+"/type", protocolType),
 		setOp(base+"/name", name),
-		setOp(base+"/vrf", defaultVRFName),
+		setOp(base+"/vrf", vrf),
 	}
+}
+
+func interfaceBase(name string) string {
+	return "/frr-interface:lib/interface" + keyPred("name", name)
+}
+
+func vrrpConfigBase() string {
+	return "/frr-interface:lib/interface/frr-vrrpd:vrrp"
+}
+
+func vrrpGroupBase(interfaceName, groupID string) string {
+	return interfaceBase(interfaceName) + "/frr-vrrpd:vrrp/vrrp-group" + keyPred("virtual-router-id", groupID)
 }
 
 func setOp(xpath, value string) MgmtOperation {

@@ -3,6 +3,7 @@ package frr
 import (
 	"fmt"
 	"net"
+	"strconv"
 	"strings"
 
 	"github.com/akam1o/arca-router/pkg/config"
@@ -52,6 +53,15 @@ func GenerateFRRConfig(cfg *config.Config) (*Config, error) {
 		frrConfig.OSPF = ospfConfig
 	}
 
+	// Convert VRRP configuration
+	if cfg.Protocols != nil && cfg.Protocols.VRRP != nil {
+		vrrpConfig, err := convertVRRPConfig(cfg.Protocols.VRRP, frrConfig.InterfaceMapping)
+		if err != nil {
+			return nil, NewGenerateError("failed to convert VRRP configuration", err)
+		}
+		frrConfig.VRRP = vrrpConfig
+	}
+
 	// Convert static routes
 	if cfg.RoutingOptions != nil && len(cfg.RoutingOptions.StaticRoutes) > 0 {
 		staticRoutes, err := convertStaticRoutes(cfg.RoutingOptions.StaticRoutes)
@@ -67,9 +77,25 @@ func GenerateFRRConfig(cfg *config.Config) (*Config, error) {
 		if err != nil {
 			return nil, NewGenerateError("failed to convert policy-options", err)
 		}
+		if len(cfg.RoutingInstances) > 0 {
+			vrfs, extraRouteMaps, err := convertVRFConfigWithPolicyChains(cfg, routeMaps)
+			if err != nil {
+				return nil, NewGenerateError("failed to convert routing-instance policy chains", err)
+			}
+			frrConfig.VRFs = vrfs
+			routeMaps = append(routeMaps, extraRouteMaps...)
+		}
 		frrConfig.PrefixLists = prefixLists
 		frrConfig.RouteMaps = routeMaps
 		frrConfig.ASPathAccessLists = asPathLists
+	}
+
+	if len(cfg.RoutingInstances) > 0 && frrConfig.VRFs == nil {
+		vrfs, err := convertVRFConfig(cfg, frrConfig.RouteMaps)
+		if err != nil {
+			return nil, NewGenerateError("failed to convert routing-instances", err)
+		}
+		frrConfig.VRFs = vrfs
 	}
 
 	return frrConfig, nil
@@ -155,6 +181,23 @@ func GenerateFRRConfigFile(frrConfig *Config) (string, error) {
 			return "", err
 		}
 		b.WriteString(ospfConfig)
+	}
+
+	// VRRP configuration
+	if frrConfig.VRRP != nil {
+		vrrpConfig, err := GenerateVRRPConfig(frrConfig.VRRP)
+		if err != nil {
+			return "", err
+		}
+		b.WriteString(vrrpConfig)
+	}
+
+	if len(frrConfig.VRFs) > 0 {
+		vrfConfig, err := GenerateVRFConfig(frrConfig.VRFs)
+		if err != nil {
+			return "", err
+		}
+		b.WriteString(vrfConfig)
 	}
 
 	// Footer
@@ -354,6 +397,38 @@ func convertOSPFConfig(cfg *config.Config, ifaceMapping map[string]string) (*OSP
 	}
 
 	return frrOSPF, nil
+}
+
+// convertVRRPConfig converts arca-router VRRP config to FRR VRRP config.
+func convertVRRPConfig(arcaVRRP *config.VRRPConfig, ifaceMapping map[string]string) (*VRRPConfig, error) {
+	if arcaVRRP == nil || len(arcaVRRP.Groups) == 0 {
+		return nil, nil
+	}
+	frrVRRP := &VRRPConfig{Groups: make([]VRRPGroup, 0, len(arcaVRRP.Groups))}
+	for name, group := range arcaVRRP.Groups {
+		if group == nil {
+			continue
+		}
+		id, err := strconv.Atoi(name)
+		if err != nil || id < 1 || id > 255 {
+			return nil, fmt.Errorf("VRRP group %q must be numeric 1-255", name)
+		}
+		linuxName, ok := ifaceMapping[group.Interface]
+		if !ok {
+			return nil, fmt.Errorf("VRRP group %s interface %s not found in interface mapping", name, group.Interface)
+		}
+		frrVRRP.Groups = append(frrVRRP.Groups, VRRPGroup{
+			ID:             id,
+			Interface:      linuxName,
+			VirtualAddress: group.VirtualAddress,
+			Priority:       group.Priority,
+			Preempt:        group.Preempt,
+		})
+	}
+	if len(frrVRRP.Groups) == 0 {
+		return nil, nil
+	}
+	return frrVRRP, nil
 }
 
 // convertStaticRoutes converts arca-router static routes to FRR format.

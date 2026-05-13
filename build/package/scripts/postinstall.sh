@@ -28,6 +28,7 @@ chmod 0750 /var/lib/arca-router || true
 chmod 0750 /var/log/arca-router || true
 
 # The default FRR apply backend is transactional and uses vtysh/mgmtd.
+# arca-router treats vrrpd as part of the standard appliance router daemon set.
 # Do not grant /etc/frr write access by default. The legacy file backend can be
 # enabled with --frr-apply-mode=file plus a local systemd/group permission override.
 
@@ -52,9 +53,12 @@ if command -v systemctl >/dev/null 2>&1; then
     fi
 fi
 
-# Check FRR mgmtd enablement for the default transactional backend.
+# Check required FRR daemon enablement.
 if [ -f /etc/frr/daemons ] && ! grep -q '^mgmtd=yes' /etc/frr/daemons; then
     echo "WARNING: FRR mgmtd is not enabled. Set mgmtd=yes in /etc/frr/daemons for the default transactional apply backend."
+fi
+if [ -f /etc/frr/daemons ] && ! grep -q '^vrrpd=yes' /etc/frr/daemons; then
+    echo "WARNING: FRR vrrpd is not enabled. Set vrrpd=yes in /etc/frr/daemons for standard HA/VRRP support."
 fi
 
 # Check VPP socket permissions (if VPP is running)
@@ -71,11 +75,11 @@ if [ "$1" = "1" ]; then
     # Initial installation
     echo ""
     echo "=========================================="
-    echo "ARCA Router v0.5 unified daemon has been installed."
+    echo "ARCA Router v0.6 unified daemon has been installed."
     echo ""
     echo "Prerequisites:"
     echo "- VPP 24.10+ with linux-cp plugin enabled"
-    echo "- FRR 8.0+ (bgpd, ospfd, zebra, staticd, mgmtd)"
+    echo "- FRR 8.0+ (bgpd, ospfd, zebra, staticd, mgmtd, vrrpd)"
     echo ""
     echo "Next steps:"
     echo "1. Copy example configs:"
@@ -88,8 +92,9 @@ if [ "$1" = "1" ]; then
     echo "   usermod -aG arca-router <admin-user>"
     echo "   # log out and back in before running arca as that user"
     echo ""
-    echo "4. Ensure VPP/FRR are running and FRR has mgmtd=yes:"
+    echo "4. Ensure VPP/FRR are running and required FRR daemons are enabled:"
     echo "   grep '^mgmtd=yes' /etc/frr/daemons"
+    echo "   grep '^vrrpd=yes' /etc/frr/daemons"
     echo "   systemctl start vpp frr"
     echo ""
     echo "5. Enable and start arca-router:"

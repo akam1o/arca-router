@@ -12,39 +12,136 @@ import (
 	"time"
 
 	"github.com/akam1o/arca-router/internal/engine"
+	"github.com/akam1o/arca-router/internal/model"
+	sbfrr "github.com/akam1o/arca-router/internal/southbound/frr"
+	sbvpp "github.com/akam1o/arca-router/internal/southbound/vpp"
+	"github.com/akam1o/arca-router/pkg/datastore"
 	"github.com/akam1o/arca-router/pkg/logger"
 	"github.com/akam1o/arca-router/pkg/netconf"
+)
+
+const defaultPrometheusPort = 9090
+
+const (
+	classOfServiceIntentOnlyStatus    = "intent-only"
+	classOfServiceNotConfiguredStatus = "not configured"
 )
 
 type metricsSource struct {
 	startedAt     time.Time
 	engine        *engine.Engine
 	netconfServer *netconf.SSHServer
+	datastore     *datastore.Config
+	configAPI     webConfigAPI
+	configSync    configSyncRuntimeSource
+	frr           frrVRRPSource
+	vpp           vppReconciliationSource
+}
+
+type frrVRRPSource interface {
+	VRRPOperationalStatus() sbfrr.VRRPOperationalStatus
+}
+
+type vppReconciliationSource interface {
+	LCPReconciliationStatus() sbvpp.LCPReconciliationStatus
 }
 
 type routerMetrics struct {
-	UptimeSeconds         float64
-	ConfigVersion         uint64
-	NETCONFActiveSessions int
-	NETCONFActiveConns    int32
-	NETCONFTotalConns     uint64
-	NETCONFSuccess        uint64
-	NETCONFFailures       uint64
-	NETCONFListening      bool
-	RunningHostname       string
+	UptimeSeconds             float64
+	ConfigVersion             uint64
+	NETCONFActiveSessions     int
+	NETCONFActiveConns        int32
+	NETCONFTotalConns         uint64
+	NETCONFSuccess            uint64
+	NETCONFFailures           uint64
+	NETCONFListening          bool
+	RunningHostname           string
+	DatastoreBackend          string
+	DatastoreEtcdEndpoints    []string
+	ConfigSyncEnabled         bool
+	ConfigSyncHealthy         bool
+	ConfigSyncEtcdRevision    int64
+	ConfigSyncRunningRevision int64
+	ConfigSyncLastCheck       time.Time
+	ConfigSyncLastApply       time.Time
+	ConfigSyncLastError       string
+	ConfigSyncCommitID        string
+	ClusterEnabled            bool
+	ClusterNodeCount          int
+	ClusterEtcdSync           bool
+	ClusterEtcdEndpoints      []string
+	ClusterSyncAligned        bool
+	HAConfigured              bool
+	HAConverged               bool
+	HAVRPGroups               int
+	HAIssues                  []string
+	FRRVRRPLastRun            time.Time
+	FRRVRRPConfiguredGroups   int
+	FRRVRRPObservedGroups     int
+	FRRVRRPActiveGroups       int
+	FRRVRRPGroups             []sbfrr.VRRPGroupOperationalStatus
+	FRRVRRPIssues             []string
+	FRRVRRPError              string
+	VPPLCPReconcileLastRun    time.Time
+	VPPLCPPairs               int
+	VPPLCPInconsistencies     []string
+	VPPLCPReconcileError      string
+	ClassOfServiceConfigured  bool
+	ClassOfServiceStatus      string
+	ClassOfServiceClasses     int
+	ClassOfServiceProfiles    int
+	ClassOfServiceBindings    int
+	ClassOfServiceIntentOnly  bool
 }
 
 func (s metricsSource) snapshot(now time.Time) routerMetrics {
-	metrics := routerMetrics{}
+	metrics := routerMetrics{
+		DatastoreBackend:         string(datastore.BackendSQLite),
+		ClusterSyncAligned:       true,
+		ClassOfServiceStatus:     classOfServiceNotConfiguredStatus,
+		ClassOfServiceIntentOnly: false,
+	}
+	var runningConfig *model.RouterConfig
 	if !s.startedAt.IsZero() {
 		metrics.UptimeSeconds = now.Sub(s.startedAt).Seconds()
+	}
+	if s.datastore != nil {
+		if s.datastore.Backend != "" {
+			metrics.DatastoreBackend = string(s.datastore.Backend)
+		}
+		metrics.DatastoreEtcdEndpoints = normalizedEndpoints(s.datastore.EtcdEndpoints)
+	}
+	if s.configSync != nil {
+		status := s.configSync.ConfigSyncStatus()
+		metrics.ConfigSyncEnabled = status.Enabled
+		metrics.ConfigSyncHealthy = status.Healthy
+		metrics.ConfigSyncEtcdRevision = status.EtcdRevision
+		metrics.ConfigSyncRunningRevision = status.RunningRevision
+		metrics.ConfigSyncLastCheck = status.LastCheck
+		metrics.ConfigSyncLastApply = status.LastApply
+		metrics.ConfigSyncLastError = status.LastError
+		metrics.ConfigSyncCommitID = status.RunningCommitID
 	}
 
 	if s.engine != nil {
 		if running := s.engine.RunningSnapshot(); running != nil {
 			metrics.ConfigVersion = running.Version
+			runningConfig = running.Config
 			if running.Config != nil && running.Config.System != nil {
 				metrics.RunningHostname = running.Config.System.HostName
+			}
+			applyClassOfServiceStatus(&metrics, running.Config)
+			if running.Config != nil && running.Config.Chassis != nil && running.Config.Chassis.Cluster != nil {
+				cluster := running.Config.Chassis.Cluster
+				metrics.ClusterEnabled = cluster.Enabled
+				metrics.ClusterNodeCount = len(cluster.Nodes)
+				metrics.ClusterEtcdEndpoints = normalizedEndpoints(clusterEtcdEndpoints(running.Config))
+				metrics.ClusterEtcdSync = len(metrics.ClusterEtcdEndpoints) > 0
+				if metrics.ClusterEtcdSync {
+					metrics.ClusterSyncAligned = s.datastore != nil &&
+						s.datastore.Backend == datastore.BackendEtcd &&
+						sameEndpoints(metrics.ClusterEtcdEndpoints, metrics.DatastoreEtcdEndpoints)
+				}
 			}
 		}
 	}
@@ -61,7 +158,163 @@ func (s metricsSource) snapshot(now time.Time) routerMetrics {
 		metrics.NETCONFFailures = nc.FailedHandshakes
 		metrics.NETCONFListening = nc.IsListening
 	}
+	if s.frr != nil {
+		vrrp := s.frr.VRRPOperationalStatus()
+		metrics.FRRVRRPLastRun = vrrp.LastRun
+		metrics.FRRVRRPConfiguredGroups = vrrp.ConfiguredGroups
+		metrics.FRRVRRPObservedGroups = vrrp.ObservedGroups
+		metrics.FRRVRRPActiveGroups = vrrp.ActiveGroups
+		metrics.FRRVRRPGroups = append([]sbfrr.VRRPGroupOperationalStatus(nil), vrrp.Groups...)
+		metrics.FRRVRRPIssues = append([]string(nil), vrrp.Issues...)
+		metrics.FRRVRRPError = vrrp.LastError
+	}
+	if s.vpp != nil {
+		lcp := s.vpp.LCPReconciliationStatus()
+		metrics.VPPLCPReconcileLastRun = lcp.LastRun
+		metrics.VPPLCPPairs = lcp.PairCount
+		metrics.VPPLCPInconsistencies = append([]string(nil), lcp.Inconsistencies...)
+		metrics.VPPLCPReconcileError = lcp.LastError
+	}
+	applyHAConvergenceStatus(&metrics, runningConfig, s.vpp != nil)
 	return metrics
+}
+
+func applyClassOfServiceStatus(metrics *routerMetrics, cfg *model.RouterConfig) {
+	if metrics == nil {
+		return
+	}
+	metrics.ClassOfServiceStatus = classOfServiceNotConfiguredStatus
+	if cfg == nil || cfg.ClassOfService == nil {
+		return
+	}
+	metrics.ClassOfServiceConfigured = true
+	metrics.ClassOfServiceStatus = classOfServiceIntentOnlyStatus
+	metrics.ClassOfServiceIntentOnly = true
+	metrics.ClassOfServiceClasses = countForwardingClasses(cfg.ClassOfService.ForwardingClasses)
+	metrics.ClassOfServiceProfiles = countTrafficControlProfiles(cfg.ClassOfService.TrafficControlProfiles)
+	metrics.ClassOfServiceBindings = countClassOfServiceBindings(cfg.ClassOfService.Interfaces)
+}
+
+func countForwardingClasses(classes map[string]*model.ForwardingClass) int {
+	count := 0
+	for _, class := range classes {
+		if class != nil {
+			count++
+		}
+	}
+	return count
+}
+
+func countTrafficControlProfiles(profiles map[string]*model.TrafficControlProfile) int {
+	count := 0
+	for _, profile := range profiles {
+		if profile != nil {
+			count++
+		}
+	}
+	return count
+}
+
+func countClassOfServiceBindings(interfaces map[string]*model.CoSInterface) int {
+	count := 0
+	for _, iface := range interfaces {
+		if iface != nil && iface.OutputTrafficControlProfile != "" {
+			count++
+		}
+	}
+	return count
+}
+
+func applyHAConvergenceStatus(metrics *routerMetrics, cfg *model.RouterConfig, hasVPP bool) {
+	if metrics == nil || cfg == nil || cfg.Chassis == nil || cfg.Chassis.Cluster == nil ||
+		!cfg.Chassis.Cluster.Enabled {
+		return
+	}
+	vrrpGroups := vrrpGroupCount(cfg)
+	metrics.HAVRPGroups = vrrpGroups
+	if vrrpGroups == 0 {
+		return
+	}
+	metrics.HAConfigured = true
+
+	var issues []string
+	if metrics.ClusterNodeCount < 2 {
+		issues = append(issues, "cluster has fewer than two nodes")
+	}
+	if !metrics.ClusterEtcdSync {
+		issues = append(issues, "etcd cluster sync is not configured")
+	} else if !metrics.ClusterSyncAligned {
+		issues = append(issues, "cluster sync endpoints are not aligned with the datastore")
+	}
+	if metrics.ClusterEtcdSync {
+		if !metrics.ConfigSyncEnabled {
+			issues = append(issues, "etcd config synchronizer is not running")
+		} else if !metrics.ConfigSyncHealthy {
+			issues = append(issues, "etcd config synchronizer is unhealthy")
+		}
+	}
+	if metrics.FRRVRRPLastRun.IsZero() {
+		issues = append(issues, "FRR VRRP status has not run")
+	}
+	if metrics.FRRVRRPError != "" {
+		issues = append(issues, "FRR VRRP status check failed")
+	}
+	if metrics.FRRVRRPObservedGroups < metrics.HAVRPGroups {
+		issues = append(issues, "FRR VRRP status is missing configured groups")
+	}
+	if metrics.FRRVRRPActiveGroups < metrics.HAVRPGroups {
+		issues = append(issues, "FRR VRRP status has inactive groups")
+	}
+	if len(metrics.FRRVRRPIssues) > 0 {
+		issues = append(issues, "FRR VRRP status found convergence issues")
+	}
+	if !hasVPP {
+		issues = append(issues, "VPP LCP reconciliation status is unavailable")
+	} else if metrics.VPPLCPReconcileLastRun.IsZero() {
+		issues = append(issues, "VPP LCP reconciliation has not run")
+	}
+	if metrics.VPPLCPReconcileError != "" {
+		issues = append(issues, "VPP LCP reconciliation check failed")
+	}
+	if len(metrics.VPPLCPInconsistencies) > 0 {
+		issues = append(issues, "VPP LCP reconciliation found inconsistencies")
+	}
+	metrics.HAIssues = issues
+	metrics.HAConverged = len(issues) == 0
+}
+
+func vrrpGroupCount(cfg *model.RouterConfig) int {
+	if cfg == nil || cfg.Protocols == nil || cfg.Protocols.VRRP == nil {
+		return 0
+	}
+	return len(cfg.Protocols.VRRP.Groups)
+}
+
+func effectiveMetricsListen(flagValue string, snapshot *model.ConfigSnapshot) string {
+	if listen := strings.TrimSpace(flagValue); listen != "" {
+		return listen
+	}
+	prometheus := snapshotPrometheusConfig(snapshot)
+	if prometheus == nil || !prometheus.Enabled {
+		return ""
+	}
+	addr := strings.TrimSpace(prometheus.ListenAddress)
+	if addr == "" {
+		addr = "127.0.0.1"
+	}
+	port := prometheus.Port
+	if port == 0 {
+		port = defaultPrometheusPort
+	}
+	return net.JoinHostPort(addr, strconv.Itoa(port))
+}
+
+func snapshotPrometheusConfig(snapshot *model.ConfigSnapshot) *model.PrometheusConfig {
+	if snapshot == nil || snapshot.Config == nil || snapshot.Config.System == nil ||
+		snapshot.Config.System.Services == nil {
+		return nil
+	}
+	return snapshot.Config.System.Services.Prometheus
 }
 
 func startMetricsServer(ctx context.Context, listenAddr string, source metricsSource, log *logger.Logger) (<-chan error, error) {
@@ -134,6 +387,102 @@ func (s metricsSource) handleMetrics(w http.ResponseWriter, r *http.Request) {
 	writeMetricType(&b, "arca_router_config_version", "gauge")
 	writeMetricValue(&b, "arca_router_config_version", float64(metrics.ConfigVersion))
 
+	writeMetricHelp(&b, "arca_router_config_sync_etcd_enabled", "Whether etcd-backed running configuration synchronization is enabled.")
+	writeMetricType(&b, "arca_router_config_sync_etcd_enabled", "gauge")
+	writeMetricHelp(&b, "arca_router_config_sync_etcd_healthy", "Whether the latest etcd config synchronization check succeeded.")
+	writeMetricType(&b, "arca_router_config_sync_etcd_healthy", "gauge")
+	writeMetricHelp(&b, "arca_router_config_sync_etcd_revision", "Latest etcd cluster revision observed by the config synchronizer.")
+	writeMetricType(&b, "arca_router_config_sync_etcd_revision", "gauge")
+	writeMetricHelp(&b, "arca_router_config_sync_running_revision", "Latest etcd running configuration key revision observed by the config synchronizer.")
+	writeMetricType(&b, "arca_router_config_sync_running_revision", "gauge")
+	writeMetricHelp(&b, "arca_router_config_sync_error", "Whether the latest etcd config synchronization check failed.")
+	writeMetricType(&b, "arca_router_config_sync_error", "gauge")
+	writeMetricHelp(&b, "arca_router_config_sync_last_check_timestamp_seconds", "Unix timestamp of the latest etcd config synchronization check.")
+	writeMetricType(&b, "arca_router_config_sync_last_check_timestamp_seconds", "gauge")
+	writeMetricHelp(&b, "arca_router_config_sync_last_apply_timestamp_seconds", "Unix timestamp of the latest config applied from etcd.")
+	writeMetricType(&b, "arca_router_config_sync_last_apply_timestamp_seconds", "gauge")
+	writeMetricBool(&b, "arca_router_config_sync_etcd_enabled", metrics.ConfigSyncEnabled)
+	writeMetricBool(&b, "arca_router_config_sync_etcd_healthy", metrics.ConfigSyncHealthy)
+	writeMetricValue(&b, "arca_router_config_sync_etcd_revision", float64(metrics.ConfigSyncEtcdRevision))
+	writeMetricValue(&b, "arca_router_config_sync_running_revision", float64(metrics.ConfigSyncRunningRevision))
+	writeMetricBool(&b, "arca_router_config_sync_error", metrics.ConfigSyncLastError != "")
+	writeMetricValue(&b, "arca_router_config_sync_last_check_timestamp_seconds", unixTimestampSeconds(metrics.ConfigSyncLastCheck))
+	writeMetricValue(&b, "arca_router_config_sync_last_apply_timestamp_seconds", unixTimestampSeconds(metrics.ConfigSyncLastApply))
+
+	writeMetricHelp(&b, "arca_router_cluster_enabled", "Whether chassis clustering is enabled in the running configuration.")
+	writeMetricType(&b, "arca_router_cluster_enabled", "gauge")
+	writeMetricHelp(&b, "arca_router_cluster_nodes", "Number of configured chassis cluster nodes.")
+	writeMetricType(&b, "arca_router_cluster_nodes", "gauge")
+	writeMetricHelp(&b, "arca_router_cluster_sync_etcd_configured", "Whether chassis cluster sync uses etcd endpoints.")
+	writeMetricType(&b, "arca_router_cluster_sync_etcd_configured", "gauge")
+	writeMetricHelp(&b, "arca_router_cluster_sync_aligned", "Whether cluster sync etcd config matches the daemon datastore backend and endpoints.")
+	writeMetricType(&b, "arca_router_cluster_sync_aligned", "gauge")
+	writeMetricBool(&b, "arca_router_cluster_enabled", metrics.ClusterEnabled)
+	writeMetricValue(&b, "arca_router_cluster_nodes", float64(metrics.ClusterNodeCount))
+	writeMetricBool(&b, "arca_router_cluster_sync_etcd_configured", metrics.ClusterEtcdSync)
+	writeMetricBool(&b, "arca_router_cluster_sync_aligned", metrics.ClusterSyncAligned)
+
+	writeMetricHelp(&b, "arca_router_ha_configured", "Whether control-plane HA is configured with chassis clustering and VRRP groups.")
+	writeMetricType(&b, "arca_router_ha_configured", "gauge")
+	writeMetricHelp(&b, "arca_router_ha_converged", "Whether configured control-plane HA has no detected config sync or VPP LCP convergence issues.")
+	writeMetricType(&b, "arca_router_ha_converged", "gauge")
+	writeMetricHelp(&b, "arca_router_ha_vrrp_groups", "Number of configured VRRP groups participating in control-plane HA.")
+	writeMetricType(&b, "arca_router_ha_vrrp_groups", "gauge")
+	writeMetricHelp(&b, "arca_router_ha_convergence_issues", "Number of detected control-plane HA convergence issues.")
+	writeMetricType(&b, "arca_router_ha_convergence_issues", "gauge")
+	writeMetricBool(&b, "arca_router_ha_configured", metrics.HAConfigured)
+	writeMetricBool(&b, "arca_router_ha_converged", metrics.HAConverged)
+	writeMetricValue(&b, "arca_router_ha_vrrp_groups", float64(metrics.HAVRPGroups))
+	writeMetricValue(&b, "arca_router_ha_convergence_issues", float64(len(metrics.HAIssues)))
+
+	writeMetricHelp(&b, "arca_router_frr_vrrp_configured_groups", "Number of VRRP groups configured for FRR.")
+	writeMetricType(&b, "arca_router_frr_vrrp_configured_groups", "gauge")
+	writeMetricHelp(&b, "arca_router_frr_vrrp_observed_groups", "Number of configured VRRP groups observed in FRR operational state.")
+	writeMetricType(&b, "arca_router_frr_vrrp_observed_groups", "gauge")
+	writeMetricHelp(&b, "arca_router_frr_vrrp_active_groups", "Number of configured VRRP groups in an active FRR state.")
+	writeMetricType(&b, "arca_router_frr_vrrp_active_groups", "gauge")
+	writeMetricHelp(&b, "arca_router_frr_vrrp_issues", "Number of detected FRR VRRP operational convergence issues.")
+	writeMetricType(&b, "arca_router_frr_vrrp_issues", "gauge")
+	writeMetricHelp(&b, "arca_router_frr_vrrp_error", "Whether the latest FRR VRRP operational status check failed.")
+	writeMetricType(&b, "arca_router_frr_vrrp_error", "gauge")
+	writeMetricHelp(&b, "arca_router_frr_vrrp_last_check_timestamp_seconds", "Unix timestamp of the latest FRR VRRP operational status check.")
+	writeMetricType(&b, "arca_router_frr_vrrp_last_check_timestamp_seconds", "gauge")
+	writeMetricValue(&b, "arca_router_frr_vrrp_configured_groups", float64(metrics.FRRVRRPConfiguredGroups))
+	writeMetricValue(&b, "arca_router_frr_vrrp_observed_groups", float64(metrics.FRRVRRPObservedGroups))
+	writeMetricValue(&b, "arca_router_frr_vrrp_active_groups", float64(metrics.FRRVRRPActiveGroups))
+	writeMetricValue(&b, "arca_router_frr_vrrp_issues", float64(len(metrics.FRRVRRPIssues)))
+	writeMetricBool(&b, "arca_router_frr_vrrp_error", metrics.FRRVRRPError != "")
+	writeMetricValue(&b, "arca_router_frr_vrrp_last_check_timestamp_seconds", unixTimestampSeconds(metrics.FRRVRRPLastRun))
+
+	writeMetricHelp(&b, "arca_router_vpp_lcp_pairs", "Number of VPP LCP pairs known after the latest reconciliation.")
+	writeMetricType(&b, "arca_router_vpp_lcp_pairs", "gauge")
+	writeMetricHelp(&b, "arca_router_vpp_lcp_inconsistencies", "Number of VPP LCP reconciliation inconsistencies detected.")
+	writeMetricType(&b, "arca_router_vpp_lcp_inconsistencies", "gauge")
+	writeMetricHelp(&b, "arca_router_vpp_lcp_reconcile_error", "Whether the latest VPP LCP reconciliation check failed.")
+	writeMetricType(&b, "arca_router_vpp_lcp_reconcile_error", "gauge")
+	writeMetricHelp(&b, "arca_router_vpp_lcp_last_reconcile_timestamp_seconds", "Unix timestamp of the latest VPP LCP reconciliation check.")
+	writeMetricType(&b, "arca_router_vpp_lcp_last_reconcile_timestamp_seconds", "gauge")
+	writeMetricValue(&b, "arca_router_vpp_lcp_pairs", float64(metrics.VPPLCPPairs))
+	writeMetricValue(&b, "arca_router_vpp_lcp_inconsistencies", float64(len(metrics.VPPLCPInconsistencies)))
+	writeMetricBool(&b, "arca_router_vpp_lcp_reconcile_error", metrics.VPPLCPReconcileError != "")
+	writeMetricValue(&b, "arca_router_vpp_lcp_last_reconcile_timestamp_seconds", unixTimestampSeconds(metrics.VPPLCPReconcileLastRun))
+
+	writeMetricHelp(&b, "arca_router_class_of_service_configured", "Whether class-of-service is configured in the running configuration.")
+	writeMetricType(&b, "arca_router_class_of_service_configured", "gauge")
+	writeMetricHelp(&b, "arca_router_class_of_service_forwarding_classes", "Number of configured class-of-service forwarding classes.")
+	writeMetricType(&b, "arca_router_class_of_service_forwarding_classes", "gauge")
+	writeMetricHelp(&b, "arca_router_class_of_service_traffic_control_profiles", "Number of configured class-of-service traffic-control profiles.")
+	writeMetricType(&b, "arca_router_class_of_service_traffic_control_profiles", "gauge")
+	writeMetricHelp(&b, "arca_router_class_of_service_interface_bindings", "Number of configured class-of-service interface bindings.")
+	writeMetricType(&b, "arca_router_class_of_service_interface_bindings", "gauge")
+	writeMetricHelp(&b, "arca_router_class_of_service_intent_only", "Whether class-of-service enforcement is currently stored as intent-only VPP interface metadata.")
+	writeMetricType(&b, "arca_router_class_of_service_intent_only", "gauge")
+	writeMetricBool(&b, "arca_router_class_of_service_configured", metrics.ClassOfServiceConfigured)
+	writeMetricValue(&b, "arca_router_class_of_service_forwarding_classes", float64(metrics.ClassOfServiceClasses))
+	writeMetricValue(&b, "arca_router_class_of_service_traffic_control_profiles", float64(metrics.ClassOfServiceProfiles))
+	writeMetricValue(&b, "arca_router_class_of_service_interface_bindings", float64(metrics.ClassOfServiceBindings))
+	writeMetricBool(&b, "arca_router_class_of_service_intent_only", metrics.ClassOfServiceIntentOnly)
+
 	writeMetricHelp(&b, "arca_router_netconf_active_sessions", "Current active NETCONF sessions.")
 	writeMetricType(&b, "arca_router_netconf_active_sessions", "gauge")
 	writeMetricHelp(&b, "arca_router_netconf_active_connections", "Current active NETCONF SSH connections.")
@@ -152,11 +501,7 @@ func (s metricsSource) handleMetrics(w http.ResponseWriter, r *http.Request) {
 	writeMetricValue(&b, "arca_router_netconf_total_connections", float64(metrics.NETCONFTotalConns))
 	writeMetricValue(&b, "arca_router_netconf_successful_handshakes", float64(metrics.NETCONFSuccess))
 	writeMetricValue(&b, "arca_router_netconf_failed_handshakes", float64(metrics.NETCONFFailures))
-	if metrics.NETCONFListening {
-		writeMetricValue(&b, "arca_router_netconf_listening", 1)
-	} else {
-		writeMetricValue(&b, "arca_router_netconf_listening", 0)
-	}
+	writeMetricBool(&b, "arca_router_netconf_listening", metrics.NETCONFListening)
 
 	_, _ = w.Write([]byte(b.String()))
 }
@@ -182,4 +527,19 @@ func writeMetricValue(b *strings.Builder, name string, value float64) {
 	b.WriteByte(' ')
 	b.WriteString(strconv.FormatFloat(value, 'f', -1, 64))
 	b.WriteByte('\n')
+}
+
+func writeMetricBool(b *strings.Builder, name string, value bool) {
+	if value {
+		writeMetricValue(b, name, 1)
+		return
+	}
+	writeMetricValue(b, name, 0)
+}
+
+func unixTimestampSeconds(ts time.Time) float64 {
+	if ts.IsZero() {
+		return 0
+	}
+	return float64(ts.Unix())
 }

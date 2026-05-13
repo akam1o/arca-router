@@ -8,13 +8,11 @@ import (
 
 const (
 	// NETCONF capabilities
-	CapabilityBase10    = "urn:ietf:params:xml:ns:netconf:base:1.0"
-	CapabilityBase11    = "urn:ietf:params:xml:ns:netconf:base:1.1"
-	CapabilityCandidate = "urn:ietf:params:xml:ns:netconf:capability:candidate:1.0"
-	CapabilityValidate  = "urn:ietf:params:xml:ns:netconf:capability:validate:1.1"
-	// CapabilityArcaRouter is kept for the embedded model, but the server does
-	// not advertise it until the YANG model matches the implemented XML schema.
-	CapabilityArcaRouter = "http://github.com/akam1o/arca-router?module=arca-router&revision=2025-12-26"
+	CapabilityBase10     = "urn:ietf:params:xml:ns:netconf:base:1.0"
+	CapabilityBase11     = "urn:ietf:params:xml:ns:netconf:base:1.1"
+	CapabilityCandidate  = "urn:ietf:params:xml:ns:netconf:capability:candidate:1.0"
+	CapabilityValidate   = "urn:ietf:params:xml:ns:netconf:capability:validate:1.1"
+	CapabilityArcaRouter = "urn:arca:router:config:1.0?module=arca-router&revision=2025-12-27"
 
 	// NETCONF namespace
 	NetconfNamespace = "urn:ietf:params:xml:ns:netconf:base:1.0"
@@ -39,6 +37,7 @@ func ServerHello(sessionID uint32) *Hello {
 		CapabilityBase11,
 		CapabilityCandidate,
 		CapabilityValidate,
+		CapabilityArcaRouter,
 	}
 	return hello
 }

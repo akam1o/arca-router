@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/tls"
 	"crypto/x509"
+	"encoding/json"
 	"fmt"
 	"os"
 	"strings"
@@ -16,6 +17,7 @@ import (
 // etcdDatastore implements the Datastore interface using etcd.
 type etcdDatastore struct {
 	client    *clientv3.Client
+	endpoints []string
 	prefix    string        // Key prefix for all arca-router data (e.g., "/arca-router/")
 	timeout   time.Duration // Default operation timeout
 	closeOnce sync.Once
@@ -83,9 +85,10 @@ func NewEtcdDatastore(cfg *Config) (Datastore, error) {
 	}
 
 	ds := &etcdDatastore{
-		client:  client,
-		prefix:  prefix,
-		timeout: timeout,
+		client:    client,
+		endpoints: append([]string(nil), cfg.EtcdEndpoints...),
+		prefix:    prefix,
+		timeout:   timeout,
 	}
 
 	return ds, nil
@@ -146,3 +149,36 @@ func (ds *etcdDatastore) withTimeout(ctx context.Context) (context.Context, cont
 	}
 	return context.WithTimeout(ctx, ds.timeout)
 }
+
+// EtcdStatus returns live revision metadata for config synchronization.
+func (ds *etcdDatastore) EtcdStatus(ctx context.Context) (*EtcdStatus, error) {
+	ctx, cancel := ds.withTimeout(ctx)
+	defer cancel()
+
+	resp, err := ds.client.Get(ctx, ds.key("running", "current"))
+	if err != nil {
+		return nil, NewError(ErrCodeInternal, "failed to get etcd running metadata", err)
+	}
+
+	status := &EtcdStatus{
+		Endpoints: append([]string(nil), ds.endpoints...),
+		Prefix:    ds.prefix,
+	}
+	if resp.Header != nil {
+		status.Revision = resp.Header.Revision
+	}
+	if len(resp.Kvs) == 0 {
+		return status, nil
+	}
+
+	status.RunningRevision = resp.Kvs[0].ModRevision
+	var metadata runningMetadata
+	if err := json.Unmarshal(resp.Kvs[0].Value, &metadata); err != nil {
+		return nil, NewError(ErrCodeInternal, "failed to unmarshal running metadata", err)
+	}
+	status.RunningCommitID = metadata.CommitID
+	status.RunningTimestamp = metadata.Timestamp
+	return status, nil
+}
+
+var _ EtcdStatusProvider = (*etcdDatastore)(nil)

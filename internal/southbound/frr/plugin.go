@@ -17,7 +17,12 @@ import (
 type FRRPlugin struct {
 	mu      sync.Mutex
 	applier pkgfrr.Applier
+	mode    pkgfrr.BackendMode
 	log     *slog.Logger
+
+	statusReader pkgfrr.VRRPStatusReader
+	statusCancel context.CancelFunc
+	vrrpStatus   VRRPOperationalStatus
 
 	currentConfig     string
 	rollbackConfig    string
@@ -33,8 +38,10 @@ func NewFRRPlugin(log *slog.Logger) *FRRPlugin {
 // NewFRRPluginWithApplyMode creates a new FRR plugin with an explicit apply backend.
 func NewFRRPluginWithApplyMode(log *slog.Logger, mode pkgfrr.BackendMode) *FRRPlugin {
 	return &FRRPlugin{
-		applier: pkgfrr.NewApplier(mode),
-		log:     log.With("plugin", "frr", "apply_mode", string(mode)),
+		applier:      pkgfrr.NewApplier(mode),
+		mode:         mode,
+		log:          log.With("plugin", "frr", "apply_mode", string(mode)),
+		statusReader: pkgfrr.NewVtyshVRRPStatusReader(),
 	}
 }
 
@@ -42,10 +49,22 @@ func (p *FRRPlugin) Name() string { return "frr" }
 
 func (p *FRRPlugin) Init(ctx context.Context) error {
 	// FRR apply backends are command-driven, so no persistent connection is needed.
+	statusCtx, cancel := context.WithCancel(ctx)
+	p.mu.Lock()
+	p.statusCancel = cancel
+	p.mu.Unlock()
+	go p.runVRRPStatusLoop(statusCtx)
 	return nil
 }
 
 func (p *FRRPlugin) Close() error {
+	p.mu.Lock()
+	cancel := p.statusCancel
+	p.statusCancel = nil
+	p.mu.Unlock()
+	if cancel != nil {
+		cancel()
+	}
 	return nil
 }
 
@@ -56,8 +75,9 @@ func (p *FRRPlugin) HealthCheck(ctx context.Context) error {
 
 // ValidateChanges validates that routing configuration changes are feasible.
 func (p *FRRPlugin) ValidateChanges(ctx context.Context, diff *engine.ConfigDiff) error {
-	// FRR validation is done at config parse time.
-	// Additional validation could check that referenced interfaces exist in VPP.
+	if diff == nil {
+		return nil
+	}
 	return nil
 }
 
@@ -69,7 +89,8 @@ func (p *FRRPlugin) ApplyChanges(ctx context.Context, diff *engine.ConfigDiff) e
 
 	// Only regenerate FRR config if routing-related changes occurred
 	if !diff.BGPChanged && !diff.OSPFChanged && !diff.StaticRoutesChanged &&
-		!diff.PolicyChanged && !diff.RoutingChanged && !diff.SystemChanged &&
+		!diff.PolicyChanged && !diff.RoutingChanged && !diff.SystemChanged && !diff.VRRPChanged &&
+		!diff.RoutingInstancesChanged &&
 		!hasFRRRelevantInterfaceChanges(diff) {
 		p.log.Debug("No routing-related changes, skipping FRR reload")
 		return nil
@@ -102,14 +123,23 @@ func (p *FRRPlugin) ApplyChanges(ctx context.Context, diff *engine.ConfigDiff) e
 	p.rollbackFRRConfig = previousFRRConfig
 	p.currentConfig = configContent
 	p.currentFRRConfig = frrConfig
+	p.vrrpStatus = p.checkVRRPOperationalStatus(ctx, frrConfig)
 
 	p.log.Info("FRR configuration applied",
 		slog.Int("config_length", len(configContent)),
 		slog.Bool("bgp_changed", diff.BGPChanged),
 		slog.Bool("ospf_changed", diff.OSPFChanged),
 	)
+	p.logVRRPStatus(p.vrrpStatus)
 
 	return nil
+}
+
+// VRRPOperationalStatus returns the latest observed FRR VRRP runtime status.
+func (p *FRRPlugin) VRRPOperationalStatus() VRRPOperationalStatus {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return cloneVRRPOperationalStatus(p.vrrpStatus)
 }
 
 func generateFRRArtifacts(cfg *model.RouterConfig) (*pkgfrr.Config, string, error) {
@@ -151,8 +181,10 @@ func (p *FRRPlugin) RollbackChanges(ctx context.Context, diff *engine.ConfigDiff
 	}
 	p.currentConfig = rollbackConfig
 	p.currentFRRConfig = rollbackFRRConfig
+	p.vrrpStatus = p.checkVRRPOperationalStatus(ctx, rollbackFRRConfig)
 
 	p.log.Info("FRR configuration rolled back")
+	p.logVRRPStatus(p.vrrpStatus)
 	return nil
 }
 
@@ -191,12 +223,23 @@ func (p *FRRPlugin) buildFullConfig(diff *engine.ConfigDiff) *model.RouterConfig
 	} else if diff.OldOSPF != nil && !diff.OSPFChanged {
 		cfg.Protocols.OSPF = diff.OldOSPF
 	}
+	if diff.NewVRRP != nil {
+		cfg.Protocols.VRRP = diff.NewVRRP
+	} else if diff.OldVRRP != nil && !diff.VRRPChanged {
+		cfg.Protocols.VRRP = diff.OldVRRP
+	}
 
 	// Policy
 	if diff.NewPolicy != nil {
 		cfg.Policy = diff.NewPolicy
 	} else if diff.OldPolicy != nil && !diff.PolicyChanged {
 		cfg.Policy = diff.OldPolicy
+	}
+
+	if diff.NewRoutingInstances != nil {
+		cfg.RoutingInstances = diff.NewRoutingInstances
+	} else if diff.OldRoutingInstances != nil && !diff.RoutingInstancesChanged {
+		cfg.RoutingInstances = diff.OldRoutingInstances
 	}
 
 	// Static routes

@@ -3,6 +3,7 @@ package vpp
 import (
 	"context"
 	"fmt"
+	"io"
 	"net"
 	"os"
 	"path/filepath"
@@ -16,9 +17,11 @@ import (
 	vppip "github.com/akam1o/arca-router/pkg/vpp/binapi/ip"
 	"github.com/akam1o/arca-router/pkg/vpp/binapi/ip_types"
 	"github.com/akam1o/arca-router/pkg/vpp/binapi/lcp"
+	"github.com/akam1o/arca-router/pkg/vpp/binapi/mpls"
 	"github.com/akam1o/arca-router/pkg/vpp/binapi/rdma"
 	"github.com/akam1o/arca-router/pkg/vpp/binapi/vpe"
 	"go.fd.io/govpp/adapter/socketclient"
+	"go.fd.io/govpp/adapter/statsclient"
 	"go.fd.io/govpp/api"
 	"go.fd.io/govpp/core"
 )
@@ -26,6 +29,9 @@ import (
 const (
 	// Default VPP API socket path
 	defaultSocketPath = "/run/vpp/api.sock"
+
+	// Environment override for the VPP stats socket path.
+	statsSocketPathEnv = "VPP_STATS_SOCKET_PATH"
 
 	// Connection timeout
 	connectTimeout = 10 * time.Second
@@ -46,9 +52,11 @@ const (
 
 // govppClient is the production VPP client using govpp
 type govppClient struct {
-	socketPath string
-	conn       *core.Connection
-	ch         api.Channel
+	socketPath      string
+	statsSocketPath string
+	conn            *core.Connection
+	statsConn       *core.StatsConnection
+	ch              api.Channel
 }
 
 // NewGovppClient creates a new govpp-based VPP client
@@ -57,9 +65,14 @@ func NewGovppClient() Client {
 	if socketPath == "" {
 		socketPath = defaultSocketPath
 	}
+	statsSocketPath := os.Getenv(statsSocketPathEnv)
+	if statsSocketPath == "" {
+		statsSocketPath = statsclient.DefaultSocketName
+	}
 
 	return &govppClient{
-		socketPath: socketPath,
+		socketPath:      socketPath,
+		statsSocketPath: statsSocketPath,
 	}
 }
 
@@ -253,6 +266,10 @@ func (c *govppClient) Close() error {
 	if c.conn != nil {
 		c.conn.Disconnect()
 		c.conn = nil
+	}
+	if c.statsConn != nil {
+		c.statsConn.Disconnect()
+		c.statsConn = nil
 	}
 
 	return nil
@@ -623,6 +640,341 @@ func (c *govppClient) DeleteInterfaceAddress(ctx context.Context, ifIndex uint32
 	return nil
 }
 
+// SetMPLSInterface enables or disables MPLS forwarding on an interface.
+func (c *govppClient) SetMPLSInterface(ctx context.Context, ifIndex uint32, enabled bool) error {
+	if c.ch == nil {
+		return fmt.Errorf("not connected to VPP")
+	}
+
+	select {
+	case <-ctx.Done():
+		return fmt.Errorf("operation cancelled: %w", ctx.Err())
+	default:
+	}
+
+	req := &mpls.SwInterfaceSetMplsEnable{
+		SwIfIndex: interface_types.InterfaceIndex(ifIndex),
+		Enable:    enabled,
+	}
+	reply := &mpls.SwInterfaceSetMplsEnableReply{}
+	if err := c.ch.SendRequest(req).ReceiveReply(reply); err != nil {
+		return fmt.Errorf("failed to set MPLS interface state: %w", err)
+	}
+	if reply.Retval != 0 {
+		return fmt.Errorf("set MPLS interface state returned error code: %d", reply.Retval)
+	}
+	return nil
+}
+
+// AddIPTable creates an IPv4 or IPv6 FIB table.
+func (c *govppClient) AddIPTable(ctx context.Context, table IPTable) error {
+	return c.setIPTable(ctx, table, true)
+}
+
+// DeleteIPTable deletes an IPv4 or IPv6 FIB table.
+func (c *govppClient) DeleteIPTable(ctx context.Context, table IPTable) error {
+	return c.setIPTable(ctx, table, false)
+}
+
+func (c *govppClient) setIPTable(ctx context.Context, table IPTable, add bool) error {
+	if c.ch == nil {
+		return fmt.Errorf("not connected to VPP")
+	}
+
+	select {
+	case <-ctx.Done():
+		return fmt.Errorf("operation cancelled: %w", ctx.Err())
+	default:
+	}
+
+	req := &vppip.IPTableAddDelV2{
+		Table: vppip.IPTable{
+			TableID: table.ID,
+			IsIP6:   table.IsIPv6,
+			Name:    table.Name,
+		},
+		CreateMfib: true,
+		IsAdd:      add,
+	}
+	reply := &vppip.IPTableAddDelV2Reply{}
+	if err := c.ch.SendRequest(req).ReceiveReply(reply); err != nil {
+		return fmt.Errorf("failed to configure IP table: %w", err)
+	}
+	if reply.Retval != 0 {
+		action := "add"
+		if !add {
+			action = "delete"
+		}
+		return fmt.Errorf("%s IP table returned error code: %d", action, reply.Retval)
+	}
+	return nil
+}
+
+// SetInterfaceTable binds an interface to an IPv4 or IPv6 FIB table.
+func (c *govppClient) SetInterfaceTable(ctx context.Context, ifIndex uint32, tableID uint32, isIPv6 bool) error {
+	if c.ch == nil {
+		return fmt.Errorf("not connected to VPP")
+	}
+
+	select {
+	case <-ctx.Done():
+		return fmt.Errorf("operation cancelled: %w", ctx.Err())
+	default:
+	}
+
+	req := &vppif.SwInterfaceSetTable{
+		SwIfIndex: interface_types.InterfaceIndex(ifIndex),
+		IsIPv6:    isIPv6,
+		VrfID:     tableID,
+	}
+	reply := &vppif.SwInterfaceSetTableReply{}
+	if err := c.ch.SendRequest(req).ReceiveReply(reply); err != nil {
+		return fmt.Errorf("failed to set interface table: %w", err)
+	}
+	if reply.Retval != 0 {
+		return fmt.Errorf("set interface table returned error code: %d", reply.Retval)
+	}
+	return nil
+}
+
+// SetQoSProfile binds output QoS policy intent to an interface.
+func (c *govppClient) SetQoSProfile(ctx context.Context, ifIndex uint32, profile QoSProfile) error {
+	if profile.Name == "" {
+		return fmt.Errorf("QoS profile name is required")
+	}
+
+	// The bundled VPP 24.10 binapi set does not expose scheduler/policer
+	// services, so keep the arca profile binding in the interface tag.
+	tag, err := c.interfaceTagWithQoSProfile(ctx, ifIndex, profile.Name)
+	if err != nil {
+		return err
+	}
+	if err := c.setInterfaceTag(ctx, ifIndex, tag); err != nil {
+		return fmt.Errorf("set QoS profile tag: %w", err)
+	}
+	return nil
+}
+
+// ClearQoSProfile removes output QoS policy intent from an interface.
+func (c *govppClient) ClearQoSProfile(ctx context.Context, ifIndex uint32) error {
+	if c.ch == nil {
+		return fmt.Errorf("not connected to VPP")
+	}
+
+	iface, err := c.GetInterface(ctx, ifIndex)
+	if err != nil {
+		return fmt.Errorf("get interface for QoS profile clear: %w", err)
+	}
+	if iface.PCIAddress == "" {
+		if err := c.clearInterfaceTag(ctx, ifIndex); err != nil {
+			return fmt.Errorf("clear QoS profile tag: %w", err)
+		}
+		return nil
+	}
+
+	tag, err := formatInterfaceTag(iface.PCIAddress, "")
+	if err != nil {
+		return err
+	}
+	if err := c.setInterfaceTag(ctx, ifIndex, tag); err != nil {
+		return fmt.Errorf("clear QoS profile tag: %w", err)
+	}
+	return nil
+}
+
+func (c *govppClient) interfaceTagWithQoSProfile(ctx context.Context, ifIndex uint32, profileName string) (string, error) {
+	if c.ch == nil {
+		return "", fmt.Errorf("not connected to VPP")
+	}
+
+	iface, err := c.GetInterface(ctx, ifIndex)
+	if err != nil {
+		return "", fmt.Errorf("get interface for QoS profile binding: %w", err)
+	}
+	return formatInterfaceTag(iface.PCIAddress, profileName)
+}
+
+// ListInterfaceCounters returns packet and byte counters by VPP interface index.
+func (c *govppClient) ListInterfaceCounters(ctx context.Context) (map[uint32]InterfaceCounters, error) {
+	statsConn, err := c.ensureStatsConnection(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, fmt.Errorf("operation cancelled: %w", err)
+	}
+
+	stats := &api.InterfaceStats{}
+	if err := statsConn.GetInterfaceStats(stats); err != nil {
+		c.closeStatsConnection()
+		return nil, fmt.Errorf("get VPP interface counters: %w", err)
+	}
+
+	counters := make(map[uint32]InterfaceCounters, len(stats.Interfaces))
+	for _, iface := range stats.Interfaces {
+		counters[iface.InterfaceIndex] = convertInterfaceCounters(iface)
+	}
+	return counters, nil
+}
+
+// ListInterfaceQueuePlacements returns RX/TX queue placement by VPP interface index.
+func (c *govppClient) ListInterfaceQueuePlacements(ctx context.Context) (map[uint32]InterfaceQueuePlacements, error) {
+	if c.conn == nil {
+		return nil, fmt.Errorf("not connected to VPP")
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, fmt.Errorf("operation cancelled: %w", err)
+	}
+
+	svc := vppif.NewServiceClient(c.conn)
+	placements := make(map[uint32]InterfaceQueuePlacements)
+	if err := c.collectRxQueuePlacements(ctx, svc, placements); err != nil {
+		return nil, err
+	}
+	if err := c.collectTxQueuePlacements(ctx, svc, placements); err != nil {
+		return nil, err
+	}
+	return placements, nil
+}
+
+func (c *govppClient) collectRxQueuePlacements(ctx context.Context, svc vppif.RPCService, placements map[uint32]InterfaceQueuePlacements) error {
+	stream, err := svc.SwInterfaceRxPlacementDump(ctx, &vppif.SwInterfaceRxPlacementDump{
+		SwIfIndex: interface_types.InterfaceIndex(^uint32(0)),
+	})
+	if err != nil {
+		return fmt.Errorf("dump RX queue placements: %w", err)
+	}
+
+	for {
+		if err := ctx.Err(); err != nil {
+			return fmt.Errorf("operation cancelled: %w", err)
+		}
+		detail, err := stream.Recv()
+		if err == io.EOF {
+			return nil
+		}
+		if err != nil {
+			return fmt.Errorf("receive RX queue placement: %w", err)
+		}
+		if detail == nil {
+			continue
+		}
+		ifIndex := uint32(detail.SwIfIndex)
+		placement := placements[ifIndex]
+		placement.Rx = append(placement.Rx, InterfaceRxQueuePlacement{
+			QueueID:  detail.QueueID,
+			WorkerID: detail.WorkerID,
+			Mode:     rxModeName(detail.Mode),
+		})
+		placements[ifIndex] = placement
+	}
+}
+
+func (c *govppClient) collectTxQueuePlacements(ctx context.Context, svc vppif.RPCService, placements map[uint32]InterfaceQueuePlacements) error {
+	cursor := uint32(0)
+	for {
+		stream, err := svc.SwInterfaceTxPlacementGet(ctx, &vppif.SwInterfaceTxPlacementGet{
+			Cursor:    cursor,
+			SwIfIndex: interface_types.InterfaceIndex(^uint32(0)),
+		})
+		if err != nil {
+			return fmt.Errorf("get TX queue placements: %w", err)
+		}
+
+		nextCursor := uint32(0)
+		for {
+			if err := ctx.Err(); err != nil {
+				return fmt.Errorf("operation cancelled: %w", err)
+			}
+			detail, reply, err := stream.Recv()
+			if err == io.EOF {
+				if reply != nil {
+					nextCursor = reply.Cursor
+				}
+				break
+			}
+			if err != nil {
+				return fmt.Errorf("receive TX queue placement: %w", err)
+			}
+			if detail == nil {
+				continue
+			}
+			ifIndex := uint32(detail.SwIfIndex)
+			threads := append([]uint32(nil), detail.Threads...)
+			placement := placements[ifIndex]
+			placement.Tx = append(placement.Tx, InterfaceTxQueuePlacement{
+				QueueID: detail.QueueID,
+				Shared:  detail.Shared != 0,
+				Threads: threads,
+			})
+			placements[ifIndex] = placement
+		}
+		if nextCursor == 0 {
+			return nil
+		}
+		cursor = nextCursor
+	}
+}
+
+func rxModeName(mode interface_types.RxMode) string {
+	switch mode {
+	case interface_types.RX_MODE_API_POLLING:
+		return "polling"
+	case interface_types.RX_MODE_API_INTERRUPT:
+		return "interrupt"
+	case interface_types.RX_MODE_API_ADAPTIVE:
+		return "adaptive"
+	case interface_types.RX_MODE_API_DEFAULT:
+		return "default"
+	default:
+		return "unknown"
+	}
+}
+
+func (c *govppClient) ensureStatsConnection(ctx context.Context) (*core.StatsConnection, error) {
+	if c.statsConn != nil {
+		return c.statsConn, nil
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, fmt.Errorf("operation cancelled: %w", err)
+	}
+	statsSocketPath := c.statsSocketPath
+	if statsSocketPath == "" {
+		statsSocketPath = statsclient.DefaultSocketName
+	}
+
+	client := statsclient.NewStatsClient(
+		statsSocketPath,
+		statsclient.SetSocketRetryTimeout(apiTimeout),
+		statsclient.SetSocketRetryPeriod(100*time.Millisecond),
+	)
+	conn, err := core.ConnectStats(client)
+	if err != nil {
+		return nil, fmt.Errorf("connect to VPP stats socket %s: %w", statsSocketPath, err)
+	}
+	c.statsConn = conn
+	return conn, nil
+}
+
+func (c *govppClient) closeStatsConnection() {
+	if c.statsConn != nil {
+		c.statsConn.Disconnect()
+		c.statsConn = nil
+	}
+}
+
+func convertInterfaceCounters(iface api.InterfaceCounters) InterfaceCounters {
+	return InterfaceCounters{
+		RxPackets: iface.Rx.Packets,
+		TxPackets: iface.Tx.Packets,
+		RxBytes:   iface.Rx.Bytes,
+		TxBytes:   iface.Tx.Bytes,
+		RxErrors:  iface.RxErrors,
+		TxErrors:  iface.TxErrors,
+		Drops:     iface.Drops,
+	}
+}
+
 // GetInterface retrieves interface information by index
 func (c *govppClient) GetInterface(ctx context.Context, ifIndex uint32) (*Interface, error) {
 	if c.ch == nil {
@@ -830,9 +1182,13 @@ func convertToInterface(msg *vppif.SwInterfaceDetails) *Interface {
 		Addresses: nil, // IP addresses will be populated by separate API calls
 	}
 
-	// Extract PCI address from interface tag if available (format: "pci=0000:03:00.0")
-	if msg.Tag != "" && strings.HasPrefix(msg.Tag, "pci=") {
-		iface.PCIAddress = strings.TrimPrefix(msg.Tag, "pci=")
+	// Extract PCI address from interface tag if available.
+	fields := parseInterfaceTag(msg.Tag)
+	if fields["pci"] != "" {
+		iface.PCIAddress = fields["pci"]
+	}
+	if fields["qos"] != "" {
+		iface.QoSProfile = fields["qos"]
 	}
 
 	return iface
@@ -842,6 +1198,11 @@ func convertToInterface(msg *vppif.SwInterfaceDetails) *Interface {
 func (c *govppClient) setInterfaceTag(ctx context.Context, ifIndex uint32, tag string) error {
 	if c.ch == nil {
 		return fmt.Errorf("not connected to VPP")
+	}
+	select {
+	case <-ctx.Done():
+		return fmt.Errorf("operation cancelled: %w", ctx.Err())
+	default:
 	}
 
 	req := &vppif.SwInterfaceTagAddDel{
@@ -860,6 +1221,72 @@ func (c *govppClient) setInterfaceTag(ctx context.Context, ifIndex uint32, tag s
 	}
 
 	return nil
+}
+
+func (c *govppClient) clearInterfaceTag(ctx context.Context, ifIndex uint32) error {
+	if c.ch == nil {
+		return fmt.Errorf("not connected to VPP")
+	}
+	select {
+	case <-ctx.Done():
+		return fmt.Errorf("operation cancelled: %w", ctx.Err())
+	default:
+	}
+
+	req := &vppif.SwInterfaceTagAddDel{
+		IsAdd:     false,
+		SwIfIndex: interface_types.InterfaceIndex(ifIndex),
+	}
+
+	reply := &vppif.SwInterfaceTagAddDelReply{}
+	if err := c.ch.SendRequest(req).ReceiveReply(reply); err != nil {
+		return fmt.Errorf("failed to clear interface tag: %w", err)
+	}
+	if reply.Retval != 0 {
+		return fmt.Errorf("clear interface tag returned error code: %d", reply.Retval)
+	}
+	return nil
+}
+
+func formatInterfaceTag(pciAddress, qosProfile string) (string, error) {
+	fields := make([]string, 0, 2)
+	if pciAddress != "" {
+		if err := validateInterfaceTagValue("PCI address", pciAddress); err != nil {
+			return "", err
+		}
+		fields = append(fields, "pci="+pciAddress)
+	}
+	if qosProfile != "" {
+		if err := validateInterfaceTagValue("QoS profile", qosProfile); err != nil {
+			return "", err
+		}
+		fields = append(fields, "qos="+qosProfile)
+	}
+
+	tag := strings.Join(fields, ";")
+	if len(tag) > 64 {
+		return "", fmt.Errorf("interface tag %q exceeds VPP 64 byte limit", tag)
+	}
+	return tag, nil
+}
+
+func validateInterfaceTagValue(field, value string) error {
+	if strings.ContainsAny(value, ";=") {
+		return fmt.Errorf("%s %q contains unsupported interface tag delimiter", field, value)
+	}
+	return nil
+}
+
+func parseInterfaceTag(tag string) map[string]string {
+	fields := make(map[string]string)
+	for _, part := range strings.Split(tag, ";") {
+		key, value, ok := strings.Cut(part, "=")
+		if !ok || key == "" {
+			continue
+		}
+		fields[key] = value
+	}
+	return fields
 }
 
 // checkSocketAccess verifies socket accessibility

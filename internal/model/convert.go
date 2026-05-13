@@ -17,6 +17,57 @@ func FromLegacyConfig(old *config.Config) *RouterConfig {
 	// System
 	if old.System != nil {
 		c.System = &SystemConfig{HostName: old.System.HostName}
+		if old.System.Services != nil {
+			services := &SystemServicesConfig{}
+			if old.System.Services.WebUI != nil {
+				services.WebUI = &WebUIConfig{
+					Enabled:       old.System.Services.WebUI.Enabled,
+					ListenAddress: old.System.Services.WebUI.ListenAddress,
+					Port:          old.System.Services.WebUI.Port,
+				}
+			}
+			if old.System.Services.Prometheus != nil {
+				services.Prometheus = &PrometheusConfig{
+					Enabled:       old.System.Services.Prometheus.Enabled,
+					ListenAddress: old.System.Services.Prometheus.ListenAddress,
+					Port:          old.System.Services.Prometheus.Port,
+				}
+			}
+			if old.System.Services.SNMP != nil {
+				services.SNMP = &SNMPConfig{
+					Enabled:       old.System.Services.SNMP.Enabled,
+					ListenAddress: old.System.Services.SNMP.ListenAddress,
+					Port:          old.System.Services.SNMP.Port,
+					Community:     old.System.Services.SNMP.Community,
+				}
+			}
+			if services.WebUI != nil || services.Prometheus != nil || services.SNMP != nil {
+				c.System.Services = services
+			}
+		}
+	}
+
+	if old.Chassis != nil && old.Chassis.Cluster != nil {
+		c.Chassis = &ChassisConfig{
+			Cluster: &ClusterConfig{
+				Enabled: old.Chassis.Cluster.Enabled,
+				Nodes:   make(map[string]*ClusterNode),
+			},
+		}
+		for name, node := range old.Chassis.Cluster.Nodes {
+			if node == nil {
+				continue
+			}
+			c.Chassis.Cluster.Nodes[name] = &ClusterNode{
+				Address:  node.Address,
+				Priority: node.Priority,
+			}
+		}
+		if old.Chassis.Cluster.Sync != nil && old.Chassis.Cluster.Sync.Etcd != nil {
+			c.Chassis.Cluster.Sync = &ClusterSyncConfig{
+				Etcd: &EtcdSyncConfig{Endpoints: append([]string{}, old.Chassis.Cluster.Sync.Etcd.Endpoints...)},
+			}
+		}
 	}
 
 	// Interfaces
@@ -103,6 +154,42 @@ func FromLegacyConfig(old *config.Config) *RouterConfig {
 				c.Protocols.OSPF.Areas[aID] = area
 			}
 		}
+		if old.Protocols.MPLS != nil {
+			c.Protocols.MPLS = &MPLSConfig{Interfaces: append([]string{}, old.Protocols.MPLS.Interfaces...)}
+		}
+		if old.Protocols.VRRP != nil {
+			c.Protocols.VRRP = &VRRPConfig{Groups: make(map[string]*VRRPGroup)}
+			for name, group := range old.Protocols.VRRP.Groups {
+				if group == nil {
+					continue
+				}
+				c.Protocols.VRRP.Groups[name] = &VRRPGroup{
+					Interface:      group.Interface,
+					VirtualAddress: group.VirtualAddress,
+					Priority:       group.Priority,
+					Preempt:        group.Preempt,
+				}
+			}
+		}
+	}
+
+	if old.RoutingInstances != nil {
+		c.RoutingInstances = make(map[string]*RoutingInstance, len(old.RoutingInstances))
+		for name, instance := range old.RoutingInstances {
+			if instance == nil {
+				continue
+			}
+			c.RoutingInstances[name] = &RoutingInstance{
+				InstanceType:       instance.InstanceType,
+				RouteDistinguisher: instance.RouteDistinguisher,
+				VRFTarget:          instance.VRFTarget,
+				VRFTargetImport:    append([]string{}, instance.VRFTargetImport...),
+				VRFTargetExport:    append([]string{}, instance.VRFTargetExport...),
+				VRFImport:          append([]string{}, instance.VRFImport...),
+				VRFExport:          append([]string{}, instance.VRFExport...),
+				Interfaces:         append([]string{}, instance.Interfaces...),
+			}
+		}
 	}
 
 	// Policy
@@ -167,6 +254,35 @@ func FromLegacyConfig(old *config.Config) *RouterConfig {
 		}
 	}
 
+	if old.ClassOfService != nil {
+		c.ClassOfService = &ClassOfServiceConfig{
+			ForwardingClasses:      make(map[string]*ForwardingClass),
+			TrafficControlProfiles: make(map[string]*TrafficControlProfile),
+			Interfaces:             make(map[string]*CoSInterface),
+		}
+		for name, fc := range old.ClassOfService.ForwardingClasses {
+			if fc == nil {
+				continue
+			}
+			c.ClassOfService.ForwardingClasses[name] = &ForwardingClass{Queue: fc.Queue}
+		}
+		for name, profile := range old.ClassOfService.TrafficControlProfiles {
+			if profile == nil {
+				continue
+			}
+			c.ClassOfService.TrafficControlProfiles[name] = &TrafficControlProfile{
+				ShapingRate:  profile.ShapingRate,
+				SchedulerMap: profile.SchedulerMap,
+			}
+		}
+		for name, iface := range old.ClassOfService.Interfaces {
+			if iface == nil {
+				continue
+			}
+			c.ClassOfService.Interfaces[name] = &CoSInterface{OutputTrafficControlProfile: iface.OutputTrafficControlProfile}
+		}
+	}
+
 	return c
 }
 
@@ -182,6 +298,58 @@ func (c *RouterConfig) ToLegacyConfig() *config.Config {
 	// System
 	if c.System != nil {
 		old.System = &config.SystemConfig{HostName: c.System.HostName}
+		if c.System.Services != nil {
+			services := &config.SystemServicesConfig{}
+			if c.System.Services.WebUI != nil {
+				services.WebUI = &config.WebUIConfig{
+					Enabled:       c.System.Services.WebUI.Enabled,
+					ListenAddress: c.System.Services.WebUI.ListenAddress,
+					Port:          c.System.Services.WebUI.Port,
+				}
+			}
+			if c.System.Services.Prometheus != nil {
+				services.Prometheus = &config.PrometheusConfig{
+					Enabled:       c.System.Services.Prometheus.Enabled,
+					ListenAddress: c.System.Services.Prometheus.ListenAddress,
+					Port:          c.System.Services.Prometheus.Port,
+				}
+			}
+			if c.System.Services.SNMP != nil {
+				services.SNMP = &config.SNMPConfig{
+					Enabled:       c.System.Services.SNMP.Enabled,
+					ListenAddress: c.System.Services.SNMP.ListenAddress,
+					Port:          c.System.Services.SNMP.Port,
+					Community:     c.System.Services.SNMP.Community,
+				}
+			}
+			if services.WebUI != nil || services.Prometheus != nil || services.SNMP != nil {
+				old.System.Services = services
+			}
+		}
+	}
+
+	if c.Chassis != nil && c.Chassis.Cluster != nil {
+		old.Chassis = &config.ChassisConfig{
+			Cluster: &config.ClusterConfig{
+				Enabled: c.Chassis.Cluster.Enabled,
+				Nodes:   make(map[string]*config.ClusterNode),
+			},
+		}
+		for name, node := range c.Chassis.Cluster.Nodes {
+			if node == nil {
+				continue
+			}
+			old.Chassis.Cluster.Nodes[name] = &config.ClusterNode{
+				Name:     name,
+				Address:  node.Address,
+				Priority: node.Priority,
+			}
+		}
+		if c.Chassis.Cluster.Sync != nil && c.Chassis.Cluster.Sync.Etcd != nil {
+			old.Chassis.Cluster.Sync = &config.ClusterSyncConfig{
+				Etcd: &config.EtcdSyncConfig{Endpoints: append([]string{}, c.Chassis.Cluster.Sync.Etcd.Endpoints...)},
+			}
+		}
 	}
 
 	// Interfaces
@@ -262,6 +430,44 @@ func (c *RouterConfig) ToLegacyConfig() *config.Config {
 				old.Protocols.OSPF.Areas[aID] = area
 			}
 		}
+		if c.Protocols.MPLS != nil {
+			old.Protocols.MPLS = &config.MPLSConfig{Interfaces: append([]string{}, c.Protocols.MPLS.Interfaces...)}
+		}
+		if c.Protocols.VRRP != nil {
+			old.Protocols.VRRP = &config.VRRPConfig{Groups: make(map[string]*config.VRRPGroup)}
+			for name, group := range c.Protocols.VRRP.Groups {
+				if group == nil {
+					continue
+				}
+				old.Protocols.VRRP.Groups[name] = &config.VRRPGroup{
+					Name:           name,
+					Interface:      group.Interface,
+					VirtualAddress: group.VirtualAddress,
+					Priority:       group.Priority,
+					Preempt:        group.Preempt,
+				}
+			}
+		}
+	}
+
+	if c.RoutingInstances != nil {
+		old.RoutingInstances = make(map[string]*config.RoutingInstance, len(c.RoutingInstances))
+		for name, instance := range c.RoutingInstances {
+			if instance == nil {
+				continue
+			}
+			old.RoutingInstances[name] = &config.RoutingInstance{
+				Name:               name,
+				InstanceType:       instance.InstanceType,
+				RouteDistinguisher: instance.RouteDistinguisher,
+				VRFTarget:          instance.VRFTarget,
+				VRFTargetImport:    append([]string{}, instance.VRFTargetImport...),
+				VRFTargetExport:    append([]string{}, instance.VRFTargetExport...),
+				VRFImport:          append([]string{}, instance.VRFImport...),
+				VRFExport:          append([]string{}, instance.VRFExport...),
+				Interfaces:         append([]string{}, instance.Interfaces...),
+			}
+		}
 	}
 
 	// Policy
@@ -327,6 +533,39 @@ func (c *RouterConfig) ToLegacyConfig() *config.Config {
 			old.Security.RateLimit = &config.RateLimitConfig{
 				PerIP:   c.Security.RateLimit.PerIP,
 				PerUser: c.Security.RateLimit.PerUser,
+			}
+		}
+	}
+
+	if c.ClassOfService != nil {
+		old.ClassOfService = &config.ClassOfServiceConfig{
+			ForwardingClasses:      make(map[string]*config.ForwardingClass),
+			TrafficControlProfiles: make(map[string]*config.TrafficControlProfile),
+			Interfaces:             make(map[string]*config.CoSInterface),
+		}
+		for name, fc := range c.ClassOfService.ForwardingClasses {
+			if fc == nil {
+				continue
+			}
+			old.ClassOfService.ForwardingClasses[name] = &config.ForwardingClass{Name: name, Queue: fc.Queue}
+		}
+		for name, profile := range c.ClassOfService.TrafficControlProfiles {
+			if profile == nil {
+				continue
+			}
+			old.ClassOfService.TrafficControlProfiles[name] = &config.TrafficControlProfile{
+				Name:         name,
+				ShapingRate:  profile.ShapingRate,
+				SchedulerMap: profile.SchedulerMap,
+			}
+		}
+		for name, iface := range c.ClassOfService.Interfaces {
+			if iface == nil {
+				continue
+			}
+			old.ClassOfService.Interfaces[name] = &config.CoSInterface{
+				Name:                        name,
+				OutputTrafficControlProfile: iface.OutputTrafficControlProfile,
 			}
 		}
 	}

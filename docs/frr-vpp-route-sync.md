@@ -210,6 +210,8 @@ bgpd=yes
 ospfd=yes
 zebra=yes
 staticd=yes
+mgmtd=yes
+vrrpd=yes
 ```
 
 ### zebra Configuration

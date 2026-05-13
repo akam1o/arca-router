@@ -5,6 +5,7 @@ import (
 	"encoding/xml"
 	"fmt"
 	"io"
+	"sort"
 	"strings"
 
 	"github.com/akam1o/arca-router/pkg/config"
@@ -43,6 +44,13 @@ func ConfigToXML(cfg *config.Config, filter *Filter) ([]byte, error) {
 		}
 	}
 
+	// Chassis clustering configuration
+	if cfg.Chassis != nil && (filter == nil || filterMatches(filter, "chassis")) {
+		if err := writeChassisXML(&buf, cfg.Chassis); err != nil {
+			return nil, fmt.Errorf("failed to serialize chassis config: %w", err)
+		}
+	}
+
 	// Interfaces configuration - use IETF interfaces namespace
 	if len(cfg.Interfaces) > 0 && (filter == nil || filterMatches(filter, "interfaces")) {
 		if err := writeInterfacesXML(&buf, cfg.Interfaces); err != nil {
@@ -58,10 +66,31 @@ func ConfigToXML(cfg *config.Config, filter *Filter) ([]byte, error) {
 		}
 	}
 
+	// Routing instances
+	if len(cfg.RoutingInstances) > 0 && (filter == nil || filterMatches(filter, "routing-instances")) {
+		if err := writeRoutingInstancesXML(&buf, cfg.RoutingInstances); err != nil {
+			return nil, fmt.Errorf("failed to serialize routing instances: %w", err)
+		}
+	}
+
 	// Protocols (BGP, OSPF)
 	if cfg.Protocols != nil && (filter == nil || filterMatches(filter, "protocols")) {
 		if err := writeProtocolsXML(&buf, cfg.Protocols); err != nil {
 			return nil, fmt.Errorf("failed to serialize protocols: %w", err)
+		}
+	}
+
+	// Class of service
+	if cfg.ClassOfService != nil && (filter == nil || filterMatches(filter, "class-of-service")) {
+		if err := writeClassOfServiceXML(&buf, cfg.ClassOfService); err != nil {
+			return nil, fmt.Errorf("failed to serialize class of service: %w", err)
+		}
+	}
+
+	// Security configuration; user secrets are intentionally omitted.
+	if cfg.Security != nil && (filter == nil || filterMatches(filter, "security")) {
+		if err := writeSecurityXML(&buf, cfg.Security); err != nil {
+			return nil, fmt.Errorf("failed to serialize security config: %w", err)
 		}
 	}
 
@@ -92,7 +121,133 @@ func writeSystemXML(buf *bytes.Buffer, sys *config.SystemConfig) error {
 		buf.WriteString("\n")
 	}
 
+	if sys.Services != nil {
+		buf.WriteString(`    <services>`)
+		buf.WriteString("\n")
+		if err := writeSystemServicesXML(buf, sys.Services); err != nil {
+			return err
+		}
+		buf.WriteString(`    </services>`)
+		buf.WriteString("\n")
+	}
+
 	buf.WriteString(`  </system>`)
+	buf.WriteString("\n")
+	return nil
+}
+
+func writeSystemServicesXML(buf *bytes.Buffer, services *config.SystemServicesConfig) error {
+	if services.WebUI != nil {
+		if err := writeServiceXML(buf, "web-ui", services.WebUI.Enabled, services.WebUI.ListenAddress, services.WebUI.Port, ""); err != nil {
+			return err
+		}
+	}
+	if services.Prometheus != nil {
+		if err := writeServiceXML(buf, "prometheus", services.Prometheus.Enabled, services.Prometheus.ListenAddress, services.Prometheus.Port, ""); err != nil {
+			return err
+		}
+	}
+	if services.SNMP != nil {
+		if err := writeServiceXML(buf, "snmp", services.SNMP.Enabled, services.SNMP.ListenAddress, services.SNMP.Port, services.SNMP.Community); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func writeServiceXML(buf *bytes.Buffer, name string, enabled bool, listenAddress string, port int, community string) error {
+	if !enabled && listenAddress == "" && port == 0 && community == "" {
+		return nil
+	}
+	fmt.Fprintf(buf, "      <%s>\n", name)
+	if enabled {
+		fmt.Fprintf(buf, "        <enabled>%t</enabled>\n", enabled)
+	}
+	if listenAddress != "" {
+		buf.WriteString(`        <listen-address>`)
+		if err := xml.EscapeText(buf, []byte(listenAddress)); err != nil {
+			return err
+		}
+		buf.WriteString(`</listen-address>`)
+		buf.WriteString("\n")
+	}
+	if port != 0 {
+		fmt.Fprintf(buf, "        <port>%d</port>\n", port)
+	}
+	if community != "" {
+		buf.WriteString(`        <community>`)
+		if err := xml.EscapeText(buf, []byte(community)); err != nil {
+			return err
+		}
+		buf.WriteString(`</community>`)
+		buf.WriteString("\n")
+	}
+	fmt.Fprintf(buf, "      </%s>\n", name)
+	return nil
+}
+
+func writeChassisXML(buf *bytes.Buffer, chassis *config.ChassisConfig) error {
+	if chassis.Cluster == nil {
+		return nil
+	}
+	cluster := chassis.Cluster
+
+	buf.WriteString(`  <chassis xmlns="` + ArcaConfigNS + `">`)
+	buf.WriteString("\n")
+	buf.WriteString(`    <cluster>`)
+	buf.WriteString("\n")
+	if cluster.Enabled {
+		buf.WriteString(`      <enabled>true</enabled>`)
+		buf.WriteString("\n")
+	}
+	for _, name := range sortedStringKeys(cluster.Nodes) {
+		node := cluster.Nodes[name]
+		if node == nil {
+			continue
+		}
+		buf.WriteString(`      <node>`)
+		buf.WriteString("\n")
+		buf.WriteString(`        <name>`)
+		if err := xml.EscapeText(buf, []byte(name)); err != nil {
+			return err
+		}
+		buf.WriteString(`</name>`)
+		buf.WriteString("\n")
+		if node.Address != "" {
+			buf.WriteString(`        <address>`)
+			if err := xml.EscapeText(buf, []byte(node.Address)); err != nil {
+				return err
+			}
+			buf.WriteString(`</address>`)
+			buf.WriteString("\n")
+		}
+		if node.Priority != 0 {
+			fmt.Fprintf(buf, "        <priority>%d</priority>\n", node.Priority)
+		}
+		buf.WriteString(`      </node>`)
+		buf.WriteString("\n")
+	}
+	if cluster.Sync != nil && cluster.Sync.Etcd != nil && len(cluster.Sync.Etcd.Endpoints) > 0 {
+		buf.WriteString(`      <sync>`)
+		buf.WriteString("\n")
+		buf.WriteString(`        <etcd>`)
+		buf.WriteString("\n")
+		for _, endpoint := range cluster.Sync.Etcd.Endpoints {
+			buf.WriteString(`          <endpoint>`)
+			if err := xml.EscapeText(buf, []byte(endpoint)); err != nil {
+				return err
+			}
+			buf.WriteString(`</endpoint>`)
+			buf.WriteString("\n")
+		}
+		buf.WriteString(`        </etcd>`)
+		buf.WriteString("\n")
+		buf.WriteString(`      </sync>`)
+		buf.WriteString("\n")
+	}
+	buf.WriteString(`    </cluster>`)
+	buf.WriteString("\n")
+	buf.WriteString(`  </chassis>`)
 	buf.WriteString("\n")
 	return nil
 }
@@ -102,7 +257,8 @@ func writeInterfacesXML(buf *bytes.Buffer, interfaces map[string]*config.Interfa
 	buf.WriteString(`  <interfaces xmlns="` + IETFInterfacesNS + `">`)
 	buf.WriteString("\n")
 
-	for name, iface := range interfaces {
+	for _, name := range sortedStringKeys(interfaces) {
+		iface := interfaces[name]
 		buf.WriteString(`    <interface>`)
 		buf.WriteString("\n")
 
@@ -124,7 +280,8 @@ func writeInterfacesXML(buf *bytes.Buffer, interfaces map[string]*config.Interfa
 
 		// Units (sub-interfaces)
 		if len(iface.Units) > 0 {
-			for unitNum, unit := range iface.Units {
+			for _, unitNum := range sortedIntKeys(iface.Units) {
+				unit := iface.Units[unitNum]
 				buf.WriteString(`      <unit>`)
 				buf.WriteString("\n")
 
@@ -132,7 +289,8 @@ func writeInterfacesXML(buf *bytes.Buffer, interfaces map[string]*config.Interfa
 
 				// Address families
 				if len(unit.Family) > 0 {
-					for familyName, family := range unit.Family {
+					for _, familyName := range sortedStringKeys(unit.Family) {
+						family := unit.Family[familyName]
 						buf.WriteString(`        <family>`)
 						buf.WriteString("\n")
 
@@ -232,6 +390,101 @@ func writeRoutingOptionsXML(buf *bytes.Buffer, ro *config.RoutingOptions) error 
 	return nil
 }
 
+func writeRoutingInstancesXML(buf *bytes.Buffer, instances map[string]*config.RoutingInstance) error {
+	buf.WriteString(`  <routing-instances xmlns="` + ArcaConfigNS + `">`)
+	buf.WriteString("\n")
+
+	for _, name := range sortedStringKeys(instances) {
+		instance := instances[name]
+		if instance == nil {
+			continue
+		}
+		buf.WriteString(`    <instance>`)
+		buf.WriteString("\n")
+		buf.WriteString(`      <name>`)
+		if err := xml.EscapeText(buf, []byte(name)); err != nil {
+			return err
+		}
+		buf.WriteString(`</name>`)
+		buf.WriteString("\n")
+		if instance.InstanceType != "" {
+			buf.WriteString(`      <instance-type>`)
+			if err := xml.EscapeText(buf, []byte(instance.InstanceType)); err != nil {
+				return err
+			}
+			buf.WriteString(`</instance-type>`)
+			buf.WriteString("\n")
+		}
+		if instance.RouteDistinguisher != "" {
+			buf.WriteString(`      <route-distinguisher>`)
+			if err := xml.EscapeText(buf, []byte(instance.RouteDistinguisher)); err != nil {
+				return err
+			}
+			buf.WriteString(`</route-distinguisher>`)
+			buf.WriteString("\n")
+		}
+		if instance.VRFTarget != "" {
+			buf.WriteString(`      <vrf-target>`)
+			if err := xml.EscapeText(buf, []byte(instance.VRFTarget)); err != nil {
+				return err
+			}
+			buf.WriteString(`</vrf-target>`)
+			buf.WriteString("\n")
+		}
+		if err := writeStringListXML(buf, "vrf-target-import", instance.VRFTargetImport, "      "); err != nil {
+			return err
+		}
+		if err := writeStringListXML(buf, "vrf-target-export", instance.VRFTargetExport, "      "); err != nil {
+			return err
+		}
+		if err := writeStringListXML(buf, "vrf-import", instance.VRFImport, "      "); err != nil {
+			return err
+		}
+		if err := writeStringListXML(buf, "vrf-export", instance.VRFExport, "      "); err != nil {
+			return err
+		}
+		if err := writeStringListXML(buf, "interface", instance.Interfaces, "      "); err != nil {
+			return err
+		}
+		buf.WriteString(`    </instance>`)
+		buf.WriteString("\n")
+	}
+
+	buf.WriteString(`  </routing-instances>`)
+	buf.WriteString("\n")
+	return nil
+}
+
+func writeStringListXML(buf *bytes.Buffer, element string, values []string, indent string) error {
+	for _, value := range values {
+		buf.WriteString(indent)
+		fmt.Fprintf(buf, "<%s>", element)
+		if err := xml.EscapeText(buf, []byte(value)); err != nil {
+			return err
+		}
+		fmt.Fprintf(buf, "</%s>\n", element)
+	}
+	return nil
+}
+
+func sortedStringKeys[V any](m map[string]V) []string {
+	keys := make([]string, 0, len(m))
+	for key := range m {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	return keys
+}
+
+func sortedIntKeys[V any](m map[int]V) []int {
+	keys := make([]int, 0, len(m))
+	for key := range m {
+		keys = append(keys, key)
+	}
+	sort.Ints(keys)
+	return keys
+}
+
 // writeProtocolsXML writes protocol configuration to XML
 func writeProtocolsXML(buf *bytes.Buffer, protocols *config.ProtocolConfig) error {
 	buf.WriteString(`  <protocols xmlns="` + ArcaConfigNS + `">`)
@@ -251,6 +504,18 @@ func writeProtocolsXML(buf *bytes.Buffer, protocols *config.ProtocolConfig) erro
 		}
 	}
 
+	if protocols.MPLS != nil {
+		if err := writeMPLSXML(buf, protocols.MPLS); err != nil {
+			return err
+		}
+	}
+
+	if protocols.VRRP != nil {
+		if err := writeVRRPXML(buf, protocols.VRRP); err != nil {
+			return err
+		}
+	}
+
 	buf.WriteString(`  </protocols>`)
 	buf.WriteString("\n")
 	return nil
@@ -262,7 +527,11 @@ func writeBGPXML(buf *bytes.Buffer, bgp *config.BGPConfig) error {
 	buf.WriteString("\n")
 
 	if len(bgp.Groups) > 0 {
-		for groupName, group := range bgp.Groups {
+		for _, groupName := range sortedStringKeys(bgp.Groups) {
+			group := bgp.Groups[groupName]
+			if group == nil {
+				continue
+			}
 			buf.WriteString(`      <group>`)
 			buf.WriteString("\n")
 
@@ -302,7 +571,11 @@ func writeBGPXML(buf *bytes.Buffer, bgp *config.BGPConfig) error {
 
 			// Neighbors
 			if len(group.Neighbors) > 0 {
-				for _, neighbor := range group.Neighbors {
+				for _, neighborIP := range sortedStringKeys(group.Neighbors) {
+					neighbor := group.Neighbors[neighborIP]
+					if neighbor == nil {
+						continue
+					}
 					buf.WriteString(`        <neighbor>`)
 					buf.WriteString("\n")
 
@@ -363,7 +636,11 @@ func writeOSPFXML(buf *bytes.Buffer, ospf *config.OSPFConfig) error {
 	}
 
 	if len(ospf.Areas) > 0 {
-		for areaName, area := range ospf.Areas {
+		for _, areaName := range sortedStringKeys(ospf.Areas) {
+			area := ospf.Areas[areaName]
+			if area == nil {
+				continue
+			}
 			buf.WriteString(`      <area>`)
 			buf.WriteString("\n")
 
@@ -383,7 +660,11 @@ func writeOSPFXML(buf *bytes.Buffer, ospf *config.OSPFConfig) error {
 
 			// Interfaces
 			if len(area.Interfaces) > 0 {
-				for _, ospfIface := range area.Interfaces {
+				for _, ifaceName := range sortedStringKeys(area.Interfaces) {
+					ospfIface := area.Interfaces[ifaceName]
+					if ospfIface == nil {
+						continue
+					}
 					buf.WriteString(`        <interface>`)
 					buf.WriteString("\n")
 
@@ -422,6 +703,203 @@ func writeOSPFXML(buf *bytes.Buffer, ospf *config.OSPFConfig) error {
 	return nil
 }
 
+func writeMPLSXML(buf *bytes.Buffer, mpls *config.MPLSConfig) error {
+	if len(mpls.Interfaces) == 0 {
+		return nil
+	}
+	buf.WriteString(`    <mpls>`)
+	buf.WriteString("\n")
+	if err := writeStringListXML(buf, "interface", mpls.Interfaces, "      "); err != nil {
+		return err
+	}
+	buf.WriteString(`    </mpls>`)
+	buf.WriteString("\n")
+	return nil
+}
+
+func writeVRRPXML(buf *bytes.Buffer, vrrp *config.VRRPConfig) error {
+	if len(vrrp.Groups) == 0 {
+		return nil
+	}
+	buf.WriteString(`    <vrrp>`)
+	buf.WriteString("\n")
+	for _, name := range sortedStringKeys(vrrp.Groups) {
+		group := vrrp.Groups[name]
+		if group == nil {
+			continue
+		}
+		buf.WriteString(`      <group>`)
+		buf.WriteString("\n")
+		buf.WriteString(`        <name>`)
+		if err := xml.EscapeText(buf, []byte(name)); err != nil {
+			return err
+		}
+		buf.WriteString(`</name>`)
+		buf.WriteString("\n")
+		if group.Interface != "" {
+			buf.WriteString(`        <interface>`)
+			if err := xml.EscapeText(buf, []byte(group.Interface)); err != nil {
+				return err
+			}
+			buf.WriteString(`</interface>`)
+			buf.WriteString("\n")
+		}
+		if group.VirtualAddress != "" {
+			buf.WriteString(`        <virtual-address>`)
+			if err := xml.EscapeText(buf, []byte(group.VirtualAddress)); err != nil {
+				return err
+			}
+			buf.WriteString(`</virtual-address>`)
+			buf.WriteString("\n")
+		}
+		if group.Priority != 0 {
+			fmt.Fprintf(buf, "        <priority>%d</priority>\n", group.Priority)
+		}
+		if group.Preempt {
+			buf.WriteString(`        <preempt>true</preempt>`)
+			buf.WriteString("\n")
+		}
+		buf.WriteString(`      </group>`)
+		buf.WriteString("\n")
+	}
+	buf.WriteString(`    </vrrp>`)
+	buf.WriteString("\n")
+	return nil
+}
+
+func writeClassOfServiceXML(buf *bytes.Buffer, cos *config.ClassOfServiceConfig) error {
+	buf.WriteString(`  <class-of-service xmlns="` + ArcaConfigNS + `">`)
+	buf.WriteString("\n")
+
+	if len(cos.ForwardingClasses) > 0 {
+		buf.WriteString(`    <forwarding-classes>`)
+		buf.WriteString("\n")
+		for _, name := range sortedStringKeys(cos.ForwardingClasses) {
+			fc := cos.ForwardingClasses[name]
+			if fc == nil {
+				continue
+			}
+			buf.WriteString(`      <forwarding-class>`)
+			buf.WriteString("\n")
+			buf.WriteString(`        <name>`)
+			if err := xml.EscapeText(buf, []byte(name)); err != nil {
+				return err
+			}
+			buf.WriteString(`</name>`)
+			buf.WriteString("\n")
+			fmt.Fprintf(buf, "        <queue>%d</queue>\n", fc.Queue)
+			buf.WriteString(`      </forwarding-class>`)
+			buf.WriteString("\n")
+		}
+		buf.WriteString(`    </forwarding-classes>`)
+		buf.WriteString("\n")
+	}
+
+	if len(cos.TrafficControlProfiles) > 0 {
+		buf.WriteString(`    <traffic-control-profiles>`)
+		buf.WriteString("\n")
+		for _, name := range sortedStringKeys(cos.TrafficControlProfiles) {
+			profile := cos.TrafficControlProfiles[name]
+			if profile == nil {
+				continue
+			}
+			buf.WriteString(`      <traffic-control-profile>`)
+			buf.WriteString("\n")
+			buf.WriteString(`        <name>`)
+			if err := xml.EscapeText(buf, []byte(name)); err != nil {
+				return err
+			}
+			buf.WriteString(`</name>`)
+			buf.WriteString("\n")
+			if profile.ShapingRate != 0 {
+				fmt.Fprintf(buf, "        <shaping-rate>%d</shaping-rate>\n", profile.ShapingRate)
+			}
+			if profile.SchedulerMap != "" {
+				buf.WriteString(`        <scheduler-map>`)
+				if err := xml.EscapeText(buf, []byte(profile.SchedulerMap)); err != nil {
+					return err
+				}
+				buf.WriteString(`</scheduler-map>`)
+				buf.WriteString("\n")
+			}
+			buf.WriteString(`      </traffic-control-profile>`)
+			buf.WriteString("\n")
+		}
+		buf.WriteString(`    </traffic-control-profiles>`)
+		buf.WriteString("\n")
+	}
+
+	if len(cos.Interfaces) > 0 {
+		buf.WriteString(`    <interfaces>`)
+		buf.WriteString("\n")
+		for _, name := range sortedStringKeys(cos.Interfaces) {
+			iface := cos.Interfaces[name]
+			if iface == nil {
+				continue
+			}
+			buf.WriteString(`      <interface>`)
+			buf.WriteString("\n")
+			buf.WriteString(`        <name>`)
+			if err := xml.EscapeText(buf, []byte(name)); err != nil {
+				return err
+			}
+			buf.WriteString(`</name>`)
+			buf.WriteString("\n")
+			if iface.OutputTrafficControlProfile != "" {
+				buf.WriteString(`        <output-traffic-control-profile>`)
+				if err := xml.EscapeText(buf, []byte(iface.OutputTrafficControlProfile)); err != nil {
+					return err
+				}
+				buf.WriteString(`</output-traffic-control-profile>`)
+				buf.WriteString("\n")
+			}
+			buf.WriteString(`      </interface>`)
+			buf.WriteString("\n")
+		}
+		buf.WriteString(`    </interfaces>`)
+		buf.WriteString("\n")
+	}
+
+	buf.WriteString(`  </class-of-service>`)
+	buf.WriteString("\n")
+	return nil
+}
+
+func writeSecurityXML(buf *bytes.Buffer, security *config.SecurityConfig) error {
+	if (security.NETCONF == nil || security.NETCONF.SSH == nil || security.NETCONF.SSH.Port == 0) && security.RateLimit == nil {
+		return nil
+	}
+
+	buf.WriteString(`  <security xmlns="` + ArcaConfigNS + `">`)
+	buf.WriteString("\n")
+	if security.NETCONF != nil && security.NETCONF.SSH != nil && security.NETCONF.SSH.Port != 0 {
+		buf.WriteString(`    <netconf>`)
+		buf.WriteString("\n")
+		buf.WriteString(`      <ssh>`)
+		buf.WriteString("\n")
+		fmt.Fprintf(buf, "        <port>%d</port>\n", security.NETCONF.SSH.Port)
+		buf.WriteString(`      </ssh>`)
+		buf.WriteString("\n")
+		buf.WriteString(`    </netconf>`)
+		buf.WriteString("\n")
+	}
+	if security.RateLimit != nil {
+		buf.WriteString(`    <rate-limit>`)
+		buf.WriteString("\n")
+		if security.RateLimit.PerIP != 0 {
+			fmt.Fprintf(buf, "      <per-ip>%d</per-ip>\n", security.RateLimit.PerIP)
+		}
+		if security.RateLimit.PerUser != 0 {
+			fmt.Fprintf(buf, "      <per-user>%d</per-user>\n", security.RateLimit.PerUser)
+		}
+		buf.WriteString(`    </rate-limit>`)
+		buf.WriteString("\n")
+	}
+	buf.WriteString(`  </security>`)
+	buf.WriteString("\n")
+	return nil
+}
+
 // filterMatches is now implemented in xpath_filter.go
 // This placeholder is kept for reference only
 
@@ -453,7 +931,40 @@ func XMLToConfig(xmlData []byte, defaultOp DefaultOperation) (*config.Config, er
 		XMLName xml.Name `xml:"config"`
 		System  *struct {
 			HostName string `xml:"host-name"`
+			Services *struct {
+				WebUI *struct {
+					Enabled       bool   `xml:"enabled"`
+					ListenAddress string `xml:"listen-address"`
+					Port          int    `xml:"port"`
+				} `xml:"web-ui"`
+				Prometheus *struct {
+					Enabled       bool   `xml:"enabled"`
+					ListenAddress string `xml:"listen-address"`
+					Port          int    `xml:"port"`
+				} `xml:"prometheus"`
+				SNMP *struct {
+					Enabled       bool   `xml:"enabled"`
+					ListenAddress string `xml:"listen-address"`
+					Port          int    `xml:"port"`
+					Community     string `xml:"community"`
+				} `xml:"snmp"`
+			} `xml:"services"`
 		} `xml:"system"`
+		Chassis *struct {
+			Cluster *struct {
+				Enabled bool `xml:"enabled"`
+				Nodes   []struct {
+					Name     string `xml:"name"`
+					Address  string `xml:"address"`
+					Priority int    `xml:"priority"`
+				} `xml:"node"`
+				Sync *struct {
+					Etcd *struct {
+						Endpoints []string `xml:"endpoint"`
+					} `xml:"etcd"`
+				} `xml:"sync"`
+			} `xml:"cluster"`
+		} `xml:"chassis"`
 		Interfaces []struct {
 			Name        string `xml:"name"`
 			Description string `xml:"description"`
@@ -474,6 +985,17 @@ func XMLToConfig(xmlData []byte, defaultOp DefaultOperation) (*config.Config, er
 				Distance int    `xml:"distance"`
 			} `xml:"static-routes>route"`
 		} `xml:"routing"`
+		RoutingInstances []struct {
+			Name               string   `xml:"name"`
+			InstanceType       string   `xml:"instance-type"`
+			RouteDistinguisher string   `xml:"route-distinguisher"`
+			VRFTarget          string   `xml:"vrf-target"`
+			VRFTargetImport    []string `xml:"vrf-target-import"`
+			VRFTargetExport    []string `xml:"vrf-target-export"`
+			VRFImport          []string `xml:"vrf-import"`
+			VRFExport          []string `xml:"vrf-export"`
+			Interfaces         []string `xml:"interface"`
+		} `xml:"routing-instances>instance"`
 		Protocols *struct {
 			BGP *struct {
 				Groups []struct {
@@ -502,7 +1024,45 @@ func XMLToConfig(xmlData []byte, defaultOp DefaultOperation) (*config.Config, er
 					} `xml:"interface"`
 				} `xml:"area"`
 			} `xml:"ospf"`
+			MPLS *struct {
+				Interfaces []string `xml:"interface"`
+			} `xml:"mpls"`
+			VRRP *struct {
+				Groups []struct {
+					Name           string `xml:"name"`
+					Interface      string `xml:"interface"`
+					VirtualAddress string `xml:"virtual-address"`
+					Priority       int    `xml:"priority"`
+					Preempt        bool   `xml:"preempt"`
+				} `xml:"group"`
+			} `xml:"vrrp"`
 		} `xml:"protocols"`
+		ClassOfService *struct {
+			ForwardingClasses []struct {
+				Name  string `xml:"name"`
+				Queue int    `xml:"queue"`
+			} `xml:"forwarding-classes>forwarding-class"`
+			TrafficControlProfiles []struct {
+				Name         string `xml:"name"`
+				ShapingRate  uint64 `xml:"shaping-rate"`
+				SchedulerMap string `xml:"scheduler-map"`
+			} `xml:"traffic-control-profiles>traffic-control-profile"`
+			Interfaces []struct {
+				Name                        string `xml:"name"`
+				OutputTrafficControlProfile string `xml:"output-traffic-control-profile"`
+			} `xml:"interfaces>interface"`
+		} `xml:"class-of-service"`
+		Security *struct {
+			NETCONF *struct {
+				SSH *struct {
+					Port int `xml:"port"`
+				} `xml:"ssh"`
+			} `xml:"netconf"`
+			RateLimit *struct {
+				PerIP   int `xml:"per-ip"`
+				PerUser int `xml:"per-user"`
+			} `xml:"rate-limit"`
+		} `xml:"security"`
 	}
 
 	// Parse with strict settings
@@ -523,6 +1083,55 @@ func XMLToConfig(xmlData []byte, defaultOp DefaultOperation) (*config.Config, er
 	if root.System != nil {
 		cfg.System = &config.SystemConfig{
 			HostName: root.System.HostName,
+		}
+		if root.System.Services != nil {
+			cfg.System.Services = &config.SystemServicesConfig{}
+			if root.System.Services.WebUI != nil {
+				cfg.System.Services.WebUI = &config.WebUIConfig{
+					Enabled:       root.System.Services.WebUI.Enabled,
+					ListenAddress: root.System.Services.WebUI.ListenAddress,
+					Port:          root.System.Services.WebUI.Port,
+				}
+			}
+			if root.System.Services.Prometheus != nil {
+				cfg.System.Services.Prometheus = &config.PrometheusConfig{
+					Enabled:       root.System.Services.Prometheus.Enabled,
+					ListenAddress: root.System.Services.Prometheus.ListenAddress,
+					Port:          root.System.Services.Prometheus.Port,
+				}
+			}
+			if root.System.Services.SNMP != nil {
+				cfg.System.Services.SNMP = &config.SNMPConfig{
+					Enabled:       root.System.Services.SNMP.Enabled,
+					ListenAddress: root.System.Services.SNMP.ListenAddress,
+					Port:          root.System.Services.SNMP.Port,
+					Community:     root.System.Services.SNMP.Community,
+				}
+			}
+		}
+	}
+
+	// Chassis
+	if root.Chassis != nil && root.Chassis.Cluster != nil {
+		cfg.Chassis = &config.ChassisConfig{
+			Cluster: &config.ClusterConfig{
+				Enabled: root.Chassis.Cluster.Enabled,
+				Nodes:   make(map[string]*config.ClusterNode),
+			},
+		}
+		for _, node := range root.Chassis.Cluster.Nodes {
+			cfg.Chassis.Cluster.Nodes[node.Name] = &config.ClusterNode{
+				Name:     node.Name,
+				Address:  node.Address,
+				Priority: node.Priority,
+			}
+		}
+		if root.Chassis.Cluster.Sync != nil && root.Chassis.Cluster.Sync.Etcd != nil {
+			cfg.Chassis.Cluster.Sync = &config.ClusterSyncConfig{
+				Etcd: &config.EtcdSyncConfig{
+					Endpoints: append([]string(nil), root.Chassis.Cluster.Sync.Etcd.Endpoints...),
+				},
+			}
 		}
 	}
 
@@ -555,6 +1164,24 @@ func XMLToConfig(xmlData []byte, defaultOp DefaultOperation) (*config.Config, er
 					NextHop:  route.NextHop,
 					Distance: route.Distance,
 				})
+		}
+	}
+
+	// Routing instances
+	if len(root.RoutingInstances) > 0 {
+		cfg.RoutingInstances = make(map[string]*config.RoutingInstance)
+		for _, instance := range root.RoutingInstances {
+			cfg.RoutingInstances[instance.Name] = &config.RoutingInstance{
+				Name:               instance.Name,
+				InstanceType:       instance.InstanceType,
+				RouteDistinguisher: instance.RouteDistinguisher,
+				VRFTarget:          instance.VRFTarget,
+				VRFTargetImport:    append([]string(nil), instance.VRFTargetImport...),
+				VRFTargetExport:    append([]string(nil), instance.VRFTargetExport...),
+				VRFImport:          append([]string(nil), instance.VRFImport...),
+				VRFExport:          append([]string(nil), instance.VRFExport...),
+				Interfaces:         append([]string(nil), instance.Interfaces...),
+			}
 		}
 	}
 
@@ -621,6 +1248,75 @@ func XMLToConfig(xmlData []byte, defaultOp DefaultOperation) (*config.Config, er
 				cfg.Protocols.OSPF.Areas[area.Name] = cfgArea
 			}
 		}
+
+		// MPLS
+		if root.Protocols.MPLS != nil {
+			cfg.Protocols.MPLS = &config.MPLSConfig{
+				Interfaces: append([]string(nil), root.Protocols.MPLS.Interfaces...),
+			}
+		}
+
+		// VRRP
+		if root.Protocols.VRRP != nil {
+			cfg.Protocols.VRRP = &config.VRRPConfig{
+				Groups: make(map[string]*config.VRRPGroup),
+			}
+			for _, group := range root.Protocols.VRRP.Groups {
+				cfg.Protocols.VRRP.Groups[group.Name] = &config.VRRPGroup{
+					Name:           group.Name,
+					Interface:      group.Interface,
+					VirtualAddress: group.VirtualAddress,
+					Priority:       group.Priority,
+					Preempt:        group.Preempt,
+				}
+			}
+		}
+	}
+
+	// Class of service
+	if root.ClassOfService != nil {
+		cfg.ClassOfService = &config.ClassOfServiceConfig{
+			ForwardingClasses:      make(map[string]*config.ForwardingClass),
+			TrafficControlProfiles: make(map[string]*config.TrafficControlProfile),
+			Interfaces:             make(map[string]*config.CoSInterface),
+		}
+		for _, fc := range root.ClassOfService.ForwardingClasses {
+			cfg.ClassOfService.ForwardingClasses[fc.Name] = &config.ForwardingClass{
+				Name:  fc.Name,
+				Queue: fc.Queue,
+			}
+		}
+		for _, profile := range root.ClassOfService.TrafficControlProfiles {
+			cfg.ClassOfService.TrafficControlProfiles[profile.Name] = &config.TrafficControlProfile{
+				Name:         profile.Name,
+				ShapingRate:  profile.ShapingRate,
+				SchedulerMap: profile.SchedulerMap,
+			}
+		}
+		for _, iface := range root.ClassOfService.Interfaces {
+			cfg.ClassOfService.Interfaces[iface.Name] = &config.CoSInterface{
+				Name:                        iface.Name,
+				OutputTrafficControlProfile: iface.OutputTrafficControlProfile,
+			}
+		}
+	}
+
+	// Security
+	if root.Security != nil {
+		cfg.Security = &config.SecurityConfig{}
+		if root.Security.NETCONF != nil && root.Security.NETCONF.SSH != nil {
+			cfg.Security.NETCONF = &config.NETCONFConfig{
+				SSH: &config.NETCONFSSHConfig{
+					Port: root.Security.NETCONF.SSH.Port,
+				},
+			}
+		}
+		if root.Security.RateLimit != nil {
+			cfg.Security.RateLimit = &config.RateLimitConfig{
+				PerIP:   root.Security.RateLimit.PerIP,
+				PerUser: root.Security.RateLimit.PerUser,
+			}
+		}
 	}
 
 	// Validate depth and element count
@@ -634,8 +1330,32 @@ func XMLToConfig(xmlData []byte, defaultOp DefaultOperation) (*config.Config, er
 var allowedConfigElementPaths = map[string]struct{}{
 	"config": {},
 
-	"config/system":           {},
-	"config/system/host-name": {},
+	"config/system":                                    {},
+	"config/system/host-name":                          {},
+	"config/system/services":                           {},
+	"config/system/services/web-ui":                    {},
+	"config/system/services/web-ui/enabled":            {},
+	"config/system/services/web-ui/listen-address":     {},
+	"config/system/services/web-ui/port":               {},
+	"config/system/services/prometheus":                {},
+	"config/system/services/prometheus/enabled":        {},
+	"config/system/services/prometheus/listen-address": {},
+	"config/system/services/prometheus/port":           {},
+	"config/system/services/snmp":                      {},
+	"config/system/services/snmp/enabled":              {},
+	"config/system/services/snmp/listen-address":       {},
+	"config/system/services/snmp/port":                 {},
+	"config/system/services/snmp/community":            {},
+	"config/chassis":                                   {},
+	"config/chassis/cluster":                           {},
+	"config/chassis/cluster/enabled":                   {},
+	"config/chassis/cluster/node":                      {},
+	"config/chassis/cluster/node/name":                 {},
+	"config/chassis/cluster/node/address":              {},
+	"config/chassis/cluster/node/priority":             {},
+	"config/chassis/cluster/sync":                      {},
+	"config/chassis/cluster/sync/etcd":                 {},
+	"config/chassis/cluster/sync/etcd/endpoint":        {},
 
 	"config/interfaces":                               {},
 	"config/interfaces/interface":                     {},
@@ -655,6 +1375,18 @@ var allowedConfigElementPaths = map[string]struct{}{
 	"config/routing/static-routes/route/prefix":   {},
 	"config/routing/static-routes/route/next-hop": {},
 	"config/routing/static-routes/route/distance": {},
+
+	"config/routing-instances":                              {},
+	"config/routing-instances/instance":                     {},
+	"config/routing-instances/instance/name":                {},
+	"config/routing-instances/instance/instance-type":       {},
+	"config/routing-instances/instance/route-distinguisher": {},
+	"config/routing-instances/instance/vrf-target":          {},
+	"config/routing-instances/instance/vrf-target-import":   {},
+	"config/routing-instances/instance/vrf-target-export":   {},
+	"config/routing-instances/instance/vrf-import":          {},
+	"config/routing-instances/instance/vrf-export":          {},
+	"config/routing-instances/instance/interface":           {},
 
 	"config/protocols":                                  {},
 	"config/protocols/bgp":                              {},
@@ -678,10 +1410,57 @@ var allowedConfigElementPaths = map[string]struct{}{
 	"config/protocols/ospf/area/interface/passive":      {},
 	"config/protocols/ospf/area/interface/metric":       {},
 	"config/protocols/ospf/area/interface/priority":     {},
+	"config/protocols/mpls":                             {},
+	"config/protocols/mpls/interface":                   {},
+	"config/protocols/vrrp":                             {},
+	"config/protocols/vrrp/group":                       {},
+	"config/protocols/vrrp/group/name":                  {},
+	"config/protocols/vrrp/group/interface":             {},
+	"config/protocols/vrrp/group/virtual-address":       {},
+	"config/protocols/vrrp/group/priority":              {},
+	"config/protocols/vrrp/group/preempt":               {},
+
+	"config/class-of-service":                                                                {},
+	"config/class-of-service/forwarding-classes":                                             {},
+	"config/class-of-service/forwarding-classes/forwarding-class":                            {},
+	"config/class-of-service/forwarding-classes/forwarding-class/name":                       {},
+	"config/class-of-service/forwarding-classes/forwarding-class/queue":                      {},
+	"config/class-of-service/traffic-control-profiles":                                       {},
+	"config/class-of-service/traffic-control-profiles/traffic-control-profile":               {},
+	"config/class-of-service/traffic-control-profiles/traffic-control-profile/name":          {},
+	"config/class-of-service/traffic-control-profiles/traffic-control-profile/shaping-rate":  {},
+	"config/class-of-service/traffic-control-profiles/traffic-control-profile/scheduler-map": {},
+	"config/class-of-service/interfaces":                                                     {},
+	"config/class-of-service/interfaces/interface":                                           {},
+	"config/class-of-service/interfaces/interface/name":                                      {},
+	"config/class-of-service/interfaces/interface/output-traffic-control-profile":            {},
+
+	"config/security":                     {},
+	"config/security/netconf":             {},
+	"config/security/netconf/ssh":         {},
+	"config/security/netconf/ssh/port":    {},
+	"config/security/rate-limit":          {},
+	"config/security/rate-limit/per-ip":   {},
+	"config/security/rate-limit/per-user": {},
 }
 
 var configTextContentPaths = map[string]struct{}{
-	"config/system/host-name": {},
+	"config/system/host-name":                          {},
+	"config/system/services/web-ui/enabled":            {},
+	"config/system/services/web-ui/listen-address":     {},
+	"config/system/services/web-ui/port":               {},
+	"config/system/services/prometheus/enabled":        {},
+	"config/system/services/prometheus/listen-address": {},
+	"config/system/services/prometheus/port":           {},
+	"config/system/services/snmp/enabled":              {},
+	"config/system/services/snmp/listen-address":       {},
+	"config/system/services/snmp/port":                 {},
+	"config/system/services/snmp/community":            {},
+	"config/chassis/cluster/enabled":                   {},
+	"config/chassis/cluster/node/name":                 {},
+	"config/chassis/cluster/node/address":              {},
+	"config/chassis/cluster/node/priority":             {},
+	"config/chassis/cluster/sync/etcd/endpoint":        {},
 
 	"config/interfaces/interface/name":                {},
 	"config/interfaces/interface/description":         {},
@@ -694,6 +1473,16 @@ var configTextContentPaths = map[string]struct{}{
 	"config/routing/static-routes/route/prefix":   {},
 	"config/routing/static-routes/route/next-hop": {},
 	"config/routing/static-routes/route/distance": {},
+
+	"config/routing-instances/instance/name":                {},
+	"config/routing-instances/instance/instance-type":       {},
+	"config/routing-instances/instance/route-distinguisher": {},
+	"config/routing-instances/instance/vrf-target":          {},
+	"config/routing-instances/instance/vrf-target-import":   {},
+	"config/routing-instances/instance/vrf-target-export":   {},
+	"config/routing-instances/instance/vrf-import":          {},
+	"config/routing-instances/instance/vrf-export":          {},
+	"config/routing-instances/instance/interface":           {},
 
 	"config/protocols/bgp/group/name":                   {},
 	"config/protocols/bgp/group/type":                   {},
@@ -711,6 +1500,24 @@ var configTextContentPaths = map[string]struct{}{
 	"config/protocols/ospf/area/interface/passive":  {},
 	"config/protocols/ospf/area/interface/metric":   {},
 	"config/protocols/ospf/area/interface/priority": {},
+	"config/protocols/mpls/interface":               {},
+	"config/protocols/vrrp/group/name":              {},
+	"config/protocols/vrrp/group/interface":         {},
+	"config/protocols/vrrp/group/virtual-address":   {},
+	"config/protocols/vrrp/group/priority":          {},
+	"config/protocols/vrrp/group/preempt":           {},
+
+	"config/class-of-service/forwarding-classes/forwarding-class/name":                       {},
+	"config/class-of-service/forwarding-classes/forwarding-class/queue":                      {},
+	"config/class-of-service/traffic-control-profiles/traffic-control-profile/name":          {},
+	"config/class-of-service/traffic-control-profiles/traffic-control-profile/shaping-rate":  {},
+	"config/class-of-service/traffic-control-profiles/traffic-control-profile/scheduler-map": {},
+	"config/class-of-service/interfaces/interface/name":                                      {},
+	"config/class-of-service/interfaces/interface/output-traffic-control-profile":            {},
+
+	"config/security/netconf/ssh/port":    {},
+	"config/security/rate-limit/per-ip":   {},
+	"config/security/rate-limit/per-user": {},
 }
 
 func isConfigTextContentPath(path []string) bool {
@@ -891,7 +1698,7 @@ func isAllowedConfigNamespace(path []string, namespace string) bool {
 		return namespace == ArcaConfigNS || namespace == IETFInterfacesNS || namespace == IETFRoutingNS
 	}
 	switch path[1] {
-	case "system", "protocols":
+	case "system", "chassis", "protocols", "routing-instances", "class-of-service", "security":
 		return namespace == ArcaConfigNS
 	case "interfaces":
 		return namespace == IETFInterfacesNS
@@ -958,6 +1765,14 @@ func mergeConfigs(existing, edit *config.Config) (*config.Config, error) {
 		if edit.System.HostName != "" {
 			existing.System.HostName = edit.System.HostName
 		}
+		if edit.System.Services != nil {
+			mergeSystemServices(existing.System, edit.System.Services)
+		}
+	}
+
+	// Merge chassis
+	if edit.Chassis != nil {
+		existing.Chassis = edit.Chassis
 	}
 
 	// Merge interfaces
@@ -1035,6 +1850,16 @@ func mergeConfigs(existing, edit *config.Config) (*config.Config, error) {
 		}
 	}
 
+	// Merge routing instances
+	if edit.RoutingInstances != nil {
+		if existing.RoutingInstances == nil {
+			existing.RoutingInstances = make(map[string]*config.RoutingInstance)
+		}
+		for name, instance := range edit.RoutingInstances {
+			existing.RoutingInstances[name] = instance
+		}
+	}
+
 	// Merge protocols
 	if edit.Protocols != nil {
 		if existing.Protocols == nil {
@@ -1073,9 +1898,93 @@ func mergeConfigs(existing, edit *config.Config) (*config.Config, error) {
 				existing.Protocols.OSPF.Areas[areaName] = editArea
 			}
 		}
+
+		if edit.Protocols.MPLS != nil {
+			if existing.Protocols.MPLS == nil {
+				existing.Protocols.MPLS = &config.MPLSConfig{}
+			}
+			for _, iface := range edit.Protocols.MPLS.Interfaces {
+				if !contains(existing.Protocols.MPLS.Interfaces, iface) {
+					existing.Protocols.MPLS.Interfaces = append(existing.Protocols.MPLS.Interfaces, iface)
+				}
+			}
+		}
+
+		if edit.Protocols.VRRP != nil {
+			if existing.Protocols.VRRP == nil {
+				existing.Protocols.VRRP = &config.VRRPConfig{
+					Groups: make(map[string]*config.VRRPGroup),
+				}
+			}
+			if existing.Protocols.VRRP.Groups == nil {
+				existing.Protocols.VRRP.Groups = make(map[string]*config.VRRPGroup)
+			}
+			for name, group := range edit.Protocols.VRRP.Groups {
+				existing.Protocols.VRRP.Groups[name] = group
+			}
+		}
+	}
+
+	// Merge class of service
+	if edit.ClassOfService != nil {
+		if existing.ClassOfService == nil {
+			existing.ClassOfService = &config.ClassOfServiceConfig{}
+		}
+		if len(edit.ClassOfService.ForwardingClasses) > 0 {
+			if existing.ClassOfService.ForwardingClasses == nil {
+				existing.ClassOfService.ForwardingClasses = make(map[string]*config.ForwardingClass)
+			}
+			for name, fc := range edit.ClassOfService.ForwardingClasses {
+				existing.ClassOfService.ForwardingClasses[name] = fc
+			}
+		}
+		if len(edit.ClassOfService.TrafficControlProfiles) > 0 {
+			if existing.ClassOfService.TrafficControlProfiles == nil {
+				existing.ClassOfService.TrafficControlProfiles = make(map[string]*config.TrafficControlProfile)
+			}
+			for name, profile := range edit.ClassOfService.TrafficControlProfiles {
+				existing.ClassOfService.TrafficControlProfiles[name] = profile
+			}
+		}
+		if len(edit.ClassOfService.Interfaces) > 0 {
+			if existing.ClassOfService.Interfaces == nil {
+				existing.ClassOfService.Interfaces = make(map[string]*config.CoSInterface)
+			}
+			for name, iface := range edit.ClassOfService.Interfaces {
+				existing.ClassOfService.Interfaces[name] = iface
+			}
+		}
+	}
+
+	// Merge security
+	if edit.Security != nil {
+		if existing.Security == nil {
+			existing.Security = &config.SecurityConfig{}
+		}
+		if edit.Security.NETCONF != nil {
+			existing.Security.NETCONF = edit.Security.NETCONF
+		}
+		if edit.Security.RateLimit != nil {
+			existing.Security.RateLimit = edit.Security.RateLimit
+		}
 	}
 
 	return existing, nil
+}
+
+func mergeSystemServices(system *config.SystemConfig, editServices *config.SystemServicesConfig) {
+	if system.Services == nil {
+		system.Services = &config.SystemServicesConfig{}
+	}
+	if editServices.WebUI != nil {
+		system.Services.WebUI = editServices.WebUI
+	}
+	if editServices.Prometheus != nil {
+		system.Services.Prometheus = editServices.Prometheus
+	}
+	if editServices.SNMP != nil {
+		system.Services.SNMP = editServices.SNMP
+	}
 }
 
 // replaceConfigs replaces existing config subtrees with edit
@@ -1087,11 +1996,23 @@ func replaceConfigs(existing, edit *config.Config) (*config.Config, error) {
 	if edit.Interfaces != nil {
 		existing.Interfaces = edit.Interfaces
 	}
+	if edit.Chassis != nil {
+		existing.Chassis = edit.Chassis
+	}
 	if edit.RoutingOptions != nil {
 		existing.RoutingOptions = edit.RoutingOptions
 	}
+	if edit.RoutingInstances != nil {
+		existing.RoutingInstances = edit.RoutingInstances
+	}
 	if edit.Protocols != nil {
 		existing.Protocols = edit.Protocols
+	}
+	if edit.ClassOfService != nil {
+		existing.ClassOfService = edit.ClassOfService
+	}
+	if edit.Security != nil {
+		existing.Security = edit.Security
 	}
 	return existing, nil
 }
@@ -1141,6 +2062,14 @@ func calculateConfigDepth(cfg *config.Config) int {
 	// System: depth 2 (config > system > hostname)
 	if cfg.System != nil {
 		maxDepth = max(maxDepth, 2)
+		if cfg.System.Services != nil {
+			maxDepth = max(maxDepth, 4)
+		}
+	}
+
+	// Chassis: depth 5 (config > chassis > cluster > sync > etcd > endpoint)
+	if cfg.Chassis != nil && cfg.Chassis.Cluster != nil {
+		maxDepth = max(maxDepth, 5)
 	}
 
 	// Interfaces: depth 5 (config > interfaces > interface > unit > family > address)
@@ -1158,6 +2087,10 @@ func calculateConfigDepth(cfg *config.Config) int {
 		maxDepth = max(maxDepth, 4)
 	}
 
+	if len(cfg.RoutingInstances) > 0 {
+		maxDepth = max(maxDepth, 3)
+	}
+
 	// Protocols: depth 5 (config > protocols > bgp > group > neighbor)
 	if cfg.Protocols != nil {
 		if cfg.Protocols.BGP != nil && len(cfg.Protocols.BGP.Groups) > 0 {
@@ -1166,6 +2099,20 @@ func calculateConfigDepth(cfg *config.Config) int {
 		if cfg.Protocols.OSPF != nil && len(cfg.Protocols.OSPF.Areas) > 0 {
 			maxDepth = max(maxDepth, 5)
 		}
+		if cfg.Protocols.MPLS != nil && len(cfg.Protocols.MPLS.Interfaces) > 0 {
+			maxDepth = max(maxDepth, 3)
+		}
+		if cfg.Protocols.VRRP != nil && len(cfg.Protocols.VRRP.Groups) > 0 {
+			maxDepth = max(maxDepth, 4)
+		}
+	}
+
+	if cfg.ClassOfService != nil {
+		maxDepth = max(maxDepth, 4)
+	}
+
+	if cfg.Security != nil {
+		maxDepth = max(maxDepth, 4)
 	}
 
 	return maxDepth
@@ -1177,6 +2124,41 @@ func countConfigElements(cfg *config.Config) int {
 
 	if cfg.System != nil {
 		count += 2 // <system> + <hostname>
+		if cfg.System.Services != nil {
+			count++ // <services>
+			if service := cfg.System.Services.WebUI; service != nil {
+				count += serviceElementCount(service.Enabled, service.ListenAddress, service.Port, "")
+			}
+			if service := cfg.System.Services.Prometheus; service != nil {
+				count += serviceElementCount(service.Enabled, service.ListenAddress, service.Port, "")
+			}
+			if service := cfg.System.Services.SNMP; service != nil {
+				count += serviceElementCount(service.Enabled, service.ListenAddress, service.Port, service.Community)
+			}
+		}
+	}
+
+	if cfg.Chassis != nil && cfg.Chassis.Cluster != nil {
+		count += 2 // <chassis> + <cluster>
+		if cfg.Chassis.Cluster.Enabled {
+			count++
+		}
+		for _, node := range cfg.Chassis.Cluster.Nodes {
+			if node == nil {
+				continue
+			}
+			count += 2 // <node> + <name>
+			if node.Address != "" {
+				count++
+			}
+			if node.Priority != 0 {
+				count++
+			}
+		}
+		if cfg.Chassis.Cluster.Sync != nil && cfg.Chassis.Cluster.Sync.Etcd != nil && len(cfg.Chassis.Cluster.Sync.Etcd.Endpoints) > 0 {
+			count += 2 // <sync> + <etcd>
+			count += len(cfg.Chassis.Cluster.Sync.Etcd.Endpoints)
+		}
 	}
 
 	if cfg.Interfaces != nil {
@@ -1216,6 +2198,30 @@ func countConfigElements(cfg *config.Config) int {
 					count++ // <distance>
 				}
 			}
+		}
+	}
+
+	if len(cfg.RoutingInstances) > 0 {
+		count++ // <routing-instances>
+		for _, instance := range cfg.RoutingInstances {
+			if instance == nil {
+				continue
+			}
+			count += 2 // <instance> + <name>
+			if instance.InstanceType != "" {
+				count++
+			}
+			if instance.RouteDistinguisher != "" {
+				count++
+			}
+			if instance.VRFTarget != "" {
+				count++
+			}
+			count += len(instance.VRFTargetImport)
+			count += len(instance.VRFTargetExport)
+			count += len(instance.VRFImport)
+			count += len(instance.VRFExport)
+			count += len(instance.Interfaces)
 		}
 	}
 
@@ -1266,8 +2272,110 @@ func countConfigElements(cfg *config.Config) int {
 				}
 			}
 		}
+		if cfg.Protocols.MPLS != nil && len(cfg.Protocols.MPLS.Interfaces) > 0 {
+			count++ // <mpls>
+			count += len(cfg.Protocols.MPLS.Interfaces)
+		}
+		if cfg.Protocols.VRRP != nil && len(cfg.Protocols.VRRP.Groups) > 0 {
+			count++ // <vrrp>
+			for _, group := range cfg.Protocols.VRRP.Groups {
+				if group == nil {
+					continue
+				}
+				count += 2 // <group> + <name>
+				if group.Interface != "" {
+					count++
+				}
+				if group.VirtualAddress != "" {
+					count++
+				}
+				if group.Priority != 0 {
+					count++
+				}
+				if group.Preempt {
+					count++
+				}
+			}
+		}
 	}
 
+	if cfg.ClassOfService != nil {
+		count++ // <class-of-service>
+		if len(cfg.ClassOfService.ForwardingClasses) > 0 {
+			count++ // <forwarding-classes>
+			for _, fc := range cfg.ClassOfService.ForwardingClasses {
+				if fc != nil {
+					count += 3 // <forwarding-class> + <name> + <queue>
+				}
+			}
+		}
+		if len(cfg.ClassOfService.TrafficControlProfiles) > 0 {
+			count++ // <traffic-control-profiles>
+			for _, profile := range cfg.ClassOfService.TrafficControlProfiles {
+				if profile == nil {
+					continue
+				}
+				count += 2 // <traffic-control-profile> + <name>
+				if profile.ShapingRate != 0 {
+					count++
+				}
+				if profile.SchedulerMap != "" {
+					count++
+				}
+			}
+		}
+		if len(cfg.ClassOfService.Interfaces) > 0 {
+			count++ // <interfaces>
+			for _, iface := range cfg.ClassOfService.Interfaces {
+				if iface == nil {
+					continue
+				}
+				count += 2 // <interface> + <name>
+				if iface.OutputTrafficControlProfile != "" {
+					count++
+				}
+			}
+		}
+	}
+
+	if cfg.Security != nil {
+		if (cfg.Security.NETCONF != nil && cfg.Security.NETCONF.SSH != nil && cfg.Security.NETCONF.SSH.Port != 0) || cfg.Security.RateLimit != nil {
+			count++ // <security>
+		}
+		if cfg.Security.NETCONF != nil && cfg.Security.NETCONF.SSH != nil && cfg.Security.NETCONF.SSH.Port != 0 {
+			count += 3 // <netconf> + <ssh> + <port>
+		}
+		if cfg.Security.RateLimit != nil {
+			count++ // <rate-limit>
+			if cfg.Security.RateLimit.PerIP != 0 {
+				count++
+			}
+			if cfg.Security.RateLimit.PerUser != 0 {
+				count++
+			}
+		}
+	}
+
+	return count
+}
+
+func serviceElementCount(enabled bool, listenAddress string, port int, community string) int {
+	if !enabled && listenAddress == "" && port == 0 && community == "" {
+		return 0
+	}
+	count := 1
+	if enabled {
+		count++
+	}
+	if listenAddress != "" {
+		count++
+	}
+	if port != 0 {
+		count++
+	}
+	if community != "" {
+		count++
+	}
 	return count
 }
 

@@ -47,6 +47,30 @@ type Client interface {
 	// DeleteInterfaceAddress removes an IP address from an interface
 	DeleteInterfaceAddress(ctx context.Context, ifIndex uint32, addr *net.IPNet) error
 
+	// SetMPLSInterface enables or disables MPLS forwarding on an interface
+	SetMPLSInterface(ctx context.Context, ifIndex uint32, enabled bool) error
+
+	// AddIPTable creates an IPv4 or IPv6 FIB table.
+	AddIPTable(ctx context.Context, table IPTable) error
+
+	// DeleteIPTable deletes an IPv4 or IPv6 FIB table.
+	DeleteIPTable(ctx context.Context, table IPTable) error
+
+	// SetInterfaceTable binds an interface to an IPv4 or IPv6 FIB table.
+	SetInterfaceTable(ctx context.Context, ifIndex uint32, tableID uint32, isIPv6 bool) error
+
+	// SetQoSProfile binds output QoS policy intent to an interface.
+	SetQoSProfile(ctx context.Context, ifIndex uint32, profile QoSProfile) error
+
+	// ClearQoSProfile removes output QoS policy intent from an interface.
+	ClearQoSProfile(ctx context.Context, ifIndex uint32) error
+
+	// ListInterfaceCounters returns packet and byte counters by VPP interface index.
+	ListInterfaceCounters(ctx context.Context) (map[uint32]InterfaceCounters, error)
+
+	// ListInterfaceQueuePlacements returns RX/TX queue placement by VPP interface index.
+	ListInterfaceQueuePlacements(ctx context.Context) (map[uint32]InterfaceQueuePlacements, error)
+
 	// GetInterface retrieves interface information by index
 	GetInterface(ctx context.Context, ifIndex uint32) (*Interface, error)
 
@@ -124,6 +148,61 @@ type Interface struct {
 	// PCIAddress is the PCI address (e.g., "0000:00:06.0") for hardware interfaces
 	// Empty for non-hardware interfaces (e.g., tap, loopback)
 	PCIAddress string
+
+	// QoSProfile is the bound output QoS profile name, if any.
+	QoSProfile string
+}
+
+// IPTable represents a VPP IPv4 or IPv6 FIB table.
+type IPTable struct {
+	ID     uint32
+	IsIPv6 bool
+	Name   string
+}
+
+// QoSProfile represents output QoS policy intent for a VPP interface.
+type QoSProfile struct {
+	Name         string
+	ShapingRate  uint64
+	SchedulerMap string
+	Queues       []QoSQueue
+}
+
+// QoSQueue maps an arca forwarding class to a VPP output queue.
+type QoSQueue struct {
+	ForwardingClass string
+	Queue           uint8
+}
+
+// InterfaceQueuePlacements holds VPP RX/TX queue placement for an interface.
+type InterfaceQueuePlacements struct {
+	Rx []InterfaceRxQueuePlacement
+	Tx []InterfaceTxQueuePlacement
+}
+
+// InterfaceRxQueuePlacement maps an RX queue to a VPP worker.
+type InterfaceRxQueuePlacement struct {
+	QueueID  uint32
+	WorkerID uint32
+	Mode     string
+}
+
+// InterfaceTxQueuePlacement maps a TX queue to VPP worker threads.
+type InterfaceTxQueuePlacement struct {
+	QueueID uint32
+	Shared  bool
+	Threads []uint32
+}
+
+// InterfaceCounters holds VPP packet, byte, error, and drop counters.
+type InterfaceCounters struct {
+	RxPackets uint64
+	TxPackets uint64
+	RxBytes   uint64
+	TxBytes   uint64
+	RxErrors  uint64
+	TxErrors  uint64
+	Drops     uint64
 }
 
 // InterfaceType represents the type of interface

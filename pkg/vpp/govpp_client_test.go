@@ -132,6 +132,26 @@ func TestConvertToInterface(t *testing.T) {
 				Addresses: nil,
 			},
 		},
+		{
+			name: "metadata tag",
+			msg: &vppif.SwInterfaceDetails{
+				SwIfIndex:     3,
+				InterfaceName: "test-if-3",
+				Flags:         0,
+				L2Address:     ethernet_types.MacAddress{0x02, 0x00, 0x00, 0x00, 0x00, 0x03},
+				Tag:           "pci=0000:03:00.0;qos=WAN",
+			},
+			want: &Interface{
+				SwIfIndex:  3,
+				Name:       "test-if-3",
+				AdminUp:    false,
+				LinkUp:     false,
+				MAC:        net.HardwareAddr{0x02, 0x00, 0x00, 0x00, 0x00, 0x03},
+				Addresses:  nil,
+				PCIAddress: "0000:03:00.0",
+				QoSProfile: "WAN",
+			},
+		},
 	}
 
 	for _, tt := range tests {
@@ -152,7 +172,45 @@ func TestConvertToInterface(t *testing.T) {
 			if got.MAC.String() != tt.want.MAC.String() {
 				t.Errorf("MAC = %s, want %s", got.MAC.String(), tt.want.MAC.String())
 			}
+			if got.PCIAddress != tt.want.PCIAddress {
+				t.Errorf("PCIAddress = %s, want %s", got.PCIAddress, tt.want.PCIAddress)
+			}
+			if got.QoSProfile != tt.want.QoSProfile {
+				t.Errorf("QoSProfile = %s, want %s", got.QoSProfile, tt.want.QoSProfile)
+			}
 		})
+	}
+}
+
+func TestConvertInterfaceCounters(t *testing.T) {
+	got := convertInterfaceCounters(api.InterfaceCounters{
+		Rx:       api.InterfaceCounterCombined{Packets: 10, Bytes: 1000},
+		Tx:       api.InterfaceCounterCombined{Packets: 20, Bytes: 2000},
+		RxErrors: 1,
+		TxErrors: 2,
+		Drops:    3,
+	})
+
+	if got.RxPackets != 10 || got.TxPackets != 20 || got.RxBytes != 1000 || got.TxBytes != 2000 || got.RxErrors != 1 || got.TxErrors != 2 || got.Drops != 3 {
+		t.Fatalf("convertInterfaceCounters() = %#v, want VPP stats counters", got)
+	}
+}
+
+func TestRxModeName(t *testing.T) {
+	tests := []struct {
+		mode interface_types.RxMode
+		want string
+	}{
+		{mode: interface_types.RX_MODE_API_POLLING, want: "polling"},
+		{mode: interface_types.RX_MODE_API_INTERRUPT, want: "interrupt"},
+		{mode: interface_types.RX_MODE_API_ADAPTIVE, want: "adaptive"},
+		{mode: interface_types.RX_MODE_API_DEFAULT, want: "default"},
+		{mode: interface_types.RX_MODE_API_UNKNOWN, want: "unknown"},
+	}
+	for _, tt := range tests {
+		if got := rxModeName(tt.mode); got != tt.want {
+			t.Fatalf("rxModeName(%s) = %q, want %q", tt.mode, got, tt.want)
+		}
 	}
 }
 

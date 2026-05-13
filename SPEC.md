@@ -1,4 +1,4 @@
-# arca-router Configuration Specification (v0.5.x)
+# arca-router Configuration Specification (v0.6.x)
 
 This document specifies the configuration syntax and semantics for arca-router.
 
@@ -8,28 +8,30 @@ This document specifies the configuration syntax and semantics for arca-router.
 
 arca-router uses Junos-like configuration syntax via `set` commands. Configuration is managed through:
 
-1. **Unified daemon (`arca-routerd`)**: Single process handling VPP, FRR, NETCONF, gRPC, Prometheus, and SNMP.
+1. **Unified daemon (`arca-routerd`)**: Single process handling VPP, FRR, NETCONF, gRPC, Prometheus, Web UI, and SNMP.
 2. **Interactive CLI (`arca`)**: Thin gRPC client for operational commands and candidate/running configuration workflow.
 3. **NETCONF/SSH**: Remote configuration via NETCONF protocol (RFC 6241), built into the daemon and backed by the same datastore/engine.
-4. **File bootstrap**: `/etc/arca-router/arca-router.conf` is used at startup only when the SQLite datastore has no running configuration.
+4. **File bootstrap**: `/etc/arca-router/arca-router.conf` is used at startup only when the configured datastore has no running configuration.
 
-### v0.5.x Architecture
+### v0.6.x Architecture
 
-The v0.5.x line is the current unified daemon path:
+The v0.6.x line extends the unified daemon path:
 
 - **Struct-first config model**: Configuration is represented as Go structs (`internal/model.RouterConfig`), not text. Text format is just one serialization.
-- **SQLite candidate/running datastore**: `/var/lib/arca-router/config.db` stores running config, candidate sessions, commit history, rollback metadata, locks, and audit events.
+- **SQLite or etcd candidate/running datastore**: SQLite remains the single-node default; etcd can be selected for clustered deployments.
 - **Diff-based engine**: The config engine (`internal/engine`) computes minimal diffs between running and candidate configs, applying only what changed.
 - **Plugin-based southbound**: VPP and FRR are `engine.Plugin` implementations, each receiving only the relevant diff.
 - **Transactional FRR apply**: The default `--frr-apply-mode=transactional` backend uses the FRR management candidate datastore through `vtysh` `mgmt commit check` / `mgmt commit apply`.
 - **Recovery FRR file backend**: `--frr-apply-mode=file` keeps the full-file reload path for recovery and compatibility.
 - **gRPC internal API**: `arca` communicates with the daemon via Unix socket gRPC (`api/v1/router.proto`, default `/run/arca-router/routerd.sock`).
 - **2-phase commit**: Validate all plugins → apply all plugins → rollback on any failure.
-- **Observability**: Optional Prometheus `/metrics`, `/healthz`, read-only SNMPv2c, and a packaged Grafana dashboard.
+- **Advanced configuration model**: Clustering, MPLS, VRRP, routing instances, class of service, and Web UI service settings are represented in the struct-first model and diff engine.
+- **Cluster datastore selection**: `arca-routerd` and embedded NETCONF share the same SQLite or etcd datastore backend.
+- **Observability**: Optional Prometheus `/metrics`, `/healthz`, Web UI dashboard with authenticated config validate/commit APIs, read-only SNMPv2c, and a packaged Grafana dashboard.
 
 Only the current command names are part of this specification: `arca-routerd` and `arca`. Obsolete command entrypoints are not maintained.
 
-> **Compatibility note**: The `set` command syntax and NETCONF configuration model remain stable. Automatic migration tooling is intentionally not part of v0.5.x.
+> **Compatibility note**: The `set` command syntax and NETCONF configuration model remain stable. Automatic migration tooling is intentionally not part of v0.6.x.
 
 ---
 
@@ -46,18 +48,19 @@ Only the current command names are part of this specification: `arca-routerd` an
 6. [Policy Options](#policy-options)
    - [Prefix Lists](#prefix-lists)
    - [Policy Statements](#policy-statements)
-7. [Security](#security)
+7. [Advanced v0.6 Configuration](#advanced-v06-configuration)
+8. [Security](#security)
    - [NETCONF Server](#netconf-server)
    - [User Management](#user-management)
    - [Rate Limiting](#rate-limiting)
-8. [Configuration Workflow](#configuration-workflow)
-9. [Examples](#examples)
-10. [Runtime Options and Observability](#runtime-options-and-observability)
-11. [Operational Commands](#operational-commands)
-12. [Configuration Validation](#configuration-validation)
-13. [Troubleshooting](#troubleshooting)
-14. [References](#references)
-15. [Version History](#version-history)
+9. [Configuration Workflow](#configuration-workflow)
+10. [Examples](#examples)
+11. [Runtime Options and Observability](#runtime-options-and-observability)
+12. [Operational Commands](#operational-commands)
+13. [Configuration Validation](#configuration-validation)
+14. [Troubleshooting](#troubleshooting)
+15. [References](#references)
+16. [Version History](#version-history)
 
 ---
 
@@ -481,6 +484,109 @@ set protocols bgp group external import PREFER-CUSTOMER
 
 ---
 
+<a id="advanced-v06-configuration"></a>
+## Advanced v0.6 Configuration
+
+The following hierarchies are part of the v0.6 management-plane model. Parser, serializer, validation, clone, conversion, diff, and candidate command replacement support are implemented. FRR VRRP application, VPP MPLS interface forwarding, VPP routing-instance table plumbing, FRR L3VPN import/export control, VPP class-of-service profile binding and operational visibility, NETCONF live interface state, and VPP queue placement telemetry are implemented; queue scheduler/policer enforcement and operational QoS counters are staged separately.
+
+Class-of-service interface bindings are applied to managed VPP interfaces as output traffic-control profile intent. VRRP and L3VPN control-plane configuration are applied by the FRR file backend and the default transactional FRR backend.
+
+MPLS, VRRP, OSPF, routing-instance, and class-of-service interface references must point to interfaces defined under `interfaces`. Unknown interface references fail validation before southbound apply. Routing-instance VPN import/export settings also fail validation before apply when required import/export targets, route distinguishers, or `routing-options autonomous-system` are missing.
+
+### Prometheus Service
+
+```
+set system services prometheus enabled true
+set system services prometheus listen-address 127.0.0.1
+set system services prometheus port 9090
+```
+
+`listen-address` must be an IP address or `localhost`. When enabled without an explicit port, the daemon uses port `9090`.
+
+### Web UI Service
+
+```
+set system services web-ui enabled true
+set system services web-ui listen-address 127.0.0.1
+set system services web-ui port 8080
+```
+
+`listen-address` must be an IP address or `localhost`. When enabled without an explicit port, the daemon uses port `8080`.
+
+### SNMP Service
+
+```
+set system services snmp enabled true
+set system services snmp listen-address 127.0.0.1
+set system services snmp port 1161
+set system services snmp community public
+```
+
+`listen-address` must be an IP address or `localhost`. When enabled without an explicit port, the daemon uses the standard UDP port `161`. When enabled without a community, the daemon uses `public`.
+
+### Multi-chassis and VRRP
+
+```
+set chassis cluster enabled true
+set chassis cluster node node0 address 192.0.2.10
+set chassis cluster node node0 priority 120
+set chassis cluster sync etcd endpoint http://127.0.0.1:2379
+
+set protocols vrrp group 10 interface ge-0/0/0
+set protocols vrrp group 10 virtual-address 192.0.2.1
+set protocols vrrp group 10 priority 110
+set protocols vrrp group 10 preempt
+```
+
+When `chassis cluster` is enabled with `sync etcd endpoint` values, the daemon must be running with `--datastore-backend=etcd`, and the configured sync endpoints must match `--etcd-endpoints`. Commits that would leave a mismatched cluster sync configuration active fail validation.
+
+When `--datastore-backend=etcd` is active, arca-routerd polls the etcd running configuration revision. If another chassis commits a newer running configuration, the daemon reloads the latest snapshot from etcd and applies it through the same engine and southbound plugins used by local commits. The sync loop only reacts to changes in the etcd `running/current` key revision, so a local commit that has updated the engine but has not yet persisted its new running revision is not overwritten by an older snapshot.
+
+VRRP group IDs must be numeric and between `1` and `255`. VRRP priority must be between `1` and `254` when configured; omit it for default behavior. The configured VRRP interface must exist under `interfaces`.
+
+Before applying FRR VRRP configuration, arca-routerd prepares the Linux state expected by FRR `vrrpd`: arca-owned macvlan interfaces named `arv4-<id>-<hash>` or `arv6-<id>-<hash>` are created on the LCP interface, assigned the RFC VRRP virtual MAC, configured with the virtual address as `/32` or `/128`, and brought up. The prepared interface names are persisted in `/var/lib/arca-router/vrrp-interfaces.json` so stale arca-owned macvlan interfaces can be removed after daemon restart. This requires `CAP_NET_ADMIN`, which is included in the packaged systemd unit.
+
+arca-routerd reads FRR VRRP operational state through `vtysh -c "show vrrp json"`. Post-failover convergence is exposed as read-only status, including per-group FRR VRRP state in `/api/status` and the Web UI. HA convergence is considered configured when chassis clustering is enabled and at least one VRRP group exists. It is considered converged only when the cluster has at least two nodes, etcd cluster sync is configured and aligned with the daemon datastore, etcd config synchronization is healthy, every configured FRR VRRP group is observed in an active `Master` or `Backup` state, and VPP LCP reconciliation has run without errors or inconsistencies.
+
+### MPLS and Routing Instances
+
+```
+set protocols mpls interface ge-0/0/0
+
+set routing-options autonomous-system 65000
+set routing-instances BLUE instance-type vrf
+set routing-instances BLUE route-distinguisher 65000:100
+set routing-instances BLUE vrf-target target:65000:100
+set routing-instances BLUE vrf-target import target:65000:101
+set routing-instances BLUE vrf-target export target:65000:102
+set routing-instances BLUE vrf-import BLUE-IN
+set routing-instances BLUE vrf-export BLUE-OUT
+set routing-instances BLUE interface ge-0/0/1
+```
+
+Only `instance-type vrf` is accepted in v0.6. Route distinguishers use `<asn>:<number>`. Shared and directional VRF targets use `target:<asn>:<number>`; bare `vrf-target` applies to both import and export, while `vrf-target import` and `vrf-target export` add direction-specific extended-community targets. `vrf-import` and `vrf-export` reference configured `policy-options policy-statement` names and may be repeated to build ordered policy chains.
+
+`protocols mpls interface` enables MPLS forwarding on the corresponding managed VPP interface. Removing the stanza disables MPLS forwarding before the interface is removed from VPP. MPLS and routing-instance interface references must resolve to configured interfaces.
+
+For VPP dataplane plumbing, each routing instance gets IPv4 and IPv6 FIB tables. When `route-distinguisher <asn>:<number>` is configured, `<number>` is used as the deterministic VPP table ID; otherwise arca-router derives a stable non-zero table ID from the routing-instance name. Interfaces listed under the routing instance are rebound to those tables, and configured addresses are removed and restored around table changes so existing addresses move with the binding.
+
+For FRR control-plane plumbing, routing instances render FRR VRF entries and per-VRF BGP VPN import/export configuration. Bare `vrf-target` applies to both `rt vpn import` and `rt vpn export`; directional targets apply only to their direction. Export requires `route-distinguisher` and automatically enables `label vpn export auto`. `vrf-import` and `vrf-export` are applied as `route-map vpn import` and `route-map vpn export`; when multiple policies are configured, arca-router generates an ordered synthetic route-map for FRR's single route-map slot.
+
+### Class of Service
+
+```
+set class-of-service forwarding-class expedited-forwarding queue 5
+set class-of-service traffic-control-profile WAN shaping-rate 1000000000
+set class-of-service traffic-control-profile WAN scheduler-map WAN-SCHED
+set class-of-service interfaces ge-0/0/0 output-traffic-control-profile WAN
+```
+
+Forwarding class queues must be between `0` and `7`. Interface bindings must reference an existing traffic-control profile and a configured interface.
+
+`arca show class-of-service` exposes the running forwarding classes, traffic-control profiles, interface bindings, and current enforcement status. VPP scheduler and policer enforcement remains `intent-only` until the supported VPP binapi surface is available.
+
+---
+
 ## Security
 
 ### NETCONF Server
@@ -500,7 +606,15 @@ set security netconf ssh port <port>
 set security netconf ssh port 830
 ```
 
-**Note**: The NETCONF server is built into `arca-routerd`. The runtime bind address is controlled by the daemon flag `--netconf-listen` (default `:830`); this configuration value is retained in the model and should match the deployed NETCONF port.
+**Note**: The NETCONF server is built into `arca-routerd`. When `--netconf-listen` is omitted, the daemon listens on the configured `security netconf ssh port`; if that is also unset, it uses `:830`. `--netconf-listen` remains the explicit runtime override and can include a listen address.
+
+NETCONF XML get-config/edit-config supports the v0.6 management-plane model for `system services`, `chassis cluster`, `protocols mpls`, `protocols vrrp`, `routing-instances`, `class-of-service`, and non-sensitive `security netconf` / `security rate-limit` settings. Security user secrets are intentionally not emitted in NETCONF XML replies.
+
+NETCONF `<get>` returns config-derived system/routing state and, when arca-routerd can collect VPP state, live managed interface admin/oper status, physical address, bound `qos-profile`, counters (`rx-packets`, `tx-packets`, `rx-bytes`, `tx-bytes`, `rx-errors`, `tx-errors`, `drops`), and VPP RX/TX queue placement. If live collection fails, interface output falls back to configured addresses with unknown operational status.
+
+The internal gRPC interface state API and `arca show interfaces` use the same managed VPP interface state source, so interface filters use configured names such as `ge-0/0/0` and expose the same bound QoS profile, packet counters, and queue placement summary for local operators.
+
+The server hello advertises the arca-router YANG module capability as `urn:arca:router:config:1.0?module=arca-router&revision=2025-12-27`.
 
 ### User Management
 
@@ -583,13 +697,24 @@ set security rate-limit per-user 20
 
 ### File-based Configuration
 
-The file at `/etc/arca-router/arca-router.conf` is a bootstrap source. On startup, `arca-routerd` first attempts to load the current running configuration from `/var/lib/arca-router/config.db`. If no running configuration exists, it parses the file, applies it through the engine, and persists it to the datastore.
+The file at `/etc/arca-router/arca-router.conf` is a bootstrap source. On startup, `arca-routerd` first attempts to load the current running configuration from the configured datastore. If no running configuration exists, it parses the file, applies it through the engine, and persists it to the datastore.
 
 1. Edit `/etc/arca-router/arca-router.conf` before the first daemon start, or after intentionally clearing the datastore.
 2. Start or restart daemon: `sudo systemctl restart arca-routerd`
 3. Verify: `sudo journalctl -u arca-routerd -n 50`
 
 After the datastore is initialized, use `arca` or NETCONF for normal configuration changes.
+
+For clustered deployments, use the etcd datastore backend:
+
+```bash
+arca-routerd \
+  --datastore-backend=etcd \
+  --etcd-endpoints=https://etcd1:2379,https://etcd2:2379,https://etcd3:2379 \
+  --etcd-prefix=/arca-router/
+```
+
+If `chassis cluster sync etcd endpoint` is configured, those endpoints must match the daemon's `--etcd-endpoints`; otherwise startup or commit validation fails before the configuration is accepted.
 
 ### NETCONF Configuration
 
@@ -808,14 +933,24 @@ Common options:
 --config <path>            Bootstrap config file (default: /etc/arca-router/arca-router.conf)
 --hardware <path>          Hardware mapping file (default: /etc/arca-router/hardware.yaml)
 --datastore <path>         SQLite datastore (default: /var/lib/arca-router/config.db)
+--datastore-backend <mode> Configuration datastore backend: sqlite or etcd (default: sqlite)
+--etcd-endpoints <list>    Comma-separated etcd endpoints for --datastore-backend=etcd
+--etcd-prefix <prefix>     etcd key prefix (default: /arca-router/)
+--etcd-timeout <duration>  etcd connection and operation timeout (default: 5s)
+--etcd-username <value>    etcd username
+--etcd-password <value>    etcd password
+--etcd-cert <path>         etcd TLS client certificate
+--etcd-key <path>          etcd TLS client key
+--etcd-ca <path>           etcd TLS CA certificate
 --grpc-socket <path>       Internal gRPC Unix socket (default: /run/arca-router/routerd.sock)
---netconf-listen <addr>    NETCONF/SSH listen address (default: :830)
+--netconf-listen <addr>    NETCONF/SSH listen address; overrides security netconf ssh port (default: :830)
 --host-key <path>          NETCONF SSH host key path
 --user-db <path>           NETCONF user database path
 --frr-apply-mode <mode>    FRR backend: transactional or file (default: transactional)
---metrics-listen <addr>    Prometheus listen address; disabled when empty
+--metrics-listen <addr>    Prometheus listen address; overrides system services prometheus config
+--web-listen <addr>        Web UI listen address; overrides system services web-ui config
 --snmp-listen <addr>       SNMPv2c UDP listen address; disabled when empty
---snmp-community <value>   SNMPv2c read-only community (default: public)
+--snmp-community <value>   SNMPv2c read-only community; overrides system services snmp config (default: public)
 --mock-vpp                 Use mock VPP client for tests
 ```
 
@@ -823,7 +958,7 @@ Common options:
 
 The default backend is `transactional`. It requires FRR `mgmtd=yes` in `/etc/frr/daemons` and `vtysh` access for the `arca-router` service user, typically through the `frrvty` group.
 
-The `file` backend writes a full FRR config and applies it with `frr-reload.py`. It is retained for recovery and compatibility; deployments that use it must grant the service user the additional permissions needed to write `/etc/frr/frr.conf`.
+The standard FRR daemon set for arca-router is `bgpd`, `ospfd`, `zebra`, `staticd`, `mgmtd`, and `vrrpd`. The transactional backend applies VRRP through the FRR `frr-vrrpd` YANG model under the interface tree. The `file` backend writes a full FRR config and applies it with `frr-reload.py`. It is retained for recovery and compatibility; deployments that use it must grant the service user the additional permissions needed to write `/etc/frr/frr.conf`.
 
 ### Prometheus and Health
 
@@ -833,16 +968,60 @@ Start the metrics endpoint with:
 arca-routerd --metrics-listen=:9090
 ```
 
+It can also be enabled from running configuration:
+
+```
+set system services prometheus enabled true
+set system services prometheus listen-address 127.0.0.1
+set system services prometheus port 9090
+```
+
 Endpoints:
 
 - `GET /metrics`
 - `GET /healthz`
+
+The metrics endpoint exports daemon uptime, running config version, NETCONF counters, config sync gauges for etcd health and running revision, cluster sync gauges for enabled state, node count, etcd sync configuration, datastore alignment, FRR VRRP operational gauges, HA convergence gauges, class-of-service intent gauges, and VPP LCP reconciliation gauges for pair count, inconsistency count, check failures, and latest check timestamp.
 
 The packaged Grafana dashboard is installed at:
 
 ```
 /usr/share/arca-router/grafana/arca-routerd-dashboard.json
 ```
+
+It includes daemon, NETCONF, config sync, HA, FRR VRRP, class-of-service intent, and VPP LCP panels backed by the Prometheus metrics endpoint.
+
+### Web UI
+
+Start the Web UI with:
+
+```bash
+arca-routerd --web-listen=127.0.0.1:8080
+```
+
+It can also be enabled from configuration:
+
+```
+set system services web-ui enabled true
+set system services web-ui listen-address 127.0.0.1
+set system services web-ui port 8080
+```
+
+Endpoints:
+
+- `GET /`
+- `GET /api/config`
+- `GET /api/config/history`
+- `GET /api/status`
+- `POST /api/config/validate`
+- `POST /api/config/commit`
+
+`/api/status` includes build metadata, uptime, running config version, datastore backend, cluster sync state, class-of-service intent state, FRR VRRP operational state with per-group state details, HA convergence state, VPP LCP reconciliation state, and NETCONF counters.
+`/api/config` returns the running configuration as set-command text with the running config version. The dashboard renders the same running configuration in the browser editor.
+`/api/config/history` returns recent configuration commits and backs the dashboard commit history panel.
+
+When password-backed `security users` exist in running configuration, the Web UI requires HTTP Basic authentication. The built-in `read-only`, `operator`, and `admin` roles are authorized for the read-only dashboard and API endpoints.
+Configuration writes require `operator` or `admin`. The dashboard editor calls `/api/config/validate` and `/api/config/commit`. `/api/config/validate` accepts `{ "config_text": "set ..." }` and returns validation status plus diff text. `/api/config/commit` accepts `{ "config_text": "set ...", "message": "..." }` and commits through the same internal gRPC candidate workflow used by the CLI.
 
 ### SNMP
 
@@ -852,13 +1031,22 @@ Start the read-only SNMPv2c endpoint with:
 arca-routerd --snmp-listen=:1161 --snmp-community=public
 ```
 
+It can also be enabled from running configuration:
+
+```
+set system services snmp enabled true
+set system services snmp listen-address 127.0.0.1
+set system services snmp port 1161
+set system services snmp community public
+```
+
 The packaged systemd unit grants `CAP_NET_BIND_SERVICE`, so the standard UDP port 161 can be used when configured:
 
 ```bash
 arca-routerd --snmp-listen=:161 --snmp-community=<read-only-community>
 ```
 
-SNMP is intended for monitoring only and should not be exposed on untrusted networks.
+SNMP is intended for monitoring only and should not be exposed on untrusted networks. The custom arca-router OID subtree exposes daemon, config, NETCONF, class-of-service intent, FRR VRRP operational, HA convergence, and VPP LCP reconciliation counters.
 
 ---
 
@@ -884,9 +1072,23 @@ arca show bgp neighbor <ip>
 # OSPF neighbors
 arca show ospf neighbor
 
+# VRRP status
+arca show vrrp
+
+# VPP LCP reconciliation status
+arca show lcp
+
+# HA convergence status
+arca show ha
+
+# Class-of-service intent
+arca show class-of-service
+
 # Configuration
 arca show configuration
 ```
+
+`show interfaces` prints live managed VPP admin/oper status, bound QoS profile, packet counters, and RX/TX queue placement when available. Name filters use configured interface names such as `ge-0/0/0`. `show vrrp` prints FRR `show vrrp` output through arca-routerd for local HA inspection. `show lcp` prints the cached VPP LCP reconciliation state used by HA convergence checks. `show ha` prints the same HA convergence summary used by Web UI, Prometheus, and SNMP. `show class-of-service` prints running CoS intent and reports `intent-only` for scheduler/policer enforcement while VPP enforcement support is staged separately.
 
 Interactive mode also supports `show history [N]` in configuration mode for commit history.
 
@@ -999,11 +1201,15 @@ sudo vtysh -c "show running-config"
 ### Check Observability Endpoints
 
 ```
-# Prometheus and health, when --metrics-listen is enabled
+# Prometheus and health, when --metrics-listen or system services prometheus is enabled
 curl http://127.0.0.1:9090/healthz
 curl http://127.0.0.1:9090/metrics
 
-# SNMP, when --snmp-listen is enabled
+# Web UI, when --web-listen or system services web-ui is enabled
+curl http://127.0.0.1:8080/api/status
+curl http://127.0.0.1:8080/api/config
+
+# SNMP, when --snmp-listen or system services snmp is enabled
 snmpget -v 2c -c public 127.0.0.1:1161 1.3.6.1.3.9950.1.3.0
 ```
 
@@ -1038,6 +1244,12 @@ sudo vppctl show interface addr
 ---
 
 ## Version History
+
+- **v0.6.x**: Advanced feature foundations
+  - Management-plane config model for clustering, MPLS, VRRP, routing instances, class of service, and Web UI
+  - etcd datastore backend selection for clustered candidate/running configuration
+  - Web UI dashboard, JSON status/config endpoints, authenticated validate/commit API, and commit history panel
+  - v0.6 config diff and candidate replacement coverage
 
 - **v0.5.x**: Production hardening
   - Current command names: `arca-routerd` and `arca`

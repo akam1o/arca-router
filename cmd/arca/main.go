@@ -12,6 +12,7 @@ import (
 	"os/signal"
 	"strconv"
 	"strings"
+	"time"
 
 	grpcclient "github.com/akam1o/arca-router/internal/northbound/grpc"
 	configcli "github.com/akam1o/arca-router/pkg/cli"
@@ -246,6 +247,42 @@ func oneShotShow(ctx context.Context, client showClient, args []string, f *cliFl
 		printCommandOutput(output)
 		return ExitSuccess
 
+	case "vrrp":
+		output, err := client.GetVRRPText(ctx)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+			return ExitOperationError
+		}
+		printCommandOutput(output)
+		return ExitSuccess
+
+	case "lcp":
+		info, err := client.GetLCPReconciliation(ctx)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+			return ExitOperationError
+		}
+		printLCPReconciliation(info)
+		return ExitSuccess
+
+	case "ha":
+		info, err := client.GetHAStatus(ctx)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+			return ExitOperationError
+		}
+		printHAStatus(info)
+		return ExitSuccess
+
+	case "class-of-service":
+		info, err := client.GetClassOfService(ctx)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+			return ExitOperationError
+		}
+		printClassOfService(info)
+		return ExitSuccess
+
 	case "route":
 		protoFilter, err := routeProtocolFilter(args[1:])
 		if err != nil {
@@ -302,6 +339,10 @@ type showClient interface {
 	GetBGPSummaryText(context.Context) (string, error)
 	GetBGPNeighborText(context.Context, string) (string, error)
 	GetOSPFNeighborsText(context.Context) (string, error)
+	GetVRRPText(context.Context) (string, error)
+	GetLCPReconciliation(context.Context) (*grpcclient.LCPReconciliationInfo, error)
+	GetHAStatus(context.Context) (*grpcclient.HAStatusInfo, error)
+	GetClassOfService(context.Context) (*grpcclient.ClassOfServiceInfo, error)
 }
 
 type cliMode int
@@ -641,6 +682,50 @@ func (sh *interactiveShell) cmdShow(ctx context.Context, args []string) error {
 		printCommandOutput(output)
 		return nil
 
+	case "vrrp":
+		if sh.mode == modeConfiguration {
+			return fmt.Errorf("'show vrrp' not available in configuration mode")
+		}
+		output, err := sh.client.GetVRRPText(ctx)
+		if err != nil {
+			return err
+		}
+		printCommandOutput(output)
+		return nil
+
+	case "lcp":
+		if sh.mode == modeConfiguration {
+			return fmt.Errorf("'show lcp' not available in configuration mode")
+		}
+		info, err := sh.client.GetLCPReconciliation(ctx)
+		if err != nil {
+			return err
+		}
+		printLCPReconciliation(info)
+		return nil
+
+	case "ha":
+		if sh.mode == modeConfiguration {
+			return fmt.Errorf("'show ha' not available in configuration mode")
+		}
+		info, err := sh.client.GetHAStatus(ctx)
+		if err != nil {
+			return err
+		}
+		printHAStatus(info)
+		return nil
+
+	case "class-of-service":
+		if sh.mode == modeConfiguration {
+			return fmt.Errorf("'show class-of-service' not available in configuration mode")
+		}
+		info, err := sh.client.GetClassOfService(ctx)
+		if err != nil {
+			return err
+		}
+		printClassOfService(info)
+		return nil
+
 	case "route":
 		if sh.mode == modeConfiguration {
 			return fmt.Errorf("'show route' not available in configuration mode")
@@ -858,6 +943,10 @@ func (sh *interactiveShell) showHelp() {
 		fmt.Println("  show bgp summary              Show BGP summary")
 		fmt.Println("  show bgp neighbor <ip>        Show BGP neighbor details")
 		fmt.Println("  show ospf neighbor            Show OSPF neighbors")
+		fmt.Println("  show vrrp                     Show VRRP status")
+		fmt.Println("  show lcp                      Show VPP LCP reconciliation status")
+		fmt.Println("  show ha                       Show HA convergence status")
+		fmt.Println("  show class-of-service         Show class-of-service intent")
 		fmt.Println("  show route                    Show routing table")
 		fmt.Println("  show route protocol <proto>   Show routes by protocol")
 		fmt.Println("  exit, quit                    Exit interactive CLI")
@@ -893,14 +982,211 @@ func printInterfaces(ifaces []grpcclient.InterfaceInfo) {
 		fmt.Println("No interfaces found")
 		return
 	}
-	fmt.Printf("%-20s %-8s %-8s %-6s %-18s %s\n",
-		"Interface", "Admin", "Oper", "MTU", "MAC", "Speed")
-	fmt.Println(strings.Repeat("-", 78))
+	fmt.Printf("%-20s %-8s %-8s %-6s %-18s %-10s %-12s %-12s %-16s %s\n",
+		"Interface", "Admin", "Oper", "MTU", "MAC", "Speed", "RX-Packets", "TX-Packets", "QoS", "Queues")
+	fmt.Println(strings.Repeat("-", 143))
 	for _, iface := range ifaces {
-		fmt.Printf("%-20s %-8s %-8s %-6d %-18s %d\n",
+		fmt.Printf("%-20s %-8s %-8s %-6d %-18s %-10d %-12d %-12d %-16s %s\n",
 			iface.Name, iface.AdminStatus, iface.OperStatus,
-			iface.MTU, iface.MAC, iface.Speed)
+			iface.MTU, iface.MAC, iface.Speed, iface.RxPackets, iface.TxPackets, interfaceQoSProfile(iface), interfaceQueueSummary(iface))
 	}
+}
+
+func interfaceQoSProfile(iface grpcclient.InterfaceInfo) string {
+	if iface.QoSProfile == "" {
+		return "-"
+	}
+	return iface.QoSProfile
+}
+
+func interfaceQueueSummary(iface grpcclient.InterfaceInfo) string {
+	var parts []string
+	for _, queue := range iface.RxQueues {
+		mode := queue.Mode
+		if mode == "" {
+			mode = "unknown"
+		}
+		parts = append(parts, fmt.Sprintf("rx%d:w%d/%s", queue.QueueID, queue.WorkerID, mode))
+	}
+	for _, queue := range iface.TxQueues {
+		suffix := ""
+		if queue.Shared {
+			suffix = "*"
+		}
+		parts = append(parts, fmt.Sprintf("tx%d:%s%s", queue.QueueID, formatQueueThreads(queue.Threads), suffix))
+	}
+	if len(parts) == 0 {
+		return "-"
+	}
+	return strings.Join(parts, " ")
+}
+
+func formatQueueThreads(threads []uint32) string {
+	if len(threads) == 0 {
+		return "[]"
+	}
+	parts := make([]string, 0, len(threads))
+	for _, thread := range threads {
+		parts = append(parts, strconv.FormatUint(uint64(thread), 10))
+	}
+	return "[" + strings.Join(parts, ",") + "]"
+}
+
+func printLCPReconciliation(info *grpcclient.LCPReconciliationInfo) {
+	if info == nil {
+		fmt.Println("No LCP reconciliation status found")
+		return
+	}
+	fmt.Printf("%-18s %s\n", "State", lcpReconciliationState(info))
+	fmt.Printf("%-18s %s\n", "Last check", formatOptionalTime(info.LastRun))
+	fmt.Printf("%-18s %d\n", "Pairs", info.PairCount)
+	if info.LastError != "" {
+		fmt.Printf("%-18s %s\n", "Last error", info.LastError)
+	}
+	if len(info.Inconsistencies) == 0 {
+		return
+	}
+	fmt.Println("Inconsistencies")
+	for _, issue := range info.Inconsistencies {
+		fmt.Printf("  - %s\n", issue)
+	}
+}
+
+func printHAStatus(info *grpcclient.HAStatusInfo) {
+	if info == nil {
+		fmt.Println("No HA status found")
+		return
+	}
+	fmt.Printf("%-18s %s\n", "State", haState(info))
+	fmt.Printf("%-18s %s\n", "Configured", yesNo(info.Configured))
+	fmt.Printf("%-18s %s\n", "Converged", yesNo(info.Converged))
+	fmt.Printf("%-18s %d\n", "VRRP groups", info.VRRPGroups)
+	fmt.Printf("%-18s %d\n", "Cluster nodes", info.ClusterNodes)
+	fmt.Printf("%-18s %s\n", "Cluster sync", clusterSyncState(info))
+	fmt.Printf("%-18s %d/%d\n", "FRR VRRP", info.FRRVRRPActiveGroups, info.FRRVRRPConfiguredGroups)
+	fmt.Printf("%-18s %s\n", "FRR last check", formatOptionalTime(info.FRRVRRPLastCheck))
+	fmt.Printf("%-18s %s\n", "VPP LCP", lcpReconciliationState(&grpcclient.LCPReconciliationInfo{
+		LastRun:         info.VPPLCPLastCheck,
+		PairCount:       info.VPPLCPPairs,
+		Inconsistencies: info.VPPLCPInconsistencies,
+		LastError:       info.VPPLCPLastError,
+	}))
+	fmt.Printf("%-18s %s\n", "LCP last check", formatOptionalTime(info.VPPLCPLastCheck))
+	if len(info.Issues) == 0 {
+		return
+	}
+	fmt.Println("Issues")
+	for _, issue := range info.Issues {
+		fmt.Printf("  - %s\n", issue)
+	}
+}
+
+func printClassOfService(info *grpcclient.ClassOfServiceInfo) {
+	if info == nil || (len(info.ForwardingClasses) == 0 && len(info.TrafficControlProfiles) == 0 && len(info.Interfaces) == 0) {
+		fmt.Println("No class-of-service configuration found")
+		return
+	}
+	fmt.Printf("%-18s %s\n", "Enforcement", formatCoSValue(info.EnforcementStatus))
+
+	if len(info.ForwardingClasses) > 0 {
+		fmt.Println()
+		fmt.Println("Forwarding classes")
+		fmt.Printf("%-32s %-8s\n", "Name", "Queue")
+		fmt.Println(strings.Repeat("-", 41))
+		for _, fc := range info.ForwardingClasses {
+			fmt.Printf("%-32s %-8d\n", fc.Name, fc.Queue)
+		}
+	}
+
+	if len(info.TrafficControlProfiles) > 0 {
+		fmt.Println()
+		fmt.Println("Traffic-control profiles")
+		fmt.Printf("%-32s %-16s %-24s %-14s\n", "Name", "Shaping rate", "Scheduler map", "Enforcement")
+		fmt.Println(strings.Repeat("-", 88))
+		for _, profile := range info.TrafficControlProfiles {
+			fmt.Printf("%-32s %-16s %-24s %-14s\n",
+				profile.Name,
+				formatCoSRate(profile.ShapingRate),
+				formatCoSValue(profile.SchedulerMap),
+				formatCoSValue(profile.EnforcementStatus),
+			)
+		}
+	}
+
+	if len(info.Interfaces) > 0 {
+		fmt.Println()
+		fmt.Println("Interfaces")
+		fmt.Printf("%-24s %-32s %-14s\n", "Interface", "Output profile", "Enforcement")
+		fmt.Println(strings.Repeat("-", 72))
+		for _, iface := range info.Interfaces {
+			fmt.Printf("%-24s %-32s %-14s\n",
+				iface.Name,
+				formatCoSValue(iface.OutputTrafficControlProfile),
+				formatCoSValue(iface.EnforcementStatus),
+			)
+		}
+	}
+}
+
+func formatCoSValue(value string) string {
+	if value == "" {
+		return "-"
+	}
+	return value
+}
+
+func formatCoSRate(value uint64) string {
+	if value == 0 {
+		return "-"
+	}
+	return strconv.FormatUint(value, 10)
+}
+
+func haState(info *grpcclient.HAStatusInfo) string {
+	if info == nil || !info.Configured {
+		return "not configured"
+	}
+	if info.Converged {
+		return "converged"
+	}
+	return "issues"
+}
+
+func clusterSyncState(info *grpcclient.HAStatusInfo) string {
+	if info == nil || !info.ClusterEtcdSync {
+		return "not configured"
+	}
+	if info.ClusterSyncAligned {
+		return "aligned"
+	}
+	return "mismatch"
+}
+
+func yesNo(value bool) string {
+	if value {
+		return "yes"
+	}
+	return "no"
+}
+
+func lcpReconciliationState(info *grpcclient.LCPReconciliationInfo) string {
+	if info == nil || info.LastRun.IsZero() {
+		return "unknown"
+	}
+	if info.LastError != "" {
+		return "check failed"
+	}
+	if len(info.Inconsistencies) > 0 {
+		return "mismatch"
+	}
+	return "consistent"
+}
+
+func formatOptionalTime(ts time.Time) string {
+	if ts.IsZero() {
+		return "never"
+	}
+	return ts.Local().Format(time.RFC3339)
 }
 
 func printCommandOutput(output string) {
@@ -1003,6 +1289,10 @@ func createCompleter() *readline.PrefixCompleter {
 			readline.PcItem("ospf",
 				readline.PcItem("neighbor"),
 			),
+			readline.PcItem("vrrp"),
+			readline.PcItem("lcp"),
+			readline.PcItem("ha"),
+			readline.PcItem("class-of-service"),
 			readline.PcItem("route",
 				readline.PcItem("protocol"),
 			),

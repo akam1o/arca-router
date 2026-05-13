@@ -147,15 +147,42 @@ func (a *stateServiceAdapter) GetInterfaces(ctx context.Context, req *apiv1.GetI
 			Speed:       iface.Speed,
 			Mtu:         iface.MTU,
 			Mac:         iface.MAC,
+			QosProfile:  iface.QoSProfile,
 			RxPackets:   iface.RxPackets,
 			TxPackets:   iface.TxPackets,
 			RxBytes:     iface.RxBytes,
 			TxBytes:     iface.TxBytes,
 			RxErrors:    iface.RxErrors,
 			TxErrors:    iface.TxErrors,
+			RxQueues:    rxQueuesToProto(iface.RxQueues),
+			TxQueues:    txQueuesToProto(iface.TxQueues),
 		})
 	}
 	return resp, nil
+}
+
+func rxQueuesToProto(queues []InterfaceRxQueueInfo) []*apiv1.InterfaceRxQueue {
+	out := make([]*apiv1.InterfaceRxQueue, 0, len(queues))
+	for _, queue := range queues {
+		out = append(out, &apiv1.InterfaceRxQueue{
+			QueueId:  queue.QueueID,
+			WorkerId: queue.WorkerID,
+			Mode:     queue.Mode,
+		})
+	}
+	return out
+}
+
+func txQueuesToProto(queues []InterfaceTxQueueInfo) []*apiv1.InterfaceTxQueue {
+	out := make([]*apiv1.InterfaceTxQueue, 0, len(queues))
+	for _, queue := range queues {
+		out = append(out, &apiv1.InterfaceTxQueue{
+			QueueId: queue.QueueID,
+			Shared:  queue.Shared,
+			Threads: append([]uint32(nil), queue.Threads...),
+		})
+	}
+	return out
 }
 
 func (a *stateServiceAdapter) GetRoutes(ctx context.Context, req *apiv1.GetRoutesRequest) (*apiv1.GetRoutesResponse, error) {
@@ -226,6 +253,98 @@ func (a *stateServiceAdapter) GetOSPFNeighborsText(ctx context.Context, _ *apiv1
 		return nil, err
 	}
 	return &apiv1.GetOSPFNeighborsTextResponse{Output: output}, nil
+}
+
+func (a *stateServiceAdapter) GetVRRPText(ctx context.Context, _ *apiv1.GetVRRPTextRequest) (*apiv1.GetVRRPTextResponse, error) {
+	output, err := a.server.GetVRRPText(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return &apiv1.GetVRRPTextResponse{Output: output}, nil
+}
+
+func (a *stateServiceAdapter) GetLCPReconciliation(ctx context.Context, _ *apiv1.GetLCPReconciliationRequest) (*apiv1.GetLCPReconciliationResponse, error) {
+	info, err := a.server.GetLCPReconciliation(ctx)
+	if err != nil {
+		return nil, err
+	}
+	resp := &apiv1.GetLCPReconciliationResponse{
+		PairCount:       uint32(info.PairCount),
+		Inconsistencies: append([]string(nil), info.Inconsistencies...),
+		LastError:       info.LastError,
+	}
+	if !info.LastRun.IsZero() {
+		resp.LastRun = info.LastRun.UTC().Format(time.RFC3339Nano)
+	}
+	return resp, nil
+}
+
+func (a *stateServiceAdapter) GetHAStatus(ctx context.Context, _ *apiv1.GetHAStatusRequest) (*apiv1.GetHAStatusResponse, error) {
+	info, err := a.server.GetHAStatus(ctx)
+	if err != nil {
+		return nil, err
+	}
+	resp := &apiv1.GetHAStatusResponse{
+		Configured:              info.Configured,
+		Converged:               info.Converged,
+		VrrpGroups:              uint32(info.VRRPGroups),
+		Issues:                  append([]string(nil), info.Issues...),
+		ClusterEnabled:          info.ClusterEnabled,
+		ClusterNodes:            uint32(info.ClusterNodes),
+		ClusterEtcdSync:         info.ClusterEtcdSync,
+		ClusterSyncAligned:      info.ClusterSyncAligned,
+		FrrVrrpConfiguredGroups: uint32(info.FRRVRRPConfiguredGroups),
+		FrrVrrpObservedGroups:   uint32(info.FRRVRRPObservedGroups),
+		FrrVrrpActiveGroups:     uint32(info.FRRVRRPActiveGroups),
+		FrrVrrpIssues:           append([]string(nil), info.FRRVRRPIssues...),
+		FrrVrrpLastError:        info.FRRVRRPLastError,
+		VppLcpPairs:             uint32(info.VPPLCPPairs),
+		VppLcpInconsistencies:   append([]string(nil), info.VPPLCPInconsistencies...),
+		VppLcpLastError:         info.VPPLCPLastError,
+	}
+	if !info.FRRVRRPLastCheck.IsZero() {
+		resp.FrrVrrpLastCheck = info.FRRVRRPLastCheck.UTC().Format(time.RFC3339Nano)
+	}
+	if !info.VPPLCPLastCheck.IsZero() {
+		resp.VppLcpLastCheck = info.VPPLCPLastCheck.UTC().Format(time.RFC3339Nano)
+	}
+	return resp, nil
+}
+
+func (a *stateServiceAdapter) GetClassOfService(ctx context.Context, _ *apiv1.GetClassOfServiceRequest) (*apiv1.GetClassOfServiceResponse, error) {
+	info, err := a.server.GetClassOfService(ctx)
+	if err != nil {
+		return nil, err
+	}
+	resp := &apiv1.GetClassOfServiceResponse{
+		EnforcementStatus: info.EnforcementStatus,
+	}
+	for _, fc := range info.ForwardingClasses {
+		queue := uint32(0)
+		if fc.Queue > 0 {
+			queue = uint32(fc.Queue)
+		}
+		resp.ForwardingClasses = append(resp.ForwardingClasses, &apiv1.ClassOfServiceForwardingClass{
+			Name:  fc.Name,
+			Queue: queue,
+		})
+	}
+	for _, profile := range info.TrafficControlProfiles {
+		resp.TrafficControlProfiles = append(resp.TrafficControlProfiles, &apiv1.ClassOfServiceTrafficControlProfile{
+			Name:              profile.Name,
+			ShapingRate:       profile.ShapingRate,
+			SchedulerMap:      profile.SchedulerMap,
+			EnforcementStatus: profile.EnforcementStatus,
+		})
+	}
+	for _, iface := range info.Interfaces {
+		resp.Interfaces = append(resp.Interfaces, &apiv1.ClassOfServiceInterface{
+			Name:                        iface.Name,
+			OutputTrafficControlProfile: iface.OutputTrafficControlProfile,
+			EnforcementStatus:           iface.EnforcementStatus,
+		})
+	}
+	return resp, nil
 }
 
 func (a *stateServiceAdapter) GetSystemInfo(ctx context.Context, _ *apiv1.GetSystemInfoRequest) (*apiv1.GetSystemInfoResponse, error) {

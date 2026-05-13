@@ -49,6 +49,69 @@ func TestBuildMgmtOperationsStaticAndBGP(t *testing.T) {
 	}
 }
 
+func TestBuildMgmtOperationsVRRP(t *testing.T) {
+	ops, err := BuildMgmtOperations(&Config{
+		VRRP: &VRRPConfig{Groups: []VRRPGroup{
+			{ID: 10, Interface: "ge0-0-0", VirtualAddress: "192.0.2.254", Priority: 110, Preempt: true},
+			{ID: 20, Interface: "ge0-0-0", VirtualAddress: "2001:db8::1"},
+		}},
+	})
+	if err != nil {
+		t.Fatalf("BuildMgmtOperations() error = %v", err)
+	}
+	commands := commandsFromOps(ops)
+	for _, want := range []string{
+		"mgmt delete-config /frr-interface:lib/interface/frr-vrrpd:vrrp",
+		"mgmt set-config /frr-interface:lib/interface[name='ge0-0-0']/name ge0-0-0",
+		"mgmt set-config /frr-interface:lib/interface[name='ge0-0-0']/frr-vrrpd:vrrp/vrrp-group[virtual-router-id='10']/virtual-router-id 10",
+		"mgmt set-config /frr-interface:lib/interface[name='ge0-0-0']/frr-vrrpd:vrrp/vrrp-group[virtual-router-id='10']/version 3",
+		"mgmt set-config /frr-interface:lib/interface[name='ge0-0-0']/frr-vrrpd:vrrp/vrrp-group[virtual-router-id='10']/priority 110",
+		"mgmt set-config /frr-interface:lib/interface[name='ge0-0-0']/frr-vrrpd:vrrp/vrrp-group[virtual-router-id='10']/preempt true",
+		"mgmt set-config /frr-interface:lib/interface[name='ge0-0-0']/frr-vrrpd:vrrp/vrrp-group[virtual-router-id='10']/v4/virtual-address 192.0.2.254",
+		"mgmt set-config /frr-interface:lib/interface[name='ge0-0-0']/frr-vrrpd:vrrp/vrrp-group[virtual-router-id='20']/v6/virtual-address 2001:db8::1",
+	} {
+		if !strings.Contains(commands, want) {
+			t.Fatalf("commands missing %q:\n%s", want, commands)
+		}
+	}
+}
+
+func TestBuildMgmtOperationsVRFVPN(t *testing.T) {
+	ops, err := BuildMgmtOperations(&Config{
+		VRFs: []VRFConfig{
+			{
+				Name:               "BLUE",
+				ASN:                65000,
+				RouteDistinguisher: "65000:100",
+				ImportTargets:      []string{"65000:100", "65000:101"},
+				ExportTargets:      []string{"65000:100", "65000:102"},
+				ImportRouteMap:     "BLUE-IN",
+				ExportRouteMap:     "BLUE-OUT",
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("BuildMgmtOperations() error = %v", err)
+	}
+	commands := commandsFromOps(ops)
+	for _, want := range []string{
+		"mgmt delete-config /frr-vrf:lib",
+		"mgmt delete-config /frr-routing:routing/control-plane-protocols/control-plane-protocol[type='frr-bgp:bgp']",
+		"mgmt set-config /frr-vrf:lib/vrf[name='BLUE']/name BLUE",
+		"mgmt set-config /frr-routing:routing/control-plane-protocols/control-plane-protocol[type='frr-bgp:bgp'][name='bgp'][vrf='BLUE']/vrf BLUE",
+		"mgmt set-config /frr-routing:routing/control-plane-protocols/control-plane-protocol[type='frr-bgp:bgp'][name='bgp'][vrf='BLUE']/frr-bgp:bgp/global/local-as 65000",
+		"mgmt set-config /frr-routing:routing/control-plane-protocols/control-plane-protocol[type='frr-bgp:bgp'][name='bgp'][vrf='BLUE']/frr-bgp:bgp/global/afi-safis/afi-safi[afi-safi-name='frr-routing:ipv4-unicast']/ipv4-unicast/vpn-config/rd 65000:100",
+		"mgmt set-config /frr-routing:routing/control-plane-protocols/control-plane-protocol[type='frr-bgp:bgp'][name='bgp'][vrf='BLUE']/frr-bgp:bgp/global/afi-safis/afi-safi[afi-safi-name='frr-routing:ipv4-unicast']/ipv4-unicast/vpn-config/import-rt-list target:65000:101",
+		"mgmt set-config /frr-routing:routing/control-plane-protocols/control-plane-protocol[type='frr-bgp:bgp'][name='bgp'][vrf='BLUE']/frr-bgp:bgp/global/afi-safis/afi-safi[afi-safi-name='frr-routing:ipv4-unicast']/ipv4-unicast/vpn-config/export-rt-list target:65000:102",
+		"mgmt set-config /frr-routing:routing/control-plane-protocols/control-plane-protocol[type='frr-bgp:bgp'][name='bgp'][vrf='BLUE']/frr-bgp:bgp/global/afi-safis/afi-safi[afi-safi-name='frr-routing:ipv4-unicast']/ipv4-unicast/vpn-config/rmap-import BLUE-IN",
+		"mgmt set-config /frr-routing:routing/control-plane-protocols/control-plane-protocol[type='frr-bgp:bgp'][name='bgp'][vrf='BLUE']/frr-bgp:bgp/global/afi-safis/afi-safi[afi-safi-name='frr-routing:ipv6-unicast']/ipv6-unicast/vpn-config/rmap-export BLUE-OUT",
+	} {
+		if !strings.Contains(commands, want) {
+			t.Fatalf("commands missing %q:\n%s", want, commands)
+		}
+	}
+}
+
 func TestVtyshMgmtClientApplySequence(t *testing.T) {
 	var got []string
 	client := NewVtyshMgmtClientWithRunner(func(ctx context.Context, command string) ([]byte, error) {

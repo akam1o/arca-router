@@ -18,6 +18,12 @@ type Config struct {
 	// OSPF holds OSPF configuration
 	OSPF *OSPFConfig
 
+	// VRRP holds VRRP configuration
+	VRRP *VRRPConfig
+
+	// VRFs holds L3VPN routing-instance configuration
+	VRFs []VRFConfig
+
 	// StaticRoutes holds static route configurations
 	StaticRoutes []StaticRoute
 
@@ -118,6 +124,31 @@ type OSPFInterface struct {
 
 	// Priority is the OSPF priority for this interface (nil = not set)
 	Priority *int
+}
+
+// VRRPConfig represents FRR VRRP configuration.
+type VRRPConfig struct {
+	Groups []VRRPGroup
+}
+
+// VRRPGroup represents one VRRP virtual router in FRR format.
+type VRRPGroup struct {
+	ID             int
+	Interface      string
+	VirtualAddress string
+	Priority       int
+	Preempt        bool
+}
+
+// VRFConfig represents FRR VRF/L3VPN route leaking configuration.
+type VRFConfig struct {
+	Name               string
+	ASN                uint32
+	RouteDistinguisher string
+	ImportTargets      []string
+	ExportTargets      []string
+	ImportRouteMap     string
+	ExportRouteMap     string
 }
 
 // StaticRoute represents a static route configuration in FRR format.

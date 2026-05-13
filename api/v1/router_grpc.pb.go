@@ -686,6 +686,10 @@ const (
 	StateService_GetBGPSummaryText_FullMethodName    = "/arca.router.v1.StateService/GetBGPSummaryText"
 	StateService_GetBGPNeighborText_FullMethodName   = "/arca.router.v1.StateService/GetBGPNeighborText"
 	StateService_GetOSPFNeighborsText_FullMethodName = "/arca.router.v1.StateService/GetOSPFNeighborsText"
+	StateService_GetVRRPText_FullMethodName          = "/arca.router.v1.StateService/GetVRRPText"
+	StateService_GetLCPReconciliation_FullMethodName = "/arca.router.v1.StateService/GetLCPReconciliation"
+	StateService_GetHAStatus_FullMethodName          = "/arca.router.v1.StateService/GetHAStatus"
+	StateService_GetClassOfService_FullMethodName    = "/arca.router.v1.StateService/GetClassOfService"
 	StateService_GetSystemInfo_FullMethodName        = "/arca.router.v1.StateService/GetSystemInfo"
 )
 
@@ -709,6 +713,14 @@ type StateServiceClient interface {
 	GetBGPNeighborText(ctx context.Context, in *GetBGPNeighborTextRequest, opts ...grpc.CallOption) (*GetBGPNeighborTextResponse, error)
 	// GetOSPFNeighborsText returns FRR OSPF neighbor output for CLI display.
 	GetOSPFNeighborsText(ctx context.Context, in *GetOSPFNeighborsTextRequest, opts ...grpc.CallOption) (*GetOSPFNeighborsTextResponse, error)
+	// GetVRRPText returns FRR VRRP output for CLI display.
+	GetVRRPText(ctx context.Context, in *GetVRRPTextRequest, opts ...grpc.CallOption) (*GetVRRPTextResponse, error)
+	// GetLCPReconciliation returns VPP LCP reconciliation state.
+	GetLCPReconciliation(ctx context.Context, in *GetLCPReconciliationRequest, opts ...grpc.CallOption) (*GetLCPReconciliationResponse, error)
+	// GetHAStatus returns control-plane HA convergence state.
+	GetHAStatus(ctx context.Context, in *GetHAStatusRequest, opts ...grpc.CallOption) (*GetHAStatusResponse, error)
+	// GetClassOfService returns running class-of-service intent.
+	GetClassOfService(ctx context.Context, in *GetClassOfServiceRequest, opts ...grpc.CallOption) (*GetClassOfServiceResponse, error)
 	// GetSystemInfo returns system information.
 	GetSystemInfo(ctx context.Context, in *GetSystemInfoRequest, opts ...grpc.CallOption) (*GetSystemInfoResponse, error)
 }
@@ -791,6 +803,46 @@ func (c *stateServiceClient) GetOSPFNeighborsText(ctx context.Context, in *GetOS
 	return out, nil
 }
 
+func (c *stateServiceClient) GetVRRPText(ctx context.Context, in *GetVRRPTextRequest, opts ...grpc.CallOption) (*GetVRRPTextResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(GetVRRPTextResponse)
+	err := c.cc.Invoke(ctx, StateService_GetVRRPText_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *stateServiceClient) GetLCPReconciliation(ctx context.Context, in *GetLCPReconciliationRequest, opts ...grpc.CallOption) (*GetLCPReconciliationResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(GetLCPReconciliationResponse)
+	err := c.cc.Invoke(ctx, StateService_GetLCPReconciliation_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *stateServiceClient) GetHAStatus(ctx context.Context, in *GetHAStatusRequest, opts ...grpc.CallOption) (*GetHAStatusResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(GetHAStatusResponse)
+	err := c.cc.Invoke(ctx, StateService_GetHAStatus_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *stateServiceClient) GetClassOfService(ctx context.Context, in *GetClassOfServiceRequest, opts ...grpc.CallOption) (*GetClassOfServiceResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(GetClassOfServiceResponse)
+	err := c.cc.Invoke(ctx, StateService_GetClassOfService_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 func (c *stateServiceClient) GetSystemInfo(ctx context.Context, in *GetSystemInfoRequest, opts ...grpc.CallOption) (*GetSystemInfoResponse, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(GetSystemInfoResponse)
@@ -821,6 +873,14 @@ type StateServiceServer interface {
 	GetBGPNeighborText(context.Context, *GetBGPNeighborTextRequest) (*GetBGPNeighborTextResponse, error)
 	// GetOSPFNeighborsText returns FRR OSPF neighbor output for CLI display.
 	GetOSPFNeighborsText(context.Context, *GetOSPFNeighborsTextRequest) (*GetOSPFNeighborsTextResponse, error)
+	// GetVRRPText returns FRR VRRP output for CLI display.
+	GetVRRPText(context.Context, *GetVRRPTextRequest) (*GetVRRPTextResponse, error)
+	// GetLCPReconciliation returns VPP LCP reconciliation state.
+	GetLCPReconciliation(context.Context, *GetLCPReconciliationRequest) (*GetLCPReconciliationResponse, error)
+	// GetHAStatus returns control-plane HA convergence state.
+	GetHAStatus(context.Context, *GetHAStatusRequest) (*GetHAStatusResponse, error)
+	// GetClassOfService returns running class-of-service intent.
+	GetClassOfService(context.Context, *GetClassOfServiceRequest) (*GetClassOfServiceResponse, error)
 	// GetSystemInfo returns system information.
 	GetSystemInfo(context.Context, *GetSystemInfoRequest) (*GetSystemInfoResponse, error)
 	mustEmbedUnimplementedStateServiceServer()
@@ -853,6 +913,18 @@ func (UnimplementedStateServiceServer) GetBGPNeighborText(context.Context, *GetB
 }
 func (UnimplementedStateServiceServer) GetOSPFNeighborsText(context.Context, *GetOSPFNeighborsTextRequest) (*GetOSPFNeighborsTextResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method GetOSPFNeighborsText not implemented")
+}
+func (UnimplementedStateServiceServer) GetVRRPText(context.Context, *GetVRRPTextRequest) (*GetVRRPTextResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method GetVRRPText not implemented")
+}
+func (UnimplementedStateServiceServer) GetLCPReconciliation(context.Context, *GetLCPReconciliationRequest) (*GetLCPReconciliationResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method GetLCPReconciliation not implemented")
+}
+func (UnimplementedStateServiceServer) GetHAStatus(context.Context, *GetHAStatusRequest) (*GetHAStatusResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method GetHAStatus not implemented")
+}
+func (UnimplementedStateServiceServer) GetClassOfService(context.Context, *GetClassOfServiceRequest) (*GetClassOfServiceResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method GetClassOfService not implemented")
 }
 func (UnimplementedStateServiceServer) GetSystemInfo(context.Context, *GetSystemInfoRequest) (*GetSystemInfoResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method GetSystemInfo not implemented")
@@ -1004,6 +1076,78 @@ func _StateService_GetOSPFNeighborsText_Handler(srv interface{}, ctx context.Con
 	return interceptor(ctx, in, info, handler)
 }
 
+func _StateService_GetVRRPText_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(GetVRRPTextRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(StateServiceServer).GetVRRPText(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: StateService_GetVRRPText_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(StateServiceServer).GetVRRPText(ctx, req.(*GetVRRPTextRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _StateService_GetLCPReconciliation_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(GetLCPReconciliationRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(StateServiceServer).GetLCPReconciliation(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: StateService_GetLCPReconciliation_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(StateServiceServer).GetLCPReconciliation(ctx, req.(*GetLCPReconciliationRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _StateService_GetHAStatus_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(GetHAStatusRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(StateServiceServer).GetHAStatus(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: StateService_GetHAStatus_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(StateServiceServer).GetHAStatus(ctx, req.(*GetHAStatusRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _StateService_GetClassOfService_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(GetClassOfServiceRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(StateServiceServer).GetClassOfService(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: StateService_GetClassOfService_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(StateServiceServer).GetClassOfService(ctx, req.(*GetClassOfServiceRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 func _StateService_GetSystemInfo_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(GetSystemInfoRequest)
 	if err := dec(in); err != nil {
@@ -1056,6 +1200,22 @@ var StateService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "GetOSPFNeighborsText",
 			Handler:    _StateService_GetOSPFNeighborsText_Handler,
+		},
+		{
+			MethodName: "GetVRRPText",
+			Handler:    _StateService_GetVRRPText_Handler,
+		},
+		{
+			MethodName: "GetLCPReconciliation",
+			Handler:    _StateService_GetLCPReconciliation_Handler,
+		},
+		{
+			MethodName: "GetHAStatus",
+			Handler:    _StateService_GetHAStatus_Handler,
+		},
+		{
+			MethodName: "GetClassOfService",
+			Handler:    _StateService_GetClassOfService_Handler,
 		},
 		{
 			MethodName: "GetSystemInfo",

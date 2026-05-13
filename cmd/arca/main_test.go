@@ -5,6 +5,7 @@ import (
 	"errors"
 	"strings"
 	"testing"
+	"time"
 
 	grpcclient "github.com/akam1o/arca-router/internal/northbound/grpc"
 )
@@ -18,6 +19,10 @@ type fakeInteractiveClient struct {
 	bgpSummaryText  string
 	bgpNeighborText string
 	ospfText        string
+	vrrpText        string
+	lcpInfo         *grpcclient.LCPReconciliationInfo
+	haInfo          *grpcclient.HAStatusInfo
+	cosInfo         *grpcclient.ClassOfServiceInfo
 
 	acquireLockCalls int
 	discardCalls     int
@@ -119,6 +124,34 @@ func (f *fakeInteractiveClient) GetOSPFNeighborsText(ctx context.Context) (strin
 		return "ospf neighbor output\n", nil
 	}
 	return f.ospfText, nil
+}
+
+func (f *fakeInteractiveClient) GetVRRPText(ctx context.Context) (string, error) {
+	if f.vrrpText == "" {
+		return "vrrp output\n", nil
+	}
+	return f.vrrpText, nil
+}
+
+func (f *fakeInteractiveClient) GetLCPReconciliation(ctx context.Context) (*grpcclient.LCPReconciliationInfo, error) {
+	if f.lcpInfo != nil {
+		return f.lcpInfo, nil
+	}
+	return &grpcclient.LCPReconciliationInfo{}, nil
+}
+
+func (f *fakeInteractiveClient) GetHAStatus(ctx context.Context) (*grpcclient.HAStatusInfo, error) {
+	if f.haInfo != nil {
+		return f.haInfo, nil
+	}
+	return &grpcclient.HAStatusInfo{}, nil
+}
+
+func (f *fakeInteractiveClient) GetClassOfService(ctx context.Context) (*grpcclient.ClassOfServiceInfo, error) {
+	if f.cosInfo != nil {
+		return f.cosInfo, nil
+	}
+	return &grpcclient.ClassOfServiceInfo{}, nil
 }
 
 func TestCmdConfigureRequiresSession(t *testing.T) {
@@ -337,11 +370,186 @@ func TestCmdShowOSPFNeighborReturnsOutput(t *testing.T) {
 	}
 }
 
+func TestCmdShowVRRPReturnsOutput(t *testing.T) {
+	ctx := context.Background()
+	client := &fakeInteractiveClient{}
+	sh := &interactiveShell{
+		client:    client,
+		hostname:  "router",
+		mode:      modeOperational,
+		sessionID: "session-1",
+	}
+
+	err := sh.cmdShow(ctx, []string{"vrrp"})
+	if err != nil {
+		t.Fatalf("cmdShow(vrrp) error = %v", err)
+	}
+}
+
+func TestCmdShowLCPReturnsOutput(t *testing.T) {
+	ctx := context.Background()
+	client := &fakeInteractiveClient{lcpInfo: &grpcclient.LCPReconciliationInfo{
+		PairCount: 1,
+	}}
+	sh := &interactiveShell{
+		client:    client,
+		hostname:  "router",
+		mode:      modeOperational,
+		sessionID: "session-1",
+	}
+
+	err := sh.cmdShow(ctx, []string{"lcp"})
+	if err != nil {
+		t.Fatalf("cmdShow(lcp) error = %v", err)
+	}
+}
+
+func TestCmdShowHAReturnsOutput(t *testing.T) {
+	ctx := context.Background()
+	client := &fakeInteractiveClient{haInfo: &grpcclient.HAStatusInfo{
+		Configured: true,
+		Converged:  true,
+		VRRPGroups: 1,
+	}}
+	sh := &interactiveShell{
+		client:    client,
+		hostname:  "router",
+		mode:      modeOperational,
+		sessionID: "session-1",
+	}
+
+	err := sh.cmdShow(ctx, []string{"ha"})
+	if err != nil {
+		t.Fatalf("cmdShow(ha) error = %v", err)
+	}
+}
+
+func TestCmdShowClassOfServiceReturnsOutput(t *testing.T) {
+	ctx := context.Background()
+	client := &fakeInteractiveClient{cosInfo: &grpcclient.ClassOfServiceInfo{
+		EnforcementStatus: "intent-only",
+		ForwardingClasses: []grpcclient.ClassOfServiceForwardingClassInfo{
+			{Name: "expedited-forwarding", Queue: 5},
+		},
+	}}
+	sh := &interactiveShell{
+		client:    client,
+		hostname:  "router",
+		mode:      modeOperational,
+		sessionID: "session-1",
+	}
+
+	err := sh.cmdShow(ctx, []string{"class-of-service"})
+	if err != nil {
+		t.Fatalf("cmdShow(class-of-service) error = %v", err)
+	}
+}
+
+func TestInterfaceQueueSummary(t *testing.T) {
+	got := interfaceQueueSummary(grpcclient.InterfaceInfo{
+		RxQueues: []grpcclient.InterfaceRxQueueInfo{
+			{QueueID: 0, WorkerID: 1, Mode: "polling"},
+		},
+		TxQueues: []grpcclient.InterfaceTxQueueInfo{
+			{QueueID: 0, Shared: true, Threads: []uint32{0, 2}},
+		},
+	})
+	if got != "rx0:w1/polling tx0:[0,2]*" {
+		t.Fatalf("interfaceQueueSummary() = %q", got)
+	}
+	if got := interfaceQueueSummary(grpcclient.InterfaceInfo{}); got != "-" {
+		t.Fatalf("interfaceQueueSummary(empty) = %q, want -", got)
+	}
+}
+
+func TestInterfaceQoSProfile(t *testing.T) {
+	if got := interfaceQoSProfile(grpcclient.InterfaceInfo{QoSProfile: "WAN"}); got != "WAN" {
+		t.Fatalf("interfaceQoSProfile() = %q, want WAN", got)
+	}
+	if got := interfaceQoSProfile(grpcclient.InterfaceInfo{}); got != "-" {
+		t.Fatalf("interfaceQoSProfile(empty) = %q, want -", got)
+	}
+}
+
 func TestOneShotShowOSPFNeighborReturnsSuccess(t *testing.T) {
 	client := &fakeInteractiveClient{}
 	code := oneShotShow(context.Background(), client, []string{"ospf", "neighbor"}, &cliFlags{})
 	if code != ExitSuccess {
 		t.Fatalf("oneShotShow(ospf neighbor) = %d, want %d", code, ExitSuccess)
+	}
+}
+
+func TestOneShotShowVRRPReturnsSuccess(t *testing.T) {
+	client := &fakeInteractiveClient{}
+	code := oneShotShow(context.Background(), client, []string{"vrrp"}, &cliFlags{})
+	if code != ExitSuccess {
+		t.Fatalf("oneShotShow(vrrp) = %d, want %d", code, ExitSuccess)
+	}
+}
+
+func TestOneShotShowLCPReturnsSuccess(t *testing.T) {
+	client := &fakeInteractiveClient{}
+	code := oneShotShow(context.Background(), client, []string{"lcp"}, &cliFlags{})
+	if code != ExitSuccess {
+		t.Fatalf("oneShotShow(lcp) = %d, want %d", code, ExitSuccess)
+	}
+}
+
+func TestOneShotShowHAReturnsSuccess(t *testing.T) {
+	client := &fakeInteractiveClient{}
+	code := oneShotShow(context.Background(), client, []string{"ha"}, &cliFlags{})
+	if code != ExitSuccess {
+		t.Fatalf("oneShotShow(ha) = %d, want %d", code, ExitSuccess)
+	}
+}
+
+func TestOneShotShowClassOfServiceReturnsSuccess(t *testing.T) {
+	client := &fakeInteractiveClient{}
+	code := oneShotShow(context.Background(), client, []string{"class-of-service"}, &cliFlags{})
+	if code != ExitSuccess {
+		t.Fatalf("oneShotShow(class-of-service) = %d, want %d", code, ExitSuccess)
+	}
+}
+
+func TestLCPReconciliationState(t *testing.T) {
+	now := time.Now()
+	tests := []struct {
+		name string
+		info *grpcclient.LCPReconciliationInfo
+		want string
+	}{
+		{name: "nil", info: nil, want: "unknown"},
+		{name: "never", info: &grpcclient.LCPReconciliationInfo{}, want: "unknown"},
+		{name: "error", info: &grpcclient.LCPReconciliationInfo{LastRun: now, LastError: "failed"}, want: "check failed"},
+		{name: "mismatch", info: &grpcclient.LCPReconciliationInfo{LastRun: now, Inconsistencies: []string{"missing pair"}}, want: "mismatch"},
+		{name: "consistent", info: &grpcclient.LCPReconciliationInfo{LastRun: now}, want: "consistent"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := lcpReconciliationState(tt.info); got != tt.want {
+				t.Fatalf("lcpReconciliationState() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestHAState(t *testing.T) {
+	tests := []struct {
+		name string
+		info *grpcclient.HAStatusInfo
+		want string
+	}{
+		{name: "nil", info: nil, want: "not configured"},
+		{name: "disabled", info: &grpcclient.HAStatusInfo{}, want: "not configured"},
+		{name: "issues", info: &grpcclient.HAStatusInfo{Configured: true}, want: "issues"},
+		{name: "converged", info: &grpcclient.HAStatusInfo{Configured: true, Converged: true}, want: "converged"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := haState(tt.info); got != tt.want {
+				t.Fatalf("haState() = %q, want %q", got, tt.want)
+			}
+		})
 	}
 }
 

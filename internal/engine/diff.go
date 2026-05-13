@@ -26,19 +26,36 @@ type ConfigDiff struct {
 	OSPFChanged bool
 	OldOSPF     *model.OSPFConfig
 	NewOSPF     *model.OSPFConfig
+	MPLSChanged bool
+	OldMPLS     *model.MPLSConfig
+	NewMPLS     *model.MPLSConfig
+	VRRPChanged bool
+	OldVRRP     *model.VRRPConfig
+	NewVRRP     *model.VRRPConfig
 
 	// Routing changes
-	StaticRoutesChanged bool
-	OldStaticRoutes     []*model.StaticRoute
-	NewStaticRoutes     []*model.StaticRoute
-	RoutingChanged      bool
-	OldRouting          *model.RoutingConfig
-	NewRouting          *model.RoutingConfig
+	StaticRoutesChanged     bool
+	OldStaticRoutes         []*model.StaticRoute
+	NewStaticRoutes         []*model.StaticRoute
+	RoutingChanged          bool
+	OldRouting              *model.RoutingConfig
+	NewRouting              *model.RoutingConfig
+	RoutingInstancesChanged bool
+	OldRoutingInstances     map[string]*model.RoutingInstance
+	NewRoutingInstances     map[string]*model.RoutingInstance
 
 	// Policy changes
 	PolicyChanged bool
 	OldPolicy     *model.PolicyConfig
 	NewPolicy     *model.PolicyConfig
+
+	// Advanced feature changes
+	ChassisChanged        bool
+	OldChassis            *model.ChassisConfig
+	NewChassis            *model.ChassisConfig
+	ClassOfServiceChanged bool
+	OldClassOfService     *model.ClassOfServiceConfig
+	NewClassOfService     *model.ClassOfServiceConfig
 
 	// System changes
 	SystemChanged bool
@@ -75,9 +92,14 @@ func (d *ConfigDiff) HasChanges() bool {
 		len(d.InterfacesChanged) > 0 ||
 		d.BGPChanged ||
 		d.OSPFChanged ||
+		d.MPLSChanged ||
+		d.VRRPChanged ||
 		d.StaticRoutesChanged ||
 		d.RoutingChanged ||
+		d.RoutingInstancesChanged ||
 		d.PolicyChanged ||
+		d.ChassisChanged ||
+		d.ClassOfServiceChanged ||
 		d.SystemChanged ||
 		d.SecurityChanged
 }
@@ -110,6 +132,7 @@ func ComputeDiff(old, new *model.RouterConfig) *ConfigDiff {
 	computeProtocolDiff(old, new, diff)
 	computeRoutingDiff(old, new, diff)
 	computePolicyDiff(old, new, diff)
+	computeAdvancedDiff(old, new, diff)
 	computeSystemDiff(old, new, diff)
 	computeSecurityDiff(old, new, diff)
 
@@ -213,6 +236,22 @@ func computeProtocolDiff(old, new *model.RouterConfig, diff *ConfigDiff) {
 		diff.OldOSPF = oldOSPF
 		diff.NewOSPF = newOSPF
 	}
+
+	oldMPLS := getMPLS(old)
+	newMPLS := getMPLS(new)
+	if !reflect.DeepEqual(oldMPLS, newMPLS) {
+		diff.MPLSChanged = true
+		diff.OldMPLS = oldMPLS
+		diff.NewMPLS = newMPLS
+	}
+
+	oldVRRP := getVRRP(old)
+	newVRRP := getVRRP(new)
+	if !reflect.DeepEqual(oldVRRP, newVRRP) {
+		diff.VRRPChanged = true
+		diff.OldVRRP = oldVRRP
+		diff.NewVRRP = newVRRP
+	}
 }
 
 func computeRoutingDiff(old, new *model.RouterConfig, diff *ConfigDiff) {
@@ -228,6 +267,11 @@ func computeRoutingDiff(old, new *model.RouterConfig, diff *ConfigDiff) {
 		diff.OldStaticRoutes = getStaticRoutes(old)
 		diff.NewStaticRoutes = getStaticRoutes(new)
 	}
+	if !reflect.DeepEqual(old.RoutingInstances, new.RoutingInstances) {
+		diff.RoutingInstancesChanged = true
+		diff.OldRoutingInstances = old.RoutingInstances
+		diff.NewRoutingInstances = new.RoutingInstances
+	}
 }
 
 func computePolicyDiff(old, new *model.RouterConfig, diff *ConfigDiff) {
@@ -235,6 +279,19 @@ func computePolicyDiff(old, new *model.RouterConfig, diff *ConfigDiff) {
 		diff.PolicyChanged = true
 		diff.OldPolicy = old.Policy
 		diff.NewPolicy = new.Policy
+	}
+}
+
+func computeAdvancedDiff(old, new *model.RouterConfig, diff *ConfigDiff) {
+	if !reflect.DeepEqual(old.Chassis, new.Chassis) {
+		diff.ChassisChanged = true
+		diff.OldChassis = old.Chassis
+		diff.NewChassis = new.Chassis
+	}
+	if !reflect.DeepEqual(old.ClassOfService, new.ClassOfService) {
+		diff.ClassOfServiceChanged = true
+		diff.OldClassOfService = old.ClassOfService
+		diff.NewClassOfService = new.ClassOfService
 	}
 }
 
@@ -269,6 +326,20 @@ func getOSPF(c *model.RouterConfig) *model.OSPFConfig {
 		return nil
 	}
 	return c.Protocols.OSPF
+}
+
+func getMPLS(c *model.RouterConfig) *model.MPLSConfig {
+	if c.Protocols == nil {
+		return nil
+	}
+	return c.Protocols.MPLS
+}
+
+func getVRRP(c *model.RouterConfig) *model.VRRPConfig {
+	if c.Protocols == nil {
+		return nil
+	}
+	return c.Protocols.VRRP
 }
 
 func getStaticRoutes(c *model.RouterConfig) []*model.StaticRoute {
@@ -379,13 +450,7 @@ func policyEqual(a, b *model.PolicyConfig) bool {
 }
 
 func systemEqual(a, b *model.SystemConfig) bool {
-	if a == nil && b == nil {
-		return true
-	}
-	if a == nil || b == nil {
-		return false
-	}
-	return a.HostName == b.HostName
+	return reflect.DeepEqual(a, b)
 }
 
 func securityEqual(a, b *model.SecurityConfig) bool {

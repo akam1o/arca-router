@@ -29,11 +29,14 @@ import (
 // Server is the internal gRPC server that exposes configuration,
 // session, and operational state services over a Unix socket.
 type Server struct {
-	engine   *engine.Engine
-	store    store.ConfigStore
-	sessions *SessionManager
-	log      *slog.Logger
-	server   *googlegrpc.Server
+	engine         *engine.Engine
+	store          store.ConfigStore
+	sessions       *SessionManager
+	log            *slog.Logger
+	server         *googlegrpc.Server
+	stateCollector interfaceStateCollector
+	lcpSource      lcpReconciliationSource
+	haSource       haStatusSource
 }
 
 var (
@@ -42,6 +45,23 @@ var (
 	}
 	runOperationalVtyshCommand = runVtyshCommandReal
 )
+
+const (
+	classOfServiceEnforcementIntentOnly    = "intent-only"
+	classOfServiceEnforcementNotConfigured = "not configured"
+)
+
+type interfaceStateCollector interface {
+	CollectState(ctx context.Context) (map[string]*model.InterfaceState, error)
+}
+
+type lcpReconciliationSource interface {
+	LCPReconciliationInfo() LCPReconciliationInfo
+}
+
+type haStatusSource interface {
+	HAStatusInfo() HAStatusInfo
+}
 
 // NewServer creates a new gRPC server.
 func NewServer(eng *engine.Engine, st store.ConfigStore, log *slog.Logger) *Server {
@@ -68,6 +88,21 @@ func (s *Server) Stop() {
 	if s.server != nil {
 		s.server.GracefulStop()
 	}
+}
+
+// SetInterfaceStateCollector installs a managed interface state source.
+func (s *Server) SetInterfaceStateCollector(collector interfaceStateCollector) {
+	s.stateCollector = collector
+}
+
+// SetLCPReconciliationSource installs a VPP LCP reconciliation state source.
+func (s *Server) SetLCPReconciliationSource(source lcpReconciliationSource) {
+	s.lcpSource = source
+}
+
+// SetHAStatusSource installs a control-plane HA status source.
+func (s *Server) SetHAStatusSource(source haStatusSource) {
+	s.haSource = source
 }
 
 // --- ConfigService implementation ---
@@ -424,6 +459,64 @@ func (s *Server) ReleaseLock(ctx context.Context, sessionID string) error {
 
 // GetInterfaces returns interface operational state.
 func (s *Server) GetInterfaces(ctx context.Context, nameFilter string) ([]InterfaceInfo, error) {
+	if s.stateCollector != nil {
+		return s.getCollectedInterfaces(ctx, nameFilter)
+	}
+
+	return s.getDirectVPPInterfaces(ctx, nameFilter)
+}
+
+func (s *Server) getCollectedInterfaces(ctx context.Context, nameFilter string) ([]InterfaceInfo, error) {
+	states, err := s.stateCollector.CollectState(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("collect interface state: %w", err)
+	}
+
+	out := make([]InterfaceInfo, 0, len(states))
+	for fallbackName, state := range states {
+		if state == nil {
+			continue
+		}
+		name := state.Name
+		if name == "" {
+			name = fallbackName
+		}
+		if name == "" {
+			continue
+		}
+		if nameFilter != "" && name != nameFilter {
+			continue
+		}
+		info := InterfaceInfo{
+			Name:        name,
+			AdminStatus: state.AdminStatus,
+			OperStatus:  state.OperStatus,
+			Speed:       state.Speed,
+			MTU:         state.MTU,
+			MAC:         state.MAC,
+			QoSProfile:  state.QoSProfile,
+		}
+		if counters := state.Counters; counters != nil {
+			info.RxPackets = counters.RxPackets
+			info.TxPackets = counters.TxPackets
+			info.RxBytes = counters.RxBytes
+			info.TxBytes = counters.TxBytes
+			info.RxErrors = counters.RxErrors
+			info.TxErrors = counters.TxErrors
+		}
+		if queues := state.Queues; queues != nil {
+			info.RxQueues = rxQueueInfosFromModel(queues.Rx)
+			info.TxQueues = txQueueInfosFromModel(queues.Tx)
+		}
+		out = append(out, info)
+	}
+	sort.Slice(out, func(i, j int) bool {
+		return out[i].Name < out[j].Name
+	})
+	return out, nil
+}
+
+func (s *Server) getDirectVPPInterfaces(ctx context.Context, nameFilter string) ([]InterfaceInfo, error) {
 	client := newOperationalVPPClient()
 	if err := client.Connect(ctx); err != nil {
 		return nil, fmt.Errorf("connect to VPP: %w", err)
@@ -438,6 +531,14 @@ func (s *Server) GetInterfaces(ctx context.Context, nameFilter string) ([]Interf
 	if err != nil {
 		return nil, fmt.Errorf("list VPP interfaces: %w", err)
 	}
+	countersByIndex, err := client.ListInterfaceCounters(ctx)
+	if err != nil {
+		s.log.Debug("failed to list VPP interface counters", slog.Any("error", err))
+	}
+	queuesByIndex, err := client.ListInterfaceQueuePlacements(ctx)
+	if err != nil {
+		s.log.Debug("failed to list VPP interface queue placements", slog.Any("error", err))
+	}
 
 	out := make([]InterfaceInfo, 0, len(ifaces))
 	for _, iface := range ifaces {
@@ -447,17 +548,79 @@ func (s *Server) GetInterfaces(ctx context.Context, nameFilter string) ([]Interf
 		if nameFilter != "" && iface.Name != nameFilter {
 			continue
 		}
-		out = append(out, InterfaceInfo{
+		info := InterfaceInfo{
 			Name:        iface.Name,
 			AdminStatus: upDown(iface.AdminUp),
 			OperStatus:  upDown(iface.LinkUp),
 			MAC:         iface.MAC.String(),
-		})
+			QoSProfile:  iface.QoSProfile,
+		}
+		if counters, ok := countersByIndex[iface.SwIfIndex]; ok {
+			info.RxPackets = counters.RxPackets
+			info.TxPackets = counters.TxPackets
+			info.RxBytes = counters.RxBytes
+			info.TxBytes = counters.TxBytes
+			info.RxErrors = counters.RxErrors
+			info.TxErrors = counters.TxErrors
+		}
+		if queues, ok := queuesByIndex[iface.SwIfIndex]; ok {
+			info.RxQueues = rxQueueInfosFromVPP(queues.Rx)
+			info.TxQueues = txQueueInfosFromVPP(queues.Tx)
+		}
+		out = append(out, info)
 	}
 	sort.Slice(out, func(i, j int) bool {
 		return out[i].Name < out[j].Name
 	})
 	return out, nil
+}
+
+func rxQueueInfosFromModel(queues []model.InterfaceRxQueue) []InterfaceRxQueueInfo {
+	infos := make([]InterfaceRxQueueInfo, 0, len(queues))
+	for _, queue := range queues {
+		infos = append(infos, InterfaceRxQueueInfo{
+			QueueID:  queue.QueueID,
+			WorkerID: queue.WorkerID,
+			Mode:     queue.Mode,
+		})
+	}
+	return infos
+}
+
+func txQueueInfosFromModel(queues []model.InterfaceTxQueue) []InterfaceTxQueueInfo {
+	infos := make([]InterfaceTxQueueInfo, 0, len(queues))
+	for _, queue := range queues {
+		infos = append(infos, InterfaceTxQueueInfo{
+			QueueID: queue.QueueID,
+			Shared:  queue.Shared,
+			Threads: append([]uint32(nil), queue.Threads...),
+		})
+	}
+	return infos
+}
+
+func rxQueueInfosFromVPP(queues []pkgvpp.InterfaceRxQueuePlacement) []InterfaceRxQueueInfo {
+	infos := make([]InterfaceRxQueueInfo, 0, len(queues))
+	for _, queue := range queues {
+		infos = append(infos, InterfaceRxQueueInfo{
+			QueueID:  queue.QueueID,
+			WorkerID: queue.WorkerID,
+			Mode:     queue.Mode,
+		})
+	}
+	return infos
+}
+
+func txQueueInfosFromVPP(queues []pkgvpp.InterfaceTxQueuePlacement) []InterfaceTxQueueInfo {
+	infos := make([]InterfaceTxQueueInfo, 0, len(queues))
+	for _, queue := range queues {
+		infos = append(infos, InterfaceTxQueueInfo{
+			QueueID: queue.QueueID,
+			Shared:  queue.Shared,
+			Threads: append([]uint32(nil), queue.Threads...),
+		})
+	}
+	return infos
 }
 
 // GetRoutes returns routing table entries.
@@ -500,6 +663,82 @@ func (s *Server) GetOSPFNeighborsText(ctx context.Context) (string, error) {
 	return runOperationalVtyshCommand(ctx, "show ip ospf neighbor")
 }
 
+// GetVRRPText returns FRR VRRP output.
+func (s *Server) GetVRRPText(ctx context.Context) (string, error) {
+	return runOperationalVtyshCommand(ctx, "show vrrp")
+}
+
+// GetLCPReconciliation returns cached VPP LCP reconciliation state.
+func (s *Server) GetLCPReconciliation(ctx context.Context) (*LCPReconciliationInfo, error) {
+	if s.lcpSource == nil {
+		return nil, unsupportedOperationalStateError("VPP LCP reconciliation state")
+	}
+	info := s.lcpSource.LCPReconciliationInfo()
+	return &info, nil
+}
+
+// GetHAStatus returns cached control-plane HA convergence state.
+func (s *Server) GetHAStatus(ctx context.Context) (*HAStatusInfo, error) {
+	if s.haSource == nil {
+		return nil, unsupportedOperationalStateError("control-plane HA state")
+	}
+	info := s.haSource.HAStatusInfo()
+	return &info, nil
+}
+
+// GetClassOfService returns running class-of-service intent.
+func (s *Server) GetClassOfService(ctx context.Context) (*ClassOfServiceInfo, error) {
+	info := &ClassOfServiceInfo{EnforcementStatus: classOfServiceEnforcementNotConfigured}
+	if s.engine == nil {
+		return info, nil
+	}
+	cfg := s.engine.Running()
+	if cfg == nil || cfg.ClassOfService == nil {
+		return info, nil
+	}
+
+	cos := cfg.ClassOfService
+	info.EnforcementStatus = classOfServiceEnforcementIntentOnly
+
+	for _, name := range sortedForwardingClassNames(cos.ForwardingClasses) {
+		fc := cos.ForwardingClasses[name]
+		if fc == nil {
+			continue
+		}
+		info.ForwardingClasses = append(info.ForwardingClasses, ClassOfServiceForwardingClassInfo{
+			Name:  name,
+			Queue: fc.Queue,
+		})
+	}
+
+	for _, name := range sortedTrafficControlProfileNames(cos.TrafficControlProfiles) {
+		profile := cos.TrafficControlProfiles[name]
+		if profile == nil {
+			continue
+		}
+		info.TrafficControlProfiles = append(info.TrafficControlProfiles, ClassOfServiceTrafficControlProfileInfo{
+			Name:              name,
+			ShapingRate:       profile.ShapingRate,
+			SchedulerMap:      profile.SchedulerMap,
+			EnforcementStatus: classOfServiceEnforcementIntentOnly,
+		})
+	}
+
+	for _, name := range sortedClassOfServiceInterfaceNames(cos.Interfaces) {
+		iface := cos.Interfaces[name]
+		if iface == nil {
+			continue
+		}
+		info.Interfaces = append(info.Interfaces, ClassOfServiceInterfaceInfo{
+			Name:                        name,
+			OutputTrafficControlProfile: iface.OutputTrafficControlProfile,
+			EnforcementStatus:           classOfServiceEnforcementIntentOnly,
+		})
+	}
+
+	return info, nil
+}
+
 // GetSystemInfo returns basic system information.
 func (s *Server) GetSystemInfo(ctx context.Context) (*SystemInfo, error) {
 	cfg := s.engine.Running()
@@ -520,6 +759,33 @@ var validRouteProtocols = map[string]bool{
 	"static":    true,
 	"connected": true,
 	"kernel":    true,
+}
+
+func sortedForwardingClassNames(classes map[string]*model.ForwardingClass) []string {
+	names := make([]string, 0, len(classes))
+	for name := range classes {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	return names
+}
+
+func sortedTrafficControlProfileNames(profiles map[string]*model.TrafficControlProfile) []string {
+	names := make([]string, 0, len(profiles))
+	for name := range profiles {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	return names
+}
+
+func sortedClassOfServiceInterfaceNames(interfaces map[string]*model.CoSInterface) []string {
+	names := make([]string, 0, len(interfaces))
+	for name := range interfaces {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	return names
 }
 
 func upDown(up bool) string {
@@ -656,8 +922,8 @@ func applyCandidateCommand(candidate, commandText string) (string, error) {
 				return "", fmt.Errorf("'set' requires arguments")
 			}
 			line := "set " + cli.NormalizeConfigPath(parts[1:])
-			if prefixes := replacementPrefixes(parts[1:]); len(prefixes) > 0 {
-				lines = removeMatchingPrefixes(lines, prefixes)
+			if rules := replacementRules(parts[1:]); len(rules) > 0 {
+				lines = removeMatchingRules(lines, rules)
 			}
 			if containsLine(lines, line) {
 				continue
@@ -682,12 +948,14 @@ func applyCandidateCommand(candidate, commandText string) (string, error) {
 	return strings.Join(lines, "\n"), nil
 }
 
-func removeMatchingPrefixes(lines []string, prefixes []string) []string {
+type replacementRule func(line string) bool
+
+func removeMatchingRules(lines []string, rules []replacementRule) []string {
 	filtered := lines[:0]
 	for _, line := range lines {
 		matched := false
-		for _, prefix := range prefixes {
-			if cli.MatchesPrefix(line, prefix) {
+		for _, rule := range rules {
+			if rule(line) {
 				matched = true
 				break
 			}
@@ -708,12 +976,83 @@ func containsLine(lines []string, target string) bool {
 	return false
 }
 
+func replacementRules(path []string) []replacementRule {
+	if len(path) >= 3 && path[0] == "routing-instances" && path[2] == "vrf-target" {
+		if len(path) >= 4 && (path[3] == "import" || path[3] == "export") {
+			return nil
+		}
+		instanceName := path[1]
+		return []replacementRule{func(line string) bool {
+			parts, err := cli.TokenizeCommand(line)
+			if err != nil {
+				return false
+			}
+			return len(parts) == 5 &&
+				parts[0] == "set" &&
+				parts[1] == "routing-instances" &&
+				parts[2] == instanceName &&
+				parts[3] == "vrf-target"
+		}}
+	}
+
+	prefixes := replacementPrefixes(path)
+	if len(prefixes) == 0 {
+		return nil
+	}
+	rules := make([]replacementRule, 0, len(prefixes))
+	for _, prefix := range prefixes {
+		prefix := prefix
+		rules = append(rules, func(line string) bool {
+			return cli.MatchesPrefix(line, prefix)
+		})
+	}
+	return rules
+}
+
 func replacementPrefixes(path []string) []string {
 	prefix := func(n int) []string {
 		return []string{"set " + cli.NormalizeConfigPath(path[:n])}
 	}
 	if len(path) >= 3 && path[0] == "system" && path[1] == "host-name" {
 		return prefix(2)
+	}
+	if len(path) >= 5 && path[0] == "system" && path[1] == "services" && path[2] == "web-ui" {
+		switch path[3] {
+		case "enabled", "listen-address", "port":
+			return prefix(4)
+		}
+	}
+	if len(path) >= 5 && path[0] == "system" && path[1] == "services" && path[2] == "prometheus" {
+		switch path[3] {
+		case "enabled", "listen-address", "port":
+			return prefix(4)
+		}
+	}
+	if len(path) >= 5 && path[0] == "system" && path[1] == "services" && path[2] == "snmp" {
+		switch path[3] {
+		case "enabled", "listen-address", "port", "community":
+			return prefix(4)
+		}
+	}
+	if len(path) >= 4 && path[0] == "security" && path[1] == "netconf" && path[2] == "ssh" && path[3] == "port" {
+		return prefix(4)
+	}
+	if len(path) >= 4 && path[0] == "chassis" && path[1] == "cluster" {
+		switch path[2] {
+		case "enabled":
+			return prefix(3)
+		case "node":
+			if len(path) >= 5 {
+				switch path[4] {
+				case "address", "priority":
+					return prefix(5)
+				}
+			}
+		case "sync":
+			if len(path) >= 6 && path[3] == "etcd" && path[4] == "endpoint" {
+				return nil
+			}
+		}
 	}
 	if len(path) >= 4 && path[0] == "interfaces" && path[2] == "description" {
 		return prefix(3)
@@ -730,6 +1069,15 @@ func replacementPrefixes(path []string) []string {
 	}
 	if len(path) >= 4 && path[0] == "protocols" {
 		switch path[1] {
+		case "mpls":
+			return nil
+		case "vrrp":
+			if len(path) >= 5 && path[2] == "group" {
+				switch path[4] {
+				case "interface", "virtual-address", "priority", "preempt":
+					return prefix(5)
+				}
+			}
 		case "ospf":
 			if path[2] == "router-id" {
 				return prefix(3)
@@ -753,6 +1101,33 @@ func replacementPrefixes(path []string) []string {
 						}
 					}
 				}
+			}
+		}
+	}
+	if len(path) >= 3 && path[0] == "routing-instances" {
+		switch path[2] {
+		case "instance-type", "route-distinguisher", "vrf-target":
+			return prefix(3)
+		case "interface", "vrf-import", "vrf-export":
+			return nil
+		}
+	}
+	if len(path) >= 4 && path[0] == "class-of-service" {
+		switch path[1] {
+		case "forwarding-class":
+			if len(path) >= 4 && path[3] == "queue" {
+				return prefix(4)
+			}
+		case "traffic-control-profile":
+			if len(path) >= 4 {
+				switch path[3] {
+				case "shaping-rate", "scheduler-map":
+					return prefix(4)
+				}
+			}
+		case "interfaces":
+			if len(path) >= 4 && path[3] == "output-traffic-control-profile" {
+				return prefix(4)
 			}
 		}
 	}

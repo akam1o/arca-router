@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"net"
 	"regexp"
+	"strconv"
 	"strings"
 )
 
@@ -17,10 +18,19 @@ func (c *RouterConfig) Validate() error {
 		return fmt.Errorf("configuration is nil")
 	}
 
+	if err := c.validateSystem(); err != nil {
+		return err
+	}
 	if err := c.validateInterfaces(); err != nil {
 		return err
 	}
+	if err := c.validateChassis(); err != nil {
+		return err
+	}
 	if err := c.validateRouting(); err != nil {
+		return err
+	}
+	if err := c.validateRoutingInstances(); err != nil {
 		return err
 	}
 	if err := c.validateProtocols(); err != nil {
@@ -28,6 +38,43 @@ func (c *RouterConfig) Validate() error {
 	}
 	if err := c.validatePolicy(); err != nil {
 		return err
+	}
+	if err := c.validateClassOfService(); err != nil {
+		return err
+	}
+	if err := c.validateSecurity(); err != nil {
+		return err
+	}
+	return nil
+}
+
+func (c *RouterConfig) validateSystem() error {
+	if c.System == nil || c.System.Services == nil {
+		return nil
+	}
+	if web := c.System.Services.WebUI; web != nil {
+		if web.Port < 0 || web.Port > 65535 {
+			return fmt.Errorf("system services web-ui: port must be 0-65535, got %d", web.Port)
+		}
+		if web.ListenAddress != "" && web.ListenAddress != "localhost" && net.ParseIP(web.ListenAddress) == nil {
+			return fmt.Errorf("system services web-ui: invalid listen-address %q", web.ListenAddress)
+		}
+	}
+	if prometheus := c.System.Services.Prometheus; prometheus != nil {
+		if prometheus.Port < 0 || prometheus.Port > 65535 {
+			return fmt.Errorf("system services prometheus: port must be 0-65535, got %d", prometheus.Port)
+		}
+		if prometheus.ListenAddress != "" && prometheus.ListenAddress != "localhost" && net.ParseIP(prometheus.ListenAddress) == nil {
+			return fmt.Errorf("system services prometheus: invalid listen-address %q", prometheus.ListenAddress)
+		}
+	}
+	if snmp := c.System.Services.SNMP; snmp != nil {
+		if snmp.Port < 0 || snmp.Port > 65535 {
+			return fmt.Errorf("system services snmp: port must be 0-65535, got %d", snmp.Port)
+		}
+		if snmp.ListenAddress != "" && snmp.ListenAddress != "localhost" && net.ParseIP(snmp.ListenAddress) == nil {
+			return fmt.Errorf("system services snmp: invalid listen-address %q", snmp.ListenAddress)
+		}
 	}
 	return nil
 }
@@ -77,6 +124,102 @@ func (c *RouterConfig) validateRouting() error {
 	return nil
 }
 
+func (c *RouterConfig) validateChassis() error {
+	if c.Chassis == nil || c.Chassis.Cluster == nil {
+		return nil
+	}
+	for name, node := range c.Chassis.Cluster.Nodes {
+		if node == nil {
+			return fmt.Errorf("chassis cluster node %s is nil", name)
+		}
+		if node.Address != "" && net.ParseIP(node.Address) == nil {
+			return fmt.Errorf("chassis cluster node %s: invalid address %q", name, node.Address)
+		}
+		if node.Priority < 0 || node.Priority > 255 {
+			return fmt.Errorf("chassis cluster node %s: priority must be 0-255, got %d", name, node.Priority)
+		}
+	}
+	if sync := c.Chassis.Cluster.Sync; sync != nil && sync.Etcd != nil {
+		for _, endpoint := range sync.Etcd.Endpoints {
+			if strings.TrimSpace(endpoint) == "" {
+				return fmt.Errorf("chassis cluster sync etcd endpoint must not be empty")
+			}
+		}
+	}
+	return nil
+}
+
+func (c *RouterConfig) validateRoutingInstances() error {
+	for name, instance := range c.RoutingInstances {
+		if instance == nil {
+			return fmt.Errorf("routing-instance %s is nil", name)
+		}
+		if instance.InstanceType != "" && instance.InstanceType != "vrf" {
+			return fmt.Errorf("routing-instance %s: unsupported instance-type %q", name, instance.InstanceType)
+		}
+		if instance.RouteDistinguisher != "" && !regexp.MustCompile(`^\d+:\d+$`).MatchString(instance.RouteDistinguisher) {
+			return fmt.Errorf("routing-instance %s: invalid route-distinguisher %q", name, instance.RouteDistinguisher)
+		}
+		importTargetCount := 0
+		exportTargetCount := 0
+		if instance.VRFTarget != "" {
+			if err := validateVRFTargetValue(fmt.Sprintf("routing-instance %s vrf-target", name), instance.VRFTarget); err != nil {
+				return err
+			}
+			importTargetCount++
+			exportTargetCount++
+		}
+		for _, ifName := range instance.Interfaces {
+			if err := c.validateInterfaceReference(fmt.Sprintf("routing-instance %s", name), ifName); err != nil {
+				return err
+			}
+		}
+		for _, target := range instance.VRFTargetImport {
+			if err := validateVRFTargetValue(fmt.Sprintf("routing-instance %s vrf-target import", name), target); err != nil {
+				return err
+			}
+			importTargetCount++
+		}
+		for _, target := range instance.VRFTargetExport {
+			if err := validateVRFTargetValue(fmt.Sprintf("routing-instance %s vrf-target export", name), target); err != nil {
+				return err
+			}
+			exportTargetCount++
+		}
+		for _, policyName := range instance.VRFImport {
+			if err := c.validatePolicyStatementReference(fmt.Sprintf("routing-instance %s vrf-import", name), policyName); err != nil {
+				return err
+			}
+		}
+		for _, policyName := range instance.VRFExport {
+			if err := c.validatePolicyStatementReference(fmt.Sprintf("routing-instance %s vrf-export", name), policyName); err != nil {
+				return err
+			}
+		}
+		if len(instance.VRFImport) > 0 && importTargetCount == 0 {
+			return fmt.Errorf("routing-instance %s: vrf-import requires an import vrf-target", name)
+		}
+		if len(instance.VRFExport) > 0 && exportTargetCount == 0 {
+			return fmt.Errorf("routing-instance %s: vrf-export requires an export vrf-target", name)
+		}
+		if exportTargetCount > 0 && instance.RouteDistinguisher == "" {
+			return fmt.Errorf("routing-instance %s: route-distinguisher is required for VPN export", name)
+		}
+		if (importTargetCount > 0 || exportTargetCount > 0 || len(instance.VRFImport) > 0 || len(instance.VRFExport) > 0) &&
+			(c.Routing == nil || c.Routing.AutonomousSystem == 0) {
+			return fmt.Errorf("routing-instance %s: routing-options autonomous-system is required for VPN import/export", name)
+		}
+	}
+	return nil
+}
+
+func validateVRFTargetValue(context, target string) error {
+	if !regexp.MustCompile(`^target:\d+:\d+$`).MatchString(target) {
+		return fmt.Errorf("%s: invalid vrf-target %q", context, target)
+	}
+	return nil
+}
+
 func (c *RouterConfig) validateProtocols() error {
 	if c.Protocols == nil {
 		return nil
@@ -90,6 +233,45 @@ func (c *RouterConfig) validateProtocols() error {
 		if ospf.RouterID != "" {
 			if net.ParseIP(ospf.RouterID) == nil {
 				return fmt.Errorf("ospf: invalid router-id %q", ospf.RouterID)
+			}
+		}
+		for areaName, area := range ospf.Areas {
+			if area == nil {
+				return fmt.Errorf("ospf area %s is nil", areaName)
+			}
+			for ifName := range area.Interfaces {
+				if err := c.validateInterfaceReference(fmt.Sprintf("ospf area %s", areaName), ifName); err != nil {
+					return err
+				}
+			}
+		}
+	}
+	if mpls := c.Protocols.MPLS; mpls != nil {
+		for _, ifName := range mpls.Interfaces {
+			if err := c.validateInterfaceReference("mpls", ifName); err != nil {
+				return err
+			}
+		}
+	}
+	if vrrp := c.Protocols.VRRP; vrrp != nil {
+		for name, group := range vrrp.Groups {
+			if group == nil {
+				return fmt.Errorf("vrrp group %s is nil", name)
+			}
+			id, err := strconv.Atoi(name)
+			if err != nil || id < 1 || id > 255 {
+				return fmt.Errorf("vrrp group %s: id must be numeric 1-255", name)
+			}
+			if group.Interface != "" {
+				if err := c.validateInterfaceReference(fmt.Sprintf("vrrp group %s", name), group.Interface); err != nil {
+					return err
+				}
+			}
+			if group.VirtualAddress != "" && net.ParseIP(group.VirtualAddress) == nil {
+				return fmt.Errorf("vrrp group %s: invalid virtual-address %q", name, group.VirtualAddress)
+			}
+			if group.Priority < 0 || group.Priority > 254 {
+				return fmt.Errorf("vrrp group %s: priority must be 1-254 when configured, got %d", name, group.Priority)
 			}
 		}
 	}
@@ -141,6 +323,68 @@ func (c *RouterConfig) validatePolicy() error {
 				return fmt.Errorf("prefix-list %s: invalid prefix %q: %w", name, prefix, err)
 			}
 		}
+	}
+	return nil
+}
+
+func (c *RouterConfig) validateClassOfService() error {
+	if c.ClassOfService == nil {
+		return nil
+	}
+	for name, fc := range c.ClassOfService.ForwardingClasses {
+		if fc == nil {
+			return fmt.Errorf("class-of-service forwarding-class %s is nil", name)
+		}
+		if fc.Queue < 0 || fc.Queue > 7 {
+			return fmt.Errorf("class-of-service forwarding-class %s: queue must be 0-7, got %d", name, fc.Queue)
+		}
+	}
+	for name, iface := range c.ClassOfService.Interfaces {
+		if err := c.validateInterfaceReference("class-of-service", name); err != nil {
+			return err
+		}
+		if iface == nil {
+			return fmt.Errorf("class-of-service interface %s is nil", name)
+		}
+		if iface.OutputTrafficControlProfile != "" {
+			if _, ok := c.ClassOfService.TrafficControlProfiles[iface.OutputTrafficControlProfile]; !ok {
+				return fmt.Errorf("class-of-service interface %s: output traffic-control-profile %q not found", name, iface.OutputTrafficControlProfile)
+			}
+		}
+	}
+	return nil
+}
+
+func (c *RouterConfig) validateInterfaceReference(context, ifName string) error {
+	if !junosIfacePattern.MatchString(ifName) {
+		return fmt.Errorf("%s: invalid interface name %q", context, ifName)
+	}
+	if _, ok := c.Interfaces[ifName]; !ok {
+		return fmt.Errorf("%s: interface %q is not configured", context, ifName)
+	}
+	return nil
+}
+
+func (c *RouterConfig) validatePolicyStatementReference(context, policyName string) error {
+	if strings.TrimSpace(policyName) == "" {
+		return fmt.Errorf("%s: empty policy-statement reference", context)
+	}
+	if c.Policy == nil {
+		return fmt.Errorf("%s: policy-statement %q not found in policy-options", context, policyName)
+	}
+	if _, ok := c.Policy.PolicyStatements[policyName]; !ok {
+		return fmt.Errorf("%s: policy-statement %q not found in policy-options", context, policyName)
+	}
+	return nil
+}
+
+func (c *RouterConfig) validateSecurity() error {
+	if c.Security == nil || c.Security.NETCONF == nil || c.Security.NETCONF.SSH == nil {
+		return nil
+	}
+	port := c.Security.NETCONF.SSH.Port
+	if port < 0 || port > 65535 {
+		return fmt.Errorf("security netconf ssh port must be 0-65535, got %d", port)
 	}
 	return nil
 }
