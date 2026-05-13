@@ -950,9 +950,11 @@ set system services web-ui port 8080
 Endpoints:
 
 - `GET /`
+- `GET /api/config`
 - `GET /api/status`
 
 `/api/status` includes build metadata, uptime, running config version, datastore backend, cluster sync state, and NETCONF counters.
+`/api/config` returns the running configuration as set-command text with the running config version. The dashboard renders the same running configuration as a read-only preview.
 
 ### SNMP
 
@@ -1115,6 +1117,7 @@ curl http://127.0.0.1:9090/metrics
 
 # Web UI, when --web-listen or system services web-ui is enabled
 curl http://127.0.0.1:8080/api/status
+curl http://127.0.0.1:8080/api/config
 
 # SNMP, when --snmp-listen is enabled
 snmpget -v 2c -c public 127.0.0.1:1161 1.3.6.1.3.9950.1.3.0
@@ -1155,7 +1158,7 @@ sudo vppctl show interface addr
 - **v0.6.x**: Advanced feature foundations
   - Management-plane config model for clustering, MPLS, VRRP, routing instances, class of service, and Web UI
   - etcd datastore backend selection for clustered candidate/running configuration
-  - Read-only Web UI dashboard and JSON status endpoint
+  - Read-only Web UI dashboard, JSON status endpoint, and running config endpoint
   - v0.6 config diff and candidate replacement coverage
 
 - **v0.5.x**: Production hardening

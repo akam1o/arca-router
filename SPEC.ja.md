@@ -968,9 +968,11 @@ set system services web-ui port 8080
 Endpoints:
 
 - `GET /`
+- `GET /api/config`
 - `GET /api/status`
 
 `/api/status` は build metadata、uptime、running config version、datastore backend、cluster sync state、NETCONF counters を返します。
+`/api/config` は running configuration を set-command text と running config version として返します。dashboard でも同じ running configuration を read-only preview として表示します。
 
 ### SNMP
 
@@ -1134,6 +1136,7 @@ curl http://127.0.0.1:9090/metrics
 
 # --web-listen または system services web-ui 有効時の Web UI
 curl http://127.0.0.1:8080/api/status
+curl http://127.0.0.1:8080/api/config
 
 # --snmp-listen 有効時の SNMP
 snmpget -v 2c -c public 127.0.0.1:1161 1.3.6.1.3.9950.1.3.0
@@ -1174,7 +1177,7 @@ sudo vppctl show interface addr
 - **v0.6.x**: Advanced feature foundations
   - clustering、MPLS、VRRP、routing instances、class of service、Web UI の management-plane config model
   - clustered candidate/running configuration 向け etcd datastore backend selection
-  - read-only Web UI dashboard と JSON status endpoint
+  - read-only Web UI dashboard、JSON status endpoint、running config endpoint
   - v0.6 config diff と candidate replacement coverage
 
 - **v0.5.x**: Production hardening

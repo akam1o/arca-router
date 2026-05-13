@@ -62,9 +62,10 @@ set system services web-ui port 8080
 Endpoints:
 
 - `GET /`
+- `GET /api/config`
 - `GET /api/status`
 
-The Web UI is intended for trusted management networks. It exposes the same daemon status used by the metrics endpoint, including datastore backend and cluster sync alignment, and does not provide authentication yet.
+The Web UI is intended for trusted management networks. It exposes the same daemon status used by the metrics endpoint, including datastore backend and cluster sync alignment. It also exposes the running configuration in set-command format through `/api/config` and the dashboard preview. It does not provide authentication yet.
 
 ## SNMP
 

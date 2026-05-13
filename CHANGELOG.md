@@ -11,6 +11,7 @@
 - **Standard FRR VRRP daemon**: `vrrpd` is part of the documented required FRR daemon set for appliance-router HA deployments
 - **v0.6 southbound safety gates**: unsupported MPLS, routing-instance, class-of-service, and transactional VRRP southbound changes fail validation instead of being silently ignored
 - **Read-only Web UI**: optional `--web-listen` HTTP dashboard and `/api/status` JSON endpoint backed by daemon observability state
+- **Read-only config API**: Web UI exposes `/api/config` and a running configuration preview in set-command format
 - **Web UI configuration**: `system services web-ui` can enable the dashboard without a command-line flag
 
 ## v0.5.x – Production Hardening (previous)
