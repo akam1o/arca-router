@@ -27,6 +27,7 @@
 - **VRRP CLI status**: `arca show vrrp` exposes FRR VRRP operational output through the daemon gRPC API
 - **VPP LCP CLI status**: `arca show lcp` exposes cached VPP LCP reconciliation state through the daemon gRPC API
 - **HA CLI status**: `arca show ha` exposes the control-plane HA convergence summary through the daemon gRPC API
+- **Class-of-service CLI status**: `arca show class-of-service` exposes running CoS intent and intent-only scheduler/policer enforcement state through the daemon gRPC API
 - **Standard FRR VRRP daemon**: `vrrpd` is part of the documented required FRR daemon set for appliance-router HA deployments
 - **VPP MPLS interface forwarding**: `protocols mpls interface` enables or disables MPLS forwarding on managed VPP interfaces with rollback coverage
 - **VPP L3VPN table plumbing**: routing-instance interfaces are bound to deterministic VPP IPv4/IPv6 FIB tables derived from route distinguishers

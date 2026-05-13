@@ -237,6 +237,7 @@ arca show ospf neighbor
 arca show vrrp
 arca show lcp
 arca show ha
+arca show class-of-service
 
 # Check VPP/FRR directly (optional)
 sudo vppctl show interface

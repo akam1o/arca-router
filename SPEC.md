@@ -583,6 +583,8 @@ set class-of-service interfaces ge-0/0/0 output-traffic-control-profile WAN
 
 Forwarding class queues must be between `0` and `7`. Interface bindings must reference an existing traffic-control profile and a configured interface.
 
+`arca show class-of-service` exposes the running forwarding classes, traffic-control profiles, interface bindings, and current enforcement status. VPP scheduler and policer enforcement remains `intent-only` until the supported VPP binapi surface is available.
+
 ---
 
 ## Security
@@ -1077,11 +1079,14 @@ arca show lcp
 # HA convergence status
 arca show ha
 
+# Class-of-service intent
+arca show class-of-service
+
 # Configuration
 arca show configuration
 ```
 
-`show interfaces` prints live managed VPP admin/oper status, bound QoS profile, packet counters, and RX/TX queue placement when available. Name filters use configured interface names such as `ge-0/0/0`. `show vrrp` prints FRR `show vrrp` output through arca-routerd for local HA inspection. `show lcp` prints the cached VPP LCP reconciliation state used by HA convergence checks. `show ha` prints the same HA convergence summary used by Web UI, Prometheus, and SNMP.
+`show interfaces` prints live managed VPP admin/oper status, bound QoS profile, packet counters, and RX/TX queue placement when available. Name filters use configured interface names such as `ge-0/0/0`. `show vrrp` prints FRR `show vrrp` output through arca-routerd for local HA inspection. `show lcp` prints the cached VPP LCP reconciliation state used by HA convergence checks. `show ha` prints the same HA convergence summary used by Web UI, Prometheus, and SNMP. `show class-of-service` prints running CoS intent and reports `intent-only` for scheduler/policer enforcement while VPP enforcement support is staged separately.
 
 Interactive mode also supports `show history [N]` in configuration mode for commit history.
 
