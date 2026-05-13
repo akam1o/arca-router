@@ -100,6 +100,15 @@ Start the daemon with an SNMP listen address:
 arca-routerd --snmp-listen=:1161 --snmp-community=public
 ```
 
+SNMP can also be enabled from running configuration:
+
+```text
+set system services snmp enabled true
+set system services snmp listen-address 127.0.0.1
+set system services snmp port 1161
+set system services snmp community public
+```
+
 For the standard port 161, the packaged systemd unit already grants `CAP_NET_BIND_SERVICE`:
 
 ```bash

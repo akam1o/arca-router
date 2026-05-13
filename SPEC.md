@@ -501,6 +501,17 @@ set system services web-ui port 8080
 
 `listen-address` must be an IP address or `localhost`. When enabled without an explicit port, the daemon uses port `8080`.
 
+### SNMP Service
+
+```
+set system services snmp enabled true
+set system services snmp listen-address 127.0.0.1
+set system services snmp port 1161
+set system services snmp community public
+```
+
+`listen-address` must be an IP address or `localhost`. When enabled without an explicit port, the daemon uses the standard UDP port `161`. When enabled without a community, the daemon uses `public`.
+
 ### Multi-chassis and VRRP
 
 ```
@@ -900,7 +911,7 @@ Common options:
 --metrics-listen <addr>    Prometheus listen address; disabled when empty
 --web-listen <addr>        Web UI listen address; overrides system services web-ui config
 --snmp-listen <addr>       SNMPv2c UDP listen address; disabled when empty
---snmp-community <value>   SNMPv2c read-only community (default: public)
+--snmp-community <value>   SNMPv2c read-only community; overrides system services snmp config (default: public)
 --mock-vpp                 Use mock VPP client for tests
 ```
 
@@ -969,6 +980,15 @@ Start the read-only SNMPv2c endpoint with:
 
 ```bash
 arca-routerd --snmp-listen=:1161 --snmp-community=public
+```
+
+It can also be enabled from running configuration:
+
+```
+set system services snmp enabled true
+set system services snmp listen-address 127.0.0.1
+set system services snmp port 1161
+set system services snmp community public
 ```
 
 The packaged systemd unit grants `CAP_NET_BIND_SERVICE`, so the standard UDP port 161 can be used when configured:

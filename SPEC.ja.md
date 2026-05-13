@@ -512,6 +512,17 @@ set system services web-ui port 8080
 
 `listen-address` は IP address または `localhost` を指定します。port を明示せずに有効化した場合、daemon は `8080` を使用します。
 
+### SNMP service
+
+```
+set system services snmp enabled true
+set system services snmp listen-address 127.0.0.1
+set system services snmp port 1161
+set system services snmp community public
+```
+
+`listen-address` は IP address または `localhost` を指定します。port を明示せずに有効化した場合、daemon は標準 UDP port `161` を使用します。community を明示しない場合は `public` を使用します。
+
 ### Multi-chassis and VRRP
 
 ```
@@ -918,7 +929,7 @@ set security rate-limit per-user 20
 --metrics-listen <addr>    Prometheus listen address。空の場合は無効
 --web-listen <addr>        Web UI listen address。system services web-ui config より優先
 --snmp-listen <addr>       SNMPv2c UDP listen address。空の場合は無効
---snmp-community <value>   SNMPv2c read-only community（デフォルト: public）
+--snmp-community <value>   SNMPv2c read-only community。system services snmp config より優先（デフォルト: public）
 --mock-vpp                 test 用の mock VPP client を使用
 ```
 
@@ -987,6 +998,15 @@ read-only SNMPv2c endpoint は次のように起動します。
 
 ```bash
 arca-routerd --snmp-listen=:1161 --snmp-community=public
+```
+
+running configuration からも有効化できます。
+
+```
+set system services snmp enabled true
+set system services snmp listen-address 127.0.0.1
+set system services snmp port 1161
+set system services snmp community public
 ```
 
 パッケージ版の systemd unit は `CAP_NET_BIND_SERVICE` を付与しているため、設定すれば標準 UDP port 161 も利用できます。

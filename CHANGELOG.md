@@ -10,6 +10,7 @@
 - **FRR VRRP generation**: `--frr-apply-mode=file` can render `protocols vrrp` groups into FRR integrated interface configuration
 - **Standard FRR VRRP daemon**: `vrrpd` is part of the documented required FRR daemon set for appliance-router HA deployments
 - **v0.6 southbound safety gates**: unsupported MPLS, routing-instance, class-of-service, and transactional VRRP southbound changes fail validation instead of being silently ignored
+- **SNMP service configuration**: `system services snmp` can enable the read-only SNMPv2c endpoint and set listen address, port, and community from running configuration
 - **Read-only Web UI**: optional `--web-listen` HTTP dashboard and `/api/status` JSON endpoint backed by daemon observability state
 - **Read-only config API**: Web UI exposes `/api/config` and a running configuration preview in set-command format
 - **Web UI authentication**: password-backed `security users` enable HTTP Basic authentication and read-only RBAC for the dashboard APIs
