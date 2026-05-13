@@ -31,7 +31,7 @@ Focus: expand the hardened unified daemon into higher-level router features.
   - Bound QoS profile visibility in interface operational state
   - VPP RX/TX queue placement telemetry for managed interfaces
   - Class-of-service intent status through CLI, Web UI, Prometheus, SNMP, and Grafana
-  - Scheduler and policer enforcement deferred until supported VPP binapi coverage is available
+  - Scheduler and policer enforcement deferred to v0.8 until supported VPP binapi coverage is available
 - **Observability services**
   - Config-driven NETCONF listen port from `security netconf ssh port`
   - Live managed VPP interface status and counters in NETCONF `<get>`
@@ -75,6 +75,11 @@ Focus: add data-center overlay support and richer external observability.
   - gNMI, OpenTelemetry, or structured event stream support
   - Subscription management and backpressure handling
   - Stable event schemas for config, daemon, and routing state changes
+- **QoS dataplane enforcement**
+  - VPP scheduler and policer capability detection
+  - Queue scheduler and policer apply support
+  - Operational QoS counters
+  - Version-specific fallback and diagnostics
 - **NMS integration**
   - Stable operational API shape for external systems
   - Integration examples for collectors and dashboards
@@ -99,6 +104,7 @@ Focus: mature management-plane correctness and operator safety.
   - Startup config and rollback archive
   - Upgrade preflight checks
   - Failed commit diagnostics
+  - QoS enforcement preflight, rollback, and post-commit diagnostics
 - **Change impact preview**
   - Route-policy and route-map dry-run
   - Route diff summaries before commit
