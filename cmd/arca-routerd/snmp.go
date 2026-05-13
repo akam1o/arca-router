@@ -20,28 +20,34 @@ import (
 const (
 	arcaSNMPBaseOID = "1.3.6.1.3.9950.1"
 
-	snmpOIDSysDescr        = "1.3.6.1.2.1.1.1.0"
-	snmpOIDSysObjectID     = "1.3.6.1.2.1.1.2.0"
-	snmpOIDSysUpTime       = "1.3.6.1.2.1.1.3.0"
-	snmpOIDSysName         = "1.3.6.1.2.1.1.5.0"
-	snmpOIDDaemonUp        = arcaSNMPBaseOID + ".1.0"
-	snmpOIDDaemonUptime    = arcaSNMPBaseOID + ".2.0"
-	snmpOIDConfigVersion   = arcaSNMPBaseOID + ".3.0"
-	snmpOIDNETCONFListen   = arcaSNMPBaseOID + ".4.0"
-	snmpOIDNETCONFSessions = arcaSNMPBaseOID + ".5.0"
-	snmpOIDNETCONFConns    = arcaSNMPBaseOID + ".6.0"
-	snmpOIDNETCONFTotal    = arcaSNMPBaseOID + ".7.0"
-	snmpOIDNETCONFSuccess  = arcaSNMPBaseOID + ".8.0"
-	snmpOIDNETCONFFailures = arcaSNMPBaseOID + ".9.0"
-	snmpOIDDaemonVersion   = arcaSNMPBaseOID + ".10.0"
-	snmpOIDVPPLCPPairs     = arcaSNMPBaseOID + ".11.0"
-	snmpOIDVPPLCPMismatch  = arcaSNMPBaseOID + ".12.0"
-	snmpOIDVPPLCPError     = arcaSNMPBaseOID + ".13.0"
-	snmpOIDVPPLCPLastRun   = arcaSNMPBaseOID + ".14.0"
-	snmpOIDHAConfigured    = arcaSNMPBaseOID + ".15.0"
-	snmpOIDHAConverged     = arcaSNMPBaseOID + ".16.0"
-	snmpOIDHAVRPGroups     = arcaSNMPBaseOID + ".17.0"
-	snmpOIDHAIssues        = arcaSNMPBaseOID + ".18.0"
+	snmpOIDSysDescr          = "1.3.6.1.2.1.1.1.0"
+	snmpOIDSysObjectID       = "1.3.6.1.2.1.1.2.0"
+	snmpOIDSysUpTime         = "1.3.6.1.2.1.1.3.0"
+	snmpOIDSysName           = "1.3.6.1.2.1.1.5.0"
+	snmpOIDDaemonUp          = arcaSNMPBaseOID + ".1.0"
+	snmpOIDDaemonUptime      = arcaSNMPBaseOID + ".2.0"
+	snmpOIDConfigVersion     = arcaSNMPBaseOID + ".3.0"
+	snmpOIDNETCONFListen     = arcaSNMPBaseOID + ".4.0"
+	snmpOIDNETCONFSessions   = arcaSNMPBaseOID + ".5.0"
+	snmpOIDNETCONFConns      = arcaSNMPBaseOID + ".6.0"
+	snmpOIDNETCONFTotal      = arcaSNMPBaseOID + ".7.0"
+	snmpOIDNETCONFSuccess    = arcaSNMPBaseOID + ".8.0"
+	snmpOIDNETCONFFailures   = arcaSNMPBaseOID + ".9.0"
+	snmpOIDDaemonVersion     = arcaSNMPBaseOID + ".10.0"
+	snmpOIDVPPLCPPairs       = arcaSNMPBaseOID + ".11.0"
+	snmpOIDVPPLCPMismatch    = arcaSNMPBaseOID + ".12.0"
+	snmpOIDVPPLCPError       = arcaSNMPBaseOID + ".13.0"
+	snmpOIDVPPLCPLastRun     = arcaSNMPBaseOID + ".14.0"
+	snmpOIDHAConfigured      = arcaSNMPBaseOID + ".15.0"
+	snmpOIDHAConverged       = arcaSNMPBaseOID + ".16.0"
+	snmpOIDHAVRPGroups       = arcaSNMPBaseOID + ".17.0"
+	snmpOIDHAIssues          = arcaSNMPBaseOID + ".18.0"
+	snmpOIDFRRVRRPConfigured = arcaSNMPBaseOID + ".19.0"
+	snmpOIDFRRVRRPObserved   = arcaSNMPBaseOID + ".20.0"
+	snmpOIDFRRVRRPActive     = arcaSNMPBaseOID + ".21.0"
+	snmpOIDFRRVRRPIssues     = arcaSNMPBaseOID + ".22.0"
+	snmpOIDFRRVRRPError      = arcaSNMPBaseOID + ".23.0"
+	snmpOIDFRRVRRPLastRun    = arcaSNMPBaseOID + ".24.0"
 
 	defaultSNMPPort      = 161
 	defaultSNMPCommunity = "public"
@@ -304,6 +310,57 @@ func snmpOIDs(source metricsSource) []*snmpserver.PDUValueControlItem {
 				return snmpserver.Asn1Gauge32Wrap(uint(len(source.snapshot(time.Now()).HAIssues))), nil
 			},
 			Document: "arcaRouterHaConvergenceIssues",
+		},
+		{
+			OID:  snmpOIDFRRVRRPConfigured,
+			Type: gosnmp.Gauge32,
+			OnGet: func() (interface{}, error) {
+				return snmpserver.Asn1Gauge32Wrap(uint(source.snapshot(time.Now()).FRRVRRPConfiguredGroups)), nil
+			},
+			Document: "arcaRouterFrrVrrpConfiguredGroups",
+		},
+		{
+			OID:  snmpOIDFRRVRRPObserved,
+			Type: gosnmp.Gauge32,
+			OnGet: func() (interface{}, error) {
+				return snmpserver.Asn1Gauge32Wrap(uint(source.snapshot(time.Now()).FRRVRRPObservedGroups)), nil
+			},
+			Document: "arcaRouterFrrVrrpObservedGroups",
+		},
+		{
+			OID:  snmpOIDFRRVRRPActive,
+			Type: gosnmp.Gauge32,
+			OnGet: func() (interface{}, error) {
+				return snmpserver.Asn1Gauge32Wrap(uint(source.snapshot(time.Now()).FRRVRRPActiveGroups)), nil
+			},
+			Document: "arcaRouterFrrVrrpActiveGroups",
+		},
+		{
+			OID:  snmpOIDFRRVRRPIssues,
+			Type: gosnmp.Gauge32,
+			OnGet: func() (interface{}, error) {
+				return snmpserver.Asn1Gauge32Wrap(uint(len(source.snapshot(time.Now()).FRRVRRPIssues))), nil
+			},
+			Document: "arcaRouterFrrVrrpConvergenceIssues",
+		},
+		{
+			OID:  snmpOIDFRRVRRPError,
+			Type: gosnmp.Integer,
+			OnGet: func() (interface{}, error) {
+				if source.snapshot(time.Now()).FRRVRRPError != "" {
+					return snmpserver.Asn1IntegerWrap(1), nil
+				}
+				return snmpserver.Asn1IntegerWrap(0), nil
+			},
+			Document: "arcaRouterFrrVrrpStatusError",
+		},
+		{
+			OID:  snmpOIDFRRVRRPLastRun,
+			Type: gosnmp.Gauge32,
+			OnGet: func() (interface{}, error) {
+				return snmpserver.Asn1Gauge32Wrap(uint(unixTimestampSeconds(source.snapshot(time.Now()).FRRVRRPLastRun))), nil
+			},
+			Document: "arcaRouterFrrVrrpLastCheck",
 		},
 	}
 }

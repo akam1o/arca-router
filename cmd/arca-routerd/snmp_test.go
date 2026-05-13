@@ -200,12 +200,18 @@ func TestSNMPEndpointExportsRouterMetrics(t *testing.T) {
 		snmpOIDHAConverged,
 		snmpOIDHAVRPGroups,
 		snmpOIDHAIssues,
+		snmpOIDFRRVRRPConfigured,
+		snmpOIDFRRVRRPObserved,
+		snmpOIDFRRVRRPActive,
+		snmpOIDFRRVRRPIssues,
+		snmpOIDFRRVRRPError,
+		snmpOIDFRRVRRPLastRun,
 	})
 	if err != nil {
 		t.Fatalf("SNMP Get() error = %v", err)
 	}
-	if len(packet.Variables) != 11 {
-		t.Fatalf("SNMP variables = %d, want 11", len(packet.Variables))
+	if len(packet.Variables) != 17 {
+		t.Fatalf("SNMP variables = %d, want 17", len(packet.Variables))
 	}
 	if got := snmpUintValue(t, packet.Variables[0].Value); got != 42 {
 		t.Fatalf("%s = %d, want 42", snmpOIDConfigVersion, got)
@@ -239,6 +245,24 @@ func TestSNMPEndpointExportsRouterMetrics(t *testing.T) {
 	}
 	if got := snmpUintValue(t, packet.Variables[10].Value); got != 0 {
 		t.Fatalf("%s = %d, want 0", snmpOIDHAIssues, got)
+	}
+	if got := snmpUintValue(t, packet.Variables[11].Value); got != 1 {
+		t.Fatalf("%s = %d, want 1", snmpOIDFRRVRRPConfigured, got)
+	}
+	if got := snmpUintValue(t, packet.Variables[12].Value); got != 1 {
+		t.Fatalf("%s = %d, want 1", snmpOIDFRRVRRPObserved, got)
+	}
+	if got := snmpUintValue(t, packet.Variables[13].Value); got != 1 {
+		t.Fatalf("%s = %d, want 1", snmpOIDFRRVRRPActive, got)
+	}
+	if got := snmpUintValue(t, packet.Variables[14].Value); got != 0 {
+		t.Fatalf("%s = %d, want 0", snmpOIDFRRVRRPIssues, got)
+	}
+	if got := snmpUintValue(t, packet.Variables[15].Value); got != 0 {
+		t.Fatalf("%s = %d, want 0", snmpOIDFRRVRRPError, got)
+	}
+	if got := snmpUintValue(t, packet.Variables[16].Value); got != 1700000300 {
+		t.Fatalf("%s = %d, want 1700000300", snmpOIDFRRVRRPLastRun, got)
 	}
 }
 
