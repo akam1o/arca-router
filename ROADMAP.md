@@ -30,8 +30,8 @@ Focus: expand the hardened unified daemon into higher-level router features.
   - VPP class-of-service profile binding for managed interfaces
   - Bound QoS profile visibility in interface operational state
   - VPP RX/TX queue placement telemetry for managed interfaces
-  - Queue scheduler and policer enforcement
-  - Operational counters for queues and schedulers
+  - Class-of-service intent status through CLI, Web UI, Prometheus, SNMP, and Grafana
+  - Scheduler and policer enforcement deferred until supported VPP binapi coverage is available
 - **Observability services**
   - Config-driven NETCONF listen port from `security netconf ssh port`
   - Live managed VPP interface status and counters in NETCONF `<get>`
