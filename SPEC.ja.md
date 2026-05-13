@@ -551,7 +551,7 @@ set protocols vrrp group 10 preempt
 
 VRRP group ID は数値で `1` から `255` の範囲です。VRRP priority は設定する場合 `1` から `254` の範囲です。default 動作にする場合は省略します。
 
-FRR VRRP 設定を適用する前に、arca-routerd は FRR `vrrpd` が前提にする Linux state を準備します。LCP interface 上に arca 管理の macvlan interface（`arv4-<id>-<hash>` または `arv6-<id>-<hash>`）を作成し、RFC VRRP virtual MAC を設定し、virtual address を `/32` または `/128` として付与して up にします。この処理には `CAP_NET_ADMIN` が必要で、packaged systemd unit には含まれています。
+FRR VRRP 設定を適用する前に、arca-routerd は FRR `vrrpd` が前提にする Linux state を準備します。LCP interface 上に arca 管理の macvlan interface（`arv4-<id>-<hash>` または `arv6-<id>-<hash>`）を作成し、RFC VRRP virtual MAC を設定し、virtual address を `/32` または `/128` として付与して up にします。準備した interface 名は `/var/lib/arca-router/vrrp-interfaces.json` に保存されるため、daemon 再起動後も stale な arca 管理 macvlan interface を削除できます。この処理には `CAP_NET_ADMIN` が必要で、packaged systemd unit には含まれています。
 
 ### MPLS and Routing Instances
 
