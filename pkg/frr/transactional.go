@@ -127,9 +127,6 @@ func BuildMgmtOperations(cfg *Config) ([]MgmtOperation, error) {
 	if cfg == nil {
 		return nil, NewInvalidConfigError("FRR config is nil")
 	}
-	if cfg.VRRP != nil && len(cfg.VRRP.Groups) > 0 {
-		return nil, NewInvalidConfigError("transactional FRR VRRP apply is not supported")
-	}
 	var ops []MgmtOperation
 	ops = append(ops,
 		deleteOp(staticProtocolBase()),
@@ -137,12 +134,18 @@ func BuildMgmtOperations(cfg *Config) ([]MgmtOperation, error) {
 		deleteOp(ospfProtocolBase()),
 		deleteOp("/frr-filter:lib"),
 		deleteOp("/frr-route-map:lib"),
+		deleteOp(vrrpConfigBase()),
 	)
 	ops = append(ops, buildStaticRouteOps(cfg.StaticRoutes)...)
 	ops = append(ops, buildBGPOps(cfg.BGP)...)
 	ops = append(ops, buildOSPFOps(cfg.OSPF)...)
 	ops = append(ops, buildPrefixListOps(cfg.PrefixLists)...)
 	ops = append(ops, buildRouteMapOps(cfg.RouteMaps)...)
+	vrrpOps, err := buildVRRPOps(cfg.VRRP)
+	if err != nil {
+		return nil, err
+	}
+	ops = append(ops, vrrpOps...)
 	return ops, nil
 }
 
@@ -348,6 +351,59 @@ func buildRouteMapOps(routeMaps []RouteMap) []MgmtOperation {
 	return ops
 }
 
+func buildVRRPOps(cfg *VRRPConfig) ([]MgmtOperation, error) {
+	if cfg == nil || len(cfg.Groups) == 0 {
+		return nil, nil
+	}
+	groups := append([]VRRPGroup(nil), cfg.Groups...)
+	sort.Slice(groups, func(i, j int) bool {
+		if groups[i].Interface != groups[j].Interface {
+			return groups[i].Interface < groups[j].Interface
+		}
+		return groups[i].ID < groups[j].ID
+	})
+
+	var ops []MgmtOperation
+	createdInterfaces := make(map[string]bool)
+	for _, group := range groups {
+		if group.Interface == "" {
+			return nil, NewInvalidConfigError(fmt.Sprintf("VRRP group %d missing interface", group.ID))
+		}
+		if group.ID < 1 || group.ID > 255 {
+			return nil, NewInvalidConfigError(fmt.Sprintf("VRRP group id must be 1-255, got %d", group.ID))
+		}
+		virtualAddress := net.ParseIP(group.VirtualAddress)
+		if virtualAddress == nil {
+			return nil, NewInvalidConfigError(fmt.Sprintf("VRRP group %d has invalid virtual address %q", group.ID, group.VirtualAddress))
+		}
+		if group.Priority < 0 || group.Priority > 254 {
+			return nil, NewInvalidConfigError(fmt.Sprintf("VRRP group %d priority must be 1-254 when configured, got %d", group.ID, group.Priority))
+		}
+		if !createdInterfaces[group.Interface] {
+			ops = append(ops, setOp(interfaceBase(group.Interface)+"/name", group.Interface))
+			createdInterfaces[group.Interface] = true
+		}
+		id := strconv.Itoa(group.ID)
+		groupBase := vrrpGroupBase(group.Interface, id)
+		ops = append(ops,
+			setOp(groupBase+"/virtual-router-id", id),
+			setOp(groupBase+"/version", "3"),
+		)
+		if group.Priority != 0 {
+			ops = append(ops, setOp(groupBase+"/priority", strconv.Itoa(group.Priority)))
+		}
+		if group.Preempt {
+			ops = append(ops, setOp(groupBase+"/preempt", "true"))
+		}
+		addressFamily := "v4"
+		if virtualAddress.To4() == nil {
+			addressFamily = "v6"
+		}
+		ops = append(ops, setOp(groupBase+"/"+addressFamily+"/virtual-address", group.VirtualAddress))
+	}
+	return ops, nil
+}
+
 const defaultVRFName = "default"
 
 func staticProtocolBase() string {
@@ -373,6 +429,18 @@ func protocolCreateOps(base, protocolType, name string) []MgmtOperation {
 		setOp(base+"/name", name),
 		setOp(base+"/vrf", defaultVRFName),
 	}
+}
+
+func interfaceBase(name string) string {
+	return "/frr-interface:lib/interface" + keyPred("name", name)
+}
+
+func vrrpConfigBase() string {
+	return "/frr-interface:lib/interface/frr-vrrpd:vrrp"
+}
+
+func vrrpGroupBase(interfaceName, groupID string) string {
+	return interfaceBase(interfaceName) + "/frr-vrrpd:vrrp/vrrp-group" + keyPred("virtual-router-id", groupID)
 }
 
 func setOp(xpath, value string) MgmtOperation {

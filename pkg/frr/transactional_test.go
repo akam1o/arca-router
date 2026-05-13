@@ -49,17 +49,30 @@ func TestBuildMgmtOperationsStaticAndBGP(t *testing.T) {
 	}
 }
 
-func TestBuildMgmtOperationsRejectsVRRP(t *testing.T) {
-	_, err := BuildMgmtOperations(&Config{
+func TestBuildMgmtOperationsVRRP(t *testing.T) {
+	ops, err := BuildMgmtOperations(&Config{
 		VRRP: &VRRPConfig{Groups: []VRRPGroup{
-			{ID: 10, Interface: "ge0-0-0", VirtualAddress: "192.0.2.254"},
+			{ID: 10, Interface: "ge0-0-0", VirtualAddress: "192.0.2.254", Priority: 110, Preempt: true},
+			{ID: 20, Interface: "ge0-0-0", VirtualAddress: "2001:db8::1"},
 		}},
 	})
-	if err == nil {
-		t.Fatal("BuildMgmtOperations() error = nil, want unsupported VRRP error")
+	if err != nil {
+		t.Fatalf("BuildMgmtOperations() error = %v", err)
 	}
-	if !strings.Contains(err.Error(), "VRRP") {
-		t.Fatalf("BuildMgmtOperations() error = %v, want VRRP", err)
+	commands := commandsFromOps(ops)
+	for _, want := range []string{
+		"mgmt delete-config /frr-interface:lib/interface/frr-vrrpd:vrrp",
+		"mgmt set-config /frr-interface:lib/interface[name='ge0-0-0']/name ge0-0-0",
+		"mgmt set-config /frr-interface:lib/interface[name='ge0-0-0']/frr-vrrpd:vrrp/vrrp-group[virtual-router-id='10']/virtual-router-id 10",
+		"mgmt set-config /frr-interface:lib/interface[name='ge0-0-0']/frr-vrrpd:vrrp/vrrp-group[virtual-router-id='10']/version 3",
+		"mgmt set-config /frr-interface:lib/interface[name='ge0-0-0']/frr-vrrpd:vrrp/vrrp-group[virtual-router-id='10']/priority 110",
+		"mgmt set-config /frr-interface:lib/interface[name='ge0-0-0']/frr-vrrpd:vrrp/vrrp-group[virtual-router-id='10']/preempt true",
+		"mgmt set-config /frr-interface:lib/interface[name='ge0-0-0']/frr-vrrpd:vrrp/vrrp-group[virtual-router-id='10']/v4/virtual-address 192.0.2.254",
+		"mgmt set-config /frr-interface:lib/interface[name='ge0-0-0']/frr-vrrpd:vrrp/vrrp-group[virtual-router-id='20']/v6/virtual-address 2001:db8::1",
+	} {
+		if !strings.Contains(commands, want) {
+			t.Fatalf("commands missing %q:\n%s", want, commands)
+		}
 	}
 }
 

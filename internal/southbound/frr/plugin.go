@@ -66,9 +66,6 @@ func (p *FRRPlugin) ValidateChanges(ctx context.Context, diff *engine.ConfigDiff
 	if diff.MPLSChanged && hasFRRMPLSConfig(diff.NewMPLS) {
 		unsupported = append(unsupported, "protocols mpls")
 	}
-	if diff.VRRPChanged && hasFRRVRRPConfig(diff.NewVRRP) && p.mode != pkgfrr.BackendModeFile {
-		unsupported = append(unsupported, "protocols vrrp")
-	}
 	if diff.RoutingInstancesChanged && len(diff.NewRoutingInstances) > 0 {
 		unsupported = append(unsupported, "routing-instances")
 	}
@@ -251,8 +248,4 @@ func hasFRRRelevantInterfaceChanges(diff *engine.ConfigDiff) bool {
 
 func hasFRRMPLSConfig(cfg *model.MPLSConfig) bool {
 	return cfg != nil && len(cfg.Interfaces) > 0
-}
-
-func hasFRRVRRPConfig(cfg *model.VRRPConfig) bool {
-	return cfg != nil && len(cfg.Groups) > 0
 }
