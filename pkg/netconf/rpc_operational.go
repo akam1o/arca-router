@@ -73,26 +73,40 @@ func (s *Server) getOperationalData(ctx context.Context, filter *Filter) ([]byte
 			}
 		}
 	}
-	return buildOperationalData(cfg, filter, time.Now().UTC())
+
+	interfaceStates := s.collectInterfaceOperationalState(ctx, filter)
+	return buildOperationalData(cfg, filter, time.Now().UTC(), interfaceStates)
 }
 
 // GetOperationalData builds operational state without a datastore-backed
 // server. It is kept for tests and callers that only need local system state.
 func GetOperationalData(ctx context.Context, filter *Filter) ([]byte, error) {
 	_ = ctx
-	return buildOperationalData(config.NewConfig(), filter, time.Now().UTC())
+	return buildOperationalData(config.NewConfig(), filter, time.Now().UTC(), nil)
 }
 
 // buildAllOperationalData builds operational data XML for the inside of <data>.
 func buildAllOperationalData() string {
-	data, err := buildOperationalData(config.NewConfig(), nil, time.Now().UTC())
+	data, err := buildOperationalData(config.NewConfig(), nil, time.Now().UTC(), nil)
 	if err != nil {
 		return ""
 	}
 	return string(data)
 }
 
-func buildOperationalData(cfg *config.Config, filter *Filter, now time.Time) ([]byte, error) {
+func (s *Server) collectInterfaceOperationalState(ctx context.Context, filter *Filter) map[string]*InterfaceOperationalState {
+	if s == nil || s.operationalProvider == nil || !includeOperationalSection(filter, "interfaces") {
+		return nil
+	}
+	states, err := s.operationalProvider.InterfaceStates(ctx)
+	if err != nil {
+		log.Printf("[NETCONF] Failed to collect interface operational state: %v", err)
+		return nil
+	}
+	return states
+}
+
+func buildOperationalData(cfg *config.Config, filter *Filter, now time.Time, interfaceStates map[string]*InterfaceOperationalState) ([]byte, error) {
 	if cfg == nil {
 		cfg = config.NewConfig()
 	}
@@ -103,8 +117,8 @@ func buildOperationalData(cfg *config.Config, filter *Filter, now time.Time) ([]
 			return nil, err
 		}
 	}
-	if includeOperationalSection(filter, "interfaces") && len(cfg.Interfaces) > 0 {
-		if err := writeInterfaceStateXML(&buf, cfg.Interfaces); err != nil {
+	if includeOperationalSection(filter, "interfaces") && (len(cfg.Interfaces) > 0 || len(interfaceStates) > 0) {
+		if err := writeInterfaceStateXML(&buf, cfg.Interfaces, interfaceStates); err != nil {
 			return nil, err
 		}
 	}
@@ -176,24 +190,43 @@ func writeSystemStateXML(buf *bytes.Buffer, cfg *config.Config, now time.Time) e
 	return nil
 }
 
-func writeInterfaceStateXML(buf *bytes.Buffer, interfaces map[string]*config.Interface) error {
+func writeInterfaceStateXML(buf *bytes.Buffer, interfaces map[string]*config.Interface, states map[string]*InterfaceOperationalState) error {
 	buf.WriteString(`  <interfaces xmlns="` + IETFInterfacesNS + `">` + "\n")
-	for _, name := range sortedConfigKeys(interfaces) {
+	for _, name := range sortedInterfaceStateNames(interfaces, states) {
 		iface := interfaces[name]
-		if iface == nil {
+		state := states[name]
+		if iface == nil && state == nil {
 			continue
 		}
 		buf.WriteString("    <interface>\n")
 		if err := writeEscapedElement(buf, "      ", "name", name); err != nil {
 			return err
 		}
-		if err := writeEscapedElement(buf, "      ", "admin-status", "configured"); err != nil {
+		if err := writeEscapedElement(buf, "      ", "admin-status", interfaceAdminStatus(state)); err != nil {
 			return err
 		}
-		if err := writeEscapedElement(buf, "      ", "oper-status", "unknown"); err != nil {
+		if err := writeEscapedElement(buf, "      ", "oper-status", interfaceOperStatus(state)); err != nil {
 			return err
 		}
-		if len(iface.Units) > 0 {
+		if state != nil && state.MAC != "" {
+			if err := writeEscapedElement(buf, "      ", "phys-address", state.MAC); err != nil {
+				return err
+			}
+		}
+		if state != nil && state.QoSProfile != "" {
+			if err := writeEscapedElement(buf, "      ", "qos-profile", state.QoSProfile); err != nil {
+				return err
+			}
+		}
+		if state != nil && state.Counters != nil {
+			writeInterfaceCountersXML(buf, state.Counters)
+		}
+		if state != nil && state.Queues != nil {
+			if err := writeInterfaceQueuesXML(buf, state.Queues); err != nil {
+				return err
+			}
+		}
+		if iface != nil && len(iface.Units) > 0 {
 			buf.WriteString("      <addresses>\n")
 			for _, unitNum := range sortedUnitKeys(iface.Units) {
 				unit := iface.Units[unitNum]
@@ -223,6 +256,88 @@ func writeInterfaceStateXML(buf *bytes.Buffer, interfaces map[string]*config.Int
 		buf.WriteString("    </interface>\n")
 	}
 	buf.WriteString("  </interfaces>\n")
+	return nil
+}
+
+func sortedInterfaceStateNames(interfaces map[string]*config.Interface, states map[string]*InterfaceOperationalState) []string {
+	seen := make(map[string]struct{}, len(interfaces)+len(states))
+	names := make([]string, 0, len(interfaces)+len(states))
+	for name := range interfaces {
+		seen[name] = struct{}{}
+		names = append(names, name)
+	}
+	for name := range states {
+		if _, ok := seen[name]; ok {
+			continue
+		}
+		seen[name] = struct{}{}
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	return names
+}
+
+func interfaceAdminStatus(state *InterfaceOperationalState) string {
+	if state != nil && state.AdminStatus != "" {
+		return state.AdminStatus
+	}
+	return "configured"
+}
+
+func interfaceOperStatus(state *InterfaceOperationalState) string {
+	if state != nil && state.OperStatus != "" {
+		return state.OperStatus
+	}
+	return "unknown"
+}
+
+func writeInterfaceCountersXML(buf *bytes.Buffer, counters *InterfaceOperationalCounters) {
+	buf.WriteString("      <statistics>\n")
+	fmt.Fprintf(buf, "        <rx-packets>%d</rx-packets>\n", counters.RxPackets)
+	fmt.Fprintf(buf, "        <tx-packets>%d</tx-packets>\n", counters.TxPackets)
+	fmt.Fprintf(buf, "        <rx-bytes>%d</rx-bytes>\n", counters.RxBytes)
+	fmt.Fprintf(buf, "        <tx-bytes>%d</tx-bytes>\n", counters.TxBytes)
+	fmt.Fprintf(buf, "        <rx-errors>%d</rx-errors>\n", counters.RxErrors)
+	fmt.Fprintf(buf, "        <tx-errors>%d</tx-errors>\n", counters.TxErrors)
+	fmt.Fprintf(buf, "        <drops>%d</drops>\n", counters.Drops)
+	buf.WriteString("      </statistics>\n")
+}
+
+func writeInterfaceQueuesXML(buf *bytes.Buffer, queues *InterfaceOperationalQueues) error {
+	buf.WriteString("      <queue-placements>\n")
+	if len(queues.Rx) > 0 {
+		buf.WriteString("        <rx-queues>\n")
+		for _, queue := range queues.Rx {
+			buf.WriteString("          <rx-queue>\n")
+			fmt.Fprintf(buf, "            <queue-id>%d</queue-id>\n", queue.QueueID)
+			fmt.Fprintf(buf, "            <worker-id>%d</worker-id>\n", queue.WorkerID)
+			if queue.Mode != "" {
+				if err := writeEscapedElement(buf, "            ", "mode", queue.Mode); err != nil {
+					return err
+				}
+			}
+			buf.WriteString("          </rx-queue>\n")
+		}
+		buf.WriteString("        </rx-queues>\n")
+	}
+	if len(queues.Tx) > 0 {
+		buf.WriteString("        <tx-queues>\n")
+		for _, queue := range queues.Tx {
+			buf.WriteString("          <tx-queue>\n")
+			fmt.Fprintf(buf, "            <queue-id>%d</queue-id>\n", queue.QueueID)
+			fmt.Fprintf(buf, "            <shared>%t</shared>\n", queue.Shared)
+			if len(queue.Threads) > 0 {
+				buf.WriteString("            <threads>\n")
+				for _, thread := range queue.Threads {
+					fmt.Fprintf(buf, "              <thread>%d</thread>\n", thread)
+				}
+				buf.WriteString("            </threads>\n")
+			}
+			buf.WriteString("          </tx-queue>\n")
+		}
+		buf.WriteString("        </tx-queues>\n")
+	}
+	buf.WriteString("      </queue-placements>\n")
 	return nil
 }
 

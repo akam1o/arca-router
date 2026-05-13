@@ -208,6 +208,48 @@ func TestMockClient_SetInterfaceDown(t *testing.T) {
 	}
 }
 
+func TestMockClient_ListInterfaceQueuePlacements(t *testing.T) {
+	client := NewMockClient()
+	ctx := context.Background()
+	if err := client.Connect(ctx); err != nil {
+		t.Fatalf("Connect() error = %v", err)
+	}
+	iface, err := client.CreateInterface(ctx, &CreateInterfaceRequest{Type: InterfaceTypeTap})
+	if err != nil {
+		t.Fatalf("CreateInterface() error = %v", err)
+	}
+
+	client.SetInterfaceQueuePlacements(iface.SwIfIndex, InterfaceQueuePlacements{
+		Rx: []InterfaceRxQueuePlacement{
+			{QueueID: 0, WorkerID: 1, Mode: "polling"},
+		},
+		Tx: []InterfaceTxQueuePlacement{
+			{QueueID: 0, Shared: true, Threads: []uint32{0, 2}},
+		},
+	})
+
+	placements, err := client.ListInterfaceQueuePlacements(ctx)
+	if err != nil {
+		t.Fatalf("ListInterfaceQueuePlacements() error = %v", err)
+	}
+	got := placements[iface.SwIfIndex]
+	if len(got.Rx) != 1 || got.Rx[0].QueueID != 0 || got.Rx[0].WorkerID != 1 || got.Rx[0].Mode != "polling" {
+		t.Fatalf("RX placements = %#v", got.Rx)
+	}
+	if len(got.Tx) != 1 || got.Tx[0].QueueID != 0 || !got.Tx[0].Shared || len(got.Tx[0].Threads) != 2 || got.Tx[0].Threads[1] != 2 {
+		t.Fatalf("TX placements = %#v", got.Tx)
+	}
+
+	got.Tx[0].Threads[1] = 99
+	placements, err = client.ListInterfaceQueuePlacements(ctx)
+	if err != nil {
+		t.Fatalf("ListInterfaceQueuePlacements() error = %v", err)
+	}
+	if placements[iface.SwIfIndex].Tx[0].Threads[1] != 2 {
+		t.Fatal("ListInterfaceQueuePlacements() leaked internal thread slice")
+	}
+}
+
 func TestMockClient_SetInterfaceAddress(t *testing.T) {
 	client := NewMockClient()
 	ctx := context.Background()

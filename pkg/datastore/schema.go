@@ -162,6 +162,24 @@ type AuditEvent struct {
 	Details       string    // Additional details (JSON or text)
 }
 
+// EtcdStatusProvider reports live etcd datastore metadata. It is implemented
+// by the etcd backend and used by clustered daemons to detect remote running
+// config commits without adding etcd-specific methods to the main Datastore
+// interface.
+type EtcdStatusProvider interface {
+	EtcdStatus(ctx context.Context) (*EtcdStatus, error)
+}
+
+// EtcdStatus describes the current etcd datastore revision state.
+type EtcdStatus struct {
+	Endpoints        []string
+	Prefix           string
+	Revision         int64
+	RunningRevision  int64
+	RunningCommitID  string
+	RunningTimestamp time.Time
+}
+
 // MigrationManager handles database schema migrations.
 type MigrationManager interface {
 	// GetCurrentVersion returns the current schema version.

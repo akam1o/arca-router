@@ -48,18 +48,37 @@ func NewApplier(mode BackendMode) Applier {
 
 // FileApplier preserves the legacy config-file reload backend.
 type FileApplier struct {
-	reloader *Reloader
+	reloader     *Reloader
+	vrrpPreparer VRRPSystemPreparer
 }
 
 // NewFileApplier creates an applier backed by the existing Reloader.
 func NewFileApplier(reloader *Reloader) *FileApplier {
+	return NewFileApplierWithPreparer(reloader, NewIPVRRPSystemPreparer(nil))
+}
+
+// NewFileApplierWithPreparer creates a file applier with a custom VRRP preparer.
+func NewFileApplierWithPreparer(reloader *Reloader, preparer VRRPSystemPreparer) *FileApplier {
 	if reloader == nil {
 		reloader = NewReloader()
 	}
-	return &FileApplier{reloader: reloader}
+	return &FileApplier{reloader: reloader, vrrpPreparer: preparer}
 }
 
 // ApplyConfig writes, validates, and reloads the generated FRR config file.
-func (a *FileApplier) ApplyConfig(ctx context.Context, configContent string, _ *Config) error {
+func (a *FileApplier) ApplyConfig(ctx context.Context, configContent string, cfg *Config) error {
+	if err := prepareVRRPSystem(ctx, a.vrrpPreparer, cfg); err != nil {
+		return err
+	}
 	return a.reloader.ApplyConfig(ctx, configContent)
+}
+
+func prepareVRRPSystem(ctx context.Context, preparer VRRPSystemPreparer, cfg *Config) error {
+	if cfg == nil || preparer == nil {
+		return nil
+	}
+	if err := preparer.Prepare(ctx, cfg); err != nil {
+		return NewApplyError("prepare VRRP Linux interfaces", err)
+	}
+	return nil
 }

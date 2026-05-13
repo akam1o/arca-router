@@ -18,6 +18,7 @@ module arca-router {
 
      This module defines the configuration and operational state for:
      - System settings (hostname)
+     - v0.6 service, clustering, MPLS, VRRP, VPN, and QoS settings
      - Interface configuration (uses IETF interfaces model)
      - Routing configuration (uses IETF routing model with extensions)
      - BGP and OSPF protocol configuration";
@@ -40,6 +41,98 @@ module arca-router {
         pattern '[a-zA-Z0-9]([a-zA-Z0-9\-]*[a-zA-Z0-9])?';
       }
       description "Router hostname (RFC 1123 compliant)";
+    }
+
+    container services {
+      description "Local management and observability services.";
+
+      container web-ui {
+        description "Read-only Web UI service.";
+        leaf enabled {
+          type boolean;
+          default false;
+        }
+        leaf listen-address {
+          type string;
+        }
+        leaf port {
+          type uint16;
+        }
+      }
+
+      container prometheus {
+        description "Prometheus metrics service.";
+        leaf enabled {
+          type boolean;
+          default false;
+        }
+        leaf listen-address {
+          type string;
+        }
+        leaf port {
+          type uint16;
+        }
+      }
+
+      container snmp {
+        description "Read-only SNMPv2c monitoring service.";
+        leaf enabled {
+          type boolean;
+          default false;
+        }
+        leaf listen-address {
+          type string;
+        }
+        leaf port {
+          type uint16;
+        }
+        leaf community {
+          type string;
+        }
+      }
+    }
+  }
+
+  // ==================================================================
+  // Chassis / Clustering Configuration
+  // ==================================================================
+
+  container chassis {
+    description "Chassis-level HA and clustering configuration.";
+
+    container cluster {
+      description "Multi-node cluster settings.";
+
+      leaf enabled {
+        type boolean;
+        default false;
+      }
+
+      list node {
+        key "name";
+        description "Cluster peer node.";
+
+        leaf name {
+          type string;
+        }
+        leaf address {
+          type string;
+        }
+        leaf priority {
+          type uint8;
+        }
+      }
+
+      container sync {
+        description "Cluster synchronization settings.";
+
+        container etcd {
+          description "etcd-backed configuration synchronization.";
+          leaf-list endpoint {
+            type string;
+          }
+        }
+      }
     }
   }
 
@@ -88,6 +181,48 @@ module arca-router {
           default 1;
           description "Administrative distance (metric)";
         }
+      }
+    }
+  }
+
+  // ==================================================================
+  // Routing Instances
+  // ==================================================================
+
+  container routing-instances {
+    description "Per-instance VRF and L3VPN service configuration.";
+
+    list instance {
+      key "name";
+
+      leaf name {
+        type string;
+      }
+      leaf instance-type {
+        type enumeration {
+          enum vrf;
+        }
+      }
+      leaf route-distinguisher {
+        type string;
+      }
+      leaf vrf-target {
+        type string;
+      }
+      leaf-list vrf-target-import {
+        type string;
+      }
+      leaf-list vrf-target-export {
+        type string;
+      }
+      leaf-list vrf-import {
+        type string;
+      }
+      leaf-list vrf-export {
+        type string;
+      }
+      leaf-list interface {
+        type string;
       }
     }
   }
@@ -216,6 +351,112 @@ module arca-router {
         }
       }
     }
+
+    container mpls {
+      description "MPLS forwarding configuration.";
+
+      leaf-list interface {
+        type string;
+        description "Interface with MPLS forwarding enabled.";
+      }
+    }
+
+    container vrrp {
+      description "VRRP high-availability groups.";
+
+      list group {
+        key "name";
+
+        leaf name {
+          type string;
+        }
+        leaf interface {
+          type string;
+        }
+        leaf virtual-address {
+          type string;
+        }
+        leaf priority {
+          type uint8;
+        }
+        leaf preempt {
+          type boolean;
+          default false;
+        }
+      }
+    }
+  }
+
+  // ==================================================================
+  // Class of Service
+  // ==================================================================
+
+  container class-of-service {
+    description "QoS and traffic-control configuration.";
+
+    container forwarding-classes {
+      list forwarding-class {
+        key "name";
+        leaf name {
+          type string;
+        }
+        leaf queue {
+          type uint8;
+        }
+      }
+    }
+
+    container traffic-control-profiles {
+      list traffic-control-profile {
+        key "name";
+        leaf name {
+          type string;
+        }
+        leaf shaping-rate {
+          type uint64;
+        }
+        leaf scheduler-map {
+          type string;
+        }
+      }
+    }
+
+    container interfaces {
+      list interface {
+        key "name";
+        leaf name {
+          type string;
+        }
+        leaf output-traffic-control-profile {
+          type string;
+        }
+      }
+    }
+  }
+
+  // ==================================================================
+  // Security
+  // ==================================================================
+
+  container security {
+    description "Management-plane security settings exposed through NETCONF XML.";
+
+    container netconf {
+      container ssh {
+        leaf port {
+          type uint16;
+        }
+      }
+    }
+
+    container rate-limit {
+      leaf per-ip {
+        type uint16;
+      }
+      leaf per-user {
+        type uint16;
+      }
+    }
   }
 
   // ==================================================================
@@ -266,7 +507,7 @@ module arca-router {
   }
 
   // ==================================================================
-  // Operational State (Future: Phase 4)
+  // Operational State
   // ==================================================================
 
   container state {
@@ -274,13 +515,14 @@ module arca-router {
     description "Operational state data (read-only)";
 
     container interfaces {
-      description "Interface operational state";
-      // TODO: Phase 4 - VPP interface state retrieval
+      description
+        "Arca-specific interface operational state. NETCONF <get> also
+         exposes live interface status, counters, and VPP queue placement
+         through ietf-interfaces.";
     }
 
     container protocols {
-      description "Protocol operational state";
-      // TODO: Phase 4 - FRR state retrieval (BGP/OSPF)
+      description "Reserved for protocol operational state.";
     }
   }
 }

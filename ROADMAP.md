@@ -8,21 +8,43 @@ release. Delivered changes are tracked in [CHANGELOG.md](CHANGELOG.md).
 Focus: expand the hardened unified daemon into higher-level router features.
 
 - **Multi-chassis / clustering**
-  - Control-plane HA using FRR and VRRP
-  - Config synchronization through etcd
-  - Failover reconciliation for local daemon state
+  - Management-plane config model for cluster nodes and etcd sync
+  - arca-routerd datastore backend selection for etcd-backed config synchronization
+  - Runtime config synchronization through etcd running revision polling
+  - Commit-time consistency guard between cluster sync config and the active etcd datastore backend
+  - Cluster and config sync observability through Web UI status and Prometheus metrics
+  - FRR VRRP config generation through the file apply backend
+  - FRR VRRP transactional apply through the management candidate datastore
+  - VRRP Linux macvlan preparation for FRR vrrpd
+  - FRR VRRP operational state polling for control-plane HA
+  - VPP LCP cache reconciliation status through Web UI, Prometheus, and SNMP
+  - Post-failover FRR/VPP convergence validation through Web UI, Prometheus, and SNMP
 - **MPLS / VPN**
-  - MPLS label switching through VPP
+  - Management-plane config model for MPLS interfaces and L3VPN service stanzas
+  - Commit-time safety gates for unsupported routing-instance southbound apply
+  - MPLS interface label forwarding through VPP
   - L3VPN integration across FRR and VPP
   - Junos-like config model for VPN services
 - **QoS / Traffic Engineering**
-  - VPP QoS policy configuration
-  - Traffic shaping and policing
-  - Operational counters for queues and schedulers
+  - Management-plane config model for forwarding classes, traffic-control profiles, and interface bindings
+  - VPP class-of-service profile binding for managed interfaces
+  - Bound QoS profile visibility in interface operational state
+  - VPP RX/TX queue placement telemetry for managed interfaces
+  - Class-of-service intent status through CLI, Web UI, Prometheus, SNMP, and Grafana
+  - Scheduler and policer enforcement deferred to v0.8 until supported VPP binapi coverage is available
+- **Observability services**
+  - Config-driven NETCONF listen port from `security netconf ssh port`
+  - Live managed VPP interface status and counters in NETCONF `<get>`
+  - Config-driven Prometheus service enablement for metrics and health checks
+  - Config-driven SNMP service enablement for read-only SNMPv2c monitoring
+  - VPP LCP reconciliation gauges in Prometheus, Web UI, and SNMP
 - **Web UI**
-  - Browser-based monitoring and configuration
-  - gRPC-backed API integration
-  - Authentication and RBAC integration
+  - Read-only browser-based monitoring and JSON status endpoint
+  - Read-only running configuration API and dashboard preview
+  - gRPC-backed validate and commit API integration
+  - Browser-based configuration editor
+  - Commit history API and dashboard panel
+  - HTTP Basic authentication and RBAC integration
 
 ## v0.7.x - Core Router Parity
 
@@ -53,6 +75,11 @@ Focus: add data-center overlay support and richer external observability.
   - gNMI, OpenTelemetry, or structured event stream support
   - Subscription management and backpressure handling
   - Stable event schemas for config, daemon, and routing state changes
+- **QoS dataplane enforcement**
+  - VPP scheduler and policer capability detection
+  - Queue scheduler and policer apply support
+  - Operational QoS counters
+  - Version-specific fallback and diagnostics
 - **NMS integration**
   - Stable operational API shape for external systems
   - Integration examples for collectors and dashboards
@@ -77,6 +104,7 @@ Focus: mature management-plane correctness and operator safety.
   - Startup config and rollback archive
   - Upgrade preflight checks
   - Failed commit diagnostics
+  - QoS enforcement preflight, rollback, and post-commit diagnostics
 - **Change impact preview**
   - Route-policy and route-map dry-run
   - Route diff summaries before commit

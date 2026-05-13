@@ -64,7 +64,7 @@ usermod -aG frr arca-router
 | VPP API socket接続 (`/run/vpp/api.sock`) | `vpp`グループ所属 | VPP APIアクセス |
 | FRR設定適用 (`vtysh` management commit) | `frrvty`グループ所属 | FRR設定管理 |
 | FRR設定ファイル書き込み (`/etc/frr/frr.conf`) | `frr`グループ所属 | 復旧用 `--frr-apply-mode=file` のみ |
-| LCP (Linux Control Plane) 操作 | `CAP_NET_ADMIN` | netlink/TAP操作 |
+| LCP (Linux Control Plane) / VRRP macvlan 操作 | `CAP_NET_ADMIN` | netlink/TAP/macvlan操作 |
 | VPP FIB操作（経路同期） | `CAP_NET_ADMIN` | Kernel routing table操作 |
 | NETCONF/SNMP privileged port bind | `CAP_NET_BIND_SERVICE` | 830/TCP と任意の 161/UDP |
 
@@ -80,7 +80,7 @@ usermod -aG frr arca-router
 
 | Capability | 用途 | 必須/推奨 |
 |-----------|------|----------|
-| `CAP_NET_ADMIN` | netlink操作、LCP、VPP FIB同期 | **必須** |
+| `CAP_NET_ADMIN` | netlink操作、LCP、VRRP macvlan、VPP FIB同期 | **必須** |
 | `CAP_NET_BIND_SERVICE` | NETCONF/SSHの830番ポート、任意のSNMP 161番ポート | **必須** |
 | `CAP_NET_RAW` | Raw socket操作（将来のBFD/LLDP用） | 推奨 (Phase 3以降) |
 
@@ -305,7 +305,7 @@ func (c *govppClient) Connect(ctx context.Context) error {
 | FRR設定ファイル書き込み | `frr`グループ | 復旧用 `--frr-apply-mode=file` のみ `/etc/frr/frr.conf`へ直接書き込み（0660） |
 | FRR状態確認（arca用） | `frrvty`グループ | `vtysh -c 'show running-config'` |
 
-**注**: v0.5以降の標準経路では、arca-routerd は FRR management candidate に変更を投入し、commit check/apply で適用する。`frrvty`グループはarca（vtysh経由）とFRR設定適用時に必要。復旧・互換用途の `--frr-apply-mode=file` では従来通り `frr.conf` を直接書き込み、`frr-reload.py` で適用する。
+**注**: v0.5以降の標準経路では、arca-routerd は FRR management candidate に変更を投入し、commit check/apply で適用する。標準の FRR daemon set は `bgpd`、`ospfd`、`zebra`、`staticd`、`mgmtd`、`vrrpd`。`frrvty`グループはarca（vtysh経由）とFRR設定適用時に必要。復旧・互換用途の `--frr-apply-mode=file` では従来通り `frr.conf` を直接書き込み、`frr-reload.py` で適用する。
 
 **権限確認フロー**:
 
@@ -384,7 +384,7 @@ sudo systemctl restart vpp
 
 **原因**:
 - ユーザーが`frrvty`グループに所属していない
-- FRRで`mgmtd`が有効化されていない
+- FRRで`mgmtd`または`vrrpd`が有効化されていない
 - `--frr-apply-mode=file`利用時のみ、ユーザーが`frr`グループに所属していない
 - `--frr-apply-mode=file`利用時のみ、`/etc/frr/frr.conf`の権限が正しくない
 
@@ -395,8 +395,9 @@ sudo systemctl restart vpp
 sudo usermod -aG frrvty arca-router
 sudo usermod -aG frr arca-router  # only required for --frr-apply-mode=file
 
-# Enable mgmtd in /etc/frr/daemons
+# Enable standard arca-router daemons in /etc/frr/daemons
 grep '^mgmtd=yes' /etc/frr/daemons
+grep '^vrrpd=yes' /etc/frr/daemons
 
 # Fix FRR config permissions (only required for --frr-apply-mode=file)
 sudo chown root:frr /etc/frr/frr.conf

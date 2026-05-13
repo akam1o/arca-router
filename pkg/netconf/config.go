@@ -1,13 +1,18 @@
 package netconf
 
-import "time"
+import (
+	"time"
+
+	"github.com/akam1o/arca-router/pkg/datastore"
+)
 
 // SSHConfig holds SSH server configuration
 type SSHConfig struct {
-	ListenAddr                  string        // Default: ":830"
-	HostKeyPath                 string        // Default: "/var/lib/arca-router/ssh_host_ed25519_key"
-	UserDBPath                  string        // Default: "/var/lib/arca-router/users.db"
-	DatastorePath               string        // Default: "/var/lib/arca-router/config.db"
+	ListenAddr                  string // Default: ":830"
+	HostKeyPath                 string // Default: "/var/lib/arca-router/ssh_host_ed25519_key"
+	UserDBPath                  string // Default: "/var/lib/arca-router/users.db"
+	DatastorePath               string // Default: "/var/lib/arca-router/config.db"
+	DatastoreConfig             *datastore.Config
 	SkipDatastoreStartupCleanup bool          // For embedded servers whose parent owns datastore startup
 	IdleTimeout                 time.Duration // Default: 30m (idle timeout)
 	AbsoluteTimeout             time.Duration // Default: 24h (max session lifetime)

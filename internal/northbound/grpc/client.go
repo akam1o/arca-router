@@ -293,6 +293,115 @@ func (c *Client) GetOSPFNeighborsText(ctx context.Context) (string, error) {
 	return resp.GetOutput(), nil
 }
 
+// GetVRRPText returns FRR VRRP output.
+func (c *Client) GetVRRPText(ctx context.Context) (string, error) {
+	ctx, cancel := contextWithDefaultTimeout(ctx)
+	defer cancel()
+	resp, err := c.state.GetVRRPText(ctx, &apiv1.GetVRRPTextRequest{})
+	if err != nil {
+		return "", err
+	}
+	return resp.GetOutput(), nil
+}
+
+// GetLCPReconciliation returns cached VPP LCP reconciliation state.
+func (c *Client) GetLCPReconciliation(ctx context.Context) (*LCPReconciliationInfo, error) {
+	ctx, cancel := contextWithDefaultTimeout(ctx)
+	defer cancel()
+	resp, err := c.state.GetLCPReconciliation(ctx, &apiv1.GetLCPReconciliationRequest{})
+	if err != nil {
+		return nil, err
+	}
+	info := &LCPReconciliationInfo{
+		PairCount:       int(resp.GetPairCount()),
+		Inconsistencies: append([]string(nil), resp.GetInconsistencies()...),
+		LastError:       resp.GetLastError(),
+	}
+	if rawLastRun := resp.GetLastRun(); rawLastRun != "" {
+		parsed, err := time.Parse(time.RFC3339Nano, rawLastRun)
+		if err == nil {
+			info.LastRun = parsed
+		}
+	}
+	return info, nil
+}
+
+// GetHAStatus returns control-plane HA convergence state.
+func (c *Client) GetHAStatus(ctx context.Context) (*HAStatusInfo, error) {
+	ctx, cancel := contextWithDefaultTimeout(ctx)
+	defer cancel()
+	resp, err := c.state.GetHAStatus(ctx, &apiv1.GetHAStatusRequest{})
+	if err != nil {
+		return nil, err
+	}
+	info := &HAStatusInfo{
+		Configured:              resp.GetConfigured(),
+		Converged:               resp.GetConverged(),
+		VRRPGroups:              int(resp.GetVrrpGroups()),
+		Issues:                  append([]string(nil), resp.GetIssues()...),
+		ClusterEnabled:          resp.GetClusterEnabled(),
+		ClusterNodes:            int(resp.GetClusterNodes()),
+		ClusterEtcdSync:         resp.GetClusterEtcdSync(),
+		ClusterSyncAligned:      resp.GetClusterSyncAligned(),
+		FRRVRRPConfiguredGroups: int(resp.GetFrrVrrpConfiguredGroups()),
+		FRRVRRPObservedGroups:   int(resp.GetFrrVrrpObservedGroups()),
+		FRRVRRPActiveGroups:     int(resp.GetFrrVrrpActiveGroups()),
+		FRRVRRPIssues:           append([]string(nil), resp.GetFrrVrrpIssues()...),
+		FRRVRRPLastError:        resp.GetFrrVrrpLastError(),
+		VPPLCPPairs:             int(resp.GetVppLcpPairs()),
+		VPPLCPInconsistencies:   append([]string(nil), resp.GetVppLcpInconsistencies()...),
+		VPPLCPLastError:         resp.GetVppLcpLastError(),
+	}
+	if rawLastCheck := resp.GetFrrVrrpLastCheck(); rawLastCheck != "" {
+		parsed, err := time.Parse(time.RFC3339Nano, rawLastCheck)
+		if err == nil {
+			info.FRRVRRPLastCheck = parsed
+		}
+	}
+	if rawLastCheck := resp.GetVppLcpLastCheck(); rawLastCheck != "" {
+		parsed, err := time.Parse(time.RFC3339Nano, rawLastCheck)
+		if err == nil {
+			info.VPPLCPLastCheck = parsed
+		}
+	}
+	return info, nil
+}
+
+// GetClassOfService returns running class-of-service intent.
+func (c *Client) GetClassOfService(ctx context.Context) (*ClassOfServiceInfo, error) {
+	ctx, cancel := contextWithDefaultTimeout(ctx)
+	defer cancel()
+	resp, err := c.state.GetClassOfService(ctx, &apiv1.GetClassOfServiceRequest{})
+	if err != nil {
+		return nil, err
+	}
+	info := &ClassOfServiceInfo{
+		EnforcementStatus: resp.GetEnforcementStatus(),
+	}
+	for _, fc := range resp.GetForwardingClasses() {
+		info.ForwardingClasses = append(info.ForwardingClasses, ClassOfServiceForwardingClassInfo{
+			Name:  fc.GetName(),
+			Queue: int(fc.GetQueue()),
+		})
+	}
+	for _, profile := range resp.GetTrafficControlProfiles() {
+		info.TrafficControlProfiles = append(info.TrafficControlProfiles, ClassOfServiceTrafficControlProfileInfo{
+			Name:              profile.GetName(),
+			ShapingRate:       profile.GetShapingRate(),
+			SchedulerMap:      profile.GetSchedulerMap(),
+			EnforcementStatus: profile.GetEnforcementStatus(),
+		})
+	}
+	for _, iface := range resp.GetInterfaces() {
+		info.Interfaces = append(info.Interfaces, ClassOfServiceInterfaceInfo{
+			Name:                        iface.GetName(),
+			OutputTrafficControlProfile: iface.GetOutputTrafficControlProfile(),
+			EnforcementStatus:           iface.GetEnforcementStatus(),
+		})
+	}
+	return info, nil
+}
+
 // GetSystemInfo returns system information.
 func (c *Client) GetSystemInfo(ctx context.Context) (*SystemInfo, error) {
 	ctx, cancel := contextWithDefaultTimeout(ctx)
@@ -343,12 +452,39 @@ func interfaceInfosFromProto(interfaces []*apiv1.InterfaceState) []InterfaceInfo
 			Speed:       iface.GetSpeed(),
 			MTU:         iface.GetMtu(),
 			MAC:         iface.GetMac(),
+			QoSProfile:  iface.GetQosProfile(),
 			RxPackets:   iface.GetRxPackets(),
 			TxPackets:   iface.GetTxPackets(),
 			RxBytes:     iface.GetRxBytes(),
 			TxBytes:     iface.GetTxBytes(),
 			RxErrors:    iface.GetRxErrors(),
 			TxErrors:    iface.GetTxErrors(),
+			RxQueues:    rxQueueInfosFromProto(iface.GetRxQueues()),
+			TxQueues:    txQueueInfosFromProto(iface.GetTxQueues()),
+		})
+	}
+	return infos
+}
+
+func rxQueueInfosFromProto(queues []*apiv1.InterfaceRxQueue) []InterfaceRxQueueInfo {
+	infos := make([]InterfaceRxQueueInfo, 0, len(queues))
+	for _, queue := range queues {
+		infos = append(infos, InterfaceRxQueueInfo{
+			QueueID:  queue.GetQueueId(),
+			WorkerID: queue.GetWorkerId(),
+			Mode:     queue.GetMode(),
+		})
+	}
+	return infos
+}
+
+func txQueueInfosFromProto(queues []*apiv1.InterfaceTxQueue) []InterfaceTxQueueInfo {
+	infos := make([]InterfaceTxQueueInfo, 0, len(queues))
+	for _, queue := range queues {
+		infos = append(infos, InterfaceTxQueueInfo{
+			QueueID: queue.GetQueueId(),
+			Shared:  queue.GetShared(),
+			Threads: append([]uint32(nil), queue.GetThreads()...),
 		})
 	}
 	return infos
@@ -403,12 +539,88 @@ type InterfaceInfo struct {
 	Speed       uint64
 	MTU         uint32
 	MAC         string
+	QoSProfile  string
 	RxPackets   uint64
 	TxPackets   uint64
 	RxBytes     uint64
 	TxBytes     uint64
 	RxErrors    uint64
 	TxErrors    uint64
+	RxQueues    []InterfaceRxQueueInfo
+	TxQueues    []InterfaceTxQueueInfo
+}
+
+// InterfaceRxQueueInfo maps an RX queue to a VPP worker.
+type InterfaceRxQueueInfo struct {
+	QueueID  uint32
+	WorkerID uint32
+	Mode     string
+}
+
+// InterfaceTxQueueInfo maps a TX queue to VPP worker threads.
+type InterfaceTxQueueInfo struct {
+	QueueID uint32
+	Shared  bool
+	Threads []uint32
+}
+
+// LCPReconciliationInfo represents VPP LCP cache reconciliation state.
+type LCPReconciliationInfo struct {
+	LastRun         time.Time
+	PairCount       int
+	Inconsistencies []string
+	LastError       string
+}
+
+// HAStatusInfo represents control-plane HA convergence state.
+type HAStatusInfo struct {
+	Configured              bool
+	Converged               bool
+	VRRPGroups              int
+	Issues                  []string
+	ClusterEnabled          bool
+	ClusterNodes            int
+	ClusterEtcdSync         bool
+	ClusterSyncAligned      bool
+	FRRVRRPLastCheck        time.Time
+	FRRVRRPConfiguredGroups int
+	FRRVRRPObservedGroups   int
+	FRRVRRPActiveGroups     int
+	FRRVRRPIssues           []string
+	FRRVRRPLastError        string
+	VPPLCPLastCheck         time.Time
+	VPPLCPPairs             int
+	VPPLCPInconsistencies   []string
+	VPPLCPLastError         string
+}
+
+// ClassOfServiceInfo represents running class-of-service intent.
+type ClassOfServiceInfo struct {
+	ForwardingClasses      []ClassOfServiceForwardingClassInfo
+	TrafficControlProfiles []ClassOfServiceTrafficControlProfileInfo
+	Interfaces             []ClassOfServiceInterfaceInfo
+	EnforcementStatus      string
+}
+
+// ClassOfServiceForwardingClassInfo maps a forwarding class to a queue.
+type ClassOfServiceForwardingClassInfo struct {
+	Name  string
+	Queue int
+}
+
+// ClassOfServiceTrafficControlProfileInfo describes a traffic-control profile.
+type ClassOfServiceTrafficControlProfileInfo struct {
+	Name              string
+	ShapingRate       uint64
+	SchedulerMap      string
+	EnforcementStatus string
+}
+
+// ClassOfServiceInterfaceInfo describes a class-of-service interface binding.
+type ClassOfServiceInterfaceInfo struct {
+	Name                        string
+	OutputTrafficControlProfile string
+	EnforcementStatus           string
 }
 
 // RouteInfo represents a routing table entry.

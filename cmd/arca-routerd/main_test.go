@@ -13,6 +13,7 @@ import (
 	"github.com/akam1o/arca-router/internal/engine"
 	"github.com/akam1o/arca-router/internal/model"
 	"github.com/akam1o/arca-router/internal/store"
+	"github.com/akam1o/arca-router/pkg/datastore"
 	"github.com/akam1o/arca-router/pkg/logger"
 	"github.com/akam1o/arca-router/pkg/netconf"
 )
@@ -183,6 +184,97 @@ func TestApplyInitialConfigDoesNotPersistDatastoreStartupConfig(t *testing.T) {
 	}
 	if running := eng.RunningSnapshot(); running == nil || running.Version != 7 {
 		t.Fatalf("running snapshot = %#v, want datastore version 7", running)
+	}
+}
+
+func TestBuildDatastoreConfigDefaultsToSQLite(t *testing.T) {
+	cfg, err := buildDatastoreConfig(&daemonFlags{datastorePath: "/tmp/config.db"})
+	if err != nil {
+		t.Fatalf("buildDatastoreConfig() error = %v", err)
+	}
+	if cfg.Backend != datastore.BackendSQLite {
+		t.Fatalf("Backend = %s, want sqlite", cfg.Backend)
+	}
+	if cfg.SQLitePath != "/tmp/config.db" {
+		t.Fatalf("SQLitePath = %q, want /tmp/config.db", cfg.SQLitePath)
+	}
+}
+
+func TestBuildDatastoreConfigEtcd(t *testing.T) {
+	cfg, err := buildDatastoreConfig(&daemonFlags{
+		datastoreMode: "etcd",
+		etcdEndpoints: "http://127.0.0.1:2379, http://127.0.0.2:2379",
+		etcdPrefix:    "/arca-test/",
+		etcdTimeout:   3,
+		etcdUsername:  "arca",
+		etcdPassword:  "secret",
+	})
+	if err != nil {
+		t.Fatalf("buildDatastoreConfig() error = %v", err)
+	}
+	if cfg.Backend != datastore.BackendEtcd {
+		t.Fatalf("Backend = %s, want etcd", cfg.Backend)
+	}
+	if got := strings.Join(cfg.EtcdEndpoints, ","); got != "http://127.0.0.1:2379,http://127.0.0.2:2379" {
+		t.Fatalf("EtcdEndpoints = %q", got)
+	}
+	if cfg.EtcdPrefix != "/arca-test/" {
+		t.Fatalf("EtcdPrefix = %q, want /arca-test/", cfg.EtcdPrefix)
+	}
+	if cfg.EtcdUsername != "arca" || cfg.EtcdPassword != "secret" {
+		t.Fatalf("etcd credentials not propagated")
+	}
+}
+
+func TestBuildDatastoreConfigEtcdRequiresEndpoints(t *testing.T) {
+	_, err := buildDatastoreConfig(&daemonFlags{datastoreMode: "etcd"})
+	if err == nil {
+		t.Fatal("buildDatastoreConfig() error = nil, want missing endpoint error")
+	}
+}
+
+func TestBuildDatastoreConfigEtcdRejectsPartialTLS(t *testing.T) {
+	_, err := buildDatastoreConfig(&daemonFlags{
+		datastoreMode: "etcd",
+		etcdEndpoints: "http://127.0.0.1:2379",
+		etcdCertFile:  "/cert.pem",
+	})
+	if err == nil {
+		t.Fatal("buildDatastoreConfig() error = nil, want partial TLS error")
+	}
+}
+
+func TestEffectiveNETCONFListenUsesFlagOverride(t *testing.T) {
+	cfg := model.NewRouterConfig()
+	cfg.Security = &model.SecurityConfig{
+		NETCONF: &model.NETCONFSecurityConfig{
+			SSH: &model.NETCONFSSHConfig{Port: 1830},
+		},
+	}
+
+	got := effectiveNETCONFListen(":2830", model.NewSnapshot(cfg, 1, "test", "test"))
+	if got != ":2830" {
+		t.Fatalf("effectiveNETCONFListen() = %q, want %q", got, ":2830")
+	}
+}
+
+func TestEffectiveNETCONFListenUsesConfigPort(t *testing.T) {
+	cfg := model.NewRouterConfig()
+	cfg.Security = &model.SecurityConfig{
+		NETCONF: &model.NETCONFSecurityConfig{
+			SSH: &model.NETCONFSSHConfig{Port: 1830},
+		},
+	}
+
+	got := effectiveNETCONFListen("", model.NewSnapshot(cfg, 1, "test", "test"))
+	if got != ":1830" {
+		t.Fatalf("effectiveNETCONFListen() = %q, want %q", got, ":1830")
+	}
+}
+
+func TestEffectiveNETCONFListenUsesDefault(t *testing.T) {
+	if got := effectiveNETCONFListen("", nil); got != ":830" {
+		t.Fatalf("effectiveNETCONFListen() = %q, want :830", got)
 	}
 }
 

@@ -2,6 +2,8 @@ package netconf
 
 import (
 	"fmt"
+	"os"
+	"strings"
 	"testing"
 )
 
@@ -17,6 +19,16 @@ func TestNewYANGValidator(t *testing.T) {
 
 	if v.modules == nil {
 		t.Error("NewYANGValidator() modules is nil")
+	}
+}
+
+func TestEmbeddedYANGMatchesPublicModel(t *testing.T) {
+	publicModel, err := os.ReadFile("../../models/arca-router.yang")
+	if err != nil {
+		t.Fatalf("ReadFile(models/arca-router.yang) error = %v", err)
+	}
+	if strings.TrimSpace(string(publicModel)) != strings.TrimSpace(arcaRouterYANG) {
+		t.Fatal("embedded YANG model differs from models/arca-router.yang")
 	}
 }
 
@@ -112,13 +124,33 @@ func TestYANGValidator_ValidateElementPath(t *testing.T) {
 			wantErr: false,
 		},
 		{
+			name:    "valid chassis path",
+			path:    "/chassis",
+			wantErr: false,
+		},
+		{
 			name:    "valid routing-options path",
 			path:    "/routing-options",
 			wantErr: false,
 		},
 		{
+			name:    "valid routing-instances path",
+			path:    "/routing-instances",
+			wantErr: false,
+		},
+		{
 			name:    "valid protocols path",
 			path:    "/protocols",
+			wantErr: false,
+		},
+		{
+			name:    "valid class-of-service path",
+			path:    "/class-of-service",
+			wantErr: false,
+		},
+		{
+			name:    "valid security path",
+			path:    "/security",
 			wantErr: false,
 		},
 		{

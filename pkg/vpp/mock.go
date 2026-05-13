@@ -11,11 +11,17 @@ import (
 
 // MockClient is a mock implementation of the VPP Client interface for testing
 type MockClient struct {
-	mu            sync.RWMutex
-	connected     bool
-	interfaces    map[uint32]*Interface
-	lcpInterfaces map[uint32]*LCPInterface
-	nextIfIdx     uint32
+	mu             sync.RWMutex
+	connected      bool
+	interfaces     map[uint32]*Interface
+	lcpInterfaces  map[uint32]*LCPInterface
+	mplsInterfaces map[uint32]bool
+	ipTables       map[ipTableKey]IPTable
+	interfaceTable map[interfaceTableKey]uint32
+	qosProfiles    map[uint32]QoSProfile
+	counters       map[uint32]InterfaceCounters
+	queuePlacement map[uint32]InterfaceQueuePlacements
+	nextIfIdx      uint32
 
 	// Hooks for testing error scenarios
 	ConnectError                error
@@ -24,6 +30,14 @@ type MockClient struct {
 	SetInterfaceDownError       error
 	SetInterfaceAddressError    error
 	DeleteInterfaceAddressError error
+	SetMPLSInterfaceError       error
+	AddIPTableError             error
+	DeleteIPTableError          error
+	SetInterfaceTableError      error
+	SetQoSProfileError          error
+	ClearQoSProfileError        error
+	ListInterfaceCountersError  error
+	ListInterfaceQueuesError    error
 	GetInterfaceError           error
 	ListInterfacesError         error
 	CreateLCPInterfaceError     error
@@ -35,10 +49,26 @@ type MockClient struct {
 // NewMockClient creates a new mock VPP client
 func NewMockClient() *MockClient {
 	return &MockClient{
-		interfaces:    make(map[uint32]*Interface),
-		lcpInterfaces: make(map[uint32]*LCPInterface),
-		nextIfIdx:     1, // Start from 1 (0 is reserved for local0)
+		interfaces:     make(map[uint32]*Interface),
+		lcpInterfaces:  make(map[uint32]*LCPInterface),
+		mplsInterfaces: make(map[uint32]bool),
+		ipTables:       make(map[ipTableKey]IPTable),
+		interfaceTable: make(map[interfaceTableKey]uint32),
+		qosProfiles:    make(map[uint32]QoSProfile),
+		counters:       make(map[uint32]InterfaceCounters),
+		queuePlacement: make(map[uint32]InterfaceQueuePlacements),
+		nextIfIdx:      1, // Start from 1 (0 is reserved for local0)
 	}
+}
+
+type ipTableKey struct {
+	id     uint32
+	isIPv6 bool
+}
+
+type interfaceTableKey struct {
+	ifIndex uint32
+	isIPv6  bool
 }
 
 // deepCopyInterface creates a deep copy of an Interface
@@ -48,10 +78,12 @@ func deepCopyInterface(iface *Interface) *Interface {
 	}
 
 	copy := &Interface{
-		SwIfIndex: iface.SwIfIndex,
-		Name:      iface.Name,
-		AdminUp:   iface.AdminUp,
-		LinkUp:    iface.LinkUp,
+		SwIfIndex:  iface.SwIfIndex,
+		Name:       iface.Name,
+		AdminUp:    iface.AdminUp,
+		LinkUp:     iface.LinkUp,
+		PCIAddress: iface.PCIAddress,
+		QoSProfile: iface.QoSProfile,
 	}
 
 	// Deep copy MAC address
@@ -414,6 +446,328 @@ func (m *MockClient) DeleteInterfaceAddress(ctx context.Context, ifIndex uint32,
 	)
 }
 
+// SetMPLSInterface enables or disables MPLS forwarding on a mock interface.
+func (m *MockClient) SetMPLSInterface(ctx context.Context, ifIndex uint32, enabled bool) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if m.SetMPLSInterfaceError != nil {
+		return m.SetMPLSInterfaceError
+	}
+
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	if !m.connected {
+		return errors.New(
+			errors.ErrCodeVPPConnection,
+			"Not connected to VPP",
+			"VPP connection not established",
+			"Connect to VPP before setting MPLS interface state",
+		)
+	}
+	if _, ok := m.interfaces[ifIndex]; !ok {
+		return errors.New(
+			errors.ErrCodeVPPOperation,
+			fmt.Sprintf("Interface with index %d not found", ifIndex),
+			"Interface does not exist",
+			"Create the interface before setting MPLS interface state",
+		)
+	}
+
+	if enabled {
+		m.mplsInterfaces[ifIndex] = true
+		return nil
+	}
+	delete(m.mplsInterfaces, ifIndex)
+	return nil
+}
+
+// MPLSInterfaceEnabled reports whether MPLS is enabled on a mock interface.
+func (m *MockClient) MPLSInterfaceEnabled(ifIndex uint32) bool {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	return m.mplsInterfaces[ifIndex]
+}
+
+// AddIPTable creates an IPv4 or IPv6 FIB table in the mock state.
+func (m *MockClient) AddIPTable(ctx context.Context, table IPTable) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if m.AddIPTableError != nil {
+		return m.AddIPTableError
+	}
+
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	if !m.connected {
+		return errors.New(
+			errors.ErrCodeVPPConnection,
+			"Not connected to VPP",
+			"VPP connection not established",
+			"Connect to VPP before adding IP tables",
+		)
+	}
+	if table.ID == 0 {
+		return errors.New(
+			errors.ErrCodeVPPOperation,
+			"IP table ID 0 is reserved",
+			"Routing instances must use a non-default table",
+			"Use a non-zero table ID",
+		)
+	}
+
+	m.ipTables[ipTableKey{id: table.ID, isIPv6: table.IsIPv6}] = table
+	return nil
+}
+
+// DeleteIPTable deletes an IPv4 or IPv6 FIB table from the mock state.
+func (m *MockClient) DeleteIPTable(ctx context.Context, table IPTable) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if m.DeleteIPTableError != nil {
+		return m.DeleteIPTableError
+	}
+
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	if !m.connected {
+		return errors.New(
+			errors.ErrCodeVPPConnection,
+			"Not connected to VPP",
+			"VPP connection not established",
+			"Connect to VPP before deleting IP tables",
+		)
+	}
+
+	delete(m.ipTables, ipTableKey{id: table.ID, isIPv6: table.IsIPv6})
+	return nil
+}
+
+// SetInterfaceTable binds an interface to an IPv4 or IPv6 FIB table in the mock state.
+func (m *MockClient) SetInterfaceTable(ctx context.Context, ifIndex uint32, tableID uint32, isIPv6 bool) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if m.SetInterfaceTableError != nil {
+		return m.SetInterfaceTableError
+	}
+
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	if !m.connected {
+		return errors.New(
+			errors.ErrCodeVPPConnection,
+			"Not connected to VPP",
+			"VPP connection not established",
+			"Connect to VPP before setting interface tables",
+		)
+	}
+	if _, ok := m.interfaces[ifIndex]; !ok {
+		return errors.New(
+			errors.ErrCodeVPPOperation,
+			fmt.Sprintf("Interface with index %d not found", ifIndex),
+			"Interface does not exist",
+			"Create the interface before setting its table",
+		)
+	}
+	if tableID != 0 {
+		if _, ok := m.ipTables[ipTableKey{id: tableID, isIPv6: isIPv6}]; !ok {
+			return errors.New(
+				errors.ErrCodeVPPOperation,
+				fmt.Sprintf("IP table %d not found", tableID),
+				"IP table does not exist",
+				"Create the IP table before binding an interface",
+			)
+		}
+	}
+
+	m.interfaceTable[interfaceTableKey{ifIndex: ifIndex, isIPv6: isIPv6}] = tableID
+	return nil
+}
+
+// IPTableExists reports whether a mock IP table exists.
+func (m *MockClient) IPTableExists(tableID uint32, isIPv6 bool) bool {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	_, ok := m.ipTables[ipTableKey{id: tableID, isIPv6: isIPv6}]
+	return ok
+}
+
+// InterfaceTableID returns the table bound to a mock interface.
+func (m *MockClient) InterfaceTableID(ifIndex uint32, isIPv6 bool) uint32 {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	return m.interfaceTable[interfaceTableKey{ifIndex: ifIndex, isIPv6: isIPv6}]
+}
+
+// SetQoSProfile binds output QoS policy intent to a mock interface.
+func (m *MockClient) SetQoSProfile(ctx context.Context, ifIndex uint32, profile QoSProfile) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if m.SetQoSProfileError != nil {
+		return m.SetQoSProfileError
+	}
+
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	if !m.connected {
+		return errors.New(
+			errors.ErrCodeVPPConnection,
+			"Not connected to VPP",
+			"VPP connection not established",
+			"Connect to VPP before setting QoS profiles",
+		)
+	}
+	iface, ok := m.interfaces[ifIndex]
+	if !ok {
+		return errors.New(
+			errors.ErrCodeVPPOperation,
+			fmt.Sprintf("Interface with index %d not found", ifIndex),
+			"Interface does not exist",
+			"Create the interface before setting its QoS profile",
+		)
+	}
+
+	m.qosProfiles[ifIndex] = cloneQoSProfile(profile)
+	iface.QoSProfile = profile.Name
+	return nil
+}
+
+// ClearQoSProfile removes output QoS policy intent from a mock interface.
+func (m *MockClient) ClearQoSProfile(ctx context.Context, ifIndex uint32) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if m.ClearQoSProfileError != nil {
+		return m.ClearQoSProfileError
+	}
+
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	if !m.connected {
+		return errors.New(
+			errors.ErrCodeVPPConnection,
+			"Not connected to VPP",
+			"VPP connection not established",
+			"Connect to VPP before clearing QoS profiles",
+		)
+	}
+	iface, ok := m.interfaces[ifIndex]
+	if !ok {
+		return errors.New(
+			errors.ErrCodeVPPOperation,
+			fmt.Sprintf("Interface with index %d not found", ifIndex),
+			"Interface does not exist",
+			"Create the interface before clearing its QoS profile",
+		)
+	}
+
+	delete(m.qosProfiles, ifIndex)
+	iface.QoSProfile = ""
+	return nil
+}
+
+// QoSProfile returns the mock QoS profile bound to an interface.
+func (m *MockClient) QoSProfile(ifIndex uint32) (QoSProfile, bool) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	profile, ok := m.qosProfiles[ifIndex]
+	return cloneQoSProfile(profile), ok
+}
+
+func cloneQoSProfile(profile QoSProfile) QoSProfile {
+	profile.Queues = append([]QoSQueue(nil), profile.Queues...)
+	return profile
+}
+
+// ListInterfaceCounters returns mock packet and byte counters by interface index.
+func (m *MockClient) ListInterfaceCounters(ctx context.Context) (map[uint32]InterfaceCounters, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	if m.ListInterfaceCountersError != nil {
+		return nil, m.ListInterfaceCountersError
+	}
+
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	if !m.connected {
+		return nil, errors.New(
+			errors.ErrCodeVPPConnection,
+			"Not connected to VPP",
+			"VPP connection not established",
+			"Connect to VPP before listing interface counters",
+		)
+	}
+
+	counters := make(map[uint32]InterfaceCounters, len(m.counters))
+	for ifIndex, value := range m.counters {
+		counters[ifIndex] = value
+	}
+	return counters, nil
+}
+
+// SetInterfaceCounters sets mock counters for a VPP interface.
+func (m *MockClient) SetInterfaceCounters(ifIndex uint32, counters InterfaceCounters) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.counters[ifIndex] = counters
+}
+
+// ListInterfaceQueuePlacements returns mock RX/TX queue placements by interface index.
+func (m *MockClient) ListInterfaceQueuePlacements(ctx context.Context) (map[uint32]InterfaceQueuePlacements, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	if m.ListInterfaceQueuesError != nil {
+		return nil, m.ListInterfaceQueuesError
+	}
+
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	if !m.connected {
+		return nil, errors.New(
+			errors.ErrCodeVPPConnection,
+			"Not connected to VPP",
+			"VPP connection not established",
+			"Connect to VPP before listing interface queue placements",
+		)
+	}
+
+	placements := make(map[uint32]InterfaceQueuePlacements, len(m.queuePlacement))
+	for ifIndex, value := range m.queuePlacement {
+		placements[ifIndex] = cloneInterfaceQueuePlacements(value)
+	}
+	return placements, nil
+}
+
+// SetInterfaceQueuePlacements sets mock RX/TX queue placements for a VPP interface.
+func (m *MockClient) SetInterfaceQueuePlacements(ifIndex uint32, placements InterfaceQueuePlacements) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.queuePlacement[ifIndex] = cloneInterfaceQueuePlacements(placements)
+}
+
+func cloneInterfaceQueuePlacements(placements InterfaceQueuePlacements) InterfaceQueuePlacements {
+	placements.Rx = append([]InterfaceRxQueuePlacement(nil), placements.Rx...)
+	placements.Tx = append([]InterfaceTxQueuePlacement(nil), placements.Tx...)
+	for i := range placements.Tx {
+		placements.Tx[i].Threads = append([]uint32(nil), placements.Tx[i].Threads...)
+	}
+	return placements
+}
+
 // GetInterface retrieves mock interface information by index
 func (m *MockClient) GetInterface(ctx context.Context, ifIndex uint32) (*Interface, error) {
 	if m.GetInterfaceError != nil {
@@ -481,6 +835,12 @@ func (m *MockClient) Reset() {
 	m.connected = false
 	m.interfaces = make(map[uint32]*Interface)
 	m.lcpInterfaces = make(map[uint32]*LCPInterface)
+	m.mplsInterfaces = make(map[uint32]bool)
+	m.ipTables = make(map[ipTableKey]IPTable)
+	m.interfaceTable = make(map[interfaceTableKey]uint32)
+	m.qosProfiles = make(map[uint32]QoSProfile)
+	m.counters = make(map[uint32]InterfaceCounters)
+	m.queuePlacement = make(map[uint32]InterfaceQueuePlacements)
 	m.nextIfIdx = 1
 
 	m.ConnectError = nil
@@ -489,6 +849,14 @@ func (m *MockClient) Reset() {
 	m.SetInterfaceDownError = nil
 	m.SetInterfaceAddressError = nil
 	m.DeleteInterfaceAddressError = nil
+	m.SetMPLSInterfaceError = nil
+	m.AddIPTableError = nil
+	m.DeleteIPTableError = nil
+	m.SetInterfaceTableError = nil
+	m.SetQoSProfileError = nil
+	m.ClearQoSProfileError = nil
+	m.ListInterfaceCountersError = nil
+	m.ListInterfaceQueuesError = nil
 	m.GetInterfaceError = nil
 	m.ListInterfacesError = nil
 	m.CreateLCPInterfaceError = nil

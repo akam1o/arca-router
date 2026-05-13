@@ -1,6 +1,52 @@
 # Changelog
 
-## v0.5.x – Production Hardening (current)
+## v0.6.x - Advanced Features (current)
+
+- **Advanced configuration model**: parser, serializer, validation, clone, conversion, and diff support for clustering, MPLS, VRRP, routing instances, class of service, and Web UI service settings
+- **Candidate command replacement**: v0.6 scalar settings replace existing candidate lines instead of accumulating duplicates
+- **Set-command idempotence**: repeated list-style set commands for interfaces, MPLS, routing-instances, cluster endpoints, and prefix-lists are deduplicated during parsing
+- **Interface reference validation**: MPLS, VRRP, routing-instance, OSPF, and class-of-service interface references must point to configured interfaces before commit
+- **L3VPN safety validation**: routing-instance VPN import/export settings fail commit validation before southbound apply when required route-targets, route distinguishers, or local AS settings are missing
+- **Routing-instance policy hooks**: `vrf-import` and `vrf-export` reference configured policy statements in the v0.6 L3VPN service model
+- **Directional VRF targets**: routing instances support shared `vrf-target` and directional `vrf-target import` / `vrf-target export` extended-community targets
+- **NETCONF v0.6 XML model**: NETCONF get-config/edit-config and the embedded YANG model cover v0.6 system services, clustering, MPLS/VRRP, routing-instances, class-of-service, and non-sensitive security settings
+- **NETCONF YANG capability**: server hello advertises the arca-router YANG module capability once the embedded model matches the implemented v0.6 XML schema
+- **etcd datastore selection**: `arca-routerd` and embedded NETCONF can use the existing etcd-backed candidate/running datastore for clustered deployments
+- **Cluster sync guard**: `chassis cluster sync etcd` commits must match the daemon's active etcd datastore backend and endpoints
+- **Cluster observability**: `/api/status`, the Web UI, and Prometheus metrics expose datastore and cluster sync state
+- **VPP LCP reconciliation observability**: VPP LCP cache reconciliation state is exposed through `/api/status`, the Web UI, Prometheus metrics, and SNMP OIDs
+- **Class-of-service observability**: `/api/status`, the Web UI, Prometheus metrics, and SNMP OIDs expose CoS configured state, forwarding-class/profile counts, interface binding count, and intent-only enforcement state
+- **Grafana class-of-service panels**: the packaged Grafana dashboard includes CoS configured, enforcement, forwarding-class, traffic-control profile, and interface binding panels
+- **NETCONF listen configuration**: `security netconf ssh port` provides the default embedded NETCONF listen port when `--netconf-listen` is omitted
+- **NETCONF interface operational state**: NETCONF `<get>` exposes live managed VPP interface status, MAC addresses, and counters when arca-routerd can collect them
+- **gRPC managed interface state**: the internal gRPC API and `arca show interfaces` use the daemon's managed VPP state collector, including configured interface names such as `ge-0/0/0`
+- **VPP queue placement telemetry**: managed interface operational state in gRPC, `arca show interfaces`, and NETCONF includes VPP RX/TX queue-to-worker placement when available
+- **VPP QoS profile state**: managed interface operational state in gRPC, `arca show interfaces`, and NETCONF includes the bound class-of-service profile intent when available
+- **FRR VRRP generation**: `--frr-apply-mode=file` can render `protocols vrrp` groups into FRR integrated interface configuration
+- **Transactional FRR VRRP apply**: the default transactional backend renders `protocols vrrp` into FRR `frr-vrrpd` management candidate operations
+- **VRRP Linux interface preparation**: FRR apply reconciles arca-owned macvlan interfaces with virtual MACs and host-prefix VIPs before applying VRRP configuration
+- **FRR VRRP group visibility**: `/api/status` and the Web UI include per-group FRR VRRP state such as Master, Backup, missing, or inactive
+- **VRRP CLI status**: `arca show vrrp` exposes FRR VRRP operational output through the daemon gRPC API
+- **VPP LCP CLI status**: `arca show lcp` exposes cached VPP LCP reconciliation state through the daemon gRPC API
+- **HA CLI status**: `arca show ha` exposes the control-plane HA convergence summary through the daemon gRPC API
+- **Class-of-service CLI status**: `arca show class-of-service` exposes running CoS intent and intent-only scheduler/policer enforcement state through the daemon gRPC API
+- **Standard FRR VRRP daemon**: `vrrpd` is part of the documented required FRR daemon set for appliance-router HA deployments
+- **VPP MPLS interface forwarding**: `protocols mpls interface` enables or disables MPLS forwarding on managed VPP interfaces with rollback coverage
+- **VPP L3VPN table plumbing**: routing-instance interfaces are bound to deterministic VPP IPv4/IPv6 FIB tables derived from route distinguishers
+- **VPP interface counters**: operational interface state reads VPP stats socket counters for packet, byte, error, and drop visibility
+- **FRR L3VPN import/export**: routing instances render FRR VRF and BGP VPN import/export configuration, including route targets and ordered policy-chain route-maps
+- **VPP QoS profile binding**: class-of-service interface bindings apply output traffic-control profile intent to managed VPP interfaces with rollback coverage
+- **Prometheus service configuration**: `system services prometheus` can enable the Prometheus and health endpoint from running configuration
+- **SNMP service configuration**: `system services snmp` can enable the read-only SNMPv2c endpoint and set listen address, port, and community from running configuration
+- **Read-only Web UI**: optional `--web-listen` HTTP dashboard and `/api/status` JSON endpoint backed by daemon observability state
+- **Read-only config API**: Web UI exposes `/api/config` and a running configuration preview in set-command format
+- **Web UI authentication**: password-backed `security users` enable HTTP Basic authentication and read-only RBAC for the dashboard APIs
+- **Web configuration API**: `/api/config/validate` and `/api/config/commit` use the internal gRPC candidate workflow for authenticated operator/admin configuration changes
+- **Browser configuration editor**: the Web UI can edit running config text, validate changes, show diffs, and commit through the Web configuration API
+- **Web commit history**: `/api/config/history` and the dashboard expose recent configuration commits from the internal gRPC history API, and the browser panel refreshes after successful Web commits
+- **Web UI configuration**: `system services web-ui` can enable the dashboard without a command-line flag
+
+## v0.5.x – Production Hardening (previous)
 
 - **Generated gRPC API**: `api/v1/router.proto` is compiled into typed Go stubs
 - **Typed daemon/CLI RPC wiring**: `arca-routerd` and `arca` use generated gRPC clients and servers

@@ -2,7 +2,7 @@
 
 ## Overview
 
-arca-router implements Role-Based Access Control (RBAC) for the NETCONF interface. This document describes the three built-in roles, their permissions, and how to manage user roles.
+arca-router implements Role-Based Access Control (RBAC) for the NETCONF interface and the read-only Web UI. This document describes the three built-in roles, their permissions, and how to manage user roles.
 
 ## Roles
 
@@ -98,6 +98,8 @@ The `admin` role provides full access to all NETCONF operations, including admin
 - read-only: 2 operations
 - operator: 11 operations
 - admin: 12 operations
+
+The Web UI uses HTTP Basic authentication when password-backed `security users` exist in the running configuration. All built-in roles can read the dashboard, `/api/status`, `/api/config`, and `/api/config/history`. The Web configuration API allows `operator` and `admin` roles to validate and commit set-command text through `/api/config/validate` and `/api/config/commit`; the `read-only` role cannot use write endpoints.
 
 ---
 

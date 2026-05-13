@@ -37,6 +37,36 @@ type fakeStore struct {
 	listCalls  int
 }
 
+type fakeInterfaceStateCollector struct {
+	states map[string]*model.InterfaceState
+	err    error
+	calls  int
+}
+
+func (f *fakeInterfaceStateCollector) CollectState(ctx context.Context) (map[string]*model.InterfaceState, error) {
+	f.calls++
+	if f.err != nil {
+		return nil, f.err
+	}
+	return f.states, nil
+}
+
+type fakeLCPReconciliationSource struct {
+	info LCPReconciliationInfo
+}
+
+func (f fakeLCPReconciliationSource) LCPReconciliationInfo() LCPReconciliationInfo {
+	return f.info
+}
+
+type fakeHAStatusSource struct {
+	info HAStatusInfo
+}
+
+func (f fakeHAStatusSource) HAStatusInfo() HAStatusInfo {
+	return f.info
+}
+
 func (f *fakeStore) GetLatestSnapshot(ctx context.Context) (*model.ConfigSnapshot, error) {
 	return f.saved, nil
 }
@@ -197,6 +227,25 @@ func TestOperationalStateEndpointsReadVPPAndFRR(t *testing.T) {
 	if err := vppClient.SetInterfaceUp(ctx, iface.SwIfIndex); err != nil {
 		t.Fatalf("mock VPP SetInterfaceUp() error = %v", err)
 	}
+	vppClient.SetInterfaceCounters(iface.SwIfIndex, pkgvpp.InterfaceCounters{
+		RxPackets: 100,
+		TxPackets: 200,
+		RxBytes:   1000,
+		TxBytes:   2000,
+		RxErrors:  1,
+		TxErrors:  2,
+	})
+	vppClient.SetInterfaceQueuePlacements(iface.SwIfIndex, pkgvpp.InterfaceQueuePlacements{
+		Rx: []pkgvpp.InterfaceRxQueuePlacement{
+			{QueueID: 0, WorkerID: 1, Mode: "polling"},
+		},
+		Tx: []pkgvpp.InterfaceTxQueuePlacement{
+			{QueueID: 0, Shared: true, Threads: []uint32{0, 2}},
+		},
+	})
+	if err := vppClient.SetQoSProfile(ctx, iface.SwIfIndex, pkgvpp.QoSProfile{Name: "WAN"}); err != nil {
+		t.Fatalf("mock VPP SetQoSProfile() error = %v", err)
+	}
 	if err := vppClient.Close(); err != nil {
 		t.Fatalf("mock VPP Close() error = %v", err)
 	}
@@ -214,6 +263,18 @@ func TestOperationalStateEndpointsReadVPPAndFRR(t *testing.T) {
 	}
 	if ifaces[0].Name != iface.Name || ifaces[0].AdminStatus != "up" || ifaces[0].OperStatus != "up" {
 		t.Fatalf("GetInterfaces()[0] = %#v, want operational VPP state", ifaces[0])
+	}
+	if ifaces[0].RxPackets != 100 || ifaces[0].TxPackets != 200 || ifaces[0].RxBytes != 1000 || ifaces[0].TxBytes != 2000 || ifaces[0].RxErrors != 1 || ifaces[0].TxErrors != 2 {
+		t.Fatalf("GetInterfaces()[0] counters = %#v, want VPP counters", ifaces[0])
+	}
+	if ifaces[0].QoSProfile != "WAN" {
+		t.Fatalf("GetInterfaces()[0] QoSProfile = %q, want WAN", ifaces[0].QoSProfile)
+	}
+	if len(ifaces[0].RxQueues) != 1 || ifaces[0].RxQueues[0].WorkerID != 1 || ifaces[0].RxQueues[0].Mode != "polling" {
+		t.Fatalf("GetInterfaces()[0] RX queues = %#v, want VPP queue placement", ifaces[0].RxQueues)
+	}
+	if len(ifaces[0].TxQueues) != 1 || !ifaces[0].TxQueues[0].Shared || len(ifaces[0].TxQueues[0].Threads) != 2 || ifaces[0].TxQueues[0].Threads[1] != 2 {
+		t.Fatalf("GetInterfaces()[0] TX queues = %#v, want VPP queue placement", ifaces[0].TxQueues)
 	}
 
 	var commands []string
@@ -236,14 +297,169 @@ func TestOperationalStateEndpointsReadVPPAndFRR(t *testing.T) {
 	if output, err := srv.GetOSPFNeighborsText(ctx); err != nil || output != "show ip ospf neighbor\n" {
 		t.Fatalf("GetOSPFNeighborsText() = %q, %v", output, err)
 	}
-	if len(commands) != 4 {
-		t.Fatalf("vtysh commands = %v, want 4 commands", commands)
+	if output, err := srv.GetVRRPText(ctx); err != nil || output != "show vrrp\n" {
+		t.Fatalf("GetVRRPText() = %q, %v", output, err)
+	}
+	if len(commands) != 5 {
+		t.Fatalf("vtysh commands = %v, want 5 commands", commands)
 	}
 	if _, err := srv.GetRouteText(ctx, "rip"); err == nil || !strings.Contains(err.Error(), "invalid route protocol") {
 		t.Fatalf("GetRouteText(invalid) error = %v, want invalid protocol", err)
 	}
 	if _, err := srv.GetBGPNeighborText(ctx, "not-an-address"); err == nil || !strings.Contains(err.Error(), "invalid BGP neighbor address") {
 		t.Fatalf("GetBGPNeighborText(invalid) error = %v, want invalid peer address", err)
+	}
+}
+
+func TestGetInterfacesUsesManagedStateCollector(t *testing.T) {
+	srv := NewServer(engine.NewEngine(nil, testLogger()), &fakeStore{}, testLogger())
+	collector := &fakeInterfaceStateCollector{
+		states: map[string]*model.InterfaceState{
+			"fallback0": {
+				Name:        "ge-0/0/0",
+				AdminStatus: "up",
+				OperStatus:  "down",
+				Speed:       10_000_000_000,
+				MTU:         1500,
+				MAC:         "02:00:00:00:00:01",
+				QoSProfile:  "WAN",
+				Counters: &model.InterfaceCounters{
+					RxPackets: 10,
+					TxPackets: 20,
+					RxBytes:   100,
+					TxBytes:   200,
+					RxErrors:  1,
+					TxErrors:  2,
+				},
+				Queues: &model.InterfaceQueues{
+					Rx: []model.InterfaceRxQueue{
+						{QueueID: 0, WorkerID: 3, Mode: "adaptive"},
+					},
+					Tx: []model.InterfaceTxQueue{
+						{QueueID: 1, Shared: true, Threads: []uint32{0, 3}},
+					},
+				},
+			},
+			"ge-0/0/1": {
+				AdminStatus: "down",
+				OperStatus:  "down",
+			},
+		},
+	}
+	srv.SetInterfaceStateCollector(collector)
+
+	ifaces, err := srv.GetInterfaces(context.Background(), "ge-0/0/0")
+	if err != nil {
+		t.Fatalf("GetInterfaces() error = %v", err)
+	}
+	if collector.calls != 1 {
+		t.Fatalf("collector calls = %d, want 1", collector.calls)
+	}
+	if len(ifaces) != 1 {
+		t.Fatalf("GetInterfaces() returned %d interfaces, want 1", len(ifaces))
+	}
+	got := ifaces[0]
+	if got.Name != "ge-0/0/0" || got.AdminStatus != "up" || got.OperStatus != "down" || got.Speed != 10_000_000_000 || got.MTU != 1500 || got.MAC != "02:00:00:00:00:01" {
+		t.Fatalf("GetInterfaces()[0] = %#v, want managed interface state", got)
+	}
+	if got.QoSProfile != "WAN" || got.RxPackets != 10 || got.TxPackets != 20 || got.RxBytes != 100 || got.TxBytes != 200 || got.RxErrors != 1 || got.TxErrors != 2 {
+		t.Fatalf("GetInterfaces()[0] counters/QoS = %#v, want collector values", got)
+	}
+	if len(got.RxQueues) != 1 || got.RxQueues[0].WorkerID != 3 || got.RxQueues[0].Mode != "adaptive" {
+		t.Fatalf("GetInterfaces()[0] RX queues = %#v, want collector queue placement", got.RxQueues)
+	}
+	if len(got.TxQueues) != 1 || got.TxQueues[0].QueueID != 1 || !got.TxQueues[0].Shared || len(got.TxQueues[0].Threads) != 2 || got.TxQueues[0].Threads[1] != 3 {
+		t.Fatalf("GetInterfaces()[0] TX queues = %#v, want collector queue placement", got.TxQueues)
+	}
+}
+
+func TestGetLCPReconciliationUsesSource(t *testing.T) {
+	srv := NewServer(engine.NewEngine(nil, testLogger()), &fakeStore{}, testLogger())
+	lastRun := time.Unix(1700000000, 0).UTC()
+	srv.SetLCPReconciliationSource(fakeLCPReconciliationSource{info: LCPReconciliationInfo{
+		LastRun:         lastRun,
+		PairCount:       2,
+		Inconsistencies: []string{"missing pair"},
+	}})
+
+	info, err := srv.GetLCPReconciliation(context.Background())
+	if err != nil {
+		t.Fatalf("GetLCPReconciliation() error = %v", err)
+	}
+	if info.LastRun != lastRun || info.PairCount != 2 || len(info.Inconsistencies) != 1 || info.Inconsistencies[0] != "missing pair" {
+		t.Fatalf("GetLCPReconciliation() = %#v, want source status", info)
+	}
+}
+
+func TestGetHAStatusUsesSource(t *testing.T) {
+	srv := NewServer(engine.NewEngine(nil, testLogger()), &fakeStore{}, testLogger())
+	lastRun := time.Unix(1700000300, 0).UTC()
+	srv.SetHAStatusSource(fakeHAStatusSource{info: HAStatusInfo{
+		Configured:              true,
+		Converged:               false,
+		VRRPGroups:              1,
+		Issues:                  []string{"FRR VRRP status has inactive groups"},
+		ClusterEnabled:          true,
+		ClusterNodes:            2,
+		ClusterEtcdSync:         true,
+		ClusterSyncAligned:      true,
+		FRRVRRPLastCheck:        lastRun,
+		FRRVRRPConfiguredGroups: 1,
+		FRRVRRPObservedGroups:   1,
+		FRRVRRPActiveGroups:     0,
+	}})
+
+	info, err := srv.GetHAStatus(context.Background())
+	if err != nil {
+		t.Fatalf("GetHAStatus() error = %v", err)
+	}
+	if !info.Configured || info.Converged || info.VRRPGroups != 1 || info.FRRVRRPLastCheck != lastRun ||
+		info.FRRVRRPActiveGroups != 0 || len(info.Issues) != 1 {
+		t.Fatalf("GetHAStatus() = %#v, want source status", info)
+	}
+}
+
+func TestGetClassOfServiceReturnsRunningConfig(t *testing.T) {
+	eng := engine.NewEngine(nil, testLogger())
+	eng.InitializeRunning(&model.RouterConfig{
+		ClassOfService: &model.ClassOfServiceConfig{
+			ForwardingClasses: map[string]*model.ForwardingClass{
+				"best-effort":          {Queue: 0},
+				"expedited-forwarding": {Queue: 5},
+			},
+			TrafficControlProfiles: map[string]*model.TrafficControlProfile{
+				"WAN": {
+					ShapingRate:  1000000000,
+					SchedulerMap: "WAN-SCHED",
+				},
+			},
+			Interfaces: map[string]*model.CoSInterface{
+				"ge-0/0/0": {OutputTrafficControlProfile: "WAN"},
+			},
+		},
+	}, 1)
+	srv := NewServer(eng, &fakeStore{}, testLogger())
+
+	info, err := srv.GetClassOfService(context.Background())
+	if err != nil {
+		t.Fatalf("GetClassOfService() error = %v", err)
+	}
+	if info.EnforcementStatus != "intent-only" {
+		t.Fatalf("EnforcementStatus = %q, want intent-only", info.EnforcementStatus)
+	}
+	if len(info.ForwardingClasses) != 2 || info.ForwardingClasses[0].Name != "best-effort" || info.ForwardingClasses[1].Name != "expedited-forwarding" {
+		t.Fatalf("ForwardingClasses = %#v, want sorted class list", info.ForwardingClasses)
+	}
+	if len(info.TrafficControlProfiles) != 1 || info.TrafficControlProfiles[0].Name != "WAN" ||
+		info.TrafficControlProfiles[0].ShapingRate != 1000000000 ||
+		info.TrafficControlProfiles[0].SchedulerMap != "WAN-SCHED" ||
+		info.TrafficControlProfiles[0].EnforcementStatus != "intent-only" {
+		t.Fatalf("TrafficControlProfiles = %#v, want WAN profile", info.TrafficControlProfiles)
+	}
+	if len(info.Interfaces) != 1 || info.Interfaces[0].Name != "ge-0/0/0" ||
+		info.Interfaces[0].OutputTrafficControlProfile != "WAN" ||
+		info.Interfaces[0].EnforcementStatus != "intent-only" {
+		t.Fatalf("Interfaces = %#v, want interface binding", info.Interfaces)
 	}
 }
 
@@ -842,6 +1058,108 @@ func TestApplyCandidateCommandPreservesOSPFInterfaceAttributes(t *testing.T) {
 	} {
 		if !strings.Contains(updated, want) {
 			t.Fatalf("updated candidate missing %q:\n%s", want, updated)
+		}
+	}
+}
+
+func TestApplyCandidateCommandReplacesV06ScalarAttributes(t *testing.T) {
+	candidate := strings.Join([]string{
+		"set system services web-ui port 8080",
+		"set system services prometheus port 9090",
+		"set system services snmp community public",
+		"set security netconf ssh port 830",
+		"set protocols vrrp group 10 priority 100",
+		"set routing-instances BLUE route-distinguisher 65000:100",
+		"set routing-instances BLUE vrf-target target:65000:100",
+		"set routing-instances BLUE vrf-target import target:65000:101",
+		"set routing-instances BLUE vrf-target export target:65000:102",
+		"set class-of-service traffic-control-profile WAN shaping-rate 1000",
+	}, "\n")
+
+	updated, err := applyCandidateCommand(candidate, strings.Join([]string{
+		"set system services web-ui port 8443",
+		"set system services prometheus port 19090",
+		"set system services snmp community monitoring",
+		"set security netconf ssh port 1830",
+		"set protocols vrrp group 10 priority 120",
+		"set routing-instances BLUE route-distinguisher 65000:200",
+		"set routing-instances BLUE vrf-target target:65000:200",
+		"set class-of-service traffic-control-profile WAN shaping-rate 2000",
+	}, "\n"))
+	if err != nil {
+		t.Fatalf("applyCandidateCommand() error = %v", err)
+	}
+	for _, oldLine := range []string{
+		"set system services web-ui port 8080",
+		"set system services prometheus port 9090",
+		"set system services snmp community public",
+		"set security netconf ssh port 830",
+		"set protocols vrrp group 10 priority 100",
+		"set routing-instances BLUE route-distinguisher 65000:100",
+		"set routing-instances BLUE vrf-target target:65000:100",
+		"set class-of-service traffic-control-profile WAN shaping-rate 1000",
+	} {
+		if strings.Contains(updated, oldLine) {
+			t.Fatalf("updated candidate retained old line %q:\n%s", oldLine, updated)
+		}
+	}
+	for _, want := range []string{
+		"set system services web-ui port 8443",
+		"set system services prometheus port 19090",
+		"set system services snmp community monitoring",
+		"set security netconf ssh port 1830",
+		"set protocols vrrp group 10 priority 120",
+		"set routing-instances BLUE route-distinguisher 65000:200",
+		"set routing-instances BLUE vrf-target target:65000:200",
+		"set routing-instances BLUE vrf-target import target:65000:101",
+		"set routing-instances BLUE vrf-target export target:65000:102",
+		"set class-of-service traffic-control-profile WAN shaping-rate 2000",
+	} {
+		if !strings.Contains(updated, want) {
+			t.Fatalf("updated candidate missing %q:\n%s", want, updated)
+		}
+	}
+}
+
+func TestApplyCandidateCommandPreservesRoutingInstancePolicyLists(t *testing.T) {
+	candidate := strings.Join([]string{
+		"set routing-instances BLUE vrf-target import target:65000:101",
+		"set routing-instances BLUE vrf-target export target:65000:102",
+		"set routing-instances BLUE vrf-import BLUE-IN",
+		"set routing-instances BLUE vrf-import BLUE-EXTRA",
+		"set routing-instances BLUE vrf-export BLUE-OUT",
+	}, "\n")
+
+	updated, err := applyCandidateCommand(candidate, strings.Join([]string{
+		"set routing-instances BLUE vrf-target import target:65000:101",
+		"set routing-instances BLUE vrf-target import target:65000:111",
+		"set routing-instances BLUE vrf-target export target:65000:102",
+		"set routing-instances BLUE vrf-target export target:65000:112",
+		"set routing-instances BLUE vrf-import BLUE-IN",
+		"set routing-instances BLUE vrf-import BLUE-NEW",
+		"set routing-instances BLUE vrf-export BLUE-OUT",
+		"set routing-instances BLUE vrf-export BLUE-NEW",
+	}, "\n"))
+	if err != nil {
+		t.Fatalf("applyCandidateCommand() error = %v", err)
+	}
+
+	for _, want := range []string{
+		"set routing-instances BLUE vrf-target import target:65000:101",
+		"set routing-instances BLUE vrf-target import target:65000:111",
+		"set routing-instances BLUE vrf-target export target:65000:102",
+		"set routing-instances BLUE vrf-target export target:65000:112",
+		"set routing-instances BLUE vrf-import BLUE-IN",
+		"set routing-instances BLUE vrf-import BLUE-EXTRA",
+		"set routing-instances BLUE vrf-import BLUE-NEW",
+		"set routing-instances BLUE vrf-export BLUE-OUT",
+		"set routing-instances BLUE vrf-export BLUE-NEW",
+	} {
+		if !strings.Contains(updated, want) {
+			t.Fatalf("updated candidate missing %q:\n%s", want, updated)
+		}
+		if got := strings.Count(updated, want); got != 1 {
+			t.Fatalf("updated candidate contains %q %d times, want 1:\n%s", want, got, updated)
 		}
 	}
 }

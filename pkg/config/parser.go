@@ -92,14 +92,20 @@ func (p *Parser) parseStatement(config *Config) error {
 	switch keyword {
 	case "system":
 		return p.parseSystem(config)
+	case "chassis":
+		return p.parseChassis(config)
 	case "interfaces":
 		return p.parseInterfaces(config)
 	case "routing-options":
 		return p.parseRoutingOptions(config)
+	case "routing-instances":
+		return p.parseRoutingInstances(config)
 	case "protocols":
 		return p.parseProtocols(config)
 	case "policy-options":
 		return p.parsePolicyOptions(config)
+	case "class-of-service":
+		return p.parseClassOfService(config)
 	case "security":
 		return p.parseSecurity(config)
 	default:
@@ -127,9 +133,297 @@ func (p *Parser) parseSystem(config *Config) error {
 		config.System.HostName = p.current.Value
 		p.nextToken()
 		return nil
+	case "services":
+		return p.parseSystemServices(config)
 	default:
 		return p.error(fmt.Sprintf("unsupported system parameter: %s", param))
 	}
+}
+
+func (p *Parser) parseSystemServices(config *Config) error {
+	if p.current.Type != TokenWord {
+		return p.error("expected system service name")
+	}
+	service := p.current.Value
+	p.nextToken()
+
+	if config.System == nil {
+		config.System = &SystemConfig{}
+	}
+	if config.System.Services == nil {
+		config.System.Services = &SystemServicesConfig{}
+	}
+
+	switch service {
+	case "web-ui":
+		return p.parseWebUIService(config.System.Services)
+	case "prometheus":
+		return p.parsePrometheusService(config.System.Services)
+	case "snmp":
+		return p.parseSNMPService(config.System.Services)
+	default:
+		return p.error(fmt.Sprintf("unsupported system service: %s", service))
+	}
+}
+
+func (p *Parser) parseWebUIService(services *SystemServicesConfig) error {
+	if services.WebUI == nil {
+		services.WebUI = &WebUIConfig{}
+	}
+	web := services.WebUI
+
+	if p.current.Type != TokenWord {
+		return p.error("expected web-ui parameter")
+	}
+	param := p.current.Value
+	p.nextToken()
+
+	switch param {
+	case "enabled":
+		enabled, err := p.parseBool()
+		if err != nil {
+			return err
+		}
+		web.Enabled = enabled
+		return nil
+	case "listen-address":
+		if p.current.Type != TokenWord && p.current.Type != TokenString {
+			return p.error("expected web-ui listen address")
+		}
+		web.ListenAddress = p.current.Value
+		p.nextToken()
+		return nil
+	case "port":
+		if p.current.Type != TokenNumber {
+			return p.error("expected web-ui port")
+		}
+		port, err := strconv.Atoi(p.current.Value)
+		if err != nil {
+			return p.error(fmt.Sprintf("invalid web-ui port: %s", p.current.Value))
+		}
+		web.Port = port
+		p.nextToken()
+		return nil
+	default:
+		return p.error(fmt.Sprintf("unsupported web-ui parameter: %s", param))
+	}
+}
+
+func (p *Parser) parsePrometheusService(services *SystemServicesConfig) error {
+	if services.Prometheus == nil {
+		services.Prometheus = &PrometheusConfig{}
+	}
+	prometheus := services.Prometheus
+
+	if p.current.Type != TokenWord {
+		return p.error("expected prometheus parameter")
+	}
+	param := p.current.Value
+	p.nextToken()
+
+	switch param {
+	case "enabled":
+		enabled, err := p.parseBool()
+		if err != nil {
+			return err
+		}
+		prometheus.Enabled = enabled
+		return nil
+	case "listen-address":
+		if p.current.Type != TokenWord && p.current.Type != TokenString {
+			return p.error("expected prometheus listen address")
+		}
+		prometheus.ListenAddress = p.current.Value
+		p.nextToken()
+		return nil
+	case "port":
+		if p.current.Type != TokenNumber {
+			return p.error("expected prometheus port")
+		}
+		port, err := strconv.Atoi(p.current.Value)
+		if err != nil {
+			return p.error(fmt.Sprintf("invalid prometheus port: %s", p.current.Value))
+		}
+		prometheus.Port = port
+		p.nextToken()
+		return nil
+	default:
+		return p.error(fmt.Sprintf("unsupported prometheus parameter: %s", param))
+	}
+}
+
+func (p *Parser) parseSNMPService(services *SystemServicesConfig) error {
+	if services.SNMP == nil {
+		services.SNMP = &SNMPConfig{}
+	}
+	snmp := services.SNMP
+
+	if p.current.Type != TokenWord {
+		return p.error("expected snmp parameter")
+	}
+	param := p.current.Value
+	p.nextToken()
+
+	switch param {
+	case "enabled":
+		enabled, err := p.parseBool()
+		if err != nil {
+			return err
+		}
+		snmp.Enabled = enabled
+		return nil
+	case "listen-address":
+		if p.current.Type != TokenWord && p.current.Type != TokenString {
+			return p.error("expected snmp listen address")
+		}
+		snmp.ListenAddress = p.current.Value
+		p.nextToken()
+		return nil
+	case "port":
+		if p.current.Type != TokenNumber {
+			return p.error("expected snmp port")
+		}
+		port, err := strconv.Atoi(p.current.Value)
+		if err != nil {
+			return p.error(fmt.Sprintf("invalid snmp port: %s", p.current.Value))
+		}
+		snmp.Port = port
+		p.nextToken()
+		return nil
+	case "community":
+		if p.current.Type != TokenWord && p.current.Type != TokenString {
+			return p.error("expected snmp community")
+		}
+		snmp.Community = p.current.Value
+		p.nextToken()
+		return nil
+	default:
+		return p.error(fmt.Sprintf("unsupported snmp parameter: %s", param))
+	}
+}
+
+func (p *Parser) parseBool() (bool, error) {
+	if p.current.Type != TokenWord {
+		return false, p.error("expected boolean value")
+	}
+	switch p.current.Value {
+	case "true", "yes", "on", "enable", "enabled":
+		p.nextToken()
+		return true, nil
+	case "false", "no", "off", "disable", "disabled":
+		p.nextToken()
+		return false, nil
+	default:
+		return false, p.error(fmt.Sprintf("invalid boolean value: %s", p.current.Value))
+	}
+}
+
+// parseChassis parses chassis-level HA configuration.
+func (p *Parser) parseChassis(config *Config) error {
+	if p.current.Type != TokenWord || p.current.Value != "cluster" {
+		return p.error("expected 'cluster' after chassis")
+	}
+	p.nextToken()
+
+	if config.Chassis == nil {
+		config.Chassis = &ChassisConfig{}
+	}
+	if config.Chassis.Cluster == nil {
+		config.Chassis.Cluster = &ClusterConfig{
+			Nodes: make(map[string]*ClusterNode),
+		}
+	}
+	cluster := config.Chassis.Cluster
+
+	if p.current.Type != TokenWord {
+		return p.error("expected cluster parameter")
+	}
+	param := p.current.Value
+	p.nextToken()
+
+	switch param {
+	case "enabled":
+		enabled, err := p.parseBool()
+		if err != nil {
+			return err
+		}
+		cluster.Enabled = enabled
+		return nil
+	case "node":
+		return p.parseClusterNode(cluster)
+	case "sync":
+		return p.parseClusterSync(cluster)
+	default:
+		return p.error(fmt.Sprintf("unsupported cluster parameter: %s", param))
+	}
+}
+
+func (p *Parser) parseClusterNode(cluster *ClusterConfig) error {
+	if p.current.Type != TokenWord {
+		return p.error("expected cluster node name")
+	}
+	name := p.current.Value
+	p.nextToken()
+
+	if cluster.Nodes == nil {
+		cluster.Nodes = make(map[string]*ClusterNode)
+	}
+	if cluster.Nodes[name] == nil {
+		cluster.Nodes[name] = &ClusterNode{Name: name}
+	}
+	node := cluster.Nodes[name]
+
+	if p.current.Type != TokenWord {
+		return p.error("expected cluster node parameter")
+	}
+	param := p.current.Value
+	p.nextToken()
+
+	switch param {
+	case "address":
+		if p.current.Type != TokenWord {
+			return p.error("expected cluster node address")
+		}
+		node.Address = p.current.Value
+		p.nextToken()
+		return nil
+	case "priority":
+		if p.current.Type != TokenNumber {
+			return p.error("expected cluster node priority")
+		}
+		priority, err := strconv.Atoi(p.current.Value)
+		if err != nil {
+			return p.error(fmt.Sprintf("invalid cluster node priority: %s", p.current.Value))
+		}
+		node.Priority = priority
+		p.nextToken()
+		return nil
+	default:
+		return p.error(fmt.Sprintf("unsupported cluster node parameter: %s", param))
+	}
+}
+
+func (p *Parser) parseClusterSync(cluster *ClusterConfig) error {
+	if p.current.Type != TokenWord || p.current.Value != "etcd" {
+		return p.error("expected 'etcd' after cluster sync")
+	}
+	p.nextToken()
+	if p.current.Type != TokenWord || p.current.Value != "endpoint" {
+		return p.error("expected 'endpoint' after cluster sync etcd")
+	}
+	p.nextToken()
+	if p.current.Type != TokenWord && p.current.Type != TokenString {
+		return p.error("expected etcd endpoint")
+	}
+	if cluster.Sync == nil {
+		cluster.Sync = &ClusterSyncConfig{}
+	}
+	if cluster.Sync.Etcd == nil {
+		cluster.Sync.Etcd = &EtcdSyncConfig{}
+	}
+	cluster.Sync.Etcd.Endpoints = appendUniqueString(cluster.Sync.Etcd.Endpoints, p.current.Value)
+	p.nextToken()
+	return nil
 }
 
 // parseInterfaces parses interface configuration
@@ -216,7 +510,7 @@ func (p *Parser) parseInterfaceUnit(iface *Interface) error {
 	}
 
 	address := p.current.Value
-	family.Addresses = append(family.Addresses, address)
+	family.Addresses = appendUniqueString(family.Addresses, address)
 	p.nextToken()
 
 	return nil
@@ -356,6 +650,91 @@ func (p *Parser) parseStaticRoute(ro *RoutingOptions) error {
 	return nil
 }
 
+// parseRoutingInstances parses routing-instance configuration.
+func (p *Parser) parseRoutingInstances(config *Config) error {
+	if p.current.Type != TokenWord {
+		return p.error("expected routing-instance name")
+	}
+	name := p.current.Value
+	p.nextToken()
+
+	if config.RoutingInstances == nil {
+		config.RoutingInstances = make(map[string]*RoutingInstance)
+	}
+	if config.RoutingInstances[name] == nil {
+		config.RoutingInstances[name] = &RoutingInstance{Name: name}
+	}
+	instance := config.RoutingInstances[name]
+
+	if p.current.Type != TokenWord {
+		return p.error("expected routing-instance parameter")
+	}
+	param := p.current.Value
+	p.nextToken()
+
+	switch param {
+	case "instance-type":
+		if p.current.Type != TokenWord {
+			return p.error("expected routing-instance type")
+		}
+		instance.InstanceType = p.current.Value
+		p.nextToken()
+		return nil
+	case "route-distinguisher":
+		if p.current.Type != TokenWord {
+			return p.error("expected route distinguisher")
+		}
+		instance.RouteDistinguisher = p.current.Value
+		p.nextToken()
+		return nil
+	case "vrf-target":
+		if p.current.Type != TokenWord {
+			return p.error("expected vrf-target")
+		}
+		if p.current.Value == "import" || p.current.Value == "export" {
+			direction := p.current.Value
+			p.nextToken()
+			if p.current.Type != TokenWord {
+				return p.error(fmt.Sprintf("expected vrf-target %s value", direction))
+			}
+			switch direction {
+			case "import":
+				instance.VRFTargetImport = appendUniqueString(instance.VRFTargetImport, p.current.Value)
+			case "export":
+				instance.VRFTargetExport = appendUniqueString(instance.VRFTargetExport, p.current.Value)
+			}
+			p.nextToken()
+			return nil
+		}
+		instance.VRFTarget = p.current.Value
+		p.nextToken()
+		return nil
+	case "vrf-import":
+		if p.current.Type != TokenWord && p.current.Type != TokenString {
+			return p.error("expected vrf-import policy")
+		}
+		instance.VRFImport = appendUniqueString(instance.VRFImport, p.current.Value)
+		p.nextToken()
+		return nil
+	case "vrf-export":
+		if p.current.Type != TokenWord && p.current.Type != TokenString {
+			return p.error("expected vrf-export policy")
+		}
+		instance.VRFExport = appendUniqueString(instance.VRFExport, p.current.Value)
+		p.nextToken()
+		return nil
+	case "interface":
+		if p.current.Type != TokenWord {
+			return p.error("expected routing-instance interface")
+		}
+		instance.Interfaces = appendUniqueString(instance.Interfaces, p.current.Value)
+		p.nextToken()
+		return nil
+	default:
+		return p.error(fmt.Sprintf("unsupported routing-instance parameter: %s", param))
+	}
+}
+
 // parseProtocols parses protocols configuration
 func (p *Parser) parseProtocols(config *Config) error {
 	if p.current.Type != TokenWord {
@@ -374,8 +753,86 @@ func (p *Parser) parseProtocols(config *Config) error {
 		return p.parseBGP(config.Protocols)
 	case "ospf":
 		return p.parseOSPF(config.Protocols)
+	case "mpls":
+		return p.parseMPLS(config.Protocols)
+	case "vrrp":
+		return p.parseVRRP(config.Protocols)
 	default:
 		return p.error(fmt.Sprintf("unsupported protocol: %s", protocol))
+	}
+}
+
+func (p *Parser) parseMPLS(pc *ProtocolConfig) error {
+	if pc.MPLS == nil {
+		pc.MPLS = &MPLSConfig{}
+	}
+	if p.current.Type != TokenWord || p.current.Value != "interface" {
+		return p.error("expected 'interface' after protocols mpls")
+	}
+	p.nextToken()
+	if p.current.Type != TokenWord {
+		return p.error("expected MPLS interface name")
+	}
+	pc.MPLS.Interfaces = appendUniqueString(pc.MPLS.Interfaces, p.current.Value)
+	p.nextToken()
+	return nil
+}
+
+func (p *Parser) parseVRRP(pc *ProtocolConfig) error {
+	if pc.VRRP == nil {
+		pc.VRRP = &VRRPConfig{Groups: make(map[string]*VRRPGroup)}
+	}
+	if p.current.Type != TokenWord || p.current.Value != "group" {
+		return p.error("expected 'group' after protocols vrrp")
+	}
+	p.nextToken()
+	if p.current.Type != TokenWord && p.current.Type != TokenNumber {
+		return p.error("expected VRRP group name")
+	}
+	groupName := p.current.Value
+	p.nextToken()
+	if pc.VRRP.Groups[groupName] == nil {
+		pc.VRRP.Groups[groupName] = &VRRPGroup{Name: groupName}
+	}
+	group := pc.VRRP.Groups[groupName]
+
+	if p.current.Type != TokenWord {
+		return p.error("expected VRRP group parameter")
+	}
+	param := p.current.Value
+	p.nextToken()
+
+	switch param {
+	case "interface":
+		if p.current.Type != TokenWord {
+			return p.error("expected VRRP interface name")
+		}
+		group.Interface = p.current.Value
+		p.nextToken()
+		return nil
+	case "virtual-address":
+		if p.current.Type != TokenWord {
+			return p.error("expected VRRP virtual address")
+		}
+		group.VirtualAddress = p.current.Value
+		p.nextToken()
+		return nil
+	case "priority":
+		if p.current.Type != TokenNumber {
+			return p.error("expected VRRP priority")
+		}
+		priority, err := strconv.Atoi(p.current.Value)
+		if err != nil {
+			return p.error(fmt.Sprintf("invalid VRRP priority: %s", p.current.Value))
+		}
+		group.Priority = priority
+		p.nextToken()
+		return nil
+	case "preempt":
+		group.Preempt = true
+		return nil
+	default:
+		return p.error(fmt.Sprintf("unsupported VRRP group parameter: %s", param))
 	}
 }
 
@@ -704,10 +1161,8 @@ func (p *Parser) parsePrefixList(config *Config) error {
 	}
 
 	// Add prefix to list
-	config.PolicyOptions.PrefixLists[listName].Prefixes = append(
-		config.PolicyOptions.PrefixLists[listName].Prefixes,
-		prefix,
-	)
+	list := config.PolicyOptions.PrefixLists[listName]
+	list.Prefixes = appendUniqueString(list.Prefixes, prefix)
 
 	return nil
 }
@@ -1013,6 +1468,126 @@ func validateCommunity(community string) error {
 	return nil
 }
 
+// parseClassOfService parses QoS and traffic-control configuration.
+func (p *Parser) parseClassOfService(config *Config) error {
+	if config.ClassOfService == nil {
+		config.ClassOfService = &ClassOfServiceConfig{
+			ForwardingClasses:      make(map[string]*ForwardingClass),
+			TrafficControlProfiles: make(map[string]*TrafficControlProfile),
+			Interfaces:             make(map[string]*CoSInterface),
+		}
+	}
+	if p.current.Type != TokenWord {
+		return p.error("expected class-of-service parameter")
+	}
+	param := p.current.Value
+	p.nextToken()
+
+	switch param {
+	case "forwarding-class":
+		return p.parseForwardingClass(config.ClassOfService)
+	case "traffic-control-profile":
+		return p.parseTrafficControlProfile(config.ClassOfService)
+	case "interfaces":
+		return p.parseCoSInterface(config.ClassOfService)
+	default:
+		return p.error(fmt.Sprintf("unsupported class-of-service parameter: %s", param))
+	}
+}
+
+func (p *Parser) parseForwardingClass(cos *ClassOfServiceConfig) error {
+	if p.current.Type != TokenWord {
+		return p.error("expected forwarding-class name")
+	}
+	name := p.current.Value
+	p.nextToken()
+	if p.current.Type != TokenWord || p.current.Value != "queue" {
+		return p.error("expected 'queue' after forwarding-class name")
+	}
+	p.nextToken()
+	if p.current.Type != TokenNumber {
+		return p.error("expected queue number")
+	}
+	queue, err := strconv.Atoi(p.current.Value)
+	if err != nil {
+		return p.error(fmt.Sprintf("invalid queue number: %s", p.current.Value))
+	}
+	if cos.ForwardingClasses == nil {
+		cos.ForwardingClasses = make(map[string]*ForwardingClass)
+	}
+	cos.ForwardingClasses[name] = &ForwardingClass{Name: name, Queue: queue}
+	p.nextToken()
+	return nil
+}
+
+func (p *Parser) parseTrafficControlProfile(cos *ClassOfServiceConfig) error {
+	if p.current.Type != TokenWord {
+		return p.error("expected traffic-control-profile name")
+	}
+	name := p.current.Value
+	p.nextToken()
+	if cos.TrafficControlProfiles == nil {
+		cos.TrafficControlProfiles = make(map[string]*TrafficControlProfile)
+	}
+	if cos.TrafficControlProfiles[name] == nil {
+		cos.TrafficControlProfiles[name] = &TrafficControlProfile{Name: name}
+	}
+	profile := cos.TrafficControlProfiles[name]
+
+	if p.current.Type != TokenWord {
+		return p.error("expected traffic-control-profile parameter")
+	}
+	param := p.current.Value
+	p.nextToken()
+
+	switch param {
+	case "shaping-rate":
+		if p.current.Type != TokenNumber {
+			return p.error("expected shaping-rate value")
+		}
+		rate, err := strconv.ParseUint(p.current.Value, 10, 64)
+		if err != nil {
+			return p.error(fmt.Sprintf("invalid shaping-rate: %s", p.current.Value))
+		}
+		profile.ShapingRate = rate
+		p.nextToken()
+		return nil
+	case "scheduler-map":
+		if p.current.Type != TokenWord {
+			return p.error("expected scheduler-map name")
+		}
+		profile.SchedulerMap = p.current.Value
+		p.nextToken()
+		return nil
+	default:
+		return p.error(fmt.Sprintf("unsupported traffic-control-profile parameter: %s", param))
+	}
+}
+
+func (p *Parser) parseCoSInterface(cos *ClassOfServiceConfig) error {
+	if p.current.Type != TokenWord {
+		return p.error("expected class-of-service interface name")
+	}
+	name := p.current.Value
+	p.nextToken()
+	if p.current.Type != TokenWord || p.current.Value != "output-traffic-control-profile" {
+		return p.error("expected output-traffic-control-profile")
+	}
+	p.nextToken()
+	if p.current.Type != TokenWord {
+		return p.error("expected traffic-control-profile name")
+	}
+	if cos.Interfaces == nil {
+		cos.Interfaces = make(map[string]*CoSInterface)
+	}
+	cos.Interfaces[name] = &CoSInterface{
+		Name:                        name,
+		OutputTrafficControlProfile: p.current.Value,
+	}
+	p.nextToken()
+	return nil
+}
+
 // parseSecurity parses security configuration (Phase 3)
 // Syntax:
 //
@@ -1206,4 +1781,13 @@ func (p *Parser) parseSecurityRateLimit(config *Config) error {
 
 	p.nextToken()
 	return nil
+}
+
+func appendUniqueString(values []string, value string) []string {
+	for _, existing := range values {
+		if existing == value {
+			return values
+		}
+	}
+	return append(values, value)
 }

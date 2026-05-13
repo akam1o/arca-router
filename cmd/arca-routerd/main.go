@@ -40,6 +40,8 @@ var (
 	BuildDate = "unknown"
 )
 
+const defaultNETCONFListen = ":830"
+
 const (
 	secureGRPCSocketDirPerms  os.FileMode = 0750
 	secureGRPCSocketFilePerms os.FileMode = 0660
@@ -52,6 +54,15 @@ type daemonFlags struct {
 	configPath    string
 	hardwarePath  string
 	datastorePath string
+	datastoreMode string
+	etcdEndpoints string
+	etcdPrefix    string
+	etcdTimeout   time.Duration
+	etcdUsername  string
+	etcdPassword  string
+	etcdCertFile  string
+	etcdKeyFile   string
+	etcdCAFile    string
 	logLevel      string
 	version       bool
 	mockVPP       bool
@@ -62,6 +73,7 @@ type daemonFlags struct {
 	userDBPath    string
 	grpcSocket    string
 	metricsListen string
+	webListen     string
 	snmpListen    string
 	snmpCommunity string
 	frrApplyMode  string
@@ -112,6 +124,24 @@ func parseFlags() *daemonFlags {
 		"Path to hardware configuration file")
 	flag.StringVar(&f.datastorePath, "datastore", "/var/lib/arca-router/config.db",
 		"Path to configuration datastore (SQLite)")
+	flag.StringVar(&f.datastoreMode, "datastore-backend", string(datastore.BackendSQLite),
+		"Configuration datastore backend: sqlite or etcd")
+	flag.StringVar(&f.etcdEndpoints, "etcd-endpoints", "",
+		"Comma-separated etcd endpoints for --datastore-backend=etcd")
+	flag.StringVar(&f.etcdPrefix, "etcd-prefix", "/arca-router/",
+		"Key prefix for the etcd datastore")
+	flag.DurationVar(&f.etcdTimeout, "etcd-timeout", 5*time.Second,
+		"etcd connection and operation timeout")
+	flag.StringVar(&f.etcdUsername, "etcd-username", "",
+		"etcd username")
+	flag.StringVar(&f.etcdPassword, "etcd-password", "",
+		"etcd password")
+	flag.StringVar(&f.etcdCertFile, "etcd-cert", "",
+		"etcd TLS client certificate path")
+	flag.StringVar(&f.etcdKeyFile, "etcd-key", "",
+		"etcd TLS client key path")
+	flag.StringVar(&f.etcdCAFile, "etcd-ca", "",
+		"etcd TLS CA certificate path")
 	flag.StringVar(&f.logLevel, "log-level", "info",
 		"Log level (debug, info, warn, error)")
 	flag.BoolVar(&f.version, "version", false,
@@ -120,8 +150,8 @@ func parseFlags() *daemonFlags {
 		"Use mock VPP client for testing")
 
 	// NETCONF flags
-	flag.StringVar(&f.netconfListen, "netconf-listen", ":830",
-		"NETCONF/SSH listen address")
+	flag.StringVar(&f.netconfListen, "netconf-listen", "",
+		"NETCONF/SSH listen address (overrides security netconf ssh port; default: :830)")
 	flag.StringVar(&f.hostKeyPath, "host-key", "/var/lib/arca-router/ssh_host_ed25519_key",
 		"Path to SSH host key")
 	flag.StringVar(&f.userDBPath, "user-db", "/var/lib/arca-router/users.db",
@@ -129,11 +159,13 @@ func parseFlags() *daemonFlags {
 	flag.StringVar(&f.grpcSocket, "grpc-socket", "/run/arca-router/routerd.sock",
 		"Path to internal gRPC Unix socket")
 	flag.StringVar(&f.metricsListen, "metrics-listen", "",
-		"Prometheus metrics listen address (disabled when empty)")
+		"Prometheus metrics listen address (overrides system services prometheus config; disabled when empty and config disabled)")
+	flag.StringVar(&f.webListen, "web-listen", "",
+		"Web UI listen address (overrides system services web-ui config; disabled when empty and config disabled)")
 	flag.StringVar(&f.snmpListen, "snmp-listen", "",
 		"SNMPv2c UDP listen address (disabled when empty)")
-	flag.StringVar(&f.snmpCommunity, "snmp-community", "public",
-		"SNMPv2c read-only community")
+	flag.StringVar(&f.snmpCommunity, "snmp-community", "",
+		"SNMPv2c read-only community (overrides system services snmp config; default: public)")
 	flag.StringVar(&f.frrApplyMode, "frr-apply-mode", string(pkgfrr.BackendModeTransactional),
 		"FRR apply backend: transactional or file")
 
@@ -154,16 +186,111 @@ func parseLogLevel(level string) slog.Level {
 	}
 }
 
+func openConfigStore(f *daemonFlags) (*storesqlite.Store, *datastore.ProcessLock, *datastore.Config, error) {
+	cfg, err := buildDatastoreConfig(f)
+	if err != nil {
+		return nil, nil, nil, err
+	}
+
+	var processLock *datastore.ProcessLock
+	if cfg.Backend == datastore.BackendSQLite {
+		processLock, err = datastore.AcquireSQLiteProcessLock(cfg.SQLitePath)
+		if err != nil {
+			return nil, nil, nil, fmt.Errorf("acquire datastore process lock: %w", err)
+		}
+	}
+
+	ds, err := datastore.NewDatastore(cfg)
+	if err != nil {
+		if processLock != nil {
+			_ = processLock.Close()
+		}
+		return nil, nil, nil, err
+	}
+	return storesqlite.New(ds), processLock, cfg, nil
+}
+
+func buildDatastoreConfig(f *daemonFlags) (*datastore.Config, error) {
+	if f == nil {
+		return nil, fmt.Errorf("daemon flags are nil")
+	}
+	backend := datastore.BackendType(strings.ToLower(strings.TrimSpace(f.datastoreMode)))
+	if backend == "" {
+		backend = datastore.BackendSQLite
+	}
+
+	switch backend {
+	case datastore.BackendSQLite:
+		path := strings.TrimSpace(f.datastorePath)
+		if path == "" {
+			path = "/var/lib/arca-router/config.db"
+		}
+		return &datastore.Config{
+			Backend:    datastore.BackendSQLite,
+			SQLitePath: path,
+		}, nil
+	case datastore.BackendEtcd:
+		endpoints := parseCommaList(f.etcdEndpoints)
+		if len(endpoints) == 0 {
+			return nil, fmt.Errorf("etcd datastore requires --etcd-endpoints")
+		}
+		tlsConfig, err := buildEtcdTLSConfig(f)
+		if err != nil {
+			return nil, err
+		}
+		return &datastore.Config{
+			Backend:       datastore.BackendEtcd,
+			EtcdEndpoints: endpoints,
+			EtcdPrefix:    f.etcdPrefix,
+			EtcdTimeout:   f.etcdTimeout,
+			EtcdUsername:  f.etcdUsername,
+			EtcdPassword:  f.etcdPassword,
+			EtcdTLS:       tlsConfig,
+		}, nil
+	default:
+		return nil, fmt.Errorf("unsupported datastore backend: %s", backend)
+	}
+}
+
+func parseCommaList(value string) []string {
+	parts := strings.Split(value, ",")
+	result := make([]string, 0, len(parts))
+	for _, part := range parts {
+		if trimmed := strings.TrimSpace(part); trimmed != "" {
+			result = append(result, trimmed)
+		}
+	}
+	return result
+}
+
+func buildEtcdTLSConfig(f *daemonFlags) (*datastore.TLSConfig, error) {
+	hasTLS := f.etcdCertFile != "" || f.etcdKeyFile != "" || f.etcdCAFile != ""
+	if !hasTLS {
+		return nil, nil
+	}
+	if f.etcdCertFile == "" || f.etcdKeyFile == "" || f.etcdCAFile == "" {
+		return nil, fmt.Errorf("etcd TLS requires --etcd-cert, --etcd-key, and --etcd-ca")
+	}
+	return &datastore.TLSConfig{
+		CertFile: f.etcdCertFile,
+		KeyFile:  f.etcdKeyFile,
+		CAFile:   f.etcdCAFile,
+	}, nil
+}
+
 func run(ctx context.Context, f *daemonFlags, log *logger.Logger) error {
 	installParserHooks()
 
 	log.Info("Configuration",
 		slog.String("config_path", f.configPath),
 		slog.String("hardware_path", f.hardwarePath),
+		slog.String("datastore_backend", f.datastoreMode),
 		slog.String("datastore_path", f.datastorePath),
+		slog.String("etcd_endpoints", f.etcdEndpoints),
 		slog.String("netconf_listen", f.netconfListen),
 		slog.String("grpc_socket", f.grpcSocket),
 		slog.String("metrics_listen", f.metricsListen),
+		slog.String("web_listen", f.webListen),
 		slog.String("snmp_listen", f.snmpListen),
 		slog.String("frr_apply_mode", f.frrApplyMode),
 	)
@@ -189,17 +316,37 @@ func run(ctx context.Context, f *daemonFlags, log *logger.Logger) error {
 		return err
 	}
 
-	// --- Step 3: Create southbound plugins ---
+	// --- Step 3: Open config store ---
+	configStore, processLock, datastoreConfig, err := openConfigStore(f)
+	if err != nil {
+		return fmt.Errorf("open config store: %w", err)
+	}
+	defer func() {
+		if closeErr := configStore.Close(); closeErr != nil {
+			log.Error("Failed to close config store", slog.Any("error", closeErr))
+		}
+		if processLock != nil {
+			if closeErr := processLock.Close(); closeErr != nil {
+				log.Error("Failed to release datastore process lock", slog.Any("error", closeErr))
+			}
+		}
+	}()
+	if err := configStore.CleanupEphemeralState(ctx); err != nil {
+		return fmt.Errorf("cleanup config store ephemeral state: %w", err)
+	}
+
+	// --- Step 4: Create validation and southbound plugins ---
+	clusterPlugin := newClusterSyncPlugin(datastoreConfig)
 	vppPlugin := sbvpp.NewVPPPlugin(vppClient, hwConfig, slog.Default())
 	frrPlugin := sbfrr.NewFRRPluginWithApplyMode(slog.Default(), frrApplyMode)
 
-	plugins := []engine.Plugin{vppPlugin, frrPlugin}
+	plugins := []engine.Plugin{clusterPlugin, vppPlugin, frrPlugin}
 
-	// --- Step 4: Create engine ---
+	// --- Step 5: Create engine ---
 	eng := engine.NewEngine(plugins, slog.Default())
 
-	// --- Step 5: Initialize plugins ---
-	log.Info("Initializing southbound plugins")
+	// --- Step 6: Initialize plugins ---
+	log.Info("Initializing engine plugins")
 	for _, p := range plugins {
 		if err := p.Init(ctx); err != nil {
 			return fmt.Errorf("init plugin %s: %w", p.Name(), err)
@@ -209,28 +356,6 @@ func run(ctx context.Context, f *daemonFlags, log *logger.Logger) error {
 				log.Error("Failed to close plugin", slog.String("plugin", p.Name()), slog.Any("error", closeErr))
 			}
 		}(p)
-	}
-
-	// --- Step 6: Open config store ---
-	processLock, err := datastore.AcquireSQLiteProcessLock(f.datastorePath)
-	if err != nil {
-		return fmt.Errorf("acquire datastore process lock: %w", err)
-	}
-	configStore, err := storesqlite.NewFromPath(f.datastorePath)
-	if err != nil {
-		_ = processLock.Close()
-		return fmt.Errorf("open config store: %w", err)
-	}
-	defer func() {
-		if closeErr := configStore.Close(); closeErr != nil {
-			log.Error("Failed to close config store", slog.Any("error", closeErr))
-		}
-		if closeErr := processLock.Close(); closeErr != nil {
-			log.Error("Failed to release datastore process lock", slog.Any("error", closeErr))
-		}
-	}()
-	if err := configStore.CleanupEphemeralState(ctx); err != nil {
-		return fmt.Errorf("cleanup config store ephemeral state: %w", err)
 	}
 
 	// --- Step 7: Load initial configuration ---
@@ -247,10 +372,30 @@ func run(ctx context.Context, f *daemonFlags, log *logger.Logger) error {
 	}
 	log.Info("Initial configuration applied", slog.String("source", initialSource))
 
+	var configSync configSyncRuntimeSource
+	if datastoreConfig.Backend == datastore.BackendEtcd {
+		etcdStatus, ok := configStore.Legacy().(datastore.EtcdStatusProvider)
+		if !ok {
+			log.Warn("etcd datastore does not expose config synchronization status")
+		} else {
+			syncer := newEtcdConfigSynchronizer(configStore, eng, etcdStatus, defaultEtcdConfigSyncInterval, log.Logger)
+			syncer.Start(ctx)
+			configSync = syncer
+		}
+	}
+
 	// --- Step 8: Start NETCONF server ---
 	var netconfServer *netconf.SSHServer
 	if f.hostKeyPath != "" {
-		netconfServer, err = startNETCONFServer(ctx, f, eng, log)
+		netconfServer, err = startNETCONFServer(
+			ctx,
+			f,
+			datastoreConfig,
+			eng,
+			newNETCONFOperationalStateProvider(vppPlugin),
+			log,
+			effectiveNETCONFListen(f.netconfListen, eng.RunningSnapshot()),
+		)
 		if err != nil {
 			return err
 		}
@@ -274,30 +419,50 @@ func run(ctx context.Context, f *daemonFlags, log *logger.Logger) error {
 	defer func() { _ = lis.Close() }()
 
 	grpcServer := nbgrpc.NewServer(eng, configStore, slog.Default())
+	grpcServer.SetInterfaceStateCollector(vppPlugin)
+	grpcServer.SetLCPReconciliationSource(newGRPCLCPReconciliationSource(vppPlugin))
+
+	observabilitySource := metricsSource{
+		startedAt:     time.Now(),
+		engine:        eng,
+		netconfServer: netconfServer,
+		datastore:     datastoreConfig,
+		configAPI:     grpcServer,
+		configSync:    configSync,
+		frr:           frrPlugin,
+		vpp:           vppPlugin,
+	}
+	grpcServer.SetHAStatusSource(newGRPCHAStatusSource(observabilitySource))
+
 	grpcErr := make(chan error, 1)
 	go func() {
 		grpcErr <- grpcServer.Serve(lis)
 	}()
 
 	// --- Step 10: Start metrics endpoint ---
-	observabilitySource := metricsSource{
-		startedAt:     time.Now(),
-		engine:        eng,
-		netconfServer: netconfServer,
-	}
 	var metricsErr <-chan error
-	if f.metricsListen != "" {
-		metricsErr, err = startMetricsServer(ctx, f.metricsListen, observabilitySource, log)
+	if metricsListen := effectiveMetricsListen(f.metricsListen, eng.RunningSnapshot()); metricsListen != "" {
+		metricsErr, err = startMetricsServer(ctx, metricsListen, observabilitySource, log)
 		if err != nil {
 			grpcServer.Stop()
 			return err
 		}
 	}
 
-	// --- Step 11: Start SNMP endpoint ---
+	// --- Step 11: Start Web UI endpoint ---
+	var webErr <-chan error
+	if webListen := effectiveWebListen(f.webListen, eng.RunningSnapshot()); webListen != "" {
+		webErr, err = startWebServer(ctx, webListen, observabilitySource, log)
+		if err != nil {
+			grpcServer.Stop()
+			return err
+		}
+	}
+
+	// --- Step 12: Start SNMP endpoint ---
 	var snmpErr <-chan error
-	if f.snmpListen != "" {
-		snmpErr, err = startSNMPServer(ctx, f.snmpListen, f.snmpCommunity, observabilitySource, log)
+	if snmpListen := effectiveSNMPListen(f.snmpListen, eng.RunningSnapshot()); snmpListen != "" {
+		snmpErr, err = startSNMPServer(ctx, snmpListen, effectiveSNMPCommunity(f.snmpCommunity, eng.RunningSnapshot()), observabilitySource, log)
 		if err != nil {
 			grpcServer.Stop()
 			return err
@@ -316,6 +481,11 @@ func run(ctx context.Context, f *daemonFlags, log *logger.Logger) error {
 			grpcServer.Stop()
 			return fmt.Errorf("metrics endpoint stopped: %w", err)
 		}
+	case err := <-webErr:
+		if err != nil {
+			grpcServer.Stop()
+			return fmt.Errorf("web endpoint stopped: %w", err)
+		}
 	case err := <-snmpErr:
 		if err != nil {
 			grpcServer.Stop()
@@ -327,13 +497,40 @@ func run(ctx context.Context, f *daemonFlags, log *logger.Logger) error {
 	return nil
 }
 
-func startNETCONFServer(ctx context.Context, f *daemonFlags, eng *engine.Engine, log *logger.Logger) (*netconf.SSHServer, error) {
-	log.Info("Starting NETCONF server", slog.String("listen", f.netconfListen))
+func effectiveNETCONFListen(flagValue string, snapshot *model.ConfigSnapshot) string {
+	if listen := strings.TrimSpace(flagValue); listen != "" {
+		return listen
+	}
+	if port := snapshotNETCONFPort(snapshot); port != 0 {
+		return fmt.Sprintf(":%d", port)
+	}
+	return defaultNETCONFListen
+}
+
+func snapshotNETCONFPort(snapshot *model.ConfigSnapshot) int {
+	if snapshot == nil || snapshot.Config == nil || snapshot.Config.Security == nil ||
+		snapshot.Config.Security.NETCONF == nil || snapshot.Config.Security.NETCONF.SSH == nil {
+		return 0
+	}
+	return snapshot.Config.Security.NETCONF.SSH.Port
+}
+
+func startNETCONFServer(
+	ctx context.Context,
+	f *daemonFlags,
+	datastoreConfig *datastore.Config,
+	eng *engine.Engine,
+	stateProvider netconf.OperationalStateProvider,
+	log *logger.Logger,
+	listenAddr string,
+) (*netconf.SSHServer, error) {
+	log.Info("Starting NETCONF server", slog.String("listen", listenAddr))
 	ncConfig := netconf.DefaultSSHConfig()
-	ncConfig.ListenAddr = f.netconfListen
+	ncConfig.ListenAddr = listenAddr
 	ncConfig.HostKeyPath = f.hostKeyPath
 	ncConfig.UserDBPath = f.userDBPath
 	ncConfig.DatastorePath = f.datastorePath
+	ncConfig.DatastoreConfig = datastoreConfig
 	ncConfig.SkipDatastoreStartupCleanup = true
 
 	server, err := netconf.NewSSHServer(ncConfig)
@@ -341,6 +538,7 @@ func startNETCONFServer(ctx context.Context, f *daemonFlags, eng *engine.Engine,
 		return nil, fmt.Errorf("create NETCONF server: %w", err)
 	}
 	server.SetCommitHook(newNETCONFCommitHook(eng))
+	server.SetOperationalStateProvider(stateProvider)
 	if err := server.Start(ctx); err != nil {
 		_ = server.Stop()
 		return nil, fmt.Errorf("start NETCONF server: %w", err)

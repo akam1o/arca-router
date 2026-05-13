@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"net"
 	"regexp"
+	"strconv"
 	"strings"
 
 	"github.com/akam1o/arca-router/pkg/errors"
@@ -49,6 +50,12 @@ func (c *Config) Validate() error {
 		return err
 	}
 
+	if c.Chassis != nil {
+		if err := c.Chassis.Validate(); err != nil {
+			return err
+		}
+	}
+
 	// Validate interfaces
 	for name, iface := range c.Interfaces {
 		if err := validateInterfaceName(name); err != nil {
@@ -66,9 +73,24 @@ func (c *Config) Validate() error {
 		}
 	}
 
+	for name, instance := range c.RoutingInstances {
+		if err := validateRoutingInstance(c, name, instance); err != nil {
+			return err
+		}
+	}
+
 	// Validate protocols
 	if c.Protocols != nil {
 		if err := c.Protocols.Validate(c); err != nil {
+			return err
+		}
+	}
+
+	if c.ClassOfService != nil {
+		if err := c.ClassOfService.Validate(); err != nil {
+			return err
+		}
+		if err := c.validateClassOfServiceInterfaceReferences(); err != nil {
 			return err
 		}
 	}
@@ -109,6 +131,82 @@ func (s *SystemConfig) Validate() error {
 		)
 	}
 
+	if s.Services != nil && s.Services.WebUI != nil {
+		if err := validateWebUI(s.Services.WebUI); err != nil {
+			return err
+		}
+	}
+	if s.Services != nil && s.Services.Prometheus != nil {
+		if err := validatePrometheus(s.Services.Prometheus); err != nil {
+			return err
+		}
+	}
+	if s.Services != nil && s.Services.SNMP != nil {
+		if err := validateSNMP(s.Services.SNMP); err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
+func validateWebUI(web *WebUIConfig) error {
+	if web.Port < 0 || web.Port > 65535 {
+		return errors.New(
+			errors.ErrCodeConfigValidation,
+			fmt.Sprintf("Invalid web-ui port: %d", web.Port),
+			"Web UI port must be between 0 and 65535",
+			"Use a valid TCP port",
+		)
+	}
+	if web.ListenAddress != "" && net.ParseIP(web.ListenAddress) == nil && web.ListenAddress != "localhost" {
+		return errors.New(
+			errors.ErrCodeConfigValidation,
+			fmt.Sprintf("Invalid web-ui listen-address: %s", web.ListenAddress),
+			"Web UI listen-address must be an IP address or localhost",
+			"Use a valid listen address",
+		)
+	}
+	return nil
+}
+
+func validatePrometheus(prometheus *PrometheusConfig) error {
+	if prometheus.Port < 0 || prometheus.Port > 65535 {
+		return errors.New(
+			errors.ErrCodeConfigValidation,
+			fmt.Sprintf("Invalid prometheus port: %d", prometheus.Port),
+			"Prometheus port must be between 0 and 65535",
+			"Use a valid TCP port",
+		)
+	}
+	if prometheus.ListenAddress != "" && net.ParseIP(prometheus.ListenAddress) == nil && prometheus.ListenAddress != "localhost" {
+		return errors.New(
+			errors.ErrCodeConfigValidation,
+			fmt.Sprintf("Invalid prometheus listen-address: %s", prometheus.ListenAddress),
+			"Prometheus listen-address must be an IP address or localhost",
+			"Use a valid listen address",
+		)
+	}
+	return nil
+}
+
+func validateSNMP(snmp *SNMPConfig) error {
+	if snmp.Port < 0 || snmp.Port > 65535 {
+		return errors.New(
+			errors.ErrCodeConfigValidation,
+			fmt.Sprintf("Invalid snmp port: %d", snmp.Port),
+			"SNMP port must be between 0 and 65535",
+			"Use a valid UDP port",
+		)
+	}
+	if snmp.ListenAddress != "" && net.ParseIP(snmp.ListenAddress) == nil && snmp.ListenAddress != "localhost" {
+		return errors.New(
+			errors.ErrCodeConfigValidation,
+			fmt.Sprintf("Invalid snmp listen-address: %s", snmp.ListenAddress),
+			"SNMP listen-address must be an IP address or localhost",
+			"Use a valid listen address",
+		)
+	}
 	return nil
 }
 
@@ -241,6 +339,29 @@ func validateInterfaceName(name string) error {
 	return nil
 }
 
+func validateConfiguredInterfaceReference(cfg *Config, context, ifName string) error {
+	if err := validateInterfaceName(ifName); err != nil {
+		return err
+	}
+	if cfg == nil {
+		return errors.New(
+			errors.ErrCodeConfigValidation,
+			fmt.Sprintf("%s references interface %s without a configuration context", context, ifName),
+			"Internal validation error",
+			"Report this issue to the maintainers",
+		)
+	}
+	if _, exists := cfg.Interfaces[ifName]; !exists {
+		return errors.New(
+			errors.ErrCodeConfigValidation,
+			fmt.Sprintf("%s references non-existent interface %s", context, ifName),
+			"Interface must be defined before it is referenced",
+			fmt.Sprintf("Add interface configuration for %s", ifName),
+		)
+	}
+	return nil
+}
+
 // validateAddress validates a CIDR address
 func validateAddress(addr, familyName, ifaceName string, unitNum int) error {
 	if addr == "" {
@@ -288,6 +409,32 @@ func validateAddress(addr, familyName, ifaceName string, unitNum int) error {
 	// ParseCIDR validation is enough here (network-address enforcement is optional).
 	_ = ipnet
 
+	return nil
+}
+
+// Validate validates chassis configuration.
+func (c *ChassisConfig) Validate() error {
+	if c == nil || c.Cluster == nil {
+		return nil
+	}
+	for name, node := range c.Cluster.Nodes {
+		if node == nil {
+			return errors.New(errors.ErrCodeConfigValidation, fmt.Sprintf("Cluster node %s is nil", name), "Cluster node is invalid", "Remove or recreate the node")
+		}
+		if node.Address != "" && net.ParseIP(node.Address) == nil {
+			return errors.New(errors.ErrCodeConfigValidation, fmt.Sprintf("Invalid cluster node address for %s: %s", name, node.Address), "Cluster node address must be a valid IP address", "Use a valid IPv4 or IPv6 address")
+		}
+		if node.Priority < 0 || node.Priority > 255 {
+			return errors.New(errors.ErrCodeConfigValidation, fmt.Sprintf("Invalid cluster node priority for %s: %d", name, node.Priority), "Cluster node priority must be between 0 and 255", "Use a valid priority value")
+		}
+	}
+	if c.Cluster.Sync != nil && c.Cluster.Sync.Etcd != nil {
+		for _, endpoint := range c.Cluster.Sync.Etcd.Endpoints {
+			if strings.TrimSpace(endpoint) == "" {
+				return errors.New(errors.ErrCodeConfigValidation, "Empty cluster etcd endpoint", "etcd endpoint must not be empty", "Set a valid endpoint")
+			}
+		}
+	}
 	return nil
 }
 
@@ -413,6 +560,103 @@ func validateStaticRoute(sr *StaticRoute) error {
 	return nil
 }
 
+func validateRoutingInstance(cfg *Config, name string, instance *RoutingInstance) error {
+	if instance == nil {
+		return errors.New(errors.ErrCodeConfigValidation, fmt.Sprintf("Routing instance %s is nil", name), "Routing instance is invalid", "Remove or recreate the routing instance")
+	}
+	if instance.InstanceType != "" && instance.InstanceType != "vrf" {
+		return errors.New(errors.ErrCodeConfigValidation, fmt.Sprintf("Unsupported routing-instance type for %s: %s", name, instance.InstanceType), "Only instance-type vrf is supported in v0.6", "Use 'set routing-instances <name> instance-type vrf'")
+	}
+	if instance.RouteDistinguisher != "" && !regexp.MustCompile(`^\d+:\d+$`).MatchString(instance.RouteDistinguisher) {
+		return errors.New(errors.ErrCodeConfigValidation, fmt.Sprintf("Invalid route-distinguisher for %s: %s", name, instance.RouteDistinguisher), "Route distinguisher must use ASN:number format", "Use a value like 65000:100")
+	}
+	importTargetCount := 0
+	exportTargetCount := 0
+	if instance.VRFTarget != "" {
+		if err := validateVRFTargetValue(fmt.Sprintf("routing-instance %s vrf-target", name), instance.VRFTarget); err != nil {
+			return err
+		}
+		importTargetCount++
+		exportTargetCount++
+	}
+	for _, ifName := range instance.Interfaces {
+		if err := validateConfiguredInterfaceReference(cfg, fmt.Sprintf("Routing instance %s", name), ifName); err != nil {
+			return err
+		}
+	}
+	for _, target := range instance.VRFTargetImport {
+		if err := validateVRFTargetValue(fmt.Sprintf("routing-instance %s vrf-target import", name), target); err != nil {
+			return err
+		}
+		importTargetCount++
+	}
+	for _, target := range instance.VRFTargetExport {
+		if err := validateVRFTargetValue(fmt.Sprintf("routing-instance %s vrf-target export", name), target); err != nil {
+			return err
+		}
+		exportTargetCount++
+	}
+	for _, policyName := range instance.VRFImport {
+		if err := validatePolicyStatementReference(cfg, fmt.Sprintf("Routing instance %s vrf-import", name), policyName); err != nil {
+			return err
+		}
+	}
+	for _, policyName := range instance.VRFExport {
+		if err := validatePolicyStatementReference(cfg, fmt.Sprintf("Routing instance %s vrf-export", name), policyName); err != nil {
+			return err
+		}
+	}
+	if len(instance.VRFImport) > 0 && importTargetCount == 0 {
+		return errors.New(errors.ErrCodeConfigValidation, fmt.Sprintf("Routing instance %s vrf-import requires an import vrf-target", name), "VRF import policy requires at least one import target", "Configure 'vrf-target import target:<asn>:<number>' or a shared 'vrf-target'")
+	}
+	if len(instance.VRFExport) > 0 && exportTargetCount == 0 {
+		return errors.New(errors.ErrCodeConfigValidation, fmt.Sprintf("Routing instance %s vrf-export requires an export vrf-target", name), "VRF export policy requires at least one export target", "Configure 'vrf-target export target:<asn>:<number>' or a shared 'vrf-target'")
+	}
+	if exportTargetCount > 0 && instance.RouteDistinguisher == "" {
+		return errors.New(errors.ErrCodeConfigValidation, fmt.Sprintf("Routing instance %s route-distinguisher is required for VPN export", name), "VPN export requires a route distinguisher", "Configure 'route-distinguisher <asn>:<number>'")
+	}
+	if (importTargetCount > 0 || exportTargetCount > 0 || len(instance.VRFImport) > 0 || len(instance.VRFExport) > 0) &&
+		(cfg.RoutingOptions == nil || cfg.RoutingOptions.AutonomousSystem == 0) {
+		return errors.New(errors.ErrCodeConfigValidation, fmt.Sprintf("Routing instance %s routing-options autonomous-system is required for VPN import/export", name), "VPN import/export requires a local autonomous-system", "Configure 'set routing-options autonomous-system <asn>'")
+	}
+	return nil
+}
+
+func validateVRFTargetValue(context, target string) error {
+	if !regexp.MustCompile(`^target:\d+:\d+$`).MatchString(target) {
+		return errors.New(errors.ErrCodeConfigValidation, fmt.Sprintf("Invalid %s: %s", context, target), "VRF target must use target:ASN:number format", "Use a value like target:65000:100")
+	}
+	return nil
+}
+
+func validatePolicyStatementReference(cfg *Config, context, policyName string) error {
+	if strings.TrimSpace(policyName) == "" {
+		return errors.New(
+			errors.ErrCodeConfigValidation,
+			fmt.Sprintf("%s references an empty policy-statement", context),
+			"Policy statement name must be specified",
+			"Use a configured policy-options policy-statement name",
+		)
+	}
+	if cfg == nil || cfg.PolicyOptions == nil || cfg.PolicyOptions.PolicyStatements == nil {
+		return errors.New(
+			errors.ErrCodeConfigValidation,
+			fmt.Sprintf("%s references unknown policy-statement %s", context, policyName),
+			"Referenced policy-statement must exist before it is used",
+			fmt.Sprintf("Create policy-options policy-statement %s", policyName),
+		)
+	}
+	if _, ok := cfg.PolicyOptions.PolicyStatements[policyName]; !ok {
+		return errors.New(
+			errors.ErrCodeConfigValidation,
+			fmt.Sprintf("%s references unknown policy-statement %s", context, policyName),
+			"Referenced policy-statement must exist before it is used",
+			fmt.Sprintf("Create policy-options policy-statement %s", policyName),
+		)
+	}
+	return nil
+}
+
 // Validate validates protocol configuration
 func (pc *ProtocolConfig) Validate(cfg *Config) error {
 	if pc == nil {
@@ -433,6 +677,52 @@ func (pc *ProtocolConfig) Validate(cfg *Config) error {
 		}
 	}
 
+	if pc.MPLS != nil {
+		for _, ifName := range pc.MPLS.Interfaces {
+			if err := validateConfiguredInterfaceReference(cfg, "MPLS", ifName); err != nil {
+				return err
+			}
+		}
+	}
+
+	if pc.VRRP != nil {
+		if err := pc.VRRP.Validate(); err != nil {
+			return err
+		}
+		for name, group := range pc.VRRP.Groups {
+			if group != nil && group.Interface != "" {
+				if err := validateConfiguredInterfaceReference(cfg, fmt.Sprintf("VRRP group %s", name), group.Interface); err != nil {
+					return err
+				}
+			}
+		}
+	}
+
+	return nil
+}
+
+// Validate validates VRRP configuration.
+func (v *VRRPConfig) Validate() error {
+	for name, group := range v.Groups {
+		if group == nil {
+			return errors.New(errors.ErrCodeConfigValidation, fmt.Sprintf("VRRP group %s is nil", name), "VRRP group is invalid", "Remove or recreate the group")
+		}
+		id, err := strconv.Atoi(name)
+		if err != nil || id < 1 || id > 255 {
+			return errors.New(errors.ErrCodeConfigValidation, fmt.Sprintf("Invalid VRRP group id: %s", name), "VRRP group id must be numeric and between 1 and 255", "Use a valid VRRP group id")
+		}
+		if group.Interface != "" {
+			if err := validateInterfaceName(group.Interface); err != nil {
+				return err
+			}
+		}
+		if group.VirtualAddress != "" && net.ParseIP(group.VirtualAddress) == nil {
+			return errors.New(errors.ErrCodeConfigValidation, fmt.Sprintf("Invalid VRRP virtual address for %s: %s", name, group.VirtualAddress), "VRRP virtual-address must be a valid IP address", "Use a valid IPv4 or IPv6 address")
+		}
+		if group.Priority < 0 || group.Priority > 254 {
+			return errors.New(errors.ErrCodeConfigValidation, fmt.Sprintf("Invalid VRRP priority for %s: %d", name, group.Priority), "VRRP priority must be between 1 and 254 when configured", "Use a valid priority")
+		}
+	}
 	return nil
 }
 
@@ -701,16 +991,8 @@ func validateOSPFInterface(areaID, ifName string, ospfIf *OSPFInterface, cfg *Co
 		)
 	}
 
-	// Check if interface exists in configuration
-	if cfg.Interfaces != nil {
-		if _, exists := cfg.Interfaces[ifName]; !exists {
-			return errors.New(
-				errors.ErrCodeConfigValidation,
-				fmt.Sprintf("OSPF references non-existent interface %s in area %s", ifName, areaID),
-				"Interface must be defined before being used in OSPF",
-				fmt.Sprintf("Add interface configuration for %s", ifName),
-			)
-		}
+	if err := validateConfiguredInterfaceReference(cfg, fmt.Sprintf("OSPF area %s", areaID), ifName); err != nil {
+		return err
 	}
 
 	// Validate metric
@@ -733,5 +1015,45 @@ func validateOSPFInterface(areaID, ifName string, ospfIf *OSPFInterface, cfg *Co
 		)
 	}
 
+	return nil
+}
+
+// Validate validates class-of-service configuration.
+func (c *ClassOfServiceConfig) Validate() error {
+	for name, fc := range c.ForwardingClasses {
+		if fc == nil {
+			return errors.New(errors.ErrCodeConfigValidation, fmt.Sprintf("Forwarding class %s is nil", name), "Forwarding class is invalid", "Remove or recreate the forwarding class")
+		}
+		if fc.Queue < 0 || fc.Queue > 7 {
+			return errors.New(errors.ErrCodeConfigValidation, fmt.Sprintf("Invalid queue for forwarding class %s: %d", name, fc.Queue), "Forwarding class queue must be between 0 and 7", "Use a valid queue number")
+		}
+	}
+	for name, profile := range c.TrafficControlProfiles {
+		if profile == nil {
+			return errors.New(errors.ErrCodeConfigValidation, fmt.Sprintf("Traffic control profile %s is nil", name), "Traffic control profile is invalid", "Remove or recreate the profile")
+		}
+	}
+	for ifName, iface := range c.Interfaces {
+		if err := validateInterfaceName(ifName); err != nil {
+			return err
+		}
+		if iface == nil {
+			return errors.New(errors.ErrCodeConfigValidation, fmt.Sprintf("Class-of-service interface %s is nil", ifName), "Class-of-service interface is invalid", "Remove or recreate the interface binding")
+		}
+		if iface.OutputTrafficControlProfile != "" {
+			if _, ok := c.TrafficControlProfiles[iface.OutputTrafficControlProfile]; !ok {
+				return errors.New(errors.ErrCodeConfigValidation, fmt.Sprintf("Class-of-service interface %s references unknown profile %s", ifName, iface.OutputTrafficControlProfile), "Referenced traffic-control-profile must exist", "Create the profile before binding it to an interface")
+			}
+		}
+	}
+	return nil
+}
+
+func (c *Config) validateClassOfServiceInterfaceReferences() error {
+	for ifName := range c.ClassOfService.Interfaces {
+		if err := validateConfiguredInterfaceReference(c, "Class-of-service", ifName); err != nil {
+			return err
+		}
+	}
 	return nil
 }

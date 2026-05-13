@@ -1,4 +1,4 @@
-# arca-router 設定仕様（v0.5.x）
+# arca-router 設定仕様（v0.6.x）
 
 このドキュメントは arca-router の設定構文とセマンティクスを定義します。
 
@@ -8,28 +8,30 @@
 
 arca-router は Junos 風の `set` コマンド構文を採用しています。設定は以下の方法で管理します。
 
-1. **統合デーモン (`arca-routerd`)**: VPP、FRR、NETCONF、gRPC、Prometheus、SNMP を単一プロセスで処理
+1. **統合デーモン (`arca-routerd`)**: VPP、FRR、NETCONF、gRPC、Prometheus、Web UI、SNMP を単一プロセスで処理
 2. **対話型 CLI (`arca`)**: gRPC シンクライアントによる運用コマンドと candidate/running 設定ワークフロー
 3. **NETCONF/SSH**: NETCONF（RFC 6241）によるリモート設定。デーモンに内蔵され、同じ datastore/engine を利用
-4. **ファイルブートストラップ**: SQLite datastore に running 設定がない場合のみ、起動時に `/etc/arca-router/arca-router.conf` を読み込み
+4. **ファイルブートストラップ**: 設定済み datastore に running 設定がない場合のみ、起動時に `/etc/arca-router/arca-router.conf` を読み込み
 
-### v0.5.x アーキテクチャ
+### v0.6.x アーキテクチャ
 
-v0.5.x は現在の統合デーモン経路です：
+v0.6.x は統合デーモン経路を advanced features 向けに拡張します：
 
 - **構造体ファースト設定モデル**: 設定は Go 構造体（`internal/model.RouterConfig`）で表現。テキストはシリアライズの一形式。
-- **SQLite candidate/running datastore**: `/var/lib/arca-router/config.db` に running 設定、candidate session、commit 履歴、rollback メタデータ、lock、audit event を保存。
+- **SQLite または etcd candidate/running datastore**: single-node では SQLite が標準。clustered deployment では etcd を選択できます。
 - **差分ベースエンジン**: 設定エンジン（`internal/engine`）が running/candidate の最小差分を計算し、変更箇所のみ適用。
 - **プラグインベース サウスバウンド**: VPP / FRR は `engine.Plugin` 実装として、それぞれ関連する差分のみを受け取る。
 - **Transactional FRR apply**: 標準の `--frr-apply-mode=transactional` は FRR management candidate datastore に対して `vtysh` の `mgmt commit check` / `mgmt commit apply` を実行。
 - **復旧用 FRR file backend**: `--frr-apply-mode=file` は復旧・互換用途の full-file reload 経路として保持。
 - **gRPC 内部 API**: `arca` は Unix ソケット gRPC（`api/v1/router.proto`、デフォルト `/run/arca-router/routerd.sock`）経由でデーモンと通信。
 - **2 フェーズコミット**: 全プラグイン検証 → 全プラグイン適用 → 障害時ロールバック。
-- **Observability**: 任意で Prometheus `/metrics`、`/healthz`、read-only SNMPv2c、パッケージ同梱 Grafana dashboard を提供。
+- **Advanced configuration model**: clustering、MPLS、VRRP、routing instances、class of service、Web UI service settings を構造体ファースト model と diff engine で扱います。
+- **Cluster datastore selection**: `arca-routerd` と embedded NETCONF は同じ SQLite または etcd datastore backend を共有します。
+- **Observability**: 任意で Prometheus `/metrics`、`/healthz`、認証付き config validate/commit API を備えた Web UI dashboard、read-only SNMPv2c、パッケージ同梱 Grafana dashboard を提供。
 
 この仕様で扱うコマンド名は `arca-routerd` と `arca` のみです。廃止済みの command entrypoint はメンテナンス対象外です。
 
-> **互換性メモ**: `set` コマンド構文と NETCONF 設定モデルは維持します。自動移行ツールは v0.5.x の対象外です。
+> **互換性メモ**: `set` コマンド構文と NETCONF 設定モデルは維持します。自動移行ツールは v0.6.x の対象外です。
 
 ---
 
@@ -46,18 +48,19 @@ v0.5.x は現在の統合デーモン経路です：
 6. [Policy Options](#policy-options)
    - [Prefix Lists](#prefix-lists)
    - [Policy Statements](#policy-statements)
-7. [セキュリティ](#security)
+7. [Advanced v0.6 Configuration](#advanced-v06-configuration)
+8. [セキュリティ](#security)
    - [NETCONF サーバ](#netconf-server)
    - [ユーザ管理](#user-management)
    - [レート制限](#rate-limiting)
-8. [設定ワークフロー](#configuration-workflow)
-9. [例](#examples)
-10. [実行時オプションと Observability](#runtime-options-and-observability)
-11. [運用コマンド](#operational-commands)
-12. [設定の妥当性確認](#configuration-validation)
-13. [トラブルシューティング](#troubleshooting)
-14. [参照](#references)
-15. [バージョン履歴](#version-history)
+9. [設定ワークフロー](#configuration-workflow)
+10. [例](#examples)
+11. [実行時オプションと Observability](#runtime-options-and-observability)
+12. [運用コマンド](#operational-commands)
+13. [設定の妥当性確認](#configuration-validation)
+14. [トラブルシューティング](#troubleshooting)
+15. [参照](#references)
+16. [バージョン履歴](#version-history)
 
 ---
 
@@ -492,6 +495,103 @@ set protocols bgp group external import PREFER-CUSTOMER
 
 ---
 
+<a id="advanced-v06-configuration"></a>
+## Advanced v0.6 Configuration
+
+以下の hierarchy は v0.6 の management-plane model です。parser、serializer、validation、clone、conversion、diff、candidate command replacement は実装済みです。FRR VRRP 適用、VPP MPLS interface forwarding、VPP routing-instance table plumbing、FRR L3VPN import/export 制御、VPP class-of-service profile binding と operational visibility、NETCONF live interface state、VPP queue placement telemetry は実装済みで、queue scheduler/policer enforcement と operational QoS counters は段階的に実装します。
+
+Class-of-service interface binding は、managed VPP interface に output traffic-control profile intent として適用されます。VRRP と L3VPN control-plane configuration は FRR file backend と標準の transactional FRR backend の両方で適用されます。
+
+MPLS、VRRP、OSPF、routing-instance、class-of-service の interface 参照は `interfaces` 配下に定義された interface を指す必要があります。未知の interface 参照は southbound apply 前の validation で失敗します。Routing-instance の VPN import/export 設定は、必要な import/export target、route distinguisher、または `routing-options autonomous-system` が不足している場合も apply 前の validation で失敗します。
+
+### Prometheus service
+
+```
+set system services prometheus enabled true
+set system services prometheus listen-address 127.0.0.1
+set system services prometheus port 9090
+```
+
+`listen-address` は IP address または `localhost` を指定します。port を明示せずに有効化した場合、daemon は `9090` を使用します。
+
+### Web UI service
+
+```
+set system services web-ui enabled true
+set system services web-ui listen-address 127.0.0.1
+set system services web-ui port 8080
+```
+
+`listen-address` は IP address または `localhost` を指定します。port を明示せずに有効化した場合、daemon は `8080` を使用します。
+
+### SNMP service
+
+```
+set system services snmp enabled true
+set system services snmp listen-address 127.0.0.1
+set system services snmp port 1161
+set system services snmp community public
+```
+
+`listen-address` は IP address または `localhost` を指定します。port を明示せずに有効化した場合、daemon は標準 UDP port `161` を使用します。community を明示しない場合は `public` を使用します。
+
+### Multi-chassis and VRRP
+
+```
+set chassis cluster enabled true
+set chassis cluster node node0 address 192.0.2.10
+set chassis cluster node node0 priority 120
+set chassis cluster sync etcd endpoint http://127.0.0.1:2379
+
+set protocols vrrp group 10 interface ge-0/0/0
+set protocols vrrp group 10 virtual-address 192.0.2.1
+set protocols vrrp group 10 priority 110
+set protocols vrrp group 10 preempt
+```
+
+`chassis cluster` を有効化し、`sync etcd endpoint` を設定する場合、daemon は `--datastore-backend=etcd` で動作している必要があります。また、設定内の sync endpoints は `--etcd-endpoints` と一致している必要があります。不一致の cluster sync 設定を active に残す commit は validation で失敗します。
+
+VRRP group ID は数値で `1` から `255` の範囲です。VRRP priority は設定する場合 `1` から `254` の範囲です。default 動作にする場合は省略します。設定する VRRP interface は `interfaces` 配下に存在する必要があります。
+
+FRR VRRP 設定を適用する前に、arca-routerd は FRR `vrrpd` が前提にする Linux state を準備します。LCP interface 上に arca 管理の macvlan interface（`arv4-<id>-<hash>` または `arv6-<id>-<hash>`）を作成し、RFC VRRP virtual MAC を設定し、virtual address を `/32` または `/128` として付与して up にします。準備した interface 名は `/var/lib/arca-router/vrrp-interfaces.json` に保存されるため、daemon 再起動後も stale な arca 管理 macvlan interface を削除できます。この処理には `CAP_NET_ADMIN` が必要で、packaged systemd unit には含まれています。
+
+### MPLS and Routing Instances
+
+```
+set protocols mpls interface ge-0/0/0
+
+set routing-options autonomous-system 65000
+set routing-instances BLUE instance-type vrf
+set routing-instances BLUE route-distinguisher 65000:100
+set routing-instances BLUE vrf-target target:65000:100
+set routing-instances BLUE vrf-target import target:65000:101
+set routing-instances BLUE vrf-target export target:65000:102
+set routing-instances BLUE vrf-import BLUE-IN
+set routing-instances BLUE vrf-export BLUE-OUT
+set routing-instances BLUE interface ge-0/0/1
+```
+
+v0.6 では `instance-type vrf` のみ受け付けます。route distinguisher は `<asn>:<number>` 形式です。共通および方向別 VRF target は `target:<asn>:<number>` 形式です。bare `vrf-target` は import/export の両方向に適用され、`vrf-target import` と `vrf-target export` は方向別の extended-community target を追加します。`vrf-import` と `vrf-export` は設定済みの `policy-options policy-statement` 名を参照し、複数回指定して順序付き policy chain を構成できます。
+
+`protocols mpls interface` は対応する managed VPP interface で MPLS forwarding を有効化します。stanza を削除すると、interface を VPP から削除する前に MPLS forwarding を無効化します。MPLS と routing-instance の interface 参照は設定済み interface に解決できる必要があります。
+
+VPP dataplane plumbing では、routing instance ごとに IPv4 / IPv6 FIB table を作成します。`route-distinguisher <asn>:<number>` が設定されている場合は `<number>` を deterministic な VPP table ID として使い、未設定の場合は routing-instance 名から stable な non-zero table ID を導出します。routing instance 配下の interface はその table に bind され、既存 address は table 変更の前後で外して戻すため、address は binding と一緒に移動します。
+
+FRR control-plane plumbing では、routing instance から FRR VRF entry と per-VRF BGP VPN import/export configuration を生成します。bare `vrf-target` は `rt vpn import` と `rt vpn export` の両方に適用され、directional target は指定方向だけに適用されます。export には `route-distinguisher` が必要で、`label vpn export auto` を自動的に有効化します。`vrf-import` と `vrf-export` は `route-map vpn import` / `route-map vpn export` として適用されます。複数 policy が設定されている場合、FRR の単一 route-map slot に合わせて順序付き synthetic route-map を生成します。
+
+### Class of Service
+
+```
+set class-of-service forwarding-class expedited-forwarding queue 5
+set class-of-service traffic-control-profile WAN shaping-rate 1000000000
+set class-of-service traffic-control-profile WAN scheduler-map WAN-SCHED
+set class-of-service interfaces ge-0/0/0 output-traffic-control-profile WAN
+```
+
+Forwarding class queue は `0` から `7` の範囲です。Interface binding は既存の traffic-control profile と設定済み interface を参照する必要があります。
+
+---
+
 <a id="security"></a>
 ## セキュリティ
 
@@ -513,7 +613,15 @@ set security netconf ssh port <port>
 set security netconf ssh port 830
 ```
 
-**注**: NETCONF サーバは `arca-routerd` に統合されています。実際の bind address はデーモンの `--netconf-listen`（デフォルト `:830`）で制御します。この設定値はモデル上に保持されるため、配備時の NETCONF ポートと一致させてください。
+**注**: NETCONF サーバは `arca-routerd` に統合されています。`--netconf-listen` を省略した場合、daemon は `security netconf ssh port` の設定ポートで listen します。未設定の場合は `:830` を使用します。`--netconf-listen` は明示的な runtime override として残り、listen address も含めて指定できます。
+
+NETCONF XML の get-config/edit-config は、v0.6 management-plane model の `system services`、`chassis cluster`、`protocols mpls`、`protocols vrrp`、`routing-instances`、`class-of-service`、および非機密の `security netconf` / `security rate-limit` 設定に対応します。Security user の secret は NETCONF XML 応答には意図的に出力しません。
+
+NETCONF `<get>` は config 由来の system/routing state に加えて、arca-routerd が VPP state を取得できる場合は managed interface の admin/oper status、physical address、bound `qos-profile`、counter（`rx-packets`、`tx-packets`、`rx-bytes`、`tx-bytes`、`rx-errors`、`tx-errors`、`drops`）、VPP RX/TX queue placement を返します。live collection に失敗した場合、interface output は設定済み address と unknown operational status にフォールバックします。
+
+internal gRPC の interface state API と `arca show interfaces` も、同じ bound QoS profile、packet counter、queue placement summary を local operator 向けに表示します。
+
+server hello は arca-router YANG module capability として `urn:arca:router:config:1.0?module=arca-router&revision=2025-12-27` を広告します。
 
 <a id="user-management"></a>
 ### ユーザ管理
@@ -599,13 +707,24 @@ set security rate-limit per-user 20
 
 ### ファイルベース設定
 
-`/etc/arca-router/arca-router.conf` はブートストラップ用の設定ソースです。`arca-routerd` は起動時にまず `/var/lib/arca-router/config.db` から current running configuration を読み込みます。running 設定が存在しない場合のみ、設定ファイルを parse して engine 経由で適用し、datastore に保存します。
+`/etc/arca-router/arca-router.conf` はブートストラップ用の設定ソースです。`arca-routerd` は起動時にまず設定済み datastore から current running configuration を読み込みます。running 設定が存在しない場合のみ、設定ファイルを parse して engine 経由で適用し、datastore に保存します。
 
 1. 初回起動前、または datastore を意図的に初期化した後に `/etc/arca-router/arca-router.conf` を編集
 2. デーモン起動/再起動: `sudo systemctl restart arca-routerd`
 3. 確認: `sudo journalctl -u arca-routerd -n 50`
 
 datastore 初期化後の通常の設定変更は `arca` または NETCONF を使用します。
+
+clustered deployment では etcd datastore backend を使用します。
+
+```bash
+arca-routerd \
+  --datastore-backend=etcd \
+  --etcd-endpoints=https://etcd1:2379,https://etcd2:2379,https://etcd3:2379 \
+  --etcd-prefix=/arca-router/
+```
+
+`chassis cluster sync etcd endpoint` を設定している場合、その endpoints は daemon の `--etcd-endpoints` と一致している必要があります。一致しない場合は、startup または commit validation で失敗し、設定は受け入れられません。
 
 ### NETCONF 設定
 
@@ -826,14 +945,24 @@ set security rate-limit per-user 20
 --config <path>            bootstrap 設定ファイル（デフォルト: /etc/arca-router/arca-router.conf）
 --hardware <path>          hardware mapping file（デフォルト: /etc/arca-router/hardware.yaml）
 --datastore <path>         SQLite datastore（デフォルト: /var/lib/arca-router/config.db）
+--datastore-backend <mode> configuration datastore backend: sqlite または etcd（デフォルト: sqlite）
+--etcd-endpoints <list>    --datastore-backend=etcd 用の comma-separated etcd endpoints
+--etcd-prefix <prefix>     etcd key prefix（デフォルト: /arca-router/）
+--etcd-timeout <duration>  etcd connection / operation timeout（デフォルト: 5s）
+--etcd-username <value>    etcd username
+--etcd-password <value>    etcd password
+--etcd-cert <path>         etcd TLS client certificate
+--etcd-key <path>          etcd TLS client key
+--etcd-ca <path>           etcd TLS CA certificate
 --grpc-socket <path>       内部 gRPC Unix socket（デフォルト: /run/arca-router/routerd.sock）
---netconf-listen <addr>    NETCONF/SSH listen address（デフォルト: :830）
+--netconf-listen <addr>    NETCONF/SSH listen address。security netconf ssh port より優先（デフォルト: :830）
 --host-key <path>          NETCONF SSH host key path
 --user-db <path>           NETCONF user database path
 --frr-apply-mode <mode>    FRR backend: transactional または file（デフォルト: transactional）
---metrics-listen <addr>    Prometheus listen address。空の場合は無効
+--metrics-listen <addr>    Prometheus listen address。system services prometheus config より優先
+--web-listen <addr>        Web UI listen address。system services web-ui config より優先
 --snmp-listen <addr>       SNMPv2c UDP listen address。空の場合は無効
---snmp-community <value>   SNMPv2c read-only community（デフォルト: public）
+--snmp-community <value>   SNMPv2c read-only community。system services snmp config より優先（デフォルト: public）
 --mock-vpp                 test 用の mock VPP client を使用
 ```
 
@@ -841,7 +970,7 @@ set security rate-limit per-user 20
 
 標準 backend は `transactional` です。FRR 側で `/etc/frr/daemons` の `mgmtd=yes` と、`arca-router` service user からの `vtysh` access（通常は `frrvty` group）が必要です。
 
-`file` backend は full FRR config を書き出し、`frr-reload.py` で適用します。復旧・互換用途として保持しており、利用する場合は service user が `/etc/frr/frr.conf` に書き込むための追加権限が必要です。
+arca-router 標準の FRR daemon set は `bgpd`、`ospfd`、`zebra`、`staticd`、`mgmtd`、`vrrpd` です。transactional backend は FRR の interface tree 配下にある `frr-vrrpd` YANG model を使って VRRP を適用します。`file` backend は full FRR config を書き出し、`frr-reload.py` で適用します。復旧・互換用途として保持しており、利用する場合は service user が `/etc/frr/frr.conf` に書き込むための追加権限が必要です。
 
 ### Prometheus と health
 
@@ -851,16 +980,60 @@ metrics endpoint は次のように起動します。
 arca-routerd --metrics-listen=:9090
 ```
 
+running configuration からも有効化できます。
+
+```
+set system services prometheus enabled true
+set system services prometheus listen-address 127.0.0.1
+set system services prometheus port 9090
+```
+
 Endpoints:
 
 - `GET /metrics`
 - `GET /healthz`
+
+metrics endpoint は daemon uptime、running config version、NETCONF counters、etcd health と running revision の config sync gauge、cluster enabled state、node count、etcd sync configuration、datastore alignment の cluster sync gauge、FRR VRRP operational gauge、HA convergence gauge、class-of-service intent gauge、VPP LCP reconciliation gauge（pair count、inconsistency count、check failure、latest check timestamp）を出力します。
 
 パッケージ版では Grafana dashboard を次の場所へインストールします。
 
 ```
 /usr/share/arca-router/grafana/arca-routerd-dashboard.json
 ```
+
+dashboard には daemon、NETCONF、config sync、HA、FRR VRRP、class-of-service intent、VPP LCP の panel が含まれ、Prometheus metrics endpoint を参照します。
+
+### Web UI
+
+Web UI は次のように起動します。
+
+```bash
+arca-routerd --web-listen=127.0.0.1:8080
+```
+
+設定からも有効化できます。
+
+```
+set system services web-ui enabled true
+set system services web-ui listen-address 127.0.0.1
+set system services web-ui port 8080
+```
+
+Endpoints:
+
+- `GET /`
+- `GET /api/config`
+- `GET /api/config/history`
+- `GET /api/status`
+- `POST /api/config/validate`
+- `POST /api/config/commit`
+
+`/api/status` は build metadata、uptime、running config version、datastore backend、cluster sync state、class-of-service intent state、per-group detail を含む FRR VRRP operational state、HA convergence state、VPP LCP reconciliation state、NETCONF counters を返します。
+`/api/config` は running configuration を set-command text と running config version として返します。dashboard でも同じ running configuration を browser editor に表示します。
+`/api/config/history` は recent configuration commits を返し、dashboard の commit history panel で使用します。
+
+running configuration に password 付きの `security users` が存在する場合、Web UI は HTTP Basic authentication を要求します。built-in の `read-only`、`operator`、`admin` role は read-only dashboard と API endpoints へのアクセスを許可されます。
+configuration write には `operator` または `admin` が必要です。dashboard editor は `/api/config/validate` と `/api/config/commit` を呼び出します。`/api/config/validate` は `{ "config_text": "set ..." }` を受け取り、validation status と diff text を返します。`/api/config/commit` は `{ "config_text": "set ...", "message": "..." }` を受け取り、CLI と同じ internal gRPC candidate workflow で commit します。
 
 ### SNMP
 
@@ -870,13 +1043,22 @@ read-only SNMPv2c endpoint は次のように起動します。
 arca-routerd --snmp-listen=:1161 --snmp-community=public
 ```
 
+running configuration からも有効化できます。
+
+```
+set system services snmp enabled true
+set system services snmp listen-address 127.0.0.1
+set system services snmp port 1161
+set system services snmp community public
+```
+
 パッケージ版の systemd unit は `CAP_NET_BIND_SERVICE` を付与しているため、設定すれば標準 UDP port 161 も利用できます。
 
 ```bash
 arca-routerd --snmp-listen=:161 --snmp-community=<read-only-community>
 ```
 
-SNMP は監視用途のみを想定しています。信頼できないネットワークには公開しないでください。
+SNMP は監視用途のみを想定しています。信頼できないネットワークには公開しないでください。custom arca-router OID subtree は daemon、config、NETCONF、class-of-service intent、FRR VRRP operational、HA convergence、VPP LCP reconciliation counters を公開します。
 
 ---
 
@@ -903,9 +1085,23 @@ arca show bgp neighbor <ip>
 # OSPF neighbors
 arca show ospf neighbor
 
+# VRRP operational state
+arca show vrrp
+
+# VPP LCP reconciliation state
+arca show lcp
+
+# HA convergence status
+arca show ha
+
+# Class-of-service intent
+arca show class-of-service
+
 # Configuration
 arca show configuration
 ```
+
+`show interfaces` は live VPP admin/oper status、bound QoS profile、packet counter、RX/TX queue placement を取得できる場合に表示します。名前フィルターには `ge-0/0/0` のような設定上の interface 名を使用します。`show vrrp` は arca-routerd 経由で FRR `show vrrp` output を表示します。`show lcp` は HA convergence check で使う cached VPP LCP reconciliation state を表示します。`show ha` は Web UI、Prometheus、SNMP と同じ HA convergence summary を表示します。`show class-of-service` は running CoS intent を表示し、VPP enforcement support が段階的対応の間は scheduler/policer enforcement を `intent-only` として報告します。
 
 対話型の設定モードでは、`show history [N]` で commit history も表示できます。
 
@@ -1018,11 +1214,15 @@ sudo vtysh -c "show running-config"
 ### Observability endpoint の確認
 
 ```
-# --metrics-listen 有効時の Prometheus / health
+# --metrics-listen または system services prometheus 有効時の Prometheus / health
 curl http://127.0.0.1:9090/healthz
 curl http://127.0.0.1:9090/metrics
 
-# --snmp-listen 有効時の SNMP
+# --web-listen または system services web-ui 有効時の Web UI
+curl http://127.0.0.1:8080/api/status
+curl http://127.0.0.1:8080/api/config
+
+# --snmp-listen または system services snmp 有効時の SNMP
 snmpget -v 2c -c public 127.0.0.1:1161 1.3.6.1.3.9950.1.3.0
 ```
 
@@ -1057,6 +1257,12 @@ sudo vppctl show interface addr
 ---
 
 ## バージョン履歴
+
+- **v0.6.x**: Advanced feature foundations
+  - clustering、MPLS、VRRP、routing instances、class of service、Web UI の management-plane config model
+  - clustered candidate/running configuration 向け etcd datastore backend selection
+  - Web UI dashboard、JSON status/config endpoint、認証付き validate/commit API、commit history panel
+  - v0.6 config diff と candidate replacement coverage
 
 - **v0.5.x**: Production hardening
   - 現行コマンド名は `arca-routerd` と `arca`
