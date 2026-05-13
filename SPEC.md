@@ -546,7 +546,7 @@ VRRP group IDs must be numeric and between `1` and `255`. VRRP priority must be 
 
 Before applying FRR VRRP configuration, arca-routerd prepares the Linux state expected by FRR `vrrpd`: arca-owned macvlan interfaces named `arv4-<id>-<hash>` or `arv6-<id>-<hash>` are created on the LCP interface, assigned the RFC VRRP virtual MAC, configured with the virtual address as `/32` or `/128`, and brought up. The prepared interface names are persisted in `/var/lib/arca-router/vrrp-interfaces.json` so stale arca-owned macvlan interfaces can be removed after daemon restart. This requires `CAP_NET_ADMIN`, which is included in the packaged systemd unit.
 
-arca-routerd reads FRR VRRP operational state through `vtysh -c "show vrrp json"`. Post-failover convergence is exposed as read-only status. HA convergence is considered configured when chassis clustering is enabled and at least one VRRP group exists. It is considered converged only when the cluster has at least two nodes, etcd cluster sync is configured and aligned with the daemon datastore, etcd config synchronization is healthy, every configured FRR VRRP group is observed in an active `Master` or `Backup` state, and VPP LCP reconciliation has run without errors or inconsistencies.
+arca-routerd reads FRR VRRP operational state through `vtysh -c "show vrrp json"`. Post-failover convergence is exposed as read-only status, including per-group FRR VRRP state in `/api/status` and the Web UI. HA convergence is considered configured when chassis clustering is enabled and at least one VRRP group exists. It is considered converged only when the cluster has at least two nodes, etcd cluster sync is configured and aligned with the daemon datastore, etcd config synchronization is healthy, every configured FRR VRRP group is observed in an active `Master` or `Backup` state, and VPP LCP reconciliation has run without errors or inconsistencies.
 
 ### MPLS and Routing Instances
 
@@ -1012,7 +1012,7 @@ Endpoints:
 - `POST /api/config/validate`
 - `POST /api/config/commit`
 
-`/api/status` includes build metadata, uptime, running config version, datastore backend, cluster sync state, FRR VRRP operational state, HA convergence state, VPP LCP reconciliation state, and NETCONF counters.
+`/api/status` includes build metadata, uptime, running config version, datastore backend, cluster sync state, FRR VRRP operational state with per-group state details, HA convergence state, VPP LCP reconciliation state, and NETCONF counters.
 `/api/config` returns the running configuration as set-command text with the running config version. The dashboard renders the same running configuration in the browser editor.
 `/api/config/history` returns recent configuration commits and backs the dashboard commit history panel.
 
