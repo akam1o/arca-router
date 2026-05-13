@@ -29,11 +29,12 @@ import (
 // Server is the internal gRPC server that exposes configuration,
 // session, and operational state services over a Unix socket.
 type Server struct {
-	engine   *engine.Engine
-	store    store.ConfigStore
-	sessions *SessionManager
-	log      *slog.Logger
-	server   *googlegrpc.Server
+	engine         *engine.Engine
+	store          store.ConfigStore
+	sessions       *SessionManager
+	log            *slog.Logger
+	server         *googlegrpc.Server
+	stateCollector interfaceStateCollector
 }
 
 var (
@@ -42,6 +43,10 @@ var (
 	}
 	runOperationalVtyshCommand = runVtyshCommandReal
 )
+
+type interfaceStateCollector interface {
+	CollectState(ctx context.Context) (map[string]*model.InterfaceState, error)
+}
 
 // NewServer creates a new gRPC server.
 func NewServer(eng *engine.Engine, st store.ConfigStore, log *slog.Logger) *Server {
@@ -68,6 +73,11 @@ func (s *Server) Stop() {
 	if s.server != nil {
 		s.server.GracefulStop()
 	}
+}
+
+// SetInterfaceStateCollector installs a managed interface state source.
+func (s *Server) SetInterfaceStateCollector(collector interfaceStateCollector) {
+	s.stateCollector = collector
 }
 
 // --- ConfigService implementation ---
@@ -424,6 +434,64 @@ func (s *Server) ReleaseLock(ctx context.Context, sessionID string) error {
 
 // GetInterfaces returns interface operational state.
 func (s *Server) GetInterfaces(ctx context.Context, nameFilter string) ([]InterfaceInfo, error) {
+	if s.stateCollector != nil {
+		return s.getCollectedInterfaces(ctx, nameFilter)
+	}
+
+	return s.getDirectVPPInterfaces(ctx, nameFilter)
+}
+
+func (s *Server) getCollectedInterfaces(ctx context.Context, nameFilter string) ([]InterfaceInfo, error) {
+	states, err := s.stateCollector.CollectState(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("collect interface state: %w", err)
+	}
+
+	out := make([]InterfaceInfo, 0, len(states))
+	for fallbackName, state := range states {
+		if state == nil {
+			continue
+		}
+		name := state.Name
+		if name == "" {
+			name = fallbackName
+		}
+		if name == "" {
+			continue
+		}
+		if nameFilter != "" && name != nameFilter {
+			continue
+		}
+		info := InterfaceInfo{
+			Name:        name,
+			AdminStatus: state.AdminStatus,
+			OperStatus:  state.OperStatus,
+			Speed:       state.Speed,
+			MTU:         state.MTU,
+			MAC:         state.MAC,
+			QoSProfile:  state.QoSProfile,
+		}
+		if counters := state.Counters; counters != nil {
+			info.RxPackets = counters.RxPackets
+			info.TxPackets = counters.TxPackets
+			info.RxBytes = counters.RxBytes
+			info.TxBytes = counters.TxBytes
+			info.RxErrors = counters.RxErrors
+			info.TxErrors = counters.TxErrors
+		}
+		if queues := state.Queues; queues != nil {
+			info.RxQueues = rxQueueInfosFromModel(queues.Rx)
+			info.TxQueues = txQueueInfosFromModel(queues.Tx)
+		}
+		out = append(out, info)
+	}
+	sort.Slice(out, func(i, j int) bool {
+		return out[i].Name < out[j].Name
+	})
+	return out, nil
+}
+
+func (s *Server) getDirectVPPInterfaces(ctx context.Context, nameFilter string) ([]InterfaceInfo, error) {
 	client := newOperationalVPPClient()
 	if err := client.Connect(ctx); err != nil {
 		return nil, fmt.Errorf("connect to VPP: %w", err)
@@ -480,6 +548,30 @@ func (s *Server) GetInterfaces(ctx context.Context, nameFilter string) ([]Interf
 		return out[i].Name < out[j].Name
 	})
 	return out, nil
+}
+
+func rxQueueInfosFromModel(queues []model.InterfaceRxQueue) []InterfaceRxQueueInfo {
+	infos := make([]InterfaceRxQueueInfo, 0, len(queues))
+	for _, queue := range queues {
+		infos = append(infos, InterfaceRxQueueInfo{
+			QueueID:  queue.QueueID,
+			WorkerID: queue.WorkerID,
+			Mode:     queue.Mode,
+		})
+	}
+	return infos
+}
+
+func txQueueInfosFromModel(queues []model.InterfaceTxQueue) []InterfaceTxQueueInfo {
+	infos := make([]InterfaceTxQueueInfo, 0, len(queues))
+	for _, queue := range queues {
+		infos = append(infos, InterfaceTxQueueInfo{
+			QueueID: queue.QueueID,
+			Shared:  queue.Shared,
+			Threads: append([]uint32(nil), queue.Threads...),
+		})
+	}
+	return infos
 }
 
 func rxQueueInfosFromVPP(queues []pkgvpp.InterfaceRxQueuePlacement) []InterfaceRxQueueInfo {

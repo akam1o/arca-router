@@ -37,6 +37,20 @@ type fakeStore struct {
 	listCalls  int
 }
 
+type fakeInterfaceStateCollector struct {
+	states map[string]*model.InterfaceState
+	err    error
+	calls  int
+}
+
+func (f *fakeInterfaceStateCollector) CollectState(ctx context.Context) (map[string]*model.InterfaceState, error) {
+	f.calls++
+	if f.err != nil {
+		return nil, f.err
+	}
+	return f.states, nil
+}
+
 func (f *fakeStore) GetLatestSnapshot(ctx context.Context) (*model.ConfigSnapshot, error) {
 	return f.saved, nil
 }
@@ -275,6 +289,68 @@ func TestOperationalStateEndpointsReadVPPAndFRR(t *testing.T) {
 	}
 	if _, err := srv.GetBGPNeighborText(ctx, "not-an-address"); err == nil || !strings.Contains(err.Error(), "invalid BGP neighbor address") {
 		t.Fatalf("GetBGPNeighborText(invalid) error = %v, want invalid peer address", err)
+	}
+}
+
+func TestGetInterfacesUsesManagedStateCollector(t *testing.T) {
+	srv := NewServer(engine.NewEngine(nil, testLogger()), &fakeStore{}, testLogger())
+	collector := &fakeInterfaceStateCollector{
+		states: map[string]*model.InterfaceState{
+			"fallback0": {
+				Name:        "ge-0/0/0",
+				AdminStatus: "up",
+				OperStatus:  "down",
+				Speed:       10_000_000_000,
+				MTU:         1500,
+				MAC:         "02:00:00:00:00:01",
+				QoSProfile:  "WAN",
+				Counters: &model.InterfaceCounters{
+					RxPackets: 10,
+					TxPackets: 20,
+					RxBytes:   100,
+					TxBytes:   200,
+					RxErrors:  1,
+					TxErrors:  2,
+				},
+				Queues: &model.InterfaceQueues{
+					Rx: []model.InterfaceRxQueue{
+						{QueueID: 0, WorkerID: 3, Mode: "adaptive"},
+					},
+					Tx: []model.InterfaceTxQueue{
+						{QueueID: 1, Shared: true, Threads: []uint32{0, 3}},
+					},
+				},
+			},
+			"ge-0/0/1": {
+				AdminStatus: "down",
+				OperStatus:  "down",
+			},
+		},
+	}
+	srv.SetInterfaceStateCollector(collector)
+
+	ifaces, err := srv.GetInterfaces(context.Background(), "ge-0/0/0")
+	if err != nil {
+		t.Fatalf("GetInterfaces() error = %v", err)
+	}
+	if collector.calls != 1 {
+		t.Fatalf("collector calls = %d, want 1", collector.calls)
+	}
+	if len(ifaces) != 1 {
+		t.Fatalf("GetInterfaces() returned %d interfaces, want 1", len(ifaces))
+	}
+	got := ifaces[0]
+	if got.Name != "ge-0/0/0" || got.AdminStatus != "up" || got.OperStatus != "down" || got.Speed != 10_000_000_000 || got.MTU != 1500 || got.MAC != "02:00:00:00:00:01" {
+		t.Fatalf("GetInterfaces()[0] = %#v, want managed interface state", got)
+	}
+	if got.QoSProfile != "WAN" || got.RxPackets != 10 || got.TxPackets != 20 || got.RxBytes != 100 || got.TxBytes != 200 || got.RxErrors != 1 || got.TxErrors != 2 {
+		t.Fatalf("GetInterfaces()[0] counters/QoS = %#v, want collector values", got)
+	}
+	if len(got.RxQueues) != 1 || got.RxQueues[0].WorkerID != 3 || got.RxQueues[0].Mode != "adaptive" {
+		t.Fatalf("GetInterfaces()[0] RX queues = %#v, want collector queue placement", got.RxQueues)
+	}
+	if len(got.TxQueues) != 1 || got.TxQueues[0].QueueID != 1 || !got.TxQueues[0].Shared || len(got.TxQueues[0].Threads) != 2 || got.TxQueues[0].Threads[1] != 3 {
+		t.Fatalf("GetInterfaces()[0] TX queues = %#v, want collector queue placement", got.TxQueues)
 	}
 }
 

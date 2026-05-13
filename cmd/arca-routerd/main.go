@@ -419,6 +419,7 @@ func run(ctx context.Context, f *daemonFlags, log *logger.Logger) error {
 	defer func() { _ = lis.Close() }()
 
 	grpcServer := nbgrpc.NewServer(eng, configStore, slog.Default())
+	grpcServer.SetInterfaceStateCollector(vppPlugin)
 	grpcErr := make(chan error, 1)
 	go func() {
 		grpcErr <- grpcServer.Serve(lis)
