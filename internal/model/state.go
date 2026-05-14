@@ -20,6 +20,8 @@ type InterfaceState struct {
 	MTU         uint32             `json:"mtu,omitempty"`
 	MAC         string             `json:"mac,omitempty"`
 	QoSProfile  string             `json:"qos-profile,omitempty"`
+	IPv4TableID uint32             `json:"ipv4-table-id,omitempty"`
+	IPv6TableID uint32             `json:"ipv6-table-id,omitempty"`
 	Counters    *InterfaceCounters `json:"counters,omitempty"`
 	Queues      *InterfaceQueues   `json:"queues,omitempty"`
 	LastChange  time.Time          `json:"last-change,omitempty"`

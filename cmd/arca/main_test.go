@@ -532,6 +532,18 @@ func TestInterfaceQoSProfile(t *testing.T) {
 	}
 }
 
+func TestInterfaceTableSummary(t *testing.T) {
+	if got := interfaceTableSummary(grpcclient.InterfaceInfo{IPv4TableID: 100, IPv6TableID: 100}); got != "v4/v6:100" {
+		t.Fatalf("interfaceTableSummary() = %q, want v4/v6:100", got)
+	}
+	if got := interfaceTableSummary(grpcclient.InterfaceInfo{IPv4TableID: 100, IPv6TableID: 200}); got != "v4:100 v6:200" {
+		t.Fatalf("interfaceTableSummary(split) = %q, want v4:100 v6:200", got)
+	}
+	if got := interfaceTableSummary(grpcclient.InterfaceInfo{}); got != "-" {
+		t.Fatalf("interfaceTableSummary(empty) = %q, want -", got)
+	}
+}
+
 func TestOneShotShowOSPFNeighborReturnsSuccess(t *testing.T) {
 	client := &fakeInteractiveClient{}
 	code := oneShotShow(context.Background(), client, []string{"ospf", "neighbor"}, &cliFlags{})

@@ -495,6 +495,8 @@ func (s *Server) getCollectedInterfaces(ctx context.Context, nameFilter string) 
 			MTU:         state.MTU,
 			MAC:         state.MAC,
 			QoSProfile:  state.QoSProfile,
+			IPv4TableID: state.IPv4TableID,
+			IPv6TableID: state.IPv6TableID,
 		}
 		if counters := state.Counters; counters != nil {
 			info.RxPackets = counters.RxPackets
@@ -554,6 +556,16 @@ func (s *Server) getDirectVPPInterfaces(ctx context.Context, nameFilter string) 
 			OperStatus:  upDown(iface.LinkUp),
 			MAC:         iface.MAC.String(),
 			QoSProfile:  iface.QoSProfile,
+		}
+		if tableID, err := client.GetInterfaceTable(ctx, iface.SwIfIndex, false); err != nil {
+			s.log.Debug("failed to get VPP interface IPv4 table", slog.String("interface", iface.Name), slog.Any("error", err))
+		} else {
+			info.IPv4TableID = tableID
+		}
+		if tableID, err := client.GetInterfaceTable(ctx, iface.SwIfIndex, true); err != nil {
+			s.log.Debug("failed to get VPP interface IPv6 table", slog.String("interface", iface.Name), slog.Any("error", err))
+		} else {
+			info.IPv6TableID = tableID
 		}
 		if counters, ok := countersByIndex[iface.SwIfIndex]; ok {
 			info.RxPackets = counters.RxPackets

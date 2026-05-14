@@ -246,6 +246,14 @@ func TestOperationalStateEndpointsReadVPPAndFRR(t *testing.T) {
 	if err := vppClient.SetQoSProfile(ctx, iface.SwIfIndex, pkgvpp.QoSProfile{Name: "WAN"}); err != nil {
 		t.Fatalf("mock VPP SetQoSProfile() error = %v", err)
 	}
+	for _, isIPv6 := range []bool{false, true} {
+		if err := vppClient.AddIPTable(ctx, pkgvpp.IPTable{ID: 100, IsIPv6: isIPv6, Name: "BLUE"}); err != nil {
+			t.Fatalf("mock VPP AddIPTable(IPv6=%t) error = %v", isIPv6, err)
+		}
+		if err := vppClient.SetInterfaceTable(ctx, iface.SwIfIndex, 100, isIPv6); err != nil {
+			t.Fatalf("mock VPP SetInterfaceTable(IPv6=%t) error = %v", isIPv6, err)
+		}
+	}
 	if err := vppClient.Close(); err != nil {
 		t.Fatalf("mock VPP Close() error = %v", err)
 	}
@@ -269,6 +277,9 @@ func TestOperationalStateEndpointsReadVPPAndFRR(t *testing.T) {
 	}
 	if ifaces[0].QoSProfile != "WAN" {
 		t.Fatalf("GetInterfaces()[0] QoSProfile = %q, want WAN", ifaces[0].QoSProfile)
+	}
+	if ifaces[0].IPv4TableID != 100 || ifaces[0].IPv6TableID != 100 {
+		t.Fatalf("GetInterfaces()[0] table IDs = %d/%d, want 100/100", ifaces[0].IPv4TableID, ifaces[0].IPv6TableID)
 	}
 	if len(ifaces[0].RxQueues) != 1 || ifaces[0].RxQueues[0].WorkerID != 1 || ifaces[0].RxQueues[0].Mode != "polling" {
 		t.Fatalf("GetInterfaces()[0] RX queues = %#v, want VPP queue placement", ifaces[0].RxQueues)
@@ -347,6 +358,8 @@ func TestGetInterfacesUsesManagedStateCollector(t *testing.T) {
 				MTU:         1500,
 				MAC:         "02:00:00:00:00:01",
 				QoSProfile:  "WAN",
+				IPv4TableID: 100,
+				IPv6TableID: 100,
 				Counters: &model.InterfaceCounters{
 					RxPackets: 10,
 					TxPackets: 20,
@@ -386,7 +399,7 @@ func TestGetInterfacesUsesManagedStateCollector(t *testing.T) {
 	if got.Name != "ge-0/0/0" || got.AdminStatus != "up" || got.OperStatus != "down" || got.Speed != 10_000_000_000 || got.MTU != 1500 || got.MAC != "02:00:00:00:00:01" {
 		t.Fatalf("GetInterfaces()[0] = %#v, want managed interface state", got)
 	}
-	if got.QoSProfile != "WAN" || got.RxPackets != 10 || got.TxPackets != 20 || got.RxBytes != 100 || got.TxBytes != 200 || got.RxErrors != 1 || got.TxErrors != 2 {
+	if got.QoSProfile != "WAN" || got.IPv4TableID != 100 || got.IPv6TableID != 100 || got.RxPackets != 10 || got.TxPackets != 20 || got.RxBytes != 100 || got.TxBytes != 200 || got.RxErrors != 1 || got.TxErrors != 2 {
 		t.Fatalf("GetInterfaces()[0] counters/QoS = %#v, want collector values", got)
 	}
 	if len(got.RxQueues) != 1 || got.RxQueues[0].WorkerID != 3 || got.RxQueues[0].Mode != "adaptive" {

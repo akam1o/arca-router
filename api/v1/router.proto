@@ -234,6 +234,8 @@ message InterfaceState {
   repeated InterfaceRxQueue rx_queues = 13;
   repeated InterfaceTxQueue tx_queues = 14;
   string qos_profile = 15;
+  uint32 ipv4_table_id = 16;
+  uint32 ipv6_table_id = 17;
 }
 
 message InterfaceRxQueue {

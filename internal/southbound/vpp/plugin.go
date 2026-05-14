@@ -345,6 +345,16 @@ func (p *VPPPlugin) CollectState(ctx context.Context) (map[string]*model.Interfa
 			MAC:        iface.MAC.String(),
 			QoSProfile: iface.QoSProfile,
 		}
+		if tableID, err := p.client.GetInterfaceTable(ctx, iface.SwIfIndex, false); err != nil {
+			p.log.Warn("Failed to get VPP interface IPv4 table", slog.String("interface", junosName), slog.Any("error", err))
+		} else {
+			state.IPv4TableID = tableID
+		}
+		if tableID, err := p.client.GetInterfaceTable(ctx, iface.SwIfIndex, true); err != nil {
+			p.log.Warn("Failed to get VPP interface IPv6 table", slog.String("interface", junosName), slog.Any("error", err))
+		} else {
+			state.IPv6TableID = tableID
+		}
 		if iface.AdminUp {
 			state.AdminStatus = "up"
 		} else {

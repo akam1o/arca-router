@@ -59,6 +59,9 @@ type Client interface {
 	// SetInterfaceTable binds an interface to an IPv4 or IPv6 FIB table.
 	SetInterfaceTable(ctx context.Context, ifIndex uint32, tableID uint32, isIPv6 bool) error
 
+	// GetInterfaceTable returns the IPv4 or IPv6 FIB table bound to an interface.
+	GetInterfaceTable(ctx context.Context, ifIndex uint32, isIPv6 bool) (uint32, error)
+
 	// SetQoSProfile binds output QoS policy intent to an interface.
 	SetQoSProfile(ctx context.Context, ifIndex uint32, profile QoSProfile) error
 
