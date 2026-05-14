@@ -11,32 +11,34 @@ import (
 )
 
 type fakeInteractiveClient struct {
-	acquireLockErr  error
-	discardErr      error
-	releaseLockErr  error
-	history         []grpcclient.CommitInfo
-	routeText       string
-	routeProtocol   string
-	routeFamily     string
-	bgpSummaryText  string
-	bgpNeighborText string
-	ospfText        string
-	ospfFamily      string
-	vrrpText        string
-	bfdText         string
-	bfdInfo         *grpcclient.BFDStatusInfo
-	bfdPeerAddress  string
-	bfdBrief        bool
-	bfdCounters     bool
-	lcpInfo         *grpcclient.LCPReconciliationInfo
-	haInfo          *grpcclient.HAStatusInfo
-	cosInfo         *grpcclient.ClassOfServiceInfo
+	acquireLockErr   error
+	discardErr       error
+	releaseLockErr   error
+	history          []grpcclient.CommitInfo
+	routeText        string
+	routeProtocol    string
+	routeFamily      string
+	routingInstances []grpcclient.RoutingInstanceInfo
+	bgpSummaryText   string
+	bgpNeighborText  string
+	ospfText         string
+	ospfFamily       string
+	vrrpText         string
+	bfdText          string
+	bfdInfo          *grpcclient.BFDStatusInfo
+	bfdPeerAddress   string
+	bfdBrief         bool
+	bfdCounters      bool
+	lcpInfo          *grpcclient.LCPReconciliationInfo
+	haInfo           *grpcclient.HAStatusInfo
+	cosInfo          *grpcclient.ClassOfServiceInfo
 
 	acquireLockCalls int
 	discardCalls     int
 	releaseLockCalls int
 	commitCalls      int
 	bfdStatusCalls   int
+	routingCalls     int
 	listHistoryCalls int
 	rollbackCalls    int
 	validateCalls    int
@@ -101,6 +103,11 @@ func (f *fakeInteractiveClient) GetInterfaces(ctx context.Context, nameFilter st
 
 func (f *fakeInteractiveClient) GetRoutes(ctx context.Context, prefixFilter, protoFilter string) ([]grpcclient.RouteInfo, error) {
 	return nil, nil
+}
+
+func (f *fakeInteractiveClient) GetRoutingInstances(ctx context.Context) ([]grpcclient.RoutingInstanceInfo, error) {
+	f.routingCalls++
+	return f.routingInstances, nil
 }
 
 func (f *fakeInteractiveClient) GetBGPNeighbors(ctx context.Context) ([]grpcclient.BGPNeighborInfo, error) {
@@ -546,6 +553,34 @@ func TestCmdShowClassOfServiceReturnsOutput(t *testing.T) {
 	}
 }
 
+func TestCmdShowRoutingInstancesReturnsOutput(t *testing.T) {
+	ctx := context.Background()
+	client := &fakeInteractiveClient{routingInstances: []grpcclient.RoutingInstanceInfo{
+		{
+			Name:               "BLUE",
+			InstanceType:       "vrf",
+			RouteDistinguisher: "65000:100",
+			IPv4TableID:        100,
+			IPv6TableID:        100,
+			Interfaces:         []string{"ge-0/0/0"},
+		},
+	}}
+	sh := &interactiveShell{
+		client:    client,
+		hostname:  "router",
+		mode:      modeOperational,
+		sessionID: "session-1",
+	}
+
+	err := sh.cmdShow(ctx, []string{"routing-instances", "BLUE"})
+	if err != nil {
+		t.Fatalf("cmdShow(routing-instances BLUE) error = %v", err)
+	}
+	if client.routingCalls != 1 {
+		t.Fatalf("routing instance calls = %d, want 1", client.routingCalls)
+	}
+}
+
 func TestInterfaceQueueSummary(t *testing.T) {
 	got := interfaceQueueSummary(grpcclient.InterfaceInfo{
 		RxQueues: []grpcclient.InterfaceRxQueueInfo{
@@ -581,6 +616,33 @@ func TestInterfaceTableSummary(t *testing.T) {
 	}
 	if got := interfaceTableSummary(grpcclient.InterfaceInfo{}); got != "-" {
 		t.Fatalf("interfaceTableSummary(empty) = %q, want -", got)
+	}
+}
+
+func TestRoutingInstanceTableSummary(t *testing.T) {
+	if got := routingInstanceTableSummary(grpcclient.RoutingInstanceInfo{IPv4TableID: 100, IPv6TableID: 100}); got != "v4/v6:100" {
+		t.Fatalf("routingInstanceTableSummary() = %q, want v4/v6:100", got)
+	}
+	if got := routingInstanceTableSummary(grpcclient.RoutingInstanceInfo{IPv4TableID: 100, IPv6TableID: 200}); got != "v4:100 v6:200" {
+		t.Fatalf("routingInstanceTableSummary(split) = %q, want v4:100 v6:200", got)
+	}
+	if got := routingInstanceTableSummary(grpcclient.RoutingInstanceInfo{}); got != "-" {
+		t.Fatalf("routingInstanceTableSummary(empty) = %q, want -", got)
+	}
+}
+
+func TestRoutingInstancesNameFilter(t *testing.T) {
+	got, err := routingInstancesNameFilter([]string{"BLUE"})
+	if err != nil || got != "BLUE" {
+		t.Fatalf("routingInstancesNameFilter(BLUE) = %q, %v; want BLUE, nil", got, err)
+	}
+	if _, err := routingInstancesNameFilter([]string{"BLUE", "RED"}); err == nil {
+		t.Fatal("routingInstancesNameFilter(extra) error = nil, want error")
+	}
+	instances := []grpcclient.RoutingInstanceInfo{{Name: "BLUE"}, {Name: "RED"}}
+	filtered := filterRoutingInstances(instances, "RED")
+	if len(filtered) != 1 || filtered[0].Name != "RED" {
+		t.Fatalf("filterRoutingInstances() = %#v, want RED", filtered)
 	}
 }
 
@@ -668,6 +730,17 @@ func TestOneShotShowClassOfServiceReturnsSuccess(t *testing.T) {
 	code := oneShotShow(context.Background(), client, []string{"class-of-service"}, &cliFlags{})
 	if code != ExitSuccess {
 		t.Fatalf("oneShotShow(class-of-service) = %d, want %d", code, ExitSuccess)
+	}
+}
+
+func TestOneShotShowRoutingInstancesReturnsSuccess(t *testing.T) {
+	client := &fakeInteractiveClient{routingInstances: []grpcclient.RoutingInstanceInfo{{Name: "BLUE", IPv4TableID: 100, IPv6TableID: 100}}}
+	code := oneShotShow(context.Background(), client, []string{"routing-instances"}, &cliFlags{})
+	if code != ExitSuccess {
+		t.Fatalf("oneShotShow(routing-instances) = %d, want %d", code, ExitSuccess)
+	}
+	if client.routingCalls != 1 {
+		t.Fatalf("routing instance calls = %d, want 1", client.routingCalls)
 	}
 }
 

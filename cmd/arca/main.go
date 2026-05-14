@@ -93,6 +93,7 @@ Show subcommands:
   configuration protocols     Show routing protocol configuration
   interfaces                  Show interface status
   interfaces <name>           Show specific interface details
+  routing-instances [name]    Show routing-instance table mapping
   bgp summary                 Show BGP summary
   bgp neighbor <ip>           Show BGP neighbor details
   ospf neighbor               Show OSPFv2 neighbors
@@ -206,6 +207,20 @@ func oneShotShow(ctx context.Context, client showClient, args []string, f *cliFl
 			return ExitOperationError
 		}
 		printInterfaces(ifaces)
+		return ExitSuccess
+
+	case "routing-instances":
+		nameFilter, err := routingInstancesNameFilter(args[1:])
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+			return ExitUsageError
+		}
+		instances, err := client.GetRoutingInstances(ctx)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+			return ExitOperationError
+		}
+		printRoutingInstances(filterRoutingInstances(instances, nameFilter))
 		return ExitSuccess
 
 	case "bgp":
@@ -376,6 +391,7 @@ type interactiveClient interface {
 type showClient interface {
 	GetRunning(context.Context) (string, uint64, error)
 	GetInterfaces(context.Context, string) ([]grpcclient.InterfaceInfo, error)
+	GetRoutingInstances(context.Context) ([]grpcclient.RoutingInstanceInfo, error)
 	GetRouteText(context.Context, string, string) (string, error)
 	GetBGPSummaryText(context.Context) (string, error)
 	GetBGPNeighborText(context.Context, string) (string, error)
@@ -680,6 +696,21 @@ func (sh *interactiveShell) cmdShow(ctx context.Context, args []string) error {
 			return err
 		}
 		printInterfaces(ifaces)
+		return nil
+
+	case "routing-instances":
+		if sh.mode == modeConfiguration {
+			return fmt.Errorf("'show routing-instances' not available in configuration mode")
+		}
+		nameFilter, err := routingInstancesNameFilter(args[1:])
+		if err != nil {
+			return err
+		}
+		instances, err := sh.client.GetRoutingInstances(ctx)
+		if err != nil {
+			return err
+		}
+		printRoutingInstances(filterRoutingInstances(instances, nameFilter))
 		return nil
 
 	case "bgp":
@@ -1017,6 +1048,7 @@ func (sh *interactiveShell) showHelp() {
 		fmt.Println("  configure                     Enter configuration mode")
 		fmt.Println("  show configuration            Show running configuration")
 		fmt.Println("  show interfaces [<name>]      Show interface status")
+		fmt.Println("  show routing-instances [name] Show routing-instance table mapping")
 		fmt.Println("  show bgp summary              Show BGP summary")
 		fmt.Println("  show bgp neighbor <ip>        Show BGP neighbor details")
 		fmt.Println("  show ospf neighbor            Show OSPFv2 neighbors")
@@ -1121,6 +1153,75 @@ func formatQueueThreads(threads []uint32) string {
 		parts = append(parts, strconv.FormatUint(uint64(thread), 10))
 	}
 	return "[" + strings.Join(parts, ",") + "]"
+}
+
+func printRoutingInstances(instances []grpcclient.RoutingInstanceInfo) {
+	if len(instances) == 0 {
+		fmt.Println("No routing instances found")
+		return
+	}
+	fmt.Printf("%-24s %-8s %-18s %-15s %s\n", "Instance", "Type", "RD", "VPP tables", "Interfaces")
+	fmt.Println(strings.Repeat("-", 98))
+	for _, instance := range instances {
+		fmt.Printf("%-24s %-8s %-18s %-15s %s\n",
+			instance.Name,
+			formatRoutingInstanceValue(instance.InstanceType),
+			formatRoutingInstanceValue(instance.RouteDistinguisher),
+			routingInstanceTableSummary(instance),
+			formatRoutingInstanceList(instance.Interfaces),
+		)
+	}
+
+	if !routingInstancesHavePolicy(instances) {
+		return
+	}
+	fmt.Println()
+	fmt.Println("Import/export")
+	fmt.Printf("%-24s %-32s %-32s %-24s %-24s\n", "Instance", "Import RT", "Export RT", "Import policy", "Export policy")
+	fmt.Println(strings.Repeat("-", 140))
+	for _, instance := range instances {
+		fmt.Printf("%-24s %-32s %-32s %-24s %-24s\n",
+			instance.Name,
+			formatRoutingInstanceList(instance.ImportTargets),
+			formatRoutingInstanceList(instance.ExportTargets),
+			formatRoutingInstanceList(instance.ImportPolicies),
+			formatRoutingInstanceList(instance.ExportPolicies),
+		)
+	}
+}
+
+func routingInstanceTableSummary(instance grpcclient.RoutingInstanceInfo) string {
+	if instance.IPv4TableID == 0 && instance.IPv6TableID == 0 {
+		return "-"
+	}
+	if instance.IPv4TableID == instance.IPv6TableID {
+		return fmt.Sprintf("v4/v6:%d", instance.IPv4TableID)
+	}
+	return fmt.Sprintf("v4:%d v6:%d", instance.IPv4TableID, instance.IPv6TableID)
+}
+
+func routingInstancesHavePolicy(instances []grpcclient.RoutingInstanceInfo) bool {
+	for _, instance := range instances {
+		if len(instance.ImportTargets) > 0 || len(instance.ExportTargets) > 0 ||
+			len(instance.ImportPolicies) > 0 || len(instance.ExportPolicies) > 0 {
+			return true
+		}
+	}
+	return false
+}
+
+func formatRoutingInstanceValue(value string) string {
+	if value == "" {
+		return "-"
+	}
+	return value
+}
+
+func formatRoutingInstanceList(values []string) string {
+	if len(values) == 0 {
+		return "-"
+	}
+	return strings.Join(values, ",")
 }
 
 func printLCPReconciliation(info *grpcclient.LCPReconciliationInfo) {
@@ -1441,6 +1542,29 @@ func bfdStatusRequested(args []string) (bool, error) {
 		return false, fmt.Errorf("'show bfd status' does not accept extra arguments")
 	}
 	return true, nil
+}
+
+func routingInstancesNameFilter(args []string) (string, error) {
+	if len(args) == 0 {
+		return "", nil
+	}
+	if len(args) > 1 {
+		return "", fmt.Errorf("'show routing-instances' accepts at most one instance name")
+	}
+	return args[0], nil
+}
+
+func filterRoutingInstances(instances []grpcclient.RoutingInstanceInfo, name string) []grpcclient.RoutingInstanceInfo {
+	if name == "" {
+		return instances
+	}
+	filtered := make([]grpcclient.RoutingInstanceInfo, 0, 1)
+	for _, instance := range instances {
+		if instance.Name == name {
+			filtered = append(filtered, instance)
+		}
+	}
+	return filtered
 }
 
 const (

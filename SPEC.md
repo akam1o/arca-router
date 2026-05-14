@@ -568,7 +568,7 @@ Only `instance-type vrf` is accepted in v0.6. Route distinguishers use `<asn>:<n
 
 `protocols mpls interface` enables MPLS forwarding on the corresponding managed VPP interface. Removing the stanza disables MPLS forwarding before the interface is removed from VPP. MPLS and routing-instance interface references must resolve to configured interfaces.
 
-For VPP dataplane plumbing, each routing instance gets IPv4 and IPv6 FIB tables. When `route-distinguisher <asn>:<number>` is configured, `<number>` is used as the deterministic VPP table ID; otherwise arca-router derives a stable non-zero table ID from the routing-instance name. Interfaces listed under the routing instance are rebound to those tables, and configured addresses are removed and restored around table changes so existing addresses move with the binding. Live interface state reports the bound IPv4 and IPv6 VPP table IDs for operator verification.
+For VPP dataplane plumbing, each routing instance gets IPv4 and IPv6 FIB tables. When `route-distinguisher <asn>:<number>` is configured, `<number>` is used as the deterministic VPP table ID; otherwise arca-router derives a stable non-zero table ID from the routing-instance name. Interfaces listed under the routing instance are rebound to those tables, and configured addresses are removed and restored around table changes so existing addresses move with the binding. Live interface state reports the bound IPv4 and IPv6 VPP table IDs for operator verification, and `arca show routing-instances [name]` summarizes routing-instance table IDs, interfaces, targets, and import/export policy chains.
 
 For FRR control-plane plumbing, routing instances render FRR VRF entries and per-VRF BGP VPN import/export configuration. Bare `vrf-target` applies to both `rt vpn import` and `rt vpn export`; directional targets apply only to their direction. Export requires `route-distinguisher` and automatically enables `label vpn export auto`. `vrf-import` and `vrf-export` are applied as `route-map vpn import` and `route-map vpn export`; when multiple policies are configured, arca-router generates an ordered synthetic route-map for FRR's single route-map slot.
 
@@ -617,6 +617,8 @@ The internal gRPC interface state API and `arca show interfaces` use the same ma
 The internal gRPC route state API reads FRR JSON route output for both IPv4 and IPv6 tables and returns structured route entries with prefix, next-hop, protocol, metric, interface, and active-path status. Prefix filters must be valid CIDR prefixes; protocol filters accept the FRR protocol names used by the route table, with `ospf3` normalized to `ospf6`.
 
 The internal gRPC BGP neighbor state API reads FRR JSON summary output and returns structured peer address, remote AS, state, uptime, received-prefix, and sent-prefix counters. When FRR reports the same peer under multiple address families, arca-router returns one peer entry with prefix counters combined and the longest observed uptime.
+
+The internal gRPC routing-instance state API returns running routing-instance intent with deterministic IPv4/IPv6 VPP table IDs, interface bindings, import/export targets, and import/export policy chains.
 
 The internal gRPC BFD state API returns arca-routerd's cached FRR BFD convergence snapshot, including configured/observed/up/down peer counts, aggregate session-down and RX-fail counters, per-peer state, diagnostics, and convergence issues.
 

@@ -231,6 +231,7 @@ arca show configuration
 
 # Check managed interface state, counters, QoS profile, and queue placement through arca-routerd
 arca show interfaces
+arca show routing-instances
 arca show route
 arca show route inet6
 arca show bgp summary
