@@ -126,6 +126,17 @@ func TestBuildMgmtOperationsRejectsOSPF3(t *testing.T) {
 	}
 }
 
+func TestBuildMgmtOperationsRejectsBFD(t *testing.T) {
+	_, err := BuildMgmtOperations(&Config{
+		BFD: &BFDConfig{
+			Peers: []BFDPeer{{Address: "192.0.2.2"}},
+		},
+	})
+	if err == nil || !strings.Contains(err.Error(), "BFD is not supported") {
+		t.Fatalf("BuildMgmtOperations() error = %v, want BFD unsupported", err)
+	}
+}
+
 func TestVtyshMgmtClientApplySequence(t *testing.T) {
 	var got []string
 	client := NewVtyshMgmtClientWithRunner(func(ctx context.Context, command string) ([]byte, error) {

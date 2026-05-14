@@ -209,6 +209,9 @@ type RoutingInstance struct {
 
 // ProtocolConfig represents routing protocol configuration
 type ProtocolConfig struct {
+	// BFD holds Bidirectional Forwarding Detection configuration
+	BFD *BFDConfig `json:"bfd,omitempty"`
+
 	// BGP holds BGP protocol configuration
 	BGP *BGPConfig `json:"bgp,omitempty"`
 
@@ -223,6 +226,38 @@ type ProtocolConfig struct {
 
 	// VRRP holds VRRP high-availability groups
 	VRRP *VRRPConfig `json:"vrrp,omitempty"`
+}
+
+// BFDConfig represents Bidirectional Forwarding Detection configuration.
+type BFDConfig struct {
+	Profiles map[string]*BFDProfile `json:"profiles,omitempty"`
+	Peers    map[string]*BFDPeer    `json:"peers,omitempty"`
+}
+
+// BFDProfile represents reusable BFD timer and mode settings.
+type BFDProfile struct {
+	Name             string `json:"name"`
+	DetectMultiplier int    `json:"detect-multiplier,omitempty"`
+	ReceiveInterval  int    `json:"receive-interval,omitempty"`
+	TransmitInterval int    `json:"transmit-interval,omitempty"`
+	EchoMode         bool   `json:"echo-mode,omitempty"`
+	PassiveMode      bool   `json:"passive-mode,omitempty"`
+}
+
+// BFDPeer represents one BFD peer session.
+type BFDPeer struct {
+	Address          string `json:"address"`
+	LocalAddress     string `json:"local-address,omitempty"`
+	Interface        string `json:"interface,omitempty"`
+	VRF              string `json:"vrf,omitempty"`
+	Multihop         bool   `json:"multihop,omitempty"`
+	Profile          string `json:"profile,omitempty"`
+	DetectMultiplier int    `json:"detect-multiplier,omitempty"`
+	ReceiveInterval  int    `json:"receive-interval,omitempty"`
+	TransmitInterval int    `json:"transmit-interval,omitempty"`
+	EchoMode         bool   `json:"echo-mode,omitempty"`
+	PassiveMode      bool   `json:"passive-mode,omitempty"`
+	Shutdown         bool   `json:"shutdown,omitempty"`
 }
 
 // MPLSConfig represents MPLS forwarding configuration.

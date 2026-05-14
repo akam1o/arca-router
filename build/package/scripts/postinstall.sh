@@ -28,7 +28,7 @@ chmod 0750 /var/lib/arca-router || true
 chmod 0750 /var/log/arca-router || true
 
 # The default FRR apply backend is transactional and uses vtysh/mgmtd.
-# arca-router treats vrrpd as part of the standard appliance router daemon set.
+# arca-router treats vrrpd and bfdd as part of the standard appliance router daemon set.
 # Do not grant /etc/frr write access by default. The legacy file backend can be
 # enabled with --frr-apply-mode=file plus a local systemd/group permission override.
 
@@ -60,6 +60,9 @@ fi
 if [ -f /etc/frr/daemons ] && ! grep -q '^vrrpd=yes' /etc/frr/daemons; then
     echo "WARNING: FRR vrrpd is not enabled. Set vrrpd=yes in /etc/frr/daemons for standard HA/VRRP support."
 fi
+if [ -f /etc/frr/daemons ] && ! grep -q '^bfdd=yes' /etc/frr/daemons; then
+    echo "WARNING: FRR bfdd is not enabled. Set bfdd=yes in /etc/frr/daemons for BFD peer support."
+fi
 
 # Check VPP socket permissions (if VPP is running)
 if [ -e /run/vpp/api.sock ]; then
@@ -79,7 +82,7 @@ if [ "$1" = "1" ]; then
     echo ""
     echo "Prerequisites:"
     echo "- VPP 24.10+ with linux-cp plugin enabled"
-    echo "- FRR 8.0+ (bgpd, ospfd, zebra, staticd, mgmtd, vrrpd)"
+    echo "- FRR 8.0+ (bgpd, ospfd, zebra, staticd, mgmtd, vrrpd, bfdd)"
     echo ""
     echo "Next steps:"
     echo "1. Copy example configs:"
@@ -95,6 +98,7 @@ if [ "$1" = "1" ]; then
     echo "4. Ensure VPP/FRR are running and required FRR daemons are enabled:"
     echo "   grep '^mgmtd=yes' /etc/frr/daemons"
     echo "   grep '^vrrpd=yes' /etc/frr/daemons"
+    echo "   grep '^bfdd=yes' /etc/frr/daemons"
     echo "   systemctl start vpp frr"
     echo ""
     echo "5. Enable and start arca-router:"

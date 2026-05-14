@@ -490,6 +490,12 @@ func writeProtocolsXML(buf *bytes.Buffer, protocols *config.ProtocolConfig) erro
 	buf.WriteString(`  <protocols xmlns="` + ArcaConfigNS + `">`)
 	buf.WriteString("\n")
 
+	if protocols.BFD != nil {
+		if err := writeBFDXML(buf, protocols.BFD); err != nil {
+			return err
+		}
+	}
+
 	// BGP
 	if protocols.BGP != nil {
 		if err := writeBGPXML(buf, protocols.BGP); err != nil {
@@ -523,6 +529,118 @@ func writeProtocolsXML(buf *bytes.Buffer, protocols *config.ProtocolConfig) erro
 
 	buf.WriteString(`  </protocols>`)
 	buf.WriteString("\n")
+	return nil
+}
+
+func writeBFDXML(buf *bytes.Buffer, bfd *config.BFDConfig) error {
+	if len(bfd.Profiles) == 0 && len(bfd.Peers) == 0 {
+		return nil
+	}
+	buf.WriteString(`    <bfd>`)
+	buf.WriteString("\n")
+	for _, name := range sortedStringKeys(bfd.Profiles) {
+		profile := bfd.Profiles[name]
+		if profile == nil {
+			continue
+		}
+		buf.WriteString(`      <profile>`)
+		buf.WriteString("\n")
+		buf.WriteString(`        <name>`)
+		if err := xml.EscapeText(buf, []byte(name)); err != nil {
+			return err
+		}
+		buf.WriteString(`</name>`)
+		buf.WriteString("\n")
+		if err := writeBFDSessionXML(buf, profile.DetectMultiplier, profile.ReceiveInterval, profile.TransmitInterval, profile.EchoMode, profile.PassiveMode, "        "); err != nil {
+			return err
+		}
+		buf.WriteString(`      </profile>`)
+		buf.WriteString("\n")
+	}
+	for _, address := range sortedStringKeys(bfd.Peers) {
+		peer := bfd.Peers[address]
+		if peer == nil {
+			continue
+		}
+		peerAddress := peer.Address
+		if peerAddress == "" {
+			peerAddress = address
+		}
+		buf.WriteString(`      <peer>`)
+		buf.WriteString("\n")
+		buf.WriteString(`        <address>`)
+		if err := xml.EscapeText(buf, []byte(peerAddress)); err != nil {
+			return err
+		}
+		buf.WriteString(`</address>`)
+		buf.WriteString("\n")
+		if peer.LocalAddress != "" {
+			buf.WriteString(`        <local-address>`)
+			if err := xml.EscapeText(buf, []byte(peer.LocalAddress)); err != nil {
+				return err
+			}
+			buf.WriteString(`</local-address>`)
+			buf.WriteString("\n")
+		}
+		if peer.Interface != "" {
+			buf.WriteString(`        <interface>`)
+			if err := xml.EscapeText(buf, []byte(peer.Interface)); err != nil {
+				return err
+			}
+			buf.WriteString(`</interface>`)
+			buf.WriteString("\n")
+		}
+		if peer.VRF != "" {
+			buf.WriteString(`        <vrf>`)
+			if err := xml.EscapeText(buf, []byte(peer.VRF)); err != nil {
+				return err
+			}
+			buf.WriteString(`</vrf>`)
+			buf.WriteString("\n")
+		}
+		if peer.Multihop {
+			buf.WriteString(`        <multihop>true</multihop>`)
+			buf.WriteString("\n")
+		}
+		if peer.Profile != "" {
+			buf.WriteString(`        <profile>`)
+			if err := xml.EscapeText(buf, []byte(peer.Profile)); err != nil {
+				return err
+			}
+			buf.WriteString(`</profile>`)
+			buf.WriteString("\n")
+		}
+		if err := writeBFDSessionXML(buf, peer.DetectMultiplier, peer.ReceiveInterval, peer.TransmitInterval, peer.EchoMode, peer.PassiveMode, "        "); err != nil {
+			return err
+		}
+		if peer.Shutdown {
+			buf.WriteString(`        <shutdown>true</shutdown>`)
+			buf.WriteString("\n")
+		}
+		buf.WriteString(`      </peer>`)
+		buf.WriteString("\n")
+	}
+	buf.WriteString(`    </bfd>`)
+	buf.WriteString("\n")
+	return nil
+}
+
+func writeBFDSessionXML(buf *bytes.Buffer, detectMultiplier, receiveInterval, transmitInterval int, echoMode, passiveMode bool, indent string) error {
+	if detectMultiplier != 0 {
+		fmt.Fprintf(buf, "%s<detect-multiplier>%d</detect-multiplier>\n", indent, detectMultiplier)
+	}
+	if receiveInterval != 0 {
+		fmt.Fprintf(buf, "%s<receive-interval>%d</receive-interval>\n", indent, receiveInterval)
+	}
+	if transmitInterval != 0 {
+		fmt.Fprintf(buf, "%s<transmit-interval>%d</transmit-interval>\n", indent, transmitInterval)
+	}
+	if echoMode {
+		fmt.Fprintf(buf, "%s<echo-mode>true</echo-mode>\n", indent)
+	}
+	if passiveMode {
+		fmt.Fprintf(buf, "%s<passive-mode>true</passive-mode>\n", indent)
+	}
 	return nil
 }
 
@@ -922,6 +1040,68 @@ type xmlOSPFProtocol struct {
 	} `xml:"area"`
 }
 
+type xmlBFDProtocol struct {
+	Profiles []struct {
+		Name             string `xml:"name"`
+		DetectMultiplier int    `xml:"detect-multiplier"`
+		ReceiveInterval  int    `xml:"receive-interval"`
+		TransmitInterval int    `xml:"transmit-interval"`
+		EchoMode         bool   `xml:"echo-mode"`
+		PassiveMode      bool   `xml:"passive-mode"`
+	} `xml:"profile"`
+	Peers []struct {
+		Address          string `xml:"address"`
+		LocalAddress     string `xml:"local-address"`
+		Interface        string `xml:"interface"`
+		VRF              string `xml:"vrf"`
+		Multihop         bool   `xml:"multihop"`
+		Profile          string `xml:"profile"`
+		DetectMultiplier int    `xml:"detect-multiplier"`
+		ReceiveInterval  int    `xml:"receive-interval"`
+		TransmitInterval int    `xml:"transmit-interval"`
+		EchoMode         bool   `xml:"echo-mode"`
+		PassiveMode      bool   `xml:"passive-mode"`
+		Shutdown         bool   `xml:"shutdown"`
+	} `xml:"peer"`
+}
+
+func bfdConfigFromXML(bfd *xmlBFDProtocol) *config.BFDConfig {
+	if bfd == nil {
+		return nil
+	}
+	cfgBFD := &config.BFDConfig{
+		Profiles: make(map[string]*config.BFDProfile),
+		Peers:    make(map[string]*config.BFDPeer),
+	}
+	for _, profile := range bfd.Profiles {
+		cfgBFD.Profiles[profile.Name] = &config.BFDProfile{
+			Name:             profile.Name,
+			DetectMultiplier: profile.DetectMultiplier,
+			ReceiveInterval:  profile.ReceiveInterval,
+			TransmitInterval: profile.TransmitInterval,
+			EchoMode:         profile.EchoMode,
+			PassiveMode:      profile.PassiveMode,
+		}
+	}
+	for _, peer := range bfd.Peers {
+		cfgBFD.Peers[peer.Address] = &config.BFDPeer{
+			Address:          peer.Address,
+			LocalAddress:     peer.LocalAddress,
+			Interface:        peer.Interface,
+			VRF:              peer.VRF,
+			Multihop:         peer.Multihop,
+			Profile:          peer.Profile,
+			DetectMultiplier: peer.DetectMultiplier,
+			ReceiveInterval:  peer.ReceiveInterval,
+			TransmitInterval: peer.TransmitInterval,
+			EchoMode:         peer.EchoMode,
+			PassiveMode:      peer.PassiveMode,
+			Shutdown:         peer.Shutdown,
+		}
+	}
+	return cfgBFD
+}
+
 func ospfConfigFromXML(ospf *xmlOSPFProtocol) *config.OSPFConfig {
 	if ospf == nil {
 		return nil
@@ -1049,6 +1229,7 @@ func XMLToConfig(xmlData []byte, defaultOp DefaultOperation) (*config.Config, er
 			Interfaces         []string `xml:"interface"`
 		} `xml:"routing-instances>instance"`
 		Protocols *struct {
+			BFD *xmlBFDProtocol `xml:"bfd"`
 			BGP *struct {
 				Groups []struct {
 					Name      string `xml:"name"`
@@ -1230,6 +1411,10 @@ func XMLToConfig(xmlData []byte, defaultOp DefaultOperation) (*config.Config, er
 	if root.Protocols != nil {
 		cfg.Protocols = &config.ProtocolConfig{}
 
+		if root.Protocols.BFD != nil {
+			cfg.Protocols.BFD = bfdConfigFromXML(root.Protocols.BFD)
+		}
+
 		// BGP
 		if root.Protocols.BGP != nil {
 			cfg.Protocols.BGP = &config.BGPConfig{
@@ -1405,6 +1590,27 @@ var allowedConfigElementPaths = map[string]struct{}{
 	"config/routing-instances/instance/interface":           {},
 
 	"config/protocols":                                  {},
+	"config/protocols/bfd":                              {},
+	"config/protocols/bfd/profile":                      {},
+	"config/protocols/bfd/profile/name":                 {},
+	"config/protocols/bfd/profile/detect-multiplier":    {},
+	"config/protocols/bfd/profile/receive-interval":     {},
+	"config/protocols/bfd/profile/transmit-interval":    {},
+	"config/protocols/bfd/profile/echo-mode":            {},
+	"config/protocols/bfd/profile/passive-mode":         {},
+	"config/protocols/bfd/peer":                         {},
+	"config/protocols/bfd/peer/address":                 {},
+	"config/protocols/bfd/peer/local-address":           {},
+	"config/protocols/bfd/peer/interface":               {},
+	"config/protocols/bfd/peer/vrf":                     {},
+	"config/protocols/bfd/peer/multihop":                {},
+	"config/protocols/bfd/peer/profile":                 {},
+	"config/protocols/bfd/peer/detect-multiplier":       {},
+	"config/protocols/bfd/peer/receive-interval":        {},
+	"config/protocols/bfd/peer/transmit-interval":       {},
+	"config/protocols/bfd/peer/echo-mode":               {},
+	"config/protocols/bfd/peer/passive-mode":            {},
+	"config/protocols/bfd/peer/shutdown":                {},
 	"config/protocols/bgp":                              {},
 	"config/protocols/bgp/group":                        {},
 	"config/protocols/bgp/group/name":                   {},
@@ -1509,6 +1715,25 @@ var configTextContentPaths = map[string]struct{}{
 	"config/routing-instances/instance/vrf-import":          {},
 	"config/routing-instances/instance/vrf-export":          {},
 	"config/routing-instances/instance/interface":           {},
+
+	"config/protocols/bfd/profile/name":              {},
+	"config/protocols/bfd/profile/detect-multiplier": {},
+	"config/protocols/bfd/profile/receive-interval":  {},
+	"config/protocols/bfd/profile/transmit-interval": {},
+	"config/protocols/bfd/profile/echo-mode":         {},
+	"config/protocols/bfd/profile/passive-mode":      {},
+	"config/protocols/bfd/peer/address":              {},
+	"config/protocols/bfd/peer/local-address":        {},
+	"config/protocols/bfd/peer/interface":            {},
+	"config/protocols/bfd/peer/vrf":                  {},
+	"config/protocols/bfd/peer/multihop":             {},
+	"config/protocols/bfd/peer/profile":              {},
+	"config/protocols/bfd/peer/detect-multiplier":    {},
+	"config/protocols/bfd/peer/receive-interval":     {},
+	"config/protocols/bfd/peer/transmit-interval":    {},
+	"config/protocols/bfd/peer/echo-mode":            {},
+	"config/protocols/bfd/peer/passive-mode":         {},
+	"config/protocols/bfd/peer/shutdown":             {},
 
 	"config/protocols/bgp/group/name":                   {},
 	"config/protocols/bgp/group/type":                   {},
@@ -1899,6 +2124,27 @@ func mergeConfigs(existing, edit *config.Config) (*config.Config, error) {
 			existing.Protocols = &config.ProtocolConfig{}
 		}
 
+		if edit.Protocols.BFD != nil {
+			if existing.Protocols.BFD == nil {
+				existing.Protocols.BFD = &config.BFDConfig{
+					Profiles: make(map[string]*config.BFDProfile),
+					Peers:    make(map[string]*config.BFDPeer),
+				}
+			}
+			if existing.Protocols.BFD.Profiles == nil {
+				existing.Protocols.BFD.Profiles = make(map[string]*config.BFDProfile)
+			}
+			if existing.Protocols.BFD.Peers == nil {
+				existing.Protocols.BFD.Peers = make(map[string]*config.BFDPeer)
+			}
+			for name, profile := range edit.Protocols.BFD.Profiles {
+				existing.Protocols.BFD.Profiles[name] = profile
+			}
+			for address, peer := range edit.Protocols.BFD.Peers {
+				existing.Protocols.BFD.Peers[address] = peer
+			}
+		}
+
 		// Merge BGP
 		if edit.Protocols.BGP != nil {
 			if existing.Protocols.BGP == nil {
@@ -2136,6 +2382,9 @@ func calculateConfigDepth(cfg *config.Config) int {
 
 	// Protocols: depth 5 (config > protocols > bgp > group > neighbor)
 	if cfg.Protocols != nil {
+		if cfg.Protocols.BFD != nil && (len(cfg.Protocols.BFD.Profiles) > 0 || len(cfg.Protocols.BFD.Peers) > 0) {
+			maxDepth = max(maxDepth, 4)
+		}
 		if cfg.Protocols.BGP != nil && len(cfg.Protocols.BGP.Groups) > 0 {
 			maxDepth = max(maxDepth, 5)
 		}
@@ -2273,6 +2522,69 @@ func countConfigElements(cfg *config.Config) int {
 
 	if cfg.Protocols != nil {
 		count++ // <protocols>
+		if cfg.Protocols.BFD != nil {
+			count++ // <bfd>
+			for _, profile := range cfg.Protocols.BFD.Profiles {
+				if profile == nil {
+					continue
+				}
+				count += 2 // <profile> + <name>
+				if profile.DetectMultiplier != 0 {
+					count++
+				}
+				if profile.ReceiveInterval != 0 {
+					count++
+				}
+				if profile.TransmitInterval != 0 {
+					count++
+				}
+				if profile.EchoMode {
+					count++
+				}
+				if profile.PassiveMode {
+					count++
+				}
+			}
+			for _, peer := range cfg.Protocols.BFD.Peers {
+				if peer == nil {
+					continue
+				}
+				count += 2 // <peer> + <address>
+				if peer.LocalAddress != "" {
+					count++
+				}
+				if peer.Interface != "" {
+					count++
+				}
+				if peer.VRF != "" {
+					count++
+				}
+				if peer.Multihop {
+					count++
+				}
+				if peer.Profile != "" {
+					count++
+				}
+				if peer.DetectMultiplier != 0 {
+					count++
+				}
+				if peer.ReceiveInterval != 0 {
+					count++
+				}
+				if peer.TransmitInterval != 0 {
+					count++
+				}
+				if peer.EchoMode {
+					count++
+				}
+				if peer.PassiveMode {
+					count++
+				}
+				if peer.Shutdown {
+					count++
+				}
+			}
+		}
 		if cfg.Protocols.BGP != nil {
 			count++ // <bgp>
 			for _, group := range cfg.Protocols.BGP.Groups {

@@ -462,7 +462,7 @@ Packages are configured via NFPM: [build/package/nfpm.yaml](../build/package/nfp
 - Creates `arca-router` user/group
 - Adds the service user to `vpp` and `frrvty`
 - Sets directory permissions
-- Warns when required FRR daemons such as `mgmtd=yes` or `vrrpd=yes` are missing
+- Warns when required FRR daemons such as `mgmtd=yes`, `vrrpd=yes`, or `bfdd=yes` are missing
 - Reloads systemd daemon
 
 ### v0.6 Smoke Checks

@@ -194,12 +194,44 @@ func (c *ProtocolsConfig) Clone() *ProtocolsConfig {
 		return nil
 	}
 	return &ProtocolsConfig{
+		BFD:   c.BFD.Clone(),
 		BGP:   c.BGP.Clone(),
 		OSPF:  c.OSPF.Clone(),
 		OSPF3: c.OSPF3.Clone(),
 		MPLS:  c.MPLS.Clone(),
 		VRRP:  c.VRRP.Clone(),
 	}
+}
+
+// Clone returns a deep copy of the BFD configuration.
+func (c *BFDConfig) Clone() *BFDConfig {
+	if c == nil {
+		return nil
+	}
+	clone := &BFDConfig{}
+	if c.Profiles != nil {
+		clone.Profiles = make(map[string]*BFDProfile, len(c.Profiles))
+		for name, profile := range c.Profiles {
+			if profile == nil {
+				clone.Profiles[name] = nil
+				continue
+			}
+			p := *profile
+			clone.Profiles[name] = &p
+		}
+	}
+	if c.Peers != nil {
+		clone.Peers = make(map[string]*BFDPeer, len(c.Peers))
+		for address, peer := range c.Peers {
+			if peer == nil {
+				clone.Peers[address] = nil
+				continue
+			}
+			p := *peer
+			clone.Peers[address] = &p
+		}
+	}
+	return clone
 }
 
 // Clone returns a deep copy of the MPLS configuration.

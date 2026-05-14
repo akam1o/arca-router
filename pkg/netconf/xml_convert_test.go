@@ -61,6 +61,65 @@ func TestConfigToXMLWritesOSPF3(t *testing.T) {
 	}
 }
 
+func TestConfigToXMLWritesBFD(t *testing.T) {
+	cfg := &config.Config{
+		Protocols: &config.ProtocolConfig{
+			BFD: &config.BFDConfig{
+				Profiles: map[string]*config.BFDProfile{
+					"fast": {Name: "fast", DetectMultiplier: 3, ReceiveInterval: 150, TransmitInterval: 150},
+				},
+				Peers: map[string]*config.BFDPeer{
+					"192.0.2.2": {Address: "192.0.2.2", LocalAddress: "192.0.2.1", Interface: "ge-0/0/0", Profile: "fast"},
+				},
+			},
+		},
+	}
+
+	xmlData, err := ConfigToXML(cfg, nil)
+	if err != nil {
+		t.Fatalf("ConfigToXML() error = %v", err)
+	}
+	xmlStr := string(xmlData)
+	for _, want := range []string{"<bfd>", "<profile>", "<name>fast</name>", "<peer>", "<address>192.0.2.2</address>", "<interface>ge-0/0/0</interface>"} {
+		if !strings.Contains(xmlStr, want) {
+			t.Fatalf("ConfigToXML() missing %q:\n%s", want, xmlStr)
+		}
+	}
+}
+
+func TestXMLToConfigParsesBFD(t *testing.T) {
+	xmlData := []byte(`
+<config>
+  <protocols xmlns="urn:arca:router:config:1.0">
+    <bfd>
+      <profile>
+        <name>fast</name>
+        <detect-multiplier>3</detect-multiplier>
+        <receive-interval>150</receive-interval>
+        <transmit-interval>150</transmit-interval>
+      </profile>
+      <peer>
+        <address>192.0.2.2</address>
+        <local-address>192.0.2.1</local-address>
+        <interface>ge-0/0/0</interface>
+        <profile>fast</profile>
+      </peer>
+    </bfd>
+  </protocols>
+</config>`)
+
+	cfg, err := XMLToConfig(xmlData, DefaultOpMerge)
+	if err != nil {
+		t.Fatalf("XMLToConfig() error = %v", err)
+	}
+	if cfg.Protocols == nil || cfg.Protocols.BFD == nil {
+		t.Fatalf("XMLToConfig() dropped BFD: %#v", cfg.Protocols)
+	}
+	if got := cfg.Protocols.BFD.Peers["192.0.2.2"].Profile; got != "fast" {
+		t.Fatalf("BFD peer profile = %q, want fast", got)
+	}
+}
+
 func TestConfigToXMLMarshalsAsSingleDataReply(t *testing.T) {
 	cfg := &config.Config{
 		System:     &config.SystemConfig{HostName: "router1"},

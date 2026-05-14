@@ -663,6 +663,12 @@ func (pc *ProtocolConfig) Validate(cfg *Config) error {
 		return nil
 	}
 
+	if pc.BFD != nil {
+		if err := pc.BFD.Validate(cfg); err != nil {
+			return err
+		}
+	}
+
 	// Validate BGP
 	if pc.BGP != nil {
 		if err := pc.BGP.Validate(cfg); err != nil {
@@ -705,6 +711,72 @@ func (pc *ProtocolConfig) Validate(cfg *Config) error {
 		}
 	}
 
+	return nil
+}
+
+// Validate validates BFD configuration.
+func (b *BFDConfig) Validate(cfg *Config) error {
+	if b == nil {
+		return nil
+	}
+	for name, profile := range b.Profiles {
+		if profile == nil {
+			return errors.New(errors.ErrCodeConfigValidation, fmt.Sprintf("BFD profile %s is nil", name), "BFD profile is invalid", "Remove or recreate the profile")
+		}
+		if err := validateBFDTimers(fmt.Sprintf("BFD profile %s", name), profile.DetectMultiplier, profile.ReceiveInterval, profile.TransmitInterval); err != nil {
+			return err
+		}
+	}
+	for address, peer := range b.Peers {
+		if peer == nil {
+			return errors.New(errors.ErrCodeConfigValidation, fmt.Sprintf("BFD peer %s is nil", address), "BFD peer is invalid", "Remove or recreate the peer")
+		}
+		peerAddress := peer.Address
+		if peerAddress == "" {
+			peerAddress = address
+		}
+		if net.ParseIP(peerAddress) == nil {
+			return errors.New(errors.ErrCodeConfigValidation, fmt.Sprintf("Invalid BFD peer address: %s", peerAddress), "BFD peer address must be a valid IP address", "Use a valid IPv4 or IPv6 address")
+		}
+		if peer.LocalAddress != "" && net.ParseIP(peer.LocalAddress) == nil {
+			return errors.New(errors.ErrCodeConfigValidation, fmt.Sprintf("Invalid BFD local-address for %s: %s", peerAddress, peer.LocalAddress), "BFD local-address must be a valid IP address", "Use a valid IPv4 or IPv6 address")
+		}
+		if peer.Interface != "" {
+			if err := validateConfiguredInterfaceReference(cfg, fmt.Sprintf("BFD peer %s", peerAddress), peer.Interface); err != nil {
+				return err
+			}
+		}
+		if peer.VRF != "" && peer.VRF != "default" {
+			if cfg == nil || cfg.RoutingInstances == nil || cfg.RoutingInstances[peer.VRF] == nil {
+				return errors.New(errors.ErrCodeConfigValidation, fmt.Sprintf("BFD peer %s references unknown routing-instance %s", peerAddress, peer.VRF), "BFD peer VRF must reference an existing routing instance or default", fmt.Sprintf("Create routing-instances %s or use default", peer.VRF))
+			}
+		}
+		if peer.Profile != "" && b.Profiles[peer.Profile] == nil {
+			return errors.New(errors.ErrCodeConfigValidation, fmt.Sprintf("BFD peer %s references unknown profile %s", peerAddress, peer.Profile), "BFD peer profile must be defined before it is referenced", fmt.Sprintf("Create protocols bfd profile %s", peer.Profile))
+		}
+		if peer.Multihop && peer.EchoMode {
+			return errors.New(errors.ErrCodeConfigValidation, fmt.Sprintf("BFD peer %s enables echo-mode with multihop", peerAddress), "FRR BFD echo-mode is not supported on multihop sessions", "Remove echo-mode or multihop from the peer")
+		}
+		if peer.Multihop && peer.Profile != "" && b.Profiles[peer.Profile] != nil && b.Profiles[peer.Profile].EchoMode {
+			return errors.New(errors.ErrCodeConfigValidation, fmt.Sprintf("BFD peer %s uses echo-mode profile %s with multihop", peerAddress, peer.Profile), "FRR BFD echo-mode is not supported on multihop sessions", "Use a profile without echo-mode for multihop peers")
+		}
+		if err := validateBFDTimers(fmt.Sprintf("BFD peer %s", peerAddress), peer.DetectMultiplier, peer.ReceiveInterval, peer.TransmitInterval); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func validateBFDTimers(context string, detectMultiplier, receiveInterval, transmitInterval int) error {
+	if detectMultiplier < 0 || detectMultiplier > 255 || detectMultiplier == 1 {
+		return errors.New(errors.ErrCodeConfigValidation, fmt.Sprintf("%s has invalid detect-multiplier: %d", context, detectMultiplier), "BFD detect-multiplier must be omitted or between 2 and 255", "Use detect-multiplier 3 for common deployments")
+	}
+	if receiveInterval < 0 || receiveInterval > 60000 || (receiveInterval > 0 && receiveInterval < 10) {
+		return errors.New(errors.ErrCodeConfigValidation, fmt.Sprintf("%s has invalid receive-interval: %d", context, receiveInterval), "BFD receive-interval must be omitted or between 10 and 60000 milliseconds", "Use receive-interval 300 for common deployments")
+	}
+	if transmitInterval < 0 || transmitInterval > 60000 || (transmitInterval > 0 && transmitInterval < 10) {
+		return errors.New(errors.ErrCodeConfigValidation, fmt.Sprintf("%s has invalid transmit-interval: %d", context, transmitInterval), "BFD transmit-interval must be omitted or between 10 and 60000 milliseconds", "Use transmit-interval 300 for common deployments")
+	}
 	return nil
 }
 

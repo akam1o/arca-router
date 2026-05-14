@@ -114,3 +114,22 @@ func TestComputeDiffDetectsOSPF3Changes(t *testing.T) {
 		t.Fatal("HasChanges() = false, want true")
 	}
 }
+
+func TestComputeDiffDetectsBFDChanges(t *testing.T) {
+	newCfg := model.NewRouterConfig()
+	newCfg.Protocols = &model.ProtocolsConfig{
+		BFD: &model.BFDConfig{
+			Peers: map[string]*model.BFDPeer{
+				"192.0.2.2": {Profile: "fast"},
+			},
+		},
+	}
+
+	diff := ComputeDiff(model.NewRouterConfig(), newCfg)
+	if !diff.BFDChanged || diff.NewBFD == nil {
+		t.Fatalf("BFD change not detected: %#v", diff)
+	}
+	if !diff.HasChanges() {
+		t.Fatal("HasChanges() = false, want true")
+	}
+}

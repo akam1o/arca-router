@@ -35,6 +35,15 @@ func GenerateFRRConfig(cfg *config.Config) (*Config, error) {
 		return nil, NewGenerateError("failed to build interface mapping", err)
 	}
 
+	// Convert BFD configuration
+	if cfg.Protocols != nil && cfg.Protocols.BFD != nil {
+		bfdConfig, err := convertBFDConfig(cfg.Protocols.BFD, frrConfig.InterfaceMapping)
+		if err != nil {
+			return nil, NewGenerateError("failed to convert BFD configuration", err)
+		}
+		frrConfig.BFD = bfdConfig
+	}
+
 	// Convert BGP configuration
 	if cfg.Protocols != nil && cfg.Protocols.BGP != nil {
 		bgpConfig, err := convertBGPConfig(cfg, frrConfig.InterfaceMapping)
@@ -172,6 +181,15 @@ func GenerateFRRConfigFile(frrConfig *Config) (string, error) {
 			return "", err
 		}
 		b.WriteString(routeMapConfig)
+	}
+
+	// BFD configuration
+	if frrConfig.BFD != nil {
+		bfdConfig, err := GenerateBFDConfig(frrConfig.BFD)
+		if err != nil {
+			return "", err
+		}
+		b.WriteString(bfdConfig)
 	}
 
 	// BGP configuration
@@ -332,6 +350,63 @@ func convertBGPConfig(cfg *config.Config, ifaceMapping map[string]string) (*BGPC
 	}
 
 	return frrBGP, nil
+}
+
+func convertBFDConfig(arcaBFD *config.BFDConfig, ifaceMapping map[string]string) (*BFDConfig, error) {
+	if arcaBFD == nil {
+		return nil, nil
+	}
+	frrBFD := &BFDConfig{
+		Profiles: make([]BFDProfile, 0, len(arcaBFD.Profiles)),
+		Peers:    make([]BFDPeer, 0, len(arcaBFD.Peers)),
+	}
+	for name, profile := range arcaBFD.Profiles {
+		if profile == nil {
+			continue
+		}
+		frrBFD.Profiles = append(frrBFD.Profiles, BFDProfile{
+			Name:             name,
+			DetectMultiplier: profile.DetectMultiplier,
+			ReceiveInterval:  profile.ReceiveInterval,
+			TransmitInterval: profile.TransmitInterval,
+			EchoMode:         profile.EchoMode,
+			PassiveMode:      profile.PassiveMode,
+		})
+	}
+	for address, peer := range arcaBFD.Peers {
+		if peer == nil {
+			continue
+		}
+		peerAddress := peer.Address
+		if peerAddress == "" {
+			peerAddress = address
+		}
+		frrPeer := BFDPeer{
+			Address:          peerAddress,
+			LocalAddress:     peer.LocalAddress,
+			VRF:              peer.VRF,
+			Multihop:         peer.Multihop,
+			Profile:          peer.Profile,
+			DetectMultiplier: peer.DetectMultiplier,
+			ReceiveInterval:  peer.ReceiveInterval,
+			TransmitInterval: peer.TransmitInterval,
+			EchoMode:         peer.EchoMode,
+			PassiveMode:      peer.PassiveMode,
+			Shutdown:         peer.Shutdown,
+		}
+		if peer.Interface != "" {
+			linuxName, ok := ifaceMapping[peer.Interface]
+			if !ok {
+				return nil, fmt.Errorf("BFD peer %s interface %s not found in interface mapping", peerAddress, peer.Interface)
+			}
+			frrPeer.Interface = linuxName
+		}
+		frrBFD.Peers = append(frrBFD.Peers, frrPeer)
+	}
+	if len(frrBFD.Profiles) == 0 && len(frrBFD.Peers) == 0 {
+		return nil, nil
+	}
+	return frrBFD, nil
 }
 
 // convertOSPFConfig converts arca-router OSPF config to FRR OSPF config.

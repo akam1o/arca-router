@@ -1,6 +1,12 @@
 # Changelog
 
-## v0.6.x - Advanced Features (current)
+## v0.7.x - Core Router Parity (current)
+
+- **BFD peer/profile configuration**: parser, serializer, validation, internal model, diff, NETCONF XML/YANG, and FRR file backend generation cover `protocols bfd profile` and `protocols bfd peer`
+- **BFD backend guard**: the transactional FRR backend rejects BFD changes until `frr-bfdd` management operations are implemented, while the file backend renders integrated `bfd` configuration
+- **Standard FRR BFD daemon**: `bfdd` is documented and checked as part of the required arca-router FRR daemon set for BFD support
+
+## v0.6.x - Advanced Features (previous)
 
 - **Advanced configuration model**: parser, serializer, validation, clone, conversion, and diff support for clustering, MPLS, VRRP, routing instances, class of service, and Web UI service settings
 - **Candidate command replacement**: v0.6 scalar settings replace existing candidate lines instead of accumulating duplicates

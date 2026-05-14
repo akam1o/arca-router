@@ -20,6 +20,9 @@ type ConfigDiff struct {
 	InterfacesChanged map[string]*InterfaceChange
 
 	// Protocol changes
+	BFDChanged   bool
+	OldBFD       *model.BFDConfig
+	NewBFD       *model.BFDConfig
 	BGPChanged   bool
 	OldBGP       *model.BGPConfig
 	NewBGP       *model.BGPConfig
@@ -93,6 +96,7 @@ func (d *ConfigDiff) HasChanges() bool {
 	return len(d.InterfacesAdded) > 0 ||
 		len(d.InterfacesRemoved) > 0 ||
 		len(d.InterfacesChanged) > 0 ||
+		d.BFDChanged ||
 		d.BGPChanged ||
 		d.OSPFChanged ||
 		d.OSPF3Changed ||
@@ -225,6 +229,14 @@ func containsAddress(addrs []UnitAddress, target UnitAddress) bool {
 }
 
 func computeProtocolDiff(old, new *model.RouterConfig, diff *ConfigDiff) {
+	oldBFD := getBFD(old)
+	newBFD := getBFD(new)
+	if !reflect.DeepEqual(oldBFD, newBFD) {
+		diff.BFDChanged = true
+		diff.OldBFD = oldBFD
+		diff.NewBFD = newBFD
+	}
+
 	oldBGP := getBGP(old)
 	newBGP := getBGP(new)
 	if !bgpEqual(oldBGP, newBGP) {
@@ -325,6 +337,13 @@ func computeSecurityDiff(old, new *model.RouterConfig, diff *ConfigDiff) {
 }
 
 // Equality helpers — simple deep comparison for each subsection.
+
+func getBFD(c *model.RouterConfig) *model.BFDConfig {
+	if c.Protocols == nil {
+		return nil
+	}
+	return c.Protocols.BFD
+}
 
 func getBGP(c *model.RouterConfig) *model.BGPConfig {
 	if c.Protocols == nil {

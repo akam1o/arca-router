@@ -13,7 +13,7 @@ arca-router is a software router with Junos-compatible configuration syntax, pow
 
 ## Status
 
-arca-router is currently in the v0.6.x advanced features phase. This README
+arca-router is currently in the v0.7.x core router parity phase. This README
 describes the current unified daemon path; detailed release history is kept in
 [`CHANGELOG.md`](CHANGELOG.md), and future scope is tracked in
 [`ROADMAP.md`](ROADMAP.md).
@@ -24,7 +24,7 @@ Current capabilities:
 - Junos-like `set` configuration syntax with a thin `arca` client
 - Struct-first configuration model with diff-based 2-phase commit and rollback
 - FRR transactional apply through the management candidate datastore
-- v0.6 config foundations for clustering, VRRP, MPLS, routing instances, and QoS
+- v0.6/v0.7 config foundations for clustering, VRRP, MPLS, routing instances, QoS, IPv6 parity, and BFD
 - Prometheus, health, SNMP, Web UI, Grafana observability, and authenticated Web config workflow
 - SQLite or etcd-backed candidate/running datastore with commit history and etcd config sync
 
@@ -46,13 +46,13 @@ Current capabilities:
 
 - **FRR 8.0+**: Free Range Routing for dynamic routing protocols
   - See [FRR Setup Guide (Debian)](docs/frr-setup-debian.md) and [FRR Setup Guide (RHEL9)](docs/frr-setup-rhel9.md)
-  - Enable `bgpd`, `ospfd`, `zebra`, `staticd`, `mgmtd`, and `vrrpd` in `/etc/frr/daemons`
+  - Enable `bgpd`, `ospfd`, `zebra`, `staticd`, `mgmtd`, `vrrpd`, and `bfdd` in `/etc/frr/daemons`
 
 - **Go 1.25+**: For building from source (optional)
 
 ---
 
-## Quick Start (v0.6.x)
+## Quick Start (v0.7.x)
 
 Requires VPP 24.10+ and FRR 8.0+ with the standard arca-router FRR daemon set enabled.
 
@@ -339,7 +339,7 @@ arca-router/
 │   │   └── main.go             # Single process: VPP + FRR + NETCONF + gRPC
 │   └── arca/                   # Thin gRPC CLI client
 │       └── main.go             # Communicates via Unix socket
-├── internal/                   # v0.6.x core packages
+├── internal/                   # v0.6.x/v0.7.x core packages
 │   ├── model/                  # Canonical config & state types
 │   │   ├── config.go           # RouterConfig (struct-first model)
 │   │   ├── state.go            # OperationalState

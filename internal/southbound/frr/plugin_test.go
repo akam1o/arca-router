@@ -86,6 +86,21 @@ func TestBuildFullConfigPreservesOSPF3FromDiffFields(t *testing.T) {
 	}
 }
 
+func TestBuildFullConfigPreservesBFDFromDiffFields(t *testing.T) {
+	diff := &engine.ConfigDiff{
+		NewBFD: &model.BFDConfig{
+			Peers: map[string]*model.BFDPeer{
+				"192.0.2.2": {Profile: "fast"},
+			},
+		},
+	}
+
+	got := NewFRRPlugin(testLogger()).buildFullConfig(diff)
+	if got.Protocols == nil || got.Protocols.BFD == nil {
+		t.Fatalf("buildFullConfig() dropped BFD: %#v", got.Protocols)
+	}
+}
+
 func TestValidateChangesAllowsTransactionalVRRP(t *testing.T) {
 	newCfg := model.NewRouterConfig()
 	newCfg.Protocols = &model.ProtocolsConfig{
@@ -148,6 +163,21 @@ func TestValidateChangesRejectsOSPF3WithTransactionalBackend(t *testing.T) {
 	}
 }
 
+func TestValidateChangesRejectsBFDWithTransactionalBackend(t *testing.T) {
+	newCfg := model.NewRouterConfig()
+	newCfg.Protocols = &model.ProtocolsConfig{
+		BFD: &model.BFDConfig{Peers: map[string]*model.BFDPeer{
+			"192.0.2.2": {},
+		}},
+	}
+	diff := engine.ComputeDiff(model.NewRouterConfig(), newCfg)
+
+	err := NewFRRPlugin(testLogger()).ValidateChanges(context.Background(), diff)
+	if err == nil || !strings.Contains(err.Error(), "BFD requires FRR file backend") {
+		t.Fatalf("ValidateChanges() error = %v, want BFD transactional rejection", err)
+	}
+}
+
 func TestValidateChangesAllowsOSPF3WithFileBackend(t *testing.T) {
 	newCfg := model.NewRouterConfig()
 	newCfg.Protocols = &model.ProtocolsConfig{
@@ -157,6 +187,21 @@ func TestValidateChangesAllowsOSPF3WithFileBackend(t *testing.T) {
 					"ge-0/0/0": {},
 				},
 			},
+		}},
+	}
+	diff := engine.ComputeDiff(model.NewRouterConfig(), newCfg)
+
+	err := NewFRRPluginWithApplyMode(testLogger(), pkgfrr.BackendModeFile).ValidateChanges(context.Background(), diff)
+	if err != nil {
+		t.Fatalf("ValidateChanges() error = %v, want nil", err)
+	}
+}
+
+func TestValidateChangesAllowsBFDWithFileBackend(t *testing.T) {
+	newCfg := model.NewRouterConfig()
+	newCfg.Protocols = &model.ProtocolsConfig{
+		BFD: &model.BFDConfig{Peers: map[string]*model.BFDPeer{
+			"192.0.2.2": {},
 		}},
 	}
 	diff := engine.ComputeDiff(model.NewRouterConfig(), newCfg)

@@ -749,6 +749,8 @@ func (p *Parser) parseProtocols(config *Config) error {
 	}
 
 	switch protocol {
+	case "bfd":
+		return p.parseBFD(config.Protocols)
 	case "bgp":
 		return p.parseBGP(config.Protocols)
 	case "ospf":
@@ -762,6 +764,181 @@ func (p *Parser) parseProtocols(config *Config) error {
 	default:
 		return p.error(fmt.Sprintf("unsupported protocol: %s", protocol))
 	}
+}
+
+func (p *Parser) parseBFD(pc *ProtocolConfig) error {
+	if pc.BFD == nil {
+		pc.BFD = &BFDConfig{
+			Profiles: make(map[string]*BFDProfile),
+			Peers:    make(map[string]*BFDPeer),
+		}
+	}
+	if p.current.Type != TokenWord {
+		return p.error("expected BFD parameter")
+	}
+	param := p.current.Value
+	p.nextToken()
+
+	switch param {
+	case "profile":
+		return p.parseBFDProfile(pc.BFD)
+	case "peer":
+		return p.parseBFDPeer(pc.BFD)
+	default:
+		return p.error(fmt.Sprintf("unsupported BFD parameter: %s", param))
+	}
+}
+
+func (p *Parser) parseBFDProfile(bfd *BFDConfig) error {
+	if p.current.Type != TokenWord && p.current.Type != TokenString {
+		return p.error("expected BFD profile name")
+	}
+	name := p.current.Value
+	p.nextToken()
+	if bfd.Profiles == nil {
+		bfd.Profiles = make(map[string]*BFDProfile)
+	}
+	if bfd.Profiles[name] == nil {
+		bfd.Profiles[name] = &BFDProfile{Name: name}
+	}
+	profile := bfd.Profiles[name]
+
+	if p.current.Type != TokenWord {
+		return p.error("expected BFD profile parameter")
+	}
+	param := p.current.Value
+	p.nextToken()
+
+	switch param {
+	case "detect-multiplier":
+		value, err := p.parseBFDNumber("detect-multiplier")
+		if err != nil {
+			return err
+		}
+		profile.DetectMultiplier = value
+		return nil
+	case "receive-interval":
+		value, err := p.parseBFDNumber("receive-interval")
+		if err != nil {
+			return err
+		}
+		profile.ReceiveInterval = value
+		return nil
+	case "transmit-interval":
+		value, err := p.parseBFDNumber("transmit-interval")
+		if err != nil {
+			return err
+		}
+		profile.TransmitInterval = value
+		return nil
+	case "echo-mode":
+		profile.EchoMode = true
+		return nil
+	case "passive-mode":
+		profile.PassiveMode = true
+		return nil
+	default:
+		return p.error(fmt.Sprintf("unsupported BFD profile parameter: %s", param))
+	}
+}
+
+func (p *Parser) parseBFDPeer(bfd *BFDConfig) error {
+	if p.current.Type != TokenWord && p.current.Type != TokenString {
+		return p.error("expected BFD peer address")
+	}
+	address := p.current.Value
+	p.nextToken()
+	if bfd.Peers == nil {
+		bfd.Peers = make(map[string]*BFDPeer)
+	}
+	if bfd.Peers[address] == nil {
+		bfd.Peers[address] = &BFDPeer{Address: address}
+	}
+	peer := bfd.Peers[address]
+
+	if p.current.Type != TokenWord {
+		return p.error("expected BFD peer parameter")
+	}
+	param := p.current.Value
+	p.nextToken()
+
+	switch param {
+	case "local-address":
+		if p.current.Type != TokenWord && p.current.Type != TokenString {
+			return p.error("expected BFD peer local-address")
+		}
+		peer.LocalAddress = p.current.Value
+		p.nextToken()
+		return nil
+	case "interface":
+		if p.current.Type != TokenWord {
+			return p.error("expected BFD peer interface name")
+		}
+		peer.Interface = p.current.Value
+		p.nextToken()
+		return nil
+	case "vrf":
+		if p.current.Type != TokenWord && p.current.Type != TokenString {
+			return p.error("expected BFD peer VRF name")
+		}
+		peer.VRF = p.current.Value
+		p.nextToken()
+		return nil
+	case "multihop":
+		peer.Multihop = true
+		return nil
+	case "profile":
+		if p.current.Type != TokenWord && p.current.Type != TokenString {
+			return p.error("expected BFD peer profile name")
+		}
+		peer.Profile = p.current.Value
+		p.nextToken()
+		return nil
+	case "detect-multiplier":
+		value, err := p.parseBFDNumber("detect-multiplier")
+		if err != nil {
+			return err
+		}
+		peer.DetectMultiplier = value
+		return nil
+	case "receive-interval":
+		value, err := p.parseBFDNumber("receive-interval")
+		if err != nil {
+			return err
+		}
+		peer.ReceiveInterval = value
+		return nil
+	case "transmit-interval":
+		value, err := p.parseBFDNumber("transmit-interval")
+		if err != nil {
+			return err
+		}
+		peer.TransmitInterval = value
+		return nil
+	case "echo-mode":
+		peer.EchoMode = true
+		return nil
+	case "passive-mode":
+		peer.PassiveMode = true
+		return nil
+	case "shutdown":
+		peer.Shutdown = true
+		return nil
+	default:
+		return p.error(fmt.Sprintf("unsupported BFD peer parameter: %s", param))
+	}
+}
+
+func (p *Parser) parseBFDNumber(name string) (int, error) {
+	if p.current.Type != TokenNumber {
+		return 0, p.error(fmt.Sprintf("expected BFD %s value", name))
+	}
+	value, err := strconv.Atoi(p.current.Value)
+	if err != nil {
+		return 0, p.error(fmt.Sprintf("invalid BFD %s: %s", name, p.current.Value))
+	}
+	p.nextToken()
+	return value, nil
 }
 
 func (p *Parser) parseMPLS(pc *ProtocolConfig) error {

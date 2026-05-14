@@ -234,6 +234,92 @@ module arca-router {
   container protocols {
     description "Routing protocol configuration";
 
+    container bfd {
+      description "Bidirectional Forwarding Detection configuration.";
+
+      list profile {
+        key "name";
+
+        leaf name {
+          type string;
+        }
+        leaf detect-multiplier {
+          type uint8 {
+            range "2..255";
+          }
+        }
+        leaf receive-interval {
+          type uint16 {
+            range "10..60000";
+          }
+        }
+        leaf transmit-interval {
+          type uint16 {
+            range "10..60000";
+          }
+        }
+        leaf echo-mode {
+          type boolean;
+          default false;
+        }
+        leaf passive-mode {
+          type boolean;
+          default false;
+        }
+      }
+
+      list peer {
+        key "address";
+
+        leaf address {
+          type string;
+        }
+        leaf local-address {
+          type string;
+        }
+        leaf interface {
+          type string;
+        }
+        leaf vrf {
+          type string;
+        }
+        leaf multihop {
+          type boolean;
+          default false;
+        }
+        leaf profile {
+          type string;
+        }
+        leaf detect-multiplier {
+          type uint8 {
+            range "2..255";
+          }
+        }
+        leaf receive-interval {
+          type uint16 {
+            range "10..60000";
+          }
+        }
+        leaf transmit-interval {
+          type uint16 {
+            range "10..60000";
+          }
+        }
+        leaf echo-mode {
+          type boolean;
+          default false;
+        }
+        leaf passive-mode {
+          type boolean;
+          default false;
+        }
+        leaf shutdown {
+          type boolean;
+          default false;
+        }
+      }
+    }
+
     container bgp {
       description "BGP protocol configuration";
 

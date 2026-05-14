@@ -58,6 +58,7 @@ zebra=yes
 staticd=yes
 mgmtd=yes
 vrrpd=yes
+bfdd=yes
 
 # Optional daemons (set to 'no' if not needed)
 ripd=no
@@ -70,7 +71,6 @@ eigrpd=no
 babeld=no
 sharpd=no
 pbrd=no
-bfdd=no
 fabricd=no
 pathd=no
 
@@ -89,10 +89,11 @@ staticd_options=""
 - `staticd`: Static route management
 - `mgmtd`: Transactional management datastore used by arca-router v0.5+
 - `vrrpd`: VRRP daemon used for appliance-style control-plane HA
+- `bfdd`: BFD peer monitoring daemon used for fast-failure detection
 
 ### 3. Configure FRR Apply Access
 
-By default, `arca-router` applies FRR changes, including VRRP groups, through the FRR management candidate datastore via `vtysh`. This requires `mgmtd=yes`, the standard `vrrpd=yes` HA daemon, and `frrvty` group access, but does not require direct writes to `/etc/frr/frr.conf`.
+By default, `arca-router` applies FRR changes, including VRRP groups, through the FRR management candidate datastore via `vtysh`. This requires `mgmtd=yes`, the standard `vrrpd=yes` HA daemon, and `frrvty` group access, but does not require direct writes to `/etc/frr/frr.conf`. BFD peer configuration currently requires `--frr-apply-mode=file` and `bfdd=yes` until transactional `frr-bfdd` management operations are implemented.
 
 When VRRP is configured, arca-routerd also prepares arca-owned Linux macvlan interfaces on the LCP interface before applying FRR. It stores prepared interface names in `/var/lib/arca-router/vrrp-interfaces.json` so cleanup survives daemon restarts. The packaged systemd unit grants `CAP_NET_ADMIN`, which is required for this macvlan and virtual-address reconciliation.
 
@@ -146,7 +147,7 @@ sudo systemctl status frr
 sudo systemctl status frr
 
 # Verify daemons are running
-ps aux | grep -E 'zebra|bgpd|ospfd|staticd|mgmtd|vrrpd'
+ps aux | grep -E 'zebra|bgpd|ospfd|staticd|mgmtd|vrrpd|bfdd'
 
 # Test FRR CLI (vtysh)
 sudo vtysh -c 'show version'

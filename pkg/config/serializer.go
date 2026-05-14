@@ -267,11 +267,79 @@ func writeProtocols(b *strings.Builder, pc *ProtocolConfig) {
 	if pc == nil {
 		return
 	}
+	writeBFD(b, pc.BFD)
 	writeBGP(b, pc.BGP)
 	writeOSPF(b, "ospf", pc.OSPF)
 	writeOSPF(b, "ospf3", pc.OSPF3)
 	writeMPLS(b, pc.MPLS)
 	writeVRRP(b, pc.VRRP)
+}
+
+func writeBFD(b *strings.Builder, bfd *BFDConfig) {
+	if bfd == nil {
+		return
+	}
+	for _, name := range sortedKeys(bfd.Profiles) {
+		profile := bfd.Profiles[name]
+		if profile == nil {
+			continue
+		}
+		if profile.ReceiveInterval != 0 {
+			writeLine(b, "set protocols bfd profile %s receive-interval %d", EscapeValue(name), profile.ReceiveInterval)
+		}
+		if profile.TransmitInterval != 0 {
+			writeLine(b, "set protocols bfd profile %s transmit-interval %d", EscapeValue(name), profile.TransmitInterval)
+		}
+		if profile.DetectMultiplier != 0 {
+			writeLine(b, "set protocols bfd profile %s detect-multiplier %d", EscapeValue(name), profile.DetectMultiplier)
+		}
+		if profile.EchoMode {
+			writeLine(b, "set protocols bfd profile %s echo-mode", EscapeValue(name))
+		}
+		if profile.PassiveMode {
+			writeLine(b, "set protocols bfd profile %s passive-mode", EscapeValue(name))
+		}
+	}
+	for _, address := range sortedKeys(bfd.Peers) {
+		peer := bfd.Peers[address]
+		if peer == nil {
+			continue
+		}
+		base := fmt.Sprintf("set protocols bfd peer %s", EscapeValue(address))
+		if peer.LocalAddress != "" {
+			writeLine(b, "%s local-address %s", base, EscapeValue(peer.LocalAddress))
+		}
+		if peer.Interface != "" {
+			writeLine(b, "%s interface %s", base, peer.Interface)
+		}
+		if peer.VRF != "" {
+			writeLine(b, "%s vrf %s", base, EscapeValue(peer.VRF))
+		}
+		if peer.Multihop {
+			writeLine(b, "%s multihop", base)
+		}
+		if peer.Profile != "" {
+			writeLine(b, "%s profile %s", base, EscapeValue(peer.Profile))
+		}
+		if peer.ReceiveInterval != 0 {
+			writeLine(b, "%s receive-interval %d", base, peer.ReceiveInterval)
+		}
+		if peer.TransmitInterval != 0 {
+			writeLine(b, "%s transmit-interval %d", base, peer.TransmitInterval)
+		}
+		if peer.DetectMultiplier != 0 {
+			writeLine(b, "%s detect-multiplier %d", base, peer.DetectMultiplier)
+		}
+		if peer.EchoMode {
+			writeLine(b, "%s echo-mode", base)
+		}
+		if peer.PassiveMode {
+			writeLine(b, "%s passive-mode", base)
+		}
+		if peer.Shutdown {
+			writeLine(b, "%s shutdown", base)
+		}
+	}
 }
 
 func writeMPLS(b *strings.Builder, mpls *MPLSConfig) {

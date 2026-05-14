@@ -305,7 +305,7 @@ func (c *govppClient) Connect(ctx context.Context) error {
 | FRR設定ファイル書き込み | `frr`グループ | 復旧用 `--frr-apply-mode=file` のみ `/etc/frr/frr.conf`へ直接書き込み（0660） |
 | FRR状態確認（arca用） | `frrvty`グループ | `vtysh -c 'show running-config'` |
 
-**注**: v0.5以降の標準経路では、arca-routerd は FRR management candidate に変更を投入し、commit check/apply で適用する。標準の FRR daemon set は `bgpd`、`ospfd`、`zebra`、`staticd`、`mgmtd`、`vrrpd`。`frrvty`グループはarca（vtysh経由）とFRR設定適用時に必要。復旧・互換用途の `--frr-apply-mode=file` では従来通り `frr.conf` を直接書き込み、`frr-reload.py` で適用する。
+**注**: v0.5以降の標準経路では、arca-routerd は FRR management candidate に変更を投入し、commit check/apply で適用する。標準の FRR daemon set は `bgpd`、`ospfd`、`zebra`、`staticd`、`mgmtd`、`vrrpd`、`bfdd`。`frrvty`グループはarca（vtysh経由）とFRR設定適用時に必要。復旧・互換用途の `--frr-apply-mode=file` では従来通り `frr.conf` を直接書き込み、`frr-reload.py` で適用する。
 
 **権限確認フロー**:
 
@@ -384,7 +384,7 @@ sudo systemctl restart vpp
 
 **原因**:
 - ユーザーが`frrvty`グループに所属していない
-- FRRで`mgmtd`または`vrrpd`が有効化されていない
+- FRRで`mgmtd`、`vrrpd`、または`bfdd`が有効化されていない
 - `--frr-apply-mode=file`利用時のみ、ユーザーが`frr`グループに所属していない
 - `--frr-apply-mode=file`利用時のみ、`/etc/frr/frr.conf`の権限が正しくない
 
@@ -398,6 +398,7 @@ sudo usermod -aG frr arca-router  # only required for --frr-apply-mode=file
 # Enable standard arca-router daemons in /etc/frr/daemons
 grep '^mgmtd=yes' /etc/frr/daemons
 grep '^vrrpd=yes' /etc/frr/daemons
+grep '^bfdd=yes' /etc/frr/daemons
 
 # Fix FRR config permissions (only required for --frr-apply-mode=file)
 sudo chown root:frr /etc/frr/frr.conf

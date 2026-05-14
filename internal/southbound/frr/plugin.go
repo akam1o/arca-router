@@ -78,6 +78,9 @@ func (p *FRRPlugin) ValidateChanges(ctx context.Context, diff *engine.ConfigDiff
 	if diff == nil {
 		return nil
 	}
+	if p.mode == pkgfrr.BackendModeTransactional && diff.BFDChanged {
+		return fmt.Errorf("BFD requires FRR file backend until frr-bfdd management operations are implemented")
+	}
 	if p.mode == pkgfrr.BackendModeTransactional && diff.NewOSPF3 != nil {
 		return fmt.Errorf("OSPFv3 requires FRR file backend until core ospf6d YANG paths are available")
 	}
@@ -91,7 +94,7 @@ func (p *FRRPlugin) ApplyChanges(ctx context.Context, diff *engine.ConfigDiff) e
 	defer p.mu.Unlock()
 
 	// Only regenerate FRR config if routing-related changes occurred
-	if !diff.BGPChanged && !diff.OSPFChanged && !diff.OSPF3Changed && !diff.StaticRoutesChanged &&
+	if !diff.BFDChanged && !diff.BGPChanged && !diff.OSPFChanged && !diff.OSPF3Changed && !diff.StaticRoutesChanged &&
 		!diff.PolicyChanged && !diff.RoutingChanged && !diff.SystemChanged && !diff.VRRPChanged &&
 		!diff.RoutingInstancesChanged &&
 		!hasFRRRelevantInterfaceChanges(diff) {
@@ -130,6 +133,7 @@ func (p *FRRPlugin) ApplyChanges(ctx context.Context, diff *engine.ConfigDiff) e
 
 	p.log.Info("FRR configuration applied",
 		slog.Int("config_length", len(configContent)),
+		slog.Bool("bfd_changed", diff.BFDChanged),
 		slog.Bool("bgp_changed", diff.BGPChanged),
 		slog.Bool("ospf_changed", diff.OSPFChanged),
 		slog.Bool("ospf3_changed", diff.OSPF3Changed),
@@ -217,6 +221,11 @@ func (p *FRRPlugin) buildFullConfig(diff *engine.ConfigDiff) *model.RouterConfig
 
 	// Protocols
 	cfg.Protocols = &model.ProtocolsConfig{}
+	if diff.NewBFD != nil {
+		cfg.Protocols.BFD = diff.NewBFD
+	} else if diff.OldBFD != nil && !diff.BFDChanged {
+		cfg.Protocols.BFD = diff.OldBFD
+	}
 	if diff.NewBGP != nil {
 		cfg.Protocols.BGP = diff.NewBGP
 	} else if diff.OldBGP != nil && !diff.BGPChanged {
