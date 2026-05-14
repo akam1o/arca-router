@@ -273,6 +273,50 @@ func TestGeneratePrefixListConfig(t *testing.T) {
 	}
 }
 
+func TestGeneratePrefixListConfigRejectsInvalidObjects(t *testing.T) {
+	tests := []struct {
+		name        string
+		prefixLists []PrefixList
+		want        string
+	}{
+		{
+			name:        "duplicate prefix-list",
+			prefixLists: []PrefixList{{Name: "CUSTOMER"}, {Name: "CUSTOMER"}},
+			want:        "prefix-list CUSTOMER is duplicated",
+		},
+		{
+			name: "duplicate sequence",
+			prefixLists: []PrefixList{{
+				Name: "CUSTOMER",
+				Entries: []PrefixListEntry{
+					{Seq: 10, Action: "permit", Prefix: "192.0.2.0/24"},
+					{Seq: 10, Action: "deny", Prefix: "198.51.100.0/24"},
+				},
+			}},
+			want: "prefix-list CUSTOMER entry 10 is duplicated",
+		},
+		{
+			name: "family mismatch",
+			prefixLists: []PrefixList{{
+				Name:   "CUSTOMER-V6",
+				IsIPv6: true,
+				Entries: []PrefixListEntry{
+					{Seq: 10, Action: "permit", Prefix: "192.0.2.0/24"},
+				},
+			}},
+			want: "address family does not match",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := GeneratePrefixListConfig(tt.prefixLists)
+			if err == nil || !strings.Contains(err.Error(), tt.want) {
+				t.Fatalf("GeneratePrefixListConfig() error = %v, want %q", err, tt.want)
+			}
+		})
+	}
+}
+
 // TestGenerateRouteMapConfig tests FRR route-map config generation
 func TestGenerateRouteMapConfig(t *testing.T) {
 	localPref := uint32(200)
@@ -296,6 +340,9 @@ func TestGenerateRouteMapConfig(t *testing.T) {
 						},
 					},
 				},
+			},
+			prefixLists: []PrefixList{
+				{Name: "MYLIST"},
 			},
 			wantText: []string{
 				"route-map MYPOLICY permit 10",
@@ -356,6 +403,9 @@ func TestGenerateRouteMapConfig(t *testing.T) {
 					},
 				},
 			},
+			prefixLists: []PrefixList{
+				{Name: "PRIVATE"},
+			},
 			wantText: []string{
 				"route-map DENY-POLICY deny 10",
 				"match ip address prefix-list PRIVATE",
@@ -396,6 +446,63 @@ func TestGenerateRouteMapConfig(t *testing.T) {
 				if !strings.Contains(result, want) {
 					t.Errorf("Expected config to contain %q\nGot:\n%s", want, result)
 				}
+			}
+		})
+	}
+}
+
+func TestGenerateRouteMapConfigRejectsInvalidObjects(t *testing.T) {
+	tests := []struct {
+		name        string
+		routeMaps   []RouteMap
+		prefixLists []PrefixList
+		want        string
+	}{
+		{
+			name: "unknown prefix-list",
+			routeMaps: []RouteMap{{
+				Name: "IMPORT",
+				Entries: []RouteMapEntry{
+					{Seq: 10, Action: "permit", MatchPrefixLists: []string{"MISSING"}},
+				},
+			}},
+			want: "references unknown prefix-list MISSING",
+		},
+		{
+			name: "duplicate route-map",
+			routeMaps: []RouteMap{
+				{Name: "IMPORT", Entries: []RouteMapEntry{{Seq: 10, Action: "permit"}}},
+				{Name: "IMPORT", Entries: []RouteMapEntry{{Seq: 20, Action: "deny"}}},
+			},
+			want: "route-map IMPORT is duplicated",
+		},
+		{
+			name: "duplicate entry sequence",
+			routeMaps: []RouteMap{{
+				Name: "IMPORT",
+				Entries: []RouteMapEntry{
+					{Seq: 10, Action: "permit"},
+					{Seq: 10, Action: "deny"},
+				},
+			}},
+			want: "route-map IMPORT entry 10 is duplicated",
+		},
+		{
+			name: "invalid peer match",
+			routeMaps: []RouteMap{{
+				Name: "IMPORT",
+				Entries: []RouteMapEntry{
+					{Seq: 10, Action: "permit", MatchNeighbor: "not-an-ip"},
+				},
+			}},
+			want: "invalid peer match not-an-ip",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := GenerateRouteMapConfig(tt.routeMaps, tt.prefixLists)
+			if err == nil || !strings.Contains(err.Error(), tt.want) {
+				t.Fatalf("GenerateRouteMapConfig() error = %v, want %q", err, tt.want)
 			}
 		})
 	}
@@ -1075,7 +1182,7 @@ func TestGenerateRouteMapWithMultiplePrefixLists(t *testing.T) {
 		},
 	}
 
-	result, err := GenerateRouteMapConfig(input, nil)
+	result, err := GenerateRouteMapConfig(input, []PrefixList{{Name: "LIST1"}, {Name: "LIST2"}})
 	if err != nil {
 		t.Fatalf("GenerateRouteMapConfig() error = %v", err)
 	}
@@ -1156,7 +1263,7 @@ func TestRouteMapMultipleEntries(t *testing.T) {
 		},
 	}
 
-	result, err := GenerateRouteMapConfig(input, nil)
+	result, err := GenerateRouteMapConfig(input, []PrefixList{{Name: "LIST1"}, {Name: "LIST2"}})
 	if err != nil {
 		t.Fatalf("GenerateRouteMapConfig() error = %v", err)
 	}

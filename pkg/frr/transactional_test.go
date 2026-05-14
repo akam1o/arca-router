@@ -271,6 +271,24 @@ func TestBuildMgmtOperationsRejectsInvalidPolicyObjects(t *testing.T) {
 			want: "entry sequence must be positive",
 		},
 		{
+			name: "duplicate prefix-list",
+			cfg: &Config{PrefixLists: []PrefixList{
+				{Name: "CUSTOMER"},
+				{Name: "CUSTOMER"},
+			}},
+			want: "prefix-list CUSTOMER is duplicated",
+		},
+		{
+			name: "duplicate prefix-list sequence",
+			cfg: &Config{PrefixLists: []PrefixList{
+				{Name: "CUSTOMER", Entries: []PrefixListEntry{
+					{Seq: 10, Action: "permit", Prefix: "192.0.2.0/24"},
+					{Seq: 10, Action: "deny", Prefix: "198.51.100.0/24"},
+				}},
+			}},
+			want: "prefix-list CUSTOMER entry 10 is duplicated",
+		},
+		{
 			name: "invalid prefix-list action",
 			cfg: &Config{PrefixLists: []PrefixList{
 				{Name: "CUSTOMER", Entries: []PrefixListEntry{{Seq: 10, Action: "drop", Prefix: "192.0.2.0/24"}}},
@@ -299,6 +317,24 @@ func TestBuildMgmtOperationsRejectsInvalidPolicyObjects(t *testing.T) {
 			want: "entry sequence must be positive",
 		},
 		{
+			name: "duplicate route-map",
+			cfg: &Config{RouteMaps: []RouteMap{
+				{Name: "IMPORT", Entries: []RouteMapEntry{{Seq: 10, Action: "permit"}}},
+				{Name: "IMPORT", Entries: []RouteMapEntry{{Seq: 20, Action: "deny"}}},
+			}},
+			want: "route-map IMPORT is duplicated",
+		},
+		{
+			name: "duplicate route-map sequence",
+			cfg: &Config{RouteMaps: []RouteMap{
+				{Name: "IMPORT", Entries: []RouteMapEntry{
+					{Seq: 10, Action: "permit"},
+					{Seq: 10, Action: "deny"},
+				}},
+			}},
+			want: "route-map IMPORT entry 10 is duplicated",
+		},
+		{
 			name: "invalid route-map action",
 			cfg: &Config{RouteMaps: []RouteMap{
 				{Name: "IMPORT", Entries: []RouteMapEntry{{Seq: 10, Action: "drop"}}},
@@ -311,6 +347,13 @@ func TestBuildMgmtOperationsRejectsInvalidPolicyObjects(t *testing.T) {
 				{Name: "IMPORT", Entries: []RouteMapEntry{{Seq: 10, Action: "permit", MatchPrefixLists: []string{""}}}},
 			}},
 			want: "references empty prefix-list",
+		},
+		{
+			name: "unknown route-map prefix-list reference",
+			cfg: &Config{RouteMaps: []RouteMap{
+				{Name: "IMPORT", Entries: []RouteMapEntry{{Seq: 10, Action: "permit", MatchPrefixLists: []string{"MISSING"}}}},
+			}},
+			want: "references unknown prefix-list MISSING",
 		},
 	}
 
