@@ -278,9 +278,10 @@ func TestGenerateRouteMapConfig(t *testing.T) {
 	localPref := uint32(200)
 
 	tests := []struct {
-		name     string
-		input    []RouteMap
-		wantText []string
+		name        string
+		input       []RouteMap
+		prefixLists []PrefixList
+		wantText    []string
 	}{
 		{
 			name: "simple route-map with prefix-list",
@@ -360,11 +361,33 @@ func TestGenerateRouteMapConfig(t *testing.T) {
 				"match ip address prefix-list PRIVATE",
 			},
 		},
+		{
+			name: "route-map with IPv6 prefix-list",
+			input: []RouteMap{
+				{
+					Name: "IPV6-POLICY",
+					Entries: []RouteMapEntry{
+						{
+							Seq:              10,
+							Action:           "permit",
+							MatchPrefixLists: []string{"IPV6LIST"},
+						},
+					},
+				},
+			},
+			prefixLists: []PrefixList{
+				{Name: "IPV6LIST", IsIPv6: true},
+			},
+			wantText: []string{
+				"route-map IPV6-POLICY permit 10",
+				"match ipv6 address prefix-list IPV6LIST",
+			},
+		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result, err := GenerateRouteMapConfig(tt.input, nil)
+			result, err := GenerateRouteMapConfig(tt.input, tt.prefixLists)
 			if err != nil {
 				t.Fatalf("GenerateRouteMapConfig() error = %v", err)
 			}
@@ -616,10 +639,20 @@ func TestRouteMapWithNeighborMatch(t *testing.T) {
 func TestRouteMapWithProtocolMatch(t *testing.T) {
 	acceptTrue := true
 
-	protocols := []string{"bgp", "ospf", "static", "connected"}
+	tests := []struct {
+		input string
+		want  string
+	}{
+		{input: "bgp", want: "bgp"},
+		{input: "ospf", want: "ospf"},
+		{input: "ospf3", want: "ospf6"},
+		{input: "static", want: "static"},
+		{input: "connected", want: "connected"},
+		{input: "direct", want: "connected"},
+	}
 
-	for _, proto := range protocols {
-		t.Run(proto, func(t *testing.T) {
+	for _, tt := range tests {
+		t.Run(tt.input, func(t *testing.T) {
 			input := map[string]*config.PolicyStatement{
 				"PROTO": {
 					Name: "PROTO",
@@ -627,7 +660,7 @@ func TestRouteMapWithProtocolMatch(t *testing.T) {
 						{
 							Name: "TERM1",
 							From: &config.PolicyMatchConditions{
-								Protocol: proto,
+								Protocol: tt.input,
 							},
 							Then: &config.PolicyActions{
 								Accept: &acceptTrue,
@@ -642,8 +675,8 @@ func TestRouteMapWithProtocolMatch(t *testing.T) {
 				t.Fatalf("convertPolicyStatements() error = %v", err)
 			}
 
-			if result[0].Entries[0].MatchProtocol != proto {
-				t.Errorf("Expected protocol %s, got %s", proto, result[0].Entries[0].MatchProtocol)
+			if result[0].Entries[0].MatchProtocol != tt.want {
+				t.Errorf("Expected protocol %s, got %s", tt.want, result[0].Entries[0].MatchProtocol)
 			}
 		})
 	}

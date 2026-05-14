@@ -76,6 +76,41 @@ func TestBuildMgmtOperationsVRRP(t *testing.T) {
 	}
 }
 
+func TestBuildMgmtOperationsIPv6RouteMapPrefixList(t *testing.T) {
+	ops, err := BuildMgmtOperations(&Config{
+		PrefixLists: []PrefixList{
+			{
+				Name:   "V6-IN",
+				IsIPv6: true,
+				Entries: []PrefixListEntry{
+					{Seq: 10, Action: "permit", Prefix: "2001:db8::/32"},
+				},
+			},
+		},
+		RouteMaps: []RouteMap{
+			{
+				Name: "IMPORT-V6",
+				Entries: []RouteMapEntry{
+					{Seq: 10, Action: "permit", MatchPrefixLists: []string{"V6-IN"}},
+				},
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("BuildMgmtOperations() error = %v", err)
+	}
+	commands := commandsFromOps(ops)
+	for _, want := range []string{
+		"mgmt set-config /frr-filter:lib/prefix-list[type='ipv6'][name='V6-IN']/entry[sequence='10']/ipv6-prefix 2001:db8::/32",
+		"mgmt set-config /frr-route-map:lib/route-map[name='IMPORT-V6']/entry[sequence='10']/match-condition[condition='frr-route-map:ipv6-prefix-list']/condition frr-route-map:ipv6-prefix-list",
+		"mgmt set-config /frr-route-map:lib/route-map[name='IMPORT-V6']/entry[sequence='10']/match-condition[condition='frr-route-map:ipv6-prefix-list']/rmap-match-condition/list-name V6-IN",
+	} {
+		if !strings.Contains(commands, want) {
+			t.Fatalf("commands missing %q:\n%s", want, commands)
+		}
+	}
+}
+
 func TestBuildMgmtOperationsVRFVPN(t *testing.T) {
 	ops, err := BuildMgmtOperations(&Config{
 		VRFs: []VRFConfig{
