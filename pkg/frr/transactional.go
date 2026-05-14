@@ -142,6 +142,9 @@ func BuildMgmtOperations(cfg *Config) ([]MgmtOperation, error) {
 	if err := validateTransactionalBFDProtocolBindings(cfg); err != nil {
 		return nil, err
 	}
+	if err := validateTransactionalStaticRouteBFDProfiles(cfg); err != nil {
+		return nil, err
+	}
 	if err := validateTransactionalRouteMapSupport(cfg); err != nil {
 		return nil, err
 	}
@@ -196,6 +199,27 @@ func validateTransactionalBFDProtocolBindings(cfg *Config) error {
 	}
 	if cfg.OSPF3 != nil && ospfHasBFDProtocolBindings(cfg.OSPF3) {
 		return NewInvalidConfigError("OSPFv3 BFD protocol bindings are not supported by the transactional FRR backend until ospf6d management operations are implemented")
+	}
+	return nil
+}
+
+func validateTransactionalStaticRouteBFDProfiles(cfg *Config) error {
+	if cfg == nil {
+		return nil
+	}
+	profiles := make(map[string]struct{})
+	if cfg.BFD != nil {
+		for _, profile := range cfg.BFD.Profiles {
+			profiles[profile.Name] = struct{}{}
+		}
+	}
+	for _, route := range cfg.StaticRoutes {
+		if route.BFDProfile == "" {
+			continue
+		}
+		if _, ok := profiles[route.BFDProfile]; !ok {
+			return NewInvalidConfigError(fmt.Sprintf("static route %s references unknown BFD profile %s", route.Prefix, route.BFDProfile))
+		}
 	}
 	return nil
 }
