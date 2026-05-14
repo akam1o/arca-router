@@ -40,7 +40,7 @@ func TestBuildOperationalDataUsesRunningConfig(t *testing.T) {
 	}
 	cfg.Protocols = &config.ProtocolConfig{BGP: &config.BGPConfig{}}
 
-	data, err := buildOperationalData(cfg, nil, time.Date(2026, 5, 12, 4, 0, 0, 0, time.UTC), nil, nil)
+	data, err := buildOperationalData(cfg, nil, time.Date(2026, 5, 12, 4, 0, 0, 0, time.UTC), nil, nil, nil, nil)
 	if err != nil {
 		t.Fatalf("buildOperationalData() error = %v", err)
 	}
@@ -91,7 +91,7 @@ func TestBuildOperationalDataUsesLiveInterfaceState(t *testing.T) {
 				},
 			},
 		},
-	}, nil)
+	}, nil, nil, nil)
 	if err != nil {
 		t.Fatalf("buildOperationalData() error = %v", err)
 	}
@@ -128,7 +128,7 @@ func TestBuildOperationalDataUsesLiveInterfaceState(t *testing.T) {
 
 func TestBuildOperationalDataWritesBFDState(t *testing.T) {
 	cfg := config.NewConfig()
-	data, err := buildOperationalData(cfg, nil, time.Date(2026, 5, 12, 4, 0, 0, 0, time.UTC), nil, &BFDOperationalState{
+	data, err := buildOperationalData(cfg, nil, time.Date(2026, 5, 12, 4, 0, 0, 0, time.UTC), nil, nil, nil, &BFDOperationalState{
 		LastRun:           time.Date(2026, 5, 14, 6, 0, 0, 0, time.UTC),
 		ConfiguredPeers:   2,
 		ObservedPeers:     2,
@@ -211,7 +211,7 @@ func TestBuildOperationalDataWritesRoutingInstanceState(t *testing.T) {
 		Interfaces:         []string{"ge-0/0/1", "ge-0/0/0", "ge-0/0/1"},
 	}
 
-	data, err := buildOperationalData(cfg, nil, time.Date(2026, 5, 12, 4, 0, 0, 0, time.UTC), nil, nil)
+	data, err := buildOperationalData(cfg, nil, time.Date(2026, 5, 12, 4, 0, 0, 0, time.UTC), nil, nil, nil, nil)
 	if err != nil {
 		t.Fatalf("buildOperationalData() error = %v", err)
 	}
@@ -243,5 +243,72 @@ func TestBuildOperationalDataWritesRoutingInstanceState(t *testing.T) {
 	}
 	if bytes.Count(data, []byte("<interface>ge-0/0/1</interface>")) != 1 {
 		t.Fatalf("routing-instance interfaces are not deduplicated:\n%s", data)
+	}
+}
+
+func TestBuildOperationalDataWritesRouteState(t *testing.T) {
+	cfg := config.NewConfig()
+	data, err := buildOperationalData(cfg, nil, time.Date(2026, 5, 12, 4, 0, 0, 0, time.UTC), nil, []RouteOperationalState{
+		{
+			Prefix:    "2001:db8::/64",
+			NextHop:   "fe80::1",
+			Protocol:  "bgp",
+			Metric:    20,
+			Interface: "ge-0/0/0",
+			Active:    true,
+		},
+	}, nil, nil)
+	if err != nil {
+		t.Fatalf("buildOperationalData() error = %v", err)
+	}
+
+	for _, want := range []string{
+		`<state xmlns="urn:arca:router:config:1.0">`,
+		"<routes>",
+		"<route>",
+		"<prefix>2001:db8::/64</prefix>",
+		"<next-hop>fe80::1</next-hop>",
+		"<protocol>bgp</protocol>",
+		"<metric>20</metric>",
+		"<interface>ge-0/0/0</interface>",
+		"<active>true</active>",
+	} {
+		if !bytes.Contains(data, []byte(want)) {
+			t.Fatalf("operational data missing %q:\n%s", want, data)
+		}
+	}
+}
+
+func TestBuildOperationalDataWritesBGPNeighborState(t *testing.T) {
+	cfg := config.NewConfig()
+	data, err := buildOperationalData(cfg, nil, time.Date(2026, 5, 12, 4, 0, 0, 0, time.UTC), nil, nil, []BGPNeighborOperationalState{
+		{
+			PeerAddress:    "2001:db8::2",
+			PeerAS:         65001,
+			State:          "Established",
+			UptimeSecs:     3661,
+			PrefixReceived: 10,
+			PrefixSent:     20,
+		},
+	}, nil)
+	if err != nil {
+		t.Fatalf("buildOperationalData() error = %v", err)
+	}
+
+	for _, want := range []string{
+		`<state xmlns="urn:arca:router:config:1.0">`,
+		"<protocols>",
+		"<bgp>",
+		"<neighbor>",
+		"<peer-address>2001:db8::2</peer-address>",
+		"<peer-as>65001</peer-as>",
+		"<state>Established</state>",
+		"<uptime-seconds>3661</uptime-seconds>",
+		"<prefix-received>10</prefix-received>",
+		"<prefix-sent>20</prefix-sent>",
+	} {
+		if !bytes.Contains(data, []byte(want)) {
+			t.Fatalf("operational data missing %q:\n%s", want, data)
+		}
 	}
 }

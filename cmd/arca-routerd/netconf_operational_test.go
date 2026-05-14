@@ -7,6 +7,7 @@ import (
 
 	"github.com/akam1o/arca-router/internal/model"
 	sbfrr "github.com/akam1o/arca-router/internal/southbound/frr"
+	pkgfrr "github.com/akam1o/arca-router/pkg/frr"
 )
 
 type fakeInterfaceStateCollector struct {
@@ -24,6 +25,24 @@ type fakeNETCONFBFDStatusSource struct {
 
 func (s fakeNETCONFBFDStatusSource) BFDOperationalStatus() sbfrr.BFDOperationalStatus {
 	return s.status
+}
+
+type fakeNETCONFRouteStatusReader struct {
+	status *pkgfrr.RouteStatus
+	err    error
+}
+
+func (r fakeNETCONFRouteStatusReader) ReadRouteStatus(ctx context.Context) (*pkgfrr.RouteStatus, error) {
+	return r.status, r.err
+}
+
+type fakeNETCONFBGPSummaryStatusReader struct {
+	status *pkgfrr.BGPSummaryStatus
+	err    error
+}
+
+func (r fakeNETCONFBGPSummaryStatusReader) ReadBGPSummaryStatus(ctx context.Context) (*pkgfrr.BGPSummaryStatus, error) {
+	return r.status, r.err
 }
 
 func TestNewNETCONFOperationalStateProviderNilCollector(t *testing.T) {
@@ -88,6 +107,66 @@ func TestNETCONFOperationalStateProviderConvertsInterfaceState(t *testing.T) {
 	}
 	if got := state.Queues.Tx[0]; got.QueueID != 0 || !got.Shared || len(got.Threads) != 2 || got.Threads[0] != 0 || got.Threads[1] != 2 {
 		t.Fatalf("tx queue = %#v", got)
+	}
+}
+
+func TestNETCONFOperationalStateProviderConvertsRouteStatus(t *testing.T) {
+	provider := &netconfOperationalStateProvider{
+		routeReader: fakeNETCONFRouteStatusReader{status: &pkgfrr.RouteStatus{
+			Routes: []pkgfrr.RouteStatusEntry{
+				{
+					Prefix:    "2001:db8::/64",
+					NextHop:   "fe80::1",
+					Protocol:  "bgp",
+					Metric:    20,
+					Interface: "ge-0/0/0",
+					Active:    true,
+				},
+			},
+		}},
+	}
+
+	routes, err := provider.Routes(context.Background())
+	if err != nil {
+		t.Fatalf("Routes() error = %v", err)
+	}
+	if len(routes) != 1 {
+		t.Fatalf("Routes() len = %d, want 1", len(routes))
+	}
+	route := routes[0]
+	if route.Prefix != "2001:db8::/64" || route.NextHop != "fe80::1" || route.Protocol != "bgp" ||
+		route.Metric != 20 || route.Interface != "ge-0/0/0" || !route.Active {
+		t.Fatalf("Routes()[0] = %#v, want converted route state", route)
+	}
+}
+
+func TestNETCONFOperationalStateProviderConvertsBGPSummaryStatus(t *testing.T) {
+	provider := &netconfOperationalStateProvider{
+		bgpReader: fakeNETCONFBGPSummaryStatusReader{status: &pkgfrr.BGPSummaryStatus{
+			Neighbors: []pkgfrr.BGPNeighborStatus{
+				{
+					PeerAddress:    "2001:db8::2",
+					PeerAS:         65001,
+					State:          "Established",
+					UptimeSecs:     3661,
+					PrefixReceived: 10,
+					PrefixSent:     20,
+				},
+			},
+		}},
+	}
+
+	neighbors, err := provider.BGPNeighbors(context.Background())
+	if err != nil {
+		t.Fatalf("BGPNeighbors() error = %v", err)
+	}
+	if len(neighbors) != 1 {
+		t.Fatalf("BGPNeighbors() len = %d, want 1", len(neighbors))
+	}
+	neighbor := neighbors[0]
+	if neighbor.PeerAddress != "2001:db8::2" || neighbor.PeerAS != 65001 || neighbor.State != "Established" ||
+		neighbor.UptimeSecs != 3661 || neighbor.PrefixReceived != 10 || neighbor.PrefixSent != 20 {
+		t.Fatalf("BGPNeighbors()[0] = %#v, want converted BGP neighbor state", neighbor)
 	}
 }
 

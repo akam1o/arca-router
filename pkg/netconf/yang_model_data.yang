@@ -714,6 +714,39 @@ module arca-router {
          through ietf-interfaces.";
     }
 
+    container routes {
+      description "Live IPv4 and IPv6 route table entries.";
+
+      list route {
+        description "One route entry or nexthop path.";
+
+        leaf prefix {
+          type string;
+          description "Route destination prefix.";
+        }
+        leaf next-hop {
+          type string;
+          description "Route nexthop address.";
+        }
+        leaf protocol {
+          type string;
+          description "Protocol that installed the route.";
+        }
+        leaf metric {
+          type uint32;
+          description "Route metric.";
+        }
+        leaf interface {
+          type string;
+          description "Outgoing interface.";
+        }
+        leaf active {
+          type boolean;
+          description "Whether the path is active in FRR.";
+        }
+      }
+    }
+
     container routing-instances {
       description "Running routing-instance intent and VPP table bindings.";
 
@@ -766,6 +799,39 @@ module arca-router {
 
     container protocols {
       description "Protocol operational state.";
+
+      container bgp {
+        description "BGP neighbor operational state.";
+
+        list neighbor {
+          description "Per-neighbor BGP operational state.";
+
+          leaf peer-address {
+            type string;
+            description "BGP peer address.";
+          }
+          leaf peer-as {
+            type uint32;
+            description "Remote peer AS number.";
+          }
+          leaf state {
+            type string;
+            description "BGP finite-state-machine state.";
+          }
+          leaf uptime-seconds {
+            type uint64;
+            description "Peer uptime in seconds.";
+          }
+          leaf prefix-received {
+            type uint32;
+            description "Received prefix count.";
+          }
+          leaf prefix-sent {
+            type uint32;
+            description "Sent prefix count.";
+          }
+        }
+      }
 
       container bfd {
         description "Cached BFD convergence state and failure counters.";

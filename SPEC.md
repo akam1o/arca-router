@@ -618,6 +618,8 @@ The internal gRPC route state API reads FRR JSON route output for both IPv4 and 
 
 The internal gRPC BGP neighbor state API reads FRR JSON summary output and returns structured peer address, remote AS, state, uptime, received-prefix, and sent-prefix counters. When FRR reports the same peer under multiple address families, arca-router returns one peer entry with prefix counters combined and the longest observed uptime.
 
+NETCONF `<get>` exposes the same live route table state under `state/routes` and BGP neighbor state under `state/protocols/bgp`, using the FRR JSON operational readers shared with the internal gRPC state APIs.
+
 The internal gRPC routing-instance state API returns running routing-instance intent with deterministic IPv4/IPv6 VPP table IDs, interface bindings, import/export targets, and import/export policy chains.
 
 The internal gRPC BFD state API returns arca-routerd's cached FRR BFD convergence snapshot, including configured/observed/up/down peer counts, aggregate session-down and RX-fail counters, per-peer state, diagnostics, and convergence issues.
