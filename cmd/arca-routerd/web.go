@@ -30,6 +30,8 @@ const webDummyPasswordHash = "$argon2id$v=19$m=65536,t=3,p=4$AAAAAAAAAAAAAAAAAAA
 
 const webConfigEditBodyLimit = 1 << 20
 
+const nmsOperationalStatusSchemaVersion = "arca.nms.operational.v1"
+
 type webConfigAPI interface {
 	GetRunning(ctx context.Context) (string, uint64, error)
 	CreateSession(ctx context.Context, user string) (string, error)
@@ -58,6 +60,13 @@ type webStatus struct {
 	FRR             webFRRStats     `json:"frr"`
 	VPP             webVPPStats     `json:"vpp"`
 	NETCONF         webNETCONFStats `json:"netconf"`
+}
+
+type nmsStatusResponse struct {
+	SchemaVersion string    `json:"schema_version"`
+	GeneratedAt   string    `json:"generated_at"`
+	Resource      string    `json:"resource"`
+	Data          webStatus `json:"data"`
 }
 
 type webDatastore struct {
@@ -598,7 +607,7 @@ var webIndexTemplate = template.Must(template.New("web-index").Parse(`<!doctype 
 
     <footer>
       <span>Generated {{.GeneratedAt}}</span>
-      <span>/api/status | /api/config | /api/config/history | /api/config/validate | /api/config/commit</span>
+      <span>/api/status | /api/nms/v1/status | /api/config | /api/config/history | /api/config/validate | /api/config/commit</span>
     </footer>
   </main>
   <script>
@@ -798,6 +807,7 @@ func newWebMux(source metricsSource) *http.ServeMux {
 	mux.HandleFunc("/api/config/commit", source.handleWebConfigCommit)
 	mux.HandleFunc("/api/config/history", source.handleWebConfigHistory)
 	mux.HandleFunc("/api/status", source.handleWebStatus)
+	mux.HandleFunc("/api/nms/v1/status", source.handleNMSStatus)
 	mux.HandleFunc("/api/config/validate", source.handleWebConfigValidate)
 	return mux
 }
@@ -814,6 +824,18 @@ func (s metricsSource) handleWebStatus(w http.ResponseWriter, r *http.Request) {
 	if err := json.NewEncoder(w).Encode(newWebStatus(s.snapshot(time.Now()))); err != nil {
 		http.Error(w, "encode status: "+err.Error(), http.StatusInternalServerError)
 	}
+}
+
+func (s metricsSource) handleNMSStatus(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	if !s.authorizeWebRead(w, r) {
+		return
+	}
+	now := time.Now()
+	writeWebJSON(w, http.StatusOK, newNMSStatusResponse(now, s.snapshot(now)))
 }
 
 func (s metricsSource) handleWebConfig(w http.ResponseWriter, r *http.Request) {
@@ -1242,6 +1264,15 @@ func formatWebOptionalDisplayTime(value string) string {
 		return "Never"
 	}
 	return value
+}
+
+func newNMSStatusResponse(now time.Time, metrics routerMetrics) nmsStatusResponse {
+	return nmsStatusResponse{
+		SchemaVersion: nmsOperationalStatusSchemaVersion,
+		GeneratedAt:   formatWebOptionalTime(now),
+		Resource:      "/api/nms/v1/status",
+		Data:          newWebStatus(metrics),
+	}
 }
 
 func newWebStatus(metrics routerMetrics) webStatus {

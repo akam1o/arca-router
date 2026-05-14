@@ -249,6 +249,9 @@ arca show ha
 arca show class-of-service
 arca show telemetry path /system path /interfaces
 
+# Query the schema-versioned NMS status API when the Web API is enabled
+curl -u monitor:ReadOnly789 http://127.0.0.1:8080/api/nms/v1/status
+
 # Check VPP/FRR directly (optional)
 sudo vppctl show interface
 sudo vppctl show lcp
