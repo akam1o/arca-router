@@ -205,6 +205,9 @@ func vrrpSystemInterfaces(cfg *VRRPConfig) ([]vrrpSystemInterface, error) {
 	if cfg == nil || len(cfg.Groups) == 0 {
 		return nil, nil
 	}
+	if err := validateVRRPConfig(cfg); err != nil {
+		return nil, err
+	}
 	groups := append([]VRRPGroup(nil), cfg.Groups...)
 	sort.Slice(groups, func(i, j int) bool {
 		if groups[i].Interface != groups[j].Interface {
@@ -216,15 +219,6 @@ func vrrpSystemInterfaces(cfg *VRRPConfig) ([]vrrpSystemInterface, error) {
 	interfaces := make([]vrrpSystemInterface, 0, len(groups))
 	for _, group := range groups {
 		ip := net.ParseIP(group.VirtualAddress)
-		if group.Interface == "" {
-			return nil, NewInvalidConfigError(fmt.Sprintf("VRRP group %d missing interface", group.ID))
-		}
-		if group.ID < 1 || group.ID > 255 {
-			return nil, NewInvalidConfigError(fmt.Sprintf("VRRP group id must be 1-255, got %d", group.ID))
-		}
-		if ip == nil {
-			return nil, NewInvalidConfigError(fmt.Sprintf("VRRP group %d has invalid virtual address %q", group.ID, group.VirtualAddress))
-		}
 		family := vrrpIPv4Family
 		prefixLen := "32"
 		if ip.To4() == nil {

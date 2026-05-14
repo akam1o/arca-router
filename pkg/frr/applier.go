@@ -74,7 +74,13 @@ func (a *FileApplier) ApplyConfig(ctx context.Context, configContent string, cfg
 }
 
 func prepareVRRPSystem(ctx context.Context, preparer VRRPSystemPreparer, cfg *Config) error {
-	if cfg == nil || preparer == nil {
+	if cfg == nil {
+		return nil
+	}
+	if err := validateVRRPConfig(cfg.VRRP); err != nil {
+		return err
+	}
+	if preparer == nil {
 		return nil
 	}
 	if err := preparer.Prepare(ctx, cfg); err != nil {
