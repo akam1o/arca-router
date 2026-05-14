@@ -1036,6 +1036,16 @@ func validateBGPGroup(cfg *Config, groupName string, group *BGPGroup) error {
 			return err
 		}
 	}
+	if group.Import != "" {
+		if err := validatePolicyStatementReference(cfg, fmt.Sprintf("BGP group %s import", groupName), group.Import); err != nil {
+			return err
+		}
+	}
+	if group.Export != "" {
+		if err := validatePolicyStatementReference(cfg, fmt.Sprintf("BGP group %s export", groupName), group.Export); err != nil {
+			return err
+		}
+	}
 
 	return nil
 }

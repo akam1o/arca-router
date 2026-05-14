@@ -70,3 +70,47 @@ func TestValidatePolicyRejectsInvalidASPath(t *testing.T) {
 		t.Fatalf("Validate() error = %v, want invalid as-path error", err)
 	}
 }
+
+func TestValidateBGPRejectsUnknownPolicyReferences(t *testing.T) {
+	tests := []struct {
+		name      string
+		configure func(*BGPGroup)
+		want      string
+	}{
+		{
+			name: "import without policy-options",
+			configure: func(group *BGPGroup) {
+				group.Import = "IMPORT-MISSING"
+			},
+			want: `bgp group EBGP import: policy-statement "IMPORT-MISSING" not found in policy-options`,
+		},
+		{
+			name: "export unknown",
+			configure: func(group *BGPGroup) {
+				group.Export = "EXPORT-MISSING"
+			},
+			want: `bgp group EBGP export: policy-statement "EXPORT-MISSING" not found in policy-options`,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg := NewRouterConfig()
+			cfg.Routing = &RoutingConfig{AutonomousSystem: 65000}
+			cfg.Protocols = &ProtocolsConfig{BGP: &BGPConfig{Groups: map[string]*BGPGroup{
+				"EBGP": {
+					Type: "external",
+					Neighbors: map[string]*BGPNeighbor{
+						"192.0.2.2": {PeerAS: 65001},
+					},
+				},
+			}}}
+			tt.configure(cfg.Protocols.BGP.Groups["EBGP"])
+
+			err := cfg.Validate()
+			if err == nil || !strings.Contains(err.Error(), tt.want) {
+				t.Fatalf("Validate() error = %v, want %q", err, tt.want)
+			}
+		})
+	}
+}

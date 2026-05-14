@@ -406,17 +406,14 @@ func (c *RouterConfig) validateBGP(bgp *BGPConfig) error {
 				}
 			}
 		}
-		// Validate import/export policy references
-		if group.Import != "" && c.Policy != nil {
-			if _, ok := c.Policy.PolicyStatements[group.Import]; !ok {
-				return fmt.Errorf("bgp group %s: import policy %q not found in policy-options",
-					groupName, group.Import)
+		if group.Import != "" {
+			if err := c.validatePolicyStatementReference(fmt.Sprintf("bgp group %s import", groupName), group.Import); err != nil {
+				return err
 			}
 		}
-		if group.Export != "" && c.Policy != nil {
-			if _, ok := c.Policy.PolicyStatements[group.Export]; !ok {
-				return fmt.Errorf("bgp group %s: export policy %q not found in policy-options",
-					groupName, group.Export)
+		if group.Export != "" {
+			if err := c.validatePolicyStatementReference(fmt.Sprintf("bgp group %s export", groupName), group.Export); err != nil {
+				return err
 			}
 		}
 	}
