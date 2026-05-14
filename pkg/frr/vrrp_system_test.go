@@ -207,6 +207,47 @@ func TestTransactionalApplierPreparesVRRPSystem(t *testing.T) {
 	}
 }
 
+func TestTransactionalApplierValidatesBeforeVRRPSystemPreparation(t *testing.T) {
+	client := &recordingMgmtClient{}
+	preparer := &recordingVRRPPreparer{}
+	applier := NewTransactionalApplierWithPreparer(client, preparer)
+	cfg := &Config{
+		VRRP: &VRRPConfig{Groups: []VRRPGroup{
+			{ID: 10, Interface: "ge0-0-0", VirtualAddress: "192.0.2.254"},
+		}},
+		BGP: &BGPConfig{Neighbors: []BGPNeighbor{
+			{IP: "192.0.2.2", RemoteAS: 65001},
+		}},
+	}
+
+	err := applier.ApplyConfig(context.Background(), "", cfg)
+	if err == nil || !strings.Contains(err.Error(), "BGP ASN is required") {
+		t.Fatalf("ApplyConfig() error = %v, want BGP validation error", err)
+	}
+	if preparer.calls != 0 {
+		t.Fatalf("preparer calls = %d, want 0", preparer.calls)
+	}
+	if len(client.ops) != 0 {
+		t.Fatalf("mgmt client ops = %d, want 0", len(client.ops))
+	}
+}
+
+func TestFileApplierValidatesVRRPBeforeSystemPreparation(t *testing.T) {
+	preparer := &recordingVRRPPreparer{}
+	applier := NewFileApplierWithPreparer(NewReloader(), preparer)
+	cfg := &Config{VRRP: &VRRPConfig{Groups: []VRRPGroup{
+		{ID: 10, Interface: "ge0-0-0", VirtualAddress: "192.0.2.254", Priority: 300},
+	}}}
+
+	err := applier.ApplyConfig(context.Background(), "", cfg)
+	if err == nil || !strings.Contains(err.Error(), "priority must be 1-254") {
+		t.Fatalf("ApplyConfig() error = %v, want VRRP priority validation error", err)
+	}
+	if preparer.calls != 0 {
+		t.Fatalf("preparer calls = %d, want 0", preparer.calls)
+	}
+}
+
 func containsCommand(commands []string, want string) bool {
 	for _, command := range commands {
 		if command == want {

@@ -120,11 +120,11 @@ func NewTransactionalApplierWithPreparer(client MgmtClient, preparer VRRPSystemP
 
 // ApplyConfig converts the generated FRR config into management operations and commits them.
 func (a *TransactionalApplier) ApplyConfig(ctx context.Context, _ string, cfg *Config) error {
-	if err := prepareVRRPSystem(ctx, a.vrrpPreparer, cfg); err != nil {
-		return err
-	}
 	ops, err := BuildMgmtOperations(cfg)
 	if err != nil {
+		return err
+	}
+	if err := prepareVRRPSystem(ctx, a.vrrpPreparer, cfg); err != nil {
 		return err
 	}
 	return a.client.Apply(ctx, ops)
@@ -917,6 +917,9 @@ func buildVRRPOps(cfg *VRRPConfig) ([]MgmtOperation, error) {
 	if cfg == nil || len(cfg.Groups) == 0 {
 		return nil, nil
 	}
+	if err := validateVRRPConfig(cfg); err != nil {
+		return nil, err
+	}
 	groups := append([]VRRPGroup(nil), cfg.Groups...)
 	sort.Slice(groups, func(i, j int) bool {
 		if groups[i].Interface != groups[j].Interface {
@@ -928,19 +931,7 @@ func buildVRRPOps(cfg *VRRPConfig) ([]MgmtOperation, error) {
 	var ops []MgmtOperation
 	createdInterfaces := make(map[string]bool)
 	for _, group := range groups {
-		if group.Interface == "" {
-			return nil, NewInvalidConfigError(fmt.Sprintf("VRRP group %d missing interface", group.ID))
-		}
-		if group.ID < 1 || group.ID > 255 {
-			return nil, NewInvalidConfigError(fmt.Sprintf("VRRP group id must be 1-255, got %d", group.ID))
-		}
 		virtualAddress := net.ParseIP(group.VirtualAddress)
-		if virtualAddress == nil {
-			return nil, NewInvalidConfigError(fmt.Sprintf("VRRP group %d has invalid virtual address %q", group.ID, group.VirtualAddress))
-		}
-		if group.Priority < 0 || group.Priority > 254 {
-			return nil, NewInvalidConfigError(fmt.Sprintf("VRRP group %d priority must be 1-254 when configured, got %d", group.ID, group.Priority))
-		}
 		if !createdInterfaces[group.Interface] {
 			ops = append(ops, setOp(interfaceBase(group.Interface)+"/name", group.Interface))
 			createdInterfaces[group.Interface] = true
