@@ -18,6 +18,7 @@ import (
 	apiv1 "github.com/akam1o/arca-router/api/v1"
 	"github.com/akam1o/arca-router/internal/engine"
 	"github.com/akam1o/arca-router/internal/model"
+	sbfrr "github.com/akam1o/arca-router/internal/southbound/frr"
 	"github.com/akam1o/arca-router/internal/store"
 	"github.com/akam1o/arca-router/pkg/cli"
 	pkgconfig "github.com/akam1o/arca-router/pkg/config"
@@ -38,6 +39,7 @@ type Server struct {
 	stateCollector interfaceStateCollector
 	lcpSource      lcpReconciliationSource
 	haSource       haStatusSource
+	bfdSource      bfdOperationalSource
 }
 
 var (
@@ -62,6 +64,10 @@ type lcpReconciliationSource interface {
 
 type haStatusSource interface {
 	HAStatusInfo() HAStatusInfo
+}
+
+type bfdOperationalSource interface {
+	BFDOperationalStatus() sbfrr.BFDOperationalStatus
 }
 
 // NewServer creates a new gRPC server.
@@ -104,6 +110,11 @@ func (s *Server) SetLCPReconciliationSource(source lcpReconciliationSource) {
 // SetHAStatusSource installs a control-plane HA status source.
 func (s *Server) SetHAStatusSource(source haStatusSource) {
 	s.haSource = source
+}
+
+// SetBFDOperationalSource installs an FRR BFD operational state source.
+func (s *Server) SetBFDOperationalSource(source bfdOperationalSource) {
+	s.bfdSource = source
 }
 
 // --- ConfigService implementation ---
@@ -781,6 +792,49 @@ func (s *Server) GetBFDText(ctx context.Context, peerAddress string, brief, coun
 		command += " counters"
 	}
 	return runOperationalVtyshCommand(ctx, command)
+}
+
+// GetBFDStatus returns cached FRR BFD operational state.
+func (s *Server) GetBFDStatus(ctx context.Context) (*BFDStatusInfo, error) {
+	if s.bfdSource == nil {
+		return nil, unsupportedOperationalStateError("FRR BFD operational state")
+	}
+	status := s.bfdSource.BFDOperationalStatus()
+	info := &BFDStatusInfo{
+		LastRun:           status.LastRun,
+		ConfiguredPeers:   status.ConfiguredPeers,
+		ObservedPeers:     status.ObservedPeers,
+		UpPeers:           status.UpPeers,
+		DownPeers:         status.DownPeers,
+		SessionDownEvents: uint64(status.SessionDownEvents),
+		RxFailPackets:     uint64(status.RxFailPackets),
+		Issues:            append([]string(nil), status.Issues...),
+		LastError:         status.LastError,
+		Peers:             make([]BFDPeerInfo, 0, len(status.Peers)),
+	}
+	for _, peer := range status.Peers {
+		info.Peers = append(info.Peers, BFDPeerInfo{
+			Peer:              peer.Peer,
+			LocalAddress:      peer.LocalAddress,
+			Interface:         peer.Interface,
+			VRF:               peer.VRF,
+			Status:            peer.Status,
+			Diagnostic:        peer.Diagnostic,
+			RemoteDiagnostic:  peer.RemoteDiagnostic,
+			Observed:          peer.Observed,
+			Up:                peer.Up,
+			SessionDownEvents: uint64(peer.SessionDownEvents),
+			RxFailPackets:     uint64(peer.RxFailPackets),
+		})
+	}
+	sort.Slice(info.Peers, func(i, j int) bool {
+		return bfdPeerSortKey(info.Peers[i]) < bfdPeerSortKey(info.Peers[j])
+	})
+	return info, nil
+}
+
+func bfdPeerSortKey(peer BFDPeerInfo) string {
+	return peer.Peer + "\x00" + peer.LocalAddress + "\x00" + peer.Interface + "\x00" + peer.VRF
 }
 
 // GetLCPReconciliation returns cached VPP LCP reconciliation state.

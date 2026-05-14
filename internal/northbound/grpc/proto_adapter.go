@@ -273,6 +273,42 @@ func (a *stateServiceAdapter) GetBFDText(ctx context.Context, req *apiv1.GetBFDT
 	return &apiv1.GetBFDTextResponse{Output: output}, nil
 }
 
+func (a *stateServiceAdapter) GetBFDStatus(ctx context.Context, _ *apiv1.GetBFDStatusRequest) (*apiv1.GetBFDStatusResponse, error) {
+	info, err := a.server.GetBFDStatus(ctx)
+	if err != nil {
+		return nil, err
+	}
+	resp := &apiv1.GetBFDStatusResponse{
+		ConfiguredPeers:   uint32(info.ConfiguredPeers),
+		ObservedPeers:     uint32(info.ObservedPeers),
+		UpPeers:           uint32(info.UpPeers),
+		DownPeers:         uint32(info.DownPeers),
+		SessionDownEvents: info.SessionDownEvents,
+		RxFailPackets:     info.RxFailPackets,
+		Issues:            append([]string(nil), info.Issues...),
+		LastError:         info.LastError,
+	}
+	if !info.LastRun.IsZero() {
+		resp.LastRun = info.LastRun.UTC().Format(time.RFC3339Nano)
+	}
+	for _, peer := range info.Peers {
+		resp.Peers = append(resp.Peers, &apiv1.BFDPeerState{
+			Peer:              peer.Peer,
+			LocalAddress:      peer.LocalAddress,
+			Interface:         peer.Interface,
+			Vrf:               peer.VRF,
+			Status:            peer.Status,
+			Diagnostic:        peer.Diagnostic,
+			RemoteDiagnostic:  peer.RemoteDiagnostic,
+			Observed:          peer.Observed,
+			Up:                peer.Up,
+			SessionDownEvents: peer.SessionDownEvents,
+			RxFailPackets:     peer.RxFailPackets,
+		})
+	}
+	return resp, nil
+}
+
 func (a *stateServiceAdapter) GetLCPReconciliation(ctx context.Context, _ *apiv1.GetLCPReconciliationRequest) (*apiv1.GetLCPReconciliationResponse, error) {
 	info, err := a.server.GetLCPReconciliation(ctx)
 	if err != nil {

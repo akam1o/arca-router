@@ -80,6 +80,9 @@ service StateService {
   // GetBFDText returns FRR BFD output for CLI display.
   rpc GetBFDText(GetBFDTextRequest) returns (GetBFDTextResponse);
 
+  // GetBFDStatus returns cached FRR BFD operational state.
+  rpc GetBFDStatus(GetBFDStatusRequest) returns (GetBFDStatusResponse);
+
   // GetLCPReconciliation returns VPP LCP reconciliation state.
   rpc GetLCPReconciliation(GetLCPReconciliationRequest) returns (GetLCPReconciliationResponse);
 
@@ -328,6 +331,35 @@ message GetBFDTextRequest {
 
 message GetBFDTextResponse {
   string output = 1;
+}
+
+message GetBFDStatusRequest {}
+
+message GetBFDStatusResponse {
+  string last_run = 1;
+  uint32 configured_peers = 2;
+  uint32 observed_peers = 3;
+  uint32 up_peers = 4;
+  uint32 down_peers = 5;
+  uint64 session_down_events = 6;
+  uint64 rx_fail_packets = 7;
+  repeated BFDPeerState peers = 8;
+  repeated string issues = 9;
+  string last_error = 10;
+}
+
+message BFDPeerState {
+  string peer = 1;
+  string local_address = 2;
+  string interface = 3;
+  string vrf = 4;
+  string status = 5;
+  string diagnostic = 6;
+  string remote_diagnostic = 7;
+  bool observed = 8;
+  bool up = 9;
+  uint64 session_down_events = 10;
+  uint64 rx_fail_packets = 11;
 }
 
 message GetLCPReconciliationRequest {}

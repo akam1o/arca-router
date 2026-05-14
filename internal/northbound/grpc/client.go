@@ -322,6 +322,34 @@ func (c *Client) GetBFDText(ctx context.Context, peerAddress string, brief, coun
 	return resp.GetOutput(), nil
 }
 
+// GetBFDStatus returns cached FRR BFD operational state.
+func (c *Client) GetBFDStatus(ctx context.Context) (*BFDStatusInfo, error) {
+	ctx, cancel := contextWithDefaultTimeout(ctx)
+	defer cancel()
+	resp, err := c.state.GetBFDStatus(ctx, &apiv1.GetBFDStatusRequest{})
+	if err != nil {
+		return nil, err
+	}
+	info := &BFDStatusInfo{
+		ConfiguredPeers:   int(resp.GetConfiguredPeers()),
+		ObservedPeers:     int(resp.GetObservedPeers()),
+		UpPeers:           int(resp.GetUpPeers()),
+		DownPeers:         int(resp.GetDownPeers()),
+		SessionDownEvents: resp.GetSessionDownEvents(),
+		RxFailPackets:     resp.GetRxFailPackets(),
+		Issues:            append([]string(nil), resp.GetIssues()...),
+		LastError:         resp.GetLastError(),
+		Peers:             bfdPeerInfosFromProto(resp.GetPeers()),
+	}
+	if rawLastRun := resp.GetLastRun(); rawLastRun != "" {
+		parsed, err := time.Parse(time.RFC3339Nano, rawLastRun)
+		if err == nil {
+			info.LastRun = parsed
+		}
+	}
+	return info, nil
+}
+
 // GetLCPReconciliation returns cached VPP LCP reconciliation state.
 func (c *Client) GetLCPReconciliation(ctx context.Context) (*LCPReconciliationInfo, error) {
 	ctx, cancel := contextWithDefaultTimeout(ctx)
@@ -540,6 +568,26 @@ func bgpNeighborInfosFromProto(neighbors []*apiv1.BGPNeighborState) []BGPNeighbo
 	return infos
 }
 
+func bfdPeerInfosFromProto(peers []*apiv1.BFDPeerState) []BFDPeerInfo {
+	infos := make([]BFDPeerInfo, 0, len(peers))
+	for _, peer := range peers {
+		infos = append(infos, BFDPeerInfo{
+			Peer:              peer.GetPeer(),
+			LocalAddress:      peer.GetLocalAddress(),
+			Interface:         peer.GetInterface(),
+			VRF:               peer.GetVrf(),
+			Status:            peer.GetStatus(),
+			Diagnostic:        peer.GetDiagnostic(),
+			RemoteDiagnostic:  peer.GetRemoteDiagnostic(),
+			Observed:          peer.GetObserved(),
+			Up:                peer.GetUp(),
+			SessionDownEvents: peer.GetSessionDownEvents(),
+			RxFailPackets:     peer.GetRxFailPackets(),
+		})
+	}
+	return infos
+}
+
 // --- Response types ---
 
 // CommitInfo represents a commit history entry.
@@ -663,6 +711,35 @@ type BGPNeighborInfo struct {
 	UptimeSecs     uint64
 	PrefixReceived uint32
 	PrefixSent     uint32
+}
+
+// BFDStatusInfo represents FRR BFD operational state.
+type BFDStatusInfo struct {
+	LastRun           time.Time
+	ConfiguredPeers   int
+	ObservedPeers     int
+	UpPeers           int
+	DownPeers         int
+	SessionDownEvents uint64
+	RxFailPackets     uint64
+	Peers             []BFDPeerInfo
+	Issues            []string
+	LastError         string
+}
+
+// BFDPeerInfo represents one FRR BFD peer state.
+type BFDPeerInfo struct {
+	Peer              string
+	LocalAddress      string
+	Interface         string
+	VRF               string
+	Status            string
+	Diagnostic        string
+	RemoteDiagnostic  string
+	Observed          bool
+	Up                bool
+	SessionDownEvents uint64
+	RxFailPackets     uint64
 }
 
 // SystemInfo represents system information.

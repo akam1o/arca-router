@@ -618,6 +618,8 @@ The internal gRPC route state API reads FRR JSON route output for both IPv4 and 
 
 The internal gRPC BGP neighbor state API reads FRR JSON summary output and returns structured peer address, remote AS, state, uptime, received-prefix, and sent-prefix counters. When FRR reports the same peer under multiple address families, arca-router returns one peer entry with prefix counters combined and the longest observed uptime.
 
+The internal gRPC BFD state API returns arca-routerd's cached FRR BFD convergence snapshot, including configured/observed/up/down peer counts, aggregate session-down and RX-fail counters, per-peer state, diagnostics, and convergence issues.
+
 The server hello advertises the arca-router YANG module capability as `urn:arca:router:config:1.0?module=arca-router&revision=2025-12-27`.
 
 ### User Management

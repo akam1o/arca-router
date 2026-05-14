@@ -13,6 +13,7 @@ import (
 
 	"github.com/akam1o/arca-router/internal/engine"
 	"github.com/akam1o/arca-router/internal/model"
+	sbfrr "github.com/akam1o/arca-router/internal/southbound/frr"
 	"github.com/akam1o/arca-router/internal/store"
 	pkgconfig "github.com/akam1o/arca-router/pkg/config"
 	pkgvpp "github.com/akam1o/arca-router/pkg/vpp"
@@ -65,6 +66,14 @@ type fakeHAStatusSource struct {
 
 func (f fakeHAStatusSource) HAStatusInfo() HAStatusInfo {
 	return f.info
+}
+
+type fakeBFDOperationalSource struct {
+	status sbfrr.BFDOperationalStatus
+}
+
+func (f fakeBFDOperationalSource) BFDOperationalStatus() sbfrr.BFDOperationalStatus {
+	return f.status
 }
 
 func (f *fakeStore) GetLatestSnapshot(ctx context.Context) (*model.ConfigSnapshot, error) {
@@ -565,6 +574,62 @@ func TestGetLCPReconciliationUsesSource(t *testing.T) {
 	}
 	if info.LastRun != lastRun || info.PairCount != 2 || len(info.Inconsistencies) != 1 || info.Inconsistencies[0] != "missing pair" {
 		t.Fatalf("GetLCPReconciliation() = %#v, want source status", info)
+	}
+}
+
+func TestGetBFDStatusUsesSource(t *testing.T) {
+	srv := NewServer(engine.NewEngine(nil, testLogger()), &fakeStore{}, testLogger())
+	lastRun := time.Unix(1700000500, 0).UTC()
+	srv.SetBFDOperationalSource(fakeBFDOperationalSource{status: sbfrr.BFDOperationalStatus{
+		LastRun:           lastRun,
+		ConfiguredPeers:   2,
+		ObservedPeers:     2,
+		UpPeers:           1,
+		DownPeers:         1,
+		SessionDownEvents: 3,
+		RxFailPackets:     4,
+		Issues:            []string{"FRR BFD peer 192.0.2.3 is not up: down"},
+		Peers: []sbfrr.BFDPeerOperationalStatus{
+			{
+				Peer:              "192.0.2.3",
+				LocalAddress:      "192.0.2.1",
+				Interface:         "ge0-0-1",
+				Status:            "down",
+				Diagnostic:        "control detection time expired",
+				RemoteDiagnostic:  "ok",
+				Observed:          true,
+				Up:                false,
+				SessionDownEvents: 3,
+				RxFailPackets:     4,
+			},
+			{
+				Peer:              "192.0.2.2",
+				LocalAddress:      "192.0.2.1",
+				Interface:         "ge0-0-0",
+				VRF:               "default",
+				Status:            "up",
+				Observed:          true,
+				Up:                true,
+				SessionDownEvents: 0,
+				RxFailPackets:     0,
+			},
+		},
+	}})
+
+	info, err := srv.GetBFDStatus(context.Background())
+	if err != nil {
+		t.Fatalf("GetBFDStatus() error = %v", err)
+	}
+	if info.LastRun != lastRun || info.ConfiguredPeers != 2 || info.ObservedPeers != 2 ||
+		info.UpPeers != 1 || info.DownPeers != 1 || info.SessionDownEvents != 3 || info.RxFailPackets != 4 {
+		t.Fatalf("GetBFDStatus() = %#v, want BFD aggregate counters", info)
+	}
+	if len(info.Peers) != 2 || info.Peers[0].Peer != "192.0.2.2" || !info.Peers[0].Up ||
+		info.Peers[1].Peer != "192.0.2.3" || info.Peers[1].Up || info.Peers[1].Diagnostic == "" {
+		t.Fatalf("GetBFDStatus().Peers = %#v, want sorted peer detail", info.Peers)
+	}
+	if len(info.Issues) != 1 || !strings.Contains(info.Issues[0], "not up") {
+		t.Fatalf("GetBFDStatus().Issues = %#v, want issue detail", info.Issues)
 	}
 }
 
