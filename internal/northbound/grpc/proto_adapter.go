@@ -357,6 +357,29 @@ func (a *stateServiceAdapter) GetHAStatus(ctx context.Context, _ *apiv1.GetHASta
 	return resp, nil
 }
 
+func (a *stateServiceAdapter) GetRoutingInstances(ctx context.Context, _ *apiv1.GetRoutingInstancesRequest) (*apiv1.GetRoutingInstancesResponse, error) {
+	instances, err := a.server.GetRoutingInstances(ctx)
+	if err != nil {
+		return nil, err
+	}
+	resp := &apiv1.GetRoutingInstancesResponse{Instances: make([]*apiv1.RoutingInstanceState, 0, len(instances))}
+	for _, instance := range instances {
+		resp.Instances = append(resp.Instances, &apiv1.RoutingInstanceState{
+			Name:               instance.Name,
+			InstanceType:       instance.InstanceType,
+			RouteDistinguisher: instance.RouteDistinguisher,
+			Ipv4TableId:        instance.IPv4TableID,
+			Ipv6TableId:        instance.IPv6TableID,
+			ImportTargets:      append([]string(nil), instance.ImportTargets...),
+			ExportTargets:      append([]string(nil), instance.ExportTargets...),
+			ImportPolicies:     append([]string(nil), instance.ImportPolicies...),
+			ExportPolicies:     append([]string(nil), instance.ExportPolicies...),
+			Interfaces:         append([]string(nil), instance.Interfaces...),
+		})
+	}
+	return resp, nil
+}
+
 func (a *stateServiceAdapter) GetClassOfService(ctx context.Context, _ *apiv1.GetClassOfServiceRequest) (*apiv1.GetClassOfServiceResponse, error) {
 	info, err := a.server.GetClassOfService(ctx)
 	if err != nil {

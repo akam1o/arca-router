@@ -413,6 +413,35 @@ func (c *Client) GetHAStatus(ctx context.Context) (*HAStatusInfo, error) {
 	return info, nil
 }
 
+// GetRoutingInstances returns running routing-instance intent and table mapping.
+func (c *Client) GetRoutingInstances(ctx context.Context) ([]RoutingInstanceInfo, error) {
+	ctx, cancel := contextWithDefaultTimeout(ctx)
+	defer cancel()
+	resp, err := c.state.GetRoutingInstances(ctx, &apiv1.GetRoutingInstancesRequest{})
+	if err != nil {
+		return nil, err
+	}
+	instances := make([]RoutingInstanceInfo, 0, len(resp.GetInstances()))
+	for _, instance := range resp.GetInstances() {
+		if instance == nil {
+			continue
+		}
+		instances = append(instances, RoutingInstanceInfo{
+			Name:               instance.GetName(),
+			InstanceType:       instance.GetInstanceType(),
+			RouteDistinguisher: instance.GetRouteDistinguisher(),
+			IPv4TableID:        instance.GetIpv4TableId(),
+			IPv6TableID:        instance.GetIpv6TableId(),
+			ImportTargets:      append([]string(nil), instance.GetImportTargets()...),
+			ExportTargets:      append([]string(nil), instance.GetExportTargets()...),
+			ImportPolicies:     append([]string(nil), instance.GetImportPolicies()...),
+			ExportPolicies:     append([]string(nil), instance.GetExportPolicies()...),
+			Interfaces:         append([]string(nil), instance.GetInterfaces()...),
+		})
+	}
+	return instances, nil
+}
+
 // GetClassOfService returns running class-of-service intent.
 func (c *Client) GetClassOfService(ctx context.Context) (*ClassOfServiceInfo, error) {
 	ctx, cancel := contextWithDefaultTimeout(ctx)
@@ -662,6 +691,20 @@ type HAStatusInfo struct {
 	VPPLCPPairs             int
 	VPPLCPInconsistencies   []string
 	VPPLCPLastError         string
+}
+
+// RoutingInstanceInfo represents running routing-instance intent and table mapping.
+type RoutingInstanceInfo struct {
+	Name               string
+	InstanceType       string
+	RouteDistinguisher string
+	IPv4TableID        uint32
+	IPv6TableID        uint32
+	ImportTargets      []string
+	ExportTargets      []string
+	ImportPolicies     []string
+	ExportPolicies     []string
+	Interfaces         []string
 }
 
 // ClassOfServiceInfo represents running class-of-service intent.

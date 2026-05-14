@@ -855,6 +855,44 @@ func (s *Server) GetHAStatus(ctx context.Context) (*HAStatusInfo, error) {
 	return &info, nil
 }
 
+// GetRoutingInstances returns running routing-instance intent and table mapping.
+func (s *Server) GetRoutingInstances(ctx context.Context) ([]RoutingInstanceInfo, error) {
+	_ = ctx
+	if s.engine == nil {
+		return nil, nil
+	}
+	cfg := s.engine.Running()
+	if cfg == nil || len(cfg.RoutingInstances) == 0 {
+		return nil, nil
+	}
+	plans, err := model.RoutingInstanceTablePlans(cfg.RoutingInstances)
+	if err != nil {
+		return nil, err
+	}
+
+	instances := make([]RoutingInstanceInfo, 0, len(cfg.RoutingInstances))
+	for _, name := range sortedRoutingInstanceNames(cfg.RoutingInstances) {
+		instance := cfg.RoutingInstances[name]
+		if instance == nil {
+			continue
+		}
+		plan := plans[name]
+		instances = append(instances, RoutingInstanceInfo{
+			Name:               name,
+			InstanceType:       runningRoutingInstanceType(instance),
+			RouteDistinguisher: instance.RouteDistinguisher,
+			IPv4TableID:        plan.TableID,
+			IPv6TableID:        plan.TableID,
+			ImportTargets:      routingInstanceImportTargets(instance),
+			ExportTargets:      routingInstanceExportTargets(instance),
+			ImportPolicies:     append([]string(nil), instance.VRFImport...),
+			ExportPolicies:     append([]string(nil), instance.VRFExport...),
+			Interfaces:         append([]string(nil), plan.Interfaces...),
+		})
+	}
+	return instances, nil
+}
+
 // GetClassOfService returns running class-of-service intent.
 func (s *Server) GetClassOfService(ctx context.Context) (*ClassOfServiceInfo, error) {
 	info := &ClassOfServiceInfo{EnforcementStatus: classOfServiceEnforcementNotConfigured}
@@ -1036,6 +1074,46 @@ func sortedClassOfServiceInterfaceNames(interfaces map[string]*model.CoSInterfac
 	}
 	sort.Strings(names)
 	return names
+}
+
+func sortedRoutingInstanceNames(instances map[string]*model.RoutingInstance) []string {
+	names := make([]string, 0, len(instances))
+	for name := range instances {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	return names
+}
+
+func runningRoutingInstanceType(instance *model.RoutingInstance) string {
+	if instance == nil || instance.InstanceType == "" {
+		return "vrf"
+	}
+	return instance.InstanceType
+}
+
+func routingInstanceImportTargets(instance *model.RoutingInstance) []string {
+	if instance == nil {
+		return nil
+	}
+	targets := make([]string, 0, len(instance.VRFTargetImport)+1)
+	if instance.VRFTarget != "" {
+		targets = append(targets, instance.VRFTarget)
+	}
+	targets = append(targets, instance.VRFTargetImport...)
+	return targets
+}
+
+func routingInstanceExportTargets(instance *model.RoutingInstance) []string {
+	if instance == nil {
+		return nil
+	}
+	targets := make([]string, 0, len(instance.VRFTargetExport)+1)
+	if instance.VRFTarget != "" {
+		targets = append(targets, instance.VRFTarget)
+	}
+	targets = append(targets, instance.VRFTargetExport...)
+	return targets
 }
 
 func upDown(up bool) string {

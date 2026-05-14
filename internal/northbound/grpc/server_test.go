@@ -705,6 +705,53 @@ func TestGetClassOfServiceReturnsRunningConfig(t *testing.T) {
 	}
 }
 
+func TestGetRoutingInstancesReturnsRunningConfig(t *testing.T) {
+	eng := engine.NewEngine(nil, testLogger())
+	eng.InitializeRunning(&model.RouterConfig{
+		RoutingInstances: map[string]*model.RoutingInstance{
+			"BLUE": {
+				InstanceType:       "vrf",
+				RouteDistinguisher: "65000:100",
+				VRFTarget:          "target:65000:100",
+				VRFTargetImport:    []string{"target:65000:101"},
+				VRFTargetExport:    []string{"target:65000:102"},
+				VRFImport:          []string{"BLUE-IN"},
+				VRFExport:          []string{"BLUE-OUT"},
+				Interfaces:         []string{"ge-0/0/1", "ge-0/0/0"},
+			},
+			"RED": {
+				Interfaces: []string{"ge-0/0/2"},
+			},
+		},
+	}, 1)
+	srv := NewServer(eng, &fakeStore{}, testLogger())
+
+	instances, err := srv.GetRoutingInstances(context.Background())
+	if err != nil {
+		t.Fatalf("GetRoutingInstances() error = %v", err)
+	}
+	if len(instances) != 2 {
+		t.Fatalf("GetRoutingInstances() returned %d instances, want 2: %#v", len(instances), instances)
+	}
+	blue := instances[0]
+	if blue.Name != "BLUE" || blue.InstanceType != "vrf" || blue.RouteDistinguisher != "65000:100" ||
+		blue.IPv4TableID != 100 || blue.IPv6TableID != 100 {
+		t.Fatalf("BLUE routing instance = %#v, want RD-derived table", blue)
+	}
+	if strings.Join(blue.ImportTargets, ",") != "target:65000:100,target:65000:101" ||
+		strings.Join(blue.ExportTargets, ",") != "target:65000:100,target:65000:102" ||
+		strings.Join(blue.ImportPolicies, ",") != "BLUE-IN" ||
+		strings.Join(blue.ExportPolicies, ",") != "BLUE-OUT" ||
+		strings.Join(blue.Interfaces, ",") != "ge-0/0/0,ge-0/0/1" {
+		t.Fatalf("BLUE routing instance lists = %#v, want targets/policies/interfaces", blue)
+	}
+	red := instances[1]
+	if red.Name != "RED" || red.InstanceType != "vrf" || red.IPv4TableID == 0 || red.IPv6TableID != red.IPv4TableID ||
+		strings.Join(red.Interfaces, ",") != "ge-0/0/2" {
+		t.Fatalf("RED routing instance = %#v, want derived table", red)
+	}
+}
+
 func TestReleaseLockWaitsForInFlightCommit(t *testing.T) {
 	parserEntered := make(chan struct{})
 	unblockParser := make(chan struct{})

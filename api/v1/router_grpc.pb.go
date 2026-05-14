@@ -691,6 +691,7 @@ const (
 	StateService_GetBFDStatus_FullMethodName         = "/arca.router.v1.StateService/GetBFDStatus"
 	StateService_GetLCPReconciliation_FullMethodName = "/arca.router.v1.StateService/GetLCPReconciliation"
 	StateService_GetHAStatus_FullMethodName          = "/arca.router.v1.StateService/GetHAStatus"
+	StateService_GetRoutingInstances_FullMethodName  = "/arca.router.v1.StateService/GetRoutingInstances"
 	StateService_GetClassOfService_FullMethodName    = "/arca.router.v1.StateService/GetClassOfService"
 	StateService_GetSystemInfo_FullMethodName        = "/arca.router.v1.StateService/GetSystemInfo"
 )
@@ -725,6 +726,8 @@ type StateServiceClient interface {
 	GetLCPReconciliation(ctx context.Context, in *GetLCPReconciliationRequest, opts ...grpc.CallOption) (*GetLCPReconciliationResponse, error)
 	// GetHAStatus returns control-plane HA convergence state.
 	GetHAStatus(ctx context.Context, in *GetHAStatusRequest, opts ...grpc.CallOption) (*GetHAStatusResponse, error)
+	// GetRoutingInstances returns running routing-instance intent and table mapping.
+	GetRoutingInstances(ctx context.Context, in *GetRoutingInstancesRequest, opts ...grpc.CallOption) (*GetRoutingInstancesResponse, error)
 	// GetClassOfService returns running class-of-service intent.
 	GetClassOfService(ctx context.Context, in *GetClassOfServiceRequest, opts ...grpc.CallOption) (*GetClassOfServiceResponse, error)
 	// GetSystemInfo returns system information.
@@ -859,6 +862,16 @@ func (c *stateServiceClient) GetHAStatus(ctx context.Context, in *GetHAStatusReq
 	return out, nil
 }
 
+func (c *stateServiceClient) GetRoutingInstances(ctx context.Context, in *GetRoutingInstancesRequest, opts ...grpc.CallOption) (*GetRoutingInstancesResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(GetRoutingInstancesResponse)
+	err := c.cc.Invoke(ctx, StateService_GetRoutingInstances_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 func (c *stateServiceClient) GetClassOfService(ctx context.Context, in *GetClassOfServiceRequest, opts ...grpc.CallOption) (*GetClassOfServiceResponse, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(GetClassOfServiceResponse)
@@ -909,6 +922,8 @@ type StateServiceServer interface {
 	GetLCPReconciliation(context.Context, *GetLCPReconciliationRequest) (*GetLCPReconciliationResponse, error)
 	// GetHAStatus returns control-plane HA convergence state.
 	GetHAStatus(context.Context, *GetHAStatusRequest) (*GetHAStatusResponse, error)
+	// GetRoutingInstances returns running routing-instance intent and table mapping.
+	GetRoutingInstances(context.Context, *GetRoutingInstancesRequest) (*GetRoutingInstancesResponse, error)
 	// GetClassOfService returns running class-of-service intent.
 	GetClassOfService(context.Context, *GetClassOfServiceRequest) (*GetClassOfServiceResponse, error)
 	// GetSystemInfo returns system information.
@@ -958,6 +973,9 @@ func (UnimplementedStateServiceServer) GetLCPReconciliation(context.Context, *Ge
 }
 func (UnimplementedStateServiceServer) GetHAStatus(context.Context, *GetHAStatusRequest) (*GetHAStatusResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method GetHAStatus not implemented")
+}
+func (UnimplementedStateServiceServer) GetRoutingInstances(context.Context, *GetRoutingInstancesRequest) (*GetRoutingInstancesResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method GetRoutingInstances not implemented")
 }
 func (UnimplementedStateServiceServer) GetClassOfService(context.Context, *GetClassOfServiceRequest) (*GetClassOfServiceResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method GetClassOfService not implemented")
@@ -1202,6 +1220,24 @@ func _StateService_GetHAStatus_Handler(srv interface{}, ctx context.Context, dec
 	return interceptor(ctx, in, info, handler)
 }
 
+func _StateService_GetRoutingInstances_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(GetRoutingInstancesRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(StateServiceServer).GetRoutingInstances(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: StateService_GetRoutingInstances_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(StateServiceServer).GetRoutingInstances(ctx, req.(*GetRoutingInstancesRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 func _StateService_GetClassOfService_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(GetClassOfServiceRequest)
 	if err := dec(in); err != nil {
@@ -1292,6 +1328,10 @@ var StateService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "GetHAStatus",
 			Handler:    _StateService_GetHAStatus_Handler,
+		},
+		{
+			MethodName: "GetRoutingInstances",
+			Handler:    _StateService_GetRoutingInstances_Handler,
 		},
 		{
 			MethodName: "GetClassOfService",

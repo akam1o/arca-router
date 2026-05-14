@@ -89,6 +89,9 @@ service StateService {
   // GetHAStatus returns control-plane HA convergence state.
   rpc GetHAStatus(GetHAStatusRequest) returns (GetHAStatusResponse);
 
+  // GetRoutingInstances returns running routing-instance intent and table mapping.
+  rpc GetRoutingInstances(GetRoutingInstancesRequest) returns (GetRoutingInstancesResponse);
+
   // GetClassOfService returns running class-of-service intent.
   rpc GetClassOfService(GetClassOfServiceRequest) returns (GetClassOfServiceResponse);
 
@@ -392,6 +395,25 @@ message GetHAStatusResponse {
   uint32 vpp_lcp_pairs = 16;
   repeated string vpp_lcp_inconsistencies = 17;
   string vpp_lcp_last_error = 18;
+}
+
+message GetRoutingInstancesRequest {}
+
+message GetRoutingInstancesResponse {
+  repeated RoutingInstanceState instances = 1;
+}
+
+message RoutingInstanceState {
+  string name = 1;
+  string instance_type = 2;
+  string route_distinguisher = 3;
+  uint32 ipv4_table_id = 4;
+  uint32 ipv6_table_id = 5;
+  repeated string import_targets = 6;
+  repeated string export_targets = 7;
+  repeated string import_policies = 8;
+  repeated string export_policies = 9;
+  repeated string interfaces = 10;
 }
 
 message GetClassOfServiceRequest {}
