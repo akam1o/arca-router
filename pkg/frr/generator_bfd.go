@@ -93,15 +93,25 @@ func validateBFDConfig(cfg *BFDConfig) error {
 		if strings.TrimSpace(profile.Name) == "" {
 			return fmt.Errorf("BFD profile name is required")
 		}
+		if _, ok := profiles[profile.Name]; ok {
+			return fmt.Errorf("BFD profile %s is duplicated", profile.Name)
+		}
 		if err := validateBFDSessionTimers(fmt.Sprintf("BFD profile %s", profile.Name), profile.DetectMultiplier, profile.ReceiveInterval, profile.TransmitInterval); err != nil {
 			return err
 		}
 		profiles[profile.Name] = profile
 	}
+	peers := make(map[string]struct{}, len(cfg.Peers))
 	for _, peer := range cfg.Peers {
-		if net.ParseIP(peer.Address) == nil {
+		peerIP := net.ParseIP(peer.Address)
+		if peerIP == nil {
 			return fmt.Errorf("BFD peer has invalid address %q", peer.Address)
 		}
+		peerKey := peerIP.String()
+		if _, ok := peers[peerKey]; ok {
+			return fmt.Errorf("BFD peer %s is duplicated", peer.Address)
+		}
+		peers[peerKey] = struct{}{}
 		if peer.LocalAddress != "" && net.ParseIP(peer.LocalAddress) == nil {
 			return fmt.Errorf("BFD peer %s has invalid local-address %q", peer.Address, peer.LocalAddress)
 		}

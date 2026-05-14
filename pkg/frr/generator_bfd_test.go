@@ -110,3 +110,27 @@ func TestGenerateBFDConfigRejectsMultihopEchoMode(t *testing.T) {
 		t.Fatalf("GenerateBFDConfig() error = %v, want echo-mode multihop error", err)
 	}
 }
+
+func TestGenerateBFDConfigRejectsDuplicateProfile(t *testing.T) {
+	_, err := GenerateBFDConfig(&BFDConfig{
+		Profiles: []BFDProfile{
+			{Name: "fast"},
+			{Name: "fast", DetectMultiplier: 3},
+		},
+	})
+	if err == nil || !strings.Contains(err.Error(), "BFD profile fast is duplicated") {
+		t.Fatalf("GenerateBFDConfig() error = %v, want duplicate profile error", err)
+	}
+}
+
+func TestGenerateBFDConfigRejectsDuplicatePeer(t *testing.T) {
+	_, err := GenerateBFDConfig(&BFDConfig{
+		Peers: []BFDPeer{
+			{Address: "192.0.2.2", Interface: "ge0-0-0"},
+			{Address: "192.0.2.2", Interface: "ge0-0-1"},
+		},
+	})
+	if err == nil || !strings.Contains(err.Error(), "BFD peer 192.0.2.2 is duplicated") {
+		t.Fatalf("GenerateBFDConfig() error = %v, want duplicate peer error", err)
+	}
+}
