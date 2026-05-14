@@ -82,50 +82,53 @@ func (p *FRRPlugin) ValidateChanges(ctx context.Context, diff *engine.ConfigDiff
 	if diff == nil {
 		return nil
 	}
-	if p.mode == pkgfrr.BackendModeTransactional && diff.BFDChanged {
-		return fmt.Errorf("BFD requires FRR file backend until frr-bfdd management operations are implemented")
-	}
-	if p.mode == pkgfrr.BackendModeTransactional && diffHasBFDProtocolBindings(diff) {
-		return fmt.Errorf("BFD protocol bindings require FRR file backend until frr-bfdd management operations are implemented")
-	}
-	if p.mode == pkgfrr.BackendModeTransactional && diffHasStaticRouteBFD(diff) {
-		return fmt.Errorf("BFD static routes require FRR file backend until frr-bfdd management operations are implemented")
-	}
 	if p.mode == pkgfrr.BackendModeTransactional && diff.NewOSPF3 != nil {
 		return fmt.Errorf("OSPFv3 requires FRR file backend until core ospf6d YANG paths are available")
+	}
+	if p.mode == pkgfrr.BackendModeTransactional {
+		if err := validateTransactionalBFDProtocolBindings(diff); err != nil {
+			return err
+		}
 	}
 	return nil
 }
 
-func diffHasBFDProtocolBindings(diff *engine.ConfigDiff) bool {
+func validateTransactionalBFDProtocolBindings(diff *engine.ConfigDiff) error {
 	if diff == nil {
-		return false
+		return nil
 	}
-	if routerConfigHasBFDProtocolBindings(diff.NewConfig) {
-		return true
+	if diff.NewConfig != nil {
+		return validateRouterConfigTransactionalBFDProtocolBindings(diff.NewConfig)
 	}
-	if diff.BGPChanged && (bgpHasBFDProtocolBindings(diff.OldBGP) || bgpHasBFDProtocolBindings(diff.NewBGP)) {
-		return true
+	if diff.BGPChanged && bgpHasBFDProfiles(diff.NewBGP) {
+		return fmt.Errorf("BGP BFD profiles require FRR file backend until BGP BFD profile management operations are implemented")
 	}
-	if diff.OSPFChanged && (ospfHasBFDProtocolBindings(diff.OldOSPF) || ospfHasBFDProtocolBindings(diff.NewOSPF)) {
-		return true
+	if diff.OSPFChanged && ospfHasBFDProtocolBindings(diff.NewOSPF) {
+		return fmt.Errorf("OSPF BFD protocol bindings require FRR file backend until OSPF interface BFD management operations are implemented")
 	}
-	if diff.OSPF3Changed && (ospfHasBFDProtocolBindings(diff.OldOSPF3) || ospfHasBFDProtocolBindings(diff.NewOSPF3)) {
-		return true
+	if diff.OSPF3Changed && ospfHasBFDProtocolBindings(diff.NewOSPF3) {
+		return fmt.Errorf("OSPFv3 BFD protocol bindings require FRR file backend until ospf6d management operations are implemented")
 	}
-	return false
+	return nil
 }
 
-func routerConfigHasBFDProtocolBindings(cfg *model.RouterConfig) bool {
+func validateRouterConfigTransactionalBFDProtocolBindings(cfg *model.RouterConfig) error {
 	if cfg == nil || cfg.Protocols == nil {
-		return false
+		return nil
 	}
-	return bgpHasBFDProtocolBindings(cfg.Protocols.BGP) ||
-		ospfHasBFDProtocolBindings(cfg.Protocols.OSPF) ||
-		ospfHasBFDProtocolBindings(cfg.Protocols.OSPF3)
+	if bgpHasBFDProfiles(cfg.Protocols.BGP) {
+		return fmt.Errorf("BGP BFD profiles require FRR file backend until BGP BFD profile management operations are implemented")
+	}
+	if ospfHasBFDProtocolBindings(cfg.Protocols.OSPF) {
+		return fmt.Errorf("OSPF BFD protocol bindings require FRR file backend until OSPF interface BFD management operations are implemented")
+	}
+	if ospfHasBFDProtocolBindings(cfg.Protocols.OSPF3) {
+		return fmt.Errorf("OSPFv3 BFD protocol bindings require FRR file backend until ospf6d management operations are implemented")
+	}
+	return nil
 }
 
-func bgpHasBFDProtocolBindings(cfg *model.BGPConfig) bool {
+func bgpHasBFDProfiles(cfg *model.BGPConfig) bool {
 	if cfg == nil {
 		return false
 	}
@@ -134,7 +137,7 @@ func bgpHasBFDProtocolBindings(cfg *model.BGPConfig) bool {
 			continue
 		}
 		for _, neighbor := range group.Neighbors {
-			if neighbor != nil && (neighbor.BFD || neighbor.BFDProfile != "") {
+			if neighbor != nil && neighbor.BFDProfile != "" {
 				return true
 			}
 		}
@@ -154,35 +157,6 @@ func ospfHasBFDProtocolBindings(cfg *model.OSPFConfig) bool {
 			if iface != nil && (iface.BFD || iface.BFDProfile != "") {
 				return true
 			}
-		}
-	}
-	return false
-}
-
-func diffHasStaticRouteBFD(diff *engine.ConfigDiff) bool {
-	if diff == nil {
-		return false
-	}
-	if routerConfigHasStaticRouteBFD(diff.NewConfig) {
-		return true
-	}
-	if diff.StaticRoutesChanged && (staticRoutesHaveBFD(diff.OldStaticRoutes) || staticRoutesHaveBFD(diff.NewStaticRoutes)) {
-		return true
-	}
-	return false
-}
-
-func routerConfigHasStaticRouteBFD(cfg *model.RouterConfig) bool {
-	if cfg == nil || cfg.Routing == nil {
-		return false
-	}
-	return staticRoutesHaveBFD(cfg.Routing.StaticRoutes)
-}
-
-func staticRoutesHaveBFD(routes []*model.StaticRoute) bool {
-	for _, route := range routes {
-		if route != nil && (route.BFD || route.BFDProfile != "" || route.BFDSource != "" || route.BFDMultihop) {
-			return true
 		}
 	}
 	return false
