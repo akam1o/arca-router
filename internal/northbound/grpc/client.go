@@ -517,8 +517,13 @@ func (c *Client) GetSystemInfo(ctx context.Context) (*SystemInfo, error) {
 	}, nil
 }
 
+// TelemetryReceiver receives structured telemetry events.
+type TelemetryReceiver interface {
+	Recv() (*TelemetryEvent, error)
+}
+
 // SubscribeTelemetry starts a structured telemetry stream.
-func (c *Client) SubscribeTelemetry(ctx context.Context, paths []string, sampleInterval time.Duration, once bool) (*TelemetryStream, error) {
+func (c *Client) SubscribeTelemetry(ctx context.Context, paths []string, sampleInterval time.Duration, once bool) (TelemetryReceiver, error) {
 	stream, err := c.telemetry.SubscribeTelemetry(ctx, &apiv1.SubscribeTelemetryRequest{
 		Paths:            append([]string(nil), paths...),
 		SampleIntervalMs: durationMillisUint32(sampleInterval),

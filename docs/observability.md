@@ -102,6 +102,13 @@ Supported paths:
 
 Subscriptions can select paths, set a sample interval, or request a one-shot snapshot. Empty path selection defaults to `/system` and `/config/running`. The server writes directly to the gRPC stream, so gRPC flow control is the backpressure boundary and arca-routerd does not build unbounded event buffers.
 
+Local operators can inspect the same stream through the CLI. The command prints one JSON envelope per line:
+
+```bash
+arca show telemetry path /system path /interfaces
+arca show telemetry path /routes interval 5s count 3
+```
+
 ## Web UI
 
 Start the read-only Web UI with an explicit listen address:

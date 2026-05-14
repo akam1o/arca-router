@@ -1116,6 +1116,8 @@ dashboard には daemon、NETCONF、config sync、HA、FRR VRRP、class-of-servi
 
 対応 path は `/system`、`/config/running`、`/interfaces`、`/routes`、`/routing/bgp/neighbors`、`/routing/ospf/neighbors`、`/routing/ospf3/neighbors`、`/routing-instances`、`/class-of-service`、`/bfd`、`/lcp`、`/ha` です。Server は gRPC stream に同期的に event を書き込むため、gRPC flow control が backpressure 境界となり、daemon は subscriber ごとの unbounded event buffer を保持しません。
 
+Local operator は `arca show telemetry path /system path /interfaces` で同じ stream を確認できます。CLI は 1 event につき 1 行の JSON envelope を出力します。`interval <duration>` と `count <events>` を指定すると、例えば `arca show telemetry path /routes interval 5s count 3` のように、sampled stream を指定 event 数で取得できます。
+
 ### Web UI
 
 Web UI は次のように起動します。
