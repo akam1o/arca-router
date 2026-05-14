@@ -463,6 +463,37 @@ func TestApplyChangesFallsBackToFileBackendForOSPF3(t *testing.T) {
 	}
 }
 
+func TestApplyChangesFallsBackToFileBackendForSourceLessBFDMultihopPeer(t *testing.T) {
+	newCfg := model.NewRouterConfig()
+	newCfg.Protocols = &model.ProtocolsConfig{
+		BFD: &model.BFDConfig{Peers: map[string]*model.BFDPeer{
+			"192.0.2.2": {Multihop: true},
+		}},
+	}
+	diff := engine.ComputeDiff(model.NewRouterConfig(), newCfg)
+	transactionalApplier := &recordingApplier{}
+	fileApplier := &recordingApplier{}
+	plugin := NewFRRPlugin(testLogger())
+	plugin.applier = transactionalApplier
+	plugin.fileApplier = fileApplier
+
+	if err := plugin.ApplyChanges(context.Background(), diff); err != nil {
+		t.Fatalf("ApplyChanges() error = %v", err)
+	}
+	if transactionalApplier.calls != 0 {
+		t.Fatalf("transactional ApplyConfig calls = %d, want 0", transactionalApplier.calls)
+	}
+	if fileApplier.calls != 1 {
+		t.Fatalf("file ApplyConfig calls = %d, want 1", fileApplier.calls)
+	}
+	if plugin.currentApplyMode != pkgfrr.BackendModeFile {
+		t.Fatalf("currentApplyMode = %q, want file", plugin.currentApplyMode)
+	}
+	if !strings.Contains(fileApplier.configContent, " peer 192.0.2.2 multihop") {
+		t.Fatalf("file applier config missing BFD multihop peer:\n%s", fileApplier.configContent)
+	}
+}
+
 func TestRollbackUsesFileBackendAfterFileFallback(t *testing.T) {
 	newCfg := model.NewRouterConfig()
 	newCfg.Interfaces["ge-0/0/0"] = &model.InterfaceConfig{
