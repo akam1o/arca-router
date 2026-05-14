@@ -1041,6 +1041,8 @@ Supported paths are `/system`, `/config/running`, `/interfaces`, `/routes`, `/ro
 
 Local operators can inspect the same stream with `arca show telemetry path /system path /interfaces`; the CLI prints one JSON envelope per line. `interval <duration>` and `count <events>` request a sampled stream for a bounded number of events, for example `arca show telemetry path /routes interval 5s count 3`.
 
+For external NMS polling, the Web API exposes `GET /api/nms/v1/status`. The response is a stable JSON envelope with `schema_version` set to `arca.nms.operational.v1`, `generated_at`, `resource`, and `data`. The `data` object contains the same read-only operational status as `/api/status`, including build metadata, config version, datastore state, config sync, HA, CoS, FRR, VPP LCP, and NETCONF counters.
+
 ### Web UI
 
 Start the Web UI with:
@@ -1063,10 +1065,12 @@ Endpoints:
 - `GET /api/config`
 - `GET /api/config/history`
 - `GET /api/status`
+- `GET /api/nms/v1/status`
 - `POST /api/config/validate`
 - `POST /api/config/commit`
 
 `/api/status` includes build metadata, uptime, running config version, datastore backend, cluster sync state, class-of-service intent state, FRR VRRP operational state with per-group state details, HA convergence state, VPP LCP reconciliation state, and NETCONF counters.
+`/api/nms/v1/status` wraps the same read-only status in the `arca.nms.operational.v1` schema envelope for external NMS collectors.
 `/api/config` returns the running configuration as set-command text with the running config version. The dashboard renders the same running configuration in the browser editor.
 `/api/config/history` returns recent configuration commits and backs the dashboard commit history panel.
 

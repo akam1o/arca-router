@@ -208,6 +208,40 @@ func TestWebStatusEndpoint(t *testing.T) {
 	}
 }
 
+func TestNMSStatusEndpoint(t *testing.T) {
+	eng := engine.NewEngine(nil, slog.Default())
+	cfg := model.NewRouterConfig()
+	cfg.System = &model.SystemConfig{HostName: "edge-nms"}
+	eng.InitializeRunning(cfg, 77)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/nms/v1/status", nil)
+	rec := httptest.NewRecorder()
+	metricsSource{
+		startedAt: time.Now().Add(-2 * time.Minute),
+		engine:    eng,
+	}.handleNMSStatus(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d", rec.Code, http.StatusOK)
+	}
+	var resp nmsStatusResponse
+	if err := json.NewDecoder(rec.Result().Body).Decode(&resp); err != nil {
+		t.Fatalf("Decode() error = %v", err)
+	}
+	if resp.SchemaVersion != nmsOperationalStatusSchemaVersion {
+		t.Fatalf("SchemaVersion = %q, want %q", resp.SchemaVersion, nmsOperationalStatusSchemaVersion)
+	}
+	if resp.Resource != "/api/nms/v1/status" {
+		t.Fatalf("Resource = %q, want /api/nms/v1/status", resp.Resource)
+	}
+	if _, err := time.Parse(time.RFC3339, resp.GeneratedAt); err != nil {
+		t.Fatalf("GeneratedAt = %q, want RFC3339 timestamp: %v", resp.GeneratedAt, err)
+	}
+	if resp.Data.ConfigVersion != 77 || resp.Data.RunningHostname != "edge-nms" {
+		t.Fatalf("Data = %#v, want config version 77 for edge-nms", resp.Data)
+	}
+}
+
 func TestWebConfigEndpoint(t *testing.T) {
 	eng := engine.NewEngine(nil, slog.Default())
 	cfg := model.NewRouterConfig()
@@ -414,6 +448,7 @@ func TestWebIndexEndpoint(t *testing.T) {
 		"Configuration editor",
 		"set system host-name edge01",
 		"/api/status",
+		"/api/nms/v1/status",
 		"/api/config",
 		"/api/config/history",
 		"refreshHistory",
