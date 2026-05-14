@@ -102,6 +102,12 @@ service StateService {
   rpc GetSystemInfo(GetSystemInfoRequest) returns (GetSystemInfoResponse);
 }
 
+// TelemetryService provides structured streaming telemetry snapshots.
+service TelemetryService {
+  // SubscribeTelemetry streams selected operational/config state paths.
+  rpc SubscribeTelemetry(SubscribeTelemetryRequest) returns (stream TelemetryEvent);
+}
+
 // --- Config messages ---
 
 message GetRunningRequest {}
@@ -478,4 +484,27 @@ message GetSystemInfoResponse {
   string hostname = 1;
   string version = 2;
   uint64 uptime_secs = 3;
+}
+
+// --- Telemetry messages ---
+
+message SubscribeTelemetryRequest {
+  // Optional paths. Empty selects the safe default paths.
+  repeated string paths = 1;
+
+  // Sample interval for repeated snapshots. Zero uses the daemon default.
+  uint32 sample_interval_ms = 2;
+
+  // Send one snapshot batch and close the stream.
+  bool once = 3;
+}
+
+message TelemetryEvent {
+  uint64 sequence = 1;
+  string timestamp = 2;
+  string path = 3;
+  string event_type = 4;
+  string encoding = 5;
+  string json_payload = 6;
+  string schema_version = 7;
 }

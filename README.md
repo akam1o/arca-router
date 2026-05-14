@@ -342,7 +342,7 @@ make packages         # Build both RPM and DEB packages
 arca-router/
 ├── api/
 │   └── v1/
-│       └── router.proto        # gRPC API definitions (Config/Session/State)
+│       └── router.proto        # gRPC API definitions (Config/Session/State/Telemetry)
 ├── cmd/
 │   ├── arca-routerd/           # Unified daemon
 │   │   └── main.go             # Single process: VPP + FRR + NETCONF + gRPC

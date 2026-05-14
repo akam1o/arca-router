@@ -457,3 +457,30 @@ func (a *stateServiceAdapter) GetSystemInfo(ctx context.Context, _ *apiv1.GetSys
 		UptimeSecs: info.UptimeSecs,
 	}, nil
 }
+
+type telemetryServiceAdapter struct {
+	apiv1.UnimplementedTelemetryServiceServer
+	server *Server
+}
+
+func (a *telemetryServiceAdapter) SubscribeTelemetry(req *apiv1.SubscribeTelemetryRequest, stream apiv1.TelemetryService_SubscribeTelemetryServer) error {
+	interval := time.Duration(req.GetSampleIntervalMs()) * time.Millisecond
+	return a.server.SubscribeTelemetry(stream.Context(), req.GetPaths(), interval, req.GetOnce(), func(event TelemetryEvent) error {
+		return stream.Send(telemetryEventToProto(event))
+	})
+}
+
+func telemetryEventToProto(event TelemetryEvent) *apiv1.TelemetryEvent {
+	resp := &apiv1.TelemetryEvent{
+		Sequence:      event.Sequence,
+		Path:          event.Path,
+		EventType:     event.EventType,
+		Encoding:      event.Encoding,
+		JsonPayload:   event.JSONPayload,
+		SchemaVersion: event.SchemaVersion,
+	}
+	if !event.Timestamp.IsZero() {
+		resp.Timestamp = event.Timestamp.UTC().Format(time.RFC3339Nano)
+	}
+	return resp
+}

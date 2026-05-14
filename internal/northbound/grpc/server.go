@@ -92,6 +92,7 @@ func (s *Server) Serve(lis net.Listener) error {
 	apiv1.RegisterConfigServiceServer(s.server, &configServiceAdapter{server: s})
 	apiv1.RegisterSessionServiceServer(s.server, &sessionServiceAdapter{server: s})
 	apiv1.RegisterStateServiceServer(s.server, &stateServiceAdapter{server: s})
+	apiv1.RegisterTelemetryServiceServer(s.server, &telemetryServiceAdapter{server: s})
 	s.log.Info("gRPC server starting", slog.String("address", lis.Addr().String()))
 	return s.server.Serve(lis)
 }
@@ -1005,8 +1006,11 @@ func (s *Server) GetClassOfService(ctx context.Context) (*ClassOfServiceInfo, er
 
 // GetSystemInfo returns basic system information.
 func (s *Server) GetSystemInfo(ctx context.Context) (*SystemInfo, error) {
-	cfg := s.engine.Running()
 	info := &SystemInfo{Version: "unknown"}
+	if s.engine == nil {
+		return info, nil
+	}
+	cfg := s.engine.Running()
 	if cfg.System != nil {
 		info.Hostname = cfg.System.HostName
 	}

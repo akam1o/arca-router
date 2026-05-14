@@ -18,10 +18,11 @@ import (
 // It provides high-level methods for config management, session control,
 // and operational state queries.
 type Client struct {
-	conn    *googlegrpc.ClientConn
-	config  apiv1.ConfigServiceClient
-	session apiv1.SessionServiceClient
-	state   apiv1.StateServiceClient
+	conn      *googlegrpc.ClientConn
+	config    apiv1.ConfigServiceClient
+	session   apiv1.SessionServiceClient
+	state     apiv1.StateServiceClient
+	telemetry apiv1.TelemetryServiceClient
 }
 
 // Dial connects to the arca-routerd gRPC server via Unix socket.
@@ -52,10 +53,11 @@ func Dial(socketPath string) (*Client, error) {
 	}
 
 	return &Client{
-		conn:    conn,
-		config:  apiv1.NewConfigServiceClient(conn),
-		session: apiv1.NewSessionServiceClient(conn),
-		state:   apiv1.NewStateServiceClient(conn),
+		conn:      conn,
+		config:    apiv1.NewConfigServiceClient(conn),
+		session:   apiv1.NewSessionServiceClient(conn),
+		state:     apiv1.NewStateServiceClient(conn),
+		telemetry: apiv1.NewTelemetryServiceClient(conn),
 	}, nil
 }
 
@@ -515,11 +517,65 @@ func (c *Client) GetSystemInfo(ctx context.Context) (*SystemInfo, error) {
 	}, nil
 }
 
+// SubscribeTelemetry starts a structured telemetry stream.
+func (c *Client) SubscribeTelemetry(ctx context.Context, paths []string, sampleInterval time.Duration, once bool) (*TelemetryStream, error) {
+	stream, err := c.telemetry.SubscribeTelemetry(ctx, &apiv1.SubscribeTelemetryRequest{
+		Paths:            append([]string(nil), paths...),
+		SampleIntervalMs: durationMillisUint32(sampleInterval),
+		Once:             once,
+	})
+	if err != nil {
+		return nil, err
+	}
+	return &TelemetryStream{stream: stream}, nil
+}
+
+// TelemetryStream receives structured telemetry events.
+type TelemetryStream struct {
+	stream apiv1.TelemetryService_SubscribeTelemetryClient
+}
+
+// Recv reads the next telemetry event from the stream.
+func (s *TelemetryStream) Recv() (*TelemetryEvent, error) {
+	resp, err := s.stream.Recv()
+	if err != nil {
+		return nil, err
+	}
+	event := &TelemetryEvent{
+		Sequence:      resp.GetSequence(),
+		Path:          resp.GetPath(),
+		EventType:     resp.GetEventType(),
+		Encoding:      resp.GetEncoding(),
+		JSONPayload:   resp.GetJsonPayload(),
+		SchemaVersion: resp.GetSchemaVersion(),
+	}
+	if rawTimestamp := resp.GetTimestamp(); rawTimestamp != "" {
+		if parsed, err := time.Parse(time.RFC3339Nano, rawTimestamp); err == nil {
+			event.Timestamp = parsed
+		}
+	}
+	return event, nil
+}
+
 func contextWithDefaultTimeout(ctx context.Context) (context.Context, context.CancelFunc) {
 	if _, ok := ctx.Deadline(); ok {
 		return ctx, func() {}
 	}
 	return context.WithTimeout(ctx, 10*time.Second)
+}
+
+func durationMillisUint32(duration time.Duration) uint32 {
+	if duration <= 0 {
+		return 0
+	}
+	ms := duration / time.Millisecond
+	if ms < 1 {
+		return 1
+	}
+	if ms > time.Duration(^uint32(0)) {
+		return ^uint32(0)
+	}
+	return uint32(ms)
 }
 
 func commitInfosFromProto(entries []*apiv1.CommitEntry) []CommitInfo {

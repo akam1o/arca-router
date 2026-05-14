@@ -2,6 +2,7 @@
 
 ## v0.8.x - Overlay and Streaming Telemetry (current)
 
+- **Structured gRPC telemetry stream**: the internal gRPC API now exposes `TelemetryService.SubscribeTelemetry` for selected config, daemon, interface, routing, BFD, LCP, HA, routing-instance, and class-of-service paths with JSON payload events, interval sampling, one-shot snapshots, and gRPC flow-control backpressure
 - **VPP VXLAN L2 dataplane plumbing**: VPP southbound validation and apply now support multicast VXLAN for L2 EVPN VNIs by creating bridge domains, creating VXLAN tunnel interfaces, bringing them up, and attaching them to L2 bridge domains with rollback coverage; L3 VNI and unicast remote-VTEP dataplane remain intentionally rejected
 - **FRR EVPN control-plane generation**: FRR file-backend generation now renders global BGP `l2vpn evpn` with `advertise-all-vni`, explicit L2 VNI route-targets, L3 VNI VRF bindings, and per-VRF EVPN route-targets while transactional mgmtd support is pending
 - **EVPN/VXLAN VNI intent model**: CLI parser/serializer, validation, internal model conversion/clone/diff, NETCONF XML/YANG, and commit-time southbound safety gates cover L2/L3 `protocols evpn vni` configuration with explicit rejection for unsupported VPP dataplane modes

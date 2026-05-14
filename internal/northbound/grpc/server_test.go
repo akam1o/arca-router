@@ -2,6 +2,7 @@ package grpc
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"io"
 	"log/slog"
@@ -218,6 +219,70 @@ func TestClientServerConfigFlow(t *testing.T) {
 	}
 	if hasChanges {
 		t.Fatalf("Diff() has changes after commit: %q", diffText)
+	}
+
+	stream, err := client.SubscribeTelemetry(ctx, []string{"/config/running"}, time.Second, true)
+	if err != nil {
+		t.Fatalf("SubscribeTelemetry() error = %v", err)
+	}
+	event, err := stream.Recv()
+	if err != nil {
+		t.Fatalf("TelemetryStream.Recv() error = %v", err)
+	}
+	if event.Path != "/config/running" || event.EventType != telemetryEventTypeSnapshot ||
+		event.Encoding != telemetryEncodingJSON || event.SchemaVersion != telemetrySchemaVersion {
+		t.Fatalf("telemetry event = %#v, want config/running JSON snapshot", event)
+	}
+	var payload map[string]any
+	if err := json.Unmarshal([]byte(event.JSONPayload), &payload); err != nil {
+		t.Fatalf("telemetry JSON payload is invalid: %v", err)
+	}
+	if payload["version"] != float64(2) || !strings.Contains(event.JSONPayload, "router2") {
+		t.Fatalf("telemetry payload = %s, want running config version 2", event.JSONPayload)
+	}
+	if _, err := stream.Recv(); err != io.EOF {
+		t.Fatalf("TelemetryStream.Recv() after once = %v, want EOF", err)
+	}
+}
+
+func TestSubscribeTelemetrySelectedSnapshots(t *testing.T) {
+	eng := engine.NewEngine(nil, testLogger())
+	eng.InitializeRunning(&model.RouterConfig{
+		System:     &model.SystemConfig{HostName: "router1"},
+		Interfaces: map[string]*model.InterfaceConfig{},
+	}, 7)
+	srv := NewServer(eng, &fakeStore{}, testLogger())
+
+	var events []TelemetryEvent
+	err := srv.SubscribeTelemetry(context.Background(), []string{"system", "running", "system"}, time.Millisecond, true, func(event TelemetryEvent) error {
+		events = append(events, event)
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("SubscribeTelemetry() error = %v", err)
+	}
+	if len(events) != 2 {
+		t.Fatalf("SubscribeTelemetry() emitted %d events, want 2", len(events))
+	}
+	if events[0].Sequence != 1 || events[0].Path != "/system" || events[0].EventType != telemetryEventTypeSnapshot {
+		t.Fatalf("events[0] = %#v, want system snapshot sequence 1", events[0])
+	}
+	if events[1].Sequence != 2 || events[1].Path != "/config/running" || events[1].EventType != telemetryEventTypeSnapshot {
+		t.Fatalf("events[1] = %#v, want config snapshot sequence 2", events[1])
+	}
+	if !strings.Contains(events[0].JSONPayload, "router1") || !strings.Contains(events[1].JSONPayload, "router1") {
+		t.Fatalf("telemetry payloads = %#v, want hostname/config content", events)
+	}
+}
+
+func TestSubscribeTelemetryRejectsUnsupportedPath(t *testing.T) {
+	srv := NewServer(engine.NewEngine(nil, testLogger()), &fakeStore{}, testLogger())
+	err := srv.SubscribeTelemetry(context.Background(), []string{"/unsupported"}, 0, true, func(event TelemetryEvent) error {
+		t.Fatalf("unexpected telemetry event: %#v", event)
+		return nil
+	})
+	if err == nil || !strings.Contains(err.Error(), "unsupported telemetry path") {
+		t.Fatalf("SubscribeTelemetry() error = %v, want unsupported path", err)
 	}
 }
 
