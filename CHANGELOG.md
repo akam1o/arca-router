@@ -20,6 +20,7 @@
 - **Transactional policy object validation**: direct FRR management operations reject invalid prefix-list and route-map names, sequence numbers, actions, prefixes, and address-family mismatches before building the candidate
 - **BGP policy reference validation**: BGP group import/export policies are validated against configured policy-statements before FRR generation
 - **Transactional BGP validation**: direct FRR management operations reject invalid BGP ASN, router-id, neighbor IP, remote-as, and address-family mismatches before building the candidate
+- **OSPF generation validation**: FRR generation rejects duplicate OSPF networks/interfaces, OSPFv2 IPv6 networks, and unsupported OSPFv3 network statements before file or transactional apply emits OSPF configuration
 - **Transactional OSPF validation**: direct FRR management operations reject invalid OSPF router-id, network, area-id, interface, metric, and priority state before building the candidate
 - **Route policy prefix-list aggregation**: FRR generation aggregates same-family prefix-list matches per route-map entry so IPv4 and IPv6 policy matches render deterministically through both file and transactional backends
 - **Route-map backend selection**: route-map source-protocol, peer, and AS-path matches fall back to the FRR file backend instead of being silently dropped by transactional apply

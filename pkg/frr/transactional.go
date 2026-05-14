@@ -245,27 +245,7 @@ func validateTransactionalOSPF(cfg *Config) error {
 	if cfg.OSPF.IsOSPFv3 {
 		return NewInvalidConfigError("OSPFv3 is not supported by the transactional FRR backend because FRR does not expose core ospf6d YANG paths")
 	}
-	if cfg.OSPF.RouterID == "" {
-		return NewInvalidConfigError("OSPF router-id is required for OSPFv2")
-	}
-	if err := validateRouterID(cfg.OSPF.RouterID); err != nil {
-		return err
-	}
-	for _, network := range cfg.OSPF.Networks {
-		if err := validateOSPFNetwork(&network); err != nil {
-			return err
-		}
-		_, prefixNet, _ := net.ParseCIDR(network.Prefix)
-		if prefixNet.IP.To4() == nil {
-			return NewInvalidConfigError(fmt.Sprintf("OSPF network %s address family does not match OSPFv2", network.Prefix))
-		}
-	}
-	for _, iface := range cfg.OSPF.Interfaces {
-		if err := validateOSPFInterface(&iface); err != nil {
-			return err
-		}
-	}
-	return nil
+	return validateOSPFConfig(cfg.OSPF)
 }
 
 func validateTransactionalStaticRouteBFDProfiles(cfg *Config) error {

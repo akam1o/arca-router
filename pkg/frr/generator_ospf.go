@@ -13,6 +13,9 @@ func GenerateOSPFConfig(cfg *OSPFConfig) (string, error) {
 	if cfg == nil {
 		return "", nil
 	}
+	if err := validateOSPFConfig(cfg); err != nil {
+		return "", err
+	}
 
 	var b strings.Builder
 
@@ -27,14 +30,7 @@ func GenerateOSPFConfig(cfg *OSPFConfig) (string, error) {
 
 	// OSPF router-id (required for OSPFv2)
 	if cfg.RouterID != "" {
-		// Validate router-id format (must be IPv4)
-		if err := validateRouterID(cfg.RouterID); err != nil {
-			return "", err
-		}
 		fmt.Fprintf(&b, " ospf router-id %s\n", cfg.RouterID)
-	} else if !cfg.IsOSPFv3 {
-		// OSPFv2 requires router-id
-		return "", NewInvalidConfigError("OSPF router-id is required for OSPFv2")
 	}
 
 	// Sort networks for deterministic output
@@ -46,9 +42,6 @@ func GenerateOSPFConfig(cfg *OSPFConfig) (string, error) {
 
 	// Network statements
 	for _, n := range networks {
-		if err := validateOSPFNetwork(&n); err != nil {
-			return "", err
-		}
 		fmt.Fprintf(&b, " network %s area %s\n", n.Prefix, n.AreaID)
 	}
 
@@ -63,10 +56,6 @@ func GenerateOSPFConfig(cfg *OSPFConfig) (string, error) {
 	})
 
 	for _, iface := range interfaces {
-		if err := validateOSPFInterface(&iface); err != nil {
-			return "", err
-		}
-
 		// OSPFv3 carries area membership on the interface itself, so a plain
 		// area binding still needs an interface section.
 		hasConfig := iface.Passive || iface.Metric > 0 || iface.Priority != nil || iface.BFD || iface.BFDProfile != ""
@@ -117,6 +106,50 @@ func GenerateOSPFConfig(cfg *OSPFConfig) (string, error) {
 	}
 
 	return b.String(), nil
+}
+
+func validateOSPFConfig(cfg *OSPFConfig) error {
+	if cfg == nil {
+		return nil
+	}
+	if cfg.RouterID != "" {
+		if err := validateRouterID(cfg.RouterID); err != nil {
+			return err
+		}
+	} else if !cfg.IsOSPFv3 {
+		return NewInvalidConfigError("OSPF router-id is required for OSPFv2")
+	}
+
+	seenNetworks := make(map[string]struct{}, len(cfg.Networks))
+	for _, network := range cfg.Networks {
+		if err := validateOSPFNetwork(&network); err != nil {
+			return err
+		}
+		_, prefixNet, _ := net.ParseCIDR(network.Prefix)
+		prefix := prefixNet.String()
+		if _, ok := seenNetworks[prefix]; ok {
+			return NewInvalidConfigError(fmt.Sprintf("OSPF network %s is duplicated", network.Prefix))
+		}
+		seenNetworks[prefix] = struct{}{}
+		if cfg.IsOSPFv3 {
+			return NewInvalidConfigError(fmt.Sprintf("OSPFv3 network %s is not supported; use interface area bindings", network.Prefix))
+		}
+		if prefixNet.IP.To4() == nil {
+			return NewInvalidConfigError(fmt.Sprintf("OSPF network %s address family does not match OSPFv2", network.Prefix))
+		}
+	}
+
+	seenInterfaces := make(map[string]struct{}, len(cfg.Interfaces))
+	for _, iface := range cfg.Interfaces {
+		if err := validateOSPFInterface(&iface); err != nil {
+			return err
+		}
+		if _, ok := seenInterfaces[iface.Name]; ok {
+			return NewInvalidConfigError(fmt.Sprintf("OSPF interface %s is duplicated", iface.Name))
+		}
+		seenInterfaces[iface.Name] = struct{}{}
+	}
+	return nil
 }
 
 // validateRouterID validates an OSPF router ID (must be IPv4 format).

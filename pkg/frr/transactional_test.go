@@ -757,6 +757,14 @@ func TestBuildMgmtOperationsRejectsInvalidOSPF(t *testing.T) {
 			want: "address family does not match OSPFv2",
 		},
 		{
+			name: "duplicate network",
+			ospf: &OSPFConfig{RouterID: "192.0.2.1", Networks: []OSPFNetwork{
+				{Prefix: "192.0.2.0/24", AreaID: "0.0.0.0"},
+				{Prefix: "192.0.2.0/24", AreaID: "0.0.0.1"},
+			}},
+			want: "OSPF network 192.0.2.0/24 is duplicated",
+		},
+		{
 			name: "missing network area",
 			ospf: &OSPFConfig{RouterID: "192.0.2.1", Networks: []OSPFNetwork{{Prefix: "192.0.2.0/24"}}},
 			want: "area-id is required",
@@ -775,6 +783,14 @@ func TestBuildMgmtOperationsRejectsInvalidOSPF(t *testing.T) {
 			name: "missing interface area",
 			ospf: &OSPFConfig{RouterID: "192.0.2.1", Interfaces: []OSPFInterface{{Name: "ge0-0-0"}}},
 			want: "area-id is required",
+		},
+		{
+			name: "duplicate interface",
+			ospf: &OSPFConfig{RouterID: "192.0.2.1", Interfaces: []OSPFInterface{
+				{Name: "ge0-0-0", AreaID: "0.0.0.0"},
+				{Name: "ge0-0-0", AreaID: "0.0.0.1"},
+			}},
+			want: "OSPF interface ge0-0-0 is duplicated",
 		},
 		{
 			name: "invalid interface metric",
