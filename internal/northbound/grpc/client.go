@@ -249,6 +249,17 @@ func (c *Client) GetBGPNeighbors(ctx context.Context) ([]BGPNeighborInfo, error)
 	return bgpNeighborInfosFromProto(resp.GetNeighbors()), nil
 }
 
+// GetOSPFNeighbors returns OSPFv2 or OSPFv3 neighbor state.
+func (c *Client) GetOSPFNeighbors(ctx context.Context, addressFamily string) ([]OSPFNeighborInfo, error) {
+	ctx, cancel := contextWithDefaultTimeout(ctx)
+	defer cancel()
+	resp, err := c.state.GetOSPFNeighbors(ctx, &apiv1.GetOSPFNeighborsRequest{AddressFamily: addressFamily})
+	if err != nil {
+		return nil, err
+	}
+	return ospfNeighborInfosFromProto(resp.GetNeighbors()), nil
+}
+
 // GetRouteText returns FRR routing table output.
 func (c *Client) GetRouteText(ctx context.Context, protoFilter, addressFamily string) (string, error) {
 	ctx, cancel := contextWithDefaultTimeout(ctx)
@@ -609,6 +620,23 @@ func bgpNeighborInfosFromProto(neighbors []*apiv1.BGPNeighborState) []BGPNeighbo
 	return infos
 }
 
+func ospfNeighborInfosFromProto(neighbors []*apiv1.OSPFNeighborState) []OSPFNeighborInfo {
+	infos := make([]OSPFNeighborInfo, 0, len(neighbors))
+	for _, neighbor := range neighbors {
+		infos = append(infos, OSPFNeighborInfo{
+			RouterID:     neighbor.GetRouterId(),
+			Address:      neighbor.GetAddress(),
+			Interface:    neighbor.GetInterface(),
+			State:        neighbor.GetState(),
+			Role:         neighbor.GetRole(),
+			Priority:     neighbor.GetPriority(),
+			DeadTimeSecs: neighbor.GetDeadTimeSecs(),
+			UptimeSecs:   neighbor.GetUptimeSecs(),
+		})
+	}
+	return infos
+}
+
 func bfdPeerInfosFromProto(peers []*apiv1.BFDPeerState) []BFDPeerInfo {
 	infos := make([]BFDPeerInfo, 0, len(peers))
 	for _, peer := range peers {
@@ -773,6 +801,22 @@ type BGPNeighborInfo struct {
 	UptimeSecs     uint64
 	PrefixReceived uint32
 	PrefixSent     uint32
+}
+
+// OSPFNeighborInfo represents OSPFv2 or OSPFv3 neighbor state.
+type OSPFNeighborInfo struct {
+	RouterID     string
+	Address      string
+	Interface    string
+	State        string
+	Role         string
+	Priority     uint32
+	DeadTimeSecs uint64
+	UptimeSecs   uint64
+}
+
+func ospfNeighborInfoSortKey(neighbor OSPFNeighborInfo) string {
+	return neighbor.RouterID + "\x00" + neighbor.Interface + "\x00" + neighbor.Address
 }
 
 // BFDStatusInfo represents FRR BFD operational state.

@@ -225,6 +225,27 @@ func (a *stateServiceAdapter) GetBGPNeighbors(ctx context.Context, _ *apiv1.GetB
 	return resp, nil
 }
 
+func (a *stateServiceAdapter) GetOSPFNeighbors(ctx context.Context, req *apiv1.GetOSPFNeighborsRequest) (*apiv1.GetOSPFNeighborsResponse, error) {
+	neighbors, err := a.server.GetOSPFNeighbors(ctx, req.GetAddressFamily())
+	if err != nil {
+		return nil, err
+	}
+	resp := &apiv1.GetOSPFNeighborsResponse{Neighbors: make([]*apiv1.OSPFNeighborState, 0, len(neighbors))}
+	for _, neighbor := range neighbors {
+		resp.Neighbors = append(resp.Neighbors, &apiv1.OSPFNeighborState{
+			RouterId:     neighbor.RouterID,
+			Address:      neighbor.Address,
+			Interface:    neighbor.Interface,
+			State:        neighbor.State,
+			Role:         neighbor.Role,
+			Priority:     neighbor.Priority,
+			DeadTimeSecs: neighbor.DeadTimeSecs,
+			UptimeSecs:   neighbor.UptimeSecs,
+		})
+	}
+	return resp, nil
+}
+
 func (a *stateServiceAdapter) GetRouteText(ctx context.Context, req *apiv1.GetRouteTextRequest) (*apiv1.GetRouteTextResponse, error) {
 	output, err := a.server.GetRouteText(ctx, req.GetProtocolFilter(), req.GetAddressFamily())
 	if err != nil {

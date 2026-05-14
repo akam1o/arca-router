@@ -495,6 +495,81 @@ func TestGetBGPNeighborsUsesFRRJSON(t *testing.T) {
 	}
 }
 
+func TestGetOSPFNeighborsUsesFRRJSON(t *testing.T) {
+	srv := NewServer(engine.NewEngine(nil, testLogger()), &fakeStore{}, testLogger())
+	ctx := context.Background()
+
+	var commands []string
+	oldVtysh := runOperationalVtyshCommand
+	runOperationalVtyshCommand = func(ctx context.Context, command string) (string, error) {
+		commands = append(commands, command)
+		switch command {
+		case "show ip ospf neighbor json":
+			return `{
+				"neighbors": {
+					"10.0.0.2": [
+						{
+							"ifaceAddress": "192.0.2.2",
+							"ifaceName": "ge0-0-0",
+							"nbrState": "Full/DROther",
+							"priority": 1,
+							"deadTime": "00:00:31",
+							"upTimeInMsec": 65000
+						}
+					]
+				}
+			}`, nil
+		case "show ipv6 ospf6 neighbor json":
+			return `{
+				"neighbors": [
+					{
+						"neighborId": "10.0.0.3",
+						"linkLocalAddress": "fe80::1",
+						"interfaceName": "ge0-0-1",
+						"state": "Full",
+						"role": "Backup",
+						"deadTime": "35.000s",
+						"duration": "00:01:05"
+					}
+				]
+			}`, nil
+		default:
+			t.Fatalf("unexpected vtysh command %q", command)
+			return "", nil
+		}
+	}
+	t.Cleanup(func() { runOperationalVtyshCommand = oldVtysh })
+
+	neighbors, err := srv.GetOSPFNeighbors(ctx, "")
+	if err != nil {
+		t.Fatalf("GetOSPFNeighbors() error = %v", err)
+	}
+	if len(neighbors) != 1 {
+		t.Fatalf("GetOSPFNeighbors() returned %d neighbors, want 1", len(neighbors))
+	}
+	if got := neighbors[0]; got.RouterID != "10.0.0.2" || got.Address != "192.0.2.2" ||
+		got.Interface != "ge0-0-0" || got.State != "Full" || got.Role != "DROther" ||
+		got.DeadTimeSecs != 31 || got.UptimeSecs != 65 {
+		t.Fatalf("GetOSPFNeighbors()[0] = %#v, want IPv4 neighbor state", got)
+	}
+
+	neighbors, err = srv.GetOSPFNeighbors(ctx, addressFamilyIPv6)
+	if err != nil {
+		t.Fatalf("GetOSPFNeighbors(inet6) error = %v", err)
+	}
+	if len(neighbors) != 1 {
+		t.Fatalf("GetOSPFNeighbors(inet6) returned %d neighbors, want 1", len(neighbors))
+	}
+	if got := neighbors[0]; got.RouterID != "10.0.0.3" || got.Address != "fe80::1" ||
+		got.Interface != "ge0-0-1" || got.State != "Full" || got.Role != "Backup" ||
+		got.DeadTimeSecs != 35 || got.UptimeSecs != 65 {
+		t.Fatalf("GetOSPFNeighbors(inet6)[0] = %#v, want IPv6 neighbor state", got)
+	}
+	if strings.Join(commands, "\n") != "show ip ospf neighbor json\nshow ipv6 ospf6 neighbor json" {
+		t.Fatalf("vtysh commands = %#v, want OSPFv2 then OSPFv3 JSON", commands)
+	}
+}
+
 func TestGetInterfacesUsesManagedStateCollector(t *testing.T) {
 	srv := NewServer(engine.NewEngine(nil, testLogger()), &fakeStore{}, testLogger())
 	collector := &fakeInterfaceStateCollector{

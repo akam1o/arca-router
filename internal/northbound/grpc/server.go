@@ -42,6 +42,7 @@ type Server struct {
 	bfdSource      bfdOperationalSource
 	routeReader    pkgfrr.RouteStatusReader
 	bgpReader      pkgfrr.BGPSummaryStatusReader
+	ospfReader     pkgfrr.OSPFNeighborStatusReader
 }
 
 var (
@@ -81,6 +82,7 @@ func NewServer(eng *engine.Engine, st store.ConfigStore, log *slog.Logger) *Serv
 		log:         log.With("component", "grpc"),
 		routeReader: newOperationalRouteStatusReader(),
 		bgpReader:   newOperationalBGPSummaryStatusReader(),
+		ospfReader:  newOperationalOSPFNeighborStatusReader(),
 	}
 }
 
@@ -127,6 +129,10 @@ func newOperationalRouteStatusReader() pkgfrr.RouteStatusReader {
 
 func newOperationalBGPSummaryStatusReader() pkgfrr.BGPSummaryStatusReader {
 	return pkgfrr.NewVtyshBGPSummaryStatusReaderWithRunner(runOperationalVtyshBytesCommand)
+}
+
+func newOperationalOSPFNeighborStatusReader() pkgfrr.OSPFNeighborStatusReader {
+	return pkgfrr.NewVtyshOSPFNeighborStatusReaderWithRunner(runOperationalVtyshBytesCommand)
 }
 
 func runOperationalVtyshBytesCommand(ctx context.Context, command string) ([]byte, error) {
@@ -733,6 +739,42 @@ func (s *Server) GetBGPNeighbors(ctx context.Context) ([]BGPNeighborInfo, error)
 	}
 	sort.Slice(neighbors, func(i, j int) bool {
 		return neighbors[i].PeerAddress < neighbors[j].PeerAddress
+	})
+	return neighbors, nil
+}
+
+// GetOSPFNeighbors returns OSPFv2 or OSPFv3 neighbor state.
+func (s *Server) GetOSPFNeighbors(ctx context.Context, addressFamily string) ([]OSPFNeighborInfo, error) {
+	family, err := normalizeAddressFamily(addressFamily)
+	if err != nil {
+		return nil, err
+	}
+	reader := s.ospfReader
+	if reader == nil {
+		reader = newOperationalOSPFNeighborStatusReader()
+	}
+	status, err := reader.ReadOSPFNeighborStatus(ctx, family == addressFamilyIPv6)
+	if err != nil {
+		return nil, err
+	}
+	if status == nil {
+		return nil, nil
+	}
+	neighbors := make([]OSPFNeighborInfo, 0, len(status.Neighbors))
+	for _, neighbor := range status.Neighbors {
+		neighbors = append(neighbors, OSPFNeighborInfo{
+			RouterID:     neighbor.RouterID,
+			Address:      neighbor.Address,
+			Interface:    neighbor.Interface,
+			State:        neighbor.State,
+			Role:         neighbor.Role,
+			Priority:     neighbor.Priority,
+			DeadTimeSecs: neighbor.DeadTimeSecs,
+			UptimeSecs:   neighbor.UptimeSecs,
+		})
+	}
+	sort.Slice(neighbors, func(i, j int) bool {
+		return ospfNeighborInfoSortKey(neighbors[i]) < ospfNeighborInfoSortKey(neighbors[j])
 	})
 	return neighbors, nil
 }

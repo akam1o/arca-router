@@ -618,6 +618,8 @@ The internal gRPC route state API reads FRR JSON route output for both IPv4 and 
 
 The internal gRPC BGP neighbor state API reads FRR JSON summary output and returns structured peer address, remote AS, state, uptime, received-prefix, and sent-prefix counters. When FRR reports the same peer under multiple address families, arca-router returns one peer entry with prefix counters combined and the longest observed uptime.
 
+The internal gRPC OSPF neighbor state API reads FRR JSON neighbor output for OSPFv2 and OSPFv3 and returns structured router ID, neighbor address, interface, state, role, priority, dead timer, and uptime fields.
+
 NETCONF `<get>` exposes the same live route table state under `state/routes` and BGP neighbor state under `state/protocols/bgp`, using the FRR JSON operational readers shared with the internal gRPC state APIs.
 
 The internal gRPC routing-instance state API returns running routing-instance intent with deterministic IPv4/IPv6 VPP table IDs, interface bindings, import/export targets, and import/export policy chains.
@@ -1106,7 +1108,7 @@ arca show class-of-service
 arca show configuration
 ```
 
-`show interfaces` prints live managed VPP admin/oper status, bound QoS profile, packet counters, and RX/TX queue placement when available. Name filters use configured interface names such as `ge-0/0/0`. `show routes` prints structured IPv4/IPv6 route state from the internal gRPC state API and supports optional `prefix <cidr>` and `protocol <proto>` filters; `show route` retains raw FRR route output. `show bgp neighbors` prints structured BGP neighbor state from the internal gRPC state API, while `show bgp summary` and `show bgp neighbor <ip>` retain raw FRR output. `show vrrp` prints FRR `show vrrp` output through arca-routerd for local HA inspection. `show lcp` prints the cached VPP LCP reconciliation state used by HA convergence checks. `show ha` prints the same HA convergence summary used by Web UI, Prometheus, and SNMP, including FRR VRRP, configured FRR BFD peer health, and VPP LCP reconciliation status. `show class-of-service` prints running CoS intent and reports `intent-only` for scheduler/policer enforcement while VPP enforcement support is staged separately.
+`show interfaces` prints live managed VPP admin/oper status, bound QoS profile, packet counters, and RX/TX queue placement when available. Name filters use configured interface names such as `ge-0/0/0`. `show routes` prints structured IPv4/IPv6 route state from the internal gRPC state API and supports optional `prefix <cidr>` and `protocol <proto>` filters; `show route` retains raw FRR route output. `show bgp neighbors` prints structured BGP neighbor state from the internal gRPC state API, while `show bgp summary` and `show bgp neighbor <ip>` retain raw FRR output. `show ospf neighbor` and `show ospf3 neighbor` print structured OSPF neighbor state from the same gRPC state API. `show vrrp` prints FRR `show vrrp` output through arca-routerd for local HA inspection. `show lcp` prints the cached VPP LCP reconciliation state used by HA convergence checks. `show ha` prints the same HA convergence summary used by Web UI, Prometheus, and SNMP, including FRR VRRP, configured FRR BFD peer health, and VPP LCP reconciliation status. `show class-of-service` prints running CoS intent and reports `intent-only` for scheduler/policer enforcement while VPP enforcement support is staged separately.
 
 Interactive mode also supports `show history [N]` in configuration mode for commit history.
 

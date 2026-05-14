@@ -25,6 +25,7 @@ type fakeInteractiveClient struct {
 	bgpNeighbors     []grpcclient.BGPNeighborInfo
 	bgpSummaryText   string
 	bgpNeighborText  string
+	ospfNeighbors    []grpcclient.OSPFNeighborInfo
 	ospfText         string
 	ospfFamily       string
 	vrrpText         string
@@ -37,18 +38,19 @@ type fakeInteractiveClient struct {
 	haInfo           *grpcclient.HAStatusInfo
 	cosInfo          *grpcclient.ClassOfServiceInfo
 
-	acquireLockCalls int
-	discardCalls     int
-	releaseLockCalls int
-	commitCalls      int
-	routeCalls       int
-	bfdStatusCalls   int
-	routingCalls     int
-	bgpNeighborCalls int
-	listHistoryCalls int
-	rollbackCalls    int
-	validateCalls    int
-	editTexts        []string
+	acquireLockCalls  int
+	discardCalls      int
+	releaseLockCalls  int
+	commitCalls       int
+	routeCalls        int
+	bfdStatusCalls    int
+	routingCalls      int
+	bgpNeighborCalls  int
+	ospfNeighborCalls int
+	listHistoryCalls  int
+	rollbackCalls     int
+	validateCalls     int
+	editTexts         []string
 }
 
 func (f *fakeInteractiveClient) GetRunning(ctx context.Context) (string, uint64, error) {
@@ -122,6 +124,12 @@ func (f *fakeInteractiveClient) GetRoutingInstances(ctx context.Context) ([]grpc
 func (f *fakeInteractiveClient) GetBGPNeighbors(ctx context.Context) ([]grpcclient.BGPNeighborInfo, error) {
 	f.bgpNeighborCalls++
 	return f.bgpNeighbors, nil
+}
+
+func (f *fakeInteractiveClient) GetOSPFNeighbors(ctx context.Context, addressFamily string) ([]grpcclient.OSPFNeighborInfo, error) {
+	f.ospfNeighborCalls++
+	f.ospfFamily = addressFamily
+	return f.ospfNeighbors, nil
 }
 
 func (f *fakeInteractiveClient) GetRouteText(ctx context.Context, protoFilter, addressFamily string) (string, error) {
@@ -403,7 +411,7 @@ func TestShowHistoryRejectsInvalidLimit(t *testing.T) {
 
 func TestCmdShowOSPFNeighborReturnsOutput(t *testing.T) {
 	ctx := context.Background()
-	client := &fakeInteractiveClient{}
+	client := &fakeInteractiveClient{ospfNeighbors: []grpcclient.OSPFNeighborInfo{{RouterID: "10.0.0.2", State: "Full"}}}
 	sh := &interactiveShell{
 		client:    client,
 		hostname:  "router",
@@ -418,11 +426,14 @@ func TestCmdShowOSPFNeighborReturnsOutput(t *testing.T) {
 	if client.ospfFamily != routeAddressFamilyIPv4 {
 		t.Fatalf("OSPF address family = %q, want %q", client.ospfFamily, routeAddressFamilyIPv4)
 	}
+	if client.ospfNeighborCalls != 1 {
+		t.Fatalf("OSPF neighbor calls = %d, want 1", client.ospfNeighborCalls)
+	}
 }
 
 func TestCmdShowOSPF3NeighborReturnsOutput(t *testing.T) {
 	ctx := context.Background()
-	client := &fakeInteractiveClient{}
+	client := &fakeInteractiveClient{ospfNeighbors: []grpcclient.OSPFNeighborInfo{{RouterID: "10.0.0.3", State: "Full"}}}
 	sh := &interactiveShell{
 		client:    client,
 		hostname:  "router",
@@ -436,6 +447,9 @@ func TestCmdShowOSPF3NeighborReturnsOutput(t *testing.T) {
 	}
 	if client.ospfFamily != routeAddressFamilyIPv6 {
 		t.Fatalf("OSPF3 address family = %q, want %q", client.ospfFamily, routeAddressFamilyIPv6)
+	}
+	if client.ospfNeighborCalls != 1 {
+		t.Fatalf("OSPF3 neighbor calls = %d, want 1", client.ospfNeighborCalls)
 	}
 }
 
@@ -705,7 +719,7 @@ func TestRoutingInstancesNameFilter(t *testing.T) {
 }
 
 func TestOneShotShowOSPFNeighborReturnsSuccess(t *testing.T) {
-	client := &fakeInteractiveClient{}
+	client := &fakeInteractiveClient{ospfNeighbors: []grpcclient.OSPFNeighborInfo{{RouterID: "10.0.0.2", State: "Full"}}}
 	code := oneShotShow(context.Background(), client, []string{"ospf", "neighbor"}, &cliFlags{})
 	if code != ExitSuccess {
 		t.Fatalf("oneShotShow(ospf neighbor) = %d, want %d", code, ExitSuccess)
@@ -713,16 +727,22 @@ func TestOneShotShowOSPFNeighborReturnsSuccess(t *testing.T) {
 	if client.ospfFamily != routeAddressFamilyIPv4 {
 		t.Fatalf("OSPF address family = %q, want %q", client.ospfFamily, routeAddressFamilyIPv4)
 	}
+	if client.ospfNeighborCalls != 1 {
+		t.Fatalf("OSPF neighbor calls = %d, want 1", client.ospfNeighborCalls)
+	}
 }
 
 func TestOneShotShowOSPF3NeighborReturnsSuccess(t *testing.T) {
-	client := &fakeInteractiveClient{}
+	client := &fakeInteractiveClient{ospfNeighbors: []grpcclient.OSPFNeighborInfo{{RouterID: "10.0.0.3", State: "Full"}}}
 	code := oneShotShow(context.Background(), client, []string{"ospf3", "neighbor"}, &cliFlags{})
 	if code != ExitSuccess {
 		t.Fatalf("oneShotShow(ospf3 neighbor) = %d, want %d", code, ExitSuccess)
 	}
 	if client.ospfFamily != routeAddressFamilyIPv6 {
 		t.Fatalf("OSPF3 address family = %q, want %q", client.ospfFamily, routeAddressFamilyIPv6)
+	}
+	if client.ospfNeighborCalls != 1 {
+		t.Fatalf("OSPF3 neighbor calls = %d, want 1", client.ospfNeighborCalls)
 	}
 }
 

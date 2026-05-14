@@ -295,12 +295,12 @@ func oneShotShow(ctx context.Context, client showClient, args []string, f *cliFl
 		if subcmd == "ospf3" {
 			addressFamily = routeAddressFamilyIPv6
 		}
-		output, err := client.GetOSPFNeighborsText(ctx, addressFamily)
+		neighbors, err := client.GetOSPFNeighbors(ctx, addressFamily)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 			return ExitOperationError
 		}
-		printCommandOutput(output)
+		printOSPFNeighbors(neighbors)
 		return ExitSuccess
 
 	case "vrrp":
@@ -420,6 +420,7 @@ type showClient interface {
 	GetRoutingInstances(context.Context) ([]grpcclient.RoutingInstanceInfo, error)
 	GetRoutes(context.Context, string, string) ([]grpcclient.RouteInfo, error)
 	GetBGPNeighbors(context.Context) ([]grpcclient.BGPNeighborInfo, error)
+	GetOSPFNeighbors(context.Context, string) ([]grpcclient.OSPFNeighborInfo, error)
 	GetRouteText(context.Context, string, string) (string, error)
 	GetBGPSummaryText(context.Context) (string, error)
 	GetBGPNeighborText(context.Context, string) (string, error)
@@ -809,11 +810,11 @@ func (sh *interactiveShell) cmdShow(ctx context.Context, args []string) error {
 		if subcmd == "ospf3" {
 			addressFamily = routeAddressFamilyIPv6
 		}
-		output, err := sh.client.GetOSPFNeighborsText(ctx, addressFamily)
+		neighbors, err := sh.client.GetOSPFNeighbors(ctx, addressFamily)
 		if err != nil {
 			return err
 		}
-		printCommandOutput(output)
+		printOSPFNeighbors(neighbors)
 		return nil
 
 	case "vrrp":
@@ -1322,6 +1323,27 @@ func printBGPNeighbors(neighbors []grpcclient.BGPNeighborInfo) {
 			formatBGPUptime(neighbor.UptimeSecs),
 			neighbor.PrefixReceived,
 			neighbor.PrefixSent,
+		)
+	}
+}
+
+func printOSPFNeighbors(neighbors []grpcclient.OSPFNeighborInfo) {
+	if len(neighbors) == 0 {
+		fmt.Println("No OSPF neighbors found")
+		return
+	}
+	fmt.Printf("%-15s %-39s %-16s %-14s %-10s %-10s %-10s\n",
+		"Router ID", "Address", "Interface", "State", "Role", "Dead", "Uptime")
+	fmt.Println(strings.Repeat("-", 122))
+	for _, neighbor := range neighbors {
+		fmt.Printf("%-15s %-39s %-16s %-14s %-10s %-10s %-10s\n",
+			formatBGPValue(neighbor.RouterID),
+			formatBGPValue(neighbor.Address),
+			formatBGPValue(neighbor.Interface),
+			formatBGPValue(neighbor.State),
+			formatBGPValue(neighbor.Role),
+			formatBGPUptime(neighbor.DeadTimeSecs),
+			formatBGPUptime(neighbor.UptimeSecs),
 		)
 	}
 }

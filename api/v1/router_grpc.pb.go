@@ -682,6 +682,7 @@ const (
 	StateService_GetInterfaces_FullMethodName        = "/arca.router.v1.StateService/GetInterfaces"
 	StateService_GetRoutes_FullMethodName            = "/arca.router.v1.StateService/GetRoutes"
 	StateService_GetBGPNeighbors_FullMethodName      = "/arca.router.v1.StateService/GetBGPNeighbors"
+	StateService_GetOSPFNeighbors_FullMethodName     = "/arca.router.v1.StateService/GetOSPFNeighbors"
 	StateService_GetRouteText_FullMethodName         = "/arca.router.v1.StateService/GetRouteText"
 	StateService_GetBGPSummaryText_FullMethodName    = "/arca.router.v1.StateService/GetBGPSummaryText"
 	StateService_GetBGPNeighborText_FullMethodName   = "/arca.router.v1.StateService/GetBGPNeighborText"
@@ -708,6 +709,8 @@ type StateServiceClient interface {
 	GetRoutes(ctx context.Context, in *GetRoutesRequest, opts ...grpc.CallOption) (*GetRoutesResponse, error)
 	// GetBGPNeighbors returns BGP neighbor state.
 	GetBGPNeighbors(ctx context.Context, in *GetBGPNeighborsRequest, opts ...grpc.CallOption) (*GetBGPNeighborsResponse, error)
+	// GetOSPFNeighbors returns OSPFv2 or OSPFv3 neighbor state.
+	GetOSPFNeighbors(ctx context.Context, in *GetOSPFNeighborsRequest, opts ...grpc.CallOption) (*GetOSPFNeighborsResponse, error)
 	// GetRouteText returns FRR route output for CLI display.
 	GetRouteText(ctx context.Context, in *GetRouteTextRequest, opts ...grpc.CallOption) (*GetRouteTextResponse, error)
 	// GetBGPSummaryText returns FRR BGP summary output for CLI display.
@@ -766,6 +769,16 @@ func (c *stateServiceClient) GetBGPNeighbors(ctx context.Context, in *GetBGPNeig
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(GetBGPNeighborsResponse)
 	err := c.cc.Invoke(ctx, StateService_GetBGPNeighbors_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *stateServiceClient) GetOSPFNeighbors(ctx context.Context, in *GetOSPFNeighborsRequest, opts ...grpc.CallOption) (*GetOSPFNeighborsResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(GetOSPFNeighborsResponse)
+	err := c.cc.Invoke(ctx, StateService_GetOSPFNeighbors_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
 	}
@@ -904,6 +917,8 @@ type StateServiceServer interface {
 	GetRoutes(context.Context, *GetRoutesRequest) (*GetRoutesResponse, error)
 	// GetBGPNeighbors returns BGP neighbor state.
 	GetBGPNeighbors(context.Context, *GetBGPNeighborsRequest) (*GetBGPNeighborsResponse, error)
+	// GetOSPFNeighbors returns OSPFv2 or OSPFv3 neighbor state.
+	GetOSPFNeighbors(context.Context, *GetOSPFNeighborsRequest) (*GetOSPFNeighborsResponse, error)
 	// GetRouteText returns FRR route output for CLI display.
 	GetRouteText(context.Context, *GetRouteTextRequest) (*GetRouteTextResponse, error)
 	// GetBGPSummaryText returns FRR BGP summary output for CLI display.
@@ -946,6 +961,9 @@ func (UnimplementedStateServiceServer) GetRoutes(context.Context, *GetRoutesRequ
 }
 func (UnimplementedStateServiceServer) GetBGPNeighbors(context.Context, *GetBGPNeighborsRequest) (*GetBGPNeighborsResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method GetBGPNeighbors not implemented")
+}
+func (UnimplementedStateServiceServer) GetOSPFNeighbors(context.Context, *GetOSPFNeighborsRequest) (*GetOSPFNeighborsResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method GetOSPFNeighbors not implemented")
 }
 func (UnimplementedStateServiceServer) GetRouteText(context.Context, *GetRouteTextRequest) (*GetRouteTextResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method GetRouteText not implemented")
@@ -1054,6 +1072,24 @@ func _StateService_GetBGPNeighbors_Handler(srv interface{}, ctx context.Context,
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
 		return srv.(StateServiceServer).GetBGPNeighbors(ctx, req.(*GetBGPNeighborsRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _StateService_GetOSPFNeighbors_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(GetOSPFNeighborsRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(StateServiceServer).GetOSPFNeighbors(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: StateService_GetOSPFNeighbors_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(StateServiceServer).GetOSPFNeighbors(ctx, req.(*GetOSPFNeighborsRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
@@ -1292,6 +1328,10 @@ var StateService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "GetBGPNeighbors",
 			Handler:    _StateService_GetBGPNeighbors_Handler,
+		},
+		{
+			MethodName: "GetOSPFNeighbors",
+			Handler:    _StateService_GetOSPFNeighbors_Handler,
 		},
 		{
 			MethodName: "GetRouteText",
