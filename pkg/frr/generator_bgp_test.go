@@ -187,6 +187,58 @@ func TestGenerateBGPConfig(t *testing.T) {
 	}
 }
 
+func TestGenerateBGPConfigRejectsInvalidConfig(t *testing.T) {
+	tests := []struct {
+		name string
+		cfg  *BGPConfig
+		want string
+	}{
+		{
+			name: "invalid router id",
+			cfg: &BGPConfig{
+				ASN:      65001,
+				RouterID: "2001:db8::1",
+			},
+			want: "invalid BGP router-id",
+		},
+		{
+			name: "duplicate neighbor",
+			cfg: &BGPConfig{
+				ASN: 65001,
+				Neighbors: []BGPNeighbor{
+					{IP: "192.0.2.2", RemoteAS: 65002},
+					{IP: "192.0.2.2", RemoteAS: 65003},
+				},
+			},
+			want: "BGP neighbor 192.0.2.2 is duplicated",
+		},
+		{
+			name: "ipv4 marked ipv6",
+			cfg: &BGPConfig{
+				ASN:       65001,
+				Neighbors: []BGPNeighbor{{IP: "192.0.2.2", RemoteAS: 65002, IsIPv6: true}},
+			},
+			want: "address family does not match configured address family",
+		},
+		{
+			name: "ipv6 marked ipv4",
+			cfg: &BGPConfig{
+				ASN:       65001,
+				Neighbors: []BGPNeighbor{{IP: "2001:db8::2", RemoteAS: 65002}},
+			},
+			want: "address family does not match configured address family",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := GenerateBGPConfig(tt.cfg)
+			if err == nil || !strings.Contains(err.Error(), tt.want) {
+				t.Fatalf("GenerateBGPConfig() error = %v, want %q", err, tt.want)
+			}
+		})
+	}
+}
+
 func TestValidateBGPNeighbor(t *testing.T) {
 	tests := []struct {
 		name     string

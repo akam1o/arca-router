@@ -117,6 +117,17 @@ func TestBuildMgmtOperationsRejectsInvalidBGP(t *testing.T) {
 			},
 			want: "address family does not match",
 		},
+		{
+			name: "duplicate neighbor",
+			bgp: &BGPConfig{
+				ASN: 65000,
+				Neighbors: []BGPNeighbor{
+					{IP: "192.0.2.2", RemoteAS: 65001},
+					{IP: "192.0.2.2", RemoteAS: 65002},
+				},
+			},
+			want: "BGP neighbor 192.0.2.2 is duplicated",
+		},
 	}
 
 	for _, tt := range tests {
