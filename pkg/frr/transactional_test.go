@@ -161,14 +161,77 @@ func TestBuildMgmtOperationsRejectsOSPF3(t *testing.T) {
 	}
 }
 
-func TestBuildMgmtOperationsRejectsBFD(t *testing.T) {
-	_, err := BuildMgmtOperations(&Config{
+func TestBuildMgmtOperationsBFD(t *testing.T) {
+	ops, err := BuildMgmtOperations(&Config{
 		BFD: &BFDConfig{
-			Peers: []BFDPeer{{Address: "192.0.2.2"}},
+			Profiles: []BFDProfile{
+				{Name: "fast", DetectMultiplier: 3, ReceiveInterval: 150, TransmitInterval: 150, EchoMode: true, PassiveMode: true},
+				{Name: "slow", DetectMultiplier: 5},
+			},
+			Peers: []BFDPeer{
+				{
+					Address:          "192.0.2.2",
+					Interface:        "ge0-0-0",
+					LocalAddress:     "192.0.2.1",
+					Profile:          "fast",
+					DetectMultiplier: 4,
+					ReceiveInterval:  200,
+					TransmitInterval: 250,
+					PassiveMode:      true,
+				},
+				{
+					Address:      "192.0.2.3",
+					LocalAddress: "192.0.2.1",
+					VRF:          "BLUE",
+					Multihop:     true,
+					Profile:      "slow",
+					Shutdown:     true,
+				},
+			},
 		},
 	})
-	if err == nil || !strings.Contains(err.Error(), "BFD is not supported") {
-		t.Fatalf("BuildMgmtOperations() error = %v, want BFD unsupported", err)
+	if err != nil {
+		t.Fatalf("BuildMgmtOperations() error = %v", err)
+	}
+	commands := commandsFromOps(ops)
+	for _, want := range []string{
+		"mgmt delete-config /frr-bfdd:bfdd",
+		"mgmt set-config /frr-bfdd:bfdd/bfd/profile[name='fast']/name fast",
+		"mgmt set-config /frr-bfdd:bfdd/bfd/profile[name='fast']/detection-multiplier 3",
+		"mgmt set-config /frr-bfdd:bfdd/bfd/profile[name='fast']/desired-transmission-interval 150000",
+		"mgmt set-config /frr-bfdd:bfdd/bfd/profile[name='fast']/required-receive-interval 150000",
+		"mgmt set-config /frr-bfdd:bfdd/bfd/profile[name='fast']/echo-mode true",
+		"mgmt set-config /frr-bfdd:bfdd/bfd/profile[name='fast']/passive-mode true",
+		"mgmt set-config /frr-bfdd:bfdd/bfd/profile[name='slow']/detection-multiplier 5",
+		"mgmt set-config /frr-bfdd:bfdd/bfd/sessions/single-hop[dest-addr='192.0.2.2'][interface='ge0-0-0'][vrf='default']/source-addr 192.0.2.1",
+		"mgmt set-config /frr-bfdd:bfdd/bfd/sessions/single-hop[dest-addr='192.0.2.2'][interface='ge0-0-0'][vrf='default']/profile fast",
+		"mgmt set-config /frr-bfdd:bfdd/bfd/sessions/single-hop[dest-addr='192.0.2.2'][interface='ge0-0-0'][vrf='default']/detection-multiplier 4",
+		"mgmt set-config /frr-bfdd:bfdd/bfd/sessions/single-hop[dest-addr='192.0.2.2'][interface='ge0-0-0'][vrf='default']/desired-transmission-interval 250000",
+		"mgmt set-config /frr-bfdd:bfdd/bfd/sessions/single-hop[dest-addr='192.0.2.2'][interface='ge0-0-0'][vrf='default']/required-receive-interval 200000",
+		"mgmt set-config /frr-bfdd:bfdd/bfd/sessions/multi-hop[source-addr='192.0.2.1'][dest-addr='192.0.2.3'][vrf='BLUE']/profile slow",
+		"mgmt set-config /frr-bfdd:bfdd/bfd/sessions/multi-hop[source-addr='192.0.2.1'][dest-addr='192.0.2.3'][vrf='BLUE']/administrative-down true",
+	} {
+		if !strings.Contains(commands, want) {
+			t.Fatalf("commands missing %q:\n%s", want, commands)
+		}
+	}
+}
+
+func TestBuildMgmtOperationsRejectsUnsupportedBFDPeerShape(t *testing.T) {
+	for _, tt := range []struct {
+		name string
+		peer BFDPeer
+		want string
+	}{
+		{name: "single hop without interface", peer: BFDPeer{Address: "192.0.2.2"}, want: "requires interface"},
+		{name: "multihop without local address", peer: BFDPeer{Address: "192.0.2.2", Multihop: true}, want: "requires local-address"},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := BuildMgmtOperations(&Config{BFD: &BFDConfig{Peers: []BFDPeer{tt.peer}}})
+			if err == nil || !strings.Contains(err.Error(), tt.want) {
+				t.Fatalf("BuildMgmtOperations() error = %v, want %q", err, tt.want)
+			}
+		})
 	}
 }
 
