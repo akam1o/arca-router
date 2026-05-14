@@ -564,7 +564,7 @@ func TestBuildMgmtOperationsOSPFInterfaceAttributes(t *testing.T) {
 				{Prefix: "192.0.2.0/24", AreaID: "0.0.0.0"},
 			},
 			Interfaces: []OSPFInterface{
-				{Name: "ge0-0-0", Passive: true, Metric: 20, Priority: &priority, BFD: true},
+				{Name: "ge0-0-0", AreaID: "0.0.0.0", Passive: true, Metric: 20, Priority: &priority, BFD: true},
 			},
 		},
 	})
@@ -586,6 +586,85 @@ func TestBuildMgmtOperationsOSPFInterfaceAttributes(t *testing.T) {
 		if !strings.Contains(commands, want) {
 			t.Fatalf("commands missing %q:\n%s", want, commands)
 		}
+	}
+}
+
+func TestBuildMgmtOperationsRejectsInvalidOSPF(t *testing.T) {
+	priorityTooHigh := 256
+	tests := []struct {
+		name string
+		ospf *OSPFConfig
+		want string
+	}{
+		{
+			name: "ospfv3 in ospf slot",
+			ospf: &OSPFConfig{IsOSPFv3: true},
+			want: "OSPFv3 is not supported",
+		},
+		{
+			name: "missing router id",
+			ospf: &OSPFConfig{Networks: []OSPFNetwork{{Prefix: "192.0.2.0/24", AreaID: "0.0.0.0"}}},
+			want: "OSPF router-id is required",
+		},
+		{
+			name: "invalid router id",
+			ospf: &OSPFConfig{RouterID: "2001:db8::1"},
+			want: "OSPF router-id must be IPv4",
+		},
+		{
+			name: "missing network prefix",
+			ospf: &OSPFConfig{RouterID: "192.0.2.1", Networks: []OSPFNetwork{{AreaID: "0.0.0.0"}}},
+			want: "OSPF network prefix is required",
+		},
+		{
+			name: "invalid network prefix",
+			ospf: &OSPFConfig{RouterID: "192.0.2.1", Networks: []OSPFNetwork{{Prefix: "192.0.2.0", AreaID: "0.0.0.0"}}},
+			want: "invalid OSPF network prefix",
+		},
+		{
+			name: "ipv6 network",
+			ospf: &OSPFConfig{RouterID: "192.0.2.1", Networks: []OSPFNetwork{{Prefix: "2001:db8::/64", AreaID: "0.0.0.0"}}},
+			want: "address family does not match OSPFv2",
+		},
+		{
+			name: "missing network area",
+			ospf: &OSPFConfig{RouterID: "192.0.2.1", Networks: []OSPFNetwork{{Prefix: "192.0.2.0/24"}}},
+			want: "area-id is required",
+		},
+		{
+			name: "invalid network area",
+			ospf: &OSPFConfig{RouterID: "192.0.2.1", Networks: []OSPFNetwork{{Prefix: "192.0.2.0/24", AreaID: "2001:db8::1"}}},
+			want: "invalid OSPF area-id",
+		},
+		{
+			name: "missing interface name",
+			ospf: &OSPFConfig{RouterID: "192.0.2.1", Interfaces: []OSPFInterface{{AreaID: "0.0.0.0"}}},
+			want: "OSPF interface name is required",
+		},
+		{
+			name: "missing interface area",
+			ospf: &OSPFConfig{RouterID: "192.0.2.1", Interfaces: []OSPFInterface{{Name: "ge0-0-0"}}},
+			want: "area-id is required",
+		},
+		{
+			name: "invalid interface metric",
+			ospf: &OSPFConfig{RouterID: "192.0.2.1", Interfaces: []OSPFInterface{{Name: "ge0-0-0", AreaID: "0.0.0.0", Metric: 65536}}},
+			want: "invalid metric",
+		},
+		{
+			name: "invalid interface priority",
+			ospf: &OSPFConfig{RouterID: "192.0.2.1", Interfaces: []OSPFInterface{{Name: "ge0-0-0", AreaID: "0.0.0.0", Priority: &priorityTooHigh}}},
+			want: "invalid priority",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := BuildMgmtOperations(&Config{OSPF: tt.ospf})
+			if err == nil || !strings.Contains(err.Error(), tt.want) {
+				t.Fatalf("BuildMgmtOperations() error = %v, want %q", err, tt.want)
+			}
+		})
 	}
 }
 
