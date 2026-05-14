@@ -22,6 +22,7 @@ type netconfOperationalStateProvider struct {
 	bfdSource   netconfBFDStatusSource
 	routeReader pkgfrr.RouteStatusReader
 	bgpReader   pkgfrr.BGPSummaryStatusReader
+	ospfReader  pkgfrr.OSPFNeighborStatusReader
 }
 
 func newNETCONFOperationalStateProvider(collector interfaceStateCollector, bfdSource netconfBFDStatusSource) netconf.OperationalStateProvider {
@@ -32,6 +33,7 @@ func newNETCONFOperationalStateProvider(collector interfaceStateCollector, bfdSo
 	if bfdSource != nil {
 		provider.routeReader = pkgfrr.NewVtyshRouteStatusReader()
 		provider.bgpReader = pkgfrr.NewVtyshBGPSummaryStatusReader()
+		provider.ospfReader = pkgfrr.NewVtyshOSPFNeighborStatusReader()
 	}
 	return provider
 }
@@ -130,6 +132,33 @@ func (p *netconfOperationalStateProvider) BGPNeighbors(ctx context.Context) ([]n
 			UptimeSecs:     neighbor.UptimeSecs,
 			PrefixReceived: neighbor.PrefixReceived,
 			PrefixSent:     neighbor.PrefixSent,
+		})
+	}
+	return result, nil
+}
+
+func (p *netconfOperationalStateProvider) OSPFNeighbors(ctx context.Context, ipv6 bool) ([]netconf.OSPFNeighborOperationalState, error) {
+	if p.ospfReader == nil {
+		return nil, nil
+	}
+	status, err := p.ospfReader.ReadOSPFNeighborStatus(ctx, ipv6)
+	if err != nil {
+		return nil, err
+	}
+	if status == nil {
+		return nil, nil
+	}
+	result := make([]netconf.OSPFNeighborOperationalState, 0, len(status.Neighbors))
+	for _, neighbor := range status.Neighbors {
+		result = append(result, netconf.OSPFNeighborOperationalState{
+			RouterID:     neighbor.RouterID,
+			Address:      neighbor.Address,
+			Interface:    neighbor.Interface,
+			State:        neighbor.State,
+			Role:         neighbor.Role,
+			Priority:     neighbor.Priority,
+			DeadTimeSecs: neighbor.DeadTimeSecs,
+			UptimeSecs:   neighbor.UptimeSecs,
 		})
 	}
 	return result, nil

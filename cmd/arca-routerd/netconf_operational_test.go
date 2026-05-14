@@ -45,6 +45,17 @@ func (r fakeNETCONFBGPSummaryStatusReader) ReadBGPSummaryStatus(ctx context.Cont
 	return r.status, r.err
 }
 
+type fakeNETCONFOSPFNeighborStatusReader struct {
+	status *pkgfrr.OSPFNeighborStatus
+	err    error
+	ipv6   bool
+}
+
+func (r *fakeNETCONFOSPFNeighborStatusReader) ReadOSPFNeighborStatus(ctx context.Context, ipv6 bool) (*pkgfrr.OSPFNeighborStatus, error) {
+	r.ipv6 = ipv6
+	return r.status, r.err
+}
+
 func TestNewNETCONFOperationalStateProviderNilCollector(t *testing.T) {
 	if provider := newNETCONFOperationalStateProvider(nil, nil); provider != nil {
 		t.Fatalf("newNETCONFOperationalStateProvider(nil, nil) = %#v, want nil", provider)
@@ -167,6 +178,41 @@ func TestNETCONFOperationalStateProviderConvertsBGPSummaryStatus(t *testing.T) {
 	if neighbor.PeerAddress != "2001:db8::2" || neighbor.PeerAS != 65001 || neighbor.State != "Established" ||
 		neighbor.UptimeSecs != 3661 || neighbor.PrefixReceived != 10 || neighbor.PrefixSent != 20 {
 		t.Fatalf("BGPNeighbors()[0] = %#v, want converted BGP neighbor state", neighbor)
+	}
+}
+
+func TestNETCONFOperationalStateProviderConvertsOSPFNeighborStatus(t *testing.T) {
+	reader := &fakeNETCONFOSPFNeighborStatusReader{status: &pkgfrr.OSPFNeighborStatus{
+		Neighbors: []pkgfrr.OSPFNeighbor{
+			{
+				RouterID:     "10.0.0.2",
+				Address:      "fe80::2",
+				Interface:    "ge-0/0/0",
+				State:        "Full",
+				Role:         "DROther",
+				Priority:     1,
+				DeadTimeSecs: 31,
+				UptimeSecs:   65,
+			},
+		},
+	}}
+	provider := &netconfOperationalStateProvider{ospfReader: reader}
+
+	neighbors, err := provider.OSPFNeighbors(context.Background(), true)
+	if err != nil {
+		t.Fatalf("OSPFNeighbors() error = %v", err)
+	}
+	if !reader.ipv6 {
+		t.Fatal("OSPFNeighbors() did not request IPv6 neighbor state")
+	}
+	if len(neighbors) != 1 {
+		t.Fatalf("OSPFNeighbors() len = %d, want 1", len(neighbors))
+	}
+	neighbor := neighbors[0]
+	if neighbor.RouterID != "10.0.0.2" || neighbor.Address != "fe80::2" || neighbor.Interface != "ge-0/0/0" ||
+		neighbor.State != "Full" || neighbor.Role != "DROther" || neighbor.Priority != 1 ||
+		neighbor.DeadTimeSecs != 31 || neighbor.UptimeSecs != 65 {
+		t.Fatalf("OSPFNeighbors()[0] = %#v, want converted OSPF neighbor state", neighbor)
 	}
 }
 

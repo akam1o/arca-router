@@ -40,7 +40,7 @@ func TestBuildOperationalDataUsesRunningConfig(t *testing.T) {
 	}
 	cfg.Protocols = &config.ProtocolConfig{BGP: &config.BGPConfig{}}
 
-	data, err := buildOperationalData(cfg, nil, time.Date(2026, 5, 12, 4, 0, 0, 0, time.UTC), nil, nil, nil, nil)
+	data, err := buildOperationalData(cfg, nil, time.Date(2026, 5, 12, 4, 0, 0, 0, time.UTC), nil, nil, nil, nil, nil, nil)
 	if err != nil {
 		t.Fatalf("buildOperationalData() error = %v", err)
 	}
@@ -91,7 +91,7 @@ func TestBuildOperationalDataUsesLiveInterfaceState(t *testing.T) {
 				},
 			},
 		},
-	}, nil, nil, nil)
+	}, nil, nil, nil, nil, nil)
 	if err != nil {
 		t.Fatalf("buildOperationalData() error = %v", err)
 	}
@@ -128,7 +128,7 @@ func TestBuildOperationalDataUsesLiveInterfaceState(t *testing.T) {
 
 func TestBuildOperationalDataWritesBFDState(t *testing.T) {
 	cfg := config.NewConfig()
-	data, err := buildOperationalData(cfg, nil, time.Date(2026, 5, 12, 4, 0, 0, 0, time.UTC), nil, nil, nil, &BFDOperationalState{
+	data, err := buildOperationalData(cfg, nil, time.Date(2026, 5, 12, 4, 0, 0, 0, time.UTC), nil, nil, nil, nil, nil, &BFDOperationalState{
 		LastRun:           time.Date(2026, 5, 14, 6, 0, 0, 0, time.UTC),
 		ConfiguredPeers:   2,
 		ObservedPeers:     2,
@@ -211,7 +211,7 @@ func TestBuildOperationalDataWritesRoutingInstanceState(t *testing.T) {
 		Interfaces:         []string{"ge-0/0/1", "ge-0/0/0", "ge-0/0/1"},
 	}
 
-	data, err := buildOperationalData(cfg, nil, time.Date(2026, 5, 12, 4, 0, 0, 0, time.UTC), nil, nil, nil, nil)
+	data, err := buildOperationalData(cfg, nil, time.Date(2026, 5, 12, 4, 0, 0, 0, time.UTC), nil, nil, nil, nil, nil, nil)
 	if err != nil {
 		t.Fatalf("buildOperationalData() error = %v", err)
 	}
@@ -257,7 +257,7 @@ func TestBuildOperationalDataWritesRouteState(t *testing.T) {
 			Interface: "ge-0/0/0",
 			Active:    true,
 		},
-	}, nil, nil)
+	}, nil, nil, nil, nil)
 	if err != nil {
 		t.Fatalf("buildOperationalData() error = %v", err)
 	}
@@ -290,7 +290,7 @@ func TestBuildOperationalDataWritesBGPNeighborState(t *testing.T) {
 			PrefixReceived: 10,
 			PrefixSent:     20,
 		},
-	}, nil)
+	}, nil, nil, nil)
 	if err != nil {
 		t.Fatalf("buildOperationalData() error = %v", err)
 	}
@@ -310,5 +310,70 @@ func TestBuildOperationalDataWritesBGPNeighborState(t *testing.T) {
 		if !bytes.Contains(data, []byte(want)) {
 			t.Fatalf("operational data missing %q:\n%s", want, data)
 		}
+	}
+}
+
+func TestBuildOperationalDataWritesOSPFNeighborState(t *testing.T) {
+	cfg := config.NewConfig()
+	data, err := buildOperationalData(cfg, nil, time.Date(2026, 5, 12, 4, 0, 0, 0, time.UTC), nil, nil, nil, []OSPFNeighborOperationalState{
+		{
+			RouterID:     "10.0.0.3",
+			Address:      "192.0.2.3",
+			Interface:    "ge-0/0/1",
+			State:        "Full",
+			Role:         "DR",
+			Priority:     2,
+			DeadTimeSecs: 30,
+			UptimeSecs:   120,
+		},
+		{
+			RouterID:     "10.0.0.2",
+			Address:      "192.0.2.2",
+			Interface:    "ge-0/0/0",
+			State:        "Full",
+			Role:         "DROther",
+			Priority:     1,
+			DeadTimeSecs: 31,
+			UptimeSecs:   65,
+		},
+	}, []OSPFNeighborOperationalState{
+		{
+			RouterID:     "10.0.0.4",
+			Address:      "fe80::2",
+			Interface:    "ge-0/0/2",
+			State:        "Full",
+			Role:         "Backup",
+			Priority:     3,
+			DeadTimeSecs: 32,
+			UptimeSecs:   95,
+		},
+	}, nil)
+	if err != nil {
+		t.Fatalf("buildOperationalData() error = %v", err)
+	}
+
+	for _, want := range []string{
+		`<state xmlns="urn:arca:router:config:1.0">`,
+		"<protocols>",
+		"<ospf>",
+		"<router-id>10.0.0.2</router-id>",
+		"<address>192.0.2.2</address>",
+		"<interface>ge-0/0/0</interface>",
+		"<state>Full</state>",
+		"<role>DROther</role>",
+		"<priority>1</priority>",
+		"<dead-time-seconds>31</dead-time-seconds>",
+		"<uptime-seconds>65</uptime-seconds>",
+		"<ospf3>",
+		"<router-id>10.0.0.4</router-id>",
+		"<address>fe80::2</address>",
+		"<role>Backup</role>",
+	} {
+		if !bytes.Contains(data, []byte(want)) {
+			t.Fatalf("operational data missing %q:\n%s", want, data)
+		}
+	}
+	if bytes.Index(data, []byte("<router-id>10.0.0.2</router-id>")) > bytes.Index(data, []byte("<router-id>10.0.0.3</router-id>")) {
+		t.Fatalf("OSPF neighbors are not sorted:\n%s", data)
 	}
 }

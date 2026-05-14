@@ -78,20 +78,22 @@ func (s *Server) getOperationalData(ctx context.Context, filter *Filter) ([]byte
 	interfaceStates := s.collectInterfaceOperationalState(ctx, filter)
 	routes := s.collectRouteOperationalState(ctx, filter)
 	bgpNeighbors := s.collectBGPOperationalState(ctx, filter)
+	ospfNeighbors := s.collectOSPFOperationalState(ctx, filter, false)
+	ospf3Neighbors := s.collectOSPFOperationalState(ctx, filter, true)
 	bfdStatus := s.collectBFDOperationalState(ctx, filter)
-	return buildOperationalData(cfg, filter, time.Now().UTC(), interfaceStates, routes, bgpNeighbors, bfdStatus)
+	return buildOperationalData(cfg, filter, time.Now().UTC(), interfaceStates, routes, bgpNeighbors, ospfNeighbors, ospf3Neighbors, bfdStatus)
 }
 
 // GetOperationalData builds operational state without a datastore-backed
 // server. It is kept for tests and callers that only need local system state.
 func GetOperationalData(ctx context.Context, filter *Filter) ([]byte, error) {
 	_ = ctx
-	return buildOperationalData(config.NewConfig(), filter, time.Now().UTC(), nil, nil, nil, nil)
+	return buildOperationalData(config.NewConfig(), filter, time.Now().UTC(), nil, nil, nil, nil, nil, nil)
 }
 
 // buildAllOperationalData builds operational data XML for the inside of <data>.
 func buildAllOperationalData() string {
-	data, err := buildOperationalData(config.NewConfig(), nil, time.Now().UTC(), nil, nil, nil, nil)
+	data, err := buildOperationalData(config.NewConfig(), nil, time.Now().UTC(), nil, nil, nil, nil, nil, nil)
 	if err != nil {
 		return ""
 	}
@@ -134,6 +136,24 @@ func (s *Server) collectBGPOperationalState(ctx context.Context, filter *Filter)
 	return neighbors
 }
 
+func (s *Server) collectOSPFOperationalState(ctx context.Context, filter *Filter, ipv6 bool) []OSPFNeighborOperationalState {
+	section := "ospf"
+	logName := "OSPFv2"
+	if ipv6 {
+		section = "ospf3"
+		logName = "OSPFv3"
+	}
+	if s == nil || s.operationalProvider == nil || !includeOperationalSection(filter, "state", "protocols", section) {
+		return nil
+	}
+	neighbors, err := s.operationalProvider.OSPFNeighbors(ctx, ipv6)
+	if err != nil {
+		log.Printf("[NETCONF] Failed to collect %s operational state: %v", logName, err)
+		return nil
+	}
+	return neighbors
+}
+
 func (s *Server) collectBFDOperationalState(ctx context.Context, filter *Filter) *BFDOperationalState {
 	if s == nil || s.operationalProvider == nil || !includeOperationalSection(filter, "state", "protocols", "bfd") {
 		return nil
@@ -149,7 +169,7 @@ func (s *Server) collectBFDOperationalState(ctx context.Context, filter *Filter)
 	return status
 }
 
-func buildOperationalData(cfg *config.Config, filter *Filter, now time.Time, interfaceStates map[string]*InterfaceOperationalState, routes []RouteOperationalState, bgpNeighbors []BGPNeighborOperationalState, bfdStatus *BFDOperationalState) ([]byte, error) {
+func buildOperationalData(cfg *config.Config, filter *Filter, now time.Time, interfaceStates map[string]*InterfaceOperationalState, routes []RouteOperationalState, bgpNeighbors []BGPNeighborOperationalState, ospfNeighbors []OSPFNeighborOperationalState, ospf3Neighbors []OSPFNeighborOperationalState, bfdStatus *BFDOperationalState) ([]byte, error) {
 	if cfg == nil {
 		cfg = config.NewConfig()
 	}
@@ -176,6 +196,12 @@ func buildOperationalData(cfg *config.Config, filter *Filter, now time.Time, int
 	if !includeOperationalSection(filter, "state", "protocols", "bgp") {
 		bgpNeighbors = nil
 	}
+	if !includeOperationalSection(filter, "state", "protocols", "ospf") {
+		ospfNeighbors = nil
+	}
+	if !includeOperationalSection(filter, "state", "protocols", "ospf3") {
+		ospf3Neighbors = nil
+	}
 	if !includeOperationalSection(filter, "state", "protocols", "bfd") {
 		bfdStatus = nil
 	}
@@ -183,8 +209,8 @@ func buildOperationalData(cfg *config.Config, filter *Filter, now time.Time, int
 	if err != nil {
 		return nil, err
 	}
-	if hasArcaOperationalState(routes, routingInstances, bgpNeighbors, bfdStatus) {
-		if err := writeArcaStateXML(&buf, routes, routingInstances, bgpNeighbors, bfdStatus); err != nil {
+	if hasArcaOperationalState(routes, routingInstances, bgpNeighbors, ospfNeighbors, ospf3Neighbors, bfdStatus) {
+		if err := writeArcaStateXML(&buf, routes, routingInstances, bgpNeighbors, ospfNeighbors, ospf3Neighbors, bfdStatus); err != nil {
 			return nil, err
 		}
 	}
@@ -276,8 +302,13 @@ func modelRoutingInstanceExportTargets(instance *model.RoutingInstance) []string
 	return targets
 }
 
-func hasArcaOperationalState(routes []RouteOperationalState, routingInstances []RoutingInstanceOperationalState, bgpNeighbors []BGPNeighborOperationalState, bfdStatus *BFDOperationalState) bool {
-	return len(routes) > 0 || len(routingInstances) > 0 || len(bgpNeighbors) > 0 || hasBFDOperationalState(bfdStatus)
+func hasArcaOperationalState(routes []RouteOperationalState, routingInstances []RoutingInstanceOperationalState, bgpNeighbors []BGPNeighborOperationalState, ospfNeighbors []OSPFNeighborOperationalState, ospf3Neighbors []OSPFNeighborOperationalState, bfdStatus *BFDOperationalState) bool {
+	return len(routes) > 0 ||
+		len(routingInstances) > 0 ||
+		len(bgpNeighbors) > 0 ||
+		len(ospfNeighbors) > 0 ||
+		len(ospf3Neighbors) > 0 ||
+		hasBFDOperationalState(bfdStatus)
 }
 
 func hasBFDOperationalState(status *BFDOperationalState) bool {
@@ -569,7 +600,7 @@ func writeRoutingProtocolXML(buf *bytes.Buffer, protocolType, name string) error
 	return nil
 }
 
-func writeArcaStateXML(buf *bytes.Buffer, routes []RouteOperationalState, routingInstances []RoutingInstanceOperationalState, bgpNeighbors []BGPNeighborOperationalState, bfdStatus *BFDOperationalState) error {
+func writeArcaStateXML(buf *bytes.Buffer, routes []RouteOperationalState, routingInstances []RoutingInstanceOperationalState, bgpNeighbors []BGPNeighborOperationalState, ospfNeighbors []OSPFNeighborOperationalState, ospf3Neighbors []OSPFNeighborOperationalState, bfdStatus *BFDOperationalState) error {
 	buf.WriteString(`  <state xmlns="` + ArcaConfigNS + `">` + "\n")
 	if len(routes) > 0 {
 		if err := writeRouteOperationalStateXML(buf, routes); err != nil {
@@ -581,10 +612,20 @@ func writeArcaStateXML(buf *bytes.Buffer, routes []RouteOperationalState, routin
 			return err
 		}
 	}
-	if len(bgpNeighbors) > 0 || hasBFDOperationalState(bfdStatus) {
+	if len(bgpNeighbors) > 0 || len(ospfNeighbors) > 0 || len(ospf3Neighbors) > 0 || hasBFDOperationalState(bfdStatus) {
 		buf.WriteString("    <protocols>\n")
 		if len(bgpNeighbors) > 0 {
 			if err := writeBGPOperationalStateXML(buf, bgpNeighbors); err != nil {
+				return err
+			}
+		}
+		if len(ospfNeighbors) > 0 {
+			if err := writeOSPFOperationalStateXML(buf, "ospf", ospfNeighbors); err != nil {
+				return err
+			}
+		}
+		if len(ospf3Neighbors) > 0 {
+			if err := writeOSPFOperationalStateXML(buf, "ospf3", ospf3Neighbors); err != nil {
 				return err
 			}
 		}
@@ -699,6 +740,42 @@ func writeBGPOperationalStateXML(buf *bytes.Buffer, neighbors []BGPNeighborOpera
 	return nil
 }
 
+func writeOSPFOperationalStateXML(buf *bytes.Buffer, element string, neighbors []OSPFNeighborOperationalState) error {
+	fmt.Fprintf(buf, "      <%s>\n", element)
+	for _, neighbor := range sortedOSPFOperationalNeighbors(neighbors) {
+		buf.WriteString("        <neighbor>\n")
+		if err := writeEscapedElement(buf, "          ", "router-id", neighbor.RouterID); err != nil {
+			return err
+		}
+		if neighbor.Address != "" {
+			if err := writeEscapedElement(buf, "          ", "address", neighbor.Address); err != nil {
+				return err
+			}
+		}
+		if neighbor.Interface != "" {
+			if err := writeEscapedElement(buf, "          ", "interface", neighbor.Interface); err != nil {
+				return err
+			}
+		}
+		if neighbor.State != "" {
+			if err := writeEscapedElement(buf, "          ", "state", neighbor.State); err != nil {
+				return err
+			}
+		}
+		if neighbor.Role != "" {
+			if err := writeEscapedElement(buf, "          ", "role", neighbor.Role); err != nil {
+				return err
+			}
+		}
+		fmt.Fprintf(buf, "          <priority>%d</priority>\n", neighbor.Priority)
+		fmt.Fprintf(buf, "          <dead-time-seconds>%d</dead-time-seconds>\n", neighbor.DeadTimeSecs)
+		fmt.Fprintf(buf, "          <uptime-seconds>%d</uptime-seconds>\n", neighbor.UptimeSecs)
+		buf.WriteString("        </neighbor>\n")
+	}
+	fmt.Fprintf(buf, "      </%s>\n", element)
+	return nil
+}
+
 func writeBFDOperationalStateXML(buf *bytes.Buffer, status *BFDOperationalState) error {
 	buf.WriteString("      <bfd>\n")
 	if !status.LastRun.IsZero() {
@@ -780,6 +857,18 @@ func sortedBFDOperationalPeers(peers []BFDPeerOperationalState) []BFDPeerOperati
 		return bfdOperationalPeerSortKey(sorted[i]) < bfdOperationalPeerSortKey(sorted[j])
 	})
 	return sorted
+}
+
+func sortedOSPFOperationalNeighbors(neighbors []OSPFNeighborOperationalState) []OSPFNeighborOperationalState {
+	sorted := append([]OSPFNeighborOperationalState(nil), neighbors...)
+	sort.Slice(sorted, func(i, j int) bool {
+		return ospfOperationalNeighborSortKey(sorted[i]) < ospfOperationalNeighborSortKey(sorted[j])
+	})
+	return sorted
+}
+
+func ospfOperationalNeighborSortKey(neighbor OSPFNeighborOperationalState) string {
+	return neighbor.RouterID + "\x00" + neighbor.Interface + "\x00" + neighbor.Address
 }
 
 func bfdOperationalPeerSortKey(peer BFDPeerOperationalState) string {
