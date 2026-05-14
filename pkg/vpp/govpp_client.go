@@ -767,6 +767,22 @@ func (c *govppClient) GetInterfaceTable(ctx context.Context, ifIndex uint32, isI
 	return reply.VrfID, nil
 }
 
+// GetQoSCapabilities reports class-of-service dataplane support for the bundled VPP binapi set.
+func (c *govppClient) GetQoSCapabilities(ctx context.Context) (QoSCapabilities, error) {
+	if err := ctx.Err(); err != nil {
+		return QoSCapabilities{}, err
+	}
+	return QoSCapabilities{
+		MetadataBinding:     true,
+		QueueScheduler:      false,
+		Policer:             false,
+		OperationalCounters: false,
+		Diagnostics: []string{
+			"VPP 24.10 binapi set does not expose scheduler or policer services; arca stores output QoS intent in interface metadata",
+		},
+	}, nil
+}
+
 // SetQoSProfile binds output QoS policy intent to an interface.
 func (c *govppClient) SetQoSProfile(ctx context.Context, ifIndex uint32, profile QoSProfile) error {
 	if profile.Name == "" {

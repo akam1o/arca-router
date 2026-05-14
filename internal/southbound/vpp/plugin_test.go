@@ -19,6 +19,35 @@ func testLogger() *slog.Logger {
 	return slog.New(slog.NewTextHandler(io.Discard, nil))
 }
 
+func TestInitRecordsQoSCapabilities(t *testing.T) {
+	ctx := context.Background()
+	client := pkgvpp.NewMockClient()
+	client.SetQoSCapabilities(pkgvpp.QoSCapabilities{
+		MetadataBinding:     true,
+		QueueScheduler:      false,
+		Policer:             false,
+		OperationalCounters: false,
+		Diagnostics:         []string{"scheduler api unavailable"},
+	})
+	plugin := NewVPPPlugin(client, &device.HardwareConfig{}, testLogger())
+	if err := plugin.Init(ctx); err != nil {
+		t.Fatalf("Init() error = %v", err)
+	}
+	t.Cleanup(func() { _ = plugin.Close() })
+
+	status := plugin.QoSCapabilityStatus()
+	if status.LastCheck.IsZero() {
+		t.Fatal("QoSCapabilityStatus().LastCheck is zero")
+	}
+	if !status.Capabilities.MetadataBinding || status.Capabilities.QueueScheduler || status.Capabilities.Policer ||
+		status.Capabilities.OperationalCounters {
+		t.Fatalf("QoSCapabilityStatus().Capabilities = %#v, want metadata-only support", status.Capabilities)
+	}
+	if len(status.Capabilities.Diagnostics) != 1 || status.Capabilities.Diagnostics[0] != "scheduler api unavailable" {
+		t.Fatalf("QoSCapabilityStatus().Diagnostics = %#v", status.Capabilities.Diagnostics)
+	}
+}
+
 func TestApplyChangesPreservesInterfaceAddressHostIP(t *testing.T) {
 	ctx := context.Background()
 	client := pkgvpp.NewMockClient()

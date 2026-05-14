@@ -13,14 +13,20 @@ import (
 	sbfrr "github.com/akam1o/arca-router/internal/southbound/frr"
 	sbvpp "github.com/akam1o/arca-router/internal/southbound/vpp"
 	"github.com/akam1o/arca-router/pkg/datastore"
+	pkgvpp "github.com/akam1o/arca-router/pkg/vpp"
 )
 
 type fakeVPPReconciliationSource struct {
 	status sbvpp.LCPReconciliationStatus
+	qos    sbvpp.QoSCapabilityStatus
 }
 
 func (s fakeVPPReconciliationSource) LCPReconciliationStatus() sbvpp.LCPReconciliationStatus {
 	return s.status
+}
+
+func (s fakeVPPReconciliationSource) QoSCapabilityStatus() sbvpp.QoSCapabilityStatus {
+	return s.qos
 }
 
 type fakeConfigSyncRuntimeSource struct {
@@ -166,6 +172,15 @@ func TestMetricsEndpointExportsRouterMetrics(t *testing.T) {
 			LastRun:         time.Unix(1700000000, 0),
 			PairCount:       2,
 			Inconsistencies: []string{"Interface 7 exists in VPP but not in cache"},
+		}, qos: sbvpp.QoSCapabilityStatus{
+			LastCheck: time.Unix(1700000500, 0),
+			Capabilities: pkgvpp.QoSCapabilities{
+				MetadataBinding:     true,
+				QueueScheduler:      false,
+				Policer:             false,
+				OperationalCounters: false,
+				Diagnostics:         []string{"scheduler api unavailable"},
+			},
 		}},
 	}.handleMetrics(rec, req)
 
@@ -216,6 +231,12 @@ func TestMetricsEndpointExportsRouterMetrics(t *testing.T) {
 		"arca_router_class_of_service_traffic_control_profiles 1",
 		"arca_router_class_of_service_interface_bindings 1",
 		"arca_router_class_of_service_intent_only 1",
+		"arca_router_class_of_service_metadata_binding_supported 1",
+		"arca_router_class_of_service_queue_scheduler_supported 0",
+		"arca_router_class_of_service_policer_supported 0",
+		"arca_router_class_of_service_counters_supported 0",
+		"arca_router_class_of_service_capability_error 0",
+		"arca_router_class_of_service_capability_last_check_timestamp_seconds 1700000500",
 		"arca_router_netconf_listening 0",
 	} {
 		if !strings.Contains(text, want) {

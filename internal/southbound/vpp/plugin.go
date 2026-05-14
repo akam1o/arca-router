@@ -39,6 +39,7 @@ type VPPPlugin struct {
 	removedInterfaces map[string]uint32
 
 	lcpReconciliation LCPReconciliationStatus
+	qosCapabilities   QoSCapabilityStatus
 }
 
 // LCPReconciliationStatus is the latest VPP LCP cache reconciliation result.
@@ -47,6 +48,13 @@ type LCPReconciliationStatus struct {
 	PairCount       int
 	Inconsistencies []string
 	LastError       string
+}
+
+// QoSCapabilityStatus is the latest VPP class-of-service capability result.
+type QoSCapabilityStatus struct {
+	LastCheck    time.Time
+	Capabilities pkgvpp.QoSCapabilities
+	LastError    string
 }
 
 // NewVPPPlugin creates a new VPP plugin.
@@ -74,6 +82,7 @@ func (p *VPPPlugin) Init(ctx context.Context) error {
 	if err := p.lcpManager.Sync(ctx); err != nil {
 		p.log.Warn("LCP state sync failed, continuing", slog.Any("error", err))
 	}
+	p.updateQoSCapabilities(ctx)
 
 	// Build interface index from existing VPP interfaces
 	existing, err := p.client.ListInterfaces(ctx)
@@ -434,6 +443,13 @@ func (p *VPPPlugin) LCPReconciliationStatus() LCPReconciliationStatus {
 	p.mu.RLock()
 	defer p.mu.RUnlock()
 	return cloneLCPReconciliationStatus(p.lcpReconciliation)
+}
+
+// QoSCapabilityStatus returns a copy of the latest class-of-service capability result.
+func (p *VPPPlugin) QoSCapabilityStatus() QoSCapabilityStatus {
+	p.mu.RLock()
+	defer p.mu.RUnlock()
+	return cloneQoSCapabilityStatus(p.qosCapabilities)
 }
 
 // --- Internal helpers ---
@@ -1216,6 +1232,22 @@ func (p *VPPPlugin) updateLCPReconciliationLocked(ctx context.Context) {
 	p.logLCPReconciliation(status)
 }
 
+func (p *VPPPlugin) updateQoSCapabilities(ctx context.Context) {
+	status := QoSCapabilityStatus{LastCheck: time.Now()}
+	capabilities, err := p.client.GetQoSCapabilities(ctx)
+	if err != nil {
+		status.LastError = err.Error()
+		p.log.Warn("VPP QoS capability detection failed", slog.String("error", status.LastError))
+	} else {
+		status.Capabilities = capabilities
+		status.Capabilities.Diagnostics = append([]string(nil), capabilities.Diagnostics...)
+	}
+
+	p.mu.Lock()
+	p.qosCapabilities = status
+	p.mu.Unlock()
+}
+
 func (p *VPPPlugin) checkLCPReconciliation(ctx context.Context) LCPReconciliationStatus {
 	status := LCPReconciliationStatus{
 		LastRun:   time.Now(),
@@ -1246,6 +1278,11 @@ func (p *VPPPlugin) logLCPReconciliation(status LCPReconciliationStatus) {
 
 func cloneLCPReconciliationStatus(status LCPReconciliationStatus) LCPReconciliationStatus {
 	status.Inconsistencies = append([]string(nil), status.Inconsistencies...)
+	return status
+}
+
+func cloneQoSCapabilityStatus(status QoSCapabilityStatus) QoSCapabilityStatus {
+	status.Capabilities.Diagnostics = append([]string(nil), status.Capabilities.Diagnostics...)
 	return status
 }
 

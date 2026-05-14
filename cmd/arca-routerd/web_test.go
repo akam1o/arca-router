@@ -18,6 +18,7 @@ import (
 	sbvpp "github.com/akam1o/arca-router/internal/southbound/vpp"
 	pkgconfig "github.com/akam1o/arca-router/pkg/config"
 	"github.com/akam1o/arca-router/pkg/datastore"
+	pkgvpp "github.com/akam1o/arca-router/pkg/vpp"
 )
 
 func TestEffectiveWebListenUsesFlagOverride(t *testing.T) {
@@ -148,6 +149,15 @@ func TestWebStatusEndpoint(t *testing.T) {
 			LastRun:         time.Unix(1700000000, 0),
 			PairCount:       2,
 			Inconsistencies: []string{"Interface 7 exists in VPP but not in cache"},
+		}, qos: sbvpp.QoSCapabilityStatus{
+			LastCheck: time.Unix(1700000500, 0),
+			Capabilities: pkgvpp.QoSCapabilities{
+				MetadataBinding:     true,
+				QueueScheduler:      false,
+				Policer:             false,
+				OperationalCounters: false,
+				Diagnostics:         []string{"scheduler api unavailable"},
+			},
 		}},
 	}.handleWebStatus(rec, req)
 
@@ -205,6 +215,14 @@ func TestWebStatusEndpoint(t *testing.T) {
 		status.ClassOfService.InterfaceBindings != 1 ||
 		!status.ClassOfService.IntentOnly {
 		t.Fatalf("ClassOfService status = %#v, want configured intent-only status", status.ClassOfService)
+	}
+	if !status.ClassOfService.Capabilities.MetadataBindingSupported ||
+		status.ClassOfService.Capabilities.QueueSchedulerSupported ||
+		status.ClassOfService.Capabilities.PolicerSupported ||
+		status.ClassOfService.Capabilities.CountersSupported ||
+		len(status.ClassOfService.Capabilities.Diagnostics) != 1 ||
+		status.ClassOfService.Capabilities.LastCheck == "" {
+		t.Fatalf("ClassOfService capabilities = %#v, want metadata binding with unsupported scheduler/policer", status.ClassOfService.Capabilities)
 	}
 }
 

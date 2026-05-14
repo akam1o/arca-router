@@ -62,6 +62,9 @@ type Client interface {
 	// GetInterfaceTable returns the IPv4 or IPv6 FIB table bound to an interface.
 	GetInterfaceTable(ctx context.Context, ifIndex uint32, isIPv6 bool) (uint32, error)
 
+	// GetQoSCapabilities reports VPP class-of-service dataplane capabilities.
+	GetQoSCapabilities(ctx context.Context) (QoSCapabilities, error)
+
 	// SetQoSProfile binds output QoS policy intent to an interface.
 	SetQoSProfile(ctx context.Context, ifIndex uint32, profile QoSProfile) error
 
@@ -190,6 +193,15 @@ type QoSProfile struct {
 type QoSQueue struct {
 	ForwardingClass string
 	Queue           uint8
+}
+
+// QoSCapabilities describes class-of-service dataplane support exposed by VPP.
+type QoSCapabilities struct {
+	MetadataBinding     bool
+	QueueScheduler      bool
+	Policer             bool
+	OperationalCounters bool
+	Diagnostics         []string
 }
 
 // BridgeDomain represents a VPP bridge-domain.
