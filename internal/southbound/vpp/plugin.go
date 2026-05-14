@@ -29,6 +29,9 @@ type VPPPlugin struct {
 	// ifaceIndex maps Junos interface name → VPP sw_if_index
 	ifaceIndex map[string]uint32
 
+	// vxlanIfIndex maps EVPN VNI → VPP VXLAN tunnel sw_if_index
+	vxlanIfIndex map[int]uint32
+
 	// appliedAddrs tracks addresses applied per interface for rollback
 	appliedAddrs map[uint32][]*net.IPNet
 
@@ -54,6 +57,7 @@ func NewVPPPlugin(client pkgvpp.Client, hwConfig *device.HardwareConfig, log *sl
 		hwConfig:          hwConfig,
 		log:               log.With("plugin", "vpp"),
 		ifaceIndex:        make(map[string]uint32),
+		vxlanIfIndex:      make(map[int]uint32),
 		appliedAddrs:      make(map[uint32][]*net.IPNet),
 		removedInterfaces: make(map[string]uint32),
 	}
@@ -108,8 +112,8 @@ func (p *VPPPlugin) ValidateChanges(ctx context.Context, diff *engine.ConfigDiff
 	if diff == nil {
 		return nil
 	}
-	if diffAddsEVPNIntent(diff) {
-		return fmt.Errorf("EVPN/VXLAN VPP dataplane apply is not implemented yet")
+	if err := validateEVPNChanges(diff); err != nil {
+		return err
 	}
 	// Validate added interfaces exist in hardware config
 	for name := range diff.InterfacesAdded {
@@ -145,10 +149,6 @@ func (p *VPPPlugin) ValidateChanges(ctx context.Context, diff *engine.ConfigDiff
 func (p *VPPPlugin) ApplyChanges(ctx context.Context, diff *engine.ConfigDiff) error {
 	p.mu.Lock()
 	defer p.mu.Unlock()
-
-	if diffAddsEVPNIntent(diff) {
-		return fmt.Errorf("EVPN/VXLAN VPP dataplane apply is not implemented yet")
-	}
 
 	// Track changes for potential rollback
 	var rollbackOps []func(context.Context) error
@@ -214,7 +214,15 @@ func (p *VPPPlugin) ApplyChanges(ctx context.Context, diff *engine.ConfigDiff) e
 		}
 	}
 
-	// 5. Remove interfaces (remove addresses, LCP, then disable)
+	// 5. Apply EVPN/VXLAN overlay state before interfaces are removed.
+	if diff.EVPNChanged {
+		if err := p.applyEVPNChanges(ctx, diff, &rollbackOps); err != nil {
+			p.executeRollback(ctx, rollbackOps)
+			return fmt.Errorf("update EVPN/VXLAN dataplane: %w", err)
+		}
+	}
+
+	// 6. Remove interfaces (remove addresses, LCP, then disable)
 	for _, name := range diff.InterfacesRemoved {
 		if err := p.removeInterface(ctx, name, &rollbackOps); err != nil {
 			p.executeRollback(ctx, rollbackOps)
@@ -255,6 +263,12 @@ func (p *VPPPlugin) RollbackChanges(ctx context.Context, diff *engine.ConfigDiff
 	if diff.ClassOfServiceChanged {
 		if err := p.applyClassOfServiceChanges(ctx, diff.NewClassOfService, diff.OldClassOfService, nil); err != nil && rollbackErr == nil {
 			rollbackErr = fmt.Errorf("restore class-of-service interfaces: %w", err)
+		}
+	}
+
+	if diff.EVPNChanged {
+		if err := p.applyEVPNChanges(ctx, reverseEVPNDiff(diff), nil); err != nil && rollbackErr == nil {
+			rollbackErr = fmt.Errorf("restore EVPN/VXLAN dataplane: %w", err)
 		}
 	}
 
@@ -1159,23 +1173,6 @@ func (p *VPPPlugin) deleteConfiguredAddresses(ctx context.Context, swIfIndex uin
 			}
 		}
 	}
-}
-
-func diffAddsEVPNIntent(diff *engine.ConfigDiff) bool {
-	if diff == nil || !diff.EVPNChanged {
-		return false
-	}
-	if evpnHasVNIs(diff.NewEVPN) {
-		return true
-	}
-	if diff.NewConfig != nil && diff.NewConfig.Protocols != nil {
-		return evpnHasVNIs(diff.NewConfig.Protocols.EVPN)
-	}
-	return false
-}
-
-func evpnHasVNIs(evpn *model.EVPNConfig) bool {
-	return evpn != nil && len(evpn.VNIs) > 0
 }
 
 func cloneIPNet(ipNet *net.IPNet) *net.IPNet {
