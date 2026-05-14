@@ -23,6 +23,10 @@ import (
 	"go.fd.io/govpp/adapter/socketclient"
 	"go.fd.io/govpp/adapter/statsclient"
 	"go.fd.io/govpp/api"
+	govppiftypes "go.fd.io/govpp/binapi/interface_types"
+	govppiptypes "go.fd.io/govpp/binapi/ip_types"
+	govppl2 "go.fd.io/govpp/binapi/l2"
+	govppvxlan "go.fd.io/govpp/binapi/vxlan"
 	"go.fd.io/govpp/core"
 )
 
@@ -804,6 +808,169 @@ func (c *govppClient) ClearQoSProfile(ctx context.Context, ifIndex uint32) error
 	}
 	if err := c.setInterfaceTag(ctx, ifIndex, tag); err != nil {
 		return fmt.Errorf("clear QoS profile tag: %w", err)
+	}
+	return nil
+}
+
+// AddBridgeDomain creates a VPP bridge domain.
+func (c *govppClient) AddBridgeDomain(ctx context.Context, bridge BridgeDomain) error {
+	if c.conn == nil {
+		return fmt.Errorf("not connected to VPP")
+	}
+	if bridge.ID == 0 {
+		return fmt.Errorf("bridge domain ID cannot be 0")
+	}
+	select {
+	case <-ctx.Done():
+		return fmt.Errorf("operation cancelled: %w", ctx.Err())
+	default:
+	}
+
+	_, err := govppl2.NewServiceClient(c.conn).BridgeDomainAddDelV2(ctx, &govppl2.BridgeDomainAddDelV2{
+		BdID:    bridge.ID,
+		Flood:   bridge.Flood,
+		UuFlood: bridge.UUFlood,
+		Forward: bridge.Forward,
+		Learn:   bridge.Learn,
+		BdTag:   bridge.Tag,
+		IsAdd:   true,
+	})
+	if err != nil {
+		return fmt.Errorf("add bridge domain %d: %w", bridge.ID, err)
+	}
+	return nil
+}
+
+// DeleteBridgeDomain deletes a VPP bridge domain.
+func (c *govppClient) DeleteBridgeDomain(ctx context.Context, bridgeID uint32) error {
+	if c.conn == nil {
+		return fmt.Errorf("not connected to VPP")
+	}
+	if bridgeID == 0 {
+		return fmt.Errorf("bridge domain ID cannot be 0")
+	}
+	select {
+	case <-ctx.Done():
+		return fmt.Errorf("operation cancelled: %w", ctx.Err())
+	default:
+	}
+
+	_, err := govppl2.NewServiceClient(c.conn).BridgeDomainAddDelV2(ctx, &govppl2.BridgeDomainAddDelV2{
+		BdID:  bridgeID,
+		IsAdd: false,
+	})
+	if err != nil {
+		return fmt.Errorf("delete bridge domain %d: %w", bridgeID, err)
+	}
+	return nil
+}
+
+// CreateVXLAN creates a VXLAN tunnel interface.
+func (c *govppClient) CreateVXLAN(ctx context.Context, req VXLANRequest) (*Interface, error) {
+	if c.conn == nil {
+		return nil, fmt.Errorf("not connected to VPP")
+	}
+	if err := validateVXLANRequest(req); err != nil {
+		return nil, err
+	}
+	select {
+	case <-ctx.Done():
+		return nil, fmt.Errorf("operation cancelled: %w", ctx.Err())
+	default:
+	}
+
+	reply, err := govppvxlan.NewServiceClient(c.conn).VxlanAddDelTunnelV3(ctx, &govppvxlan.VxlanAddDelTunnelV3{
+		IsAdd:          true,
+		Instance:       ^uint32(0),
+		SrcAddress:     govppiptypes.NewAddress(req.SourceAddress),
+		DstAddress:     govppiptypes.NewAddress(req.DestinationAddress),
+		DstPort:        4789,
+		McastSwIfIndex: govppiftypes.InterfaceIndex(req.MulticastInterfaceIndex),
+		EncapVrfID:     req.EncapsulationTable,
+		DecapNextIndex: ^uint32(0),
+		Vni:            req.VNI,
+		IsL3:           req.L3,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("create VXLAN tunnel VNI %d: %w", req.VNI, err)
+	}
+	return c.GetInterface(ctx, uint32(reply.SwIfIndex))
+}
+
+// DeleteVXLAN deletes a VXLAN tunnel interface.
+func (c *govppClient) DeleteVXLAN(ctx context.Context, req VXLANRequest) error {
+	if c.conn == nil {
+		return fmt.Errorf("not connected to VPP")
+	}
+	if err := validateVXLANRequest(req); err != nil {
+		return err
+	}
+	select {
+	case <-ctx.Done():
+		return fmt.Errorf("operation cancelled: %w", ctx.Err())
+	default:
+	}
+
+	_, err := govppvxlan.NewServiceClient(c.conn).VxlanAddDelTunnelV3(ctx, &govppvxlan.VxlanAddDelTunnelV3{
+		IsAdd:          false,
+		Instance:       ^uint32(0),
+		SrcAddress:     govppiptypes.NewAddress(req.SourceAddress),
+		DstAddress:     govppiptypes.NewAddress(req.DestinationAddress),
+		DstPort:        4789,
+		McastSwIfIndex: govppiftypes.InterfaceIndex(req.MulticastInterfaceIndex),
+		EncapVrfID:     req.EncapsulationTable,
+		DecapNextIndex: ^uint32(0),
+		Vni:            req.VNI,
+		IsL3:           req.L3,
+	})
+	if err != nil {
+		return fmt.Errorf("delete VXLAN tunnel VNI %d: %w", req.VNI, err)
+	}
+	return nil
+}
+
+// SetInterfaceL2Bridge attaches or detaches an interface to a VPP bridge domain.
+func (c *govppClient) SetInterfaceL2Bridge(ctx context.Context, ifIndex uint32, bridgeID uint32, enable bool) error {
+	if c.conn == nil {
+		return fmt.Errorf("not connected to VPP")
+	}
+	if bridgeID == 0 {
+		return fmt.Errorf("bridge domain ID cannot be 0")
+	}
+	select {
+	case <-ctx.Done():
+		return fmt.Errorf("operation cancelled: %w", ctx.Err())
+	default:
+	}
+
+	_, err := govppl2.NewServiceClient(c.conn).SwInterfaceSetL2Bridge(ctx, &govppl2.SwInterfaceSetL2Bridge{
+		RxSwIfIndex: govppiftypes.InterfaceIndex(ifIndex),
+		BdID:        bridgeID,
+		PortType:    govppl2.L2_API_PORT_TYPE_NORMAL,
+		Enable:      enable,
+	})
+	if err != nil {
+		action := "attach"
+		if !enable {
+			action = "detach"
+		}
+		return fmt.Errorf("%s interface %d to bridge domain %d: %w", action, ifIndex, bridgeID, err)
+	}
+	return nil
+}
+
+func validateVXLANRequest(req VXLANRequest) error {
+	if req.VNI == 0 || req.VNI > 16777215 {
+		return fmt.Errorf("VXLAN VNI must be between 1 and 16777215, got %d", req.VNI)
+	}
+	if req.SourceAddress == nil || req.SourceAddress.To16() == nil {
+		return fmt.Errorf("VXLAN source address is required")
+	}
+	if req.DestinationAddress == nil || req.DestinationAddress.To16() == nil {
+		return fmt.Errorf("VXLAN destination address is required")
+	}
+	if (req.SourceAddress.To4() == nil) != (req.DestinationAddress.To4() == nil) {
+		return fmt.Errorf("VXLAN source and destination address families must match")
 	}
 	return nil
 }
