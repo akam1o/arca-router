@@ -441,13 +441,93 @@ func (c *RouterConfig) validatePolicy() error {
 		return nil
 	}
 	for name, pl := range c.Policy.PrefixLists {
+		if strings.TrimSpace(name) == "" {
+			return fmt.Errorf("policy-options prefix-list name is empty")
+		}
+		if pl == nil {
+			return fmt.Errorf("policy-options prefix-list %s is nil", name)
+		}
 		for _, prefix := range pl.Prefixes {
 			if _, _, err := net.ParseCIDR(prefix); err != nil {
 				return fmt.Errorf("prefix-list %s: invalid prefix %q: %w", name, prefix, err)
 			}
 		}
 	}
+	for name, statement := range c.Policy.PolicyStatements {
+		if strings.TrimSpace(name) == "" {
+			return fmt.Errorf("policy-options policy-statement name is empty")
+		}
+		if statement == nil {
+			return fmt.Errorf("policy-options policy-statement %s is nil", name)
+		}
+		if err := c.validatePolicyStatement(name, statement); err != nil {
+			return err
+		}
+	}
 	return nil
+}
+
+func (c *RouterConfig) validatePolicyStatement(name string, statement *PolicyStatement) error {
+	for _, term := range statement.Terms {
+		if term == nil {
+			return fmt.Errorf("policy-statement %s: nil term", name)
+		}
+		if strings.TrimSpace(term.Name) == "" {
+			return fmt.Errorf("policy-statement %s: empty term name", name)
+		}
+		if term.From != nil {
+			for _, listName := range term.From.PrefixLists {
+				if strings.TrimSpace(listName) == "" {
+					return fmt.Errorf("policy-statement %s term %s: empty prefix-list reference", name, term.Name)
+				}
+				if c.Policy.PrefixLists == nil || c.Policy.PrefixLists[listName] == nil {
+					return fmt.Errorf("policy-statement %s term %s: prefix-list %q not found in policy-options", name, term.Name, listName)
+				}
+			}
+			if term.From.Protocol != "" && !isValidRoutePolicyProtocol(term.From.Protocol) {
+				return fmt.Errorf("policy-statement %s term %s: invalid protocol %q", name, term.Name, term.From.Protocol)
+			}
+			if term.From.Neighbor != "" && net.ParseIP(term.From.Neighbor) == nil {
+				return fmt.Errorf("policy-statement %s term %s: invalid neighbor %q", name, term.Name, term.From.Neighbor)
+			}
+			if term.From.ASPath != "" {
+				if _, err := regexp.Compile(term.From.ASPath); err != nil {
+					return fmt.Errorf("policy-statement %s term %s: invalid as-path %q: %w", name, term.Name, term.From.ASPath, err)
+				}
+			}
+		}
+		if term.Then != nil && term.Then.Community != "" && !isValidPolicyCommunity(term.Then.Community) {
+			return fmt.Errorf("policy-statement %s term %s: invalid community %q", name, term.Name, term.Then.Community)
+		}
+	}
+	return nil
+}
+
+func isValidRoutePolicyProtocol(protocol string) bool {
+	switch protocol {
+	case "bgp", "ospf", "ospf3", "static", "connected", "direct", "kernel", "rip":
+		return true
+	default:
+		return false
+	}
+}
+
+func isValidPolicyCommunity(community string) bool {
+	switch community {
+	case "no-export", "no-advertise", "local-AS", "no-peer":
+		return true
+	default:
+		parts := strings.Split(community, ":")
+		if len(parts) != 2 || parts[0] == "" || parts[1] == "" {
+			return false
+		}
+		asn, err := strconv.ParseUint(parts[0], 10, 32)
+		if err != nil || asn > 65535 {
+			return false
+		}
+		value, err := strconv.ParseUint(parts[1], 10, 32)
+		return err == nil && value <= 65535
+	}
 }
 
 func (c *RouterConfig) validateClassOfService() error {
