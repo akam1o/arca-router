@@ -119,6 +119,20 @@ func TestMetricsEndpointExportsRouterMetrics(t *testing.T) {
 		VRRP: &model.VRRPConfig{Groups: map[string]*model.VRRPGroup{
 			"10": {Interface: "ge-0/0/0", VirtualAddress: "192.0.2.1", Priority: 110, Preempt: true},
 		}},
+		EVPN: &model.EVPNConfig{VNIs: map[int]*model.EVPNVNI{
+			10010: {
+				VNI:             10010,
+				Type:            "l2",
+				BridgeDomain:    "BD-10",
+				SourceInterface: "ge-0/0/0",
+				MulticastGroup:  "239.0.0.10",
+			},
+			20010: {
+				VNI:             20010,
+				Type:            "l3",
+				RoutingInstance: "BLUE",
+			},
+		}},
 	}
 	cfg.ClassOfService = &model.ClassOfServiceConfig{
 		ForwardingClasses: map[string]*model.ForwardingClass{
@@ -203,6 +217,11 @@ func TestMetricsEndpointExportsRouterMetrics(t *testing.T) {
 		"arca_router_cluster_nodes 2",
 		"arca_router_cluster_sync_etcd_configured 1",
 		"arca_router_cluster_sync_aligned 1",
+		"arca_router_overlay_evpn_configured 1",
+		"arca_router_overlay_evpn_vnis 2",
+		"arca_router_overlay_evpn_l2_vnis 1",
+		"arca_router_overlay_evpn_l3_vnis 1",
+		"arca_router_overlay_evpn_multicast_vnis 1",
 		"arca_router_ha_configured 1",
 		"arca_router_ha_converged 0",
 		"arca_router_ha_vrrp_groups 1",

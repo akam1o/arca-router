@@ -1102,7 +1102,7 @@ Endpoints:
 - `GET /metrics`
 - `GET /healthz`
 
-metrics endpoint は daemon uptime、running config version、NETCONF counters、etcd health と running revision の config sync gauge、cluster enabled state、node count、etcd sync configuration、datastore alignment の cluster sync gauge、FRR VRRP operational gauge、HA convergence gauge、class-of-service intent と VPP QoS capability gauge、VPP LCP reconciliation gauge（pair count、inconsistency count、check failure、latest check timestamp）を出力します。
+metrics endpoint は daemon uptime、running config version、NETCONF counters、etcd health と running revision の config sync gauge、cluster enabled state、node count、etcd sync configuration、datastore alignment の cluster sync gauge、EVPN/VXLAN overlay intent の configured state と VNI count gauge、FRR VRRP operational gauge、HA convergence gauge、class-of-service intent と VPP QoS capability gauge、VPP LCP reconciliation gauge（pair count、inconsistency count、check failure、latest check timestamp）を出力します。
 
 パッケージ版では Grafana dashboard を次の場所へインストールします。
 
@@ -1154,7 +1154,7 @@ Endpoints:
 - `POST /api/config/validate`
 - `POST /api/config/commit`
 
-`/api/status` は build metadata、uptime、running config version、datastore backend、cluster sync state、VPP QoS capability diagnostics を含む class-of-service intent state、per-group detail を含む FRR VRRP operational state、HA convergence state、VPP LCP reconciliation state、NETCONF counters を返します。
+`/api/status` は build metadata、uptime、running config version、datastore backend、cluster sync state、EVPN/VXLAN overlay intent count、VPP QoS capability diagnostics を含む class-of-service intent state、per-group detail を含む FRR VRRP operational state、HA convergence state、VPP LCP reconciliation state、NETCONF counters を返します。
 `/api/nms/v1/status` は同じ read-only status を external NMS collector 用の `arca.nms.operational.v1` schema envelope で包んで返します。
 `/api/nms/v1/telemetry/paths` は structured telemetry path catalog を collector discovery 用の `arca.nms.telemetry-catalog.v1` schema envelope で包んで返します。
 `/api/nms/v1/telemetry/snapshot` は one-shot structured telemetry event を HTTP-only collector 用の `arca.nms.telemetry-snapshot.v1` schema envelope で包み、configurable な timeout と payload byte budget guardrail を強制します。

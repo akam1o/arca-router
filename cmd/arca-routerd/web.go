@@ -70,6 +70,7 @@ type webStatus struct {
 	Datastore       webDatastore    `json:"datastore"`
 	ConfigSync      webConfigSync   `json:"config_sync"`
 	Cluster         webCluster      `json:"cluster"`
+	Overlay         webOverlayStats `json:"overlay"`
 	HA              webHAStats      `json:"ha"`
 	ClassOfService  webCoSStats     `json:"class_of_service"`
 	FRR             webFRRStats     `json:"frr"`
@@ -151,6 +152,18 @@ type webCluster struct {
 	EtcdSyncConfigured bool     `json:"etcd_sync_configured"`
 	EtcdEndpoints      []string `json:"etcd_endpoints,omitempty"`
 	SyncAligned        bool     `json:"sync_aligned"`
+}
+
+type webOverlayStats struct {
+	EVPN webEVPNStats `json:"evpn"`
+}
+
+type webEVPNStats struct {
+	Configured    bool `json:"configured"`
+	VNIs          int  `json:"vnis"`
+	L2VNIs        int  `json:"l2_vnis"`
+	L3VNIs        int  `json:"l3_vnis"`
+	MulticastVNIs int  `json:"multicast_vnis"`
 }
 
 type webHAStats struct {
@@ -1587,6 +1600,15 @@ func newWebStatus(metrics routerMetrics) webStatus {
 			EtcdSyncConfigured: metrics.ClusterEtcdSync,
 			EtcdEndpoints:      metrics.ClusterEtcdEndpoints,
 			SyncAligned:        metrics.ClusterSyncAligned,
+		},
+		Overlay: webOverlayStats{
+			EVPN: webEVPNStats{
+				Configured:    metrics.OverlayEVPNConfigured,
+				VNIs:          metrics.OverlayEVPNVNIs,
+				L2VNIs:        metrics.OverlayEVPNL2VNIs,
+				L3VNIs:        metrics.OverlayEVPNL3VNIs,
+				MulticastVNIs: metrics.OverlayEVPNMulticastVNIs,
+			},
 		},
 		HA: webHAStats{
 			Configured: metrics.HAConfigured,

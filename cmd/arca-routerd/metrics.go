@@ -77,6 +77,11 @@ type routerMetrics struct {
 	ClusterEtcdSync                        bool
 	ClusterEtcdEndpoints                   []string
 	ClusterSyncAligned                     bool
+	OverlayEVPNConfigured                  bool
+	OverlayEVPNVNIs                        int
+	OverlayEVPNL2VNIs                      int
+	OverlayEVPNL3VNIs                      int
+	OverlayEVPNMulticastVNIs               int
 	HAConfigured                           bool
 	HAConverged                            bool
 	HAVRPGroups                            int
@@ -153,6 +158,7 @@ func (s metricsSource) snapshot(now time.Time) routerMetrics {
 			if running.Config != nil && running.Config.System != nil {
 				metrics.RunningHostname = running.Config.System.HostName
 			}
+			applyOverlayStatus(&metrics, running.Config)
 			applyClassOfServiceStatus(&metrics, running.Config)
 			if running.Config != nil && running.Config.Chassis != nil && running.Config.Chassis.Cluster != nil {
 				cluster := running.Config.Chassis.Cluster
@@ -214,6 +220,28 @@ func (s metricsSource) snapshot(now time.Time) routerMetrics {
 	}
 	applyHAConvergenceStatus(&metrics, runningConfig, s.vpp != nil)
 	return metrics
+}
+
+func applyOverlayStatus(metrics *routerMetrics, cfg *model.RouterConfig) {
+	if metrics == nil || cfg == nil || cfg.Protocols == nil || cfg.Protocols.EVPN == nil {
+		return
+	}
+	for _, vni := range cfg.Protocols.EVPN.VNIs {
+		if vni == nil {
+			continue
+		}
+		metrics.OverlayEVPNVNIs++
+		switch vni.Type {
+		case "l2":
+			metrics.OverlayEVPNL2VNIs++
+		case "l3":
+			metrics.OverlayEVPNL3VNIs++
+		}
+		if vni.MulticastGroup != "" {
+			metrics.OverlayEVPNMulticastVNIs++
+		}
+	}
+	metrics.OverlayEVPNConfigured = metrics.OverlayEVPNVNIs > 0
 }
 
 func applyClassOfServiceStatus(metrics *routerMetrics, cfg *model.RouterConfig) {
@@ -491,6 +519,22 @@ func (s metricsSource) handleMetrics(w http.ResponseWriter, r *http.Request) {
 	writeMetricValue(&b, "arca_router_cluster_nodes", float64(metrics.ClusterNodeCount))
 	writeMetricBool(&b, "arca_router_cluster_sync_etcd_configured", metrics.ClusterEtcdSync)
 	writeMetricBool(&b, "arca_router_cluster_sync_aligned", metrics.ClusterSyncAligned)
+
+	writeMetricHelp(&b, "arca_router_overlay_evpn_configured", "Whether EVPN/VXLAN overlay intent is configured.")
+	writeMetricType(&b, "arca_router_overlay_evpn_configured", "gauge")
+	writeMetricHelp(&b, "arca_router_overlay_evpn_vnis", "Number of configured EVPN/VXLAN VNIs.")
+	writeMetricType(&b, "arca_router_overlay_evpn_vnis", "gauge")
+	writeMetricHelp(&b, "arca_router_overlay_evpn_l2_vnis", "Number of configured EVPN/VXLAN L2 VNIs.")
+	writeMetricType(&b, "arca_router_overlay_evpn_l2_vnis", "gauge")
+	writeMetricHelp(&b, "arca_router_overlay_evpn_l3_vnis", "Number of configured EVPN/VXLAN L3 VNIs.")
+	writeMetricType(&b, "arca_router_overlay_evpn_l3_vnis", "gauge")
+	writeMetricHelp(&b, "arca_router_overlay_evpn_multicast_vnis", "Number of EVPN/VXLAN VNIs configured with a multicast group.")
+	writeMetricType(&b, "arca_router_overlay_evpn_multicast_vnis", "gauge")
+	writeMetricBool(&b, "arca_router_overlay_evpn_configured", metrics.OverlayEVPNConfigured)
+	writeMetricValue(&b, "arca_router_overlay_evpn_vnis", float64(metrics.OverlayEVPNVNIs))
+	writeMetricValue(&b, "arca_router_overlay_evpn_l2_vnis", float64(metrics.OverlayEVPNL2VNIs))
+	writeMetricValue(&b, "arca_router_overlay_evpn_l3_vnis", float64(metrics.OverlayEVPNL3VNIs))
+	writeMetricValue(&b, "arca_router_overlay_evpn_multicast_vnis", float64(metrics.OverlayEVPNMulticastVNIs))
 
 	writeMetricHelp(&b, "arca_router_ha_configured", "Whether control-plane HA is configured with chassis clustering and VRRP groups.")
 	writeMetricType(&b, "arca_router_ha_configured", "gauge")

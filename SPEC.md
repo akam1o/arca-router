@@ -1023,7 +1023,7 @@ Endpoints:
 - `GET /metrics`
 - `GET /healthz`
 
-The metrics endpoint exports daemon uptime, running config version, NETCONF counters, config sync gauges for etcd health and running revision, cluster sync gauges for enabled state, node count, etcd sync configuration, datastore alignment, FRR VRRP operational gauges, HA convergence gauges, class-of-service intent and VPP QoS capability gauges, and VPP LCP reconciliation gauges for pair count, inconsistency count, check failures, and latest check timestamp.
+The metrics endpoint exports daemon uptime, running config version, NETCONF counters, config sync gauges for etcd health and running revision, cluster sync gauges for enabled state, node count, etcd sync configuration, datastore alignment, EVPN/VXLAN overlay intent gauges for configured state and VNI counts, FRR VRRP operational gauges, HA convergence gauges, class-of-service intent and VPP QoS capability gauges, and VPP LCP reconciliation gauges for pair count, inconsistency count, check failures, and latest check timestamp.
 
 The packaged Grafana dashboard is installed at:
 
@@ -1075,7 +1075,7 @@ Endpoints:
 - `POST /api/config/validate`
 - `POST /api/config/commit`
 
-`/api/status` includes build metadata, uptime, running config version, datastore backend, cluster sync state, class-of-service intent state with VPP QoS capability diagnostics, FRR VRRP operational state with per-group state details, HA convergence state, VPP LCP reconciliation state, and NETCONF counters.
+`/api/status` includes build metadata, uptime, running config version, datastore backend, cluster sync state, EVPN/VXLAN overlay intent counts, class-of-service intent state with VPP QoS capability diagnostics, FRR VRRP operational state with per-group state details, HA convergence state, VPP LCP reconciliation state, and NETCONF counters.
 `/api/nms/v1/status` wraps the same read-only status in the `arca.nms.operational.v1` schema envelope for external NMS collectors.
 `/api/nms/v1/telemetry/paths` wraps the structured telemetry path catalog in the `arca.nms.telemetry-catalog.v1` schema envelope for collector discovery.
 `/api/nms/v1/telemetry/snapshot` wraps one-shot structured telemetry events in the `arca.nms.telemetry-snapshot.v1` schema envelope for HTTP-only collectors and enforces configurable timeout and payload byte budget guardrails.

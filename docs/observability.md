@@ -39,6 +39,11 @@ Exported metrics:
 - `arca_router_cluster_nodes`
 - `arca_router_cluster_sync_etcd_configured`
 - `arca_router_cluster_sync_aligned`
+- `arca_router_overlay_evpn_configured`
+- `arca_router_overlay_evpn_vnis`
+- `arca_router_overlay_evpn_l2_vnis`
+- `arca_router_overlay_evpn_l3_vnis`
+- `arca_router_overlay_evpn_multicast_vnis`
 - `arca_router_ha_configured`
 - `arca_router_ha_converged`
 - `arca_router_ha_vrrp_groups`
@@ -150,7 +155,7 @@ Endpoints:
 - `POST /api/config/validate`
 - `POST /api/config/commit`
 
-The Web UI is intended for trusted management networks. It exposes the same daemon status used by the metrics endpoint, including datastore backend, etcd config sync health, cluster sync alignment, FRR VRRP and BFD operational state, class-of-service intent with VPP QoS capability diagnostics, HA convergence, and VPP LCP reconciliation state. It also exposes the running configuration in set-command format through `/api/config`, renders it in the dashboard editor, shows recent commit history from `/api/config/history`, and can validate or commit edited set-command text.
+The Web UI is intended for trusted management networks. It exposes the same daemon status used by the metrics endpoint, including datastore backend, etcd config sync health, cluster sync alignment, EVPN/VXLAN overlay intent counts, FRR VRRP and BFD operational state, class-of-service intent with VPP QoS capability diagnostics, HA convergence, and VPP LCP reconciliation state. It also exposes the running configuration in set-command format through `/api/config`, renders it in the dashboard editor, shows recent commit history from `/api/config/history`, and can validate or commit edited set-command text.
 
 `/api/nms/v1/status` returns the same read-only operational status in a schema-versioned envelope with `schema_version`, `generated_at`, `resource`, and `data` fields. External NMS collectors should use this endpoint when they need a stable API shape instead of scraping the dashboard page.
 `/api/nms/v1/telemetry/paths` returns the supported structured telemetry paths, the default path set, event schema version, and payload encoding so collectors can discover stream inputs before subscribing over gRPC or invoking the CLI for local validation.

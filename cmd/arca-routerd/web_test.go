@@ -90,6 +90,20 @@ func TestWebStatusEndpoint(t *testing.T) {
 		VRRP: &model.VRRPConfig{Groups: map[string]*model.VRRPGroup{
 			"10": {Interface: "ge-0/0/0", VirtualAddress: "192.0.2.1", Priority: 110, Preempt: true},
 		}},
+		EVPN: &model.EVPNConfig{VNIs: map[int]*model.EVPNVNI{
+			10010: {
+				VNI:             10010,
+				Type:            "l2",
+				BridgeDomain:    "BD-10",
+				SourceInterface: "ge-0/0/0",
+				MulticastGroup:  "239.0.0.10",
+			},
+			20010: {
+				VNI:             20010,
+				Type:            "l3",
+				RoutingInstance: "BLUE",
+			},
+		}},
 	}
 	cfg.ClassOfService = &model.ClassOfServiceConfig{
 		ForwardingClasses: map[string]*model.ForwardingClass{
@@ -186,6 +200,11 @@ func TestWebStatusEndpoint(t *testing.T) {
 	}
 	if !status.Cluster.Enabled || status.Cluster.NodeCount != 1 || !status.Cluster.EtcdSyncConfigured || !status.Cluster.SyncAligned {
 		t.Fatalf("Cluster status = %#v, want enabled aligned etcd sync", status.Cluster)
+	}
+	if !status.Overlay.EVPN.Configured || status.Overlay.EVPN.VNIs != 2 ||
+		status.Overlay.EVPN.L2VNIs != 1 || status.Overlay.EVPN.L3VNIs != 1 ||
+		status.Overlay.EVPN.MulticastVNIs != 1 {
+		t.Fatalf("Overlay EVPN status = %#v, want configured L2/L3 multicast VNI counts", status.Overlay.EVPN)
 	}
 	if !status.HA.Configured || status.HA.Converged || status.HA.VRRPGroups != 1 || status.HA.IssueCount != 2 {
 		t.Fatalf("HA status = %#v, want configured with cluster and VPP LCP issues", status.HA)
