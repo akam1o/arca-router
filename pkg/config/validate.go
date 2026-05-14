@@ -86,6 +86,12 @@ func (c *Config) Validate() error {
 		}
 	}
 
+	if c.PolicyOptions != nil {
+		if err := c.PolicyOptions.Validate(); err != nil {
+			return err
+		}
+	}
+
 	if c.ClassOfService != nil {
 		if err := c.ClassOfService.Validate(); err != nil {
 			return err
@@ -95,6 +101,88 @@ func (c *Config) Validate() error {
 		}
 	}
 
+	return nil
+}
+
+// Validate validates policy-options configuration.
+func (po *PolicyOptions) Validate() error {
+	if po == nil {
+		return nil
+	}
+	for name, list := range po.PrefixLists {
+		if strings.TrimSpace(name) == "" {
+			return errors.New(errors.ErrCodeConfigValidation, "Policy prefix-list name is empty", "Prefix-list names must be specified", "Use a non-empty policy-options prefix-list name")
+		}
+		if list == nil {
+			return errors.New(errors.ErrCodeConfigValidation, fmt.Sprintf("Policy prefix-list %s is nil", name), "Prefix-list configuration is invalid", "Remove or recreate the prefix-list")
+		}
+		for _, prefix := range list.Prefixes {
+			if _, _, err := net.ParseCIDR(prefix); err != nil {
+				return errors.New(
+					errors.ErrCodeConfigValidation,
+					fmt.Sprintf("Policy prefix-list %s has invalid prefix %q", name, prefix),
+					"Prefix-list entries must be valid IPv4 or IPv6 CIDR prefixes",
+					"Use a value like 192.0.2.0/24 or 2001:db8::/32",
+				)
+			}
+		}
+	}
+	for name, statement := range po.PolicyStatements {
+		if strings.TrimSpace(name) == "" {
+			return errors.New(errors.ErrCodeConfigValidation, "Policy statement name is empty", "Policy statement names must be specified", "Use a non-empty policy-options policy-statement name")
+		}
+		if statement == nil {
+			return errors.New(errors.ErrCodeConfigValidation, fmt.Sprintf("Policy statement %s is nil", name), "Policy statement configuration is invalid", "Remove or recreate the policy-statement")
+		}
+		if err := po.validatePolicyStatement(name, statement); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (po *PolicyOptions) validatePolicyStatement(name string, statement *PolicyStatement) error {
+	for _, term := range statement.Terms {
+		if term == nil {
+			return errors.New(errors.ErrCodeConfigValidation, fmt.Sprintf("Policy statement %s has a nil term", name), "Policy terms must be valid", "Remove or recreate the policy term")
+		}
+		if strings.TrimSpace(term.Name) == "" {
+			return errors.New(errors.ErrCodeConfigValidation, fmt.Sprintf("Policy statement %s has an empty term name", name), "Policy terms must have names", "Use a non-empty policy term name")
+		}
+		if term.From != nil {
+			for _, listName := range term.From.PrefixLists {
+				if strings.TrimSpace(listName) == "" {
+					return errors.New(errors.ErrCodeConfigValidation, fmt.Sprintf("Policy statement %s term %s references an empty prefix-list", name, term.Name), "Prefix-list references must be specified", "Use a configured policy-options prefix-list name")
+				}
+				if po.PrefixLists == nil || po.PrefixLists[listName] == nil {
+					return errors.New(
+						errors.ErrCodeConfigValidation,
+						fmt.Sprintf("Policy statement %s term %s references unknown prefix-list %s", name, term.Name, listName),
+						"Referenced prefix-list must exist before it is used",
+						fmt.Sprintf("Create policy-options prefix-list %s", listName),
+					)
+				}
+			}
+			if term.From.Protocol != "" {
+				if err := validateProtocol(term.From.Protocol); err != nil {
+					return errors.New(errors.ErrCodeConfigValidation, fmt.Sprintf("Policy statement %s term %s has invalid protocol %q", name, term.Name, term.From.Protocol), err.Error(), "Use one of bgp, ospf, ospf3, static, connected, direct, kernel, or rip")
+				}
+			}
+			if term.From.Neighbor != "" && net.ParseIP(term.From.Neighbor) == nil {
+				return errors.New(errors.ErrCodeConfigValidation, fmt.Sprintf("Policy statement %s term %s has invalid neighbor %q", name, term.Name, term.From.Neighbor), "Neighbor matches must be valid IP addresses", "Use a valid IPv4 or IPv6 address")
+			}
+			if term.From.ASPath != "" {
+				if _, err := regexp.Compile(term.From.ASPath); err != nil {
+					return errors.New(errors.ErrCodeConfigValidation, fmt.Sprintf("Policy statement %s term %s has invalid as-path %q", name, term.Name, term.From.ASPath), "AS path match must be a valid regular expression", "Use a valid AS path regular expression")
+				}
+			}
+		}
+		if term.Then != nil && term.Then.Community != "" {
+			if err := validateCommunity(term.Then.Community); err != nil {
+				return errors.New(errors.ErrCodeConfigValidation, fmt.Sprintf("Policy statement %s term %s has invalid community %q", name, term.Name, term.Then.Community), err.Error(), "Use ASN:number or a supported well-known community")
+			}
+		}
+	}
 	return nil
 }
 
