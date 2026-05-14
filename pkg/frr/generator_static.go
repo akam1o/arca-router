@@ -13,6 +13,9 @@ func GenerateStaticRouteConfig(routes []StaticRoute) (string, error) {
 	if len(routes) == 0 {
 		return "", nil
 	}
+	if err := validateStaticRoutes(routes); err != nil {
+		return "", err
+	}
 
 	var b strings.Builder
 
@@ -30,10 +33,6 @@ func GenerateStaticRouteConfig(routes []StaticRoute) (string, error) {
 
 	// Generate static route commands
 	for _, route := range sortedRoutes {
-		if err := validateStaticRoute(&route); err != nil {
-			return "", err
-		}
-
 		// Determine IPv4 or IPv6
 		routeCmd := "ip route"
 		if route.IsIPv6 {
@@ -62,6 +61,35 @@ func GenerateStaticRouteConfig(routes []StaticRoute) (string, error) {
 	b.WriteString("!\n")
 
 	return b.String(), nil
+}
+
+func validateStaticRoutes(routes []StaticRoute) error {
+	seen := make(map[string]struct{}, len(routes))
+	for _, route := range routes {
+		if err := validateStaticRoute(&route); err != nil {
+			return err
+		}
+		_, prefixNet, _ := net.ParseCIDR(route.Prefix)
+		nextHopIP := net.ParseIP(route.NextHop)
+		prefixIPv6 := prefixNet.IP.To4() == nil
+		nextHopIPv6 := nextHopIP.To4() == nil
+		if prefixIPv6 != nextHopIPv6 {
+			return NewInvalidConfigError(fmt.Sprintf("static route %s: next-hop family does not match prefix", route.Prefix))
+		}
+		if prefixIPv6 != route.IsIPv6 {
+			return NewInvalidConfigError(fmt.Sprintf("static route %s address family does not match configured address family", route.Prefix))
+		}
+		key := staticRouteKey(prefixNet.String(), nextHopIP.String(), route.IsIPv6)
+		if _, ok := seen[key]; ok {
+			return NewInvalidConfigError(fmt.Sprintf("static route %s via %s is duplicated", route.Prefix, route.NextHop))
+		}
+		seen[key] = struct{}{}
+	}
+	return nil
+}
+
+func staticRouteKey(prefix, nextHop string, isIPv6 bool) string {
+	return fmt.Sprintf("%t\x00%s\x00%s", isIPv6, prefix, nextHop)
 }
 
 // validateStaticRoute validates a static route configuration.
