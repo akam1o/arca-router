@@ -11,20 +11,21 @@ import (
 
 // MockClient is a mock implementation of the VPP Client interface for testing
 type MockClient struct {
-	mu             sync.RWMutex
-	connected      bool
-	interfaces     map[uint32]*Interface
-	lcpInterfaces  map[uint32]*LCPInterface
-	mplsInterfaces map[uint32]bool
-	ipTables       map[ipTableKey]IPTable
-	interfaceTable map[interfaceTableKey]uint32
-	qosProfiles    map[uint32]QoSProfile
-	bridgeDomains  map[uint32]BridgeDomain
-	vxlanTunnels   map[vxlanTunnelKey]*Interface
-	l2Bridge       map[uint32]uint32
-	counters       map[uint32]InterfaceCounters
-	queuePlacement map[uint32]InterfaceQueuePlacements
-	nextIfIdx      uint32
+	mu              sync.RWMutex
+	connected       bool
+	interfaces      map[uint32]*Interface
+	lcpInterfaces   map[uint32]*LCPInterface
+	mplsInterfaces  map[uint32]bool
+	ipTables        map[ipTableKey]IPTable
+	interfaceTable  map[interfaceTableKey]uint32
+	qosProfiles     map[uint32]QoSProfile
+	bridgeDomains   map[uint32]BridgeDomain
+	vxlanTunnels    map[vxlanTunnelKey]*Interface
+	l2Bridge        map[uint32]uint32
+	counters        map[uint32]InterfaceCounters
+	queuePlacement  map[uint32]InterfaceQueuePlacements
+	qosCapabilities QoSCapabilities
+	nextIfIdx       uint32
 
 	// Hooks for testing error scenarios
 	ConnectError                error
@@ -38,6 +39,7 @@ type MockClient struct {
 	DeleteIPTableError          error
 	SetInterfaceTableError      error
 	GetInterfaceTableError      error
+	GetQoSCapabilitiesError     error
 	SetQoSProfileError          error
 	ClearQoSProfileError        error
 	AddBridgeDomainError        error
@@ -69,7 +71,10 @@ func NewMockClient() *MockClient {
 		l2Bridge:       make(map[uint32]uint32),
 		counters:       make(map[uint32]InterfaceCounters),
 		queuePlacement: make(map[uint32]InterfaceQueuePlacements),
-		nextIfIdx:      1, // Start from 1 (0 is reserved for local0)
+		qosCapabilities: QoSCapabilities{
+			MetadataBinding: true,
+		},
+		nextIfIdx: 1, // Start from 1 (0 is reserved for local0)
 	}
 }
 
@@ -659,6 +664,27 @@ func (m *MockClient) InterfaceTableID(ifIndex uint32, isIPv6 bool) uint32 {
 	return m.interfaceTable[interfaceTableKey{ifIndex: ifIndex, isIPv6: isIPv6}]
 }
 
+// GetQoSCapabilities reports mock class-of-service dataplane capabilities.
+func (m *MockClient) GetQoSCapabilities(ctx context.Context) (QoSCapabilities, error) {
+	if err := ctx.Err(); err != nil {
+		return QoSCapabilities{}, err
+	}
+	if m.GetQoSCapabilitiesError != nil {
+		return QoSCapabilities{}, m.GetQoSCapabilitiesError
+	}
+
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	return cloneQoSCapabilities(m.qosCapabilities), nil
+}
+
+// SetQoSCapabilities sets mock class-of-service dataplane capabilities.
+func (m *MockClient) SetQoSCapabilities(capabilities QoSCapabilities) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.qosCapabilities = cloneQoSCapabilities(capabilities)
+}
+
 // SetQoSProfile binds output QoS policy intent to a mock interface.
 func (m *MockClient) SetQoSProfile(ctx context.Context, ifIndex uint32, profile QoSProfile) error {
 	if err := ctx.Err(); err != nil {
@@ -740,6 +766,11 @@ func (m *MockClient) QoSProfile(ifIndex uint32) (QoSProfile, bool) {
 func cloneQoSProfile(profile QoSProfile) QoSProfile {
 	profile.Queues = append([]QoSQueue(nil), profile.Queues...)
 	return profile
+}
+
+func cloneQoSCapabilities(capabilities QoSCapabilities) QoSCapabilities {
+	capabilities.Diagnostics = append([]string(nil), capabilities.Diagnostics...)
+	return capabilities
 }
 
 // AddBridgeDomain creates a mock bridge domain.
@@ -1148,6 +1179,7 @@ func (m *MockClient) Reset() {
 	m.l2Bridge = make(map[uint32]uint32)
 	m.counters = make(map[uint32]InterfaceCounters)
 	m.queuePlacement = make(map[uint32]InterfaceQueuePlacements)
+	m.qosCapabilities = QoSCapabilities{MetadataBinding: true}
 	m.nextIfIdx = 1
 
 	m.ConnectError = nil
@@ -1161,6 +1193,7 @@ func (m *MockClient) Reset() {
 	m.DeleteIPTableError = nil
 	m.SetInterfaceTableError = nil
 	m.GetInterfaceTableError = nil
+	m.GetQoSCapabilitiesError = nil
 	m.SetQoSProfileError = nil
 	m.ClearQoSProfileError = nil
 	m.AddBridgeDomainError = nil

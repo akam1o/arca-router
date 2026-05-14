@@ -119,12 +119,23 @@ type webHAStats struct {
 }
 
 type webCoSStats struct {
-	Configured             bool   `json:"configured"`
-	EnforcementStatus      string `json:"enforcement_status"`
-	ForwardingClasses      int    `json:"forwarding_classes"`
-	TrafficControlProfiles int    `json:"traffic_control_profiles"`
-	InterfaceBindings      int    `json:"interface_bindings"`
-	IntentOnly             bool   `json:"intent_only"`
+	Configured             bool               `json:"configured"`
+	EnforcementStatus      string             `json:"enforcement_status"`
+	ForwardingClasses      int                `json:"forwarding_classes"`
+	TrafficControlProfiles int                `json:"traffic_control_profiles"`
+	InterfaceBindings      int                `json:"interface_bindings"`
+	IntentOnly             bool               `json:"intent_only"`
+	Capabilities           webCoSCapabilities `json:"capabilities"`
+}
+
+type webCoSCapabilities struct {
+	LastCheck                string   `json:"last_check,omitempty"`
+	MetadataBindingSupported bool     `json:"metadata_binding_supported"`
+	QueueSchedulerSupported  bool     `json:"queue_scheduler_supported"`
+	PolicerSupported         bool     `json:"policer_supported"`
+	CountersSupported        bool     `json:"counters_supported"`
+	Diagnostics              []string `json:"diagnostics,omitempty"`
+	LastError                string   `json:"last_error,omitempty"`
 }
 
 type webFRRStats struct {
@@ -245,49 +256,53 @@ type webAuthUser struct {
 }
 
 type webIndexData struct {
-	Status                  webStatus
-	Uptime                  string
-	NETCONFState            string
-	NETCONFStateClass       string
-	NETCONFConnections      string
-	ClusterState            string
-	ClusterStateClass       string
-	ClusterSyncState        string
-	ClusterSyncAlignment    string
-	ClusterNodeCount        string
-	ConfigSyncState         string
-	ConfigSyncStateClass    string
-	ConfigSyncRevision      string
-	ConfigSyncLastApply     string
-	HAState                 string
-	HAStateClass            string
-	HAVRPGroups             string
-	HAIssues                string
-	ClassOfServiceState     string
-	ClassOfServiceClass     string
-	ClassOfServiceProfiles  string
-	ClassOfServiceBindings  string
-	ClassOfServiceClasses   string
-	FRRVRRPState            string
-	FRRVRRPStateClass       string
-	FRRVRRPActiveGroups     string
-	FRRVRRPGroups           []webVRRPGroupView
-	FRRBFDState             string
-	FRRBFDStateClass        string
-	FRRBFDUpPeers           string
-	FRRBFDSessionDownEvents string
-	FRRBFDRxFailPackets     string
-	FRRBFDPeers             []webBFDPeerView
-	VPPLCPState             string
-	VPPLCPStateClass        string
-	VPPLCPPairs             string
-	VPPLCPInconsistencies   string
-	VPPLCPLastReconcile     string
-	DatastoreBackend        string
-	GeneratedAt             string
-	ConfigVersionString     string
-	RunningConfig           string
-	History                 []webCommitEntry
+	Status                   webStatus
+	Uptime                   string
+	NETCONFState             string
+	NETCONFStateClass        string
+	NETCONFConnections       string
+	ClusterState             string
+	ClusterStateClass        string
+	ClusterSyncState         string
+	ClusterSyncAlignment     string
+	ClusterNodeCount         string
+	ConfigSyncState          string
+	ConfigSyncStateClass     string
+	ConfigSyncRevision       string
+	ConfigSyncLastApply      string
+	HAState                  string
+	HAStateClass             string
+	HAVRPGroups              string
+	HAIssues                 string
+	ClassOfServiceState      string
+	ClassOfServiceClass      string
+	ClassOfServiceProfiles   string
+	ClassOfServiceBindings   string
+	ClassOfServiceClasses    string
+	ClassOfServiceScheduler  string
+	ClassOfServicePolicer    string
+	ClassOfServiceCounters   string
+	ClassOfServiceDiagnostic string
+	FRRVRRPState             string
+	FRRVRRPStateClass        string
+	FRRVRRPActiveGroups      string
+	FRRVRRPGroups            []webVRRPGroupView
+	FRRBFDState              string
+	FRRBFDStateClass         string
+	FRRBFDUpPeers            string
+	FRRBFDSessionDownEvents  string
+	FRRBFDRxFailPackets      string
+	FRRBFDPeers              []webBFDPeerView
+	VPPLCPState              string
+	VPPLCPStateClass         string
+	VPPLCPPairs              string
+	VPPLCPInconsistencies    string
+	VPPLCPLastReconcile      string
+	DatastoreBackend         string
+	GeneratedAt              string
+	ConfigVersionString      string
+	RunningConfig            string
+	History                  []webCommitEntry
 }
 
 type webVRRPGroupView struct {
@@ -576,6 +591,10 @@ var webIndexTemplate = template.Must(template.New("web-index").Parse(`<!doctype 
           <div class="row"><span>Traffic-control profiles</span><strong>{{.ClassOfServiceProfiles}}</strong></div>
           <div class="row"><span>Forwarding classes</span><strong>{{.ClassOfServiceClasses}}</strong></div>
           <div class="row"><span>Interface bindings</span><strong>{{.ClassOfServiceBindings}}</strong></div>
+          <div class="row"><span>Queue scheduler</span><strong>{{.ClassOfServiceScheduler}}</strong></div>
+          <div class="row"><span>Policer</span><strong>{{.ClassOfServicePolicer}}</strong></div>
+          <div class="row"><span>QoS counters</span><strong>{{.ClassOfServiceCounters}}</strong></div>
+          <div class="row"><span>Diagnostic</span><strong>{{.ClassOfServiceDiagnostic}}</strong></div>
         </div>
       </article>
       <article class="panel span-2">
@@ -1295,6 +1314,27 @@ func formatWebOptionalDisplayTime(value string) string {
 	return value
 }
 
+func webSupportedStatus(supported bool) string {
+	if supported {
+		return "Supported"
+	}
+	return "Unsupported"
+}
+
+func webCoSDiagnosticText(capabilities webCoSCapabilities) string {
+	if capabilities.LastError != "" {
+		return "Detection failed"
+	}
+	if capabilities.MetadataBindingSupported && !capabilities.QueueSchedulerSupported &&
+		!capabilities.PolicerSupported && !capabilities.CountersSupported {
+		return "Metadata only"
+	}
+	if len(capabilities.Diagnostics) == 0 {
+		return "None"
+	}
+	return fmt.Sprintf("%d diagnostics", len(capabilities.Diagnostics))
+}
+
 func newNMSStatusResponse(now time.Time, metrics routerMetrics) nmsStatusResponse {
 	return nmsStatusResponse{
 		SchemaVersion: nmsOperationalStatusSchemaVersion,
@@ -1372,6 +1412,15 @@ func newWebStatus(metrics routerMetrics) webStatus {
 			TrafficControlProfiles: metrics.ClassOfServiceProfiles,
 			InterfaceBindings:      metrics.ClassOfServiceBindings,
 			IntentOnly:             metrics.ClassOfServiceIntentOnly,
+			Capabilities: webCoSCapabilities{
+				LastCheck:                formatWebOptionalTime(metrics.ClassOfServiceCapabilityLastCheck),
+				MetadataBindingSupported: metrics.ClassOfServiceMetadataBindingSupported,
+				QueueSchedulerSupported:  metrics.ClassOfServiceQueueSchedulerSupported,
+				PolicerSupported:         metrics.ClassOfServicePolicerSupported,
+				CountersSupported:        metrics.ClassOfServiceCountersSupported,
+				Diagnostics:              append([]string(nil), metrics.ClassOfServiceCapabilityDiagnostics...),
+				LastError:                metrics.ClassOfServiceCapabilityError,
+			},
 		},
 		FRR: webFRRStats{
 			VRRP: webVRRPStats{
@@ -1553,49 +1602,53 @@ func newWebIndexData(status webStatus, now time.Time, runningConfig string, hist
 	}
 
 	return webIndexData{
-		Status:                  status,
-		Uptime:                  formatWebUptime(status.UptimeSeconds),
-		NETCONFState:            state,
-		NETCONFStateClass:       stateClass,
-		NETCONFConnections:      strconv.FormatUint(status.NETCONF.TotalConnections, 10),
-		ClusterState:            clusterState,
-		ClusterStateClass:       clusterStateClass,
-		ClusterSyncState:        clusterSyncState,
-		ClusterSyncAlignment:    clusterSyncAlignment,
-		ClusterNodeCount:        strconv.Itoa(status.Cluster.NodeCount),
-		ConfigSyncState:         configSyncState,
-		ConfigSyncStateClass:    configSyncStateClass,
-		ConfigSyncRevision:      configSyncRevision,
-		ConfigSyncLastApply:     formatWebOptionalDisplayTime(status.ConfigSync.LastApply),
-		HAState:                 haState,
-		HAStateClass:            haStateClass,
-		HAVRPGroups:             strconv.Itoa(status.HA.VRRPGroups),
-		HAIssues:                strconv.Itoa(status.HA.IssueCount),
-		ClassOfServiceState:     cosState,
-		ClassOfServiceClass:     cosStateClass,
-		ClassOfServiceProfiles:  strconv.Itoa(status.ClassOfService.TrafficControlProfiles),
-		ClassOfServiceBindings:  strconv.Itoa(status.ClassOfService.InterfaceBindings),
-		ClassOfServiceClasses:   strconv.Itoa(status.ClassOfService.ForwardingClasses),
-		FRRVRRPState:            frrVRRPState,
-		FRRVRRPStateClass:       frrVRRPStateClass,
-		FRRVRRPActiveGroups:     fmt.Sprintf("%d/%d", status.FRR.VRRP.ActiveGroups, status.FRR.VRRP.ConfiguredGroups),
-		FRRVRRPGroups:           webVRRPGroupViews(status.FRR.VRRP.Groups),
-		FRRBFDState:             frrBFDState,
-		FRRBFDStateClass:        frrBFDStateClass,
-		FRRBFDUpPeers:           webBFDPeerRatio(status.FRR.BFD),
-		FRRBFDSessionDownEvents: strconv.Itoa(status.FRR.BFD.SessionDownEvents),
-		FRRBFDRxFailPackets:     strconv.Itoa(status.FRR.BFD.RxFailPackets),
-		FRRBFDPeers:             webBFDPeerViews(status.FRR.BFD.Peers),
-		VPPLCPState:             vppLCPState,
-		VPPLCPStateClass:        vppLCPStateClass,
-		VPPLCPPairs:             strconv.Itoa(status.VPP.LCP.PairCount),
-		VPPLCPInconsistencies:   strconv.Itoa(status.VPP.LCP.InconsistencyCount),
-		VPPLCPLastReconcile:     formatWebOptionalDisplayTime(status.VPP.LCP.LastReconcile),
-		DatastoreBackend:        status.Datastore.Backend,
-		GeneratedAt:             now.UTC().Format(time.RFC3339),
-		ConfigVersionString:     strconv.FormatUint(status.ConfigVersion, 10),
-		RunningConfig:           runningConfig,
-		History:                 history,
+		Status:                   status,
+		Uptime:                   formatWebUptime(status.UptimeSeconds),
+		NETCONFState:             state,
+		NETCONFStateClass:        stateClass,
+		NETCONFConnections:       strconv.FormatUint(status.NETCONF.TotalConnections, 10),
+		ClusterState:             clusterState,
+		ClusterStateClass:        clusterStateClass,
+		ClusterSyncState:         clusterSyncState,
+		ClusterSyncAlignment:     clusterSyncAlignment,
+		ClusterNodeCount:         strconv.Itoa(status.Cluster.NodeCount),
+		ConfigSyncState:          configSyncState,
+		ConfigSyncStateClass:     configSyncStateClass,
+		ConfigSyncRevision:       configSyncRevision,
+		ConfigSyncLastApply:      formatWebOptionalDisplayTime(status.ConfigSync.LastApply),
+		HAState:                  haState,
+		HAStateClass:             haStateClass,
+		HAVRPGroups:              strconv.Itoa(status.HA.VRRPGroups),
+		HAIssues:                 strconv.Itoa(status.HA.IssueCount),
+		ClassOfServiceState:      cosState,
+		ClassOfServiceClass:      cosStateClass,
+		ClassOfServiceProfiles:   strconv.Itoa(status.ClassOfService.TrafficControlProfiles),
+		ClassOfServiceBindings:   strconv.Itoa(status.ClassOfService.InterfaceBindings),
+		ClassOfServiceClasses:    strconv.Itoa(status.ClassOfService.ForwardingClasses),
+		ClassOfServiceScheduler:  webSupportedStatus(status.ClassOfService.Capabilities.QueueSchedulerSupported),
+		ClassOfServicePolicer:    webSupportedStatus(status.ClassOfService.Capabilities.PolicerSupported),
+		ClassOfServiceCounters:   webSupportedStatus(status.ClassOfService.Capabilities.CountersSupported),
+		ClassOfServiceDiagnostic: webCoSDiagnosticText(status.ClassOfService.Capabilities),
+		FRRVRRPState:             frrVRRPState,
+		FRRVRRPStateClass:        frrVRRPStateClass,
+		FRRVRRPActiveGroups:      fmt.Sprintf("%d/%d", status.FRR.VRRP.ActiveGroups, status.FRR.VRRP.ConfiguredGroups),
+		FRRVRRPGroups:            webVRRPGroupViews(status.FRR.VRRP.Groups),
+		FRRBFDState:              frrBFDState,
+		FRRBFDStateClass:         frrBFDStateClass,
+		FRRBFDUpPeers:            webBFDPeerRatio(status.FRR.BFD),
+		FRRBFDSessionDownEvents:  strconv.Itoa(status.FRR.BFD.SessionDownEvents),
+		FRRBFDRxFailPackets:      strconv.Itoa(status.FRR.BFD.RxFailPackets),
+		FRRBFDPeers:              webBFDPeerViews(status.FRR.BFD.Peers),
+		VPPLCPState:              vppLCPState,
+		VPPLCPStateClass:         vppLCPStateClass,
+		VPPLCPPairs:              strconv.Itoa(status.VPP.LCP.PairCount),
+		VPPLCPInconsistencies:    strconv.Itoa(status.VPP.LCP.InconsistencyCount),
+		VPPLCPLastReconcile:      formatWebOptionalDisplayTime(status.VPP.LCP.LastReconcile),
+		DatastoreBackend:         status.Datastore.Backend,
+		GeneratedAt:              now.UTC().Format(time.RFC3339),
+		ConfigVersionString:      strconv.FormatUint(status.ConfigVersion, 10),
+		RunningConfig:            runningConfig,
+		History:                  history,
 	}
 }
 

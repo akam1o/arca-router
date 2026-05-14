@@ -62,6 +62,17 @@ Exported metrics:
 - `arca_router_vpp_lcp_inconsistencies`
 - `arca_router_vpp_lcp_reconcile_error`
 - `arca_router_vpp_lcp_last_reconcile_timestamp_seconds`
+- `arca_router_class_of_service_configured`
+- `arca_router_class_of_service_forwarding_classes`
+- `arca_router_class_of_service_traffic_control_profiles`
+- `arca_router_class_of_service_interface_bindings`
+- `arca_router_class_of_service_intent_only`
+- `arca_router_class_of_service_metadata_binding_supported`
+- `arca_router_class_of_service_queue_scheduler_supported`
+- `arca_router_class_of_service_policer_supported`
+- `arca_router_class_of_service_counters_supported`
+- `arca_router_class_of_service_capability_error`
+- `arca_router_class_of_service_capability_last_check_timestamp_seconds`
 - `arca_router_netconf_active_sessions`
 - `arca_router_netconf_active_connections`
 - `arca_router_netconf_total_connections`
@@ -136,7 +147,7 @@ Endpoints:
 - `POST /api/config/validate`
 - `POST /api/config/commit`
 
-The Web UI is intended for trusted management networks. It exposes the same daemon status used by the metrics endpoint, including datastore backend, etcd config sync health, cluster sync alignment, FRR VRRP and BFD operational state, HA convergence, and VPP LCP reconciliation state. It also exposes the running configuration in set-command format through `/api/config`, renders it in the dashboard editor, shows recent commit history from `/api/config/history`, and can validate or commit edited set-command text.
+The Web UI is intended for trusted management networks. It exposes the same daemon status used by the metrics endpoint, including datastore backend, etcd config sync health, cluster sync alignment, FRR VRRP and BFD operational state, class-of-service intent with VPP QoS capability diagnostics, HA convergence, and VPP LCP reconciliation state. It also exposes the running configuration in set-command format through `/api/config`, renders it in the dashboard editor, shows recent commit history from `/api/config/history`, and can validate or commit edited set-command text.
 
 `/api/nms/v1/status` returns the same read-only operational status in a schema-versioned envelope with `schema_version`, `generated_at`, `resource`, and `data` fields. External NMS collectors should use this endpoint when they need a stable API shape instead of scraping the dashboard page.
 `/api/nms/v1/telemetry/paths` returns the supported structured telemetry paths, the default path set, event schema version, and payload encoding so collectors can discover stream inputs before subscribing over gRPC or invoking the CLI for local validation.

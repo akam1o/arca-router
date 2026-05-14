@@ -2,6 +2,7 @@
 
 ## v0.8.x - Overlay and Streaming Telemetry (current)
 
+- **VPP QoS capability diagnostics**: VPP southbound initialization now records class-of-service dataplane capability detection, including metadata binding, scheduler, policer, and operational counter support, and exposes the result through metrics and the Web/NMS status API
 - **NMS telemetry catalog API**: `/api/nms/v1/telemetry/paths` exposes the supported structured telemetry paths, default path set, event schema version, and payload encoding for collector discovery
 - **NMS operational status API**: the Web API now exposes `/api/nms/v1/status`, a schema-versioned JSON envelope for external NMS and collectors that need a stable read-only operational status shape
 - **Telemetry CLI snapshots**: `arca show telemetry` now consumes the structured gRPC telemetry stream and prints selected telemetry events as JSON lines for local debugging and collector validation

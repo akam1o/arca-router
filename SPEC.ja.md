@@ -672,6 +672,8 @@ set class-of-service interfaces ge-0/0/0 output-traffic-control-profile WAN
 
 Forwarding class queue は `0` から `7` の範囲です。Interface binding は既存の traffic-control profile と設定済み interface を参照する必要があります。
 
+`arca show class-of-service` は running forwarding classes、traffic-control profiles、interface bindings、current enforcement status を表示します。VPP scheduler / policer enforcement は、対応 VPP binapi surface が利用可能になるまで `intent-only` のままです。VPP southbound は initialization 時に class-of-service dataplane capability を検出し、metadata binding、queue scheduler enforcement、policer enforcement、operational QoS counters の対応状況を記録します。現在の bundled VPP 24.10 binapi path は metadata binding をサポートし、scheduler、policer、QoS counters は未対応 diagnostic として報告します。
+
 ---
 
 <a id="overlay-v08-configuration"></a>
@@ -1100,7 +1102,7 @@ Endpoints:
 - `GET /metrics`
 - `GET /healthz`
 
-metrics endpoint は daemon uptime、running config version、NETCONF counters、etcd health と running revision の config sync gauge、cluster enabled state、node count、etcd sync configuration、datastore alignment の cluster sync gauge、FRR VRRP operational gauge、HA convergence gauge、class-of-service intent gauge、VPP LCP reconciliation gauge（pair count、inconsistency count、check failure、latest check timestamp）を出力します。
+metrics endpoint は daemon uptime、running config version、NETCONF counters、etcd health と running revision の config sync gauge、cluster enabled state、node count、etcd sync configuration、datastore alignment の cluster sync gauge、FRR VRRP operational gauge、HA convergence gauge、class-of-service intent と VPP QoS capability gauge、VPP LCP reconciliation gauge（pair count、inconsistency count、check failure、latest check timestamp）を出力します。
 
 パッケージ版では Grafana dashboard を次の場所へインストールします。
 
@@ -1149,7 +1151,7 @@ Endpoints:
 - `POST /api/config/validate`
 - `POST /api/config/commit`
 
-`/api/status` は build metadata、uptime、running config version、datastore backend、cluster sync state、class-of-service intent state、per-group detail を含む FRR VRRP operational state、HA convergence state、VPP LCP reconciliation state、NETCONF counters を返します。
+`/api/status` は build metadata、uptime、running config version、datastore backend、cluster sync state、VPP QoS capability diagnostics を含む class-of-service intent state、per-group detail を含む FRR VRRP operational state、HA convergence state、VPP LCP reconciliation state、NETCONF counters を返します。
 `/api/nms/v1/status` は同じ read-only status を external NMS collector 用の `arca.nms.operational.v1` schema envelope で包んで返します。
 `/api/nms/v1/telemetry/paths` は structured telemetry path catalog を collector discovery 用の `arca.nms.telemetry-catalog.v1` schema envelope で包んで返します。
 `/api/config` は running configuration を set-command text と running config version として返します。dashboard でも同じ running configuration を browser editor に表示します。

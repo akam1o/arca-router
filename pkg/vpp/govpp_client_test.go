@@ -196,6 +196,23 @@ func TestConvertInterfaceCounters(t *testing.T) {
 	}
 }
 
+func TestGovppClientGetQoSCapabilities(t *testing.T) {
+	client := &govppClient{}
+	caps, err := client.GetQoSCapabilities(context.Background())
+	if err != nil {
+		t.Fatalf("GetQoSCapabilities() error = %v", err)
+	}
+	if !caps.MetadataBinding {
+		t.Fatal("MetadataBinding = false, want true")
+	}
+	if caps.QueueScheduler || caps.Policer || caps.OperationalCounters {
+		t.Fatalf("QoS capabilities = %#v, want scheduler, policer, and counters unsupported", caps)
+	}
+	if len(caps.Diagnostics) == 0 {
+		t.Fatal("Diagnostics is empty, want bundled binapi limitation diagnostic")
+	}
+}
+
 func TestRxModeName(t *testing.T) {
 	tests := []struct {
 		mode interface_types.RxMode
