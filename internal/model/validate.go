@@ -259,6 +259,11 @@ func (c *RouterConfig) validateProtocols() error {
 			return err
 		}
 	}
+	if evpn := c.Protocols.EVPN; evpn != nil {
+		if err := c.validateEVPN(evpn); err != nil {
+			return err
+		}
+	}
 	if ospf := c.Protocols.OSPF; ospf != nil {
 		if err := c.validateOSPF("ospf", ospf); err != nil {
 			return err
@@ -296,6 +301,89 @@ func (c *RouterConfig) validateProtocols() error {
 			if group.Priority < 0 || group.Priority > 254 {
 				return fmt.Errorf("vrrp group %s: priority must be 1-254 when configured, got %d", name, group.Priority)
 			}
+		}
+	}
+	return nil
+}
+
+func (c *RouterConfig) validateEVPN(evpn *EVPNConfig) error {
+	for id, vni := range evpn.VNIs {
+		if err := c.validateEVPNVNI(id, vni); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (c *RouterConfig) validateEVPNVNI(id int, vni *EVPNVNI) error {
+	context := fmt.Sprintf("evpn vni %d", id)
+	if vni == nil {
+		return fmt.Errorf("%s is nil", context)
+	}
+	if id < 1 || id > 16777215 {
+		return fmt.Errorf("%s: VNI must be 1-16777215", context)
+	}
+	if vni.VNI != 0 && vni.VNI != id {
+		return fmt.Errorf("%s: VNI value %d does not match map key", context, vni.VNI)
+	}
+	if vni.Type != "l2" && vni.Type != "l3" {
+		return fmt.Errorf("%s: type must be l2 or l3", context)
+	}
+	switch vni.Type {
+	case "l2":
+		if strings.TrimSpace(vni.BridgeDomain) == "" {
+			return fmt.Errorf("%s: bridge-domain is required for L2 VNI", context)
+		}
+		if vni.RoutingInstance != "" {
+			return fmt.Errorf("%s: routing-instance is only valid for L3 VNI", context)
+		}
+	case "l3":
+		if strings.TrimSpace(vni.RoutingInstance) == "" {
+			return fmt.Errorf("%s: routing-instance is required for L3 VNI", context)
+		}
+		if vni.BridgeDomain != "" {
+			return fmt.Errorf("%s: bridge-domain is only valid for L2 VNI", context)
+		}
+		if vni.VLANID != 0 {
+			return fmt.Errorf("%s: vlan-id is only valid for L2 VNI", context)
+		}
+		if _, ok := c.RoutingInstances[vni.RoutingInstance]; !ok {
+			return fmt.Errorf("%s: routing-instance %q is not configured", context, vni.RoutingInstance)
+		}
+	}
+	if vni.VLANID != 0 && (vni.VLANID < 1 || vni.VLANID > 4094) {
+		return fmt.Errorf("%s: vlan-id must be 1-4094, got %d", context, vni.VLANID)
+	}
+	if vni.RouteDistinguisher != "" && !regexp.MustCompile(`^\d+:\d+$`).MatchString(vni.RouteDistinguisher) {
+		return fmt.Errorf("%s: invalid route-distinguisher %q", context, vni.RouteDistinguisher)
+	}
+	if vni.VRFTarget != "" {
+		if err := validateVRFTargetValue(fmt.Sprintf("%s vrf-target", context), vni.VRFTarget); err != nil {
+			return err
+		}
+	}
+	for _, target := range vni.VRFTargetImport {
+		if err := validateVRFTargetValue(fmt.Sprintf("%s vrf-target import", context), target); err != nil {
+			return err
+		}
+	}
+	for _, target := range vni.VRFTargetExport {
+		if err := validateVRFTargetValue(fmt.Sprintf("%s vrf-target export", context), target); err != nil {
+			return err
+		}
+	}
+	if vni.SourceInterface != "" {
+		if err := c.validateInterfaceReference(context, vni.SourceInterface); err != nil {
+			return err
+		}
+	}
+	if vni.SourceAddress != "" && net.ParseIP(vni.SourceAddress) == nil {
+		return fmt.Errorf("%s: invalid source-address %q", context, vni.SourceAddress)
+	}
+	if vni.MulticastGroup != "" {
+		groupIP := net.ParseIP(vni.MulticastGroup)
+		if groupIP == nil || !groupIP.IsMulticast() {
+			return fmt.Errorf("%s: invalid multicast-group %q", context, vni.MulticastGroup)
 		}
 	}
 	return nil

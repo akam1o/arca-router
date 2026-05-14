@@ -196,6 +196,7 @@ func (c *ProtocolsConfig) Clone() *ProtocolsConfig {
 	return &ProtocolsConfig{
 		BFD:   c.BFD.Clone(),
 		BGP:   c.BGP.Clone(),
+		EVPN:  c.EVPN.Clone(),
 		OSPF:  c.OSPF.Clone(),
 		OSPF3: c.OSPF3.Clone(),
 		MPLS:  c.MPLS.Clone(),
@@ -232,6 +233,32 @@ func (c *BFDConfig) Clone() *BFDConfig {
 		}
 	}
 	return clone
+}
+
+// Clone returns a deep copy of the EVPN configuration.
+func (c *EVPNConfig) Clone() *EVPNConfig {
+	if c == nil {
+		return nil
+	}
+	clone := &EVPNConfig{}
+	if c.VNIs != nil {
+		clone.VNIs = make(map[int]*EVPNVNI, len(c.VNIs))
+		for id, vni := range c.VNIs {
+			clone.VNIs[id] = vni.Clone()
+		}
+	}
+	return clone
+}
+
+// Clone returns a deep copy of the EVPN VNI configuration.
+func (v *EVPNVNI) Clone() *EVPNVNI {
+	if v == nil {
+		return nil
+	}
+	clone := *v
+	clone.VRFTargetImport = append([]string(nil), v.VRFTargetImport...)
+	clone.VRFTargetExport = append([]string(nil), v.VRFTargetExport...)
+	return &clone
 }
 
 // Clone returns a deep copy of the MPLS configuration.

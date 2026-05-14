@@ -827,6 +827,12 @@ func (pc *ProtocolConfig) Validate(cfg *Config) error {
 		}
 	}
 
+	if pc.EVPN != nil {
+		if err := pc.EVPN.Validate(cfg); err != nil {
+			return err
+		}
+	}
+
 	// Validate OSPF
 	if pc.OSPF != nil {
 		if err := pc.OSPF.Validate(cfg); err != nil {
@@ -862,6 +868,106 @@ func (pc *ProtocolConfig) Validate(cfg *Config) error {
 		}
 	}
 
+	return nil
+}
+
+// Validate validates EVPN/VXLAN overlay configuration.
+func (e *EVPNConfig) Validate(cfg *Config) error {
+	if e == nil {
+		return nil
+	}
+	for id, vni := range e.VNIs {
+		if err := validateEVPNVNI(cfg, id, vni); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func validateEVPNVNI(cfg *Config, id int, vni *EVPNVNI) error {
+	context := fmt.Sprintf("EVPN VNI %d", id)
+	if vni == nil {
+		return errors.New(errors.ErrCodeConfigValidation, fmt.Sprintf("%s is nil", context), "EVPN VNI configuration is invalid", "Remove or recreate the EVPN VNI")
+	}
+	if id < 1 || id > 16777215 {
+		return errors.New(errors.ErrCodeConfigValidation, fmt.Sprintf("Invalid %s", context), "EVPN VNI must be between 1 and 16777215", "Use a valid VXLAN VNI")
+	}
+	if vni.VNI != 0 && vni.VNI != id {
+		return errors.New(errors.ErrCodeConfigValidation, fmt.Sprintf("%s has mismatched VNI value %d", context, vni.VNI), "EVPN VNI map key and value must match", "Use a consistent EVPN VNI value")
+	}
+	if vni.Type != "l2" && vni.Type != "l3" {
+		return errors.New(errors.ErrCodeConfigValidation, fmt.Sprintf("%s has invalid type: %s", context, vni.Type), "EVPN VNI type must be l2 or l3", fmt.Sprintf("Set 'protocols evpn vni %d type l2' or 'type l3'", id))
+	}
+	switch vni.Type {
+	case "l2":
+		if strings.TrimSpace(vni.BridgeDomain) == "" {
+			return errors.New(errors.ErrCodeConfigValidation, fmt.Sprintf("%s is missing bridge-domain", context), "L2 EVPN VNIs require a bridge-domain", fmt.Sprintf("Set 'protocols evpn vni %d bridge-domain <name>'", id))
+		}
+		if vni.RoutingInstance != "" {
+			return errors.New(errors.ErrCodeConfigValidation, fmt.Sprintf("%s has routing-instance on an L2 VNI", context), "routing-instance is only valid for L3 EVPN VNIs", "Remove routing-instance or set type l3")
+		}
+	case "l3":
+		if strings.TrimSpace(vni.RoutingInstance) == "" {
+			return errors.New(errors.ErrCodeConfigValidation, fmt.Sprintf("%s is missing routing-instance", context), "L3 EVPN VNIs require a routing-instance", fmt.Sprintf("Set 'protocols evpn vni %d routing-instance <name>'", id))
+		}
+		if vni.BridgeDomain != "" {
+			return errors.New(errors.ErrCodeConfigValidation, fmt.Sprintf("%s has bridge-domain on an L3 VNI", context), "bridge-domain is only valid for L2 EVPN VNIs", "Remove bridge-domain or set type l2")
+		}
+		if vni.VLANID != 0 {
+			return errors.New(errors.ErrCodeConfigValidation, fmt.Sprintf("%s has vlan-id on an L3 VNI", context), "vlan-id is only valid for L2 EVPN VNIs", "Remove vlan-id or set type l2")
+		}
+		if err := validateRoutingInstanceReference(cfg, context, vni.RoutingInstance); err != nil {
+			return err
+		}
+	}
+	if vni.VLANID != 0 && (vni.VLANID < 1 || vni.VLANID > 4094) {
+		return errors.New(errors.ErrCodeConfigValidation, fmt.Sprintf("%s has invalid vlan-id: %d", context, vni.VLANID), "EVPN VLAN ID must be between 1 and 4094", "Use a valid VLAN ID")
+	}
+	if vni.RouteDistinguisher != "" && !regexp.MustCompile(`^\d+:\d+$`).MatchString(vni.RouteDistinguisher) {
+		return errors.New(errors.ErrCodeConfigValidation, fmt.Sprintf("Invalid %s route-distinguisher: %s", context, vni.RouteDistinguisher), "EVPN route distinguisher must use ASN:number format", "Use a value like 65000:100")
+	}
+	if vni.VRFTarget != "" {
+		if err := validateVRFTargetValue(fmt.Sprintf("%s vrf-target", context), vni.VRFTarget); err != nil {
+			return err
+		}
+	}
+	for _, target := range vni.VRFTargetImport {
+		if err := validateVRFTargetValue(fmt.Sprintf("%s vrf-target import", context), target); err != nil {
+			return err
+		}
+	}
+	for _, target := range vni.VRFTargetExport {
+		if err := validateVRFTargetValue(fmt.Sprintf("%s vrf-target export", context), target); err != nil {
+			return err
+		}
+	}
+	if vni.SourceInterface != "" {
+		if err := validateConfiguredInterfaceReference(cfg, context, vni.SourceInterface); err != nil {
+			return err
+		}
+	}
+	if vni.SourceAddress != "" && net.ParseIP(vni.SourceAddress) == nil {
+		return errors.New(errors.ErrCodeConfigValidation, fmt.Sprintf("%s has invalid source-address: %s", context, vni.SourceAddress), "EVPN source-address must be a valid IP address", "Use a valid IPv4 or IPv6 address")
+	}
+	if vni.MulticastGroup != "" {
+		groupIP := net.ParseIP(vni.MulticastGroup)
+		if groupIP == nil || !groupIP.IsMulticast() {
+			return errors.New(errors.ErrCodeConfigValidation, fmt.Sprintf("%s has invalid multicast-group: %s", context, vni.MulticastGroup), "EVPN multicast-group must be a valid multicast IP address", "Use an IPv4 224.0.0.0/4 or IPv6 ff00::/8 group")
+		}
+	}
+	return nil
+}
+
+func validateRoutingInstanceReference(cfg *Config, context, name string) error {
+	if strings.TrimSpace(name) == "" {
+		return errors.New(errors.ErrCodeConfigValidation, fmt.Sprintf("%s references an empty routing-instance", context), "Routing instance name must be specified", "Use a configured routing-instance name")
+	}
+	if cfg == nil || cfg.RoutingInstances == nil {
+		return errors.New(errors.ErrCodeConfigValidation, fmt.Sprintf("%s references unknown routing-instance %s", context, name), "Referenced routing-instance must exist before it is used", fmt.Sprintf("Create routing-instances %s", name))
+	}
+	if _, ok := cfg.RoutingInstances[name]; !ok {
+		return errors.New(errors.ErrCodeConfigValidation, fmt.Sprintf("%s references unknown routing-instance %s", context, name), "Referenced routing-instance must exist before it is used", fmt.Sprintf("Create routing-instances %s", name))
+	}
 	return nil
 }
 

@@ -141,6 +141,10 @@ func FromLegacyConfig(old *config.Config) *RouterConfig {
 			}
 		}
 
+		if old.Protocols.EVPN != nil {
+			c.Protocols.EVPN = evpnFromLegacy(old.Protocols.EVPN)
+		}
+
 		if old.Protocols.OSPF != nil {
 			c.Protocols.OSPF = ospfFromLegacy(old.Protocols.OSPF)
 		}
@@ -363,6 +367,37 @@ func bfdFromLegacy(old *config.BFDConfig) *BFDConfig {
 	return bfd
 }
 
+func evpnFromLegacy(old *config.EVPNConfig) *EVPNConfig {
+	if old == nil {
+		return nil
+	}
+	evpn := &EVPNConfig{}
+	if old.VNIs != nil {
+		evpn.VNIs = make(map[int]*EVPNVNI, len(old.VNIs))
+		for id, vni := range old.VNIs {
+			if vni == nil {
+				evpn.VNIs[id] = nil
+				continue
+			}
+			evpn.VNIs[id] = &EVPNVNI{
+				VNI:                vni.VNI,
+				Type:               vni.Type,
+				BridgeDomain:       vni.BridgeDomain,
+				VLANID:             vni.VLANID,
+				RoutingInstance:    vni.RoutingInstance,
+				RouteDistinguisher: vni.RouteDistinguisher,
+				VRFTarget:          vni.VRFTarget,
+				VRFTargetImport:    append([]string{}, vni.VRFTargetImport...),
+				VRFTargetExport:    append([]string{}, vni.VRFTargetExport...),
+				SourceInterface:    vni.SourceInterface,
+				SourceAddress:      vni.SourceAddress,
+				MulticastGroup:     vni.MulticastGroup,
+			}
+		}
+	}
+	return evpn
+}
+
 // ToLegacyConfig converts the new internal model back to the legacy pkg/config.Config.
 // This is used during the migration period when some subsystems still expect the old type.
 func (c *RouterConfig) ToLegacyConfig() *config.Config {
@@ -490,6 +525,9 @@ func (c *RouterConfig) ToLegacyConfig() *config.Config {
 				}
 				old.Protocols.BGP.Groups[gName] = bg
 			}
+		}
+		if c.Protocols.EVPN != nil {
+			old.Protocols.EVPN = evpnToLegacy(c.Protocols.EVPN)
 		}
 		if c.Protocols.OSPF != nil {
 			old.Protocols.OSPF = ospfToLegacy(c.Protocols.OSPF)
@@ -638,6 +676,37 @@ func (c *RouterConfig) ToLegacyConfig() *config.Config {
 	}
 
 	return old
+}
+
+func evpnToLegacy(c *EVPNConfig) *config.EVPNConfig {
+	if c == nil {
+		return nil
+	}
+	evpn := &config.EVPNConfig{}
+	if c.VNIs != nil {
+		evpn.VNIs = make(map[int]*config.EVPNVNI, len(c.VNIs))
+		for id, vni := range c.VNIs {
+			if vni == nil {
+				evpn.VNIs[id] = nil
+				continue
+			}
+			evpn.VNIs[id] = &config.EVPNVNI{
+				VNI:                vni.VNI,
+				Type:               vni.Type,
+				BridgeDomain:       vni.BridgeDomain,
+				VLANID:             vni.VLANID,
+				RoutingInstance:    vni.RoutingInstance,
+				RouteDistinguisher: vni.RouteDistinguisher,
+				VRFTarget:          vni.VRFTarget,
+				VRFTargetImport:    append([]string{}, vni.VRFTargetImport...),
+				VRFTargetExport:    append([]string{}, vni.VRFTargetExport...),
+				SourceInterface:    vni.SourceInterface,
+				SourceAddress:      vni.SourceAddress,
+				MulticastGroup:     vni.MulticastGroup,
+			}
+		}
+	}
+	return evpn
 }
 
 func ospfToLegacy(c *OSPFConfig) *config.OSPFConfig {

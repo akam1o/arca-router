@@ -108,6 +108,9 @@ func (p *VPPPlugin) ValidateChanges(ctx context.Context, diff *engine.ConfigDiff
 	if diff == nil {
 		return nil
 	}
+	if diffAddsEVPNIntent(diff) {
+		return fmt.Errorf("EVPN/VXLAN VPP dataplane apply is not implemented yet")
+	}
 	// Validate added interfaces exist in hardware config
 	for name := range diff.InterfacesAdded {
 		if !p.hasHardwareConfig(name) {
@@ -142,6 +145,10 @@ func (p *VPPPlugin) ValidateChanges(ctx context.Context, diff *engine.ConfigDiff
 func (p *VPPPlugin) ApplyChanges(ctx context.Context, diff *engine.ConfigDiff) error {
 	p.mu.Lock()
 	defer p.mu.Unlock()
+
+	if diffAddsEVPNIntent(diff) {
+		return fmt.Errorf("EVPN/VXLAN VPP dataplane apply is not implemented yet")
+	}
 
 	// Track changes for potential rollback
 	var rollbackOps []func(context.Context) error
@@ -1152,6 +1159,23 @@ func (p *VPPPlugin) deleteConfiguredAddresses(ctx context.Context, swIfIndex uin
 			}
 		}
 	}
+}
+
+func diffAddsEVPNIntent(diff *engine.ConfigDiff) bool {
+	if diff == nil || !diff.EVPNChanged {
+		return false
+	}
+	if evpnHasVNIs(diff.NewEVPN) {
+		return true
+	}
+	if diff.NewConfig != nil && diff.NewConfig.Protocols != nil {
+		return evpnHasVNIs(diff.NewConfig.Protocols.EVPN)
+	}
+	return false
+}
+
+func evpnHasVNIs(evpn *model.EVPNConfig) bool {
+	return evpn != nil && len(evpn.VNIs) > 0
 }
 
 func cloneIPNet(ipNet *net.IPNet) *net.IPNet {

@@ -49,18 +49,19 @@ Only the current command names are part of this specification: `arca-routerd` an
    - [Prefix Lists](#prefix-lists)
    - [Policy Statements](#policy-statements)
 7. [Advanced v0.6 Configuration](#advanced-v06-configuration)
-8. [Security](#security)
+8. [Overlay v0.8 Configuration](#overlay-v08-configuration)
+9. [Security](#security)
    - [NETCONF Server](#netconf-server)
    - [User Management](#user-management)
    - [Rate Limiting](#rate-limiting)
-9. [Configuration Workflow](#configuration-workflow)
-10. [Examples](#examples)
-11. [Runtime Options and Observability](#runtime-options-and-observability)
-12. [Operational Commands](#operational-commands)
-13. [Configuration Validation](#configuration-validation)
-14. [Troubleshooting](#troubleshooting)
-15. [References](#references)
-16. [Version History](#version-history)
+10. [Configuration Workflow](#configuration-workflow)
+11. [Examples](#examples)
+12. [Runtime Options and Observability](#runtime-options-and-observability)
+13. [Operational Commands](#operational-commands)
+14. [Configuration Validation](#configuration-validation)
+15. [Troubleshooting](#troubleshooting)
+16. [References](#references)
+17. [Version History](#version-history)
 
 ---
 
@@ -587,6 +588,31 @@ Forwarding class queues must be between `0` and `7`. Interface bindings must ref
 
 ---
 
+<a id="overlay-v08-configuration"></a>
+## Overlay v0.8 Configuration
+
+The v0.8 management-plane model includes EVPN/VXLAN VNI intent. Parser, serializer, validation, clone, conversion, diff, and NETCONF XML/YANG coverage are implemented for L2 and L3 VNIs. FRR EVPN control-plane apply and VPP VXLAN dataplane apply are not enabled yet; commit validation rejects EVPN/VXLAN changes until those southbound integrations are implemented.
+
+```
+set protocols evpn vni 10010 type l2
+set protocols evpn vni 10010 bridge-domain BD-10
+set protocols evpn vni 10010 vlan-id 10
+set protocols evpn vni 10010 route-distinguisher 65000:10010
+set protocols evpn vni 10010 vrf-target target:65000:10010
+set protocols evpn vni 10010 vrf-target import target:65000:10011
+set protocols evpn vni 10010 vrf-target export target:65000:10012
+set protocols evpn vni 10010 source-interface ge-0/0/0
+set protocols evpn vni 10010 source-address 192.0.2.1
+set protocols evpn vni 10010 multicast-group 239.0.0.10
+
+set protocols evpn vni 20010 type l3
+set protocols evpn vni 20010 routing-instance BLUE
+```
+
+VNI values must be between `1` and `16777215`. `type l2` requires `bridge-domain` and may include `vlan-id`; `type l3` requires `routing-instance` and must reference a configured routing instance. Route distinguishers use `<asn>:<number>`, route targets use `target:<asn>:<number>`, source interfaces must reference configured interfaces, and multicast groups must be valid multicast IPv4 or IPv6 addresses.
+
+---
+
 ## Security
 
 ### NETCONF Server
@@ -608,7 +634,7 @@ set security netconf ssh port 830
 
 **Note**: The NETCONF server is built into `arca-routerd`. When `--netconf-listen` is omitted, the daemon listens on the configured `security netconf ssh port`; if that is also unset, it uses `:830`. `--netconf-listen` remains the explicit runtime override and can include a listen address.
 
-NETCONF XML get-config/edit-config supports the v0.6 management-plane model for `system services`, `chassis cluster`, `protocols mpls`, `protocols vrrp`, `routing-instances`, `class-of-service`, and non-sensitive `security netconf` / `security rate-limit` settings. Security user secrets are intentionally not emitted in NETCONF XML replies.
+NETCONF XML get-config/edit-config supports the v0.6 management-plane model for `system services`, `chassis cluster`, `protocols mpls`, `protocols vrrp`, `routing-instances`, `class-of-service`, the v0.8 `protocols evpn` VNI intent model, and non-sensitive `security netconf` / `security rate-limit` settings. Security user secrets are intentionally not emitted in NETCONF XML replies.
 
 NETCONF `<get>` returns config-derived system/routing state and, when arca-routerd can collect VPP state, live managed interface admin/oper status, physical address, bound `qos-profile`, VPP table bindings (`ipv4-table-id`, `ipv6-table-id`), counters (`rx-packets`, `tx-packets`, `rx-bytes`, `tx-bytes`, `rx-errors`, `tx-errors`, `drops`), and VPP RX/TX queue placement. If live collection fails, interface output falls back to configured addresses with unknown operational status.
 

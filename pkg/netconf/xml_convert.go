@@ -504,6 +504,12 @@ func sortedStringKeys[V any](m map[string]V) []string {
 	return keys
 }
 
+func sortedStrings(values []string) []string {
+	sorted := append([]string(nil), values...)
+	sort.Strings(sorted)
+	return sorted
+}
+
 func sortedIntKeys[V any](m map[int]V) []int {
 	keys := make([]int, 0, len(m))
 	for key := range m {
@@ -527,6 +533,12 @@ func writeProtocolsXML(buf *bytes.Buffer, protocols *config.ProtocolConfig) erro
 	// BGP
 	if protocols.BGP != nil {
 		if err := writeBGPXML(buf, protocols.BGP); err != nil {
+			return err
+		}
+	}
+
+	if protocols.EVPN != nil {
+		if err := writeEVPNXML(buf, protocols.EVPN); err != nil {
 			return err
 		}
 	}
@@ -782,6 +794,111 @@ func writeBGPXML(buf *bytes.Buffer, bgp *config.BGPConfig) error {
 	}
 
 	buf.WriteString(`    </bgp>`)
+	buf.WriteString("\n")
+	return nil
+}
+
+func writeEVPNXML(buf *bytes.Buffer, evpn *config.EVPNConfig) error {
+	if len(evpn.VNIs) == 0 {
+		return nil
+	}
+	buf.WriteString(`    <evpn>`)
+	buf.WriteString("\n")
+	for _, vni := range sortedIntKeys(evpn.VNIs) {
+		entry := evpn.VNIs[vni]
+		if entry == nil {
+			continue
+		}
+		buf.WriteString(`      <vni>`)
+		buf.WriteString("\n")
+		fmt.Fprintf(buf, "        <id>%d</id>\n", vni)
+		if entry.Type != "" {
+			buf.WriteString(`        <type>`)
+			if err := xml.EscapeText(buf, []byte(entry.Type)); err != nil {
+				return err
+			}
+			buf.WriteString(`</type>`)
+			buf.WriteString("\n")
+		}
+		if entry.BridgeDomain != "" {
+			buf.WriteString(`        <bridge-domain>`)
+			if err := xml.EscapeText(buf, []byte(entry.BridgeDomain)); err != nil {
+				return err
+			}
+			buf.WriteString(`</bridge-domain>`)
+			buf.WriteString("\n")
+		}
+		if entry.VLANID != 0 {
+			fmt.Fprintf(buf, "        <vlan-id>%d</vlan-id>\n", entry.VLANID)
+		}
+		if entry.RoutingInstance != "" {
+			buf.WriteString(`        <routing-instance>`)
+			if err := xml.EscapeText(buf, []byte(entry.RoutingInstance)); err != nil {
+				return err
+			}
+			buf.WriteString(`</routing-instance>`)
+			buf.WriteString("\n")
+		}
+		if entry.RouteDistinguisher != "" {
+			buf.WriteString(`        <route-distinguisher>`)
+			if err := xml.EscapeText(buf, []byte(entry.RouteDistinguisher)); err != nil {
+				return err
+			}
+			buf.WriteString(`</route-distinguisher>`)
+			buf.WriteString("\n")
+		}
+		if entry.VRFTarget != "" {
+			buf.WriteString(`        <vrf-target>`)
+			if err := xml.EscapeText(buf, []byte(entry.VRFTarget)); err != nil {
+				return err
+			}
+			buf.WriteString(`</vrf-target>`)
+			buf.WriteString("\n")
+		}
+		for _, target := range sortedStrings(entry.VRFTargetImport) {
+			buf.WriteString(`        <vrf-target-import>`)
+			if err := xml.EscapeText(buf, []byte(target)); err != nil {
+				return err
+			}
+			buf.WriteString(`</vrf-target-import>`)
+			buf.WriteString("\n")
+		}
+		for _, target := range sortedStrings(entry.VRFTargetExport) {
+			buf.WriteString(`        <vrf-target-export>`)
+			if err := xml.EscapeText(buf, []byte(target)); err != nil {
+				return err
+			}
+			buf.WriteString(`</vrf-target-export>`)
+			buf.WriteString("\n")
+		}
+		if entry.SourceInterface != "" {
+			buf.WriteString(`        <source-interface>`)
+			if err := xml.EscapeText(buf, []byte(entry.SourceInterface)); err != nil {
+				return err
+			}
+			buf.WriteString(`</source-interface>`)
+			buf.WriteString("\n")
+		}
+		if entry.SourceAddress != "" {
+			buf.WriteString(`        <source-address>`)
+			if err := xml.EscapeText(buf, []byte(entry.SourceAddress)); err != nil {
+				return err
+			}
+			buf.WriteString(`</source-address>`)
+			buf.WriteString("\n")
+		}
+		if entry.MulticastGroup != "" {
+			buf.WriteString(`        <multicast-group>`)
+			if err := xml.EscapeText(buf, []byte(entry.MulticastGroup)); err != nil {
+				return err
+			}
+			buf.WriteString(`</multicast-group>`)
+			buf.WriteString("\n")
+		}
+		buf.WriteString(`      </vni>`)
+		buf.WriteString("\n")
+	}
+	buf.WriteString(`    </evpn>`)
 	buf.WriteString("\n")
 	return nil
 }
@@ -1123,6 +1240,23 @@ type xmlBFDProtocol struct {
 	} `xml:"peer"`
 }
 
+type xmlEVPNProtocol struct {
+	VNIs []struct {
+		ID                 int      `xml:"id"`
+		Type               string   `xml:"type"`
+		BridgeDomain       string   `xml:"bridge-domain"`
+		VLANID             int      `xml:"vlan-id"`
+		RoutingInstance    string   `xml:"routing-instance"`
+		RouteDistinguisher string   `xml:"route-distinguisher"`
+		VRFTarget          string   `xml:"vrf-target"`
+		VRFTargetImport    []string `xml:"vrf-target-import"`
+		VRFTargetExport    []string `xml:"vrf-target-export"`
+		SourceInterface    string   `xml:"source-interface"`
+		SourceAddress      string   `xml:"source-address"`
+		MulticastGroup     string   `xml:"multicast-group"`
+	} `xml:"vni"`
+}
+
 func bfdConfigFromXML(bfd *xmlBFDProtocol) *config.BFDConfig {
 	if bfd == nil {
 		return nil
@@ -1158,6 +1292,30 @@ func bfdConfigFromXML(bfd *xmlBFDProtocol) *config.BFDConfig {
 		}
 	}
 	return cfgBFD
+}
+
+func evpnConfigFromXML(evpn *xmlEVPNProtocol) *config.EVPNConfig {
+	if evpn == nil {
+		return nil
+	}
+	cfgEVPN := &config.EVPNConfig{VNIs: make(map[int]*config.EVPNVNI)}
+	for _, vni := range evpn.VNIs {
+		cfgEVPN.VNIs[vni.ID] = &config.EVPNVNI{
+			VNI:                vni.ID,
+			Type:               vni.Type,
+			BridgeDomain:       vni.BridgeDomain,
+			VLANID:             vni.VLANID,
+			RoutingInstance:    vni.RoutingInstance,
+			RouteDistinguisher: vni.RouteDistinguisher,
+			VRFTarget:          vni.VRFTarget,
+			VRFTargetImport:    append([]string(nil), vni.VRFTargetImport...),
+			VRFTargetExport:    append([]string(nil), vni.VRFTargetExport...),
+			SourceInterface:    vni.SourceInterface,
+			SourceAddress:      vni.SourceAddress,
+			MulticastGroup:     vni.MulticastGroup,
+		}
+	}
+	return cfgEVPN
 }
 
 func ospfConfigFromXML(ospf *xmlOSPFProtocol) *config.OSPFConfig {
@@ -1310,6 +1468,7 @@ func XMLToConfig(xmlData []byte, defaultOp DefaultOperation) (*config.Config, er
 					} `xml:"neighbor"`
 				} `xml:"group"`
 			} `xml:"bgp"`
+			EVPN  *xmlEVPNProtocol `xml:"evpn"`
 			OSPF  *xmlOSPFProtocol `xml:"ospf"`
 			OSPF3 *xmlOSPFProtocol `xml:"ospf3"`
 			MPLS  *struct {
@@ -1514,6 +1673,10 @@ func XMLToConfig(xmlData []byte, defaultOp DefaultOperation) (*config.Config, er
 			}
 		}
 
+		if root.Protocols.EVPN != nil {
+			cfg.Protocols.EVPN = evpnConfigFromXML(root.Protocols.EVPN)
+		}
+
 		// OSPF
 		if root.Protocols.OSPF != nil {
 			cfg.Protocols.OSPF = ospfConfigFromXML(root.Protocols.OSPF)
@@ -1700,6 +1863,20 @@ var allowedConfigElementPaths = map[string]struct{}{
 	"config/protocols/bgp/group/neighbor/local-address": {},
 	"config/protocols/bgp/group/neighbor/bfd":           {},
 	"config/protocols/bgp/group/neighbor/bfd-profile":   {},
+	"config/protocols/evpn":                             {},
+	"config/protocols/evpn/vni":                         {},
+	"config/protocols/evpn/vni/id":                      {},
+	"config/protocols/evpn/vni/type":                    {},
+	"config/protocols/evpn/vni/bridge-domain":           {},
+	"config/protocols/evpn/vni/vlan-id":                 {},
+	"config/protocols/evpn/vni/routing-instance":        {},
+	"config/protocols/evpn/vni/route-distinguisher":     {},
+	"config/protocols/evpn/vni/vrf-target":              {},
+	"config/protocols/evpn/vni/vrf-target-import":       {},
+	"config/protocols/evpn/vni/vrf-target-export":       {},
+	"config/protocols/evpn/vni/source-interface":        {},
+	"config/protocols/evpn/vni/source-address":          {},
+	"config/protocols/evpn/vni/multicast-group":         {},
 	"config/protocols/ospf":                             {},
 	"config/protocols/ospf/router-id":                   {},
 	"config/protocols/ospf/area":                        {},
@@ -1831,6 +2008,19 @@ var configTextContentPaths = map[string]struct{}{
 	"config/protocols/bgp/group/neighbor/local-address": {},
 	"config/protocols/bgp/group/neighbor/bfd":           {},
 	"config/protocols/bgp/group/neighbor/bfd-profile":   {},
+
+	"config/protocols/evpn/vni/id":                  {},
+	"config/protocols/evpn/vni/type":                {},
+	"config/protocols/evpn/vni/bridge-domain":       {},
+	"config/protocols/evpn/vni/vlan-id":             {},
+	"config/protocols/evpn/vni/routing-instance":    {},
+	"config/protocols/evpn/vni/route-distinguisher": {},
+	"config/protocols/evpn/vni/vrf-target":          {},
+	"config/protocols/evpn/vni/vrf-target-import":   {},
+	"config/protocols/evpn/vni/vrf-target-export":   {},
+	"config/protocols/evpn/vni/source-interface":    {},
+	"config/protocols/evpn/vni/source-address":      {},
+	"config/protocols/evpn/vni/multicast-group":     {},
 
 	"config/protocols/ospf/router-id":                   {},
 	"config/protocols/ospf/area/name":                   {},
@@ -2252,6 +2442,20 @@ func mergeConfigs(existing, edit *config.Config) (*config.Config, error) {
 			}
 		}
 
+		if edit.Protocols.EVPN != nil {
+			if existing.Protocols.EVPN == nil {
+				existing.Protocols.EVPN = &config.EVPNConfig{
+					VNIs: make(map[int]*config.EVPNVNI),
+				}
+			}
+			if existing.Protocols.EVPN.VNIs == nil {
+				existing.Protocols.EVPN.VNIs = make(map[int]*config.EVPNVNI)
+			}
+			for vni, entry := range edit.Protocols.EVPN.VNIs {
+				existing.Protocols.EVPN.VNIs[vni] = entry
+			}
+		}
+
 		// Merge OSPF
 		if edit.Protocols.OSPF != nil {
 			mergeOSPFConfig(&existing.Protocols.OSPF, edit.Protocols.OSPF)
@@ -2479,6 +2683,9 @@ func calculateConfigDepth(cfg *config.Config) int {
 		}
 		if cfg.Protocols.BGP != nil && len(cfg.Protocols.BGP.Groups) > 0 {
 			maxDepth = max(maxDepth, 5)
+		}
+		if cfg.Protocols.EVPN != nil && len(cfg.Protocols.EVPN.VNIs) > 0 {
+			maxDepth = max(maxDepth, 4)
 		}
 		if cfg.Protocols.OSPF != nil && len(cfg.Protocols.OSPF.Areas) > 0 {
 			maxDepth = max(maxDepth, 5)
@@ -2716,6 +2923,44 @@ func countConfigElements(cfg *config.Config) int {
 					if neighbor.BFDProfile != "" {
 						count++
 					}
+				}
+			}
+		}
+		if cfg.Protocols.EVPN != nil && len(cfg.Protocols.EVPN.VNIs) > 0 {
+			count++ // <evpn>
+			for _, vni := range cfg.Protocols.EVPN.VNIs {
+				if vni == nil {
+					continue
+				}
+				count += 2 // <vni> + <id>
+				if vni.Type != "" {
+					count++
+				}
+				if vni.BridgeDomain != "" {
+					count++
+				}
+				if vni.VLANID != 0 {
+					count++
+				}
+				if vni.RoutingInstance != "" {
+					count++
+				}
+				if vni.RouteDistinguisher != "" {
+					count++
+				}
+				if vni.VRFTarget != "" {
+					count++
+				}
+				count += len(vni.VRFTargetImport)
+				count += len(vni.VRFTargetExport)
+				if vni.SourceInterface != "" {
+					count++
+				}
+				if vni.SourceAddress != "" {
+					count++
+				}
+				if vni.MulticastGroup != "" {
+					count++
 				}
 			}
 		}

@@ -108,6 +108,7 @@ type AddressFamily struct {
 type ProtocolsConfig struct {
 	BFD   *BFDConfig  `json:"bfd,omitempty"`
 	BGP   *BGPConfig  `json:"bgp,omitempty"`
+	EVPN  *EVPNConfig `json:"evpn,omitempty"`
 	OSPF  *OSPFConfig `json:"ospf,omitempty"`
 	OSPF3 *OSPFConfig `json:"ospf3,omitempty"`
 	MPLS  *MPLSConfig `json:"mpls,omitempty"`
@@ -142,6 +143,27 @@ type BFDPeer struct {
 	EchoMode         bool   `json:"echo-mode,omitempty"`
 	PassiveMode      bool   `json:"passive-mode,omitempty"`
 	Shutdown         bool   `json:"shutdown,omitempty"`
+}
+
+// EVPNConfig represents EVPN/VXLAN overlay configuration.
+type EVPNConfig struct {
+	VNIs map[int]*EVPNVNI `json:"vnis,omitempty"`
+}
+
+// EVPNVNI represents one L2 or L3 VXLAN network identifier.
+type EVPNVNI struct {
+	VNI                int      `json:"vni"`
+	Type               string   `json:"type,omitempty"`
+	BridgeDomain       string   `json:"bridge-domain,omitempty"`
+	VLANID             int      `json:"vlan-id,omitempty"`
+	RoutingInstance    string   `json:"routing-instance,omitempty"`
+	RouteDistinguisher string   `json:"route-distinguisher,omitempty"`
+	VRFTarget          string   `json:"vrf-target,omitempty"`
+	VRFTargetImport    []string `json:"vrf-target-import,omitempty"`
+	VRFTargetExport    []string `json:"vrf-target-export,omitempty"`
+	SourceInterface    string   `json:"source-interface,omitempty"`
+	SourceAddress      string   `json:"source-address,omitempty"`
+	MulticastGroup     string   `json:"multicast-group,omitempty"`
 }
 
 // MPLSConfig represents MPLS forwarding configuration.

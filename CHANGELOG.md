@@ -1,6 +1,10 @@
 # Changelog
 
-## v0.7.x - Core Router Parity (current)
+## v0.8.x - Overlay and Streaming Telemetry (current)
+
+- **EVPN/VXLAN VNI intent model**: CLI parser/serializer, validation, internal model conversion/clone/diff, NETCONF XML/YANG, and commit-time southbound safety gates cover L2/L3 `protocols evpn vni` configuration before FRR/VPP apply support is enabled
+
+## v0.7.x - Core Router Parity (previous)
 
 - **BFD peer/profile configuration**: parser, serializer, validation, internal model, diff, NETCONF XML/YANG, FRR file backend generation, and transactional `frr-bfdd` operations cover `protocols bfd profile` and `protocols bfd peer`
 - **BFD protocol bindings**: BGP neighbors and OSPF/OSPFv3 interfaces can enable BFD directly, including reusable `protocols bfd profile` references

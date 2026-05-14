@@ -19,9 +19,10 @@ module arca-router {
      This module defines the configuration and operational state for:
      - System settings (hostname)
      - v0.6 service, clustering, MPLS, VRRP, VPN, and QoS settings
+     - v0.8 EVPN/VXLAN VNI intent settings
      - Interface configuration (uses IETF interfaces model)
      - Routing configuration (uses IETF routing model with extensions)
-     - BGP and OSPF protocol configuration";
+     - BGP, EVPN, and OSPF protocol configuration";
 
   revision 2025-12-27 {
     description "Initial revision for Phase 3 Task 2.3";
@@ -415,6 +416,87 @@ module arca-router {
             type string;
             description "BFD profile used by this neighbor";
           }
+        }
+      }
+    }
+
+    container evpn {
+      description "EVPN/VXLAN overlay configuration.";
+
+      list vni {
+        key "id";
+        description "L2 or L3 VXLAN network identifier.";
+
+        leaf id {
+          type uint32 {
+            range "1..16777215";
+          }
+          description "VXLAN VNI.";
+        }
+
+        leaf type {
+          type enumeration {
+            enum l2 {
+              description "Layer-2 bridge-domain VNI.";
+            }
+            enum l3 {
+              description "Layer-3 routing-instance VNI.";
+            }
+          }
+          mandatory true;
+          description "EVPN VNI type.";
+        }
+
+        leaf bridge-domain {
+          type string;
+          description "Bridge-domain name for an L2 VNI.";
+        }
+
+        leaf vlan-id {
+          type uint16 {
+            range "1..4094";
+          }
+          description "Optional VLAN ID associated with an L2 VNI.";
+        }
+
+        leaf routing-instance {
+          type string;
+          description "Routing instance associated with an L3 VNI.";
+        }
+
+        leaf route-distinguisher {
+          type string;
+          description "EVPN route distinguisher in ASN:number format.";
+        }
+
+        leaf vrf-target {
+          type string;
+          description "Shared EVPN route target in target:ASN:number format.";
+        }
+
+        leaf-list vrf-target-import {
+          type string;
+          description "EVPN import route target.";
+        }
+
+        leaf-list vrf-target-export {
+          type string;
+          description "EVPN export route target.";
+        }
+
+        leaf source-interface {
+          type string;
+          description "Local VTEP source interface.";
+        }
+
+        leaf source-address {
+          type string;
+          description "Local VTEP source address.";
+        }
+
+        leaf multicast-group {
+          type string;
+          description "Multicast group for flood-and-learn VXLAN replication.";
         }
       }
     }

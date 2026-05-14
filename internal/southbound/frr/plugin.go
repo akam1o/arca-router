@@ -86,6 +86,9 @@ func (p *FRRPlugin) ValidateChanges(ctx context.Context, diff *engine.ConfigDiff
 	if diff == nil {
 		return nil
 	}
+	if diffAddsEVPNIntent(diff) {
+		return fmt.Errorf("EVPN/VXLAN FRR control-plane apply is not implemented yet")
+	}
 	if !hasFRRRelevantChanges(diff) {
 		return nil
 	}
@@ -106,6 +109,10 @@ func (p *FRRPlugin) ValidateChanges(ctx context.Context, diff *engine.ConfigDiff
 func (p *FRRPlugin) ApplyChanges(ctx context.Context, diff *engine.ConfigDiff) error {
 	p.mu.Lock()
 	defer p.mu.Unlock()
+
+	if diffAddsEVPNIntent(diff) {
+		return fmt.Errorf("EVPN/VXLAN FRR control-plane apply is not implemented yet")
+	}
 
 	// Only regenerate FRR config if routing-related changes occurred
 	if !hasFRRRelevantChanges(diff) {
@@ -365,6 +372,11 @@ func (p *FRRPlugin) buildFullConfig(diff *engine.ConfigDiff) *model.RouterConfig
 	} else if diff.OldBGP != nil && !diff.BGPChanged {
 		cfg.Protocols.BGP = diff.OldBGP
 	}
+	if diff.NewEVPN != nil {
+		cfg.Protocols.EVPN = diff.NewEVPN
+	} else if diff.OldEVPN != nil && !diff.EVPNChanged {
+		cfg.Protocols.EVPN = diff.OldEVPN
+	}
 	if diff.NewOSPF != nil {
 		cfg.Protocols.OSPF = diff.NewOSPF
 	} else if diff.OldOSPF != nil && !diff.OSPFChanged {
@@ -416,6 +428,7 @@ func hasFRRRelevantChanges(diff *engine.ConfigDiff) bool {
 	}
 	return diff.BFDChanged ||
 		diff.BGPChanged ||
+		diff.EVPNChanged ||
 		diff.OSPFChanged ||
 		diff.OSPF3Changed ||
 		diff.StaticRoutesChanged ||
@@ -437,4 +450,21 @@ func hasFRRRelevantInterfaceChanges(diff *engine.ConfigDiff) bool {
 		}
 	}
 	return false
+}
+
+func diffAddsEVPNIntent(diff *engine.ConfigDiff) bool {
+	if diff == nil || !diff.EVPNChanged {
+		return false
+	}
+	if evpnHasVNIs(diff.NewEVPN) {
+		return true
+	}
+	if diff.NewConfig != nil && diff.NewConfig.Protocols != nil {
+		return evpnHasVNIs(diff.NewConfig.Protocols.EVPN)
+	}
+	return false
+}
+
+func evpnHasVNIs(evpn *model.EVPNConfig) bool {
+	return evpn != nil && len(evpn.VNIs) > 0
 }

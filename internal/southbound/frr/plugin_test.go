@@ -158,6 +158,35 @@ func TestValidateChangesAllowsMPLSConfig(t *testing.T) {
 	}
 }
 
+func TestValidateChangesRejectsEVPNUntilFRRApplyExists(t *testing.T) {
+	newCfg := model.NewRouterConfig()
+	newCfg.Protocols = &model.ProtocolsConfig{
+		EVPN: &model.EVPNConfig{VNIs: map[int]*model.EVPNVNI{
+			10010: {VNI: 10010, Type: "l2", BridgeDomain: "BD-10"},
+		}},
+	}
+	diff := engine.ComputeDiff(model.NewRouterConfig(), newCfg)
+
+	err := NewFRRPlugin(testLogger()).ValidateChanges(context.Background(), diff)
+	if err == nil || !strings.Contains(err.Error(), "EVPN/VXLAN FRR control-plane apply is not implemented yet") {
+		t.Fatalf("ValidateChanges() error = %v, want EVPN unsupported error", err)
+	}
+}
+
+func TestValidateChangesAllowsRemovingEVPNIntent(t *testing.T) {
+	oldCfg := model.NewRouterConfig()
+	oldCfg.Protocols = &model.ProtocolsConfig{
+		EVPN: &model.EVPNConfig{VNIs: map[int]*model.EVPNVNI{
+			10010: {VNI: 10010, Type: "l2", BridgeDomain: "BD-10"},
+		}},
+	}
+	diff := engine.ComputeDiff(oldCfg, model.NewRouterConfig())
+
+	if err := NewFRRPlugin(testLogger()).ValidateChanges(context.Background(), diff); err != nil {
+		t.Fatalf("ValidateChanges() error = %v, want nil for EVPN removal", err)
+	}
+}
+
 func TestValidateChangesAllowsOSPF3WithTransactionalBackend(t *testing.T) {
 	newCfg := model.NewRouterConfig()
 	addTestInterface(newCfg, "ge-0/0/0")

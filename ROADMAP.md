@@ -68,7 +68,7 @@ Focus: close common router feature gaps before adding more advanced overlays.
 Focus: add data-center overlay support and richer external observability.
 
 - **EVPN / VXLAN**
-  - L2/L3 VNI configuration model
+  - L2/L3 VNI configuration model with CLI, validation, diff, and NETCONF/YANG coverage
   - FRR EVPN control-plane integration
   - VPP VXLAN dataplane plumbing
 - **Streaming telemetry**
