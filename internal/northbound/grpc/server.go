@@ -40,6 +40,8 @@ type Server struct {
 	lcpSource      lcpReconciliationSource
 	haSource       haStatusSource
 	bfdSource      bfdOperationalSource
+	routeReader    pkgfrr.RouteStatusReader
+	bgpReader      pkgfrr.BGPSummaryStatusReader
 }
 
 var (
@@ -73,10 +75,12 @@ type bfdOperationalSource interface {
 // NewServer creates a new gRPC server.
 func NewServer(eng *engine.Engine, st store.ConfigStore, log *slog.Logger) *Server {
 	return &Server{
-		engine:   eng,
-		store:    st,
-		sessions: NewSessionManager(),
-		log:      log.With("component", "grpc"),
+		engine:      eng,
+		store:       st,
+		sessions:    NewSessionManager(),
+		log:         log.With("component", "grpc"),
+		routeReader: newOperationalRouteStatusReader(),
+		bgpReader:   newOperationalBGPSummaryStatusReader(),
 	}
 }
 
@@ -115,6 +119,22 @@ func (s *Server) SetHAStatusSource(source haStatusSource) {
 // SetBFDOperationalSource installs an FRR BFD operational state source.
 func (s *Server) SetBFDOperationalSource(source bfdOperationalSource) {
 	s.bfdSource = source
+}
+
+func newOperationalRouteStatusReader() pkgfrr.RouteStatusReader {
+	return pkgfrr.NewVtyshRouteStatusReaderWithRunner(runOperationalVtyshBytesCommand)
+}
+
+func newOperationalBGPSummaryStatusReader() pkgfrr.BGPSummaryStatusReader {
+	return pkgfrr.NewVtyshBGPSummaryStatusReaderWithRunner(runOperationalVtyshBytesCommand)
+}
+
+func runOperationalVtyshBytesCommand(ctx context.Context, command string) ([]byte, error) {
+	output, err := runOperationalVtyshCommand(ctx, command)
+	if err != nil {
+		return nil, err
+	}
+	return []byte(output), nil
 }
 
 // --- ConfigService implementation ---
@@ -650,37 +670,36 @@ func txQueueInfosFromVPP(queues []pkgvpp.InterfaceTxQueuePlacement) []InterfaceT
 // GetRoutes returns routing table entries.
 func (s *Server) GetRoutes(ctx context.Context, prefixFilter, protoFilter string) ([]RouteInfo, error) {
 	var parsedPrefix string
-	families := []string{addressFamilyIPv4, addressFamilyIPv6}
 	if strings.TrimSpace(prefixFilter) != "" {
 		prefix, err := netip.ParsePrefix(strings.TrimSpace(prefixFilter))
 		if err != nil {
 			return nil, fmt.Errorf("invalid route prefix filter %q", prefixFilter)
 		}
 		parsedPrefix = prefix.String()
-		families = routeFamiliesForPrefix(prefix)
 	}
 
-	var routes []RouteInfo
-	for _, family := range families {
-		command := routeTextCommand(family) + " json"
-		output, err := runOperationalVtyshCommand(ctx, command)
-		if err != nil {
-			return nil, fmt.Errorf("%s: %w", command, err)
+	reader := s.routeReader
+	if reader == nil {
+		reader = newOperationalRouteStatusReader()
+	}
+	status, err := reader.ReadRouteStatus(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if status == nil {
+		return nil, nil
+	}
+
+	routes := make([]RouteInfo, 0, len(status.Routes))
+	for _, route := range status.Routes {
+		info := routeInfoFromFRRRoute(route)
+		if parsedPrefix != "" && info.Prefix != parsedPrefix {
+			continue
 		}
-		status, err := pkgfrr.ParseRouteStatusJSON([]byte(output))
-		if err != nil {
-			return nil, fmt.Errorf("%s: %w", command, err)
+		if !routeProtocolFilterMatches(info.Protocol, protoFilter) {
+			continue
 		}
-		for _, route := range status.Routes {
-			info := routeInfoFromFRRRoute(route)
-			if parsedPrefix != "" && info.Prefix != parsedPrefix {
-				continue
-			}
-			if !routeProtocolFilterMatches(info.Protocol, protoFilter) {
-				continue
-			}
-			routes = append(routes, info)
-		}
+		routes = append(routes, info)
 	}
 	sort.Slice(routes, func(i, j int) bool {
 		return routeInfoSortKey(routes[i]) < routeInfoSortKey(routes[j])
@@ -688,22 +707,18 @@ func (s *Server) GetRoutes(ctx context.Context, prefixFilter, protoFilter string
 	return routes, nil
 }
 
-func routeFamiliesForPrefix(prefix netip.Prefix) []string {
-	if prefix.Addr().Is6() {
-		return []string{addressFamilyIPv6}
-	}
-	return []string{addressFamilyIPv4}
-}
-
 // GetBGPNeighbors returns BGP neighbor state.
 func (s *Server) GetBGPNeighbors(ctx context.Context) ([]BGPNeighborInfo, error) {
-	output, err := runOperationalVtyshCommand(ctx, "show bgp summary json")
-	if err != nil {
-		return nil, fmt.Errorf("show bgp summary json: %w", err)
+	reader := s.bgpReader
+	if reader == nil {
+		reader = newOperationalBGPSummaryStatusReader()
 	}
-	status, err := pkgfrr.ParseBGPSummaryJSON([]byte(output))
+	status, err := reader.ReadBGPSummaryStatus(ctx)
 	if err != nil {
-		return nil, fmt.Errorf("show bgp summary json: %w", err)
+		return nil, err
+	}
+	if status == nil {
+		return nil, nil
 	}
 	neighbors := make([]BGPNeighborInfo, 0, len(status.Neighbors))
 	for _, neighbor := range status.Neighbors {
