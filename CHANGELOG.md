@@ -2,6 +2,7 @@
 
 ## v0.8.x - Overlay and Streaming Telemetry (current)
 
+- **EVPN Grafana panels**: the packaged Grafana dashboard now includes EVPN/VXLAN overlay configured, total VNI, L2 VNI, L3 VNI, and multicast VNI panels backed by the Prometheus overlay metrics
 - **EVPN observability summary**: `/metrics`, `/api/status`, and `/api/nms/v1/status` now expose EVPN/VXLAN configured, total VNI, L2 VNI, L3 VNI, and multicast VNI counts for overlay intent monitoring
 - **EVPN telemetry path**: structured telemetry and NMS snapshots now expose `/overlays/evpn` with sorted EVPN/VXLAN VNI intent, including L2 bridge-domain metadata, route targets, multicast source settings, and L3 routing-instance bindings
 - **NMS telemetry snapshot API**: `/api/nms/v1/telemetry/snapshot` exposes one-shot structured telemetry snapshots over the Web API for HTTP-only collectors, with repeated `path` query parameters, timeout and payload byte budget guardrails, and the same telemetry event payloads used by the gRPC stream

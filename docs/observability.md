@@ -91,6 +91,8 @@ The packaged Grafana dashboard is installed at:
 /usr/share/arca-router/grafana/arca-routerd-dashboard.json
 ```
 
+The dashboard includes EVPN/VXLAN overlay configured, total VNI, L2 VNI, L3 VNI, and multicast VNI panels backed by the overlay metrics.
+
 Source path:
 
 ```text

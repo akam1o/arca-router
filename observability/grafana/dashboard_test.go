@@ -109,6 +109,23 @@ func TestDashboardIncludesClassOfServicePanels(t *testing.T) {
 	}
 }
 
+func TestDashboardIncludesEVPNPanels(t *testing.T) {
+	dash := loadDashboard(t)
+	want := map[string]string{
+		"arca_router_overlay_evpn_configured":     "EVPN Overlay",
+		"arca_router_overlay_evpn_vnis":           "EVPN VNIs",
+		"arca_router_overlay_evpn_l2_vnis":        "EVPN L2 VNIs",
+		"arca_router_overlay_evpn_l3_vnis":        "EVPN L3 VNIs",
+		"arca_router_overlay_evpn_multicast_vnis": "EVPN Multicast VNIs",
+	}
+	expressions := panelExpressions(dash.Panels)
+	for expr, title := range want {
+		if got := expressions[expr]; got != title {
+			t.Fatalf("expression %q is on panel %q, want %q", expr, got, title)
+		}
+	}
+}
+
 func loadDashboard(t *testing.T) dashboard {
 	t.Helper()
 	data, err := os.ReadFile("arca-routerd-dashboard.json")
