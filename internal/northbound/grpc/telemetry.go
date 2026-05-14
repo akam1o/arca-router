@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"sort"
 	"strings"
 	"time"
 )
@@ -29,6 +30,7 @@ var (
 		"/routing/ospf/neighbors",
 		"/routing/ospf3/neighbors",
 		"/routing-instances",
+		"/overlays/evpn",
 		"/class-of-service",
 		"/bfd",
 		"/lcp",
@@ -43,6 +45,7 @@ var (
 		"/routing/ospf/neighbors":  "OSPFv2 neighbor operational state",
 		"/routing/ospf3/neighbors": "OSPFv3 neighbor operational state",
 		"/routing-instances":       "routing instance operational summary",
+		"/overlays/evpn":           "EVPN/VXLAN VNI overlay intent",
 		"/class-of-service":        "class-of-service intent and enforcement status",
 		"/bfd":                     "BFD peer operational status",
 		"/lcp":                     "VPP LCP reconciliation status",
@@ -108,6 +111,25 @@ type telemetryConfigPayload struct {
 	Version    uint64 `json:"version"`
 	ConfigText string `json:"config_text"`
 	LineCount  int    `json:"line_count"`
+}
+
+type telemetryEVPNPayload struct {
+	VNIs []telemetryEVPNVNIPayload `json:"vnis"`
+}
+
+type telemetryEVPNVNIPayload struct {
+	VNI                int      `json:"vni"`
+	Type               string   `json:"type,omitempty"`
+	BridgeDomain       string   `json:"bridge_domain,omitempty"`
+	VLANID             int      `json:"vlan_id,omitempty"`
+	RoutingInstance    string   `json:"routing_instance,omitempty"`
+	RouteDistinguisher string   `json:"route_distinguisher,omitempty"`
+	VRFTarget          string   `json:"vrf_target,omitempty"`
+	VRFTargetImport    []string `json:"vrf_target_import,omitempty"`
+	VRFTargetExport    []string `json:"vrf_target_export,omitempty"`
+	SourceInterface    string   `json:"source_interface,omitempty"`
+	SourceAddress      string   `json:"source_address,omitempty"`
+	MulticastGroup     string   `json:"multicast_group,omitempty"`
 }
 
 func buildTelemetryPathSet(paths []string) map[string]struct{} {
@@ -262,6 +284,8 @@ func (s *Server) telemetryPayload(ctx context.Context, path string) (any, error)
 		return struct {
 			Instances []RoutingInstanceInfo `json:"instances"`
 		}{Instances: instances}, nil
+	case "/overlays/evpn":
+		return s.telemetryEVPNPayload(), nil
 	case "/class-of-service":
 		info, err := s.GetClassOfService(ctx)
 		if err != nil {
@@ -343,6 +367,8 @@ func normalizeTelemetryPath(rawPath string) string {
 		return "/routing/ospf/neighbors"
 	case "/ospf3", "/ospf3/neighbors":
 		return "/routing/ospf3/neighbors"
+	case "/evpn", "/overlay/evpn", "/overlays/evpn":
+		return "/overlays/evpn"
 	case "/cos":
 		return "/class-of-service"
 	}
@@ -368,4 +394,46 @@ func countConfigLines(text string) int {
 		return 0
 	}
 	return strings.Count(text, "\n") + 1
+}
+
+func (s *Server) telemetryEVPNPayload() telemetryEVPNPayload {
+	payload := telemetryEVPNPayload{VNIs: []telemetryEVPNVNIPayload{}}
+	if s.engine == nil {
+		return payload
+	}
+	cfg := s.engine.Running()
+	if cfg == nil || cfg.Protocols == nil || cfg.Protocols.EVPN == nil || len(cfg.Protocols.EVPN.VNIs) == 0 {
+		return payload
+	}
+
+	ids := make([]int, 0, len(cfg.Protocols.EVPN.VNIs))
+	for id := range cfg.Protocols.EVPN.VNIs {
+		ids = append(ids, id)
+	}
+	sort.Ints(ids)
+	for _, id := range ids {
+		vni := cfg.Protocols.EVPN.VNIs[id]
+		if vni == nil {
+			continue
+		}
+		vniID := vni.VNI
+		if vniID == 0 {
+			vniID = id
+		}
+		payload.VNIs = append(payload.VNIs, telemetryEVPNVNIPayload{
+			VNI:                vniID,
+			Type:               vni.Type,
+			BridgeDomain:       vni.BridgeDomain,
+			VLANID:             vni.VLANID,
+			RoutingInstance:    vni.RoutingInstance,
+			RouteDistinguisher: vni.RouteDistinguisher,
+			VRFTarget:          vni.VRFTarget,
+			VRFTargetImport:    append([]string(nil), vni.VRFTargetImport...),
+			VRFTargetExport:    append([]string(nil), vni.VRFTargetExport...),
+			SourceInterface:    vni.SourceInterface,
+			SourceAddress:      vni.SourceAddress,
+			MulticastGroup:     vni.MulticastGroup,
+		})
+	}
+	return payload
 }

@@ -106,6 +106,7 @@ Supported paths:
 - `/routing/ospf/neighbors`
 - `/routing/ospf3/neighbors`
 - `/routing-instances`
+- `/overlays/evpn`
 - `/class-of-service`
 - `/bfd`
 - `/lcp`
@@ -118,6 +119,7 @@ Local operators can inspect the same stream through the CLI. The command prints 
 ```bash
 arca show telemetry path /system path /interfaces
 arca show telemetry path /routes interval 5s count 3
+arca show telemetry path /overlays/evpn
 ```
 
 ## Web UI
@@ -162,7 +164,7 @@ When the running configuration contains password-backed `security users`, the We
 curl -u monitor:ReadOnly789 http://127.0.0.1:8080/api/status
 curl -u monitor:ReadOnly789 http://127.0.0.1:8080/api/nms/v1/status
 curl -u monitor:ReadOnly789 http://127.0.0.1:8080/api/nms/v1/telemetry/paths
-curl -u monitor:ReadOnly789 'http://127.0.0.1:8080/api/nms/v1/telemetry/snapshot?path=/system&path=/interfaces&timeout=5s&max_payload_bytes=8388608'
+curl -u monitor:ReadOnly789 'http://127.0.0.1:8080/api/nms/v1/telemetry/snapshot?path=/system&path=/interfaces&path=/overlays/evpn&timeout=5s&max_payload_bytes=8388608'
 curl -u monitor:ReadOnly789 http://127.0.0.1:8080/api/config
 curl -u monitor:ReadOnly789 http://127.0.0.1:8080/api/config/history
 ```

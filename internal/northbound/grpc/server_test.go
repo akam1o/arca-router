@@ -275,6 +275,58 @@ func TestSubscribeTelemetrySelectedSnapshots(t *testing.T) {
 	}
 }
 
+func TestSubscribeTelemetryEVPNOverlaySnapshot(t *testing.T) {
+	eng := engine.NewEngine(nil, testLogger())
+	eng.InitializeRunning(&model.RouterConfig{
+		Protocols: &model.ProtocolsConfig{EVPN: &model.EVPNConfig{VNIs: map[int]*model.EVPNVNI{
+			20010: {
+				VNI:             20010,
+				Type:            "l3",
+				RoutingInstance: "BLUE",
+				VRFTargetImport: []string{"target:65000:20010"},
+			},
+			10010: {
+				VNI:                10010,
+				Type:               "l2",
+				BridgeDomain:       "BD-10",
+				VLANID:             10,
+				RouteDistinguisher: "65000:10010",
+				VRFTarget:          "target:65000:10010",
+				VRFTargetExport:    []string{"target:65000:10011"},
+				SourceInterface:    "ge-0/0/0",
+				SourceAddress:      "192.0.2.1",
+				MulticastGroup:     "239.0.0.10",
+			},
+		}}},
+	}, 8)
+	srv := NewServer(eng, &fakeStore{}, testLogger())
+
+	var events []TelemetryEvent
+	err := srv.SubscribeTelemetry(context.Background(), []string{"evpn"}, 0, true, func(event TelemetryEvent) error {
+		events = append(events, event)
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("SubscribeTelemetry(evpn) error = %v", err)
+	}
+	if len(events) != 1 || events[0].Path != "/overlays/evpn" || events[0].EventType != telemetryEventTypeSnapshot {
+		t.Fatalf("events = %#v, want one EVPN overlay snapshot", events)
+	}
+	var payload telemetryEVPNPayload
+	if err := json.Unmarshal([]byte(events[0].JSONPayload), &payload); err != nil {
+		t.Fatalf("EVPN telemetry payload is invalid JSON: %v", err)
+	}
+	if len(payload.VNIs) != 2 || payload.VNIs[0].VNI != 10010 || payload.VNIs[1].VNI != 20010 {
+		t.Fatalf("EVPN VNIs = %#v, want sorted 10010 and 20010", payload.VNIs)
+	}
+	if payload.VNIs[0].BridgeDomain != "BD-10" || payload.VNIs[0].MulticastGroup != "239.0.0.10" {
+		t.Fatalf("L2 EVPN VNI payload = %#v, want bridge-domain and multicast group", payload.VNIs[0])
+	}
+	if payload.VNIs[1].RoutingInstance != "BLUE" || len(payload.VNIs[1].VRFTargetImport) != 1 {
+		t.Fatalf("L3 EVPN VNI payload = %#v, want routing-instance and import target", payload.VNIs[1])
+	}
+}
+
 func TestSubscribeTelemetryRejectsUnsupportedPath(t *testing.T) {
 	srv := NewServer(engine.NewEngine(nil, testLogger()), &fakeStore{}, testLogger())
 	err := srv.SubscribeTelemetry(context.Background(), []string{"/unsupported"}, 0, true, func(event TelemetryEvent) error {

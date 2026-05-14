@@ -591,7 +591,7 @@ Forwarding class queues must be between `0` and `7`. Interface bindings must ref
 <a id="overlay-v08-configuration"></a>
 ## Overlay v0.8 Configuration
 
-The v0.8 management-plane model includes EVPN/VXLAN VNI intent. Parser, serializer, validation, clone, conversion, diff, and NETCONF XML/YANG coverage are implemented for L2 and L3 VNIs. FRR EVPN control-plane generation is implemented through the FRR file backend: arca-router renders global BGP `l2vpn evpn` with `advertise-all-vni`, explicit L2 VNI route-targets, L3 VNI VRF bindings, and per-VRF EVPN route-targets. VPP VXLAN dataplane apply supports L2 VNIs with multicast VXLAN: the VPP southbound creates a bridge domain using the VNI as the bridge ID, creates the multicast VXLAN tunnel, brings the tunnel interface up, and attaches it to the bridge domain. L3 VNI dataplane apply and unicast remote-VTEP dataplane are not implemented yet and are rejected by VPP validation.
+The v0.8 management-plane model includes EVPN/VXLAN VNI intent. Parser, serializer, validation, clone, conversion, diff, NETCONF XML/YANG coverage, and the `/overlays/evpn` structured telemetry path are implemented for L2 and L3 VNIs. FRR EVPN control-plane generation is implemented through the FRR file backend: arca-router renders global BGP `l2vpn evpn` with `advertise-all-vni`, explicit L2 VNI route-targets, L3 VNI VRF bindings, and per-VRF EVPN route-targets. VPP VXLAN dataplane apply supports L2 VNIs with multicast VXLAN: the VPP southbound creates a bridge domain using the VNI as the bridge ID, creates the multicast VXLAN tunnel, brings the tunnel interface up, and attaches it to the bridge domain. L3 VNI dataplane apply and unicast remote-VTEP dataplane are not implemented yet and are rejected by VPP validation.
 
 ```
 set protocols evpn vni 10010 type l2
@@ -1037,7 +1037,7 @@ It includes daemon, NETCONF, config sync, HA, FRR VRRP, class-of-service intent,
 
 The internal Unix socket gRPC API includes `TelemetryService.SubscribeTelemetry` for structured streaming telemetry. Events use the `arca.telemetry.v1` envelope with `sequence`, `timestamp`, `path`, `event_type`, `encoding`, and `json_payload`; payloads are JSON. Subscriptions can select paths, set a sample interval, or request a one-shot snapshot. Empty path selection defaults to `/system` and `/config/running`.
 
-Supported paths are `/system`, `/config/running`, `/interfaces`, `/routes`, `/routing/bgp/neighbors`, `/routing/ospf/neighbors`, `/routing/ospf3/neighbors`, `/routing-instances`, `/class-of-service`, `/bfd`, `/lcp`, and `/ha`. The server writes events synchronously to the gRPC stream, so gRPC flow control provides the backpressure boundary and the daemon does not keep unbounded per-subscriber event buffers.
+Supported paths are `/system`, `/config/running`, `/interfaces`, `/routes`, `/routing/bgp/neighbors`, `/routing/ospf/neighbors`, `/routing/ospf3/neighbors`, `/routing-instances`, `/overlays/evpn`, `/class-of-service`, `/bfd`, `/lcp`, and `/ha`. The server writes events synchronously to the gRPC stream, so gRPC flow control provides the backpressure boundary and the daemon does not keep unbounded per-subscriber event buffers.
 
 Local operators can inspect the same stream with `arca show telemetry path /system path /interfaces`; the CLI prints one JSON envelope per line. `interval <duration>` and `count <events>` request a sampled stream for a bounded number of events, for example `arca show telemetry path /routes interval 5s count 3`.
 
