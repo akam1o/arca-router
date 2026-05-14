@@ -2,10 +2,10 @@
 
 ## v0.7.x - Core Router Parity (current)
 
-- **BFD peer/profile configuration**: parser, serializer, validation, internal model, diff, NETCONF XML/YANG, and FRR file backend generation cover `protocols bfd profile` and `protocols bfd peer`
+- **BFD peer/profile configuration**: parser, serializer, validation, internal model, diff, NETCONF XML/YANG, FRR file backend generation, and transactional `frr-bfdd` operations cover `protocols bfd profile` and `protocols bfd peer`
 - **BFD protocol bindings**: BGP neighbors and OSPF/OSPFv3 interfaces can enable BFD directly, including reusable `protocols bfd profile` references
-- **BFD static route monitoring**: static routes can be monitored by BFD with optional source address, multihop, and BFD profile settings in the FRR file backend
-- **BFD backend guard**: the transactional FRR backend rejects BFD peer/profile, protocol binding, and static route monitoring changes until `frr-bfdd` management operations are implemented, while the file backend renders integrated `bfd` configuration
+- **BFD static route monitoring**: static routes can be monitored by BFD with optional source address, multihop, and BFD profile settings in the FRR apply backends
+- **BFD backend fallback**: the default transactional FRR backend applies explicit BFD sessions/profiles, static route BFD, profile-less BGP BFD, and profile-less OSPF BFD; arca-routerd falls back to the file backend for BGP/OSPF BFD profile bindings and OSPFv3 until FRR exposes those management YANG paths
 - **Standard FRR BFD daemon**: `bfdd` is documented and checked as part of the required arca-router FRR daemon set for BFD support
 
 ## v0.6.x - Advanced Features (previous)

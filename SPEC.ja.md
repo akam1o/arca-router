@@ -464,7 +464,7 @@ set protocols ospf3 area 0.0.0.0 interface ge-0/0/0 bfd profile fast
 set routing-options static route 203.0.113.0/24 next-hop 192.0.2.2 bfd source 192.0.2.1 profile fast
 ```
 
-BFD peer/profile、BGP/OSPF/OSPFv3 binding、static route BFD monitoring は parser、serializer、validation、internal model、diff、NETCONF XML/YANG、FRR file backend に対応します。BFD の FRR transactional backend は `frr-bfdd` management operation mapping が実装されるまで未対応のため、BFD を適用する場合は `--frr-apply-mode=file` を使用します。
+BFD peer/profile、BGP/OSPF/OSPFv3 binding、static route BFD monitoring は parser、serializer、validation、internal model、diff、NETCONF XML/YANG、FRR apply backend に対応します。標準の transactional backend は explicit BFD peer/profile、static route BFD monitoring、profile なし BGP BFD、profile なし OSPF BFD を management operation として適用します。BGP/OSPF の BFD profile binding と OSPFv3 は、対応する FRR management YANG path が揃うまで file backend へ自動 fallback します。
 
 ### スタティックルート
 
@@ -1051,7 +1051,7 @@ set security rate-limit per-user 20
 
 標準 backend は `transactional` です。FRR 側で `/etc/frr/daemons` の `mgmtd=yes` と、`arca-router` service user からの `vtysh` access（通常は `frrvty` group）が必要です。
 
-arca-router 標準の FRR daemon set は `bgpd`、`ospfd`、`zebra`、`staticd`、`mgmtd`、`vrrpd`、`bfdd` です。transactional backend は FRR の interface tree 配下にある `frr-vrrpd` YANG model を使って VRRP を適用します。BFD peer/profile、BGP/OSPF/OSPFv3 binding、static route BFD monitoring は `frr-bfdd` management operation mapping が実装されるまで `file` backend で適用します。`file` backend は full FRR config を書き出し、`frr-reload.py` で適用します。復旧・互換用途として保持しており、利用する場合は service user が `/etc/frr/frr.conf` に書き込むための追加権限が必要です。
+arca-router 標準の FRR daemon set は `bgpd`、`ospfd`、`ospf6d`、`zebra`、`staticd`、`mgmtd`、`vrrpd`、`bfdd` です。transactional backend は FRR の interface tree 配下にある `frr-vrrpd` YANG model で VRRP を適用し、`frr-bfdd` で explicit BFD peer/profile、`frr-staticd` で static route BFD monitoring、`frr-bgp` で profile なし BGP BFD、`frr-ospfd` で profile なし OSPF BFD を適用します。BGP/OSPF の BFD profile binding と OSPFv3 は、対応する FRR management YANG path が揃うまで file backend へ自動 fallback します。`file` backend は full FRR config を書き出し、`frr-reload.py` で適用します。復旧・互換用途として保持しており、明示的に利用する場合や自動 fallback 対象の機能を使う場合は、service user が `/etc/frr/frr.conf` に書き込むための追加権限が必要です。
 
 ### Prometheus と health
 
