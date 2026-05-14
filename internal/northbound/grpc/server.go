@@ -21,6 +21,7 @@ import (
 	"github.com/akam1o/arca-router/internal/store"
 	"github.com/akam1o/arca-router/pkg/cli"
 	pkgconfig "github.com/akam1o/arca-router/pkg/config"
+	pkgfrr "github.com/akam1o/arca-router/pkg/frr"
 	pkgvpp "github.com/akam1o/arca-router/pkg/vpp"
 	"github.com/google/uuid"
 	googlegrpc "google.golang.org/grpc"
@@ -637,7 +638,50 @@ func txQueueInfosFromVPP(queues []pkgvpp.InterfaceTxQueuePlacement) []InterfaceT
 
 // GetRoutes returns routing table entries.
 func (s *Server) GetRoutes(ctx context.Context, prefixFilter, protoFilter string) ([]RouteInfo, error) {
-	return nil, unsupportedOperationalStateError("route state")
+	var parsedPrefix string
+	families := []string{addressFamilyIPv4, addressFamilyIPv6}
+	if strings.TrimSpace(prefixFilter) != "" {
+		prefix, err := netip.ParsePrefix(strings.TrimSpace(prefixFilter))
+		if err != nil {
+			return nil, fmt.Errorf("invalid route prefix filter %q", prefixFilter)
+		}
+		parsedPrefix = prefix.String()
+		families = routeFamiliesForPrefix(prefix)
+	}
+
+	var routes []RouteInfo
+	for _, family := range families {
+		command := routeTextCommand(family) + " json"
+		output, err := runOperationalVtyshCommand(ctx, command)
+		if err != nil {
+			return nil, fmt.Errorf("%s: %w", command, err)
+		}
+		status, err := pkgfrr.ParseRouteStatusJSON([]byte(output))
+		if err != nil {
+			return nil, fmt.Errorf("%s: %w", command, err)
+		}
+		for _, route := range status.Routes {
+			info := routeInfoFromFRRRoute(route)
+			if parsedPrefix != "" && info.Prefix != parsedPrefix {
+				continue
+			}
+			if !routeProtocolFilterMatches(info.Protocol, protoFilter) {
+				continue
+			}
+			routes = append(routes, info)
+		}
+	}
+	sort.Slice(routes, func(i, j int) bool {
+		return routeInfoSortKey(routes[i]) < routeInfoSortKey(routes[j])
+	})
+	return routes, nil
+}
+
+func routeFamiliesForPrefix(prefix netip.Prefix) []string {
+	if prefix.Addr().Is6() {
+		return []string{addressFamilyIPv6}
+	}
+	return []string{addressFamilyIPv4}
 }
 
 // GetBGPNeighbors returns BGP neighbor state.
@@ -840,6 +884,41 @@ func routeTextCommand(addressFamily string) string {
 		return "show ipv6 route"
 	}
 	return "show ip route"
+}
+
+func routeInfoFromFRRRoute(route pkgfrr.RouteStatusEntry) RouteInfo {
+	return RouteInfo{
+		Prefix:    route.Prefix,
+		NextHop:   route.NextHop,
+		Protocol:  normalizeRouteProtocolName(route.Protocol),
+		Metric:    route.Metric,
+		Interface: route.Interface,
+		Active:    route.Active,
+	}
+}
+
+func routeProtocolFilterMatches(protocol, filter string) bool {
+	filter = normalizeRouteProtocolName(filter)
+	if filter == "" {
+		return true
+	}
+	return normalizeRouteProtocolName(protocol) == filter
+}
+
+func normalizeRouteProtocolName(protocol string) string {
+	protocol = strings.ToLower(strings.TrimSpace(protocol))
+	switch protocol {
+	case "connect", "direct", "directlyconnected":
+		return "connected"
+	case "ospfv3", "ospf3":
+		return "ospf6"
+	default:
+		return protocol
+	}
+}
+
+func routeInfoSortKey(route RouteInfo) string {
+	return route.Prefix + "\x00" + route.Protocol + "\x00" + route.NextHop + "\x00" + route.Interface
 }
 
 func routeProtocolForFamily(protocol, addressFamily string) (string, error) {

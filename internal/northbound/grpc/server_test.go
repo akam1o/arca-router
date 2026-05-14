@@ -346,6 +346,86 @@ func TestOperationalStateEndpointsReadVPPAndFRR(t *testing.T) {
 	}
 }
 
+func TestGetRoutesUsesFRRJSON(t *testing.T) {
+	srv := NewServer(engine.NewEngine(nil, testLogger()), &fakeStore{}, testLogger())
+	ctx := context.Background()
+
+	var commands []string
+	oldVtysh := runOperationalVtyshCommand
+	runOperationalVtyshCommand = func(ctx context.Context, command string) (string, error) {
+		commands = append(commands, command)
+		switch command {
+		case "show ip route json":
+			return `{
+				"10.0.0.0/24": [
+					{
+						"protocol": "bgp",
+						"metric": 20,
+						"selected": true,
+						"nexthops": [
+							{"ip": "192.0.2.1", "interfaceName": "ge0-0-0", "active": true}
+						]
+					}
+				],
+				"192.0.2.0/24": [
+					{"protocol": "connected", "selected": true, "interfaceName": "ge0-0-1"}
+				]
+			}`, nil
+		case "show ipv6 route json":
+			return `{
+				"2001:db8:100::/64": [
+					{
+						"protocol": "ospf6",
+						"selected": true,
+						"nexthops": [
+							{"ip": "2001:db8::2", "interfaceName": "ge0-0-2", "active": true}
+						]
+					}
+				]
+			}`, nil
+		default:
+			t.Fatalf("unexpected vtysh command %q", command)
+			return "", nil
+		}
+	}
+	t.Cleanup(func() { runOperationalVtyshCommand = oldVtysh })
+
+	routes, err := srv.GetRoutes(ctx, "", "")
+	if err != nil {
+		t.Fatalf("GetRoutes() error = %v", err)
+	}
+	if len(commands) != 2 || commands[0] != "show ip route json" || commands[1] != "show ipv6 route json" {
+		t.Fatalf("vtysh commands = %#v, want IPv4 and IPv6 route JSON", commands)
+	}
+	if len(routes) != 3 {
+		t.Fatalf("GetRoutes() returned %d routes, want 3", len(routes))
+	}
+	if got := routes[0]; got.Prefix != "10.0.0.0/24" || got.NextHop != "192.0.2.1" ||
+		got.Protocol != "bgp" || got.Metric != 20 || got.Interface != "ge0-0-0" || !got.Active {
+		t.Fatalf("GetRoutes()[0] = %#v, want parsed BGP route", got)
+	}
+
+	routes, err = srv.GetRoutes(ctx, "", "ospf3")
+	if err != nil {
+		t.Fatalf("GetRoutes(ospf3) error = %v", err)
+	}
+	if len(routes) != 1 || routes[0].Prefix != "2001:db8:100::/64" || routes[0].Protocol != "ospf6" {
+		t.Fatalf("GetRoutes(ospf3) = %#v, want IPv6 OSPF route", routes)
+	}
+
+	routes, err = srv.GetRoutes(ctx, "192.0.2.0/24", "")
+	if err != nil {
+		t.Fatalf("GetRoutes(prefix) error = %v", err)
+	}
+	if len(routes) != 1 || routes[0].Protocol != "connected" {
+		t.Fatalf("GetRoutes(prefix) = %#v, want connected route", routes)
+	}
+
+	if _, err := srv.GetRoutes(ctx, "not-a-prefix", ""); err == nil || !strings.Contains(err.Error(), "invalid route prefix filter") {
+		t.Fatalf("GetRoutes(invalid prefix) error = %v, want invalid prefix", err)
+	}
+}
+
 func TestGetInterfacesUsesManagedStateCollector(t *testing.T) {
 	srv := NewServer(engine.NewEngine(nil, testLogger()), &fakeStore{}, testLogger())
 	collector := &fakeInterfaceStateCollector{
