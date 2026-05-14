@@ -223,3 +223,87 @@ func TestMetricsEndpointExportsRouterMetrics(t *testing.T) {
 		}
 	}
 }
+
+func TestHAConvergenceIncludesConfiguredBFDStatus(t *testing.T) {
+	now := time.Unix(1700000500, 0)
+	cfg := testHAConvergenceConfig()
+	metrics := testConvergedHAMetrics(now)
+	metrics.FRRBFDLastRun = now
+	metrics.FRRBFDConfiguredPeers = 1
+	metrics.FRRBFDObservedPeers = 1
+	metrics.FRRBFDDownPeers = 1
+
+	applyHAConvergenceStatus(&metrics, cfg, true)
+
+	if !metrics.HAConfigured {
+		t.Fatal("HAConfigured = false, want true")
+	}
+	if metrics.HAConverged {
+		t.Fatal("HAConverged = true, want false when a configured BFD peer is down")
+	}
+	if !containsString(metrics.HAIssues, "FRR BFD status has down peers") {
+		t.Fatalf("HAIssues = %#v, want BFD down peer issue", metrics.HAIssues)
+	}
+}
+
+func TestHAConvergenceIgnoresUnconfiguredBFDStatus(t *testing.T) {
+	now := time.Unix(1700000500, 0)
+	cfg := testHAConvergenceConfig()
+	metrics := testConvergedHAMetrics(now)
+
+	applyHAConvergenceStatus(&metrics, cfg, true)
+
+	if !metrics.HAConfigured || !metrics.HAConverged {
+		t.Fatalf("HA status = configured %v converged %v issues %#v, want converged without configured BFD", metrics.HAConfigured, metrics.HAConverged, metrics.HAIssues)
+	}
+	if len(metrics.HAIssues) != 0 {
+		t.Fatalf("HAIssues = %#v, want none", metrics.HAIssues)
+	}
+}
+
+func testHAConvergenceConfig() *model.RouterConfig {
+	cfg := model.NewRouterConfig()
+	cfg.Chassis = &model.ChassisConfig{
+		Cluster: &model.ClusterConfig{
+			Enabled: true,
+			Nodes: map[string]*model.ClusterNode{
+				"node0": {Address: "192.0.2.10"},
+				"node1": {Address: "192.0.2.11"},
+			},
+			Sync: &model.ClusterSyncConfig{
+				Etcd: &model.EtcdSyncConfig{Endpoints: []string{"https://etcd1:2379"}},
+			},
+		},
+	}
+	cfg.Protocols = &model.ProtocolsConfig{
+		VRRP: &model.VRRPConfig{Groups: map[string]*model.VRRPGroup{
+			"10": {Interface: "ge-0/0/0", VirtualAddress: "192.0.2.1", Priority: 110, Preempt: true},
+		}},
+	}
+	return cfg
+}
+
+func testConvergedHAMetrics(now time.Time) routerMetrics {
+	return routerMetrics{
+		ClusterNodeCount:        2,
+		ClusterEtcdSync:         true,
+		ClusterSyncAligned:      true,
+		ConfigSyncEnabled:       true,
+		ConfigSyncHealthy:       true,
+		FRRVRRPLastRun:          now,
+		FRRVRRPConfiguredGroups: 1,
+		FRRVRRPObservedGroups:   1,
+		FRRVRRPActiveGroups:     1,
+		VPPLCPReconcileLastRun:  now,
+		VPPLCPPairs:             1,
+	}
+}
+
+func containsString(values []string, want string) bool {
+	for _, value := range values {
+		if value == want {
+			return true
+		}
+	}
+	return false
+}

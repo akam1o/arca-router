@@ -290,6 +290,22 @@ func applyHAConvergenceStatus(metrics *routerMetrics, cfg *model.RouterConfig, h
 	if len(metrics.FRRVRRPIssues) > 0 {
 		issues = append(issues, "FRR VRRP status found convergence issues")
 	}
+	if metrics.FRRBFDConfiguredPeers > 0 {
+		if metrics.FRRBFDLastRun.IsZero() {
+			issues = append(issues, "FRR BFD status has not run")
+		}
+		if metrics.FRRBFDError != "" {
+			issues = append(issues, "FRR BFD status check failed")
+		}
+		if metrics.FRRBFDObservedPeers < metrics.FRRBFDConfiguredPeers {
+			issues = append(issues, "FRR BFD status is missing configured peers")
+		} else if metrics.FRRBFDDownPeers > 0 || metrics.FRRBFDUpPeers < metrics.FRRBFDConfiguredPeers {
+			issues = append(issues, "FRR BFD status has down peers")
+		}
+		if len(metrics.FRRBFDIssues) > 0 {
+			issues = append(issues, "FRR BFD status found convergence issues")
+		}
+	}
 	if !hasVPP {
 		issues = append(issues, "VPP LCP reconciliation status is unavailable")
 	} else if metrics.VPPLCPReconcileLastRun.IsZero() {
@@ -446,7 +462,7 @@ func (s metricsSource) handleMetrics(w http.ResponseWriter, r *http.Request) {
 
 	writeMetricHelp(&b, "arca_router_ha_configured", "Whether control-plane HA is configured with chassis clustering and VRRP groups.")
 	writeMetricType(&b, "arca_router_ha_configured", "gauge")
-	writeMetricHelp(&b, "arca_router_ha_converged", "Whether configured control-plane HA has no detected config sync or VPP LCP convergence issues.")
+	writeMetricHelp(&b, "arca_router_ha_converged", "Whether configured control-plane HA has no detected config sync, FRR runtime, or VPP LCP convergence issues.")
 	writeMetricType(&b, "arca_router_ha_converged", "gauge")
 	writeMetricHelp(&b, "arca_router_ha_vrrp_groups", "Number of configured VRRP groups participating in control-plane HA.")
 	writeMetricType(&b, "arca_router_ha_vrrp_groups", "gauge")
