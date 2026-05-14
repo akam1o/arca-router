@@ -1072,6 +1072,9 @@ arca show interfaces
 arca show interfaces ge-0/0/0
 
 # Routing table
+arca show routes
+arca show routes protocol bgp
+arca show routes prefix 2001:db8::/64
 arca show route
 arca show route protocol bgp
 
@@ -1101,7 +1104,7 @@ arca show class-of-service
 arca show configuration
 ```
 
-`show interfaces` prints live managed VPP admin/oper status, bound QoS profile, packet counters, and RX/TX queue placement when available. Name filters use configured interface names such as `ge-0/0/0`. `show bgp neighbors` prints structured BGP neighbor state from the internal gRPC state API, while `show bgp summary` and `show bgp neighbor <ip>` retain raw FRR output. `show vrrp` prints FRR `show vrrp` output through arca-routerd for local HA inspection. `show lcp` prints the cached VPP LCP reconciliation state used by HA convergence checks. `show ha` prints the same HA convergence summary used by Web UI, Prometheus, and SNMP. `show class-of-service` prints running CoS intent and reports `intent-only` for scheduler/policer enforcement while VPP enforcement support is staged separately.
+`show interfaces` prints live managed VPP admin/oper status, bound QoS profile, packet counters, and RX/TX queue placement when available. Name filters use configured interface names such as `ge-0/0/0`. `show routes` prints structured IPv4/IPv6 route state from the internal gRPC state API and supports optional `prefix <cidr>` and `protocol <proto>` filters; `show route` retains raw FRR route output. `show bgp neighbors` prints structured BGP neighbor state from the internal gRPC state API, while `show bgp summary` and `show bgp neighbor <ip>` retain raw FRR output. `show vrrp` prints FRR `show vrrp` output through arca-routerd for local HA inspection. `show lcp` prints the cached VPP LCP reconciliation state used by HA convergence checks. `show ha` prints the same HA convergence summary used by Web UI, Prometheus, and SNMP. `show class-of-service` prints running CoS intent and reports `intent-only` for scheduler/policer enforcement while VPP enforcement support is staged separately.
 
 Interactive mode also supports `show history [N]` in configuration mode for commit history.
 

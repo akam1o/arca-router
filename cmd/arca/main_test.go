@@ -18,6 +18,9 @@ type fakeInteractiveClient struct {
 	routeText        string
 	routeProtocol    string
 	routeFamily      string
+	routePrefix      string
+	routeStateProto  string
+	routes           []grpcclient.RouteInfo
 	routingInstances []grpcclient.RoutingInstanceInfo
 	bgpNeighbors     []grpcclient.BGPNeighborInfo
 	bgpSummaryText   string
@@ -38,6 +41,7 @@ type fakeInteractiveClient struct {
 	discardCalls     int
 	releaseLockCalls int
 	commitCalls      int
+	routeCalls       int
 	bfdStatusCalls   int
 	routingCalls     int
 	bgpNeighborCalls int
@@ -104,7 +108,10 @@ func (f *fakeInteractiveClient) GetInterfaces(ctx context.Context, nameFilter st
 }
 
 func (f *fakeInteractiveClient) GetRoutes(ctx context.Context, prefixFilter, protoFilter string) ([]grpcclient.RouteInfo, error) {
-	return nil, nil
+	f.routeCalls++
+	f.routePrefix = prefixFilter
+	f.routeStateProto = protoFilter
+	return f.routes, nil
 }
 
 func (f *fakeInteractiveClient) GetRoutingInstances(ctx context.Context) ([]grpcclient.RoutingInstanceInfo, error) {
@@ -605,6 +612,33 @@ func TestCmdShowBGPNeighborsUsesStructuredState(t *testing.T) {
 	}
 }
 
+func TestCmdShowRoutesUsesStructuredState(t *testing.T) {
+	ctx := context.Background()
+	client := &fakeInteractiveClient{routes: []grpcclient.RouteInfo{
+		{Prefix: "2001:db8::/64", NextHop: "fe80::1", Protocol: "bgp", Metric: 20, Interface: "ge-0/0/0", Active: true},
+	}}
+	sh := &interactiveShell{
+		client:    client,
+		hostname:  "router",
+		mode:      modeOperational,
+		sessionID: "session-1",
+	}
+
+	err := sh.cmdShow(ctx, []string{"routes", "prefix", "2001:db8::/64", "protocol", "bgp"})
+	if err != nil {
+		t.Fatalf("cmdShow(routes) error = %v", err)
+	}
+	if client.routeCalls != 1 {
+		t.Fatalf("route calls = %d, want 1", client.routeCalls)
+	}
+	if client.routePrefix != "2001:db8::/64" || client.routeStateProto != "bgp" {
+		t.Fatalf("route filters = prefix %q proto %q, want prefix/proto", client.routePrefix, client.routeStateProto)
+	}
+	if client.routeFamily != "" || client.routeProtocol != "" {
+		t.Fatalf("raw route filters = family %q proto %q, want unused", client.routeFamily, client.routeProtocol)
+	}
+}
+
 func TestInterfaceQueueSummary(t *testing.T) {
 	got := interfaceQueueSummary(grpcclient.InterfaceInfo{
 		RxQueues: []grpcclient.InterfaceRxQueueInfo{
@@ -779,6 +813,20 @@ func TestOneShotShowBGPNeighborsReturnsSuccess(t *testing.T) {
 	}
 }
 
+func TestOneShotShowRoutesReturnsSuccess(t *testing.T) {
+	client := &fakeInteractiveClient{routes: []grpcclient.RouteInfo{{Prefix: "192.0.2.0/24", Protocol: "connected", Active: true}}}
+	code := oneShotShow(context.Background(), client, []string{"routes", "protocol", "connected"}, &cliFlags{})
+	if code != ExitSuccess {
+		t.Fatalf("oneShotShow(routes) = %d, want %d", code, ExitSuccess)
+	}
+	if client.routeCalls != 1 {
+		t.Fatalf("route calls = %d, want 1", client.routeCalls)
+	}
+	if client.routeStateProto != "connected" {
+		t.Fatalf("route protocol filter = %q, want connected", client.routeStateProto)
+	}
+}
+
 func TestRouteTextOptions(t *testing.T) {
 	tests := []struct {
 		name       string
@@ -811,6 +859,45 @@ func TestRouteTextOptions(t *testing.T) {
 			}
 			if gotProto != tt.wantProto || gotFamily != tt.wantFamily {
 				t.Fatalf("routeTextOptions(%v) = %q, %q; want %q, %q", tt.args, gotProto, gotFamily, tt.wantProto, tt.wantFamily)
+			}
+		})
+	}
+}
+
+func TestRouteStateOptions(t *testing.T) {
+	tests := []struct {
+		name       string
+		args       []string
+		wantPrefix string
+		wantProto  string
+		wantErr    bool
+	}{
+		{name: "default"},
+		{name: "prefix", args: []string{"prefix", "192.0.2.0/24"}, wantPrefix: "192.0.2.0/24"},
+		{name: "protocol", args: []string{"protocol", "ospf3"}, wantProto: "ospf3"},
+		{name: "prefix protocol", args: []string{"prefix", "2001:db8::/64", "protocol", "bgp"}, wantPrefix: "2001:db8::/64", wantProto: "bgp"},
+		{name: "protocol prefix", args: []string{"protocol", "connected", "prefix", "192.0.2.0/24"}, wantPrefix: "192.0.2.0/24", wantProto: "connected"},
+		{name: "unknown", args: []string{"inet6"}, wantErr: true},
+		{name: "missing prefix", args: []string{"prefix"}, wantErr: true},
+		{name: "duplicate prefix", args: []string{"prefix", "192.0.2.0/24", "prefix", "198.51.100.0/24"}, wantErr: true},
+		{name: "missing protocol", args: []string{"protocol"}, wantErr: true},
+		{name: "invalid protocol", args: []string{"protocol", "rip"}, wantErr: true},
+		{name: "duplicate protocol", args: []string{"protocol", "bgp", "protocol", "static"}, wantErr: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			gotPrefix, gotProto, err := routeStateOptions(tt.args)
+			if tt.wantErr {
+				if err == nil {
+					t.Fatalf("routeStateOptions(%v) error = nil, want error", tt.args)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("routeStateOptions(%v) error = %v", tt.args, err)
+			}
+			if gotPrefix != tt.wantPrefix || gotProto != tt.wantProto {
+				t.Fatalf("routeStateOptions(%v) = %q, %q; want %q, %q", tt.args, gotPrefix, gotProto, tt.wantPrefix, tt.wantProto)
 			}
 		})
 	}

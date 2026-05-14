@@ -94,6 +94,7 @@ Show subcommands:
   interfaces                  Show interface status
   interfaces <name>           Show specific interface details
   routing-instances [name]    Show routing-instance table mapping
+  routes [prefix <cidr>] [protocol <proto>] Show route status
   bgp neighbors               Show BGP neighbor status
   bgp summary                 Show raw BGP summary
   bgp neighbor <ip>           Show raw BGP neighbor details
@@ -222,6 +223,20 @@ func oneShotShow(ctx context.Context, client showClient, args []string, f *cliFl
 			return ExitOperationError
 		}
 		printRoutingInstances(filterRoutingInstances(instances, nameFilter))
+		return ExitSuccess
+
+	case "routes":
+		prefixFilter, protoFilter, err := routeStateOptions(args[1:])
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+			return ExitUsageError
+		}
+		routes, err := client.GetRoutes(ctx, prefixFilter, protoFilter)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+			return ExitOperationError
+		}
+		printRoutes(routes)
 		return ExitSuccess
 
 	case "bgp":
@@ -397,13 +412,13 @@ type interactiveClient interface {
 	ListHistory(context.Context, int, int) ([]grpcclient.CommitInfo, error)
 	AcquireLock(context.Context, string, string) error
 	ReleaseLock(context.Context, string) error
-	GetRoutes(context.Context, string, string) ([]grpcclient.RouteInfo, error)
 }
 
 type showClient interface {
 	GetRunning(context.Context) (string, uint64, error)
 	GetInterfaces(context.Context, string) ([]grpcclient.InterfaceInfo, error)
 	GetRoutingInstances(context.Context) ([]grpcclient.RoutingInstanceInfo, error)
+	GetRoutes(context.Context, string, string) ([]grpcclient.RouteInfo, error)
 	GetBGPNeighbors(context.Context) ([]grpcclient.BGPNeighborInfo, error)
 	GetRouteText(context.Context, string, string) (string, error)
 	GetBGPSummaryText(context.Context) (string, error)
@@ -724,6 +739,21 @@ func (sh *interactiveShell) cmdShow(ctx context.Context, args []string) error {
 			return err
 		}
 		printRoutingInstances(filterRoutingInstances(instances, nameFilter))
+		return nil
+
+	case "routes":
+		if sh.mode == modeConfiguration {
+			return fmt.Errorf("'show routes' not available in configuration mode")
+		}
+		prefixFilter, protoFilter, err := routeStateOptions(args[1:])
+		if err != nil {
+			return err
+		}
+		routes, err := sh.client.GetRoutes(ctx, prefixFilter, protoFilter)
+		if err != nil {
+			return err
+		}
+		printRoutes(routes)
 		return nil
 
 	case "bgp":
@@ -1072,6 +1102,7 @@ func (sh *interactiveShell) showHelp() {
 		fmt.Println("  show configuration            Show running configuration")
 		fmt.Println("  show interfaces [<name>]      Show interface status")
 		fmt.Println("  show routing-instances [name] Show routing-instance table mapping")
+		fmt.Println("  show routes [prefix <cidr>] [protocol <proto>] Show route status")
 		fmt.Println("  show bgp neighbors            Show BGP neighbor status")
 		fmt.Println("  show bgp summary              Show raw BGP summary")
 		fmt.Println("  show bgp neighbor <ip>        Show raw BGP neighbor details")
@@ -1246,6 +1277,33 @@ func formatRoutingInstanceList(values []string) string {
 		return "-"
 	}
 	return strings.Join(values, ",")
+}
+
+func printRoutes(routes []grpcclient.RouteInfo) {
+	if len(routes) == 0 {
+		fmt.Println("No routes found")
+		return
+	}
+	fmt.Printf("%-43s %-39s %-12s %-8s %-16s %-8s\n",
+		"Prefix", "Next hop", "Protocol", "Metric", "Interface", "Active")
+	fmt.Println(strings.Repeat("-", 131))
+	for _, route := range routes {
+		fmt.Printf("%-43s %-39s %-12s %-8d %-16s %-8s\n",
+			formatRouteValue(route.Prefix),
+			formatRouteValue(route.NextHop),
+			formatRouteValue(route.Protocol),
+			route.Metric,
+			formatRouteValue(route.Interface),
+			yesNo(route.Active),
+		)
+	}
+}
+
+func formatRouteValue(value string) string {
+	if value == "" {
+		return "-"
+	}
+	return value
 }
 
 func printBGPNeighbors(neighbors []grpcclient.BGPNeighborInfo) {
@@ -1574,6 +1632,37 @@ func routeTextOptions(args []string) (protocol, addressFamily string, err error)
 	return protocol, addressFamily, nil
 }
 
+func routeStateOptions(args []string) (prefix, protocol string, err error) {
+	for len(args) > 0 {
+		switch args[0] {
+		case "prefix":
+			if prefix != "" {
+				return "", "", fmt.Errorf("'show routes' accepts prefix only once")
+			}
+			if len(args) < 2 {
+				return "", "", fmt.Errorf("'show routes prefix' requires a CIDR prefix")
+			}
+			prefix = args[1]
+			args = args[2:]
+		case "protocol":
+			if protocol != "" {
+				return "", "", fmt.Errorf("'show routes' accepts protocol only once")
+			}
+			if len(args) < 2 {
+				return "", "", fmt.Errorf("'show routes protocol' requires a protocol name")
+			}
+			protocol = args[1]
+			if !validRouteStateProtocol(protocol) {
+				return "", "", fmt.Errorf("invalid protocol '%s'. Valid: %s", protocol, validRouteStateProtocolList())
+			}
+			args = args[2:]
+		default:
+			return "", "", fmt.Errorf("'show routes' accepts '[prefix <cidr>] [protocol <proto>]'")
+		}
+	}
+	return prefix, protocol, nil
+}
+
 func bfdTextOptions(args []string) (peerAddress string, brief bool, counters bool, err error) {
 	if len(args) == 0 {
 		return "", false, false, nil
@@ -1678,6 +1767,14 @@ func validRouteProtocolList(addressFamily string) string {
 		return "bgp, ospf3, ospf6, static, connected, kernel"
 	}
 	return "bgp, ospf, static, connected, kernel"
+}
+
+func validRouteStateProtocol(protocol string) bool {
+	return validIPv4RouteProtocols[protocol] || validIPv6RouteProtocols[protocol]
+}
+
+func validRouteStateProtocolList() string {
+	return "bgp, ospf, ospf3, ospf6, static, connected, kernel"
 }
 
 // --- Utilities ---
