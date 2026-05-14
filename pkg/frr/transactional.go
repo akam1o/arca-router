@@ -139,6 +139,9 @@ func BuildMgmtOperations(cfg *Config) ([]MgmtOperation, error) {
 	if cfg.OSPF3 != nil {
 		return nil, NewInvalidConfigError("OSPFv3 is not supported by the transactional FRR backend because FRR does not expose core ospf6d YANG paths")
 	}
+	if err := validateTransactionalBGP(cfg); err != nil {
+		return nil, err
+	}
 	if err := validateTransactionalBFDProtocolBindings(cfg); err != nil {
 		return nil, err
 	}
@@ -187,6 +190,38 @@ func BuildMgmtOperations(cfg *Config) ([]MgmtOperation, error) {
 	}
 	ops = append(ops, vrrpOps...)
 	return ops, nil
+}
+
+func validateTransactionalBGP(cfg *Config) error {
+	if cfg == nil || cfg.BGP == nil {
+		return nil
+	}
+	if cfg.BGP.ASN == 0 {
+		return NewInvalidConfigError("BGP ASN is required")
+	}
+	if cfg.BGP.RouterID != "" {
+		routerID := net.ParseIP(cfg.BGP.RouterID)
+		if routerID == nil || routerID.To4() == nil {
+			return NewInvalidConfigError(fmt.Sprintf("invalid BGP router-id: %s", cfg.BGP.RouterID))
+		}
+	}
+	for _, neighbor := range cfg.BGP.Neighbors {
+		if strings.TrimSpace(neighbor.IP) == "" {
+			return NewInvalidConfigError("BGP neighbor IP is required")
+		}
+		peerIP := net.ParseIP(neighbor.IP)
+		if peerIP == nil {
+			return NewInvalidConfigError(fmt.Sprintf("invalid BGP neighbor IP: %s", neighbor.IP))
+		}
+		if neighbor.RemoteAS == 0 {
+			return NewInvalidConfigError(fmt.Sprintf("BGP neighbor %s: remote-as is required", neighbor.IP))
+		}
+		isIPv6 := peerIP.To4() == nil
+		if isIPv6 != neighbor.IsIPv6 {
+			return NewInvalidConfigError(fmt.Sprintf("BGP neighbor %s address family does not match configured address family", neighbor.IP))
+		}
+	}
+	return nil
 }
 
 func validateTransactionalBFDProtocolBindings(cfg *Config) error {
