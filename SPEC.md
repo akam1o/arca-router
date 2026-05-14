@@ -1039,6 +1039,8 @@ The internal Unix socket gRPC API includes `TelemetryService.SubscribeTelemetry`
 
 Supported paths are `/system`, `/config/running`, `/interfaces`, `/routes`, `/routing/bgp/neighbors`, `/routing/ospf/neighbors`, `/routing/ospf3/neighbors`, `/routing-instances`, `/class-of-service`, `/bfd`, `/lcp`, and `/ha`. The server writes events synchronously to the gRPC stream, so gRPC flow control provides the backpressure boundary and the daemon does not keep unbounded per-subscriber event buffers.
 
+Local operators can inspect the same stream with `arca show telemetry path /system path /interfaces`; the CLI prints one JSON envelope per line. `interval <duration>` and `count <events>` request a sampled stream for a bounded number of events, for example `arca show telemetry path /routes interval 5s count 3`.
+
 ### Web UI
 
 Start the Web UI with:

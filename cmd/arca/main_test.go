@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"errors"
+	"io"
 	"strings"
 	"testing"
 	"time"
@@ -37,6 +38,7 @@ type fakeInteractiveClient struct {
 	lcpInfo          *grpcclient.LCPReconciliationInfo
 	haInfo           *grpcclient.HAStatusInfo
 	cosInfo          *grpcclient.ClassOfServiceInfo
+	telemetryEvents  []*grpcclient.TelemetryEvent
 
 	acquireLockCalls  int
 	discardCalls      int
@@ -49,8 +51,12 @@ type fakeInteractiveClient struct {
 	ospfNeighborCalls int
 	listHistoryCalls  int
 	rollbackCalls     int
+	telemetryCalls    int
 	validateCalls     int
 	editTexts         []string
+	telemetryPaths    []string
+	telemetryInterval time.Duration
+	telemetryOnce     bool
 }
 
 func (f *fakeInteractiveClient) GetRunning(ctx context.Context) (string, uint64, error) {
@@ -207,6 +213,27 @@ func (f *fakeInteractiveClient) GetClassOfService(ctx context.Context) (*grpccli
 		return f.cosInfo, nil
 	}
 	return &grpcclient.ClassOfServiceInfo{}, nil
+}
+
+func (f *fakeInteractiveClient) SubscribeTelemetry(ctx context.Context, paths []string, sampleInterval time.Duration, once bool) (grpcclient.TelemetryReceiver, error) {
+	f.telemetryCalls++
+	f.telemetryPaths = append([]string(nil), paths...)
+	f.telemetryInterval = sampleInterval
+	f.telemetryOnce = once
+	return &fakeTelemetryStream{events: append([]*grpcclient.TelemetryEvent(nil), f.telemetryEvents...)}, nil
+}
+
+type fakeTelemetryStream struct {
+	events []*grpcclient.TelemetryEvent
+}
+
+func (s *fakeTelemetryStream) Recv() (*grpcclient.TelemetryEvent, error) {
+	if len(s.events) == 0 {
+		return nil, io.EOF
+	}
+	event := s.events[0]
+	s.events = s.events[1:]
+	return event, nil
 }
 
 func TestCmdConfigureRequiresSession(t *testing.T) {
@@ -844,6 +871,56 @@ func TestOneShotShowRoutesReturnsSuccess(t *testing.T) {
 	}
 	if client.routeStateProto != "connected" {
 		t.Fatalf("route protocol filter = %q, want connected", client.routeStateProto)
+	}
+}
+
+func TestOneShotShowTelemetryReturnsSuccess(t *testing.T) {
+	client := &fakeInteractiveClient{telemetryEvents: []*grpcclient.TelemetryEvent{
+		{
+			Sequence:      1,
+			Timestamp:     time.Unix(100, 0).UTC(),
+			Path:          "/system",
+			EventType:     "snapshot",
+			Encoding:      "json",
+			SchemaVersion: "arca.telemetry.v1",
+			JSONPayload:   `{"hostname":"router1"}`,
+		},
+	}}
+	code := oneShotShow(context.Background(), client, []string{"telemetry", "path", "/system"}, &cliFlags{})
+	if code != ExitSuccess {
+		t.Fatalf("oneShotShow(telemetry) = %d, want %d", code, ExitSuccess)
+	}
+	if client.telemetryCalls != 1 {
+		t.Fatalf("telemetry calls = %d, want 1", client.telemetryCalls)
+	}
+	if len(client.telemetryPaths) != 1 || client.telemetryPaths[0] != "/system" {
+		t.Fatalf("telemetry paths = %#v, want /system", client.telemetryPaths)
+	}
+	if !client.telemetryOnce {
+		t.Fatal("telemetry once = false, want true")
+	}
+}
+
+func TestTelemetryOptions(t *testing.T) {
+	opts, err := telemetryOptions([]string{"path", "/system", "path", "/routes", "interval", "5s", "count", "3"})
+	if err != nil {
+		t.Fatalf("telemetryOptions() error = %v", err)
+	}
+	if len(opts.paths) != 2 || opts.paths[0] != "/system" || opts.paths[1] != "/routes" {
+		t.Fatalf("paths = %#v, want /system and /routes", opts.paths)
+	}
+	if opts.interval != 5*time.Second {
+		t.Fatalf("interval = %v, want 5s", opts.interval)
+	}
+	if opts.once || opts.count != 3 {
+		t.Fatalf("once/count = %v/%d, want false/3", opts.once, opts.count)
+	}
+
+	if _, err := telemetryOptions([]string{"interval"}); !isTelemetryUsageError(err) {
+		t.Fatalf("telemetryOptions(interval) error = %v, want usage error", err)
+	}
+	if _, err := telemetryOptions([]string{"count", "0"}); !isTelemetryUsageError(err) {
+		t.Fatalf("telemetryOptions(count 0) error = %v, want usage error", err)
 	}
 }
 

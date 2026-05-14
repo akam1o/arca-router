@@ -247,6 +247,7 @@ arca show bfd counters
 arca show lcp
 arca show ha
 arca show class-of-service
+arca show telemetry path /system path /interfaces
 
 # Check VPP/FRR directly (optional)
 sudo vppctl show interface

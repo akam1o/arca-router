@@ -6,8 +6,11 @@ package main
 import (
 	"bufio"
 	"context"
+	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
+	"io"
 	"os"
 	"os/signal"
 	"strconv"
@@ -32,6 +35,8 @@ const (
 
 	defaultSocket = "/run/arca-router/routerd.sock"
 )
+
+var errTelemetryUsage = errors.New("telemetry usage error")
 
 type cliFlags struct {
 	grpcSocket  string
@@ -104,6 +109,8 @@ Show subcommands:
   bfd status                  Show BFD operational state
   bfd [brief|counters]        Show raw BFD status
   bfd peer <ip> [counters]    Show BFD peer details
+  telemetry [path <path>]... [interval <duration>] [count <events>]
+                              Show telemetry events as JSON lines
   route [inet|inet6]                 Show routing table
   route [inet|inet6] protocol <proto> Show routes by protocol
 
@@ -367,6 +374,16 @@ func oneShotShow(ctx context.Context, client showClient, args []string, f *cliFl
 		printClassOfService(info)
 		return ExitSuccess
 
+	case "telemetry":
+		if err := showTelemetry(ctx, client, args[1:]); err != nil {
+			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+			if isTelemetryUsageError(err) {
+				return ExitUsageError
+			}
+			return ExitOperationError
+		}
+		return ExitSuccess
+
 	case "route":
 		protoFilter, addressFamily, err := routeTextOptions(args[1:])
 		if err != nil {
@@ -431,6 +448,7 @@ type showClient interface {
 	GetLCPReconciliation(context.Context) (*grpcclient.LCPReconciliationInfo, error)
 	GetHAStatus(context.Context) (*grpcclient.HAStatusInfo, error)
 	GetClassOfService(context.Context) (*grpcclient.ClassOfServiceInfo, error)
+	SubscribeTelemetry(context.Context, []string, time.Duration, bool) (grpcclient.TelemetryReceiver, error)
 }
 
 type cliMode int
@@ -888,6 +906,12 @@ func (sh *interactiveShell) cmdShow(ctx context.Context, args []string) error {
 		printClassOfService(info)
 		return nil
 
+	case "telemetry":
+		if sh.mode == modeConfiguration {
+			return fmt.Errorf("'show telemetry' not available in configuration mode")
+		}
+		return showTelemetry(ctx, sh.client, args[1:])
+
 	case "route":
 		if sh.mode == modeConfiguration {
 			return fmt.Errorf("'show route' not available in configuration mode")
@@ -1113,6 +1137,8 @@ func (sh *interactiveShell) showHelp() {
 		fmt.Println("  show bfd status               Show BFD operational state")
 		fmt.Println("  show bfd [brief|counters]     Show raw BFD status")
 		fmt.Println("  show bfd peer <ip> [counters] Show BFD peer details")
+		fmt.Println("  show telemetry [path <path>]... [interval <duration>] [count <events>]")
+		fmt.Println("                                Show telemetry events as JSON lines")
 		fmt.Println("  show lcp                      Show VPP LCP reconciliation status")
 		fmt.Println("  show ha                       Show HA convergence status")
 		fmt.Println("  show class-of-service         Show class-of-service intent")
@@ -1648,6 +1674,138 @@ func printCommandOutput(output string) {
 	if output != "" && !strings.HasSuffix(output, "\n") {
 		fmt.Println()
 	}
+}
+
+type telemetryCLIOptions struct {
+	paths    []string
+	interval time.Duration
+	once     bool
+	count    int
+}
+
+type telemetryOutputEvent struct {
+	Sequence      uint64          `json:"sequence"`
+	Timestamp     string          `json:"timestamp,omitempty"`
+	Path          string          `json:"path"`
+	EventType     string          `json:"event_type"`
+	Encoding      string          `json:"encoding"`
+	SchemaVersion string          `json:"schema_version"`
+	Payload       json.RawMessage `json:"payload"`
+}
+
+func showTelemetry(ctx context.Context, client showClient, args []string) error {
+	opts, err := telemetryOptions(args)
+	if err != nil {
+		return err
+	}
+	streamCtx, cancel := context.WithCancel(ctx)
+	defer cancel()
+
+	stream, err := client.SubscribeTelemetry(streamCtx, opts.paths, opts.interval, opts.once)
+	if err != nil {
+		return err
+	}
+	events := 0
+	for {
+		event, err := stream.Recv()
+		if err == io.EOF {
+			return nil
+		}
+		if err != nil {
+			return err
+		}
+		if err := printTelemetryEvent(event); err != nil {
+			return err
+		}
+		events++
+		if opts.count > 0 && events >= opts.count {
+			return nil
+		}
+	}
+}
+
+func telemetryOptions(args []string) (telemetryCLIOptions, error) {
+	opts := telemetryCLIOptions{once: true}
+	for len(args) > 0 {
+		switch args[0] {
+		case "path":
+			if len(args) < 2 {
+				return opts, telemetryUsageError("'show telemetry path' requires a path")
+			}
+			opts.paths = append(opts.paths, args[1])
+			args = args[2:]
+		case "interval":
+			if len(args) < 2 {
+				return opts, telemetryUsageError("'show telemetry interval' requires a duration such as 5s")
+			}
+			interval, err := time.ParseDuration(args[1])
+			if err != nil || interval <= 0 {
+				return opts, telemetryUsageError("invalid telemetry interval %q", args[1])
+			}
+			opts.interval = interval
+			args = args[2:]
+		case "count":
+			if len(args) < 2 {
+				return opts, telemetryUsageError("'show telemetry count' requires a positive event count")
+			}
+			count, err := strconv.Atoi(args[1])
+			if err != nil || count <= 0 {
+				return opts, telemetryUsageError("invalid telemetry event count %q", args[1])
+			}
+			opts.count = count
+			opts.once = false
+			args = args[2:]
+		case "once":
+			opts.once = true
+			opts.count = 0
+			args = args[1:]
+		default:
+			opts.paths = append(opts.paths, args[0])
+			args = args[1:]
+		}
+	}
+	return opts, nil
+}
+
+func telemetryUsageError(format string, args ...interface{}) error {
+	return fmt.Errorf("%w: %s", errTelemetryUsage, fmt.Sprintf(format, args...))
+}
+
+func isTelemetryUsageError(err error) bool {
+	return errors.Is(err, errTelemetryUsage)
+}
+
+func printTelemetryEvent(event *grpcclient.TelemetryEvent) error {
+	if event == nil {
+		return nil
+	}
+	payload := json.RawMessage(event.JSONPayload)
+	if len(payload) == 0 {
+		payload = json.RawMessage("null")
+	} else if !json.Valid(payload) {
+		encoded, err := json.Marshal(event.JSONPayload)
+		if err != nil {
+			return err
+		}
+		payload = json.RawMessage(encoded)
+	}
+
+	timestamp := ""
+	if !event.Timestamp.IsZero() {
+		timestamp = event.Timestamp.UTC().Format(time.RFC3339Nano)
+	}
+	output := telemetryOutputEvent{
+		Sequence:      event.Sequence,
+		Timestamp:     timestamp,
+		Path:          event.Path,
+		EventType:     event.EventType,
+		Encoding:      event.Encoding,
+		SchemaVersion: event.SchemaVersion,
+		Payload:       payload,
+	}
+	encoder := json.NewEncoder(os.Stdout)
+	encoder.SetEscapeHTML(false)
+	return encoder.Encode(output)
 }
 
 func routeTextOptions(args []string) (protocol, addressFamily string, err error) {
