@@ -32,11 +32,16 @@ func (s fakeConfigSyncRuntimeSource) ConfigSyncStatus() configSyncStatus {
 }
 
 type fakeFRRVRRPSource struct {
-	status sbfrr.VRRPOperationalStatus
+	vrrpStatus sbfrr.VRRPOperationalStatus
+	bfdStatus  sbfrr.BFDOperationalStatus
 }
 
 func (s fakeFRRVRRPSource) VRRPOperationalStatus() sbfrr.VRRPOperationalStatus {
-	return s.status
+	return s.vrrpStatus
+}
+
+func (s fakeFRRVRRPSource) BFDOperationalStatus() sbfrr.BFDOperationalStatus {
+	return s.bfdStatus
 }
 
 func TestEffectiveMetricsListenUsesFlagOverride(t *testing.T) {
@@ -141,12 +146,22 @@ func TestMetricsEndpointExportsRouterMetrics(t *testing.T) {
 			LastCheck:       time.Unix(1700000100, 0),
 			LastApply:       time.Unix(1700000200, 0),
 		}},
-		frr: fakeFRRVRRPSource{status: sbfrr.VRRPOperationalStatus{
-			LastRun:          time.Unix(1700000300, 0),
-			ConfiguredGroups: 1,
-			ObservedGroups:   1,
-			ActiveGroups:     1,
-		}},
+		frr: fakeFRRVRRPSource{
+			vrrpStatus: sbfrr.VRRPOperationalStatus{
+				LastRun:          time.Unix(1700000300, 0),
+				ConfiguredGroups: 1,
+				ObservedGroups:   1,
+				ActiveGroups:     1,
+			},
+			bfdStatus: sbfrr.BFDOperationalStatus{
+				LastRun:           time.Unix(1700000400, 0),
+				ConfiguredPeers:   1,
+				ObservedPeers:     1,
+				UpPeers:           1,
+				SessionDownEvents: 2,
+				RxFailPackets:     1,
+			},
+		},
 		vpp: fakeVPPReconciliationSource{status: sbvpp.LCPReconciliationStatus{
 			LastRun:         time.Unix(1700000000, 0),
 			PairCount:       2,
@@ -183,6 +198,15 @@ func TestMetricsEndpointExportsRouterMetrics(t *testing.T) {
 		"arca_router_frr_vrrp_issues 0",
 		"arca_router_frr_vrrp_error 0",
 		"arca_router_frr_vrrp_last_check_timestamp_seconds 1700000300",
+		"arca_router_frr_bfd_configured_peers 1",
+		"arca_router_frr_bfd_observed_peers 1",
+		"arca_router_frr_bfd_up_peers 1",
+		"arca_router_frr_bfd_down_peers 0",
+		"arca_router_frr_bfd_session_down_events 2",
+		"arca_router_frr_bfd_rx_fail_packets 1",
+		"arca_router_frr_bfd_issues 0",
+		"arca_router_frr_bfd_error 0",
+		"arca_router_frr_bfd_last_check_timestamp_seconds 1700000400",
 		"arca_router_vpp_lcp_pairs 2",
 		"arca_router_vpp_lcp_inconsistencies 1",
 		"arca_router_vpp_lcp_reconcile_error 0",

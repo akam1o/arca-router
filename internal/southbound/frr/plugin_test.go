@@ -408,6 +408,68 @@ func TestCheckVRRPOperationalStatusRecordsReaderError(t *testing.T) {
 	}
 }
 
+func TestCheckBFDOperationalStatusReportsMissingPeer(t *testing.T) {
+	plugin := NewFRRPlugin(testLogger())
+	plugin.bfdStatusReader = fakeBFDStatusReader{status: &pkgfrr.BFDStatus{}}
+
+	status := plugin.checkBFDOperationalStatus(context.Background(), &pkgfrr.Config{
+		BFD: &pkgfrr.BFDConfig{Peers: []pkgfrr.BFDPeer{
+			{Address: "192.0.2.2", LocalAddress: "192.0.2.1", Interface: "ge0-0-0"},
+		}},
+	})
+	if status.ConfiguredPeers != 1 || status.ObservedPeers != 0 || status.UpPeers != 0 ||
+		len(status.Issues) != 1 || status.LastError != "" {
+		t.Fatalf("checkBFDOperationalStatus() = %#v, want one missing peer issue", status)
+	}
+	if len(status.Peers) != 1 || status.Peers[0].Status != "missing" || status.Peers[0].Observed || status.Peers[0].Up {
+		t.Fatalf("checkBFDOperationalStatus().Peers = %#v, want missing peer detail", status.Peers)
+	}
+}
+
+func TestCheckBFDOperationalStatusReportsDownPeerAndCounters(t *testing.T) {
+	plugin := NewFRRPlugin(testLogger())
+	plugin.bfdStatusReader = fakeBFDStatusReader{status: &pkgfrr.BFDStatus{
+		Peers: []pkgfrr.BFDPeerStatus{
+			{
+				Peer:              "192.0.2.2",
+				Status:            "down",
+				SessionDownEvents: 2,
+				RxFailPackets:     1,
+			},
+		},
+	}}
+
+	status := plugin.checkBFDOperationalStatus(context.Background(), &pkgfrr.Config{
+		BGP: &pkgfrr.BGPConfig{Neighbors: []pkgfrr.BGPNeighbor{
+			{IP: "192.0.2.2", RemoteAS: 65001, BFD: true},
+		}},
+	})
+	if status.ConfiguredPeers != 1 || status.ObservedPeers != 1 || status.UpPeers != 0 ||
+		status.DownPeers != 1 || status.SessionDownEvents != 2 || status.RxFailPackets != 1 ||
+		len(status.Issues) != 1 {
+		t.Fatalf("checkBFDOperationalStatus() = %#v, want down peer and counters", status)
+	}
+}
+
+func TestCheckBFDOperationalStatusConverged(t *testing.T) {
+	plugin := NewFRRPlugin(testLogger())
+	plugin.bfdStatusReader = fakeBFDStatusReader{status: &pkgfrr.BFDStatus{
+		Peers: []pkgfrr.BFDPeerStatus{
+			{Peer: "2001:db8::2", LocalAddress: "2001:db8::1", Status: "up", SessionDownEvents: 1},
+		},
+	}}
+
+	status := plugin.checkBFDOperationalStatus(context.Background(), &pkgfrr.Config{
+		StaticRoutes: []pkgfrr.StaticRoute{
+			{Prefix: "2001:db8:100::/64", NextHop: "2001:db8::2", BFD: true, BFDSource: "2001:db8::1"},
+		},
+	})
+	if status.ConfiguredPeers != 1 || status.ObservedPeers != 1 || status.UpPeers != 1 ||
+		status.DownPeers != 0 || len(status.Issues) != 0 || status.SessionDownEvents != 1 {
+		t.Fatalf("checkBFDOperationalStatus() = %#v, want converged peer", status)
+	}
+}
+
 type recordingApplier struct {
 	configContent string
 	cfg           *pkgfrr.Config
@@ -430,6 +492,21 @@ func (r fakeVRRPStatusReader) ReadVRRPStatus(ctx context.Context) (*pkgfrr.VRRPS
 	}
 	if r.status == nil {
 		return &pkgfrr.VRRPStatus{}, nil
+	}
+	return r.status, nil
+}
+
+type fakeBFDStatusReader struct {
+	status *pkgfrr.BFDStatus
+	err    error
+}
+
+func (r fakeBFDStatusReader) ReadBFDStatus(ctx context.Context) (*pkgfrr.BFDStatus, error) {
+	if r.err != nil {
+		return nil, r.err
+	}
+	if r.status == nil {
+		return &pkgfrr.BFDStatus{}, nil
 	}
 	return r.status, nil
 }

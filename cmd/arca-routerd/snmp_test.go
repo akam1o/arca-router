@@ -144,12 +144,22 @@ func TestSNMPEndpointExportsRouterMetrics(t *testing.T) {
 			LastCheck:       time.Unix(1700000100, 0),
 			LastApply:       time.Unix(1700000200, 0),
 		}},
-		frr: fakeFRRVRRPSource{status: sbfrr.VRRPOperationalStatus{
-			LastRun:          time.Unix(1700000300, 0),
-			ConfiguredGroups: 1,
-			ObservedGroups:   1,
-			ActiveGroups:     1,
-		}},
+		frr: fakeFRRVRRPSource{
+			vrrpStatus: sbfrr.VRRPOperationalStatus{
+				LastRun:          time.Unix(1700000300, 0),
+				ConfiguredGroups: 1,
+				ObservedGroups:   1,
+				ActiveGroups:     1,
+			},
+			bfdStatus: sbfrr.BFDOperationalStatus{
+				LastRun:           time.Unix(1700000400, 0),
+				ConfiguredPeers:   1,
+				ObservedPeers:     1,
+				UpPeers:           1,
+				SessionDownEvents: 2,
+				RxFailPackets:     1,
+			},
+		},
 		vpp: fakeVPPReconciliationSource{status: sbvpp.LCPReconciliationStatus{
 			LastRun:   time.Unix(1700000000, 0),
 			PairCount: 2,
@@ -223,12 +233,21 @@ func TestSNMPEndpointExportsRouterMetrics(t *testing.T) {
 		snmpOIDCoSProfiles,
 		snmpOIDCoSBindings,
 		snmpOIDCoSIntentOnly,
+		snmpOIDFRRBFDConfigured,
+		snmpOIDFRRBFDObserved,
+		snmpOIDFRRBFDUp,
+		snmpOIDFRRBFDDownPeers,
+		snmpOIDFRRBFDSessionDown,
+		snmpOIDFRRBFDRxFail,
+		snmpOIDFRRBFDIssues,
+		snmpOIDFRRBFDError,
+		snmpOIDFRRBFDLastRun,
 	})
 	if err != nil {
 		t.Fatalf("SNMP Get() error = %v", err)
 	}
-	if len(packet.Variables) != 22 {
-		t.Fatalf("SNMP variables = %d, want 22", len(packet.Variables))
+	if len(packet.Variables) != 31 {
+		t.Fatalf("SNMP variables = %d, want 31", len(packet.Variables))
 	}
 	if got := snmpUintValue(t, packet.Variables[0].Value); got != 42 {
 		t.Fatalf("%s = %d, want 42", snmpOIDConfigVersion, got)
@@ -295,6 +314,33 @@ func TestSNMPEndpointExportsRouterMetrics(t *testing.T) {
 	}
 	if got := snmpUintValue(t, packet.Variables[21].Value); got != 1 {
 		t.Fatalf("%s = %d, want 1", snmpOIDCoSIntentOnly, got)
+	}
+	if got := snmpUintValue(t, packet.Variables[22].Value); got != 1 {
+		t.Fatalf("%s = %d, want 1", snmpOIDFRRBFDConfigured, got)
+	}
+	if got := snmpUintValue(t, packet.Variables[23].Value); got != 1 {
+		t.Fatalf("%s = %d, want 1", snmpOIDFRRBFDObserved, got)
+	}
+	if got := snmpUintValue(t, packet.Variables[24].Value); got != 1 {
+		t.Fatalf("%s = %d, want 1", snmpOIDFRRBFDUp, got)
+	}
+	if got := snmpUintValue(t, packet.Variables[25].Value); got != 0 {
+		t.Fatalf("%s = %d, want 0", snmpOIDFRRBFDDownPeers, got)
+	}
+	if got := snmpUintValue(t, packet.Variables[26].Value); got != 2 {
+		t.Fatalf("%s = %d, want 2", snmpOIDFRRBFDSessionDown, got)
+	}
+	if got := snmpUintValue(t, packet.Variables[27].Value); got != 1 {
+		t.Fatalf("%s = %d, want 1", snmpOIDFRRBFDRxFail, got)
+	}
+	if got := snmpUintValue(t, packet.Variables[28].Value); got != 0 {
+		t.Fatalf("%s = %d, want 0", snmpOIDFRRBFDIssues, got)
+	}
+	if got := snmpUintValue(t, packet.Variables[29].Value); got != 0 {
+		t.Fatalf("%s = %d, want 0", snmpOIDFRRBFDError, got)
+	}
+	if got := snmpUintValue(t, packet.Variables[30].Value); got != 1700000400 {
+		t.Fatalf("%s = %d, want 1700000400", snmpOIDFRRBFDLastRun, got)
 	}
 }
 
