@@ -112,6 +112,54 @@ func TestBuildMgmtOperationsIPv6RouteMapPrefixList(t *testing.T) {
 	}
 }
 
+func TestBuildMgmtOperationsAggregatesRouteMapPrefixLists(t *testing.T) {
+	ops, err := BuildMgmtOperations(&Config{
+		PrefixLists: []PrefixList{
+			{
+				Name: "V4-A",
+				Entries: []PrefixListEntry{
+					{Seq: 10, Action: "permit", Prefix: "192.0.2.0/24"},
+				},
+			},
+			{
+				Name: "V4-B",
+				Entries: []PrefixListEntry{
+					{Seq: 10, Action: "permit", Prefix: "198.51.100.0/24"},
+				},
+			},
+		},
+		RouteMaps: []RouteMap{
+			{
+				Name: "IMPORT",
+				Entries: []RouteMapEntry{
+					{Seq: 10, Action: "permit", MatchPrefixLists: []string{"V4-A", "V4-B"}},
+				},
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("BuildMgmtOperations() error = %v", err)
+	}
+	commands := commandsFromOps(ops)
+	for _, want := range []string{
+		"mgmt set-config /frr-filter:lib/prefix-list[type='ipv4'][name='ARCA-IMPORT-10-V4']/entry[sequence='10']/ipv4-prefix 192.0.2.0/24",
+		"mgmt set-config /frr-filter:lib/prefix-list[type='ipv4'][name='ARCA-IMPORT-10-V4']/entry[sequence='20']/ipv4-prefix 198.51.100.0/24",
+		"mgmt set-config /frr-route-map:lib/route-map[name='IMPORT']/entry[sequence='10']/match-condition[condition='frr-route-map:ipv4-prefix-list']/rmap-match-condition/list-name ARCA-IMPORT-10-V4",
+	} {
+		if !strings.Contains(commands, want) {
+			t.Fatalf("commands missing %q:\n%s", want, commands)
+		}
+	}
+	for _, unexpected := range []string{
+		"mgmt set-config /frr-route-map:lib/route-map[name='IMPORT']/entry[sequence='10']/match-condition[condition='frr-route-map:ipv4-prefix-list']/rmap-match-condition/list-name V4-A",
+		"mgmt set-config /frr-route-map:lib/route-map[name='IMPORT']/entry[sequence='10']/match-condition[condition='frr-route-map:ipv4-prefix-list']/rmap-match-condition/list-name V4-B",
+	} {
+		if strings.Contains(commands, unexpected) {
+			t.Fatalf("commands retained unaggregated match %q:\n%s", unexpected, commands)
+		}
+	}
+}
+
 func TestBuildMgmtOperationsVRFVPN(t *testing.T) {
 	ops, err := BuildMgmtOperations(&Config{
 		VRFs: []VRFConfig{

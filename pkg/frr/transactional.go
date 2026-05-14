@@ -142,6 +142,10 @@ func BuildMgmtOperations(cfg *Config) ([]MgmtOperation, error) {
 	if err := validateTransactionalBFDProtocolBindings(cfg); err != nil {
 		return nil, err
 	}
+	prefixLists, routeMaps, err := aggregateRouteMapPrefixListMatches(cfg.PrefixLists, cfg.RouteMaps)
+	if err != nil {
+		return nil, NewInvalidConfigError(err.Error())
+	}
 	var ops []MgmtOperation
 	ops = append(ops,
 		deleteOp(staticProtocolBase()),
@@ -157,8 +161,8 @@ func BuildMgmtOperations(cfg *Config) ([]MgmtOperation, error) {
 	ops = append(ops, buildStaticRouteOps(cfg.StaticRoutes)...)
 	ops = append(ops, buildBGPOps(cfg.BGP)...)
 	ops = append(ops, buildOSPFOps(cfg.OSPF)...)
-	ops = append(ops, buildPrefixListOps(cfg.PrefixLists)...)
-	ops = append(ops, buildRouteMapOps(cfg.RouteMaps, cfg.PrefixLists)...)
+	ops = append(ops, buildPrefixListOps(prefixLists)...)
+	ops = append(ops, buildRouteMapOps(routeMaps, prefixLists)...)
 	bfdOps, err := buildBFDConfigOps(cfg.BFD)
 	if err != nil {
 		return nil, err

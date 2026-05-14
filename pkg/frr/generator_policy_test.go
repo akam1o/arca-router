@@ -470,6 +470,70 @@ func TestConvertPolicyOptionsIntegration(t *testing.T) {
 	}
 }
 
+func TestConvertPolicyOptionsAggregatesSameFamilyPrefixLists(t *testing.T) {
+	acceptTrue := true
+	cfg := &config.Config{
+		PolicyOptions: &config.PolicyOptions{
+			PrefixLists: map[string]*config.PrefixList{
+				"V4-A": {Name: "V4-A", Prefixes: []string{"192.0.2.0/24"}},
+				"V4-B": {Name: "V4-B", Prefixes: []string{"198.51.100.0/24"}},
+				"V6-A": {Name: "V6-A", Prefixes: []string{"2001:db8::/32"}},
+			},
+			PolicyStatements: map[string]*config.PolicyStatement{
+				"IMPORT": {
+					Name: "IMPORT",
+					Terms: []*config.PolicyTerm{
+						{
+							Name: "MATCH",
+							From: &config.PolicyMatchConditions{PrefixLists: []string{"V4-A", "V4-B", "V6-A"}},
+							Then: &config.PolicyActions{Accept: &acceptTrue},
+						},
+					},
+				},
+			},
+		},
+	}
+
+	prefixLists, routeMaps, _, err := convertPolicyOptions(cfg)
+	if err != nil {
+		t.Fatalf("convertPolicyOptions() error = %v", err)
+	}
+	if len(routeMaps) != 1 || len(routeMaps[0].Entries) != 1 {
+		t.Fatalf("routeMaps = %#v, want one route-map entry", routeMaps)
+	}
+	wantMatches := []string{"ARCA-IMPORT-10-V4", "V6-A"}
+	if got := routeMaps[0].Entries[0].MatchPrefixLists; strings.Join(got, ",") != strings.Join(wantMatches, ",") {
+		t.Fatalf("MatchPrefixLists = %#v, want %#v", got, wantMatches)
+	}
+	aggregate := findPrefixList(prefixLists, "ARCA-IMPORT-10-V4")
+	if aggregate == nil {
+		t.Fatalf("aggregate prefix-list not found in %#v", prefixLists)
+	}
+	if aggregate.IsIPv6 {
+		t.Fatalf("aggregate IsIPv6 = true, want false")
+	}
+	if got := prefixListPrefixes(*aggregate); strings.Join(got, ",") != "192.0.2.0/24,198.51.100.0/24" {
+		t.Fatalf("aggregate prefixes = %#v", got)
+	}
+}
+
+func findPrefixList(prefixLists []PrefixList, name string) *PrefixList {
+	for i := range prefixLists {
+		if prefixLists[i].Name == name {
+			return &prefixLists[i]
+		}
+	}
+	return nil
+}
+
+func prefixListPrefixes(prefixList PrefixList) []string {
+	prefixes := make([]string, 0, len(prefixList.Entries))
+	for _, entry := range prefixList.Entries {
+		prefixes = append(prefixes, entry.Prefix)
+	}
+	return prefixes
+}
+
 // TestIsIPv6Prefix tests IPv6 prefix detection
 func TestIsIPv6Prefix(t *testing.T) {
 	tests := []struct {

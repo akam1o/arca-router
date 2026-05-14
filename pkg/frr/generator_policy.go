@@ -28,6 +28,10 @@ func convertPolicyOptions(cfg *config.Config) ([]PrefixList, []RouteMap, []ASPat
 	if err != nil {
 		return nil, nil, nil, err
 	}
+	prefixLists, routeMaps, err = aggregateRouteMapPrefixListMatches(prefixLists, routeMaps)
+	if err != nil {
+		return nil, nil, nil, err
+	}
 
 	return prefixLists, routeMaps, asPathLists, nil
 }
@@ -234,6 +238,139 @@ func convertPolicyStatementsWithMapping(policyStatementsMap map[string]*config.P
 	}
 
 	return frrRouteMaps, asPathLists, nil
+}
+
+func aggregateRouteMapPrefixListMatches(prefixLists []PrefixList, routeMaps []RouteMap) ([]PrefixList, []RouteMap, error) {
+	if len(routeMaps) == 0 {
+		return prefixLists, routeMaps, nil
+	}
+	prefixListByName := make(map[string]PrefixList, len(prefixLists))
+	for _, list := range prefixLists {
+		prefixListByName[list.Name] = list
+	}
+
+	aggregatedPrefixLists := append([]PrefixList(nil), prefixLists...)
+	normalizedRouteMaps := append([]RouteMap(nil), routeMaps...)
+	for routeMapIndex := range normalizedRouteMaps {
+		routeMap := &normalizedRouteMaps[routeMapIndex]
+		routeMap.Entries = append([]RouteMapEntry(nil), routeMap.Entries...)
+		for entryIndex := range routeMap.Entries {
+			entry := &routeMap.Entries[entryIndex]
+			if len(entry.MatchPrefixLists) == 0 {
+				continue
+			}
+			ipv4Names, ipv6Names, err := splitRouteMapPrefixListFamilies(routeMap.Name, entry.Seq, entry.MatchPrefixLists, prefixListByName)
+			if err != nil {
+				return nil, nil, err
+			}
+			if len(entry.MatchPrefixLists) == 1 {
+				entry.MatchPrefixLists = append(ipv4Names, ipv6Names...)
+				continue
+			}
+			var normalized []string
+			if len(ipv4Names) > 1 {
+				listName := uniqueAggregatePrefixListName(aggregateRouteMapPrefixListName(routeMap.Name, entry.Seq, false), prefixListByName)
+				list := aggregatePrefixLists(listName, false, ipv4Names, prefixListByName)
+				aggregatedPrefixLists = append(aggregatedPrefixLists, list)
+				prefixListByName[list.Name] = list
+				normalized = append(normalized, list.Name)
+			} else {
+				normalized = append(normalized, ipv4Names...)
+			}
+			if len(ipv6Names) > 1 {
+				listName := uniqueAggregatePrefixListName(aggregateRouteMapPrefixListName(routeMap.Name, entry.Seq, true), prefixListByName)
+				list := aggregatePrefixLists(listName, true, ipv6Names, prefixListByName)
+				aggregatedPrefixLists = append(aggregatedPrefixLists, list)
+				prefixListByName[list.Name] = list
+				normalized = append(normalized, list.Name)
+			} else {
+				normalized = append(normalized, ipv6Names...)
+			}
+			entry.MatchPrefixLists = normalized
+		}
+	}
+	return aggregatedPrefixLists, normalizedRouteMaps, nil
+}
+
+func splitRouteMapPrefixListFamilies(routeMapName string, seq int, names []string, prefixListByName map[string]PrefixList) ([]string, []string, error) {
+	var ipv4Names []string
+	var ipv6Names []string
+	seen := make(map[string]bool, len(names))
+	for _, name := range names {
+		if seen[name] {
+			continue
+		}
+		seen[name] = true
+		list, ok := prefixListByName[name]
+		if !ok {
+			return nil, nil, fmt.Errorf("route-map %s entry %d references unknown prefix-list %s", routeMapName, seq, name)
+		}
+		if list.IsIPv6 {
+			ipv6Names = append(ipv6Names, name)
+			continue
+		}
+		ipv4Names = append(ipv4Names, name)
+	}
+	return ipv4Names, ipv6Names, nil
+}
+
+func aggregatePrefixLists(name string, ipv6 bool, sourceNames []string, prefixListByName map[string]PrefixList) PrefixList {
+	list := PrefixList{Name: name, IsIPv6: ipv6}
+	seen := make(map[string]bool)
+	for _, sourceName := range sourceNames {
+		source := prefixListByName[sourceName]
+		entries := append([]PrefixListEntry(nil), source.Entries...)
+		sort.Slice(entries, func(i, j int) bool { return entries[i].Seq < entries[j].Seq })
+		for _, entry := range entries {
+			key := entry.Action + "\x00" + entry.Prefix
+			if seen[key] {
+				continue
+			}
+			seen[key] = true
+			list.Entries = append(list.Entries, PrefixListEntry{
+				Seq:    (len(list.Entries) + 1) * 10,
+				Action: entry.Action,
+				Prefix: entry.Prefix,
+			})
+		}
+	}
+	return list
+}
+
+func uniqueAggregatePrefixListName(base string, prefixListByName map[string]PrefixList) string {
+	if _, exists := prefixListByName[base]; !exists {
+		return base
+	}
+	for i := 2; ; i++ {
+		name := fmt.Sprintf("%s-%d", base, i)
+		if _, exists := prefixListByName[name]; !exists {
+			return name
+		}
+	}
+}
+
+func aggregateRouteMapPrefixListName(routeMapName string, seq int, ipv6 bool) string {
+	family := "V4"
+	if ipv6 {
+		family = "V6"
+	}
+	var b strings.Builder
+	b.WriteString("ARCA-")
+	wrote := false
+	for _, r := range strings.ToUpper(routeMapName) {
+		if (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') {
+			b.WriteRune(r)
+			wrote = true
+			continue
+		}
+		if wrote {
+			b.WriteRune('-')
+		}
+	}
+	if !wrote {
+		b.WriteString("ROUTE-MAP")
+	}
+	return fmt.Sprintf("%s-%d-%s", strings.TrimRight(b.String(), "-"), seq, family)
 }
 
 func frrSourceProtocol(protocol string) string {
