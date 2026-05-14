@@ -124,6 +124,9 @@ func GenerateFRRConfigFile(frrConfig *Config) (string, error) {
 	if frrConfig == nil {
 		return "", fmt.Errorf("FRR config is nil")
 	}
+	if err := validateFRRConfigReferences(frrConfig); err != nil {
+		return "", err
+	}
 
 	var b strings.Builder
 
@@ -243,6 +246,39 @@ func GenerateFRRConfigFile(frrConfig *Config) (string, error) {
 	b.WriteString("end\n")
 
 	return b.String(), nil
+}
+
+func validateFRRConfigReferences(frrConfig *Config) error {
+	if err := validatePolicyObjects(frrConfig.PrefixLists, frrConfig.RouteMaps); err != nil {
+		return err
+	}
+	if err := validateASPathAccessLists(frrConfig.ASPathAccessLists); err != nil {
+		return err
+	}
+	if err := validateFRRRouteMapReferences(frrConfig); err != nil {
+		return err
+	}
+	return validateRouteMapASPathReferences(frrConfig.RouteMaps, frrConfig.ASPathAccessLists)
+}
+
+func validateRouteMapASPathReferences(routeMaps []RouteMap, asPathLists []ASPathAccessList) error {
+	asPathListNames := make(map[string]struct{}, len(asPathLists))
+	for _, list := range asPathLists {
+		if strings.TrimSpace(list.Name) != "" {
+			asPathListNames[list.Name] = struct{}{}
+		}
+	}
+	for _, routeMap := range routeMaps {
+		for _, entry := range routeMap.Entries {
+			if strings.TrimSpace(entry.MatchASPath) == "" {
+				continue
+			}
+			if _, ok := asPathListNames[entry.MatchASPath]; !ok {
+				return NewInvalidConfigError(fmt.Sprintf("route-map %s entry %d references unknown AS-path access-list %s", routeMap.Name, entry.Seq, entry.MatchASPath))
+			}
+		}
+	}
+	return nil
 }
 
 // buildInterfaceMapping creates a mapping from Junos interface names to Linux interface names.

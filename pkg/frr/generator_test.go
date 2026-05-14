@@ -320,6 +320,112 @@ func TestGenerateFRRConfigFile(t *testing.T) {
 	}
 }
 
+func TestGenerateFRRConfigFileRejectsUnknownPolicyReferences(t *testing.T) {
+	tests := []struct {
+		name string
+		cfg  *Config
+		want string
+	}{
+		{
+			name: "BGP import route-map",
+			cfg: &Config{
+				BGP: &BGPConfig{
+					ASN:         65000,
+					IPv4Unicast: true,
+					Neighbors: []BGPNeighbor{
+						{IP: "192.0.2.2", RemoteAS: 65001, RouteMapIn: "MISSING-IN"},
+					},
+				},
+			},
+			want: "BGP neighbor 192.0.2.2 import references unknown route-map MISSING-IN",
+		},
+		{
+			name: "BGP export route-map",
+			cfg: &Config{
+				BGP: &BGPConfig{
+					ASN:         65000,
+					IPv4Unicast: true,
+					Neighbors: []BGPNeighbor{
+						{IP: "192.0.2.2", RemoteAS: 65001, RouteMapOut: "MISSING-OUT"},
+					},
+				},
+			},
+			want: "BGP neighbor 192.0.2.2 export references unknown route-map MISSING-OUT",
+		},
+		{
+			name: "VRF import route-map",
+			cfg: &Config{
+				VRFs: []VRFConfig{{Name: "BLUE", ImportRouteMap: "MISSING-IN"}},
+			},
+			want: "VRF BLUE import references unknown route-map MISSING-IN",
+		},
+		{
+			name: "VRF export route-map",
+			cfg: &Config{
+				VRFs: []VRFConfig{{Name: "BLUE", ExportRouteMap: "MISSING-OUT"}},
+			},
+			want: "VRF BLUE export references unknown route-map MISSING-OUT",
+		},
+		{
+			name: "route-map AS-path access-list",
+			cfg: &Config{
+				RouteMaps: []RouteMap{{
+					Name: "IMPORT",
+					Entries: []RouteMapEntry{
+						{Seq: 10, Action: "permit", MatchASPath: "MISSING-AS"},
+					},
+				}},
+			},
+			want: "route-map IMPORT entry 10 references unknown AS-path access-list MISSING-AS",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := GenerateFRRConfigFile(tt.cfg)
+			if err == nil || !strings.Contains(err.Error(), tt.want) {
+				t.Fatalf("GenerateFRRConfigFile() error = %v, want %q", err, tt.want)
+			}
+		})
+	}
+}
+
+func TestGenerateFRRConfigFileAllowsPolicyReferences(t *testing.T) {
+	text, err := GenerateFRRConfigFile(&Config{
+		ASPathAccessLists: []ASPathAccessList{{
+			Name:    "CUSTOMER-AS",
+			Entries: []ASPathAccessListEntry{{Seq: 10, Action: "permit", Regex: "^65001_"}},
+		}},
+		RouteMaps: []RouteMap{{
+			Name: "IMPORT",
+			Entries: []RouteMapEntry{
+				{Seq: 10, Action: "permit", MatchASPath: "CUSTOMER-AS"},
+			},
+		}},
+		BGP: &BGPConfig{
+			ASN:         65000,
+			IPv4Unicast: true,
+			Neighbors: []BGPNeighbor{
+				{IP: "192.0.2.2", RemoteAS: 65001, RouteMapIn: "IMPORT"},
+			},
+		},
+		VRFs: []VRFConfig{{Name: "BLUE", ASN: 65000, ImportRouteMap: "IMPORT"}},
+	})
+	if err != nil {
+		t.Fatalf("GenerateFRRConfigFile() error = %v", err)
+	}
+	for _, want := range []string{
+		"bgp as-path access-list CUSTOMER-AS seq 10 permit ^65001_",
+		"route-map IMPORT permit 10",
+		" match as-path CUSTOMER-AS",
+		"  neighbor 192.0.2.2 route-map IMPORT in",
+		"  route-map vpn import IMPORT",
+	} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("FRR config missing %q:\n%s", want, text)
+		}
+	}
+}
+
 func TestBuildInterfaceMapping(t *testing.T) {
 	cfg := &config.Config{
 		Interfaces: map[string]*config.Interface{
