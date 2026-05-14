@@ -151,6 +151,9 @@ func BuildMgmtOperations(cfg *Config) ([]MgmtOperation, error) {
 	if err := validateTransactionalVRFVPN(cfg); err != nil {
 		return nil, err
 	}
+	if err := validateTransactionalRouteMapReferences(cfg); err != nil {
+		return nil, err
+	}
 	prefixLists, routeMaps, err := aggregateRouteMapPrefixListMatches(cfg.PrefixLists, cfg.RouteMaps)
 	if err != nil {
 		return nil, NewInvalidConfigError(err.Error())
@@ -223,6 +226,48 @@ func validateTransactionalStaticRouteBFDProfiles(cfg *Config) error {
 		if _, ok := profiles[route.BFDProfile]; !ok {
 			return NewInvalidConfigError(fmt.Sprintf("static route %s references unknown BFD profile %s", route.Prefix, route.BFDProfile))
 		}
+	}
+	return nil
+}
+
+func validateTransactionalRouteMapReferences(cfg *Config) error {
+	if cfg == nil {
+		return nil
+	}
+	routeMaps := make(map[string]struct{}, len(cfg.RouteMaps))
+	for _, routeMap := range cfg.RouteMaps {
+		if strings.TrimSpace(routeMap.Name) == "" {
+			return NewInvalidConfigError("route-map name is required")
+		}
+		routeMaps[routeMap.Name] = struct{}{}
+	}
+	if cfg.BGP != nil {
+		for _, neighbor := range cfg.BGP.Neighbors {
+			if err := validateRouteMapReference(routeMaps, fmt.Sprintf("BGP neighbor %s import", neighbor.IP), neighbor.RouteMapIn); err != nil {
+				return err
+			}
+			if err := validateRouteMapReference(routeMaps, fmt.Sprintf("BGP neighbor %s export", neighbor.IP), neighbor.RouteMapOut); err != nil {
+				return err
+			}
+		}
+	}
+	for _, vrf := range cfg.VRFs {
+		if err := validateRouteMapReference(routeMaps, fmt.Sprintf("VRF %s import", vrf.Name), vrf.ImportRouteMap); err != nil {
+			return err
+		}
+		if err := validateRouteMapReference(routeMaps, fmt.Sprintf("VRF %s export", vrf.Name), vrf.ExportRouteMap); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func validateRouteMapReference(routeMaps map[string]struct{}, context, name string) error {
+	if name == "" {
+		return nil
+	}
+	if _, ok := routeMaps[name]; !ok {
+		return NewInvalidConfigError(fmt.Sprintf("%s references unknown route-map %s", context, name))
 	}
 	return nil
 }
