@@ -86,6 +86,18 @@ func (p *FRRPlugin) ValidateChanges(ctx context.Context, diff *engine.ConfigDiff
 	if diff == nil {
 		return nil
 	}
+	if !hasFRRRelevantChanges(diff) {
+		return nil
+	}
+	frrConfig, _, err := generateFRRArtifacts(p.buildFullConfig(diff))
+	if err != nil {
+		return err
+	}
+	if p.applyModeForConfig(frrConfig) == pkgfrr.BackendModeTransactional {
+		if _, err := pkgfrr.BuildMgmtOperations(frrConfig); err != nil {
+			return fmt.Errorf("validate transactional FRR config: %w", err)
+		}
+	}
 	return nil
 }
 
@@ -96,10 +108,7 @@ func (p *FRRPlugin) ApplyChanges(ctx context.Context, diff *engine.ConfigDiff) e
 	defer p.mu.Unlock()
 
 	// Only regenerate FRR config if routing-related changes occurred
-	if !diff.BFDChanged && !diff.BGPChanged && !diff.OSPFChanged && !diff.OSPF3Changed && !diff.StaticRoutesChanged &&
-		!diff.PolicyChanged && !diff.RoutingChanged && !diff.SystemChanged && !diff.VRRPChanged &&
-		!diff.RoutingInstancesChanged &&
-		!hasFRRRelevantInterfaceChanges(diff) {
+	if !hasFRRRelevantChanges(diff) {
 		p.log.Debug("No routing-related changes, skipping FRR reload")
 		return nil
 	}
@@ -399,6 +408,23 @@ func (p *FRRPlugin) buildFullConfig(diff *engine.ConfigDiff) *model.RouterConfig
 	}
 
 	return cfg
+}
+
+func hasFRRRelevantChanges(diff *engine.ConfigDiff) bool {
+	if diff == nil {
+		return false
+	}
+	return diff.BFDChanged ||
+		diff.BGPChanged ||
+		diff.OSPFChanged ||
+		diff.OSPF3Changed ||
+		diff.StaticRoutesChanged ||
+		diff.PolicyChanged ||
+		diff.RoutingChanged ||
+		diff.SystemChanged ||
+		diff.VRRPChanged ||
+		diff.RoutingInstancesChanged ||
+		hasFRRRelevantInterfaceChanges(diff)
 }
 
 func hasFRRRelevantInterfaceChanges(diff *engine.ConfigDiff) bool {

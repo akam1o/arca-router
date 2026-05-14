@@ -17,6 +17,18 @@ func testLogger() *slog.Logger {
 	return slog.New(slog.NewTextHandler(io.Discard, nil))
 }
 
+func addTestInterface(cfg *model.RouterConfig, name string) {
+	cfg.Interfaces[name] = &model.InterfaceConfig{Units: map[int]*model.Unit{}}
+}
+
+func setTestRoutingOptions(cfg *model.RouterConfig) {
+	if cfg.Routing == nil {
+		cfg.Routing = &model.RoutingConfig{}
+	}
+	cfg.Routing.AutonomousSystem = 65000
+	cfg.Routing.RouterID = "192.0.2.1"
+}
+
 func TestBuildFullConfigUsesDiffNewConfig(t *testing.T) {
 	newCfg := model.NewRouterConfig()
 	newCfg.Interfaces["ge-0/0/0"] = &model.InterfaceConfig{
@@ -103,6 +115,7 @@ func TestBuildFullConfigPreservesBFDFromDiffFields(t *testing.T) {
 
 func TestValidateChangesAllowsTransactionalVRRP(t *testing.T) {
 	newCfg := model.NewRouterConfig()
+	addTestInterface(newCfg, "ge-0/0/0")
 	newCfg.Protocols = &model.ProtocolsConfig{
 		VRRP: &model.VRRPConfig{Groups: map[string]*model.VRRPGroup{
 			"10": {Interface: "ge-0/0/0", VirtualAddress: "192.0.2.254"},
@@ -118,6 +131,7 @@ func TestValidateChangesAllowsTransactionalVRRP(t *testing.T) {
 
 func TestValidateChangesAllowsVRRPWithFileBackend(t *testing.T) {
 	newCfg := model.NewRouterConfig()
+	addTestInterface(newCfg, "ge-0/0/0")
 	newCfg.Protocols = &model.ProtocolsConfig{
 		VRRP: &model.VRRPConfig{Groups: map[string]*model.VRRPGroup{
 			"10": {Interface: "ge-0/0/0", VirtualAddress: "192.0.2.254"},
@@ -146,6 +160,7 @@ func TestValidateChangesAllowsMPLSConfig(t *testing.T) {
 
 func TestValidateChangesAllowsOSPF3WithTransactionalBackend(t *testing.T) {
 	newCfg := model.NewRouterConfig()
+	addTestInterface(newCfg, "ge-0/0/0")
 	newCfg.Protocols = &model.ProtocolsConfig{
 		OSPF3: &model.OSPFConfig{Areas: map[string]*model.OSPFArea{
 			"0.0.0.0": {
@@ -180,6 +195,7 @@ func TestValidateChangesAllowsBFDWithTransactionalBackend(t *testing.T) {
 
 func TestValidateChangesAllowsBGPBFDBindingWithTransactionalBackend(t *testing.T) {
 	newCfg := model.NewRouterConfig()
+	setTestRoutingOptions(newCfg)
 	newCfg.Protocols = &model.ProtocolsConfig{
 		BGP: &model.BGPConfig{Groups: map[string]*model.BGPGroup{
 			"EBGP": {
@@ -200,7 +216,11 @@ func TestValidateChangesAllowsBGPBFDBindingWithTransactionalBackend(t *testing.T
 
 func TestValidateChangesAllowsBGPBFDProfileWithTransactionalBackend(t *testing.T) {
 	newCfg := model.NewRouterConfig()
+	setTestRoutingOptions(newCfg)
 	newCfg.Protocols = &model.ProtocolsConfig{
+		BFD: &model.BFDConfig{Profiles: map[string]*model.BFDProfile{
+			"fast": {},
+		}},
 		BGP: &model.BGPConfig{Groups: map[string]*model.BGPGroup{
 			"EBGP": {
 				Type: "external",
@@ -220,6 +240,8 @@ func TestValidateChangesAllowsBGPBFDProfileWithTransactionalBackend(t *testing.T
 
 func TestValidateChangesAllowsOSPFBFDBindingWithTransactionalBackend(t *testing.T) {
 	newCfg := model.NewRouterConfig()
+	addTestInterface(newCfg, "ge-0/0/0")
+	setTestRoutingOptions(newCfg)
 	newCfg.Protocols = &model.ProtocolsConfig{
 		OSPF: &model.OSPFConfig{Areas: map[string]*model.OSPFArea{
 			"0.0.0.0": {
@@ -239,7 +261,12 @@ func TestValidateChangesAllowsOSPFBFDBindingWithTransactionalBackend(t *testing.
 
 func TestValidateChangesAllowsOSPFBFDProfileWithTransactionalBackend(t *testing.T) {
 	newCfg := model.NewRouterConfig()
+	addTestInterface(newCfg, "ge-0/0/0")
+	setTestRoutingOptions(newCfg)
 	newCfg.Protocols = &model.ProtocolsConfig{
+		BFD: &model.BFDConfig{Profiles: map[string]*model.BFDProfile{
+			"fast": {},
+		}},
 		OSPF: &model.OSPFConfig{Areas: map[string]*model.OSPFArea{
 			"0.0.0.0": {
 				Interfaces: map[string]*model.OSPFInterface{
@@ -258,6 +285,11 @@ func TestValidateChangesAllowsOSPFBFDProfileWithTransactionalBackend(t *testing.
 
 func TestValidateChangesAllowsBFDStaticRouteWithTransactionalBackend(t *testing.T) {
 	newCfg := model.NewRouterConfig()
+	newCfg.Protocols = &model.ProtocolsConfig{
+		BFD: &model.BFDConfig{Profiles: map[string]*model.BFDProfile{
+			"fast": {},
+		}},
+	}
 	newCfg.Routing = &model.RoutingConfig{StaticRoutes: []*model.StaticRoute{
 		{Prefix: "203.0.113.0/24", NextHop: "192.0.2.2", BFD: true, BFDProfile: "fast"},
 	}}
@@ -269,8 +301,22 @@ func TestValidateChangesAllowsBFDStaticRouteWithTransactionalBackend(t *testing.
 	}
 }
 
+func TestValidateChangesRejectsTransactionalStaticRouteBFDProfileGap(t *testing.T) {
+	newCfg := model.NewRouterConfig()
+	newCfg.Routing = &model.RoutingConfig{StaticRoutes: []*model.StaticRoute{
+		{Prefix: "203.0.113.0/24", NextHop: "192.0.2.2", BFD: true, BFDProfile: "missing"},
+	}}
+	diff := engine.ComputeDiff(model.NewRouterConfig(), newCfg)
+
+	err := NewFRRPlugin(testLogger()).ValidateChanges(context.Background(), diff)
+	if err == nil || !strings.Contains(err.Error(), "unknown BFD profile missing") {
+		t.Fatalf("ValidateChanges() error = %v, want missing static route BFD profile", err)
+	}
+}
+
 func TestValidateChangesAllowsOSPF3WithFileBackend(t *testing.T) {
 	newCfg := model.NewRouterConfig()
+	addTestInterface(newCfg, "ge-0/0/0")
 	newCfg.Protocols = &model.ProtocolsConfig{
 		OSPF3: &model.OSPFConfig{Areas: map[string]*model.OSPFArea{
 			"0.0.0.0": {
@@ -290,7 +336,11 @@ func TestValidateChangesAllowsOSPF3WithFileBackend(t *testing.T) {
 
 func TestValidateChangesAllowsBFDProtocolBindingWithFileBackend(t *testing.T) {
 	newCfg := model.NewRouterConfig()
+	setTestRoutingOptions(newCfg)
 	newCfg.Protocols = &model.ProtocolsConfig{
+		BFD: &model.BFDConfig{Profiles: map[string]*model.BFDProfile{
+			"fast": {},
+		}},
 		BGP: &model.BGPConfig{Groups: map[string]*model.BGPGroup{
 			"EBGP": {
 				Type: "external",
@@ -338,6 +388,7 @@ func TestValidateChangesAllowsBFDWithFileBackend(t *testing.T) {
 
 func TestValidateChangesAllowsRoutingInstances(t *testing.T) {
 	newCfg := model.NewRouterConfig()
+	setTestRoutingOptions(newCfg)
 	newCfg.RoutingInstances = map[string]*model.RoutingInstance{
 		"BLUE": {InstanceType: "vrf", RouteDistinguisher: "65000:100", VRFTarget: "target:65000:100"},
 	}

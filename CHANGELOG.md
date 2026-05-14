@@ -11,6 +11,7 @@
 - **BFD candidate editing**: candidate `set` replacement handles BFD profile, peer, BGP neighbor, and OSPF/OSPFv3 interface binding paths so updated BFD settings do not leave stale set lines behind
 - **Standard FRR BFD daemon**: `bfdd` is documented and checked as part of the required arca-router FRR daemon set for BFD support
 - **FRR apply preflight ordering**: transactional apply now builds and validates management operations before preparing VRRP Linux interfaces, and both FRR apply backends reject invalid VRRP groups before host-side VRRP preparation
+- **FRR validation preflight**: the FRR southbound plugin now generates FRR artifacts and validates transactional management operations during commit validation, while preserving file-backend fallback for unsupported mgmtd paths
 - **Route policy validation**: legacy and canonical config validation reject invalid IPv4/IPv6 prefix-list entries, unknown policy-statement prefix-list references, invalid route-policy protocols, neighbors, AS-path regexes, and community values before apply
 - **Transactional policy object validation**: direct FRR management operations reject invalid prefix-list and route-map names, sequence numbers, actions, prefixes, and address-family mismatches before building the candidate
 - **BGP policy reference validation**: BGP group import/export policies are validated against configured policy-statements before FRR generation
