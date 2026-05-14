@@ -154,6 +154,9 @@ func BuildMgmtOperations(cfg *Config) ([]MgmtOperation, error) {
 	if err := validateTransactionalStaticRouteBFDProfiles(cfg); err != nil {
 		return nil, err
 	}
+	if err := validateTransactionalBFDVRFReferences(cfg); err != nil {
+		return nil, err
+	}
 	if err := validateTransactionalRouteMapSupport(cfg); err != nil {
 		return nil, err
 	}
@@ -321,6 +324,25 @@ func validateTransactionalStaticRouteBFDProfiles(cfg *Config) error {
 		}
 		if _, ok := profiles[route.BFDProfile]; !ok {
 			return NewInvalidConfigError(fmt.Sprintf("static route %s references unknown BFD profile %s", route.Prefix, route.BFDProfile))
+		}
+	}
+	return nil
+}
+
+func validateTransactionalBFDVRFReferences(cfg *Config) error {
+	if cfg == nil || cfg.BFD == nil {
+		return nil
+	}
+	vrfs := make(map[string]struct{}, len(cfg.VRFs))
+	for _, vrf := range cfg.VRFs {
+		vrfs[vrf.Name] = struct{}{}
+	}
+	for _, peer := range cfg.BFD.Peers {
+		if peer.VRF == "" || peer.VRF == defaultVRFName {
+			continue
+		}
+		if _, ok := vrfs[peer.VRF]; !ok {
+			return NewInvalidConfigError(fmt.Sprintf("BFD peer %s references unknown VRF %s", peer.Address, peer.VRF))
 		}
 	}
 	return nil

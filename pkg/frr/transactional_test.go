@@ -519,6 +519,7 @@ func TestBuildMgmtOperationsRejectsOSPF3(t *testing.T) {
 
 func TestBuildMgmtOperationsBFD(t *testing.T) {
 	ops, err := BuildMgmtOperations(&Config{
+		VRFs: []VRFConfig{{Name: "BLUE"}},
 		BFD: &BFDConfig{
 			Profiles: []BFDProfile{
 				{Name: "fast", DetectMultiplier: 3, ReceiveInterval: 150, TransmitInterval: 150, EchoMode: true, PassiveMode: true},
@@ -570,6 +571,17 @@ func TestBuildMgmtOperationsBFD(t *testing.T) {
 		if !strings.Contains(commands, want) {
 			t.Fatalf("commands missing %q:\n%s", want, commands)
 		}
+	}
+}
+
+func TestBuildMgmtOperationsRejectsUnknownBFDPeerVRF(t *testing.T) {
+	_, err := BuildMgmtOperations(&Config{
+		BFD: &BFDConfig{Peers: []BFDPeer{
+			{Address: "192.0.2.2", Interface: "ge0-0-0", VRF: "BLUE"},
+		}},
+	})
+	if err == nil || !strings.Contains(err.Error(), "BFD peer 192.0.2.2 references unknown VRF BLUE") {
+		t.Fatalf("BuildMgmtOperations() error = %v, want unknown BFD peer VRF", err)
 	}
 }
 

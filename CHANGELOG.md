@@ -7,6 +7,7 @@
 - **BFD static route monitoring**: static routes can be monitored by BFD with optional source address, multihop, and BFD profile settings in the FRR apply backends
 - **Transactional static route validation**: direct FRR management operations reject invalid static route prefix, next-hop, distance, address-family, and BFD option combinations before building the candidate
 - **Static route BFD profile validation**: transactional FRR apply rejects static route BFD profile references that are not part of the generated BFD profile set
+- **BFD VRF reference validation**: transactional FRR apply rejects explicit BFD peers that reference VRFs outside the generated VRF set before building the candidate
 - **BFD backend fallback**: the default transactional FRR backend applies explicit BFD sessions/profiles, static route BFD, profile-less BGP BFD, and profile-less OSPF BFD; arca-routerd falls back to the file backend for BGP/OSPF BFD profile bindings and OSPFv3 until FRR exposes those management YANG paths
 - **BFD candidate editing**: candidate `set` replacement handles BFD profile, peer, BGP neighbor, and OSPF/OSPFv3 interface binding paths so updated BFD settings do not leave stale set lines behind
 - **Standard FRR BFD daemon**: `bfdd` is documented and checked as part of the required arca-router FRR daemon set for BFD support
