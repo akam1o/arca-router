@@ -15,10 +15,11 @@ import (
 
 // FRRPlugin implements engine.Plugin for FRR routing daemon operations.
 type FRRPlugin struct {
-	mu      sync.Mutex
-	applier pkgfrr.Applier
-	mode    pkgfrr.BackendMode
-	log     *slog.Logger
+	mu          sync.Mutex
+	applier     pkgfrr.Applier
+	fileApplier pkgfrr.Applier
+	mode        pkgfrr.BackendMode
+	log         *slog.Logger
 
 	statusReader    pkgfrr.VRRPStatusReader
 	bfdStatusReader pkgfrr.BFDStatusReader
@@ -30,6 +31,8 @@ type FRRPlugin struct {
 	rollbackConfig    string
 	currentFRRConfig  *pkgfrr.Config
 	rollbackFRRConfig *pkgfrr.Config
+	currentApplyMode  pkgfrr.BackendMode
+	rollbackApplyMode pkgfrr.BackendMode
 }
 
 // NewFRRPlugin creates a new FRR plugin.
@@ -41,6 +44,7 @@ func NewFRRPlugin(log *slog.Logger) *FRRPlugin {
 func NewFRRPluginWithApplyMode(log *slog.Logger, mode pkgfrr.BackendMode) *FRRPlugin {
 	return &FRRPlugin{
 		applier:         pkgfrr.NewApplier(mode),
+		fileApplier:     pkgfrr.NewApplier(pkgfrr.BackendModeFile),
 		mode:            mode,
 		log:             log.With("plugin", "frr", "apply_mode", string(mode)),
 		statusReader:    pkgfrr.NewVtyshVRRPStatusReader(),
@@ -82,101 +86,7 @@ func (p *FRRPlugin) ValidateChanges(ctx context.Context, diff *engine.ConfigDiff
 	if diff == nil {
 		return nil
 	}
-	if p.mode == pkgfrr.BackendModeTransactional && diff.NewOSPF3 != nil {
-		return fmt.Errorf("OSPFv3 requires FRR file backend until core ospf6d YANG paths are available")
-	}
-	if p.mode == pkgfrr.BackendModeTransactional {
-		if err := validateTransactionalBFDProtocolBindings(diff); err != nil {
-			return err
-		}
-	}
 	return nil
-}
-
-func validateTransactionalBFDProtocolBindings(diff *engine.ConfigDiff) error {
-	if diff == nil {
-		return nil
-	}
-	if diff.NewConfig != nil {
-		return validateRouterConfigTransactionalBFDProtocolBindings(diff.NewConfig)
-	}
-	if diff.BGPChanged && bgpHasBFDProfiles(diff.NewBGP) {
-		return fmt.Errorf("BGP BFD profiles require FRR file backend until BGP BFD profile management operations are implemented")
-	}
-	if diff.OSPFChanged && ospfHasBFDProfiles(diff.NewOSPF) {
-		return fmt.Errorf("OSPF BFD profiles require FRR file backend until OSPF BFD profile management operations are implemented")
-	}
-	if diff.OSPF3Changed && ospfHasBFDProtocolBindings(diff.NewOSPF3) {
-		return fmt.Errorf("OSPFv3 BFD protocol bindings require FRR file backend until ospf6d management operations are implemented")
-	}
-	return nil
-}
-
-func validateRouterConfigTransactionalBFDProtocolBindings(cfg *model.RouterConfig) error {
-	if cfg == nil || cfg.Protocols == nil {
-		return nil
-	}
-	if bgpHasBFDProfiles(cfg.Protocols.BGP) {
-		return fmt.Errorf("BGP BFD profiles require FRR file backend until BGP BFD profile management operations are implemented")
-	}
-	if ospfHasBFDProfiles(cfg.Protocols.OSPF) {
-		return fmt.Errorf("OSPF BFD profiles require FRR file backend until OSPF BFD profile management operations are implemented")
-	}
-	if ospfHasBFDProtocolBindings(cfg.Protocols.OSPF3) {
-		return fmt.Errorf("OSPFv3 BFD protocol bindings require FRR file backend until ospf6d management operations are implemented")
-	}
-	return nil
-}
-
-func bgpHasBFDProfiles(cfg *model.BGPConfig) bool {
-	if cfg == nil {
-		return false
-	}
-	for _, group := range cfg.Groups {
-		if group == nil {
-			continue
-		}
-		for _, neighbor := range group.Neighbors {
-			if neighbor != nil && neighbor.BFDProfile != "" {
-				return true
-			}
-		}
-	}
-	return false
-}
-
-func ospfHasBFDProtocolBindings(cfg *model.OSPFConfig) bool {
-	if cfg == nil {
-		return false
-	}
-	for _, area := range cfg.Areas {
-		if area == nil {
-			continue
-		}
-		for _, iface := range area.Interfaces {
-			if iface != nil && (iface.BFD || iface.BFDProfile != "") {
-				return true
-			}
-		}
-	}
-	return false
-}
-
-func ospfHasBFDProfiles(cfg *model.OSPFConfig) bool {
-	if cfg == nil {
-		return false
-	}
-	for _, area := range cfg.Areas {
-		if area == nil {
-			continue
-		}
-		for _, iface := range area.Interfaces {
-			if iface != nil && iface.BFDProfile != "" {
-				return true
-			}
-		}
-	}
-	return false
 }
 
 // ApplyChanges regenerates the desired FRR view and commits it through the
@@ -206,26 +116,35 @@ func (p *FRRPlugin) ApplyChanges(ctx context.Context, diff *engine.ConfigDiff) e
 
 	previousConfig := p.currentConfig
 	previousFRRConfig := p.currentFRRConfig
+	previousApplyMode := p.currentApplyMode
+	if previousApplyMode == "" {
+		previousApplyMode = p.mode
+	}
 	if previousConfig == "" && diff.OldConfig != nil {
 		if oldFRRConfig, oldConfigContent, oldErr := generateFRRArtifacts(diff.OldConfig); oldErr == nil {
 			previousConfig = oldConfigContent
 			previousFRRConfig = oldFRRConfig
+			previousApplyMode = p.applyModeForConfig(oldFRRConfig)
 		}
 	}
 
-	if err := p.applier.ApplyConfig(ctx, configContent, frrConfig); err != nil {
+	applier, applyMode := p.applierForConfig(frrConfig)
+	if err := applier.ApplyConfig(ctx, configContent, frrConfig); err != nil {
 		return fmt.Errorf("apply FRR config: %w", err)
 	}
 
 	p.rollbackConfig = previousConfig
 	p.rollbackFRRConfig = previousFRRConfig
+	p.rollbackApplyMode = previousApplyMode
 	p.currentConfig = configContent
 	p.currentFRRConfig = frrConfig
+	p.currentApplyMode = applyMode
 	p.vrrpStatus = p.checkVRRPOperationalStatus(ctx, frrConfig)
 	p.bfdStatus = p.checkBFDOperationalStatus(ctx, frrConfig)
 
 	p.log.Info("FRR configuration applied",
 		slog.Int("config_length", len(configContent)),
+		slog.String("effective_apply_mode", string(applyMode)),
 		slog.Bool("bfd_changed", diff.BFDChanged),
 		slog.Bool("bgp_changed", diff.BGPChanged),
 		slog.Bool("ospf_changed", diff.OSPFChanged),
@@ -276,27 +195,99 @@ func (p *FRRPlugin) RollbackChanges(ctx context.Context, diff *engine.ConfigDiff
 
 	rollbackConfig := p.rollbackConfig
 	rollbackFRRConfig := p.rollbackFRRConfig
+	rollbackApplyMode := p.rollbackApplyMode
 	if rollbackFRRConfig == nil && diff != nil && diff.OldConfig != nil {
 		if oldFRRConfig, oldConfigContent, oldErr := generateFRRArtifacts(diff.OldConfig); oldErr == nil {
 			rollbackFRRConfig = oldFRRConfig
 			if rollbackConfig == "" {
 				rollbackConfig = oldConfigContent
 			}
+			if rollbackApplyMode == "" {
+				rollbackApplyMode = p.applyModeForConfig(oldFRRConfig)
+			}
 		}
 	}
 
-	if err := p.applier.ApplyConfig(ctx, rollbackConfig, rollbackFRRConfig); err != nil {
+	applier, applyMode := p.applierForRollback(rollbackFRRConfig, rollbackApplyMode)
+	if err := applier.ApplyConfig(ctx, rollbackConfig, rollbackFRRConfig); err != nil {
 		return fmt.Errorf("rollback FRR config: %w", err)
 	}
 	p.currentConfig = rollbackConfig
 	p.currentFRRConfig = rollbackFRRConfig
+	p.currentApplyMode = applyMode
 	p.vrrpStatus = p.checkVRRPOperationalStatus(ctx, rollbackFRRConfig)
 	p.bfdStatus = p.checkBFDOperationalStatus(ctx, rollbackFRRConfig)
 
-	p.log.Info("FRR configuration rolled back")
+	p.log.Info("FRR configuration rolled back", slog.String("effective_apply_mode", string(applyMode)))
 	p.logVRRPStatus(p.vrrpStatus)
 	p.logBFDStatus(p.bfdStatus)
 	return nil
+}
+
+func (p *FRRPlugin) applierForConfig(cfg *pkgfrr.Config) (pkgfrr.Applier, pkgfrr.BackendMode) {
+	mode := p.applyModeForConfig(cfg)
+	if mode == pkgfrr.BackendModeFile {
+		return p.fileBackendApplier(), mode
+	}
+	return p.applier, mode
+}
+
+func (p *FRRPlugin) applierForRollback(cfg *pkgfrr.Config, rollbackMode pkgfrr.BackendMode) (pkgfrr.Applier, pkgfrr.BackendMode) {
+	if p.currentApplyMode == pkgfrr.BackendModeFile || rollbackMode == pkgfrr.BackendModeFile {
+		return p.fileBackendApplier(), pkgfrr.BackendModeFile
+	}
+	return p.applierForConfig(cfg)
+}
+
+func (p *FRRPlugin) fileBackendApplier() pkgfrr.Applier {
+	if p.mode == pkgfrr.BackendModeFile && p.applier != nil {
+		return p.applier
+	}
+	if p.fileApplier != nil {
+		return p.fileApplier
+	}
+	return pkgfrr.NewApplier(pkgfrr.BackendModeFile)
+}
+
+func (p *FRRPlugin) applyModeForConfig(cfg *pkgfrr.Config) pkgfrr.BackendMode {
+	if p.mode == pkgfrr.BackendModeFile {
+		return pkgfrr.BackendModeFile
+	}
+	if requiresFRRFileBackend(cfg) {
+		return pkgfrr.BackendModeFile
+	}
+	return p.mode
+}
+
+func requiresFRRFileBackend(cfg *pkgfrr.Config) bool {
+	if cfg == nil {
+		return false
+	}
+	return cfg.OSPF3 != nil || frrBGPHasBFDProfiles(cfg.BGP) || frrOSPFHasBFDProfiles(cfg.OSPF)
+}
+
+func frrBGPHasBFDProfiles(cfg *pkgfrr.BGPConfig) bool {
+	if cfg == nil {
+		return false
+	}
+	for _, neighbor := range cfg.Neighbors {
+		if neighbor.BFDProfile != "" {
+			return true
+		}
+	}
+	return false
+}
+
+func frrOSPFHasBFDProfiles(cfg *pkgfrr.OSPFConfig) bool {
+	if cfg == nil {
+		return false
+	}
+	for _, iface := range cfg.Interfaces {
+		if iface.BFDProfile != "" {
+			return true
+		}
+	}
+	return false
 }
 
 // buildFullConfig reconstructs the complete RouterConfig from the diff's new state.

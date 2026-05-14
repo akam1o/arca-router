@@ -144,7 +144,7 @@ func TestValidateChangesAllowsMPLSConfig(t *testing.T) {
 	}
 }
 
-func TestValidateChangesRejectsOSPF3WithTransactionalBackend(t *testing.T) {
+func TestValidateChangesAllowsOSPF3WithTransactionalBackend(t *testing.T) {
 	newCfg := model.NewRouterConfig()
 	newCfg.Protocols = &model.ProtocolsConfig{
 		OSPF3: &model.OSPFConfig{Areas: map[string]*model.OSPFArea{
@@ -158,8 +158,8 @@ func TestValidateChangesRejectsOSPF3WithTransactionalBackend(t *testing.T) {
 	diff := engine.ComputeDiff(model.NewRouterConfig(), newCfg)
 
 	err := NewFRRPlugin(testLogger()).ValidateChanges(context.Background(), diff)
-	if err == nil || !strings.Contains(err.Error(), "OSPFv3 requires FRR file backend") {
-		t.Fatalf("ValidateChanges() error = %v, want OSPF3 transactional rejection", err)
+	if err != nil {
+		t.Fatalf("ValidateChanges() error = %v, want nil", err)
 	}
 }
 
@@ -198,7 +198,7 @@ func TestValidateChangesAllowsBGPBFDBindingWithTransactionalBackend(t *testing.T
 	}
 }
 
-func TestValidateChangesRejectsBGPBFDProfileWithTransactionalBackend(t *testing.T) {
+func TestValidateChangesAllowsBGPBFDProfileWithTransactionalBackend(t *testing.T) {
 	newCfg := model.NewRouterConfig()
 	newCfg.Protocols = &model.ProtocolsConfig{
 		BGP: &model.BGPConfig{Groups: map[string]*model.BGPGroup{
@@ -213,8 +213,8 @@ func TestValidateChangesRejectsBGPBFDProfileWithTransactionalBackend(t *testing.
 	diff := engine.ComputeDiff(model.NewRouterConfig(), newCfg)
 
 	err := NewFRRPlugin(testLogger()).ValidateChanges(context.Background(), diff)
-	if err == nil || !strings.Contains(err.Error(), "BGP BFD profiles require FRR file backend") {
-		t.Fatalf("ValidateChanges() error = %v, want BGP BFD profile transactional rejection", err)
+	if err != nil {
+		t.Fatalf("ValidateChanges() error = %v, want nil", err)
 	}
 }
 
@@ -237,7 +237,7 @@ func TestValidateChangesAllowsOSPFBFDBindingWithTransactionalBackend(t *testing.
 	}
 }
 
-func TestValidateChangesRejectsOSPFBFDProfileWithTransactionalBackend(t *testing.T) {
+func TestValidateChangesAllowsOSPFBFDProfileWithTransactionalBackend(t *testing.T) {
 	newCfg := model.NewRouterConfig()
 	newCfg.Protocols = &model.ProtocolsConfig{
 		OSPF: &model.OSPFConfig{Areas: map[string]*model.OSPFArea{
@@ -251,8 +251,8 @@ func TestValidateChangesRejectsOSPFBFDProfileWithTransactionalBackend(t *testing
 	diff := engine.ComputeDiff(model.NewRouterConfig(), newCfg)
 
 	err := NewFRRPlugin(testLogger()).ValidateChanges(context.Background(), diff)
-	if err == nil || !strings.Contains(err.Error(), "OSPF BFD profiles require FRR file backend") {
-		t.Fatalf("ValidateChanges() error = %v, want OSPF BFD profile transactional rejection", err)
+	if err != nil {
+		t.Fatalf("ValidateChanges() error = %v, want nil", err)
 	}
 }
 
@@ -420,6 +420,115 @@ func TestApplyChangesPassesRoutingInstancesToApplier(t *testing.T) {
 	}
 }
 
+func TestApplyChangesFallsBackToFileBackendForOSPF3(t *testing.T) {
+	newCfg := model.NewRouterConfig()
+	newCfg.Interfaces["ge-0/0/0"] = &model.InterfaceConfig{
+		Units: map[int]*model.Unit{
+			0: {Family: map[string]*model.AddressFamily{"inet6": {Addresses: []string{"2001:db8::1/64"}}}},
+		},
+	}
+	newCfg.Protocols = &model.ProtocolsConfig{
+		OSPF3: &model.OSPFConfig{Areas: map[string]*model.OSPFArea{
+			"0.0.0.0": {
+				Interfaces: map[string]*model.OSPFInterface{
+					"ge-0/0/0": {Metric: 20},
+				},
+			},
+		}},
+	}
+	diff := engine.ComputeDiff(model.NewRouterConfig(), newCfg)
+	transactionalApplier := &recordingApplier{}
+	fileApplier := &recordingApplier{}
+	plugin := NewFRRPlugin(testLogger())
+	plugin.applier = transactionalApplier
+	plugin.fileApplier = fileApplier
+
+	if err := plugin.ApplyChanges(context.Background(), diff); err != nil {
+		t.Fatalf("ApplyChanges() error = %v", err)
+	}
+	if transactionalApplier.calls != 0 {
+		t.Fatalf("transactional ApplyConfig calls = %d, want 0", transactionalApplier.calls)
+	}
+	if fileApplier.calls != 1 {
+		t.Fatalf("file ApplyConfig calls = %d, want 1", fileApplier.calls)
+	}
+	if plugin.currentApplyMode != pkgfrr.BackendModeFile {
+		t.Fatalf("currentApplyMode = %q, want file", plugin.currentApplyMode)
+	}
+	if fileApplier.cfg == nil || fileApplier.cfg.OSPF3 == nil {
+		t.Fatalf("file applier config OSPF3 = %#v, want OSPF3 config", fileApplier.cfg)
+	}
+	if !strings.Contains(fileApplier.configContent, "router ospf6") {
+		t.Fatalf("file applier config missing OSPFv3:\n%s", fileApplier.configContent)
+	}
+}
+
+func TestRollbackUsesFileBackendAfterFileFallback(t *testing.T) {
+	newCfg := model.NewRouterConfig()
+	newCfg.Interfaces["ge-0/0/0"] = &model.InterfaceConfig{
+		Units: map[int]*model.Unit{
+			0: {Family: map[string]*model.AddressFamily{"inet6": {Addresses: []string{"2001:db8::1/64"}}}},
+		},
+	}
+	newCfg.Protocols = &model.ProtocolsConfig{
+		OSPF3: &model.OSPFConfig{Areas: map[string]*model.OSPFArea{
+			"0.0.0.0": {
+				Interfaces: map[string]*model.OSPFInterface{
+					"ge-0/0/0": {Metric: 20},
+				},
+			},
+		}},
+	}
+	diff := engine.ComputeDiff(model.NewRouterConfig(), newCfg)
+	transactionalApplier := &recordingApplier{}
+	fileApplier := &recordingApplier{}
+	plugin := NewFRRPlugin(testLogger())
+	plugin.applier = transactionalApplier
+	plugin.fileApplier = fileApplier
+
+	if err := plugin.ApplyChanges(context.Background(), diff); err != nil {
+		t.Fatalf("ApplyChanges() error = %v", err)
+	}
+	if err := plugin.RollbackChanges(context.Background(), diff); err != nil {
+		t.Fatalf("RollbackChanges() error = %v", err)
+	}
+	if transactionalApplier.calls != 0 {
+		t.Fatalf("transactional ApplyConfig calls = %d, want 0", transactionalApplier.calls)
+	}
+	if fileApplier.calls != 2 {
+		t.Fatalf("file ApplyConfig calls = %d, want 2", fileApplier.calls)
+	}
+	if plugin.currentApplyMode != pkgfrr.BackendModeFile {
+		t.Fatalf("currentApplyMode after rollback = %q, want file", plugin.currentApplyMode)
+	}
+}
+
+func TestApplyChangesUsesConfiguredFileBackend(t *testing.T) {
+	newCfg := model.NewRouterConfig()
+	newCfg.Routing = &model.RoutingConfig{StaticRoutes: []*model.StaticRoute{
+		{Prefix: "203.0.113.0/24", NextHop: "192.0.2.1"},
+	}}
+	diff := engine.ComputeDiff(model.NewRouterConfig(), newCfg)
+	configuredFileApplier := &recordingApplier{}
+	fallbackFileApplier := &recordingApplier{}
+	plugin := NewFRRPluginWithApplyMode(testLogger(), pkgfrr.BackendModeFile)
+	plugin.applier = configuredFileApplier
+	plugin.fileApplier = fallbackFileApplier
+
+	if err := plugin.ApplyChanges(context.Background(), diff); err != nil {
+		t.Fatalf("ApplyChanges() error = %v", err)
+	}
+	if configuredFileApplier.calls != 1 {
+		t.Fatalf("configured file ApplyConfig calls = %d, want 1", configuredFileApplier.calls)
+	}
+	if fallbackFileApplier.calls != 0 {
+		t.Fatalf("fallback file ApplyConfig calls = %d, want 0", fallbackFileApplier.calls)
+	}
+	if plugin.currentApplyMode != pkgfrr.BackendModeFile {
+		t.Fatalf("currentApplyMode = %q, want file", plugin.currentApplyMode)
+	}
+}
+
 func TestValidateChangesAllowsRemovingUnsupportedV06FRRConfig(t *testing.T) {
 	oldCfg := model.NewRouterConfig()
 	oldCfg.Protocols = &model.ProtocolsConfig{
@@ -531,9 +640,11 @@ func TestCheckBFDOperationalStatusConverged(t *testing.T) {
 type recordingApplier struct {
 	configContent string
 	cfg           *pkgfrr.Config
+	calls         int
 }
 
 func (a *recordingApplier) ApplyConfig(ctx context.Context, configContent string, cfg *pkgfrr.Config) error {
+	a.calls++
 	a.configContent = configContent
 	a.cfg = cfg
 	return nil
