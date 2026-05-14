@@ -1076,6 +1076,7 @@ arca show route
 arca show route protocol bgp
 
 # BGP summary
+arca show bgp neighbors
 arca show bgp summary
 
 # BGP neighbors
@@ -1100,7 +1101,7 @@ arca show class-of-service
 arca show configuration
 ```
 
-`show interfaces` prints live managed VPP admin/oper status, bound QoS profile, packet counters, and RX/TX queue placement when available. Name filters use configured interface names such as `ge-0/0/0`. `show vrrp` prints FRR `show vrrp` output through arca-routerd for local HA inspection. `show lcp` prints the cached VPP LCP reconciliation state used by HA convergence checks. `show ha` prints the same HA convergence summary used by Web UI, Prometheus, and SNMP. `show class-of-service` prints running CoS intent and reports `intent-only` for scheduler/policer enforcement while VPP enforcement support is staged separately.
+`show interfaces` prints live managed VPP admin/oper status, bound QoS profile, packet counters, and RX/TX queue placement when available. Name filters use configured interface names such as `ge-0/0/0`. `show bgp neighbors` prints structured BGP neighbor state from the internal gRPC state API, while `show bgp summary` and `show bgp neighbor <ip>` retain raw FRR output. `show vrrp` prints FRR `show vrrp` output through arca-routerd for local HA inspection. `show lcp` prints the cached VPP LCP reconciliation state used by HA convergence checks. `show ha` prints the same HA convergence summary used by Web UI, Prometheus, and SNMP. `show class-of-service` prints running CoS intent and reports `intent-only` for scheduler/policer enforcement while VPP enforcement support is staged separately.
 
 Interactive mode also supports `show history [N]` in configuration mode for commit history.
 

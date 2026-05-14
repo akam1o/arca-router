@@ -234,6 +234,7 @@ arca show interfaces
 arca show routing-instances
 arca show route
 arca show route inet6
+arca show bgp neighbors
 arca show bgp summary
 arca show ospf neighbor
 arca show ospf3 neighbor
