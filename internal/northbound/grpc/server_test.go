@@ -300,14 +300,26 @@ func TestOperationalStateEndpointsReadVPPAndFRR(t *testing.T) {
 	if output, err := srv.GetVRRPText(ctx); err != nil || output != "show vrrp\n" {
 		t.Fatalf("GetVRRPText() = %q, %v", output, err)
 	}
-	if len(commands) != 5 {
-		t.Fatalf("vtysh commands = %v, want 5 commands", commands)
+	if output, err := srv.GetBFDText(ctx, "", true, false); err != nil || output != "show bfd peers brief\n" {
+		t.Fatalf("GetBFDText(brief) = %q, %v", output, err)
+	}
+	if output, err := srv.GetBFDText(ctx, "192.0.2.2", false, true); err != nil || output != "show bfd peer 192.0.2.2 counters\n" {
+		t.Fatalf("GetBFDText(peer counters) = %q, %v", output, err)
+	}
+	if len(commands) != 7 {
+		t.Fatalf("vtysh commands = %v, want 7 commands", commands)
 	}
 	if _, err := srv.GetRouteText(ctx, "rip"); err == nil || !strings.Contains(err.Error(), "invalid route protocol") {
 		t.Fatalf("GetRouteText(invalid) error = %v, want invalid protocol", err)
 	}
 	if _, err := srv.GetBGPNeighborText(ctx, "not-an-address"); err == nil || !strings.Contains(err.Error(), "invalid BGP neighbor address") {
 		t.Fatalf("GetBGPNeighborText(invalid) error = %v, want invalid peer address", err)
+	}
+	if _, err := srv.GetBFDText(ctx, "not-an-address", false, false); err == nil || !strings.Contains(err.Error(), "invalid BFD peer address") {
+		t.Fatalf("GetBFDText(invalid peer) error = %v, want invalid peer address", err)
+	}
+	if _, err := srv.GetBFDText(ctx, "192.0.2.2", true, false); err == nil || !strings.Contains(err.Error(), "does not support brief") {
+		t.Fatalf("GetBFDText(peer brief) error = %v, want brief unsupported", err)
 	}
 }
 

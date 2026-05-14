@@ -304,6 +304,21 @@ func (c *Client) GetVRRPText(ctx context.Context) (string, error) {
 	return resp.GetOutput(), nil
 }
 
+// GetBFDText returns FRR BFD output.
+func (c *Client) GetBFDText(ctx context.Context, peerAddress string, brief, counters bool) (string, error) {
+	ctx, cancel := contextWithDefaultTimeout(ctx)
+	defer cancel()
+	resp, err := c.state.GetBFDText(ctx, &apiv1.GetBFDTextRequest{
+		PeerAddress: peerAddress,
+		Brief:       brief,
+		Counters:    counters,
+	})
+	if err != nil {
+		return "", err
+	}
+	return resp.GetOutput(), nil
+}
+
 // GetLCPReconciliation returns cached VPP LCP reconciliation state.
 func (c *Client) GetLCPReconciliation(ctx context.Context) (*LCPReconciliationInfo, error) {
 	ctx, cancel := contextWithDefaultTimeout(ctx)

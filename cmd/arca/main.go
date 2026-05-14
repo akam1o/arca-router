@@ -96,6 +96,9 @@ Show subcommands:
   bgp summary                 Show BGP summary
   bgp neighbor <ip>           Show BGP neighbor details
   ospf neighbor               Show OSPF neighbors
+  vrrp                        Show VRRP status
+  bfd [brief|counters]        Show BFD status
+  bfd peer <ip> [counters]    Show BFD peer details
   route                       Show routing table
   route protocol <proto>      Show routes by protocol
 
@@ -256,6 +259,20 @@ func oneShotShow(ctx context.Context, client showClient, args []string, f *cliFl
 		printCommandOutput(output)
 		return ExitSuccess
 
+	case "bfd":
+		peerAddress, brief, counters, err := bfdTextOptions(args[1:])
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+			return ExitUsageError
+		}
+		output, err := client.GetBFDText(ctx, peerAddress, brief, counters)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+			return ExitOperationError
+		}
+		printCommandOutput(output)
+		return ExitSuccess
+
 	case "lcp":
 		info, err := client.GetLCPReconciliation(ctx)
 		if err != nil {
@@ -340,6 +357,7 @@ type showClient interface {
 	GetBGPNeighborText(context.Context, string) (string, error)
 	GetOSPFNeighborsText(context.Context) (string, error)
 	GetVRRPText(context.Context) (string, error)
+	GetBFDText(context.Context, string, bool, bool) (string, error)
 	GetLCPReconciliation(context.Context) (*grpcclient.LCPReconciliationInfo, error)
 	GetHAStatus(context.Context) (*grpcclient.HAStatusInfo, error)
 	GetClassOfService(context.Context) (*grpcclient.ClassOfServiceInfo, error)
@@ -693,6 +711,21 @@ func (sh *interactiveShell) cmdShow(ctx context.Context, args []string) error {
 		printCommandOutput(output)
 		return nil
 
+	case "bfd":
+		if sh.mode == modeConfiguration {
+			return fmt.Errorf("'show bfd' not available in configuration mode")
+		}
+		peerAddress, brief, counters, err := bfdTextOptions(args[1:])
+		if err != nil {
+			return err
+		}
+		output, err := sh.client.GetBFDText(ctx, peerAddress, brief, counters)
+		if err != nil {
+			return err
+		}
+		printCommandOutput(output)
+		return nil
+
 	case "lcp":
 		if sh.mode == modeConfiguration {
 			return fmt.Errorf("'show lcp' not available in configuration mode")
@@ -944,6 +977,8 @@ func (sh *interactiveShell) showHelp() {
 		fmt.Println("  show bgp neighbor <ip>        Show BGP neighbor details")
 		fmt.Println("  show ospf neighbor            Show OSPF neighbors")
 		fmt.Println("  show vrrp                     Show VRRP status")
+		fmt.Println("  show bfd [brief|counters]     Show BFD status")
+		fmt.Println("  show bfd peer <ip> [counters] Show BFD peer details")
 		fmt.Println("  show lcp                      Show VPP LCP reconciliation status")
 		fmt.Println("  show ha                       Show HA convergence status")
 		fmt.Println("  show class-of-service         Show class-of-service intent")
@@ -1214,6 +1249,37 @@ func routeProtocolFilter(args []string) (string, error) {
 		return "", fmt.Errorf("invalid protocol '%s'. Valid: bgp, ospf, static, connected, kernel", protocol)
 	}
 	return protocol, nil
+}
+
+func bfdTextOptions(args []string) (peerAddress string, brief bool, counters bool, err error) {
+	if len(args) == 0 {
+		return "", false, false, nil
+	}
+	switch args[0] {
+	case "brief":
+		if len(args) > 1 {
+			return "", false, false, fmt.Errorf("'show bfd brief' does not accept extra arguments")
+		}
+		return "", true, false, nil
+	case "counters":
+		if len(args) > 1 {
+			return "", false, false, fmt.Errorf("'show bfd counters' does not accept extra arguments")
+		}
+		return "", false, true, nil
+	case "peer":
+		if len(args) < 2 {
+			return "", false, false, fmt.Errorf("'show bfd peer' requires an IP address")
+		}
+		if len(args) > 3 {
+			return "", false, false, fmt.Errorf("'show bfd peer' accepts only an optional counters argument")
+		}
+		if len(args) == 3 && args[2] != "counters" {
+			return "", false, false, fmt.Errorf("'show bfd peer' accepts only an optional counters argument")
+		}
+		return args[1], false, len(args) == 3, nil
+	default:
+		return "", false, false, fmt.Errorf("'show bfd' accepts brief, counters, peer <ip>, or no arguments")
+	}
 }
 
 var validRouteProtocols = map[string]bool{

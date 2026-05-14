@@ -235,6 +235,8 @@ arca show route
 arca show bgp summary
 arca show ospf neighbor
 arca show vrrp
+arca show bfd
+arca show bfd counters
 arca show lcp
 arca show ha
 arca show class-of-service
