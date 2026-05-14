@@ -636,6 +636,7 @@ func TestGetBFDStatusUsesSource(t *testing.T) {
 func TestGetHAStatusUsesSource(t *testing.T) {
 	srv := NewServer(engine.NewEngine(nil, testLogger()), &fakeStore{}, testLogger())
 	lastRun := time.Unix(1700000300, 0).UTC()
+	bfdLastRun := time.Unix(1700000400, 0).UTC()
 	srv.SetHAStatusSource(fakeHAStatusSource{info: HAStatusInfo{
 		Configured:              true,
 		Converged:               false,
@@ -649,6 +650,12 @@ func TestGetHAStatusUsesSource(t *testing.T) {
 		FRRVRRPConfiguredGroups: 1,
 		FRRVRRPObservedGroups:   1,
 		FRRVRRPActiveGroups:     0,
+		FRRBFDLastCheck:         bfdLastRun,
+		FRRBFDConfiguredPeers:   1,
+		FRRBFDObservedPeers:     1,
+		FRRBFDUpPeers:           0,
+		FRRBFDDownPeers:         1,
+		FRRBFDIssues:            []string{"FRR BFD peer 192.0.2.2 is down"},
 	}})
 
 	info, err := srv.GetHAStatus(context.Background())
@@ -656,7 +663,9 @@ func TestGetHAStatusUsesSource(t *testing.T) {
 		t.Fatalf("GetHAStatus() error = %v", err)
 	}
 	if !info.Configured || info.Converged || info.VRRPGroups != 1 || info.FRRVRRPLastCheck != lastRun ||
-		info.FRRVRRPActiveGroups != 0 || len(info.Issues) != 1 {
+		info.FRRVRRPActiveGroups != 0 || info.FRRBFDLastCheck != bfdLastRun ||
+		info.FRRBFDConfiguredPeers != 1 || info.FRRBFDDownPeers != 1 || len(info.FRRBFDIssues) != 1 ||
+		len(info.Issues) != 1 {
 		t.Fatalf("GetHAStatus() = %#v, want source status", info)
 	}
 }

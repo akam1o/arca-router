@@ -1388,6 +1388,8 @@ func printHAStatus(info *grpcclient.HAStatusInfo) {
 	fmt.Printf("%-18s %s\n", "Cluster sync", clusterSyncState(info))
 	fmt.Printf("%-18s %d/%d\n", "FRR VRRP", info.FRRVRRPActiveGroups, info.FRRVRRPConfiguredGroups)
 	fmt.Printf("%-18s %s\n", "FRR last check", formatOptionalTime(info.FRRVRRPLastCheck))
+	fmt.Printf("%-18s %s\n", "FRR BFD", haBFDState(info))
+	fmt.Printf("%-18s %s\n", "BFD last check", formatOptionalTime(info.FRRBFDLastCheck))
 	fmt.Printf("%-18s %s\n", "VPP LCP", lcpReconciliationState(&grpcclient.LCPReconciliationInfo{
 		LastRun:         info.VPPLCPLastCheck,
 		PairCount:       info.VPPLCPPairs,
@@ -1535,6 +1537,25 @@ func clusterSyncState(info *grpcclient.HAStatusInfo) string {
 		return "aligned"
 	}
 	return "mismatch"
+}
+
+func haBFDState(info *grpcclient.HAStatusInfo) string {
+	if info == nil || (info.FRRBFDConfiguredPeers == 0 && info.FRRBFDObservedPeers == 0) {
+		return "not configured"
+	}
+	totalPeers := info.FRRBFDConfiguredPeers
+	if totalPeers == 0 {
+		totalPeers = info.FRRBFDObservedPeers
+	}
+	state := fmt.Sprintf("%d/%d up", info.FRRBFDUpPeers, totalPeers)
+	if info.FRRBFDLastError != "" || len(info.FRRBFDIssues) > 0 ||
+		info.FRRBFDDownPeers > 0 || info.FRRBFDUpPeers < info.FRRBFDConfiguredPeers {
+		return state + " (issues)"
+	}
+	if info.FRRBFDLastCheck.IsZero() {
+		return state + " (unknown)"
+	}
+	return state
 }
 
 func hasBFDStatus(info *grpcclient.BFDStatusInfo) bool {

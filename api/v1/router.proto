@@ -395,6 +395,13 @@ message GetHAStatusResponse {
   uint32 vpp_lcp_pairs = 16;
   repeated string vpp_lcp_inconsistencies = 17;
   string vpp_lcp_last_error = 18;
+  string frr_bfd_last_check = 19;
+  uint32 frr_bfd_configured_peers = 20;
+  uint32 frr_bfd_observed_peers = 21;
+  uint32 frr_bfd_up_peers = 22;
+  uint32 frr_bfd_down_peers = 23;
+  repeated string frr_bfd_issues = 24;
+  string frr_bfd_last_error = 25;
 }
 
 message GetRoutingInstancesRequest {}
