@@ -224,6 +224,11 @@ func (c *RouterConfig) validateProtocols() error {
 	if c.Protocols == nil {
 		return nil
 	}
+	if bfd := c.Protocols.BFD; bfd != nil {
+		if err := c.validateBFD(bfd); err != nil {
+			return err
+		}
+	}
 	if bgp := c.Protocols.BGP; bgp != nil {
 		if err := c.validateBGP(bgp); err != nil {
 			return err
@@ -267,6 +272,64 @@ func (c *RouterConfig) validateProtocols() error {
 				return fmt.Errorf("vrrp group %s: priority must be 1-254 when configured, got %d", name, group.Priority)
 			}
 		}
+	}
+	return nil
+}
+
+func (c *RouterConfig) validateBFD(bfd *BFDConfig) error {
+	for name, profile := range bfd.Profiles {
+		if profile == nil {
+			return fmt.Errorf("bfd profile %s is nil", name)
+		}
+		if err := validateModelBFDTimers(fmt.Sprintf("bfd profile %s", name), profile.DetectMultiplier, profile.ReceiveInterval, profile.TransmitInterval); err != nil {
+			return err
+		}
+	}
+	for address, peer := range bfd.Peers {
+		if peer == nil {
+			return fmt.Errorf("bfd peer %s is nil", address)
+		}
+		if net.ParseIP(address) == nil {
+			return fmt.Errorf("bfd peer %s: invalid peer address", address)
+		}
+		if peer.LocalAddress != "" && net.ParseIP(peer.LocalAddress) == nil {
+			return fmt.Errorf("bfd peer %s: invalid local-address %q", address, peer.LocalAddress)
+		}
+		if peer.Interface != "" {
+			if err := c.validateInterfaceReference(fmt.Sprintf("bfd peer %s", address), peer.Interface); err != nil {
+				return err
+			}
+		}
+		if peer.VRF != "" && peer.VRF != "default" {
+			if c.RoutingInstances == nil || c.RoutingInstances[peer.VRF] == nil {
+				return fmt.Errorf("bfd peer %s: routing-instance %q is not configured", address, peer.VRF)
+			}
+		}
+		if peer.Profile != "" && bfd.Profiles[peer.Profile] == nil {
+			return fmt.Errorf("bfd peer %s: profile %q is not configured", address, peer.Profile)
+		}
+		if peer.Multihop && peer.EchoMode {
+			return fmt.Errorf("bfd peer %s: echo-mode is not supported with multihop", address)
+		}
+		if peer.Multihop && peer.Profile != "" && bfd.Profiles[peer.Profile] != nil && bfd.Profiles[peer.Profile].EchoMode {
+			return fmt.Errorf("bfd peer %s: echo-mode profile %q is not supported with multihop", address, peer.Profile)
+		}
+		if err := validateModelBFDTimers(fmt.Sprintf("bfd peer %s", address), peer.DetectMultiplier, peer.ReceiveInterval, peer.TransmitInterval); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func validateModelBFDTimers(context string, detectMultiplier, receiveInterval, transmitInterval int) error {
+	if detectMultiplier < 0 || detectMultiplier > 255 || detectMultiplier == 1 {
+		return fmt.Errorf("%s: detect-multiplier must be omitted or 2-255, got %d", context, detectMultiplier)
+	}
+	if receiveInterval < 0 || receiveInterval > 60000 || (receiveInterval > 0 && receiveInterval < 10) {
+		return fmt.Errorf("%s: receive-interval must be omitted or 10-60000, got %d", context, receiveInterval)
+	}
+	if transmitInterval < 0 || transmitInterval > 60000 || (transmitInterval > 0 && transmitInterval < 10) {
+		return fmt.Errorf("%s: transmit-interval must be omitted or 10-60000, got %d", context, transmitInterval)
 	}
 	return nil
 }

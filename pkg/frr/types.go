@@ -15,6 +15,9 @@ type Config struct {
 	// BGP holds BGP configuration
 	BGP *BGPConfig
 
+	// BFD holds Bidirectional Forwarding Detection configuration
+	BFD *BFDConfig
+
 	// OSPF holds OSPF configuration
 	OSPF *OSPFConfig
 
@@ -60,6 +63,38 @@ type BGPConfig struct {
 
 	// IPv6Unicast enables IPv6 unicast address family
 	IPv6Unicast bool
+}
+
+// BFDConfig represents FRR BFD configuration.
+type BFDConfig struct {
+	Profiles []BFDProfile
+	Peers    []BFDPeer
+}
+
+// BFDProfile represents an FRR BFD profile.
+type BFDProfile struct {
+	Name             string
+	DetectMultiplier int
+	ReceiveInterval  int
+	TransmitInterval int
+	EchoMode         bool
+	PassiveMode      bool
+}
+
+// BFDPeer represents an FRR BFD peer.
+type BFDPeer struct {
+	Address          string
+	LocalAddress     string
+	Interface        string
+	VRF              string
+	Multihop         bool
+	Profile          string
+	DetectMultiplier int
+	ReceiveInterval  int
+	TransmitInterval int
+	EchoMode         bool
+	PassiveMode      bool
+	Shutdown         bool
 }
 
 // BGPNeighbor represents a BGP neighbor configuration in FRR format.
