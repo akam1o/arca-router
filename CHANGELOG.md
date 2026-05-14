@@ -11,6 +11,7 @@
 - **Route policy validation**: legacy and canonical config validation reject invalid IPv4/IPv6 prefix-list entries, unknown policy-statement prefix-list references, invalid route-policy protocols, neighbors, AS-path regexes, and community values before apply
 - **BGP policy reference validation**: BGP group import/export policies are validated against configured policy-statements before FRR generation
 - **Route policy prefix-list aggregation**: FRR generation aggregates same-family prefix-list matches per route-map entry so IPv4 and IPv6 policy matches render deterministically through both file and transactional backends
+- **Route-map backend selection**: route-map source-protocol, peer, and AS-path matches fall back to the FRR file backend instead of being silently dropped by transactional apply
 - **BFD peer backend selection**: interface-less single-hop and source-less multihop BFD peers fall back to the FRR file backend because FRR mgmtd requires those fields as transactional session keys
 
 ## v0.6.x - Advanced Features (previous)

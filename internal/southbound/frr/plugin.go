@@ -266,7 +266,9 @@ func requiresFRRFileBackend(cfg *pkgfrr.Config) bool {
 	return cfg.OSPF3 != nil ||
 		frrBGPHasBFDProfiles(cfg.BGP) ||
 		frrOSPFHasBFDProfiles(cfg.OSPF) ||
-		frrBFDRequiresFileBackend(cfg.BFD)
+		frrBFDRequiresFileBackend(cfg.BFD) ||
+		frrRouteMapsRequireFileBackend(cfg.RouteMaps) ||
+		len(cfg.ASPathAccessLists) > 0
 }
 
 func frrBGPHasBFDProfiles(cfg *pkgfrr.BGPConfig) bool {
@@ -303,6 +305,17 @@ func frrBFDRequiresFileBackend(cfg *pkgfrr.BFDConfig) bool {
 		}
 		if !peer.Multihop && peer.Interface == "" {
 			return true
+		}
+	}
+	return false
+}
+
+func frrRouteMapsRequireFileBackend(routeMaps []pkgfrr.RouteMap) bool {
+	for _, routeMap := range routeMaps {
+		for _, entry := range routeMap.Entries {
+			if entry.MatchProtocol != "" || entry.MatchNeighbor != "" || entry.MatchASPath != "" {
+				return true
+			}
 		}
 	}
 	return false

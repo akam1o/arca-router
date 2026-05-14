@@ -525,6 +525,44 @@ func TestApplyChangesFallsBackToFileBackendForInterfaceLessBFDSingleHopPeer(t *t
 	}
 }
 
+func TestApplyChangesFallsBackToFileBackendForUnsupportedRouteMapMatches(t *testing.T) {
+	accept := true
+	newCfg := model.NewRouterConfig()
+	newCfg.Policy = &model.PolicyConfig{PolicyStatements: map[string]*model.PolicyStatement{
+		"IMPORT": {
+			Terms: []*model.PolicyTerm{
+				{
+					Name: "AS-PATH",
+					From: &model.PolicyMatchConditions{ASPath: "^65001"},
+					Then: &model.PolicyActions{Accept: &accept},
+				},
+			},
+		},
+	}}
+	diff := engine.ComputeDiff(model.NewRouterConfig(), newCfg)
+	transactionalApplier := &recordingApplier{}
+	fileApplier := &recordingApplier{}
+	plugin := NewFRRPlugin(testLogger())
+	plugin.applier = transactionalApplier
+	plugin.fileApplier = fileApplier
+
+	if err := plugin.ApplyChanges(context.Background(), diff); err != nil {
+		t.Fatalf("ApplyChanges() error = %v", err)
+	}
+	if transactionalApplier.calls != 0 {
+		t.Fatalf("transactional ApplyConfig calls = %d, want 0", transactionalApplier.calls)
+	}
+	if fileApplier.calls != 1 {
+		t.Fatalf("file ApplyConfig calls = %d, want 1", fileApplier.calls)
+	}
+	if plugin.currentApplyMode != pkgfrr.BackendModeFile {
+		t.Fatalf("currentApplyMode = %q, want file", plugin.currentApplyMode)
+	}
+	if !strings.Contains(fileApplier.configContent, "match as-path AS-PATH-1") {
+		t.Fatalf("file applier config missing AS-path route-map match:\n%s", fileApplier.configContent)
+	}
+}
+
 func TestRollbackUsesFileBackendAfterFileFallback(t *testing.T) {
 	newCfg := model.NewRouterConfig()
 	newCfg.Interfaces["ge-0/0/0"] = &model.InterfaceConfig{

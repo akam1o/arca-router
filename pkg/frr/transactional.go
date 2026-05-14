@@ -142,6 +142,9 @@ func BuildMgmtOperations(cfg *Config) ([]MgmtOperation, error) {
 	if err := validateTransactionalBFDProtocolBindings(cfg); err != nil {
 		return nil, err
 	}
+	if err := validateTransactionalRouteMapSupport(cfg); err != nil {
+		return nil, err
+	}
 	prefixLists, routeMaps, err := aggregateRouteMapPrefixListMatches(cfg.PrefixLists, cfg.RouteMaps)
 	if err != nil {
 		return nil, NewInvalidConfigError(err.Error())
@@ -193,6 +196,29 @@ func validateTransactionalBFDProtocolBindings(cfg *Config) error {
 	}
 	if cfg.OSPF3 != nil && ospfHasBFDProtocolBindings(cfg.OSPF3) {
 		return NewInvalidConfigError("OSPFv3 BFD protocol bindings are not supported by the transactional FRR backend until ospf6d management operations are implemented")
+	}
+	return nil
+}
+
+func validateTransactionalRouteMapSupport(cfg *Config) error {
+	if cfg == nil {
+		return nil
+	}
+	for _, routeMap := range cfg.RouteMaps {
+		for _, entry := range routeMap.Entries {
+			if entry.MatchProtocol != "" {
+				return NewInvalidConfigError(fmt.Sprintf("route-map %s entry %d match source-protocol is not supported by the transactional FRR backend until route-map source-protocol management operations are implemented", routeMap.Name, entry.Seq))
+			}
+			if entry.MatchNeighbor != "" {
+				return NewInvalidConfigError(fmt.Sprintf("route-map %s entry %d match peer is not supported by the transactional FRR backend until route-map peer management operations are implemented", routeMap.Name, entry.Seq))
+			}
+			if entry.MatchASPath != "" {
+				return NewInvalidConfigError(fmt.Sprintf("route-map %s entry %d match as-path is not supported by the transactional FRR backend until AS-path route-map management operations are implemented", routeMap.Name, entry.Seq))
+			}
+		}
+	}
+	if len(cfg.ASPathAccessLists) > 0 {
+		return NewInvalidConfigError("AS-path access-lists are not supported by the transactional FRR backend until AS-path management operations are implemented")
 	}
 	return nil
 }

@@ -160,6 +160,52 @@ func TestBuildMgmtOperationsAggregatesRouteMapPrefixLists(t *testing.T) {
 	}
 }
 
+func TestBuildMgmtOperationsRejectsUnsupportedRouteMapMatches(t *testing.T) {
+	tests := []struct {
+		name     string
+		cfg      *Config
+		wantText string
+	}{
+		{
+			name: "source protocol match",
+			cfg: &Config{RouteMaps: []RouteMap{
+				{Name: "IMPORT", Entries: []RouteMapEntry{{Seq: 10, Action: "permit", MatchProtocol: "bgp"}}},
+			}},
+			wantText: "match source-protocol",
+		},
+		{
+			name: "peer match",
+			cfg: &Config{RouteMaps: []RouteMap{
+				{Name: "IMPORT", Entries: []RouteMapEntry{{Seq: 10, Action: "permit", MatchNeighbor: "192.0.2.2"}}},
+			}},
+			wantText: "match peer",
+		},
+		{
+			name: "as path match",
+			cfg: &Config{RouteMaps: []RouteMap{
+				{Name: "IMPORT", Entries: []RouteMapEntry{{Seq: 10, Action: "permit", MatchASPath: "AS-PATH-1"}}},
+			}},
+			wantText: "match as-path",
+		},
+		{
+			name: "as path access list",
+			cfg: &Config{ASPathAccessLists: []ASPathAccessList{
+				{Name: "AS-PATH-1", Entries: []ASPathAccessListEntry{{Seq: 10, Action: "permit", Regex: "^65001"}}},
+			}},
+			wantText: "AS-path access-lists",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := BuildMgmtOperations(tt.cfg)
+			if err == nil || !strings.Contains(err.Error(), tt.wantText) {
+				t.Fatalf("BuildMgmtOperations() error = %v, want %q", err, tt.wantText)
+			}
+		})
+	}
+}
+
 func TestBuildMgmtOperationsVRFVPN(t *testing.T) {
 	ops, err := BuildMgmtOperations(&Config{
 		VRFs: []VRFConfig{
