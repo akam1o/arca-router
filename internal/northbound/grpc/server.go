@@ -686,7 +686,29 @@ func routeFamiliesForPrefix(prefix netip.Prefix) []string {
 
 // GetBGPNeighbors returns BGP neighbor state.
 func (s *Server) GetBGPNeighbors(ctx context.Context) ([]BGPNeighborInfo, error) {
-	return nil, unsupportedOperationalStateError("BGP neighbor state")
+	output, err := runOperationalVtyshCommand(ctx, "show bgp summary json")
+	if err != nil {
+		return nil, fmt.Errorf("show bgp summary json: %w", err)
+	}
+	status, err := pkgfrr.ParseBGPSummaryJSON([]byte(output))
+	if err != nil {
+		return nil, fmt.Errorf("show bgp summary json: %w", err)
+	}
+	neighbors := make([]BGPNeighborInfo, 0, len(status.Neighbors))
+	for _, neighbor := range status.Neighbors {
+		neighbors = append(neighbors, BGPNeighborInfo{
+			PeerAddress:    neighbor.PeerAddress,
+			PeerAS:         neighbor.PeerAS,
+			State:          neighbor.State,
+			UptimeSecs:     neighbor.UptimeSecs,
+			PrefixReceived: neighbor.PrefixReceived,
+			PrefixSent:     neighbor.PrefixSent,
+		})
+	}
+	sort.Slice(neighbors, func(i, j int) bool {
+		return neighbors[i].PeerAddress < neighbors[j].PeerAddress
+	})
+	return neighbors, nil
 }
 
 // GetRouteText returns FRR routing table output.

@@ -426,6 +426,66 @@ func TestGetRoutesUsesFRRJSON(t *testing.T) {
 	}
 }
 
+func TestGetBGPNeighborsUsesFRRJSON(t *testing.T) {
+	srv := NewServer(engine.NewEngine(nil, testLogger()), &fakeStore{}, testLogger())
+	ctx := context.Background()
+
+	var commands []string
+	oldVtysh := runOperationalVtyshCommand
+	runOperationalVtyshCommand = func(ctx context.Context, command string) (string, error) {
+		commands = append(commands, command)
+		if command != "show bgp summary json" {
+			t.Fatalf("unexpected vtysh command %q", command)
+		}
+		return `{
+			"ipv4Unicast": {
+				"peers": {
+					"192.0.2.2": {
+						"remoteAs": 65001,
+						"state": "Established",
+						"peerUptime": "00:01:30",
+						"pfxRcd": 10,
+						"pfxSnt": 3
+					}
+				}
+			},
+			"ipv6Unicast": {
+				"peers": {
+					"2001:db8::2": {
+						"remoteAs": 65002,
+						"state": "Active",
+						"peerUptimeMsec": 42000,
+						"pfxRcd": 0,
+						"pfxSnt": 1
+					}
+				}
+			}
+		}`, nil
+	}
+	t.Cleanup(func() { runOperationalVtyshCommand = oldVtysh })
+
+	neighbors, err := srv.GetBGPNeighbors(ctx)
+	if err != nil {
+		t.Fatalf("GetBGPNeighbors() error = %v", err)
+	}
+	if len(commands) != 1 || commands[0] != "show bgp summary json" {
+		t.Fatalf("vtysh commands = %#v, want BGP summary JSON", commands)
+	}
+	if len(neighbors) != 2 {
+		t.Fatalf("GetBGPNeighbors() returned %d neighbors, want 2", len(neighbors))
+	}
+	if got := neighbors[0]; got.PeerAddress != "192.0.2.2" || got.PeerAS != 65001 ||
+		got.State != "Established" || got.UptimeSecs != 90 ||
+		got.PrefixReceived != 10 || got.PrefixSent != 3 {
+		t.Fatalf("GetBGPNeighbors()[0] = %#v, want IPv4 peer state", got)
+	}
+	if got := neighbors[1]; got.PeerAddress != "2001:db8::2" || got.PeerAS != 65002 ||
+		got.State != "Active" || got.UptimeSecs != 42 ||
+		got.PrefixReceived != 0 || got.PrefixSent != 1 {
+		t.Fatalf("GetBGPNeighbors()[1] = %#v, want IPv6 peer state", got)
+	}
+}
+
 func TestGetInterfacesUsesManagedStateCollector(t *testing.T) {
 	srv := NewServer(engine.NewEngine(nil, testLogger()), &fakeStore{}, testLogger())
 	collector := &fakeInterfaceStateCollector{
