@@ -300,6 +300,10 @@ func validPolicyAction(action string) bool {
 }
 
 func validateTransactionalRouteMapReferences(cfg *Config) error {
+	return validateFRRRouteMapReferences(cfg)
+}
+
+func validateFRRRouteMapReferences(cfg *Config) error {
 	if cfg == nil {
 		return nil
 	}
