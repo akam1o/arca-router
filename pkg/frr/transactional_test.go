@@ -242,6 +242,59 @@ func TestBuildMgmtOperationsVRFVPN(t *testing.T) {
 	}
 }
 
+func TestBuildMgmtOperationsRejectsInvalidVRFVPN(t *testing.T) {
+	tests := []struct {
+		name string
+		vrf  VRFConfig
+		want string
+	}{
+		{
+			name: "empty name",
+			vrf:  VRFConfig{Name: ""},
+			want: "VRF name is required",
+		},
+		{
+			name: "missing asn",
+			vrf:  VRFConfig{Name: "BLUE", ImportTargets: []string{"65000:100"}},
+			want: "BGP ASN is required",
+		},
+		{
+			name: "export without rd",
+			vrf:  VRFConfig{Name: "BLUE", ASN: 65000, ExportTargets: []string{"65000:100"}},
+			want: "route-distinguisher is required",
+		},
+		{
+			name: "invalid rd",
+			vrf:  VRFConfig{Name: "BLUE", ASN: 65000, RouteDistinguisher: "bad", ExportTargets: []string{"65000:100"}},
+			want: "invalid route-distinguisher",
+		},
+		{
+			name: "invalid import target",
+			vrf:  VRFConfig{Name: "BLUE", ASN: 65000, ImportTargets: []string{"bad"}},
+			want: "invalid import route-target",
+		},
+		{
+			name: "import route-map without target",
+			vrf:  VRFConfig{Name: "BLUE", ASN: 65000, ImportRouteMap: "BLUE-IN"},
+			want: "route-map import requires an import route-target",
+		},
+		{
+			name: "export route-map without target",
+			vrf:  VRFConfig{Name: "BLUE", ASN: 65000, ExportRouteMap: "BLUE-OUT"},
+			want: "route-map export requires an export route-target",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := BuildMgmtOperations(&Config{VRFs: []VRFConfig{tt.vrf}})
+			if err == nil || !strings.Contains(err.Error(), tt.want) {
+				t.Fatalf("BuildMgmtOperations() error = %v, want %q", err, tt.want)
+			}
+		})
+	}
+}
+
 func TestBuildMgmtOperationsRejectsOSPF3(t *testing.T) {
 	_, err := BuildMgmtOperations(&Config{
 		OSPF3: &OSPFConfig{

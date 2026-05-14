@@ -148,6 +148,9 @@ func BuildMgmtOperations(cfg *Config) ([]MgmtOperation, error) {
 	if err := validateTransactionalRouteMapSupport(cfg); err != nil {
 		return nil, err
 	}
+	if err := validateTransactionalVRFVPN(cfg); err != nil {
+		return nil, err
+	}
 	prefixLists, routeMaps, err := aggregateRouteMapPrefixListMatches(cfg.PrefixLists, cfg.RouteMaps)
 	if err != nil {
 		return nil, NewInvalidConfigError(err.Error())
@@ -222,6 +225,69 @@ func validateTransactionalStaticRouteBFDProfiles(cfg *Config) error {
 		}
 	}
 	return nil
+}
+
+func validateTransactionalVRFVPN(cfg *Config) error {
+	if cfg == nil {
+		return nil
+	}
+	for _, vrf := range cfg.VRFs {
+		if strings.TrimSpace(vrf.Name) == "" {
+			return NewInvalidConfigError("VRF name is required")
+		}
+		importTargetCount := len(vrf.ImportTargets)
+		exportTargetCount := len(vrf.ExportTargets)
+		for _, target := range vrf.ImportTargets {
+			if !validRouteTargetValue(target) {
+				return NewInvalidConfigError(fmt.Sprintf("VRF %s: invalid import route-target %s", vrf.Name, target))
+			}
+		}
+		for _, target := range vrf.ExportTargets {
+			if !validRouteTargetValue(target) {
+				return NewInvalidConfigError(fmt.Sprintf("VRF %s: invalid export route-target %s", vrf.Name, target))
+			}
+		}
+		if vrf.ImportRouteMap != "" && importTargetCount == 0 {
+			return NewInvalidConfigError(fmt.Sprintf("VRF %s: route-map import requires an import route-target", vrf.Name))
+		}
+		if vrf.ExportRouteMap != "" && exportTargetCount == 0 {
+			return NewInvalidConfigError(fmt.Sprintf("VRF %s: route-map export requires an export route-target", vrf.Name))
+		}
+		if exportTargetCount > 0 {
+			if vrf.RouteDistinguisher == "" {
+				return NewInvalidConfigError(fmt.Sprintf("VRF %s: route-distinguisher is required for VPN export", vrf.Name))
+			}
+			if !validRouteDistinguisher(vrf.RouteDistinguisher) {
+				return NewInvalidConfigError(fmt.Sprintf("VRF %s: invalid route-distinguisher %s", vrf.Name, vrf.RouteDistinguisher))
+			}
+		}
+		if vrfHasVPNConfig(vrf) && vrf.ASN == 0 {
+			return NewInvalidConfigError(fmt.Sprintf("VRF %s: BGP ASN is required for VPN import/export", vrf.Name))
+		}
+	}
+	return nil
+}
+
+func validRouteTargetValue(target string) bool {
+	return validColonUintPair(strings.TrimPrefix(target, "target:"))
+}
+
+func validRouteDistinguisher(rd string) bool {
+	return validColonUintPair(rd)
+}
+
+func validColonUintPair(value string) bool {
+	left, right, ok := strings.Cut(value, ":")
+	if !ok || left == "" || right == "" {
+		return false
+	}
+	if _, err := strconv.ParseUint(left, 10, 32); err != nil {
+		return false
+	}
+	if _, err := strconv.ParseUint(right, 10, 32); err != nil {
+		return false
+	}
+	return true
 }
 
 func validateTransactionalRouteMapSupport(cfg *Config) error {
