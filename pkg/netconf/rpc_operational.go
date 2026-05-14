@@ -12,6 +12,7 @@ import (
 	"sort"
 	"time"
 
+	"github.com/akam1o/arca-router/internal/model"
 	"github.com/akam1o/arca-router/pkg/config"
 	"github.com/akam1o/arca-router/pkg/datastore"
 )
@@ -143,8 +144,15 @@ func buildOperationalData(cfg *config.Config, filter *Filter, now time.Time, int
 			return nil, err
 		}
 	}
-	if includeOperationalSection(filter, "state", "protocols", "bfd") && hasBFDOperationalState(bfdStatus) {
-		if err := writeArcaStateXML(&buf, bfdStatus); err != nil {
+	if !includeOperationalSection(filter, "state", "protocols", "bfd") {
+		bfdStatus = nil
+	}
+	routingInstances, err := collectRoutingInstanceOperationalState(cfg, filter)
+	if err != nil {
+		return nil, err
+	}
+	if hasArcaOperationalState(routingInstances, bfdStatus) {
+		if err := writeArcaStateXML(&buf, routingInstances, bfdStatus); err != nil {
 			return nil, err
 		}
 	}
@@ -157,6 +165,87 @@ func buildOperationalData(cfg *config.Config, filter *Filter, now time.Time, int
 	}
 
 	return buf.Bytes(), nil
+}
+
+func collectRoutingInstanceOperationalState(cfg *config.Config, filter *Filter) ([]RoutingInstanceOperationalState, error) {
+	if cfg == nil || len(cfg.RoutingInstances) == 0 || !includeOperationalSection(filter, "state", "routing-instances") {
+		return nil, nil
+	}
+	return routingInstanceOperationalStates(cfg)
+}
+
+func routingInstanceOperationalStates(cfg *config.Config) ([]RoutingInstanceOperationalState, error) {
+	modelConfig := model.FromLegacyConfig(cfg)
+	plans, err := model.RoutingInstanceTablePlans(modelConfig.RoutingInstances)
+	if err != nil {
+		return nil, err
+	}
+
+	instances := make([]RoutingInstanceOperationalState, 0, len(modelConfig.RoutingInstances))
+	for _, name := range sortedModelRoutingInstanceNames(modelConfig.RoutingInstances) {
+		instance := modelConfig.RoutingInstances[name]
+		if instance == nil {
+			continue
+		}
+		plan := plans[name]
+		instances = append(instances, RoutingInstanceOperationalState{
+			Name:               name,
+			InstanceType:       modelRoutingInstanceType(instance),
+			RouteDistinguisher: instance.RouteDistinguisher,
+			IPv4TableID:        plan.TableID,
+			IPv6TableID:        plan.TableID,
+			ImportTargets:      modelRoutingInstanceImportTargets(instance),
+			ExportTargets:      modelRoutingInstanceExportTargets(instance),
+			ImportPolicies:     append([]string(nil), instance.VRFImport...),
+			ExportPolicies:     append([]string(nil), instance.VRFExport...),
+			Interfaces:         append([]string(nil), plan.Interfaces...),
+		})
+	}
+	return instances, nil
+}
+
+func sortedModelRoutingInstanceNames(instances map[string]*model.RoutingInstance) []string {
+	names := make([]string, 0, len(instances))
+	for name := range instances {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	return names
+}
+
+func modelRoutingInstanceType(instance *model.RoutingInstance) string {
+	if instance == nil || instance.InstanceType == "" {
+		return "vrf"
+	}
+	return instance.InstanceType
+}
+
+func modelRoutingInstanceImportTargets(instance *model.RoutingInstance) []string {
+	if instance == nil {
+		return nil
+	}
+	targets := make([]string, 0, len(instance.VRFTargetImport)+1)
+	if instance.VRFTarget != "" {
+		targets = append(targets, instance.VRFTarget)
+	}
+	targets = append(targets, instance.VRFTargetImport...)
+	return targets
+}
+
+func modelRoutingInstanceExportTargets(instance *model.RoutingInstance) []string {
+	if instance == nil {
+		return nil
+	}
+	targets := make([]string, 0, len(instance.VRFTargetExport)+1)
+	if instance.VRFTarget != "" {
+		targets = append(targets, instance.VRFTarget)
+	}
+	targets = append(targets, instance.VRFTargetExport...)
+	return targets
+}
+
+func hasArcaOperationalState(routingInstances []RoutingInstanceOperationalState, bfdStatus *BFDOperationalState) bool {
+	return len(routingInstances) > 0 || hasBFDOperationalState(bfdStatus)
 }
 
 func hasBFDOperationalState(status *BFDOperationalState) bool {
@@ -448,16 +537,69 @@ func writeRoutingProtocolXML(buf *bytes.Buffer, protocolType, name string) error
 	return nil
 }
 
-func writeArcaStateXML(buf *bytes.Buffer, bfdStatus *BFDOperationalState) error {
+func writeArcaStateXML(buf *bytes.Buffer, routingInstances []RoutingInstanceOperationalState, bfdStatus *BFDOperationalState) error {
 	buf.WriteString(`  <state xmlns="` + ArcaConfigNS + `">` + "\n")
-	buf.WriteString("    <protocols>\n")
-	if hasBFDOperationalState(bfdStatus) {
-		if err := writeBFDOperationalStateXML(buf, bfdStatus); err != nil {
+	if len(routingInstances) > 0 {
+		if err := writeRoutingInstanceOperationalStateXML(buf, routingInstances); err != nil {
 			return err
 		}
 	}
-	buf.WriteString("    </protocols>\n")
+	if hasBFDOperationalState(bfdStatus) {
+		buf.WriteString("    <protocols>\n")
+		if err := writeBFDOperationalStateXML(buf, bfdStatus); err != nil {
+			return err
+		}
+		buf.WriteString("    </protocols>\n")
+	}
 	buf.WriteString("  </state>\n")
+	return nil
+}
+
+func writeRoutingInstanceOperationalStateXML(buf *bytes.Buffer, instances []RoutingInstanceOperationalState) error {
+	buf.WriteString("    <routing-instances>\n")
+	for _, instance := range instances {
+		buf.WriteString("      <instance>\n")
+		if err := writeEscapedElement(buf, "        ", "name", instance.Name); err != nil {
+			return err
+		}
+		if err := writeEscapedElement(buf, "        ", "instance-type", instance.InstanceType); err != nil {
+			return err
+		}
+		if instance.RouteDistinguisher != "" {
+			if err := writeEscapedElement(buf, "        ", "route-distinguisher", instance.RouteDistinguisher); err != nil {
+				return err
+			}
+		}
+		fmt.Fprintf(buf, "        <ipv4-table-id>%d</ipv4-table-id>\n", instance.IPv4TableID)
+		fmt.Fprintf(buf, "        <ipv6-table-id>%d</ipv6-table-id>\n", instance.IPv6TableID)
+		for _, target := range instance.ImportTargets {
+			if err := writeEscapedElement(buf, "        ", "import-target", target); err != nil {
+				return err
+			}
+		}
+		for _, target := range instance.ExportTargets {
+			if err := writeEscapedElement(buf, "        ", "export-target", target); err != nil {
+				return err
+			}
+		}
+		for _, policy := range instance.ImportPolicies {
+			if err := writeEscapedElement(buf, "        ", "import-policy", policy); err != nil {
+				return err
+			}
+		}
+		for _, policy := range instance.ExportPolicies {
+			if err := writeEscapedElement(buf, "        ", "export-policy", policy); err != nil {
+				return err
+			}
+		}
+		for _, iface := range instance.Interfaces {
+			if err := writeEscapedElement(buf, "        ", "interface", iface); err != nil {
+				return err
+			}
+		}
+		buf.WriteString("      </instance>\n")
+	}
+	buf.WriteString("    </routing-instances>\n")
 	return nil
 }
 

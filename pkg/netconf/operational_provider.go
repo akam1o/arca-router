@@ -43,6 +43,20 @@ type InterfaceOperationalQueues struct {
 	Tx []InterfaceOperationalTxQueue
 }
 
+// RoutingInstanceOperationalState describes one routing-instance table mapping.
+type RoutingInstanceOperationalState struct {
+	Name               string
+	InstanceType       string
+	RouteDistinguisher string
+	IPv4TableID        uint32
+	IPv6TableID        uint32
+	ImportTargets      []string
+	ExportTargets      []string
+	ImportPolicies     []string
+	ExportPolicies     []string
+	Interfaces         []string
+}
+
 // InterfaceOperationalRxQueue maps an RX queue to a VPP worker.
 type InterfaceOperationalRxQueue struct {
 	QueueID  uint32
