@@ -715,7 +715,96 @@ module arca-router {
     }
 
     container protocols {
-      description "Reserved for protocol operational state.";
+      description "Protocol operational state.";
+
+      container bfd {
+        description "Cached BFD convergence state and failure counters.";
+
+        leaf last-run {
+          type string;
+          description "RFC3339 timestamp of the latest BFD state collection.";
+        }
+        leaf configured-peers {
+          type uint32;
+          description "Number of BFD peers expected from configuration.";
+        }
+        leaf observed-peers {
+          type uint32;
+          description "Number of BFD peers observed in FRR runtime state.";
+        }
+        leaf up-peers {
+          type uint32;
+          description "Number of observed BFD peers in up state.";
+        }
+        leaf down-peers {
+          type uint32;
+          description "Number of configured or observed BFD peers not up.";
+        }
+        leaf session-down-events {
+          type uint64;
+          description "Aggregate BFD session down events.";
+        }
+        leaf rx-fail-packets {
+          type uint64;
+          description "Aggregate BFD RX failure packet counter.";
+        }
+        list peer {
+          description "Per-peer BFD operational state.";
+
+          leaf address {
+            type string;
+            description "BFD peer address.";
+          }
+          leaf local-address {
+            type string;
+            description "Local address used for the BFD session.";
+          }
+          leaf interface {
+            type string;
+            description "Interface associated with the BFD session.";
+          }
+          leaf vrf {
+            type string;
+            description "VRF associated with the BFD session.";
+          }
+          leaf status {
+            type string;
+            description "FRR BFD peer status.";
+          }
+          leaf diagnostic {
+            type string;
+            description "Local BFD diagnostic string.";
+          }
+          leaf remote-diagnostic {
+            type string;
+            description "Remote BFD diagnostic string.";
+          }
+          leaf observed {
+            type boolean;
+            description "Whether FRR reported the peer.";
+          }
+          leaf up {
+            type boolean;
+            description "Whether the peer is currently up.";
+          }
+          leaf session-down-events {
+            type uint64;
+            description "Peer session down event counter.";
+          }
+          leaf rx-fail-packets {
+            type uint64;
+            description "Peer RX failure packet counter.";
+          }
+        }
+        leaf-list issue {
+          type string;
+          description "Convergence issue detected by arca-routerd.";
+        }
+        leaf last-error {
+          type string;
+          description "Last BFD state collection error.";
+        }
+      }
     }
   }
 }

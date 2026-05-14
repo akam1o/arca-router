@@ -75,19 +75,20 @@ func (s *Server) getOperationalData(ctx context.Context, filter *Filter) ([]byte
 	}
 
 	interfaceStates := s.collectInterfaceOperationalState(ctx, filter)
-	return buildOperationalData(cfg, filter, time.Now().UTC(), interfaceStates)
+	bfdStatus := s.collectBFDOperationalState(ctx, filter)
+	return buildOperationalData(cfg, filter, time.Now().UTC(), interfaceStates, bfdStatus)
 }
 
 // GetOperationalData builds operational state without a datastore-backed
 // server. It is kept for tests and callers that only need local system state.
 func GetOperationalData(ctx context.Context, filter *Filter) ([]byte, error) {
 	_ = ctx
-	return buildOperationalData(config.NewConfig(), filter, time.Now().UTC(), nil)
+	return buildOperationalData(config.NewConfig(), filter, time.Now().UTC(), nil, nil)
 }
 
 // buildAllOperationalData builds operational data XML for the inside of <data>.
 func buildAllOperationalData() string {
-	data, err := buildOperationalData(config.NewConfig(), nil, time.Now().UTC(), nil)
+	data, err := buildOperationalData(config.NewConfig(), nil, time.Now().UTC(), nil, nil)
 	if err != nil {
 		return ""
 	}
@@ -106,7 +107,22 @@ func (s *Server) collectInterfaceOperationalState(ctx context.Context, filter *F
 	return states
 }
 
-func buildOperationalData(cfg *config.Config, filter *Filter, now time.Time, interfaceStates map[string]*InterfaceOperationalState) ([]byte, error) {
+func (s *Server) collectBFDOperationalState(ctx context.Context, filter *Filter) *BFDOperationalState {
+	if s == nil || s.operationalProvider == nil || !includeOperationalSection(filter, "state", "protocols", "bfd") {
+		return nil
+	}
+	status, err := s.operationalProvider.BFDStatus(ctx)
+	if err != nil {
+		log.Printf("[NETCONF] Failed to collect BFD operational state: %v", err)
+		return nil
+	}
+	if !hasBFDOperationalState(status) {
+		return nil
+	}
+	return status
+}
+
+func buildOperationalData(cfg *config.Config, filter *Filter, now time.Time, interfaceStates map[string]*InterfaceOperationalState, bfdStatus *BFDOperationalState) ([]byte, error) {
 	if cfg == nil {
 		cfg = config.NewConfig()
 	}
@@ -127,6 +143,11 @@ func buildOperationalData(cfg *config.Config, filter *Filter, now time.Time, int
 			return nil, err
 		}
 	}
+	if includeOperationalSection(filter, "state", "protocols", "bfd") && hasBFDOperationalState(bfdStatus) {
+		if err := writeArcaStateXML(&buf, bfdStatus); err != nil {
+			return nil, err
+		}
+	}
 
 	if buf.Len() > MaxXMLSize {
 		return nil, NewRPCError(ErrorTypeProtocol, ErrorTagInvalidValue,
@@ -136,6 +157,22 @@ func buildOperationalData(cfg *config.Config, filter *Filter, now time.Time, int
 	}
 
 	return buf.Bytes(), nil
+}
+
+func hasBFDOperationalState(status *BFDOperationalState) bool {
+	if status == nil {
+		return false
+	}
+	return !status.LastRun.IsZero() ||
+		status.ConfiguredPeers != 0 ||
+		status.ObservedPeers != 0 ||
+		status.UpPeers != 0 ||
+		status.DownPeers != 0 ||
+		status.SessionDownEvents != 0 ||
+		status.RxFailPackets != 0 ||
+		len(status.Peers) != 0 ||
+		len(status.Issues) != 0 ||
+		status.LastError != ""
 }
 
 func includeOperationalSection(filter *Filter, names ...string) bool {
@@ -409,6 +446,106 @@ func writeRoutingProtocolXML(buf *bytes.Buffer, protocolType, name string) error
 	}
 	buf.WriteString("        </routing-protocol>\n")
 	return nil
+}
+
+func writeArcaStateXML(buf *bytes.Buffer, bfdStatus *BFDOperationalState) error {
+	buf.WriteString(`  <state xmlns="` + ArcaConfigNS + `">` + "\n")
+	buf.WriteString("    <protocols>\n")
+	if hasBFDOperationalState(bfdStatus) {
+		if err := writeBFDOperationalStateXML(buf, bfdStatus); err != nil {
+			return err
+		}
+	}
+	buf.WriteString("    </protocols>\n")
+	buf.WriteString("  </state>\n")
+	return nil
+}
+
+func writeBFDOperationalStateXML(buf *bytes.Buffer, status *BFDOperationalState) error {
+	buf.WriteString("      <bfd>\n")
+	if !status.LastRun.IsZero() {
+		if err := writeEscapedElement(buf, "        ", "last-run", status.LastRun.UTC().Format(time.RFC3339Nano)); err != nil {
+			return err
+		}
+	}
+	fmt.Fprintf(buf, "        <configured-peers>%d</configured-peers>\n", status.ConfiguredPeers)
+	fmt.Fprintf(buf, "        <observed-peers>%d</observed-peers>\n", status.ObservedPeers)
+	fmt.Fprintf(buf, "        <up-peers>%d</up-peers>\n", status.UpPeers)
+	fmt.Fprintf(buf, "        <down-peers>%d</down-peers>\n", status.DownPeers)
+	fmt.Fprintf(buf, "        <session-down-events>%d</session-down-events>\n", status.SessionDownEvents)
+	fmt.Fprintf(buf, "        <rx-fail-packets>%d</rx-fail-packets>\n", status.RxFailPackets)
+	for _, peer := range sortedBFDOperationalPeers(status.Peers) {
+		if err := writeBFDOperationalPeerXML(buf, peer); err != nil {
+			return err
+		}
+	}
+	for _, issue := range status.Issues {
+		if err := writeEscapedElement(buf, "        ", "issue", issue); err != nil {
+			return err
+		}
+	}
+	if status.LastError != "" {
+		if err := writeEscapedElement(buf, "        ", "last-error", status.LastError); err != nil {
+			return err
+		}
+	}
+	buf.WriteString("      </bfd>\n")
+	return nil
+}
+
+func writeBFDOperationalPeerXML(buf *bytes.Buffer, peer BFDPeerOperationalState) error {
+	buf.WriteString("        <peer>\n")
+	if err := writeEscapedElement(buf, "          ", "address", peer.Peer); err != nil {
+		return err
+	}
+	if peer.LocalAddress != "" {
+		if err := writeEscapedElement(buf, "          ", "local-address", peer.LocalAddress); err != nil {
+			return err
+		}
+	}
+	if peer.Interface != "" {
+		if err := writeEscapedElement(buf, "          ", "interface", peer.Interface); err != nil {
+			return err
+		}
+	}
+	if peer.VRF != "" {
+		if err := writeEscapedElement(buf, "          ", "vrf", peer.VRF); err != nil {
+			return err
+		}
+	}
+	if peer.Status != "" {
+		if err := writeEscapedElement(buf, "          ", "status", peer.Status); err != nil {
+			return err
+		}
+	}
+	if peer.Diagnostic != "" {
+		if err := writeEscapedElement(buf, "          ", "diagnostic", peer.Diagnostic); err != nil {
+			return err
+		}
+	}
+	if peer.RemoteDiagnostic != "" {
+		if err := writeEscapedElement(buf, "          ", "remote-diagnostic", peer.RemoteDiagnostic); err != nil {
+			return err
+		}
+	}
+	fmt.Fprintf(buf, "          <observed>%t</observed>\n", peer.Observed)
+	fmt.Fprintf(buf, "          <up>%t</up>\n", peer.Up)
+	fmt.Fprintf(buf, "          <session-down-events>%d</session-down-events>\n", peer.SessionDownEvents)
+	fmt.Fprintf(buf, "          <rx-fail-packets>%d</rx-fail-packets>\n", peer.RxFailPackets)
+	buf.WriteString("        </peer>\n")
+	return nil
+}
+
+func sortedBFDOperationalPeers(peers []BFDPeerOperationalState) []BFDPeerOperationalState {
+	sorted := append([]BFDPeerOperationalState(nil), peers...)
+	sort.Slice(sorted, func(i, j int) bool {
+		return bfdOperationalPeerSortKey(sorted[i]) < bfdOperationalPeerSortKey(sorted[j])
+	})
+	return sorted
+}
+
+func bfdOperationalPeerSortKey(peer BFDPeerOperationalState) string {
+	return peer.Peer + "\x00" + peer.LocalAddress + "\x00" + peer.Interface + "\x00" + peer.VRF
 }
 
 func writeEscapedElement(buf *bytes.Buffer, indent, name, value string) error {
