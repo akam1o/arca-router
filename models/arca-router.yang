@@ -714,6 +714,56 @@ module arca-router {
          through ietf-interfaces.";
     }
 
+    container routing-instances {
+      description "Running routing-instance intent and VPP table bindings.";
+
+      list instance {
+        key "name";
+        description "Per-routing-instance table mapping and policy summary.";
+
+        leaf name {
+          type string;
+          description "Routing-instance name.";
+        }
+        leaf instance-type {
+          type string;
+          description "Routing-instance type.";
+        }
+        leaf route-distinguisher {
+          type string;
+          description "Configured route distinguisher.";
+        }
+        leaf ipv4-table-id {
+          type uint32;
+          description "Bound VPP IPv4 table ID.";
+        }
+        leaf ipv6-table-id {
+          type uint32;
+          description "Bound VPP IPv6 table ID.";
+        }
+        leaf-list import-target {
+          type string;
+          description "VPN import route target.";
+        }
+        leaf-list export-target {
+          type string;
+          description "VPN export route target.";
+        }
+        leaf-list import-policy {
+          type string;
+          description "Ordered import policy chain.";
+        }
+        leaf-list export-policy {
+          type string;
+          description "Ordered export policy chain.";
+        }
+        leaf-list interface {
+          type string;
+          description "Interface bound to the routing-instance tables.";
+        }
+      }
+    }
+
     container protocols {
       description "Protocol operational state.";
 

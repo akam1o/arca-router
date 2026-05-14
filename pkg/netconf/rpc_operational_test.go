@@ -196,3 +196,52 @@ func TestBuildOperationalDataWritesBFDState(t *testing.T) {
 		t.Fatalf("BFD peers are not sorted:\n%s", data)
 	}
 }
+
+func TestBuildOperationalDataWritesRoutingInstanceState(t *testing.T) {
+	cfg := config.NewConfig()
+	cfg.RoutingInstances = map[string]*config.RoutingInstance{}
+	cfg.RoutingInstances["BLUE"] = &config.RoutingInstance{
+		InstanceType:       "vrf",
+		RouteDistinguisher: "65000:100",
+		VRFTarget:          "target:65000:100",
+		VRFTargetImport:    []string{"target:65000:101"},
+		VRFTargetExport:    []string{"target:65000:102"},
+		VRFImport:          []string{"BLUE-IN"},
+		VRFExport:          []string{"BLUE-OUT"},
+		Interfaces:         []string{"ge-0/0/1", "ge-0/0/0", "ge-0/0/1"},
+	}
+
+	data, err := buildOperationalData(cfg, nil, time.Date(2026, 5, 12, 4, 0, 0, 0, time.UTC), nil, nil)
+	if err != nil {
+		t.Fatalf("buildOperationalData() error = %v", err)
+	}
+
+	for _, want := range []string{
+		`<state xmlns="urn:arca:router:config:1.0">`,
+		"<routing-instances>",
+		"<instance>",
+		"<name>BLUE</name>",
+		"<instance-type>vrf</instance-type>",
+		"<route-distinguisher>65000:100</route-distinguisher>",
+		"<ipv4-table-id>100</ipv4-table-id>",
+		"<ipv6-table-id>100</ipv6-table-id>",
+		"<import-target>target:65000:100</import-target>",
+		"<import-target>target:65000:101</import-target>",
+		"<export-target>target:65000:100</export-target>",
+		"<export-target>target:65000:102</export-target>",
+		"<import-policy>BLUE-IN</import-policy>",
+		"<export-policy>BLUE-OUT</export-policy>",
+		"<interface>ge-0/0/0</interface>",
+		"<interface>ge-0/0/1</interface>",
+	} {
+		if !bytes.Contains(data, []byte(want)) {
+			t.Fatalf("operational data missing %q:\n%s", want, data)
+		}
+	}
+	if bytes.Index(data, []byte("<interface>ge-0/0/0</interface>")) > bytes.Index(data, []byte("<interface>ge-0/0/1</interface>")) {
+		t.Fatalf("routing-instance interfaces are not sorted:\n%s", data)
+	}
+	if bytes.Count(data, []byte("<interface>ge-0/0/1</interface>")) != 1 {
+		t.Fatalf("routing-instance interfaces are not deduplicated:\n%s", data)
+	}
+}
