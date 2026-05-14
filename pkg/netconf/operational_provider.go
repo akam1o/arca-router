@@ -9,6 +9,10 @@ import (
 type OperationalStateProvider interface {
 	// InterfaceStates returns interface state keyed by management-plane interface name.
 	InterfaceStates(ctx context.Context) (map[string]*InterfaceOperationalState, error)
+	// Routes returns live route table entries.
+	Routes(ctx context.Context) ([]RouteOperationalState, error)
+	// BGPNeighbors returns live BGP neighbor state.
+	BGPNeighbors(ctx context.Context) ([]BGPNeighborOperationalState, error)
 	// BFDStatus returns cached BFD protocol operational state.
 	BFDStatus(ctx context.Context) (*BFDOperationalState, error)
 }
@@ -55,6 +59,26 @@ type RoutingInstanceOperationalState struct {
 	ImportPolicies     []string
 	ExportPolicies     []string
 	Interfaces         []string
+}
+
+// RouteOperationalState describes one live route entry or nexthop path.
+type RouteOperationalState struct {
+	Prefix    string
+	NextHop   string
+	Protocol  string
+	Metric    uint32
+	Interface string
+	Active    bool
+}
+
+// BGPNeighborOperationalState describes one BGP peer in operational output.
+type BGPNeighborOperationalState struct {
+	PeerAddress    string
+	PeerAS         uint32
+	State          string
+	UptimeSecs     uint64
+	PrefixReceived uint32
+	PrefixSent     uint32
 }
 
 // InterfaceOperationalRxQueue maps an RX queue to a VPP worker.

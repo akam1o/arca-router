@@ -5,6 +5,7 @@ import (
 
 	"github.com/akam1o/arca-router/internal/model"
 	sbfrr "github.com/akam1o/arca-router/internal/southbound/frr"
+	pkgfrr "github.com/akam1o/arca-router/pkg/frr"
 	"github.com/akam1o/arca-router/pkg/netconf"
 )
 
@@ -17,15 +18,22 @@ type netconfBFDStatusSource interface {
 }
 
 type netconfOperationalStateProvider struct {
-	collector interfaceStateCollector
-	bfdSource netconfBFDStatusSource
+	collector   interfaceStateCollector
+	bfdSource   netconfBFDStatusSource
+	routeReader pkgfrr.RouteStatusReader
+	bgpReader   pkgfrr.BGPSummaryStatusReader
 }
 
 func newNETCONFOperationalStateProvider(collector interfaceStateCollector, bfdSource netconfBFDStatusSource) netconf.OperationalStateProvider {
 	if collector == nil && bfdSource == nil {
 		return nil
 	}
-	return &netconfOperationalStateProvider{collector: collector, bfdSource: bfdSource}
+	provider := &netconfOperationalStateProvider{collector: collector, bfdSource: bfdSource}
+	if bfdSource != nil {
+		provider.routeReader = pkgfrr.NewVtyshRouteStatusReader()
+		provider.bgpReader = pkgfrr.NewVtyshBGPSummaryStatusReader()
+	}
+	return provider
 }
 
 func (p *netconfOperationalStateProvider) InterfaceStates(ctx context.Context) (map[string]*netconf.InterfaceOperationalState, error) {
@@ -73,6 +81,56 @@ func (p *netconfOperationalStateProvider) InterfaceStates(ctx context.Context) (
 			converted.Queues = convertInterfaceOperationalQueues(state.Queues)
 		}
 		result[stateName] = converted
+	}
+	return result, nil
+}
+
+func (p *netconfOperationalStateProvider) Routes(ctx context.Context) ([]netconf.RouteOperationalState, error) {
+	if p.routeReader == nil {
+		return nil, nil
+	}
+	status, err := p.routeReader.ReadRouteStatus(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if status == nil {
+		return nil, nil
+	}
+	result := make([]netconf.RouteOperationalState, 0, len(status.Routes))
+	for _, route := range status.Routes {
+		result = append(result, netconf.RouteOperationalState{
+			Prefix:    route.Prefix,
+			NextHop:   route.NextHop,
+			Protocol:  route.Protocol,
+			Metric:    route.Metric,
+			Interface: route.Interface,
+			Active:    route.Active,
+		})
+	}
+	return result, nil
+}
+
+func (p *netconfOperationalStateProvider) BGPNeighbors(ctx context.Context) ([]netconf.BGPNeighborOperationalState, error) {
+	if p.bgpReader == nil {
+		return nil, nil
+	}
+	status, err := p.bgpReader.ReadBGPSummaryStatus(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if status == nil {
+		return nil, nil
+	}
+	result := make([]netconf.BGPNeighborOperationalState, 0, len(status.Neighbors))
+	for _, neighbor := range status.Neighbors {
+		result = append(result, netconf.BGPNeighborOperationalState{
+			PeerAddress:    neighbor.PeerAddress,
+			PeerAS:         neighbor.PeerAS,
+			State:          neighbor.State,
+			UptimeSecs:     neighbor.UptimeSecs,
+			PrefixReceived: neighbor.PrefixReceived,
+			PrefixSent:     neighbor.PrefixSent,
+		})
 	}
 	return result, nil
 }
