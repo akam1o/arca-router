@@ -239,6 +239,80 @@ func TestBuildMgmtOperationsAggregatesRouteMapPrefixLists(t *testing.T) {
 	}
 }
 
+func TestBuildMgmtOperationsRejectsInvalidPolicyObjects(t *testing.T) {
+	tests := []struct {
+		name string
+		cfg  *Config
+		want string
+	}{
+		{
+			name: "empty prefix-list name",
+			cfg: &Config{PrefixLists: []PrefixList{
+				{Name: ""},
+			}},
+			want: "prefix-list name is required",
+		},
+		{
+			name: "invalid prefix-list sequence",
+			cfg: &Config{PrefixLists: []PrefixList{
+				{Name: "CUSTOMER", Entries: []PrefixListEntry{{Action: "permit", Prefix: "192.0.2.0/24"}}},
+			}},
+			want: "entry sequence must be positive",
+		},
+		{
+			name: "invalid prefix-list action",
+			cfg: &Config{PrefixLists: []PrefixList{
+				{Name: "CUSTOMER", Entries: []PrefixListEntry{{Seq: 10, Action: "drop", Prefix: "192.0.2.0/24"}}},
+			}},
+			want: "invalid action drop",
+		},
+		{
+			name: "invalid prefix-list prefix",
+			cfg: &Config{PrefixLists: []PrefixList{
+				{Name: "CUSTOMER", Entries: []PrefixListEntry{{Seq: 10, Action: "permit", Prefix: "192.0.2.0"}}},
+			}},
+			want: "invalid prefix 192.0.2.0",
+		},
+		{
+			name: "prefix-list family mismatch",
+			cfg: &Config{PrefixLists: []PrefixList{
+				{Name: "CUSTOMER-V6", IsIPv6: true, Entries: []PrefixListEntry{{Seq: 10, Action: "permit", Prefix: "192.0.2.0/24"}}},
+			}},
+			want: "address family does not match",
+		},
+		{
+			name: "invalid route-map sequence",
+			cfg: &Config{RouteMaps: []RouteMap{
+				{Name: "IMPORT", Entries: []RouteMapEntry{{Action: "permit"}}},
+			}},
+			want: "entry sequence must be positive",
+		},
+		{
+			name: "invalid route-map action",
+			cfg: &Config{RouteMaps: []RouteMap{
+				{Name: "IMPORT", Entries: []RouteMapEntry{{Seq: 10, Action: "drop"}}},
+			}},
+			want: "invalid action drop",
+		},
+		{
+			name: "empty route-map prefix-list reference",
+			cfg: &Config{RouteMaps: []RouteMap{
+				{Name: "IMPORT", Entries: []RouteMapEntry{{Seq: 10, Action: "permit", MatchPrefixLists: []string{""}}}},
+			}},
+			want: "references empty prefix-list",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := BuildMgmtOperations(tt.cfg)
+			if err == nil || !strings.Contains(err.Error(), tt.want) {
+				t.Fatalf("BuildMgmtOperations() error = %v, want %q", err, tt.want)
+			}
+		})
+	}
+}
+
 func TestBuildMgmtOperationsRejectsUnsupportedRouteMapMatches(t *testing.T) {
 	tests := []struct {
 		name     string

@@ -157,6 +157,9 @@ func BuildMgmtOperations(cfg *Config) ([]MgmtOperation, error) {
 	if err := validateTransactionalRouteMapSupport(cfg); err != nil {
 		return nil, err
 	}
+	if err := validateTransactionalPolicyObjects(cfg); err != nil {
+		return nil, err
+	}
 	if err := validateTransactionalVRFVPN(cfg); err != nil {
 		return nil, err
 	}
@@ -321,6 +324,56 @@ func validateTransactionalStaticRouteBFDProfiles(cfg *Config) error {
 		}
 	}
 	return nil
+}
+
+func validateTransactionalPolicyObjects(cfg *Config) error {
+	if cfg == nil {
+		return nil
+	}
+	for _, list := range cfg.PrefixLists {
+		if strings.TrimSpace(list.Name) == "" {
+			return NewInvalidConfigError("prefix-list name is required")
+		}
+		for _, entry := range list.Entries {
+			if entry.Seq <= 0 {
+				return NewInvalidConfigError(fmt.Sprintf("prefix-list %s entry sequence must be positive", list.Name))
+			}
+			if !validPolicyAction(entry.Action) {
+				return NewInvalidConfigError(fmt.Sprintf("prefix-list %s entry %d has invalid action %s", list.Name, entry.Seq, entry.Action))
+			}
+			_, prefixNet, err := net.ParseCIDR(entry.Prefix)
+			if err != nil {
+				return NewInvalidConfigError(fmt.Sprintf("prefix-list %s entry %d has invalid prefix %s", list.Name, entry.Seq, entry.Prefix))
+			}
+			prefixIPv6 := prefixNet.IP.To4() == nil
+			if prefixIPv6 != list.IsIPv6 {
+				return NewInvalidConfigError(fmt.Sprintf("prefix-list %s entry %d address family does not match configured address family", list.Name, entry.Seq))
+			}
+		}
+	}
+	for _, routeMap := range cfg.RouteMaps {
+		if strings.TrimSpace(routeMap.Name) == "" {
+			return NewInvalidConfigError("route-map name is required")
+		}
+		for _, entry := range routeMap.Entries {
+			if entry.Seq <= 0 {
+				return NewInvalidConfigError(fmt.Sprintf("route-map %s entry sequence must be positive", routeMap.Name))
+			}
+			if !validPolicyAction(entry.Action) {
+				return NewInvalidConfigError(fmt.Sprintf("route-map %s entry %d has invalid action %s", routeMap.Name, entry.Seq, entry.Action))
+			}
+			for _, prefixList := range entry.MatchPrefixLists {
+				if strings.TrimSpace(prefixList) == "" {
+					return NewInvalidConfigError(fmt.Sprintf("route-map %s entry %d references empty prefix-list", routeMap.Name, entry.Seq))
+				}
+			}
+		}
+	}
+	return nil
+}
+
+func validPolicyAction(action string) bool {
+	return action == "permit" || action == "deny"
 }
 
 func validateTransactionalRouteMapReferences(cfg *Config) error {
