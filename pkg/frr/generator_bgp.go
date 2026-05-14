@@ -97,6 +97,14 @@ func GenerateBGPConfig(cfg *BGPConfig) (string, error) {
 		b.WriteString(" exit-address-family\n")
 	}
 
+	if cfg.EVPN != nil {
+		evpnConfig, err := GenerateEVPNConfig(cfg.EVPN, neighbors)
+		if err != nil {
+			return "", err
+		}
+		b.WriteString(evpnConfig)
+	}
+
 	b.WriteString("!\n")
 
 	return b.String(), nil

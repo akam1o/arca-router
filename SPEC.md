@@ -591,7 +591,7 @@ Forwarding class queues must be between `0` and `7`. Interface bindings must ref
 <a id="overlay-v08-configuration"></a>
 ## Overlay v0.8 Configuration
 
-The v0.8 management-plane model includes EVPN/VXLAN VNI intent. Parser, serializer, validation, clone, conversion, diff, and NETCONF XML/YANG coverage are implemented for L2 and L3 VNIs. FRR EVPN control-plane apply and VPP VXLAN dataplane apply are not enabled yet; commit validation rejects EVPN/VXLAN changes until those southbound integrations are implemented.
+The v0.8 management-plane model includes EVPN/VXLAN VNI intent. Parser, serializer, validation, clone, conversion, diff, and NETCONF XML/YANG coverage are implemented for L2 and L3 VNIs. FRR EVPN control-plane generation is implemented through the FRR file backend: arca-router renders global BGP `l2vpn evpn` with `advertise-all-vni`, explicit L2 VNI route-targets, L3 VNI VRF bindings, and per-VRF EVPN route-targets. VPP VXLAN dataplane apply is not enabled yet, so full EVPN/VXLAN commits are still rejected until the VPP southbound integration is implemented.
 
 ```
 set protocols evpn vni 10010 type l2
@@ -609,7 +609,7 @@ set protocols evpn vni 20010 type l3
 set protocols evpn vni 20010 routing-instance BLUE
 ```
 
-VNI values must be between `1` and `16777215`. `type l2` requires `bridge-domain` and may include `vlan-id`; `type l3` requires `routing-instance` and must reference a configured routing instance. Route distinguishers use `<asn>:<number>`, route targets use `target:<asn>:<number>`, source interfaces must reference configured interfaces, and multicast groups must be valid multicast IPv4 or IPv6 addresses.
+VNI values must be between `1` and `16777215`. `type l2` requires `bridge-domain` and may include `vlan-id`; `type l3` requires `routing-instance` and must reference a configured routing instance. Route distinguishers use `<asn>:<number>`, route targets use `target:<asn>:<number>`, source interfaces must reference configured interfaces, and multicast groups must be valid multicast IPv4 or IPv6 addresses. FRR EVPN generation currently maps route-target intent; FRR derives EVPN route distinguishers from local EVPN state.
 
 ---
 

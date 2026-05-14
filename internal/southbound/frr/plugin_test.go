@@ -158,18 +158,19 @@ func TestValidateChangesAllowsMPLSConfig(t *testing.T) {
 	}
 }
 
-func TestValidateChangesRejectsEVPNUntilFRRApplyExists(t *testing.T) {
+func TestValidateChangesAllowsEVPNControlPlane(t *testing.T) {
 	newCfg := model.NewRouterConfig()
+	newCfg.Routing = &model.RoutingConfig{AutonomousSystem: 65000}
 	newCfg.Protocols = &model.ProtocolsConfig{
 		EVPN: &model.EVPNConfig{VNIs: map[int]*model.EVPNVNI{
-			10010: {VNI: 10010, Type: "l2", BridgeDomain: "BD-10"},
+			10010: {VNI: 10010, Type: "l2", BridgeDomain: "BD-10", VRFTarget: "target:65000:10010"},
 		}},
 	}
 	diff := engine.ComputeDiff(model.NewRouterConfig(), newCfg)
 
 	err := NewFRRPlugin(testLogger()).ValidateChanges(context.Background(), diff)
-	if err == nil || !strings.Contains(err.Error(), "EVPN/VXLAN FRR control-plane apply is not implemented yet") {
-		t.Fatalf("ValidateChanges() error = %v, want EVPN unsupported error", err)
+	if err != nil {
+		t.Fatalf("ValidateChanges() error = %v, want nil", err)
 	}
 }
 
@@ -540,6 +541,46 @@ func TestApplyChangesFallsBackToFileBackendForOSPF3(t *testing.T) {
 	}
 	if !strings.Contains(fileApplier.configContent, "router ospf6") {
 		t.Fatalf("file applier config missing OSPFv3:\n%s", fileApplier.configContent)
+	}
+}
+
+func TestApplyChangesFallsBackToFileBackendForEVPN(t *testing.T) {
+	newCfg := model.NewRouterConfig()
+	newCfg.Routing = &model.RoutingConfig{AutonomousSystem: 65000, RouterID: "192.0.2.1"}
+	newCfg.Protocols = &model.ProtocolsConfig{
+		EVPN: &model.EVPNConfig{VNIs: map[int]*model.EVPNVNI{
+			10010: {VNI: 10010, Type: "l2", BridgeDomain: "BD-10", VRFTarget: "target:65000:10010"},
+		}},
+	}
+	diff := engine.ComputeDiff(model.NewRouterConfig(), newCfg)
+	transactionalApplier := &recordingApplier{}
+	fileApplier := &recordingApplier{}
+	plugin := NewFRRPlugin(testLogger())
+	plugin.applier = transactionalApplier
+	plugin.fileApplier = fileApplier
+
+	if err := plugin.ApplyChanges(context.Background(), diff); err != nil {
+		t.Fatalf("ApplyChanges() error = %v", err)
+	}
+	if transactionalApplier.calls != 0 {
+		t.Fatalf("transactional ApplyConfig calls = %d, want 0", transactionalApplier.calls)
+	}
+	if fileApplier.calls != 1 {
+		t.Fatalf("file ApplyConfig calls = %d, want 1", fileApplier.calls)
+	}
+	if plugin.currentApplyMode != pkgfrr.BackendModeFile {
+		t.Fatalf("currentApplyMode = %q, want file", plugin.currentApplyMode)
+	}
+	for _, want := range []string{
+		"address-family l2vpn evpn",
+		"advertise-all-vni",
+		"vni 10010",
+		"route-target import 65000:10010",
+		"route-target export 65000:10010",
+	} {
+		if !strings.Contains(fileApplier.configContent, want) {
+			t.Fatalf("file applier config missing %q:\n%s", want, fileApplier.configContent)
+		}
 	}
 }
 

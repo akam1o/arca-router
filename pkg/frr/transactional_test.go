@@ -140,6 +140,20 @@ func TestBuildMgmtOperationsRejectsInvalidBGP(t *testing.T) {
 	}
 }
 
+func TestBuildMgmtOperationsRejectsEVPN(t *testing.T) {
+	_, err := BuildMgmtOperations(&Config{
+		BGP: &BGPConfig{
+			ASN: 65000,
+			EVPN: &EVPNConfig{VNIs: []EVPNVNI{
+				{VNI: 10010, Type: "l2", BridgeDomain: "BD-10"},
+			}},
+		},
+	})
+	if err == nil || !strings.Contains(err.Error(), "EVPN/VXLAN is not supported by the transactional FRR backend") {
+		t.Fatalf("BuildMgmtOperations() error = %v, want EVPN unsupported error", err)
+	}
+}
+
 func TestBuildMgmtOperationsVRRP(t *testing.T) {
 	ops, err := BuildMgmtOperations(&Config{
 		VRRP: &VRRPConfig{Groups: []VRRPGroup{

@@ -2,7 +2,8 @@
 
 ## v0.8.x - Overlay and Streaming Telemetry (current)
 
-- **EVPN/VXLAN VNI intent model**: CLI parser/serializer, validation, internal model conversion/clone/diff, NETCONF XML/YANG, and commit-time southbound safety gates cover L2/L3 `protocols evpn vni` configuration before FRR/VPP apply support is enabled
+- **FRR EVPN control-plane generation**: FRR file-backend generation now renders global BGP `l2vpn evpn` with `advertise-all-vni`, explicit L2 VNI route-targets, L3 VNI VRF bindings, and per-VRF EVPN route-targets while transactional mgmtd support is pending; full EVPN/VXLAN commits still wait on VPP VXLAN dataplane apply
+- **EVPN/VXLAN VNI intent model**: CLI parser/serializer, validation, internal model conversion/clone/diff, NETCONF XML/YANG, and commit-time southbound safety gates cover L2/L3 `protocols evpn vni` configuration before complete VPP dataplane apply support is enabled
 
 ## v0.7.x - Core Router Parity (previous)
 

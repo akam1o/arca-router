@@ -53,6 +53,11 @@ func GenerateFRRConfig(cfg *config.Config) (*Config, error) {
 		frrConfig.BGP = bgpConfig
 	}
 
+	// Convert EVPN/VXLAN control-plane configuration
+	if err := attachEVPNConfig(cfg, frrConfig); err != nil {
+		return nil, NewGenerateError("failed to convert EVPN configuration", err)
+	}
+
 	// Convert OSPF configuration
 	if cfg.Protocols != nil && cfg.Protocols.OSPF != nil {
 		ospfConfig, err := convertOSPFConfig(cfg, cfg.Protocols.OSPF, frrConfig.InterfaceMapping, false)
@@ -112,6 +117,14 @@ func GenerateFRRConfig(cfg *config.Config) (*Config, error) {
 		vrfs, err := convertVRFConfig(cfg, frrConfig.RouteMaps)
 		if err != nil {
 			return nil, NewGenerateError("failed to convert routing-instances", err)
+		}
+		frrConfig.VRFs = vrfs
+	}
+
+	if frrConfig.BGP != nil && frrConfig.BGP.EVPN != nil {
+		vrfs, err := applyEVPNToVRFs(frrConfig.BGP.EVPN, frrConfig.VRFs)
+		if err != nil {
+			return nil, NewGenerateError("failed to apply EVPN L3 VNI configuration to VRFs", err)
 		}
 		frrConfig.VRFs = vrfs
 	}

@@ -63,6 +63,29 @@ type BGPConfig struct {
 
 	// IPv6Unicast enables IPv6 unicast address family
 	IPv6Unicast bool
+
+	// EVPN holds EVPN/VXLAN BGP address-family configuration
+	EVPN *EVPNConfig
+}
+
+// EVPNConfig represents FRR EVPN/VXLAN BGP configuration.
+type EVPNConfig struct {
+	VNIs []EVPNVNI
+}
+
+// EVPNVNI represents one EVPN VNI in FRR format.
+type EVPNVNI struct {
+	VNI                int
+	Type               string
+	BridgeDomain       string
+	VLANID             int
+	RoutingInstance    string
+	RouteDistinguisher string
+	ImportTargets      []string
+	ExportTargets      []string
+	SourceInterface    string
+	SourceAddress      string
+	MulticastGroup     string
 }
 
 // BFDConfig represents FRR BFD configuration.
@@ -194,11 +217,21 @@ type VRRPGroup struct {
 type VRFConfig struct {
 	Name               string
 	ASN                uint32
+	VNI                int
 	RouteDistinguisher string
 	ImportTargets      []string
 	ExportTargets      []string
 	ImportRouteMap     string
 	ExportRouteMap     string
+	EVPN               *VRFEVPNConfig
+}
+
+// VRFEVPNConfig represents per-VRF EVPN address-family configuration.
+type VRFEVPNConfig struct {
+	ImportTargets        []string
+	ExportTargets        []string
+	AdvertiseIPv4Unicast bool
+	AdvertiseIPv6Unicast bool
 }
 
 // StaticRoute represents a static route configuration in FRR format.
