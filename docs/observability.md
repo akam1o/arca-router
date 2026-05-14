@@ -81,6 +81,27 @@ Source path:
 observability/grafana/arca-routerd-dashboard.json
 ```
 
+## gRPC Telemetry Stream
+
+The internal Unix socket gRPC API exposes `TelemetryService.SubscribeTelemetry` for local collectors and NMS sidecars. Events use the `arca.telemetry.v1` schema envelope with `sequence`, `timestamp`, `path`, `event_type`, `encoding`, and `json_payload` fields. Payloads are encoded as JSON.
+
+Supported paths:
+
+- `/system`
+- `/config/running`
+- `/interfaces`
+- `/routes`
+- `/routing/bgp/neighbors`
+- `/routing/ospf/neighbors`
+- `/routing/ospf3/neighbors`
+- `/routing-instances`
+- `/class-of-service`
+- `/bfd`
+- `/lcp`
+- `/ha`
+
+Subscriptions can select paths, set a sample interval, or request a one-shot snapshot. Empty path selection defaults to `/system` and `/config/running`. The server writes directly to the gRPC stream, so gRPC flow control is the backpressure boundary and arca-routerd does not build unbounded event buffers.
+
 ## Web UI
 
 Start the read-only Web UI with an explicit listen address:

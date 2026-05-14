@@ -72,9 +72,10 @@ Focus: add data-center overlay support and richer external observability.
   - FRR EVPN control-plane generation through the FRR file backend
   - VPP VXLAN L2 multicast dataplane plumbing; L3 VNI and unicast remote-VTEP dataplane support remain pending
 - **Streaming telemetry**
-  - gNMI, OpenTelemetry, or structured event stream support
-  - Subscription management and backpressure handling
-  - Stable event schemas for config, daemon, and routing state changes
+  - Structured gRPC telemetry event stream with JSON payload schemas for selected config, daemon, and routing state paths
+  - Subscription path filtering, sample intervals, one-shot snapshots, and gRPC flow-control backpressure
+  - gNMI or OpenTelemetry exporter integration
+  - Expanded stable event schemas for additional dataplane and protocol state changes
 - **QoS dataplane enforcement**
   - VPP scheduler and policer capability detection
   - Queue scheduler and policer apply support
