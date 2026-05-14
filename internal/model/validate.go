@@ -348,6 +348,11 @@ func (c *RouterConfig) validateOSPF(protocol string, ospf *OSPFConfig) error {
 			if err := c.validateInterfaceReference(fmt.Sprintf("%s area %s", protocol, areaName), ifName); err != nil {
 				return err
 			}
+			if area.Interfaces[ifName] != nil && area.Interfaces[ifName].BFDProfile != "" {
+				if err := c.validateBFDProfileReference(fmt.Sprintf("%s area %s interface %s", protocol, areaName, ifName), area.Interfaces[ifName].BFDProfile); err != nil {
+					return err
+				}
+			}
 		}
 	}
 	return nil
@@ -370,6 +375,11 @@ func (c *RouterConfig) validateBGP(bgp *BGPConfig) error {
 			if neighbor.PeerAS == 0 {
 				return fmt.Errorf("bgp group %s neighbor %s: peer-as is required", groupName, ip)
 			}
+			if neighbor.BFDProfile != "" {
+				if err := c.validateBFDProfileReference(fmt.Sprintf("bgp group %s neighbor %s", groupName, ip), neighbor.BFDProfile); err != nil {
+					return err
+				}
+			}
 		}
 		// Validate import/export policy references
 		if group.Import != "" && c.Policy != nil {
@@ -384,6 +394,19 @@ func (c *RouterConfig) validateBGP(bgp *BGPConfig) error {
 					groupName, group.Export)
 			}
 		}
+	}
+	return nil
+}
+
+func (c *RouterConfig) validateBFDProfileReference(context, profileName string) error {
+	if strings.TrimSpace(profileName) == "" {
+		return fmt.Errorf("%s: empty BFD profile reference", context)
+	}
+	if c.Protocols == nil || c.Protocols.BFD == nil || c.Protocols.BFD.Profiles == nil {
+		return fmt.Errorf("%s: BFD profile %q not found in protocols bfd", context, profileName)
+	}
+	if c.Protocols.BFD.Profiles[profileName] == nil {
+		return fmt.Errorf("%s: BFD profile %q not found in protocols bfd", context, profileName)
 	}
 	return nil
 }

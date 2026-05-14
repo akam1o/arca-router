@@ -129,6 +129,8 @@ func FromLegacyConfig(old *config.Config) *RouterConfig {
 						PeerAS:       n.PeerAS,
 						Description:  n.Description,
 						LocalAddress: n.LocalAddress,
+						BFD:          n.BFD,
+						BFDProfile:   n.BFDProfile,
 					}
 				}
 				c.Protocols.BGP.Groups[gName] = bg
@@ -295,8 +297,10 @@ func ospfFromLegacy(old *config.OSPFConfig) *OSPFConfig {
 				continue
 			}
 			oi := &OSPFInterface{
-				Passive: i.Passive,
-				Metric:  i.Metric,
+				Passive:    i.Passive,
+				Metric:     i.Metric,
+				BFD:        i.BFD,
+				BFDProfile: i.BFDProfile,
 			}
 			if i.PrioritySet || i.Priority != 0 {
 				p := i.Priority
@@ -472,6 +476,8 @@ func (c *RouterConfig) ToLegacyConfig() *config.Config {
 						PeerAS:       n.PeerAS,
 						Description:  n.Description,
 						LocalAddress: n.LocalAddress,
+						BFD:          n.BFD,
+						BFDProfile:   n.BFDProfile,
 					}
 				}
 				old.Protocols.BGP.Groups[gName] = bg
@@ -649,9 +655,11 @@ func ospfToLegacy(c *OSPFConfig) *config.OSPFConfig {
 				continue
 			}
 			oi := &config.OSPFInterface{
-				Name:    iName,
-				Passive: i.Passive,
-				Metric:  i.Metric,
+				Name:       iName,
+				Passive:    i.Passive,
+				Metric:     i.Metric,
+				BFD:        i.BFD,
+				BFDProfile: i.BFDProfile,
 			}
 			if i.Priority != nil {
 				oi.Priority = *i.Priority

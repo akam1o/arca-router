@@ -729,6 +729,20 @@ func writeBGPXML(buf *bytes.Buffer, bgp *config.BGPConfig) error {
 						buf.WriteString("\n")
 					}
 
+					if neighbor.BFD || neighbor.BFDProfile != "" {
+						buf.WriteString(`          <bfd>true</bfd>`)
+						buf.WriteString("\n")
+					}
+
+					if neighbor.BFDProfile != "" {
+						buf.WriteString(`          <bfd-profile>`)
+						if err := xml.EscapeText(buf, []byte(neighbor.BFDProfile)); err != nil {
+							return err
+						}
+						buf.WriteString(`</bfd-profile>`)
+						buf.WriteString("\n")
+					}
+
 					buf.WriteString(`        </neighbor>`)
 					buf.WriteString("\n")
 				}
@@ -809,6 +823,20 @@ func writeOSPFXML(buf *bytes.Buffer, element string, ospf *config.OSPFConfig) er
 
 					if ospfIface.PrioritySet || ospfIface.Priority > 0 {
 						fmt.Fprintf(buf, "          <priority>%d</priority>\n", ospfIface.Priority)
+					}
+
+					if ospfIface.BFD || ospfIface.BFDProfile != "" {
+						buf.WriteString(`          <bfd>true</bfd>`)
+						buf.WriteString("\n")
+					}
+
+					if ospfIface.BFDProfile != "" {
+						buf.WriteString(`          <bfd-profile>`)
+						if err := xml.EscapeText(buf, []byte(ospfIface.BFDProfile)); err != nil {
+							return err
+						}
+						buf.WriteString(`</bfd-profile>`)
+						buf.WriteString("\n")
 					}
 
 					buf.WriteString(`        </interface>`)
@@ -1032,10 +1060,12 @@ type xmlOSPFProtocol struct {
 		Name       string `xml:"name"`
 		AreaID     string `xml:"area-id"`
 		Interfaces []struct {
-			Name     string `xml:"name"`
-			Passive  bool   `xml:"passive"`
-			Metric   int    `xml:"metric"`
-			Priority *int   `xml:"priority"`
+			Name       string `xml:"name"`
+			Passive    bool   `xml:"passive"`
+			Metric     int    `xml:"metric"`
+			Priority   *int   `xml:"priority"`
+			BFD        bool   `xml:"bfd"`
+			BFDProfile string `xml:"bfd-profile"`
 		} `xml:"interface"`
 	} `xml:"area"`
 }
@@ -1128,6 +1158,8 @@ func ospfConfigFromXML(ospf *xmlOSPFProtocol) *config.OSPFConfig {
 				Metric:      ospfIface.Metric,
 				Priority:    priority,
 				PrioritySet: prioritySet,
+				BFD:         ospfIface.BFD || ospfIface.BFDProfile != "",
+				BFDProfile:  ospfIface.BFDProfile,
 			}
 		}
 		cfgOSPF.Areas[area.Name] = cfgArea
@@ -1241,6 +1273,8 @@ func XMLToConfig(xmlData []byte, defaultOp DefaultOperation) (*config.Config, er
 						PeerAS       uint32 `xml:"peer-as"`
 						Description  string `xml:"description"`
 						LocalAddress string `xml:"local-address"`
+						BFD          bool   `xml:"bfd"`
+						BFDProfile   string `xml:"bfd-profile"`
 					} `xml:"neighbor"`
 				} `xml:"group"`
 			} `xml:"bgp"`
@@ -1435,6 +1469,8 @@ func XMLToConfig(xmlData []byte, defaultOp DefaultOperation) (*config.Config, er
 						PeerAS:       neighbor.PeerAS,
 						Description:  neighbor.Description,
 						LocalAddress: neighbor.LocalAddress,
+						BFD:          neighbor.BFD || neighbor.BFDProfile != "",
+						BFDProfile:   neighbor.BFDProfile,
 					}
 				}
 
@@ -1622,6 +1658,8 @@ var allowedConfigElementPaths = map[string]struct{}{
 	"config/protocols/bgp/group/neighbor/peer-as":       {},
 	"config/protocols/bgp/group/neighbor/description":   {},
 	"config/protocols/bgp/group/neighbor/local-address": {},
+	"config/protocols/bgp/group/neighbor/bfd":           {},
+	"config/protocols/bgp/group/neighbor/bfd-profile":   {},
 	"config/protocols/ospf":                             {},
 	"config/protocols/ospf/router-id":                   {},
 	"config/protocols/ospf/area":                        {},
@@ -1632,6 +1670,8 @@ var allowedConfigElementPaths = map[string]struct{}{
 	"config/protocols/ospf/area/interface/passive":      {},
 	"config/protocols/ospf/area/interface/metric":       {},
 	"config/protocols/ospf/area/interface/priority":     {},
+	"config/protocols/ospf/area/interface/bfd":          {},
+	"config/protocols/ospf/area/interface/bfd-profile":  {},
 	"config/protocols/ospf3":                            {},
 	"config/protocols/ospf3/router-id":                  {},
 	"config/protocols/ospf3/area":                       {},
@@ -1642,6 +1682,8 @@ var allowedConfigElementPaths = map[string]struct{}{
 	"config/protocols/ospf3/area/interface/passive":     {},
 	"config/protocols/ospf3/area/interface/metric":      {},
 	"config/protocols/ospf3/area/interface/priority":    {},
+	"config/protocols/ospf3/area/interface/bfd":         {},
+	"config/protocols/ospf3/area/interface/bfd-profile": {},
 	"config/protocols/mpls":                             {},
 	"config/protocols/mpls/interface":                   {},
 	"config/protocols/vrrp":                             {},
@@ -1743,27 +1785,33 @@ var configTextContentPaths = map[string]struct{}{
 	"config/protocols/bgp/group/neighbor/peer-as":       {},
 	"config/protocols/bgp/group/neighbor/description":   {},
 	"config/protocols/bgp/group/neighbor/local-address": {},
+	"config/protocols/bgp/group/neighbor/bfd":           {},
+	"config/protocols/bgp/group/neighbor/bfd-profile":   {},
 
-	"config/protocols/ospf/router-id":                {},
-	"config/protocols/ospf/area/name":                {},
-	"config/protocols/ospf/area/area-id":             {},
-	"config/protocols/ospf/area/interface/name":      {},
-	"config/protocols/ospf/area/interface/passive":   {},
-	"config/protocols/ospf/area/interface/metric":    {},
-	"config/protocols/ospf/area/interface/priority":  {},
-	"config/protocols/ospf3/router-id":               {},
-	"config/protocols/ospf3/area/name":               {},
-	"config/protocols/ospf3/area/area-id":            {},
-	"config/protocols/ospf3/area/interface/name":     {},
-	"config/protocols/ospf3/area/interface/passive":  {},
-	"config/protocols/ospf3/area/interface/metric":   {},
-	"config/protocols/ospf3/area/interface/priority": {},
-	"config/protocols/mpls/interface":                {},
-	"config/protocols/vrrp/group/name":               {},
-	"config/protocols/vrrp/group/interface":          {},
-	"config/protocols/vrrp/group/virtual-address":    {},
-	"config/protocols/vrrp/group/priority":           {},
-	"config/protocols/vrrp/group/preempt":            {},
+	"config/protocols/ospf/router-id":                   {},
+	"config/protocols/ospf/area/name":                   {},
+	"config/protocols/ospf/area/area-id":                {},
+	"config/protocols/ospf/area/interface/name":         {},
+	"config/protocols/ospf/area/interface/passive":      {},
+	"config/protocols/ospf/area/interface/metric":       {},
+	"config/protocols/ospf/area/interface/priority":     {},
+	"config/protocols/ospf/area/interface/bfd":          {},
+	"config/protocols/ospf/area/interface/bfd-profile":  {},
+	"config/protocols/ospf3/router-id":                  {},
+	"config/protocols/ospf3/area/name":                  {},
+	"config/protocols/ospf3/area/area-id":               {},
+	"config/protocols/ospf3/area/interface/name":        {},
+	"config/protocols/ospf3/area/interface/passive":     {},
+	"config/protocols/ospf3/area/interface/metric":      {},
+	"config/protocols/ospf3/area/interface/priority":    {},
+	"config/protocols/ospf3/area/interface/bfd":         {},
+	"config/protocols/ospf3/area/interface/bfd-profile": {},
+	"config/protocols/mpls/interface":                   {},
+	"config/protocols/vrrp/group/name":                  {},
+	"config/protocols/vrrp/group/interface":             {},
+	"config/protocols/vrrp/group/virtual-address":       {},
+	"config/protocols/vrrp/group/priority":              {},
+	"config/protocols/vrrp/group/preempt":               {},
 
 	"config/class-of-service/forwarding-classes/forwarding-class/name":                       {},
 	"config/class-of-service/forwarding-classes/forwarding-class/queue":                      {},
@@ -2606,6 +2654,12 @@ func countConfigElements(cfg *config.Config) int {
 					if neighbor.LocalAddress != "" {
 						count++
 					}
+					if neighbor.BFD || neighbor.BFDProfile != "" {
+						count++
+					}
+					if neighbor.BFDProfile != "" {
+						count++
+					}
 				}
 			}
 		}
@@ -2627,6 +2681,12 @@ func countConfigElements(cfg *config.Config) int {
 					if ospfIface.PrioritySet || ospfIface.Priority > 0 {
 						count++
 					}
+					if ospfIface.BFD || ospfIface.BFDProfile != "" {
+						count++
+					}
+					if ospfIface.BFDProfile != "" {
+						count++
+					}
 				}
 			}
 		}
@@ -2646,6 +2706,12 @@ func countConfigElements(cfg *config.Config) int {
 						count++
 					}
 					if ospfIface.PrioritySet || ospfIface.Priority > 0 {
+						count++
+					}
+					if ospfIface.BFD || ospfIface.BFDProfile != "" {
+						count++
+					}
+					if ospfIface.BFDProfile != "" {
 						count++
 					}
 				}

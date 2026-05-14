@@ -832,7 +832,7 @@ func (bgp *BGPConfig) Validate(cfg *Config) error {
 	}
 
 	for groupName, group := range bgp.Groups {
-		if err := validateBGPGroup(groupName, group); err != nil {
+		if err := validateBGPGroup(cfg, groupName, group); err != nil {
 			return err
 		}
 	}
@@ -841,7 +841,7 @@ func (bgp *BGPConfig) Validate(cfg *Config) error {
 }
 
 // validateBGPGroup validates a BGP group
-func validateBGPGroup(groupName string, group *BGPGroup) error {
+func validateBGPGroup(cfg *Config, groupName string, group *BGPGroup) error {
 	if group == nil {
 		return errors.New(
 			errors.ErrCodeConfigValidation,
@@ -881,7 +881,7 @@ func validateBGPGroup(groupName string, group *BGPGroup) error {
 	}
 
 	for neighborIP, neighbor := range group.Neighbors {
-		if err := validateBGPNeighbor(groupName, neighborIP, neighbor); err != nil {
+		if err := validateBGPNeighbor(cfg, groupName, neighborIP, neighbor); err != nil {
 			return err
 		}
 	}
@@ -890,7 +890,7 @@ func validateBGPGroup(groupName string, group *BGPGroup) error {
 }
 
 // validateBGPNeighbor validates a BGP neighbor
-func validateBGPNeighbor(groupName, neighborIP string, neighbor *BGPNeighbor) error {
+func validateBGPNeighbor(cfg *Config, groupName, neighborIP string, neighbor *BGPNeighbor) error {
 	if neighbor == nil {
 		return errors.New(
 			errors.ErrCodeConfigValidation,
@@ -939,6 +939,12 @@ func validateBGPNeighbor(groupName, neighborIP string, neighbor *BGPNeighbor) er
 				"Local address must be a valid IP address",
 				"Use a valid IPv4 or IPv6 address",
 			)
+		}
+	}
+
+	if neighbor.BFDProfile != "" {
+		if err := validateBFDProfileReference(cfg, fmt.Sprintf("BGP neighbor %s in group %s", neighborIP, groupName), neighbor.BFDProfile); err != nil {
+			return err
 		}
 	}
 
@@ -1103,6 +1109,40 @@ func validateOSPFInterface(protocolLabel, areaID, ifName string, ospfIf *OSPFInt
 		)
 	}
 
+	if ospfIf.BFDProfile != "" {
+		if err := validateBFDProfileReference(cfg, fmt.Sprintf("%s interface %s in area %s", protocolLabel, ifName, areaID), ospfIf.BFDProfile); err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
+func validateBFDProfileReference(cfg *Config, context, profileName string) error {
+	if strings.TrimSpace(profileName) == "" {
+		return errors.New(
+			errors.ErrCodeConfigValidation,
+			fmt.Sprintf("%s references an empty BFD profile", context),
+			"BFD profile reference must not be empty",
+			"Use a configured protocols bfd profile name",
+		)
+	}
+	if cfg == nil || cfg.Protocols == nil || cfg.Protocols.BFD == nil || cfg.Protocols.BFD.Profiles == nil {
+		return errors.New(
+			errors.ErrCodeConfigValidation,
+			fmt.Sprintf("%s references BFD profile %s but no BFD profiles are configured", context, profileName),
+			"BFD profile must be defined before it is referenced",
+			fmt.Sprintf("Create protocols bfd profile %s", profileName),
+		)
+	}
+	if cfg.Protocols.BFD.Profiles[profileName] == nil {
+		return errors.New(
+			errors.ErrCodeConfigValidation,
+			fmt.Sprintf("%s references unknown BFD profile %s", context, profileName),
+			"BFD profile must be defined before it is referenced",
+			fmt.Sprintf("Create protocols bfd profile %s", profileName),
+		)
+	}
 	return nil
 }
 

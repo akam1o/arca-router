@@ -412,6 +412,13 @@ func writeBGP(b *strings.Builder, bgp *BGPConfig) {
 				writeLine(b, "set protocols bgp group %s neighbor %s local-address %s",
 					groupName, neighborIP, neighbor.LocalAddress)
 			}
+			if neighbor.BFDProfile != "" {
+				writeLine(b, "set protocols bgp group %s neighbor %s bfd profile %s",
+					groupName, neighborIP, EscapeValue(neighbor.BFDProfile))
+			} else if neighbor.BFD {
+				writeLine(b, "set protocols bgp group %s neighbor %s bfd",
+					groupName, neighborIP)
+			}
 		}
 	}
 }
@@ -445,6 +452,13 @@ func writeOSPF(b *strings.Builder, protocol string, ospf *OSPFConfig) {
 			}
 			if ospfIface.PrioritySet || ospfIface.Priority > 0 {
 				writeLine(b, "%s priority %d", base, ospfIface.Priority)
+				wrote = true
+			}
+			if ospfIface.BFDProfile != "" {
+				writeLine(b, "%s bfd profile %s", base, EscapeValue(ospfIface.BFDProfile))
+				wrote = true
+			} else if ospfIface.BFD {
+				writeLine(b, "%s bfd", base)
 				wrote = true
 			}
 			if !wrote {

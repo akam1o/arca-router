@@ -56,6 +56,26 @@ func TestGenerateBGPConfig(t *testing.T) {
 			wantErr: false,
 		},
 		{
+			name: "BGP with BFD profile",
+			cfg: &BGPConfig{
+				ASN:         65001,
+				IPv4Unicast: true,
+				Neighbors: []BGPNeighbor{
+					{
+						IP:         "10.0.2.2",
+						RemoteAS:   65002,
+						BFD:        true,
+						BFDProfile: "fast",
+					},
+				},
+			},
+			want: []string{
+				"neighbor 10.0.2.2 remote-as 65002",
+				"neighbor 10.0.2.2 bfd profile fast",
+			},
+			wantErr: false,
+		},
+		{
 			name: "BGP with multiple neighbors (sorted)",
 			cfg: &BGPConfig{
 				ASN:         65001,

@@ -112,6 +112,12 @@ type BGPNeighbor struct {
 	// Can be either an interface name (Linux format) or IP address
 	UpdateSource string
 
+	// BFD enables BFD failure detection for this neighbor
+	BFD bool
+
+	// BFDProfile selects the BFD profile for this neighbor
+	BFDProfile string
+
 	// IsIPv6 indicates if this is an IPv6 neighbor
 	IsIPv6 bool
 
@@ -162,6 +168,12 @@ type OSPFInterface struct {
 
 	// Priority is the OSPF priority for this interface (nil = not set)
 	Priority *int
+
+	// BFD enables BFD failure detection on this OSPF interface
+	BFD bool
+
+	// BFDProfile selects the BFD profile for this OSPF interface
+	BFDProfile string
 }
 
 // VRRPConfig represents FRR VRRP configuration.

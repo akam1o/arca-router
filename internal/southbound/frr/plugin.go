@@ -81,10 +81,75 @@ func (p *FRRPlugin) ValidateChanges(ctx context.Context, diff *engine.ConfigDiff
 	if p.mode == pkgfrr.BackendModeTransactional && diff.BFDChanged {
 		return fmt.Errorf("BFD requires FRR file backend until frr-bfdd management operations are implemented")
 	}
+	if p.mode == pkgfrr.BackendModeTransactional && diffHasBFDProtocolBindings(diff) {
+		return fmt.Errorf("BFD protocol bindings require FRR file backend until frr-bfdd management operations are implemented")
+	}
 	if p.mode == pkgfrr.BackendModeTransactional && diff.NewOSPF3 != nil {
 		return fmt.Errorf("OSPFv3 requires FRR file backend until core ospf6d YANG paths are available")
 	}
 	return nil
+}
+
+func diffHasBFDProtocolBindings(diff *engine.ConfigDiff) bool {
+	if diff == nil {
+		return false
+	}
+	if routerConfigHasBFDProtocolBindings(diff.NewConfig) {
+		return true
+	}
+	if diff.BGPChanged && (bgpHasBFDProtocolBindings(diff.OldBGP) || bgpHasBFDProtocolBindings(diff.NewBGP)) {
+		return true
+	}
+	if diff.OSPFChanged && (ospfHasBFDProtocolBindings(diff.OldOSPF) || ospfHasBFDProtocolBindings(diff.NewOSPF)) {
+		return true
+	}
+	if diff.OSPF3Changed && (ospfHasBFDProtocolBindings(diff.OldOSPF3) || ospfHasBFDProtocolBindings(diff.NewOSPF3)) {
+		return true
+	}
+	return false
+}
+
+func routerConfigHasBFDProtocolBindings(cfg *model.RouterConfig) bool {
+	if cfg == nil || cfg.Protocols == nil {
+		return false
+	}
+	return bgpHasBFDProtocolBindings(cfg.Protocols.BGP) ||
+		ospfHasBFDProtocolBindings(cfg.Protocols.OSPF) ||
+		ospfHasBFDProtocolBindings(cfg.Protocols.OSPF3)
+}
+
+func bgpHasBFDProtocolBindings(cfg *model.BGPConfig) bool {
+	if cfg == nil {
+		return false
+	}
+	for _, group := range cfg.Groups {
+		if group == nil {
+			continue
+		}
+		for _, neighbor := range group.Neighbors {
+			if neighbor != nil && (neighbor.BFD || neighbor.BFDProfile != "") {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func ospfHasBFDProtocolBindings(cfg *model.OSPFConfig) bool {
+	if cfg == nil {
+		return false
+	}
+	for _, area := range cfg.Areas {
+		if area == nil {
+			continue
+		}
+		for _, iface := range area.Interfaces {
+			if iface != nil && (iface.BFD || iface.BFDProfile != "") {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // ApplyChanges regenerates the desired FRR view and commits it through the

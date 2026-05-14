@@ -137,6 +137,20 @@ func TestBuildMgmtOperationsRejectsBFD(t *testing.T) {
 	}
 }
 
+func TestBuildMgmtOperationsRejectsBFDProtocolBindings(t *testing.T) {
+	_, err := BuildMgmtOperations(&Config{
+		BGP: &BGPConfig{
+			ASN: 65000,
+			Neighbors: []BGPNeighbor{
+				{IP: "192.0.2.2", RemoteAS: 65001, BFD: true, BFDProfile: "fast"},
+			},
+		},
+	})
+	if err == nil || !strings.Contains(err.Error(), "BFD protocol bindings") {
+		t.Fatalf("BuildMgmtOperations() error = %v, want BFD protocol binding unsupported", err)
+	}
+}
+
 func TestVtyshMgmtClientApplySequence(t *testing.T) {
 	var got []string
 	client := NewVtyshMgmtClientWithRunner(func(ctx context.Context, command string) ([]byte, error) {

@@ -178,6 +178,26 @@ func TestValidateChangesRejectsBFDWithTransactionalBackend(t *testing.T) {
 	}
 }
 
+func TestValidateChangesRejectsBFDProtocolBindingWithTransactionalBackend(t *testing.T) {
+	newCfg := model.NewRouterConfig()
+	newCfg.Protocols = &model.ProtocolsConfig{
+		BGP: &model.BGPConfig{Groups: map[string]*model.BGPGroup{
+			"EBGP": {
+				Type: "external",
+				Neighbors: map[string]*model.BGPNeighbor{
+					"192.0.2.2": {PeerAS: 65001, BFD: true, BFDProfile: "fast"},
+				},
+			},
+		}},
+	}
+	diff := engine.ComputeDiff(model.NewRouterConfig(), newCfg)
+
+	err := NewFRRPlugin(testLogger()).ValidateChanges(context.Background(), diff)
+	if err == nil || !strings.Contains(err.Error(), "BFD protocol bindings require FRR file backend") {
+		t.Fatalf("ValidateChanges() error = %v, want BFD binding transactional rejection", err)
+	}
+}
+
 func TestValidateChangesAllowsOSPF3WithFileBackend(t *testing.T) {
 	newCfg := model.NewRouterConfig()
 	newCfg.Protocols = &model.ProtocolsConfig{
@@ -185,6 +205,26 @@ func TestValidateChangesAllowsOSPF3WithFileBackend(t *testing.T) {
 			"0.0.0.0": {
 				Interfaces: map[string]*model.OSPFInterface{
 					"ge-0/0/0": {},
+				},
+			},
+		}},
+	}
+	diff := engine.ComputeDiff(model.NewRouterConfig(), newCfg)
+
+	err := NewFRRPluginWithApplyMode(testLogger(), pkgfrr.BackendModeFile).ValidateChanges(context.Background(), diff)
+	if err != nil {
+		t.Fatalf("ValidateChanges() error = %v, want nil", err)
+	}
+}
+
+func TestValidateChangesAllowsBFDProtocolBindingWithFileBackend(t *testing.T) {
+	newCfg := model.NewRouterConfig()
+	newCfg.Protocols = &model.ProtocolsConfig{
+		BGP: &model.BGPConfig{Groups: map[string]*model.BGPGroup{
+			"EBGP": {
+				Type: "external",
+				Neighbors: map[string]*model.BGPNeighbor{
+					"192.0.2.2": {PeerAS: 65001, BFD: true, BFDProfile: "fast"},
 				},
 			},
 		}},

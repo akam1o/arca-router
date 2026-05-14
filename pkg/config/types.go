@@ -313,6 +313,12 @@ type BGPNeighbor struct {
 
 	// LocalAddress is the local address to use for peering
 	LocalAddress string `json:"local-address,omitempty"`
+
+	// BFD enables BFD failure detection for this neighbor
+	BFD bool `json:"bfd,omitempty"`
+
+	// BFDProfile selects the BFD profile for this neighbor
+	BFDProfile string `json:"bfd-profile,omitempty"`
 }
 
 // OSPFConfig represents OSPF protocol configuration
@@ -349,6 +355,12 @@ type OSPFInterface struct {
 
 	// PrioritySet records whether priority was explicitly configured.
 	PrioritySet bool `json:"-"`
+
+	// BFD enables BFD failure detection on this OSPF interface
+	BFD bool `json:"bfd,omitempty"`
+
+	// BFDProfile selects the BFD profile for this OSPF interface
+	BFDProfile string `json:"bfd-profile,omitempty"`
 }
 
 // PolicyOptions represents policy-options configuration

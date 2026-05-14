@@ -120,6 +120,65 @@ func TestXMLToConfigParsesBFD(t *testing.T) {
 	}
 }
 
+func TestXMLBFDProtocolBindingsRoundTrip(t *testing.T) {
+	cfg := &config.Config{
+		Protocols: &config.ProtocolConfig{
+			BGP: &config.BGPConfig{Groups: map[string]*config.BGPGroup{
+				"EBGP": {
+					Type: "external",
+					Neighbors: map[string]*config.BGPNeighbor{
+						"192.0.2.2": {IP: "192.0.2.2", PeerAS: 65001, BFD: true, BFDProfile: "fast"},
+					},
+				},
+			}},
+			OSPF: &config.OSPFConfig{Areas: map[string]*config.OSPFArea{
+				"0.0.0.0": {
+					AreaID: "0.0.0.0",
+					Interfaces: map[string]*config.OSPFInterface{
+						"ge-0/0/0": {Name: "ge-0/0/0", BFD: true, BFDProfile: "fast"},
+					},
+				},
+			}},
+			OSPF3: &config.OSPFConfig{Areas: map[string]*config.OSPFArea{
+				"0.0.0.0": {
+					AreaID: "0.0.0.0",
+					Interfaces: map[string]*config.OSPFInterface{
+						"ge-0/0/0": {Name: "ge-0/0/0", BFD: true, BFDProfile: "fast"},
+					},
+				},
+			}},
+		},
+	}
+
+	xmlData, err := ConfigToXML(cfg, nil)
+	if err != nil {
+		t.Fatalf("ConfigToXML() error = %v", err)
+	}
+	xmlStr := string(xmlData)
+	for _, want := range []string{"<bfd>true</bfd>", "<bfd-profile>fast</bfd-profile>"} {
+		if !strings.Contains(xmlStr, want) {
+			t.Fatalf("ConfigToXML() missing %q:\n%s", want, xmlStr)
+		}
+	}
+
+	roundTrip, err := XMLToConfig(xmlData, DefaultOpMerge)
+	if err != nil {
+		t.Fatalf("XMLToConfig() error = %v", err)
+	}
+	neighbor := roundTrip.Protocols.BGP.Groups["EBGP"].Neighbors["192.0.2.2"]
+	if neighbor == nil || !neighbor.BFD || neighbor.BFDProfile != "fast" {
+		t.Fatalf("BGP BFD binding = %#v, want profile fast", neighbor)
+	}
+	ospfIface := roundTrip.Protocols.OSPF.Areas["0.0.0.0"].Interfaces["ge-0/0/0"]
+	if ospfIface == nil || !ospfIface.BFD || ospfIface.BFDProfile != "fast" {
+		t.Fatalf("OSPF BFD binding = %#v, want profile fast", ospfIface)
+	}
+	ospf3Iface := roundTrip.Protocols.OSPF3.Areas["0.0.0.0"].Interfaces["ge-0/0/0"]
+	if ospf3Iface == nil || !ospf3Iface.BFD || ospf3Iface.BFDProfile != "fast" {
+		t.Fatalf("OSPF3 BFD binding = %#v, want profile fast", ospf3Iface)
+	}
+}
+
 func TestConfigToXMLMarshalsAsSingleDataReply(t *testing.T) {
 	cfg := &config.Config{
 		System:     &config.SystemConfig{HostName: "router1"},
