@@ -416,6 +416,13 @@ func TestApplyChangesMapsRoutingInstanceTables(t *testing.T) {
 			t.Fatalf("InterfaceTableID(IPv6=%t) = %d, want 100", isIPv6, got)
 		}
 	}
+	state, err := plugin.CollectState(ctx)
+	if err != nil {
+		t.Fatalf("CollectState() error = %v", err)
+	}
+	if got := state["ge-0/0/0"]; got == nil || got.IPv4TableID != 100 || got.IPv6TableID != 100 {
+		t.Fatalf("CollectState() table IDs = %#v, want IPv4/IPv6 table 100", got)
+	}
 	iface, err := client.GetInterface(ctx, idx)
 	if err != nil {
 		t.Fatalf("GetInterface() error = %v", err)
@@ -436,6 +443,13 @@ func TestApplyChangesMapsRoutingInstanceTables(t *testing.T) {
 		if client.IPTableExists(100, isIPv6) {
 			t.Fatalf("routing table 100 IPv6=%t still exists after removal", isIPv6)
 		}
+	}
+	state, err = plugin.CollectState(ctx)
+	if err != nil {
+		t.Fatalf("CollectState() after removal error = %v", err)
+	}
+	if got := state["ge-0/0/0"]; got == nil || got.IPv4TableID != 0 || got.IPv6TableID != 0 {
+		t.Fatalf("CollectState() table IDs after removal = %#v, want default table 0", got)
 	}
 }
 

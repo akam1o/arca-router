@@ -15,6 +15,8 @@ type InterfaceOperationalState struct {
 	OperStatus  string
 	MAC         string
 	QoSProfile  string
+	IPv4TableID uint32
+	IPv6TableID uint32
 	Counters    *InterfaceOperationalCounters
 	Queues      *InterfaceOperationalQueues
 }

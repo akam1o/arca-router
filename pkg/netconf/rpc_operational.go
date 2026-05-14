@@ -218,6 +218,12 @@ func writeInterfaceStateXML(buf *bytes.Buffer, interfaces map[string]*config.Int
 				return err
 			}
 		}
+		if state != nil && state.IPv4TableID != 0 {
+			fmt.Fprintf(buf, "      <ipv4-table-id>%d</ipv4-table-id>\n", state.IPv4TableID)
+		}
+		if state != nil && state.IPv6TableID != 0 {
+			fmt.Fprintf(buf, "      <ipv6-table-id>%d</ipv6-table-id>\n", state.IPv6TableID)
+		}
 		if state != nil && state.Counters != nil {
 			writeInterfaceCountersXML(buf, state.Counters)
 		}

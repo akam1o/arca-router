@@ -148,6 +148,8 @@ func (a *stateServiceAdapter) GetInterfaces(ctx context.Context, req *apiv1.GetI
 			Mtu:         iface.MTU,
 			Mac:         iface.MAC,
 			QosProfile:  iface.QoSProfile,
+			Ipv4TableId: iface.IPv4TableID,
+			Ipv6TableId: iface.IPv6TableID,
 			RxPackets:   iface.RxPackets,
 			TxPackets:   iface.TxPackets,
 			RxBytes:     iface.RxBytes,

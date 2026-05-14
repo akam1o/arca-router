@@ -31,6 +31,8 @@ func TestNETCONFOperationalStateProviderConvertsInterfaceState(t *testing.T) {
 				OperStatus:  "down",
 				MAC:         "02:00:00:00:00:01",
 				QoSProfile:  "WAN",
+				IPv4TableID: 100,
+				IPv6TableID: 100,
 				Counters: &model.InterfaceCounters{
 					RxPackets: 10,
 					TxPackets: 20,
@@ -60,7 +62,7 @@ func TestNETCONFOperationalStateProviderConvertsInterfaceState(t *testing.T) {
 	if state == nil {
 		t.Fatal("InterfaceStates() missing ge-0/0/0")
 	}
-	if state.AdminStatus != "up" || state.OperStatus != "down" || state.MAC != "02:00:00:00:00:01" || state.QoSProfile != "WAN" {
+	if state.AdminStatus != "up" || state.OperStatus != "down" || state.MAC != "02:00:00:00:00:01" || state.QoSProfile != "WAN" || state.IPv4TableID != 100 || state.IPv6TableID != 100 {
 		t.Fatalf("state = %#v", state)
 	}
 	if state.Counters == nil || state.Counters.RxPackets != 10 || state.Counters.TxPackets != 20 ||

@@ -1034,13 +1034,13 @@ func printInterfaces(ifaces []grpcclient.InterfaceInfo) {
 		fmt.Println("No interfaces found")
 		return
 	}
-	fmt.Printf("%-20s %-8s %-8s %-6s %-18s %-10s %-12s %-12s %-16s %s\n",
-		"Interface", "Admin", "Oper", "MTU", "MAC", "Speed", "RX-Packets", "TX-Packets", "QoS", "Queues")
-	fmt.Println(strings.Repeat("-", 143))
+	fmt.Printf("%-20s %-8s %-8s %-6s %-18s %-10s %-12s %-12s %-16s %-15s %s\n",
+		"Interface", "Admin", "Oper", "MTU", "MAC", "Speed", "RX-Packets", "TX-Packets", "QoS", "Tables", "Queues")
+	fmt.Println(strings.Repeat("-", 159))
 	for _, iface := range ifaces {
-		fmt.Printf("%-20s %-8s %-8s %-6d %-18s %-10d %-12d %-12d %-16s %s\n",
+		fmt.Printf("%-20s %-8s %-8s %-6d %-18s %-10d %-12d %-12d %-16s %-15s %s\n",
 			iface.Name, iface.AdminStatus, iface.OperStatus,
-			iface.MTU, iface.MAC, iface.Speed, iface.RxPackets, iface.TxPackets, interfaceQoSProfile(iface), interfaceQueueSummary(iface))
+			iface.MTU, iface.MAC, iface.Speed, iface.RxPackets, iface.TxPackets, interfaceQoSProfile(iface), interfaceTableSummary(iface), interfaceQueueSummary(iface))
 	}
 }
 
@@ -1049,6 +1049,16 @@ func interfaceQoSProfile(iface grpcclient.InterfaceInfo) string {
 		return "-"
 	}
 	return iface.QoSProfile
+}
+
+func interfaceTableSummary(iface grpcclient.InterfaceInfo) string {
+	if iface.IPv4TableID == 0 && iface.IPv6TableID == 0 {
+		return "-"
+	}
+	if iface.IPv4TableID == iface.IPv6TableID {
+		return fmt.Sprintf("v4/v6:%d", iface.IPv4TableID)
+	}
+	return fmt.Sprintf("v4:%d v6:%d", iface.IPv4TableID, iface.IPv6TableID)
 }
 
 func interfaceQueueSummary(iface grpcclient.InterfaceInfo) string {

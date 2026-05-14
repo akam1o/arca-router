@@ -250,6 +250,33 @@ func TestMockClient_ListInterfaceQueuePlacements(t *testing.T) {
 	}
 }
 
+func TestMockClient_GetInterfaceTable(t *testing.T) {
+	client := NewMockClient()
+	ctx := context.Background()
+	if err := client.Connect(ctx); err != nil {
+		t.Fatalf("Connect() error = %v", err)
+	}
+	iface, err := client.CreateInterface(ctx, &CreateInterfaceRequest{Type: InterfaceTypeTap})
+	if err != nil {
+		t.Fatalf("CreateInterface() error = %v", err)
+	}
+	for _, isIPv6 := range []bool{false, true} {
+		if err := client.AddIPTable(ctx, IPTable{ID: 100, IsIPv6: isIPv6, Name: "BLUE"}); err != nil {
+			t.Fatalf("AddIPTable(IPv6=%t) error = %v", isIPv6, err)
+		}
+		if err := client.SetInterfaceTable(ctx, iface.SwIfIndex, 100, isIPv6); err != nil {
+			t.Fatalf("SetInterfaceTable(IPv6=%t) error = %v", isIPv6, err)
+		}
+		got, err := client.GetInterfaceTable(ctx, iface.SwIfIndex, isIPv6)
+		if err != nil {
+			t.Fatalf("GetInterfaceTable(IPv6=%t) error = %v", isIPv6, err)
+		}
+		if got != 100 {
+			t.Fatalf("GetInterfaceTable(IPv6=%t) = %d, want 100", isIPv6, got)
+		}
+	}
+}
+
 func TestMockClient_SetInterfaceAddress(t *testing.T) {
 	client := NewMockClient()
 	ctx := context.Background()

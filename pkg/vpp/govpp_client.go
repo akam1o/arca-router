@@ -737,6 +737,32 @@ func (c *govppClient) SetInterfaceTable(ctx context.Context, ifIndex uint32, tab
 	return nil
 }
 
+// GetInterfaceTable returns the IPv4 or IPv6 FIB table bound to an interface.
+func (c *govppClient) GetInterfaceTable(ctx context.Context, ifIndex uint32, isIPv6 bool) (uint32, error) {
+	if c.ch == nil {
+		return 0, fmt.Errorf("not connected to VPP")
+	}
+
+	select {
+	case <-ctx.Done():
+		return 0, fmt.Errorf("operation cancelled: %w", ctx.Err())
+	default:
+	}
+
+	req := &vppif.SwInterfaceGetTable{
+		SwIfIndex: interface_types.InterfaceIndex(ifIndex),
+		IsIPv6:    isIPv6,
+	}
+	reply := &vppif.SwInterfaceGetTableReply{}
+	if err := c.ch.SendRequest(req).ReceiveReply(reply); err != nil {
+		return 0, fmt.Errorf("failed to get interface table: %w", err)
+	}
+	if reply.Retval != 0 {
+		return 0, fmt.Errorf("get interface table returned error code: %d", reply.Retval)
+	}
+	return reply.VrfID, nil
+}
+
 // SetQoSProfile binds output QoS policy intent to an interface.
 func (c *govppClient) SetQoSProfile(ctx context.Context, ifIndex uint32, profile QoSProfile) error {
 	if profile.Name == "" {
