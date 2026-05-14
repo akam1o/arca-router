@@ -99,7 +99,7 @@ The `admin` role provides full access to all NETCONF operations, including admin
 - operator: 11 operations
 - admin: 12 operations
 
-The Web UI uses HTTP Basic authentication when password-backed `security users` exist in the running configuration. All built-in roles can read the dashboard, `/api/status`, `/api/config`, and `/api/config/history`. The Web configuration API allows `operator` and `admin` roles to validate and commit set-command text through `/api/config/validate` and `/api/config/commit`; the `read-only` role cannot use write endpoints.
+The Web UI uses HTTP Basic authentication when password-backed `security users` exist in the running configuration. All built-in roles can read the dashboard, `/api/status`, `/api/nms/v1/status`, `/api/nms/v1/telemetry/paths`, `/api/nms/v1/telemetry/snapshot`, `/api/config`, and `/api/config/history`. The Web configuration API allows `operator` and `admin` roles to validate and commit set-command text through `/api/config/validate` and `/api/config/commit`; the `read-only` role cannot use write endpoints.
 
 ---
 

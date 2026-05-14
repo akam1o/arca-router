@@ -33,6 +33,7 @@ type metricsSource struct {
 	netconfServer *netconf.SSHServer
 	datastore     *datastore.Config
 	configAPI     webConfigAPI
+	telemetryAPI  webTelemetryAPI
 	configSync    configSyncRuntimeSource
 	frr           frrVRRPSource
 	vpp           vppReconciliationSource

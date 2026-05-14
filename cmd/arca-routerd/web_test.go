@@ -293,6 +293,56 @@ func TestNMSTelemetryCatalogEndpoint(t *testing.T) {
 	}
 }
 
+func TestNMSTelemetrySnapshotEndpoint(t *testing.T) {
+	telemetry := &webTelemetryTestAPI{events: []nbgrpc.TelemetryEvent{
+		{
+			Sequence:      1,
+			Timestamp:     time.Unix(1700000600, 123).UTC(),
+			Path:          "/system",
+			EventType:     "snapshot",
+			Encoding:      nbgrpc.TelemetryEncoding(),
+			SchemaVersion: nbgrpc.TelemetryEventSchemaVersion(),
+			JSONPayload:   `{"hostname":"edge01"}`,
+		},
+		{
+			Sequence:      2,
+			Timestamp:     time.Unix(1700000601, 0).UTC(),
+			Path:          "/interfaces",
+			EventType:     "snapshot",
+			Encoding:      nbgrpc.TelemetryEncoding(),
+			SchemaVersion: nbgrpc.TelemetryEventSchemaVersion(),
+			JSONPayload:   `{"interfaces":[]}`,
+		},
+	}}
+
+	req := httptest.NewRequest(http.MethodGet, "/api/nms/v1/telemetry/snapshot?path=/system&path=/interfaces", nil)
+	rec := httptest.NewRecorder()
+	metricsSource{telemetryAPI: telemetry}.handleNMSTelemetrySnapshot(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d: %s", rec.Code, http.StatusOK, rec.Body.String())
+	}
+	if !telemetry.once || len(telemetry.paths) != 2 || telemetry.paths[0] != "/system" || telemetry.paths[1] != "/interfaces" {
+		t.Fatalf("telemetry subscription = once %v paths %#v, want one-shot system/interfaces", telemetry.once, telemetry.paths)
+	}
+	var resp nmsTelemetrySnapshotResponse
+	if err := json.NewDecoder(rec.Result().Body).Decode(&resp); err != nil {
+		t.Fatalf("Decode() error = %v", err)
+	}
+	if resp.SchemaVersion != nmsTelemetrySnapshotSchemaVersion || resp.Resource != "/api/nms/v1/telemetry/snapshot" {
+		t.Fatalf("snapshot envelope = %#v", resp)
+	}
+	if resp.EventSchemaVersion != nbgrpc.TelemetryEventSchemaVersion() || resp.Encoding != nbgrpc.TelemetryEncoding() {
+		t.Fatalf("snapshot schema/encoding = %q/%q", resp.EventSchemaVersion, resp.Encoding)
+	}
+	if len(resp.Paths) != 2 || resp.Paths[0] != "/system" || resp.Paths[1] != "/interfaces" {
+		t.Fatalf("Paths = %#v, want emitted paths", resp.Paths)
+	}
+	if len(resp.Events) != 2 || resp.Events[0].Path != "/system" || string(resp.Events[0].Payload) != `{"hostname":"edge01"}` {
+		t.Fatalf("Events = %#v, want system payload event", resp.Events)
+	}
+}
+
 func TestWebConfigEndpoint(t *testing.T) {
 	eng := engine.NewEngine(nil, slog.Default())
 	cfg := model.NewRouterConfig()
@@ -501,6 +551,7 @@ func TestWebIndexEndpoint(t *testing.T) {
 		"/api/status",
 		"/api/nms/v1/status",
 		"/api/nms/v1/telemetry/paths",
+		"/api/nms/v1/telemetry/snapshot",
 		"/api/config",
 		"/api/config/history",
 		"refreshHistory",
@@ -580,4 +631,25 @@ func (a webHistoryTestAPI) ListHistory(ctx context.Context, limit, offset int) (
 		history = history[:limit]
 	}
 	return history, nil
+}
+
+type webTelemetryTestAPI struct {
+	events []nbgrpc.TelemetryEvent
+	paths  []string
+	once   bool
+	err    error
+}
+
+func (a *webTelemetryTestAPI) SubscribeTelemetry(ctx context.Context, rawPaths []string, interval time.Duration, once bool, send func(nbgrpc.TelemetryEvent) error) error {
+	a.paths = append([]string(nil), rawPaths...)
+	a.once = once
+	if a.err != nil {
+		return a.err
+	}
+	for _, event := range a.events {
+		if err := send(event); err != nil {
+			return err
+		}
+	}
+	return nil
 }

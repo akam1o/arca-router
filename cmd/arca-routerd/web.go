@@ -32,6 +32,7 @@ const webConfigEditBodyLimit = 1 << 20
 
 const nmsOperationalStatusSchemaVersion = "arca.nms.operational.v1"
 const nmsTelemetryCatalogSchemaVersion = "arca.nms.telemetry-catalog.v1"
+const nmsTelemetrySnapshotSchemaVersion = "arca.nms.telemetry-snapshot.v1"
 
 type webConfigAPI interface {
 	GetRunning(ctx context.Context) (string, uint64, error)
@@ -44,6 +45,10 @@ type webConfigAPI interface {
 	Diff(ctx context.Context, sessionID string) (string, bool, error)
 	Commit(ctx context.Context, sessionID, user, message string) (string, uint64, error)
 	ListHistory(ctx context.Context, limit, offset int) ([]nbgrpc.CommitInfo, error)
+}
+
+type webTelemetryAPI interface {
+	SubscribeTelemetry(ctx context.Context, rawPaths []string, interval time.Duration, once bool, send func(nbgrpc.TelemetryEvent) error) error
 }
 
 type webStatus struct {
@@ -78,6 +83,26 @@ type nmsTelemetryCatalogResponse struct {
 	Encoding           string             `json:"encoding"`
 	DefaultPaths       []string           `json:"default_paths"`
 	Paths              []nmsTelemetryPath `json:"paths"`
+}
+
+type nmsTelemetrySnapshotResponse struct {
+	SchemaVersion      string                      `json:"schema_version"`
+	GeneratedAt        string                      `json:"generated_at"`
+	Resource           string                      `json:"resource"`
+	EventSchemaVersion string                      `json:"event_schema_version"`
+	Encoding           string                      `json:"encoding"`
+	Paths              []string                    `json:"paths"`
+	Events             []nmsTelemetrySnapshotEvent `json:"events"`
+}
+
+type nmsTelemetrySnapshotEvent struct {
+	Sequence      uint64          `json:"sequence"`
+	Timestamp     string          `json:"timestamp,omitempty"`
+	Path          string          `json:"path"`
+	EventType     string          `json:"event_type"`
+	Encoding      string          `json:"encoding"`
+	SchemaVersion string          `json:"schema_version"`
+	Payload       json.RawMessage `json:"payload"`
 }
 
 type nmsTelemetryPath struct {
@@ -643,7 +668,7 @@ var webIndexTemplate = template.Must(template.New("web-index").Parse(`<!doctype 
 
     <footer>
       <span>Generated {{.GeneratedAt}}</span>
-      <span>/api/status | /api/nms/v1/status | /api/nms/v1/telemetry/paths | /api/config | /api/config/history | /api/config/validate | /api/config/commit</span>
+      <span>/api/status | /api/nms/v1/status | /api/nms/v1/telemetry/paths | /api/nms/v1/telemetry/snapshot | /api/config | /api/config/history | /api/config/validate | /api/config/commit</span>
     </footer>
   </main>
   <script>
@@ -845,6 +870,7 @@ func newWebMux(source metricsSource) *http.ServeMux {
 	mux.HandleFunc("/api/status", source.handleWebStatus)
 	mux.HandleFunc("/api/nms/v1/status", source.handleNMSStatus)
 	mux.HandleFunc("/api/nms/v1/telemetry/paths", source.handleNMSTelemetryCatalog)
+	mux.HandleFunc("/api/nms/v1/telemetry/snapshot", source.handleNMSTelemetrySnapshot)
 	mux.HandleFunc("/api/config/validate", source.handleWebConfigValidate)
 	return mux
 }
@@ -884,6 +910,31 @@ func (s metricsSource) handleNMSTelemetryCatalog(w http.ResponseWriter, r *http.
 		return
 	}
 	writeWebJSON(w, http.StatusOK, newNMSTelemetryCatalogResponse(time.Now()))
+}
+
+func (s metricsSource) handleNMSTelemetrySnapshot(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	if !s.authorizeWebRead(w, r) {
+		return
+	}
+	if s.telemetryAPI == nil {
+		writeWebJSONError(w, http.StatusServiceUnavailable, "telemetry API is not available")
+		return
+	}
+	now := time.Now()
+	events, err := s.collectNMSTelemetrySnapshot(r.Context(), nmsTelemetrySnapshotPaths(r))
+	if err != nil {
+		status := http.StatusInternalServerError
+		if strings.Contains(err.Error(), "unsupported telemetry path") {
+			status = http.StatusBadRequest
+		}
+		writeWebJSONError(w, status, err.Error())
+		return
+	}
+	writeWebJSON(w, http.StatusOK, newNMSTelemetrySnapshotResponse(now, events))
 }
 
 func (s metricsSource) handleWebConfig(w http.ResponseWriter, r *http.Request) {
@@ -1367,6 +1418,78 @@ func newNMSTelemetryCatalogResponse(now time.Time) nmsTelemetryCatalogResponse {
 		DefaultPaths:       defaultPaths,
 		Paths:              paths,
 	}
+}
+
+func (s metricsSource) collectNMSTelemetrySnapshot(ctx context.Context, paths []string) ([]nbgrpc.TelemetryEvent, error) {
+	var events []nbgrpc.TelemetryEvent
+	err := s.telemetryAPI.SubscribeTelemetry(ctx, paths, 0, true, func(event nbgrpc.TelemetryEvent) error {
+		events = append(events, event)
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return events, nil
+}
+
+func nmsTelemetrySnapshotPaths(r *http.Request) []string {
+	rawPaths := r.URL.Query()["path"]
+	paths := make([]string, 0, len(rawPaths))
+	for _, rawPath := range rawPaths {
+		for _, part := range strings.Split(rawPath, ",") {
+			if path := strings.TrimSpace(part); path != "" {
+				paths = append(paths, path)
+			}
+		}
+	}
+	return paths
+}
+
+func newNMSTelemetrySnapshotResponse(now time.Time, events []nbgrpc.TelemetryEvent) nmsTelemetrySnapshotResponse {
+	responseEvents := make([]nmsTelemetrySnapshotEvent, 0, len(events))
+	paths := make([]string, 0, len(events))
+	for _, event := range events {
+		responseEvents = append(responseEvents, newNMSTelemetrySnapshotEvent(event))
+		paths = append(paths, event.Path)
+	}
+	return nmsTelemetrySnapshotResponse{
+		SchemaVersion:      nmsTelemetrySnapshotSchemaVersion,
+		GeneratedAt:        formatWebOptionalTime(now),
+		Resource:           "/api/nms/v1/telemetry/snapshot",
+		EventSchemaVersion: nbgrpc.TelemetryEventSchemaVersion(),
+		Encoding:           nbgrpc.TelemetryEncoding(),
+		Paths:              paths,
+		Events:             responseEvents,
+	}
+}
+
+func newNMSTelemetrySnapshotEvent(event nbgrpc.TelemetryEvent) nmsTelemetrySnapshotEvent {
+	output := nmsTelemetrySnapshotEvent{
+		Sequence:      event.Sequence,
+		Path:          event.Path,
+		EventType:     event.EventType,
+		Encoding:      event.Encoding,
+		SchemaVersion: event.SchemaVersion,
+		Payload:       telemetrySnapshotPayload(event.JSONPayload),
+	}
+	if !event.Timestamp.IsZero() {
+		output.Timestamp = event.Timestamp.UTC().Format(time.RFC3339Nano)
+	}
+	return output
+}
+
+func telemetrySnapshotPayload(payload string) json.RawMessage {
+	if payload == "" {
+		return json.RawMessage("null")
+	}
+	if json.Valid([]byte(payload)) {
+		return json.RawMessage(payload)
+	}
+	encoded, err := json.Marshal(payload)
+	if err != nil {
+		return json.RawMessage("null")
+	}
+	return json.RawMessage(encoded)
 }
 
 func newWebStatus(metrics routerMetrics) webStatus {
