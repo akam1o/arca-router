@@ -552,10 +552,44 @@ func prefixListKey(name string, isIPv6 bool) string {
 	return fmt.Sprintf("%t\x00%s", isIPv6, name)
 }
 
+func validateASPathAccessLists(asPathLists []ASPathAccessList) error {
+	names := make(map[string]struct{}, len(asPathLists))
+	for _, list := range asPathLists {
+		if strings.TrimSpace(list.Name) == "" {
+			return NewInvalidConfigError("AS-path access-list name is required")
+		}
+		if _, ok := names[list.Name]; ok {
+			return NewInvalidConfigError(fmt.Sprintf("AS-path access-list %s is duplicated", list.Name))
+		}
+		names[list.Name] = struct{}{}
+
+		sequences := make(map[int]struct{}, len(list.Entries))
+		for _, entry := range list.Entries {
+			if entry.Seq <= 0 {
+				return NewInvalidConfigError(fmt.Sprintf("AS-path access-list %s entry sequence must be positive", list.Name))
+			}
+			if _, ok := sequences[entry.Seq]; ok {
+				return NewInvalidConfigError(fmt.Sprintf("AS-path access-list %s entry %d is duplicated", list.Name, entry.Seq))
+			}
+			sequences[entry.Seq] = struct{}{}
+			if !validPolicyAction(entry.Action) {
+				return NewInvalidConfigError(fmt.Sprintf("AS-path access-list %s entry %d has invalid action %s", list.Name, entry.Seq, entry.Action))
+			}
+			if strings.TrimSpace(entry.Regex) == "" {
+				return NewInvalidConfigError(fmt.Sprintf("AS-path access-list %s entry %d regex is required", list.Name, entry.Seq))
+			}
+		}
+	}
+	return nil
+}
+
 // GenerateASPathAccessListConfig generates FRR AS-path access-list configuration.
 func GenerateASPathAccessListConfig(asPathLists []ASPathAccessList) (string, error) {
 	if len(asPathLists) == 0 {
 		return "", nil
+	}
+	if err := validateASPathAccessLists(asPathLists); err != nil {
+		return "", err
 	}
 
 	var b strings.Builder

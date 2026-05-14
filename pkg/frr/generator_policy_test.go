@@ -508,6 +508,95 @@ func TestGenerateRouteMapConfigRejectsInvalidObjects(t *testing.T) {
 	}
 }
 
+func TestGenerateASPathAccessListConfig(t *testing.T) {
+	result, err := GenerateASPathAccessListConfig([]ASPathAccessList{{
+		Name: "CUSTOMER-AS",
+		Entries: []ASPathAccessListEntry{
+			{Seq: 10, Action: "permit", Regex: "^65001_"},
+			{Seq: 20, Action: "deny", Regex: "_64512$"},
+		},
+	}})
+	if err != nil {
+		t.Fatalf("GenerateASPathAccessListConfig() error = %v", err)
+	}
+
+	for _, want := range []string{
+		"bgp as-path access-list CUSTOMER-AS seq 10 permit ^65001_",
+		"bgp as-path access-list CUSTOMER-AS seq 20 deny _64512$",
+	} {
+		if !strings.Contains(result, want) {
+			t.Errorf("Expected config to contain %q\nGot:\n%s", want, result)
+		}
+	}
+}
+
+func TestGenerateASPathAccessListConfigRejectsInvalidObjects(t *testing.T) {
+	tests := []struct {
+		name        string
+		asPathLists []ASPathAccessList
+		want        string
+	}{
+		{
+			name: "empty name",
+			asPathLists: []ASPathAccessList{{
+				Entries: []ASPathAccessListEntry{{Seq: 10, Action: "permit", Regex: "^65001_"}},
+			}},
+			want: "AS-path access-list name is required",
+		},
+		{
+			name: "duplicate list",
+			asPathLists: []ASPathAccessList{
+				{Name: "CUSTOMER-AS", Entries: []ASPathAccessListEntry{{Seq: 10, Action: "permit", Regex: "^65001_"}}},
+				{Name: "CUSTOMER-AS", Entries: []ASPathAccessListEntry{{Seq: 20, Action: "deny", Regex: "_64512$"}}},
+			},
+			want: "AS-path access-list CUSTOMER-AS is duplicated",
+		},
+		{
+			name: "non-positive sequence",
+			asPathLists: []ASPathAccessList{{
+				Name:    "CUSTOMER-AS",
+				Entries: []ASPathAccessListEntry{{Seq: 0, Action: "permit", Regex: "^65001_"}},
+			}},
+			want: "AS-path access-list CUSTOMER-AS entry sequence must be positive",
+		},
+		{
+			name: "duplicate sequence",
+			asPathLists: []ASPathAccessList{{
+				Name: "CUSTOMER-AS",
+				Entries: []ASPathAccessListEntry{
+					{Seq: 10, Action: "permit", Regex: "^65001_"},
+					{Seq: 10, Action: "deny", Regex: "_64512$"},
+				},
+			}},
+			want: "AS-path access-list CUSTOMER-AS entry 10 is duplicated",
+		},
+		{
+			name: "invalid action",
+			asPathLists: []ASPathAccessList{{
+				Name:    "CUSTOMER-AS",
+				Entries: []ASPathAccessListEntry{{Seq: 10, Action: "drop", Regex: "^65001_"}},
+			}},
+			want: "AS-path access-list CUSTOMER-AS entry 10 has invalid action drop",
+		},
+		{
+			name: "empty regex",
+			asPathLists: []ASPathAccessList{{
+				Name:    "CUSTOMER-AS",
+				Entries: []ASPathAccessListEntry{{Seq: 10, Action: "permit"}},
+			}},
+			want: "AS-path access-list CUSTOMER-AS entry 10 regex is required",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := GenerateASPathAccessListConfig(tt.asPathLists)
+			if err == nil || !strings.Contains(err.Error(), tt.want) {
+				t.Fatalf("GenerateASPathAccessListConfig() error = %v, want %q", err, tt.want)
+			}
+		})
+	}
+}
+
 // TestConvertPolicyOptionsIntegration tests full conversion flow
 func TestConvertPolicyOptionsIntegration(t *testing.T) {
 	acceptTrue := true

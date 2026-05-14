@@ -17,6 +17,7 @@
 - **FRR validation preflight**: the FRR southbound plugin now generates FRR artifacts and validates transactional management operations during commit validation, while preserving file-backend fallback for unsupported mgmtd paths
 - **Route policy validation**: legacy and canonical config validation reject invalid IPv4/IPv6 prefix-list entries, unknown policy-statement prefix-list references, invalid route-policy protocols, neighbors, AS-path regexes, and community values before apply
 - **Policy generation validation**: FRR generation rejects invalid or duplicate prefix-list and route-map objects, unknown route-map prefix-list references, and invalid route-map peer matches before file or transactional apply emits policy configuration
+- **AS-path generation validation**: FRR generation rejects invalid or duplicate AS-path access-list objects before file backend emits BGP policy configuration
 - **BGP generation validation**: FRR generation rejects invalid BGP router IDs, duplicate neighbors, and neighbor address-family mismatches before file or transactional apply emits BGP configuration
 - **Transactional policy object validation**: direct FRR management operations reject invalid prefix-list and route-map names, sequence numbers, actions, prefixes, and address-family mismatches before building the candidate
 - **BGP policy reference validation**: BGP group import/export policies are validated against configured policy-statements before FRR generation
