@@ -240,22 +240,7 @@ func validateTransactionalStaticRoutes(cfg *Config) error {
 	if cfg == nil {
 		return nil
 	}
-	for _, route := range cfg.StaticRoutes {
-		if err := validateStaticRoute(&route); err != nil {
-			return err
-		}
-		_, prefixNet, _ := net.ParseCIDR(route.Prefix)
-		nextHopIP := net.ParseIP(route.NextHop)
-		prefixIPv6 := prefixNet.IP.To4() == nil
-		nextHopIPv6 := nextHopIP.To4() == nil
-		if prefixIPv6 != nextHopIPv6 {
-			return NewInvalidConfigError(fmt.Sprintf("static route %s: next-hop family does not match prefix", route.Prefix))
-		}
-		if prefixIPv6 != route.IsIPv6 {
-			return NewInvalidConfigError(fmt.Sprintf("static route %s address family does not match configured address family", route.Prefix))
-		}
-	}
-	return nil
+	return validateStaticRoutes(cfg.StaticRoutes)
 }
 
 func validateTransactionalBFDProtocolBindings(cfg *Config) error {

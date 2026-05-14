@@ -6,6 +6,7 @@
 - **BFD protocol bindings**: BGP neighbors and OSPF/OSPFv3 interfaces can enable BFD directly, including reusable `protocols bfd profile` references
 - **BFD static route monitoring**: static routes can be monitored by BFD with optional source address, multihop, and BFD profile settings in the FRR apply backends
 - **Transactional static route validation**: direct FRR management operations reject invalid static route prefix, next-hop, distance, address-family, and BFD option combinations before building the candidate
+- **Static route generation validation**: FRR generation rejects duplicate static route paths and address-family mismatches before file or transactional apply emits route configuration
 - **Static route BFD profile validation**: transactional FRR apply rejects static route BFD profile references that are not part of the generated BFD profile set
 - **BFD VRF reference validation**: transactional FRR apply rejects explicit BFD peers that reference VRFs outside the generated VRF set before building the candidate
 - **BFD duplicate detection**: FRR config generation rejects duplicate BFD profiles and peers before file or transactional apply emits overlapping daemon configuration

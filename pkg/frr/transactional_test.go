@@ -865,6 +865,16 @@ func TestBuildMgmtOperationsRejectsInvalidStaticRoutes(t *testing.T) {
 	}
 }
 
+func TestBuildMgmtOperationsRejectsDuplicateStaticRoute(t *testing.T) {
+	_, err := BuildMgmtOperations(&Config{StaticRoutes: []StaticRoute{
+		{Prefix: "203.0.113.0/24", NextHop: "192.0.2.1"},
+		{Prefix: "203.0.113.0/24", NextHop: "192.0.2.1", Distance: 10},
+	}})
+	if err == nil || !strings.Contains(err.Error(), "static route 203.0.113.0/24 via 192.0.2.1 is duplicated") {
+		t.Fatalf("BuildMgmtOperations() error = %v, want duplicate static route", err)
+	}
+}
+
 func TestBuildMgmtOperationsStaticRouteBFD(t *testing.T) {
 	ops, err := BuildMgmtOperations(&Config{
 		BFD: &BFDConfig{

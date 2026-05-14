@@ -240,6 +240,43 @@ func TestGenerateFRRConfigConvertsBFDStaticRoute(t *testing.T) {
 	}
 }
 
+func TestGenerateStaticRouteConfigRejectsDuplicateRoute(t *testing.T) {
+	_, err := GenerateStaticRouteConfig([]StaticRoute{
+		{Prefix: "203.0.113.0/24", NextHop: "192.0.2.1"},
+		{Prefix: "203.0.113.0/24", NextHop: "192.0.2.1", Distance: 10},
+	})
+	if err == nil || !strings.Contains(err.Error(), "static route 203.0.113.0/24 via 192.0.2.1 is duplicated") {
+		t.Fatalf("GenerateStaticRouteConfig() error = %v, want duplicate route error", err)
+	}
+}
+
+func TestGenerateStaticRouteConfigRejectsFamilyMismatch(t *testing.T) {
+	tests := []struct {
+		name   string
+		routes []StaticRoute
+		want   string
+	}{
+		{
+			name:   "next-hop family",
+			routes: []StaticRoute{{Prefix: "2001:db8::/64", NextHop: "192.0.2.1", IsIPv6: true}},
+			want:   "next-hop family does not match prefix",
+		},
+		{
+			name:   "configured family",
+			routes: []StaticRoute{{Prefix: "2001:db8::/64", NextHop: "2001:db8::1"}},
+			want:   "address family does not match configured address family",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := GenerateStaticRouteConfig(tt.routes)
+			if err == nil || !strings.Contains(err.Error(), tt.want) {
+				t.Fatalf("GenerateStaticRouteConfig() error = %v, want %q", err, tt.want)
+			}
+		})
+	}
+}
+
 func TestValidateStaticRoute(t *testing.T) {
 	tests := []struct {
 		name    string
