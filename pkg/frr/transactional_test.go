@@ -404,6 +404,9 @@ func TestBuildMgmtOperationsOSPFInterfaceAttributes(t *testing.T) {
 
 func TestBuildMgmtOperationsStaticRouteBFD(t *testing.T) {
 	ops, err := BuildMgmtOperations(&Config{
+		BFD: &BFDConfig{
+			Profiles: []BFDProfile{{Name: "fast"}},
+		},
 		StaticRoutes: []StaticRoute{
 			{
 				Prefix:      "203.0.113.0/24",
@@ -434,6 +437,22 @@ func TestBuildMgmtOperationsStaticRouteBFD(t *testing.T) {
 		if !strings.Contains(commands, want) {
 			t.Fatalf("commands missing %q:\n%s", want, commands)
 		}
+	}
+}
+
+func TestBuildMgmtOperationsRejectsUnknownStaticRouteBFDProfile(t *testing.T) {
+	_, err := BuildMgmtOperations(&Config{
+		StaticRoutes: []StaticRoute{
+			{
+				Prefix:     "203.0.113.0/24",
+				NextHop:    "192.0.2.2",
+				BFD:        true,
+				BFDProfile: "missing",
+			},
+		},
+	})
+	if err == nil || !strings.Contains(err.Error(), "static route 203.0.113.0/24 references unknown BFD profile missing") {
+		t.Fatalf("BuildMgmtOperations() error = %v, want unknown static route BFD profile", err)
 	}
 }
 
