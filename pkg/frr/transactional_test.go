@@ -585,6 +585,39 @@ func TestBuildMgmtOperationsRejectsUnknownBFDPeerVRF(t *testing.T) {
 	}
 }
 
+func TestBuildMgmtOperationsRejectsDuplicateBFDObjects(t *testing.T) {
+	tests := []struct {
+		name string
+		bfd  *BFDConfig
+		want string
+	}{
+		{
+			name: "profile",
+			bfd: &BFDConfig{Profiles: []BFDProfile{
+				{Name: "fast"},
+				{Name: "fast", DetectMultiplier: 3},
+			}},
+			want: "BFD profile fast is duplicated",
+		},
+		{
+			name: "peer",
+			bfd: &BFDConfig{Peers: []BFDPeer{
+				{Address: "192.0.2.2", Interface: "ge0-0-0"},
+				{Address: "192.0.2.2", Interface: "ge0-0-1"},
+			}},
+			want: "BFD peer 192.0.2.2 is duplicated",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := BuildMgmtOperations(&Config{BFD: tt.bfd})
+			if err == nil || !strings.Contains(err.Error(), tt.want) {
+				t.Fatalf("BuildMgmtOperations() error = %v, want %q", err, tt.want)
+			}
+		})
+	}
+}
+
 func TestBuildMgmtOperationsRejectsUnsupportedBFDPeerShape(t *testing.T) {
 	for _, tt := range []struct {
 		name string
