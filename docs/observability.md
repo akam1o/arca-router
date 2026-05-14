@@ -132,12 +132,14 @@ Endpoints:
 - `GET /api/config/history`
 - `GET /api/status`
 - `GET /api/nms/v1/status`
+- `GET /api/nms/v1/telemetry/paths`
 - `POST /api/config/validate`
 - `POST /api/config/commit`
 
 The Web UI is intended for trusted management networks. It exposes the same daemon status used by the metrics endpoint, including datastore backend, etcd config sync health, cluster sync alignment, FRR VRRP and BFD operational state, HA convergence, and VPP LCP reconciliation state. It also exposes the running configuration in set-command format through `/api/config`, renders it in the dashboard editor, shows recent commit history from `/api/config/history`, and can validate or commit edited set-command text.
 
 `/api/nms/v1/status` returns the same read-only operational status in a schema-versioned envelope with `schema_version`, `generated_at`, `resource`, and `data` fields. External NMS collectors should use this endpoint when they need a stable API shape instead of scraping the dashboard page.
+`/api/nms/v1/telemetry/paths` returns the supported structured telemetry paths, the default path set, event schema version, and payload encoding so collectors can discover stream inputs before subscribing over gRPC or invoking the CLI for local validation.
 
 HA convergence is evaluated when chassis clustering is enabled and at least one VRRP group is configured. The status is converged only when there are at least two cluster nodes, etcd cluster sync is configured and aligned with the daemon datastore, the etcd config synchronizer is healthy, FRR VRRP operational state reports every configured group as active, and VPP LCP reconciliation has run without errors or inconsistencies.
 
@@ -146,6 +148,7 @@ When the running configuration contains password-backed `security users`, the We
 ```bash
 curl -u monitor:ReadOnly789 http://127.0.0.1:8080/api/status
 curl -u monitor:ReadOnly789 http://127.0.0.1:8080/api/nms/v1/status
+curl -u monitor:ReadOnly789 http://127.0.0.1:8080/api/nms/v1/telemetry/paths
 curl -u monitor:ReadOnly789 http://127.0.0.1:8080/api/config
 curl -u monitor:ReadOnly789 http://127.0.0.1:8080/api/config/history
 ```

@@ -286,6 +286,36 @@ func TestSubscribeTelemetryRejectsUnsupportedPath(t *testing.T) {
 	}
 }
 
+func TestTelemetryPathCatalog(t *testing.T) {
+	catalog := TelemetryPathCatalog()
+	if len(catalog) != len(telemetryPathOrder) {
+		t.Fatalf("TelemetryPathCatalog() length = %d, want %d", len(catalog), len(telemetryPathOrder))
+	}
+	defaults := map[string]bool{}
+	for i, info := range catalog {
+		if info.Path != telemetryPathOrder[i] {
+			t.Fatalf("catalog[%d].Path = %q, want %q", i, info.Path, telemetryPathOrder[i])
+		}
+		if info.Description == "" {
+			t.Fatalf("catalog[%d].Description is empty for %s", i, info.Path)
+		}
+		if info.Default {
+			defaults[info.Path] = true
+		}
+	}
+	for _, path := range defaultTelemetryPaths {
+		if !defaults[path] {
+			t.Fatalf("default path %s is not marked default in catalog %#v", path, catalog)
+		}
+	}
+	if TelemetryEventSchemaVersion() != telemetrySchemaVersion {
+		t.Fatalf("TelemetryEventSchemaVersion() = %q, want %q", TelemetryEventSchemaVersion(), telemetrySchemaVersion)
+	}
+	if TelemetryEncoding() != telemetryEncodingJSON {
+		t.Fatalf("TelemetryEncoding() = %q, want %q", TelemetryEncoding(), telemetryEncodingJSON)
+	}
+}
+
 func TestOperationalStateEndpointsReadVPPAndFRR(t *testing.T) {
 	srv := NewServer(engine.NewEngine(nil, testLogger()), &fakeStore{}, testLogger())
 	ctx := context.Background()

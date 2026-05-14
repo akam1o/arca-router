@@ -2,6 +2,7 @@
 
 ## v0.8.x - Overlay and Streaming Telemetry (current)
 
+- **NMS telemetry catalog API**: `/api/nms/v1/telemetry/paths` exposes the supported structured telemetry paths, default path set, event schema version, and payload encoding for collector discovery
 - **NMS operational status API**: the Web API now exposes `/api/nms/v1/status`, a schema-versioned JSON envelope for external NMS and collectors that need a stable read-only operational status shape
 - **Telemetry CLI snapshots**: `arca show telemetry` now consumes the structured gRPC telemetry stream and prints selected telemetry events as JSON lines for local debugging and collector validation
 - **Structured gRPC telemetry stream**: the internal gRPC API now exposes `TelemetryService.SubscribeTelemetry` for selected config, daemon, interface, routing, BFD, LCP, HA, routing-instance, and class-of-service paths with JSON payload events, interval sampling, one-shot snapshots, and gRPC flow-control backpressure

@@ -31,6 +31,7 @@ const webDummyPasswordHash = "$argon2id$v=19$m=65536,t=3,p=4$AAAAAAAAAAAAAAAAAAA
 const webConfigEditBodyLimit = 1 << 20
 
 const nmsOperationalStatusSchemaVersion = "arca.nms.operational.v1"
+const nmsTelemetryCatalogSchemaVersion = "arca.nms.telemetry-catalog.v1"
 
 type webConfigAPI interface {
 	GetRunning(ctx context.Context) (string, uint64, error)
@@ -67,6 +68,22 @@ type nmsStatusResponse struct {
 	GeneratedAt   string    `json:"generated_at"`
 	Resource      string    `json:"resource"`
 	Data          webStatus `json:"data"`
+}
+
+type nmsTelemetryCatalogResponse struct {
+	SchemaVersion      string             `json:"schema_version"`
+	GeneratedAt        string             `json:"generated_at"`
+	Resource           string             `json:"resource"`
+	EventSchemaVersion string             `json:"event_schema_version"`
+	Encoding           string             `json:"encoding"`
+	DefaultPaths       []string           `json:"default_paths"`
+	Paths              []nmsTelemetryPath `json:"paths"`
+}
+
+type nmsTelemetryPath struct {
+	Path        string `json:"path"`
+	Description string `json:"description"`
+	Default     bool   `json:"default"`
 }
 
 type webDatastore struct {
@@ -607,7 +624,7 @@ var webIndexTemplate = template.Must(template.New("web-index").Parse(`<!doctype 
 
     <footer>
       <span>Generated {{.GeneratedAt}}</span>
-      <span>/api/status | /api/nms/v1/status | /api/config | /api/config/history | /api/config/validate | /api/config/commit</span>
+      <span>/api/status | /api/nms/v1/status | /api/nms/v1/telemetry/paths | /api/config | /api/config/history | /api/config/validate | /api/config/commit</span>
     </footer>
   </main>
   <script>
@@ -808,6 +825,7 @@ func newWebMux(source metricsSource) *http.ServeMux {
 	mux.HandleFunc("/api/config/history", source.handleWebConfigHistory)
 	mux.HandleFunc("/api/status", source.handleWebStatus)
 	mux.HandleFunc("/api/nms/v1/status", source.handleNMSStatus)
+	mux.HandleFunc("/api/nms/v1/telemetry/paths", source.handleNMSTelemetryCatalog)
 	mux.HandleFunc("/api/config/validate", source.handleWebConfigValidate)
 	return mux
 }
@@ -836,6 +854,17 @@ func (s metricsSource) handleNMSStatus(w http.ResponseWriter, r *http.Request) {
 	}
 	now := time.Now()
 	writeWebJSON(w, http.StatusOK, newNMSStatusResponse(now, s.snapshot(now)))
+}
+
+func (s metricsSource) handleNMSTelemetryCatalog(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	if !s.authorizeWebRead(w, r) {
+		return
+	}
+	writeWebJSON(w, http.StatusOK, newNMSTelemetryCatalogResponse(time.Now()))
 }
 
 func (s metricsSource) handleWebConfig(w http.ResponseWriter, r *http.Request) {
@@ -1272,6 +1301,31 @@ func newNMSStatusResponse(now time.Time, metrics routerMetrics) nmsStatusRespons
 		GeneratedAt:   formatWebOptionalTime(now),
 		Resource:      "/api/nms/v1/status",
 		Data:          newWebStatus(metrics),
+	}
+}
+
+func newNMSTelemetryCatalogResponse(now time.Time) nmsTelemetryCatalogResponse {
+	catalog := nbgrpc.TelemetryPathCatalog()
+	paths := make([]nmsTelemetryPath, 0, len(catalog))
+	defaultPaths := make([]string, 0, len(catalog))
+	for _, info := range catalog {
+		paths = append(paths, nmsTelemetryPath{
+			Path:        info.Path,
+			Description: info.Description,
+			Default:     info.Default,
+		})
+		if info.Default {
+			defaultPaths = append(defaultPaths, info.Path)
+		}
+	}
+	return nmsTelemetryCatalogResponse{
+		SchemaVersion:      nmsTelemetryCatalogSchemaVersion,
+		GeneratedAt:        formatWebOptionalTime(now),
+		Resource:           "/api/nms/v1/telemetry/paths",
+		EventSchemaVersion: nbgrpc.TelemetryEventSchemaVersion(),
+		Encoding:           nbgrpc.TelemetryEncoding(),
+		DefaultPaths:       defaultPaths,
+		Paths:              paths,
 	}
 }
 

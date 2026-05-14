@@ -1120,6 +1120,8 @@ Local operator は `arca show telemetry path /system path /interfaces` で同じ
 
 外部 NMS の polling 用に、Web API は `GET /api/nms/v1/status` を公開します。Response は `schema_version` に `arca.nms.operational.v1`、`generated_at`、`resource`、`data` を持つ stable JSON envelope です。`data` には `/api/status` と同じ read-only operational status が入り、build metadata、config version、datastore state、config sync、HA、CoS、FRR、VPP LCP、NETCONF counters を含みます。
 
+Collector discovery 用に、Web API は `GET /api/nms/v1/telemetry/paths` も公開します。Response は `schema_version` に `arca.nms.telemetry-catalog.v1`、`event_schema_version`、`encoding`、`default_paths`、description と default membership を含む順序付き telemetry `paths` catalog を持つ stable JSON envelope です。
+
 ### Web UI
 
 Web UI は次のように起動します。
@@ -1143,11 +1145,13 @@ Endpoints:
 - `GET /api/config/history`
 - `GET /api/status`
 - `GET /api/nms/v1/status`
+- `GET /api/nms/v1/telemetry/paths`
 - `POST /api/config/validate`
 - `POST /api/config/commit`
 
 `/api/status` は build metadata、uptime、running config version、datastore backend、cluster sync state、class-of-service intent state、per-group detail を含む FRR VRRP operational state、HA convergence state、VPP LCP reconciliation state、NETCONF counters を返します。
 `/api/nms/v1/status` は同じ read-only status を external NMS collector 用の `arca.nms.operational.v1` schema envelope で包んで返します。
+`/api/nms/v1/telemetry/paths` は structured telemetry path catalog を collector discovery 用の `arca.nms.telemetry-catalog.v1` schema envelope で包んで返します。
 `/api/config` は running configuration を set-command text と running config version として返します。dashboard でも同じ running configuration を browser editor に表示します。
 `/api/config/history` は recent configuration commits を返し、dashboard の commit history panel で使用します。
 

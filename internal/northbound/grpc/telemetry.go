@@ -34,8 +34,29 @@ var (
 		"/lcp",
 		"/ha",
 	}
+	telemetryPathDescriptions = map[string]string{
+		"/system":                  "daemon system metadata and uptime",
+		"/config/running":          "running configuration text and version",
+		"/interfaces":              "managed interface operational state, counters, QoS binding, and queue placement",
+		"/routes":                  "routing table snapshot",
+		"/routing/bgp/neighbors":   "BGP neighbor operational state",
+		"/routing/ospf/neighbors":  "OSPFv2 neighbor operational state",
+		"/routing/ospf3/neighbors": "OSPFv3 neighbor operational state",
+		"/routing-instances":       "routing instance operational summary",
+		"/class-of-service":        "class-of-service intent and enforcement status",
+		"/bfd":                     "BFD peer operational status",
+		"/lcp":                     "VPP LCP reconciliation status",
+		"/ha":                      "control-plane HA convergence status",
+	}
 	telemetryPathSet = buildTelemetryPathSet(telemetryPathOrder)
 )
+
+// TelemetryPathInfo describes a supported structured telemetry path.
+type TelemetryPathInfo struct {
+	Path        string
+	Description string
+	Default     bool
+}
 
 // TelemetryEvent is one structured telemetry update emitted over gRPC.
 type TelemetryEvent struct {
@@ -46,6 +67,31 @@ type TelemetryEvent struct {
 	Encoding      string
 	JSONPayload   string
 	SchemaVersion string
+}
+
+// TelemetryEventSchemaVersion returns the current structured telemetry event schema version.
+func TelemetryEventSchemaVersion() string {
+	return telemetrySchemaVersion
+}
+
+// TelemetryEncoding returns the payload encoding used by structured telemetry events.
+func TelemetryEncoding() string {
+	return telemetryEncodingJSON
+}
+
+// TelemetryPathCatalog returns the supported structured telemetry paths in canonical emission order.
+func TelemetryPathCatalog() []TelemetryPathInfo {
+	defaults := buildTelemetryPathSet(defaultTelemetryPaths)
+	catalog := make([]TelemetryPathInfo, 0, len(telemetryPathOrder))
+	for _, path := range telemetryPathOrder {
+		_, isDefault := defaults[path]
+		catalog = append(catalog, TelemetryPathInfo{
+			Path:        path,
+			Description: telemetryPathDescriptions[path],
+			Default:     isDefault,
+		})
+	}
+	return catalog
 }
 
 type telemetryErrorPayload struct {

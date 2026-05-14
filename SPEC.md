@@ -1043,6 +1043,8 @@ Local operators can inspect the same stream with `arca show telemetry path /syst
 
 For external NMS polling, the Web API exposes `GET /api/nms/v1/status`. The response is a stable JSON envelope with `schema_version` set to `arca.nms.operational.v1`, `generated_at`, `resource`, and `data`. The `data` object contains the same read-only operational status as `/api/status`, including build metadata, config version, datastore state, config sync, HA, CoS, FRR, VPP LCP, and NETCONF counters.
 
+The Web API also exposes `GET /api/nms/v1/telemetry/paths` for collector discovery. The response is a stable JSON envelope with `schema_version` set to `arca.nms.telemetry-catalog.v1`, `event_schema_version`, `encoding`, `default_paths`, and the ordered telemetry `paths` catalog with descriptions and default membership.
+
 ### Web UI
 
 Start the Web UI with:
@@ -1066,11 +1068,13 @@ Endpoints:
 - `GET /api/config/history`
 - `GET /api/status`
 - `GET /api/nms/v1/status`
+- `GET /api/nms/v1/telemetry/paths`
 - `POST /api/config/validate`
 - `POST /api/config/commit`
 
 `/api/status` includes build metadata, uptime, running config version, datastore backend, cluster sync state, class-of-service intent state, FRR VRRP operational state with per-group state details, HA convergence state, VPP LCP reconciliation state, and NETCONF counters.
 `/api/nms/v1/status` wraps the same read-only status in the `arca.nms.operational.v1` schema envelope for external NMS collectors.
+`/api/nms/v1/telemetry/paths` wraps the structured telemetry path catalog in the `arca.nms.telemetry-catalog.v1` schema envelope for collector discovery.
 `/api/config` returns the running configuration as set-command text with the running config version. The dashboard renders the same running configuration in the browser editor.
 `/api/config/history` returns recent configuration commits and backs the dashboard commit history panel.
 

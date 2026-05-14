@@ -242,6 +242,39 @@ func TestNMSStatusEndpoint(t *testing.T) {
 	}
 }
 
+func TestNMSTelemetryCatalogEndpoint(t *testing.T) {
+	req := httptest.NewRequest(http.MethodGet, "/api/nms/v1/telemetry/paths", nil)
+	rec := httptest.NewRecorder()
+	metricsSource{}.handleNMSTelemetryCatalog(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d", rec.Code, http.StatusOK)
+	}
+	var resp nmsTelemetryCatalogResponse
+	if err := json.NewDecoder(rec.Result().Body).Decode(&resp); err != nil {
+		t.Fatalf("Decode() error = %v", err)
+	}
+	if resp.SchemaVersion != nmsTelemetryCatalogSchemaVersion {
+		t.Fatalf("SchemaVersion = %q, want %q", resp.SchemaVersion, nmsTelemetryCatalogSchemaVersion)
+	}
+	if resp.Resource != "/api/nms/v1/telemetry/paths" {
+		t.Fatalf("Resource = %q, want /api/nms/v1/telemetry/paths", resp.Resource)
+	}
+	if resp.EventSchemaVersion != nbgrpc.TelemetryEventSchemaVersion() || resp.Encoding != nbgrpc.TelemetryEncoding() {
+		t.Fatalf("event schema/encoding = %q/%q, want %q/%q",
+			resp.EventSchemaVersion, resp.Encoding, nbgrpc.TelemetryEventSchemaVersion(), nbgrpc.TelemetryEncoding())
+	}
+	if len(resp.DefaultPaths) != 2 || resp.DefaultPaths[0] != "/system" || resp.DefaultPaths[1] != "/config/running" {
+		t.Fatalf("DefaultPaths = %#v, want system and config/running", resp.DefaultPaths)
+	}
+	if len(resp.Paths) == 0 {
+		t.Fatal("Paths is empty, want telemetry path catalog")
+	}
+	if resp.Paths[0].Path != "/system" || !resp.Paths[0].Default || resp.Paths[0].Description == "" {
+		t.Fatalf("Paths[0] = %#v, want default system path with description", resp.Paths[0])
+	}
+}
+
 func TestWebConfigEndpoint(t *testing.T) {
 	eng := engine.NewEngine(nil, slog.Default())
 	cfg := model.NewRouterConfig()
@@ -449,6 +482,7 @@ func TestWebIndexEndpoint(t *testing.T) {
 		"set system host-name edge01",
 		"/api/status",
 		"/api/nms/v1/status",
+		"/api/nms/v1/telemetry/paths",
 		"/api/config",
 		"/api/config/history",
 		"refreshHistory",
