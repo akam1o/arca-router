@@ -237,6 +237,7 @@ arca show bgp summary
 arca show ospf neighbor
 arca show ospf3 neighbor
 arca show vrrp
+arca show bfd status
 arca show bfd
 arca show bfd counters
 arca show lcp

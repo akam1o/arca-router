@@ -24,6 +24,7 @@ type fakeInteractiveClient struct {
 	ospfFamily      string
 	vrrpText        string
 	bfdText         string
+	bfdInfo         *grpcclient.BFDStatusInfo
 	bfdPeerAddress  string
 	bfdBrief        bool
 	bfdCounters     bool
@@ -35,6 +36,7 @@ type fakeInteractiveClient struct {
 	discardCalls     int
 	releaseLockCalls int
 	commitCalls      int
+	bfdStatusCalls   int
 	listHistoryCalls int
 	rollbackCalls    int
 	validateCalls    int
@@ -151,6 +153,14 @@ func (f *fakeInteractiveClient) GetBFDText(ctx context.Context, peerAddress stri
 		return "bfd output\n", nil
 	}
 	return f.bfdText, nil
+}
+
+func (f *fakeInteractiveClient) GetBFDStatus(ctx context.Context) (*grpcclient.BFDStatusInfo, error) {
+	f.bfdStatusCalls++
+	if f.bfdInfo != nil {
+		return f.bfdInfo, nil
+	}
+	return &grpcclient.BFDStatusInfo{}, nil
 }
 
 func (f *fakeInteractiveClient) GetLCPReconciliation(ctx context.Context) (*grpcclient.LCPReconciliationInfo, error) {
@@ -447,6 +457,36 @@ func TestCmdShowBFDReturnsOutput(t *testing.T) {
 	}
 }
 
+func TestCmdShowBFDStatusUsesStructuredState(t *testing.T) {
+	ctx := context.Background()
+	client := &fakeInteractiveClient{bfdInfo: &grpcclient.BFDStatusInfo{
+		LastRun:         time.Now(),
+		ConfiguredPeers: 1,
+		ObservedPeers:   1,
+		UpPeers:         1,
+		Peers: []grpcclient.BFDPeerInfo{
+			{Peer: "192.0.2.2", Interface: "ge-0/0/0", Status: "up", Observed: true, Up: true},
+		},
+	}}
+	sh := &interactiveShell{
+		client:    client,
+		hostname:  "router",
+		mode:      modeOperational,
+		sessionID: "session-1",
+	}
+
+	err := sh.cmdShow(ctx, []string{"bfd", "status"})
+	if err != nil {
+		t.Fatalf("cmdShow(bfd status) error = %v", err)
+	}
+	if client.bfdStatusCalls != 1 {
+		t.Fatalf("BFD status calls = %d, want 1", client.bfdStatusCalls)
+	}
+	if client.bfdPeerAddress != "" || client.bfdBrief || client.bfdCounters {
+		t.Fatalf("BFD text options = peer %q brief %v counters %v, want unused", client.bfdPeerAddress, client.bfdBrief, client.bfdCounters)
+	}
+}
+
 func TestCmdShowLCPReturnsOutput(t *testing.T) {
 	ctx := context.Background()
 	client := &fakeInteractiveClient{lcpInfo: &grpcclient.LCPReconciliationInfo{
@@ -596,6 +636,17 @@ func TestOneShotShowBFDReturnsSuccess(t *testing.T) {
 	}
 }
 
+func TestOneShotShowBFDStatusReturnsSuccess(t *testing.T) {
+	client := &fakeInteractiveClient{bfdInfo: &grpcclient.BFDStatusInfo{LastRun: time.Now(), ConfiguredPeers: 1}}
+	code := oneShotShow(context.Background(), client, []string{"bfd", "status"}, &cliFlags{})
+	if code != ExitSuccess {
+		t.Fatalf("oneShotShow(bfd status) = %d, want %d", code, ExitSuccess)
+	}
+	if client.bfdStatusCalls != 1 {
+		t.Fatalf("BFD status calls = %d, want 1", client.bfdStatusCalls)
+	}
+}
+
 func TestOneShotShowLCPReturnsSuccess(t *testing.T) {
 	client := &fakeInteractiveClient{}
 	code := oneShotShow(context.Background(), client, []string{"lcp"}, &cliFlags{})
@@ -695,6 +746,37 @@ func TestBFDTextOptions(t *testing.T) {
 	}
 }
 
+func TestBFDStatusRequested(t *testing.T) {
+	tests := []struct {
+		name    string
+		args    []string
+		want    bool
+		wantErr bool
+	}{
+		{name: "default"},
+		{name: "status", args: []string{"status"}, want: true},
+		{name: "status extra", args: []string{"status", "detail"}, wantErr: true},
+		{name: "brief", args: []string{"brief"}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := bfdStatusRequested(tt.args)
+			if tt.wantErr {
+				if err == nil {
+					t.Fatalf("bfdStatusRequested(%v) error = nil, want error", tt.args)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("bfdStatusRequested(%v) error = %v", tt.args, err)
+			}
+			if got != tt.want {
+				t.Fatalf("bfdStatusRequested(%v) = %v, want %v", tt.args, got, tt.want)
+			}
+		})
+	}
+}
+
 func TestLCPReconciliationState(t *testing.T) {
 	now := time.Now()
 	tests := []struct {
@@ -712,6 +794,29 @@ func TestLCPReconciliationState(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			if got := lcpReconciliationState(tt.info); got != tt.want {
 				t.Fatalf("lcpReconciliationState() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestBFDOperationalState(t *testing.T) {
+	now := time.Now()
+	tests := []struct {
+		name string
+		info *grpcclient.BFDStatusInfo
+		want string
+	}{
+		{name: "nil", info: nil, want: "unknown"},
+		{name: "empty", info: &grpcclient.BFDStatusInfo{}, want: "unknown"},
+		{name: "error", info: &grpcclient.BFDStatusInfo{LastRun: now, LastError: "failed"}, want: "check failed"},
+		{name: "issue", info: &grpcclient.BFDStatusInfo{LastRun: now, Issues: []string{"peer missing"}}, want: "issues"},
+		{name: "down", info: &grpcclient.BFDStatusInfo{LastRun: now, DownPeers: 1}, want: "issues"},
+		{name: "converged", info: &grpcclient.BFDStatusInfo{LastRun: now, ConfiguredPeers: 1, ObservedPeers: 1, UpPeers: 1}, want: "converged"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := bfdOperationalState(tt.info); got != tt.want {
+				t.Fatalf("bfdOperationalState() = %q, want %q", got, tt.want)
 			}
 		})
 	}

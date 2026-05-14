@@ -622,6 +622,8 @@ The internal gRPC BFD state API returns arca-routerd's cached FRR BFD convergenc
 
 NETCONF `<get>` exposes the same cached BFD operational state under `state/protocols/bfd`, including aggregate counters, per-peer diagnostics, convergence issues, and the last collection error.
 
+The CLI exposes the cached BFD snapshot through `arca show bfd status`. Raw FRR BFD output remains available through `arca show bfd`, `arca show bfd brief`, `arca show bfd counters`, and `arca show bfd peer <ip> [counters]`.
+
 The server hello advertises the arca-router YANG module capability as `urn:arca:router:config:1.0?module=arca-router&revision=2025-12-27`.
 
 ### User Management

@@ -98,7 +98,8 @@ Show subcommands:
   ospf neighbor               Show OSPFv2 neighbors
   ospf3 neighbor              Show OSPFv3 neighbors
   vrrp                        Show VRRP status
-  bfd [brief|counters]        Show BFD status
+  bfd status                  Show BFD operational state
+  bfd [brief|counters]        Show raw BFD status
   bfd peer <ip> [counters]    Show BFD peer details
   route [inet|inet6]                 Show routing table
   route [inet|inet6] protocol <proto> Show routes by protocol
@@ -269,6 +270,20 @@ func oneShotShow(ctx context.Context, client showClient, args []string, f *cliFl
 		return ExitSuccess
 
 	case "bfd":
+		statusRequested, err := bfdStatusRequested(args[1:])
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+			return ExitUsageError
+		}
+		if statusRequested {
+			info, err := client.GetBFDStatus(ctx)
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+				return ExitOperationError
+			}
+			printBFDStatus(info)
+			return ExitSuccess
+		}
 		peerAddress, brief, counters, err := bfdTextOptions(args[1:])
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
@@ -367,6 +382,7 @@ type showClient interface {
 	GetOSPFNeighborsText(context.Context, string) (string, error)
 	GetVRRPText(context.Context) (string, error)
 	GetBFDText(context.Context, string, bool, bool) (string, error)
+	GetBFDStatus(context.Context) (*grpcclient.BFDStatusInfo, error)
 	GetLCPReconciliation(context.Context) (*grpcclient.LCPReconciliationInfo, error)
 	GetHAStatus(context.Context) (*grpcclient.HAStatusInfo, error)
 	GetClassOfService(context.Context) (*grpcclient.ClassOfServiceInfo, error)
@@ -731,6 +747,18 @@ func (sh *interactiveShell) cmdShow(ctx context.Context, args []string) error {
 		if sh.mode == modeConfiguration {
 			return fmt.Errorf("'show bfd' not available in configuration mode")
 		}
+		statusRequested, err := bfdStatusRequested(args[1:])
+		if err != nil {
+			return err
+		}
+		if statusRequested {
+			info, err := sh.client.GetBFDStatus(ctx)
+			if err != nil {
+				return err
+			}
+			printBFDStatus(info)
+			return nil
+		}
 		peerAddress, brief, counters, err := bfdTextOptions(args[1:])
 		if err != nil {
 			return err
@@ -994,7 +1022,8 @@ func (sh *interactiveShell) showHelp() {
 		fmt.Println("  show ospf neighbor            Show OSPFv2 neighbors")
 		fmt.Println("  show ospf3 neighbor           Show OSPFv3 neighbors")
 		fmt.Println("  show vrrp                     Show VRRP status")
-		fmt.Println("  show bfd [brief|counters]     Show BFD status")
+		fmt.Println("  show bfd status               Show BFD operational state")
+		fmt.Println("  show bfd [brief|counters]     Show raw BFD status")
 		fmt.Println("  show bfd peer <ip> [counters] Show BFD peer details")
 		fmt.Println("  show lcp                      Show VPP LCP reconciliation status")
 		fmt.Println("  show ha                       Show HA convergence status")
@@ -1143,6 +1172,58 @@ func printHAStatus(info *grpcclient.HAStatusInfo) {
 	}
 }
 
+func printBFDStatus(info *grpcclient.BFDStatusInfo) {
+	if !hasBFDStatus(info) {
+		fmt.Println("No BFD operational status found")
+		return
+	}
+	fmt.Printf("%-18s %s\n", "State", bfdOperationalState(info))
+	fmt.Printf("%-18s %s\n", "Last check", formatOptionalTime(info.LastRun))
+	fmt.Printf("%-18s %d\n", "Configured peers", info.ConfiguredPeers)
+	fmt.Printf("%-18s %d\n", "Observed peers", info.ObservedPeers)
+	fmt.Printf("%-18s %d\n", "Up peers", info.UpPeers)
+	fmt.Printf("%-18s %d\n", "Down peers", info.DownPeers)
+	fmt.Printf("%-18s %d\n", "Session down", info.SessionDownEvents)
+	fmt.Printf("%-18s %d\n", "RX fail packets", info.RxFailPackets)
+	if info.LastError != "" {
+		fmt.Printf("%-18s %s\n", "Last error", info.LastError)
+	}
+	if len(info.Peers) > 0 {
+		fmt.Println()
+		fmt.Println("Peers")
+		fmt.Printf("%-39s %-39s %-16s %-12s %-10s %-8s %-12s %-12s\n",
+			"Peer", "Local", "Interface", "VRF", "Status", "Up", "Down events", "RX fails")
+		fmt.Println(strings.Repeat("-", 158))
+		for _, peer := range info.Peers {
+			fmt.Printf("%-39s %-39s %-16s %-12s %-10s %-8s %-12d %-12d\n",
+				formatBFDValue(peer.Peer),
+				formatBFDValue(peer.LocalAddress),
+				formatBFDValue(peer.Interface),
+				formatBFDValue(peer.VRF),
+				formatBFDValue(peer.Status),
+				yesNo(peer.Up),
+				peer.SessionDownEvents,
+				peer.RxFailPackets,
+			)
+			if peer.Diagnostic != "" || peer.RemoteDiagnostic != "" || !peer.Observed {
+				fmt.Printf("  diagnostic: %s remote: %s observed: %s\n",
+					formatBFDValue(peer.Diagnostic),
+					formatBFDValue(peer.RemoteDiagnostic),
+					yesNo(peer.Observed),
+				)
+			}
+		}
+	}
+	if len(info.Issues) == 0 {
+		return
+	}
+	fmt.Println()
+	fmt.Println("Issues")
+	for _, issue := range info.Issues {
+		fmt.Printf("  - %s\n", issue)
+	}
+}
+
 func printClassOfService(info *grpcclient.ClassOfServiceInfo) {
 	if info == nil || (len(info.ForwardingClasses) == 0 && len(info.TrafficControlProfiles) == 0 && len(info.Interfaces) == 0) {
 		fmt.Println("No class-of-service configuration found")
@@ -1222,6 +1303,42 @@ func clusterSyncState(info *grpcclient.HAStatusInfo) string {
 		return "aligned"
 	}
 	return "mismatch"
+}
+
+func hasBFDStatus(info *grpcclient.BFDStatusInfo) bool {
+	if info == nil {
+		return false
+	}
+	return !info.LastRun.IsZero() ||
+		info.ConfiguredPeers != 0 ||
+		info.ObservedPeers != 0 ||
+		info.UpPeers != 0 ||
+		info.DownPeers != 0 ||
+		info.SessionDownEvents != 0 ||
+		info.RxFailPackets != 0 ||
+		len(info.Peers) != 0 ||
+		len(info.Issues) != 0 ||
+		info.LastError != ""
+}
+
+func bfdOperationalState(info *grpcclient.BFDStatusInfo) string {
+	if !hasBFDStatus(info) {
+		return "unknown"
+	}
+	if info.LastError != "" {
+		return "check failed"
+	}
+	if len(info.Issues) > 0 || info.DownPeers > 0 {
+		return "issues"
+	}
+	return "converged"
+}
+
+func formatBFDValue(value string) string {
+	if value == "" {
+		return "-"
+	}
+	return value
 }
 
 func yesNo(value bool) string {
@@ -1309,9 +1426,21 @@ func bfdTextOptions(args []string) (peerAddress string, brief bool, counters boo
 			return "", false, false, fmt.Errorf("'show bfd peer' accepts only an optional counters argument")
 		}
 		return args[1], false, len(args) == 3, nil
+	case "status":
+		return "", false, false, fmt.Errorf("'show bfd status' is handled as structured operational state")
 	default:
-		return "", false, false, fmt.Errorf("'show bfd' accepts brief, counters, peer <ip>, or no arguments")
+		return "", false, false, fmt.Errorf("'show bfd' accepts status, brief, counters, peer <ip>, or no arguments")
 	}
+}
+
+func bfdStatusRequested(args []string) (bool, error) {
+	if len(args) == 0 || args[0] != "status" {
+		return false, nil
+	}
+	if len(args) > 1 {
+		return false, fmt.Errorf("'show bfd status' does not accept extra arguments")
+	}
+	return true, nil
 }
 
 const (
