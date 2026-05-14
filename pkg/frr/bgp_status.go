@@ -1,6 +1,7 @@
 package frr
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/netip"
@@ -8,6 +9,11 @@ import (
 	"strconv"
 	"strings"
 )
+
+// BGPSummaryStatusReader reads FRR's operational BGP summary state.
+type BGPSummaryStatusReader interface {
+	ReadBGPSummaryStatus(ctx context.Context) (*BGPSummaryStatus, error)
+}
 
 // BGPSummaryStatus is the parsed output of FRR's BGP summary JSON command.
 type BGPSummaryStatus struct {
@@ -22,6 +28,37 @@ type BGPNeighborStatus struct {
 	UptimeSecs     uint64
 	PrefixReceived uint32
 	PrefixSent     uint32
+}
+
+// VtyshBGPSummaryStatusReader reads BGP summary state through vtysh.
+type VtyshBGPSummaryStatusReader struct {
+	run VtyshRunner
+}
+
+// NewVtyshBGPSummaryStatusReader creates a vtysh-backed BGP summary status reader.
+func NewVtyshBGPSummaryStatusReader() *VtyshBGPSummaryStatusReader {
+	return &VtyshBGPSummaryStatusReader{run: runVtyshMgmtCommand}
+}
+
+// NewVtyshBGPSummaryStatusReaderWithRunner creates a reader with a test runner.
+func NewVtyshBGPSummaryStatusReaderWithRunner(run VtyshRunner) *VtyshBGPSummaryStatusReader {
+	return &VtyshBGPSummaryStatusReader{run: run}
+}
+
+// ReadBGPSummaryStatus executes FRR's JSON BGP summary command and parses the result.
+func (r *VtyshBGPSummaryStatusReader) ReadBGPSummaryStatus(ctx context.Context) (*BGPSummaryStatus, error) {
+	if r.run == nil {
+		r.run = runVtyshMgmtCommand
+	}
+	output, err := r.run(ctx, "show bgp summary json")
+	if err != nil {
+		return nil, NewApplyError("read FRR BGP summary status", err)
+	}
+	status, err := ParseBGPSummaryJSON(output)
+	if err != nil {
+		return nil, NewApplyError("parse FRR BGP summary status", err)
+	}
+	return status, nil
 }
 
 // ParseBGPSummaryJSON parses FRR's show bgp summary json output.

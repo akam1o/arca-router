@@ -1,6 +1,9 @@
 package frr
 
-import "testing"
+import (
+	"context"
+	"testing"
+)
 
 func TestParseBGPSummaryJSONAcceptsFRRPeerMap(t *testing.T) {
 	status, err := ParseBGPSummaryJSON([]byte(`{
@@ -97,5 +100,43 @@ func TestParseBGPSummaryJSONAcceptsNeighborArray(t *testing.T) {
 func TestParseBGPSummaryJSONRejectsInvalidJSON(t *testing.T) {
 	if _, err := ParseBGPSummaryJSON([]byte(`not-json`)); err == nil {
 		t.Fatal("ParseBGPSummaryJSON(invalid) error = nil, want error")
+	}
+}
+
+func TestVtyshBGPSummaryStatusReaderRunsShowBGPSummaryJSON(t *testing.T) {
+	var commands []string
+	reader := NewVtyshBGPSummaryStatusReaderWithRunner(func(ctx context.Context, command string) ([]byte, error) {
+		commands = append(commands, command)
+		if command != "show bgp summary json" {
+			t.Fatalf("unexpected command %q", command)
+		}
+		return []byte(`{
+			"ipv4Unicast": {
+				"peers": {
+					"192.0.2.2": {
+						"remoteAs": 65001,
+						"state": "Established",
+						"peerUptime": "01:00:00",
+						"pfxRcd": 4,
+						"pfxSnt": 5
+					}
+				}
+			}
+		}`), nil
+	})
+
+	status, err := reader.ReadBGPSummaryStatus(context.Background())
+	if err != nil {
+		t.Fatalf("ReadBGPSummaryStatus() error = %v", err)
+	}
+	if len(commands) != 1 || commands[0] != "show bgp summary json" {
+		t.Fatalf("commands = %#v, want BGP summary JSON", commands)
+	}
+	if len(status.Neighbors) != 1 {
+		t.Fatalf("neighbors = %d, want 1", len(status.Neighbors))
+	}
+	if got := status.Neighbors[0]; got.PeerAddress != "192.0.2.2" || got.PeerAS != 65001 ||
+		got.State != "Established" || got.UptimeSecs != 3600 || got.PrefixReceived != 4 || got.PrefixSent != 5 {
+		t.Fatalf("neighbor = %#v, want parsed BGP summary", got)
 	}
 }

@@ -1,12 +1,18 @@
 package frr
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/netip"
 	"sort"
 	"strings"
 )
+
+// RouteStatusReader reads FRR's operational route state.
+type RouteStatusReader interface {
+	ReadRouteStatus(ctx context.Context) (*RouteStatus, error)
+}
 
 // RouteStatus is the parsed output of FRR's route JSON commands.
 type RouteStatus struct {
@@ -21,6 +27,44 @@ type RouteStatusEntry struct {
 	Metric    uint32
 	Interface string
 	Active    bool
+}
+
+// VtyshRouteStatusReader reads IPv4 and IPv6 route state through vtysh.
+type VtyshRouteStatusReader struct {
+	run VtyshRunner
+}
+
+// NewVtyshRouteStatusReader creates a vtysh-backed route status reader.
+func NewVtyshRouteStatusReader() *VtyshRouteStatusReader {
+	return &VtyshRouteStatusReader{run: runVtyshMgmtCommand}
+}
+
+// NewVtyshRouteStatusReaderWithRunner creates a reader with a test runner.
+func NewVtyshRouteStatusReaderWithRunner(run VtyshRunner) *VtyshRouteStatusReader {
+	return &VtyshRouteStatusReader{run: run}
+}
+
+// ReadRouteStatus executes FRR's JSON route show commands and parses the result.
+func (r *VtyshRouteStatusReader) ReadRouteStatus(ctx context.Context) (*RouteStatus, error) {
+	if r.run == nil {
+		r.run = runVtyshMgmtCommand
+	}
+	var routes []RouteStatusEntry
+	for _, command := range []string{"show ip route json", "show ipv6 route json"} {
+		output, err := r.run(ctx, command)
+		if err != nil {
+			return nil, NewApplyError("read FRR route status", err)
+		}
+		status, err := ParseRouteStatusJSON(output)
+		if err != nil {
+			return nil, NewApplyError("parse FRR route status", err)
+		}
+		routes = append(routes, status.Routes...)
+	}
+	sort.Slice(routes, func(i, j int) bool {
+		return routeSortKey(routes[i]) < routeSortKey(routes[j])
+	})
+	return &RouteStatus{Routes: routes}, nil
 }
 
 // ParseRouteStatusJSON parses FRR's show ip/ipv6 route json output.
