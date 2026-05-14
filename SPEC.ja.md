@@ -1124,7 +1124,7 @@ Local operator は `arca show telemetry path /system path /interfaces` で同じ
 
 Collector discovery 用に、Web API は `GET /api/nms/v1/telemetry/paths` も公開します。Response は `schema_version` に `arca.nms.telemetry-catalog.v1`、`event_schema_version`、`encoding`、`default_paths`、description と default membership を含む順序付き telemetry `paths` catalog を持つ stable JSON envelope です。
 
-HTTP-only collector は `GET /api/nms/v1/telemetry/snapshot` で one-shot telemetry を取得できます。Endpoint は `?path=/system&path=/interfaces` のように repeated `path` query parameter を受け取り、`path` を省略した場合は gRPC telemetry stream と同じ default path set を使用します。Response は `schema_version` に `arca.nms.telemetry-snapshot.v1`、`event_schema_version`、`encoding`、配信された `paths`、gRPC stream と同じ structured telemetry event field と JSON payload を持つ `events` を含む stable JSON envelope です。
+HTTP-only collector は `GET /api/nms/v1/telemetry/snapshot` で one-shot telemetry を取得できます。Endpoint は `?path=/system&path=/interfaces` のように repeated `path` query parameter を受け取り、`path` を省略した場合は gRPC telemetry stream と同じ default path set を使用します。`timeout` は Go duration string として受け取り、default は `5s`、最大は `30s` です。`max_payload_bytes` は default `8388608`、最大 `67108864` で、`/routes` のような大きい path の応答を bounded にします。Response は `schema_version` に `arca.nms.telemetry-snapshot.v1`、`event_schema_version`、`encoding`、配信された `paths`、`payload_bytes`、`max_payload_bytes`、`timeout_ms`、gRPC stream と同じ structured telemetry event field と JSON payload を持つ `events` を含む stable JSON envelope です。
 
 ### Web UI
 
@@ -1157,7 +1157,7 @@ Endpoints:
 `/api/status` は build metadata、uptime、running config version、datastore backend、cluster sync state、VPP QoS capability diagnostics を含む class-of-service intent state、per-group detail を含む FRR VRRP operational state、HA convergence state、VPP LCP reconciliation state、NETCONF counters を返します。
 `/api/nms/v1/status` は同じ read-only status を external NMS collector 用の `arca.nms.operational.v1` schema envelope で包んで返します。
 `/api/nms/v1/telemetry/paths` は structured telemetry path catalog を collector discovery 用の `arca.nms.telemetry-catalog.v1` schema envelope で包んで返します。
-`/api/nms/v1/telemetry/snapshot` は one-shot structured telemetry event を HTTP-only collector 用の `arca.nms.telemetry-snapshot.v1` schema envelope で包んで返します。
+`/api/nms/v1/telemetry/snapshot` は one-shot structured telemetry event を HTTP-only collector 用の `arca.nms.telemetry-snapshot.v1` schema envelope で包み、configurable な timeout と payload byte budget guardrail を強制します。
 `/api/config` は running configuration を set-command text と running config version として返します。dashboard でも同じ running configuration を browser editor に表示します。
 `/api/config/history` は recent configuration commits を返し、dashboard の commit history panel で使用します。
 

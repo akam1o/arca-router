@@ -34,6 +34,15 @@ const nmsOperationalStatusSchemaVersion = "arca.nms.operational.v1"
 const nmsTelemetryCatalogSchemaVersion = "arca.nms.telemetry-catalog.v1"
 const nmsTelemetrySnapshotSchemaVersion = "arca.nms.telemetry-snapshot.v1"
 
+const (
+	defaultNMSTelemetrySnapshotTimeout         = 5 * time.Second
+	maxNMSTelemetrySnapshotTimeout             = 30 * time.Second
+	defaultNMSTelemetrySnapshotMaxPayloadBytes = 8 << 20
+	maxNMSTelemetrySnapshotMaxPayloadBytes     = 64 << 20
+)
+
+var errNMSTelemetrySnapshotTooLarge = errors.New("nms telemetry snapshot payload budget exceeded")
+
 type webConfigAPI interface {
 	GetRunning(ctx context.Context) (string, uint64, error)
 	CreateSession(ctx context.Context, user string) (string, error)
@@ -92,6 +101,9 @@ type nmsTelemetrySnapshotResponse struct {
 	EventSchemaVersion string                      `json:"event_schema_version"`
 	Encoding           string                      `json:"encoding"`
 	Paths              []string                    `json:"paths"`
+	PayloadBytes       int                         `json:"payload_bytes"`
+	MaxPayloadBytes    int                         `json:"max_payload_bytes"`
+	TimeoutMs          int64                       `json:"timeout_ms"`
 	Events             []nmsTelemetrySnapshotEvent `json:"events"`
 }
 
@@ -109,6 +121,12 @@ type nmsTelemetryPath struct {
 	Path        string `json:"path"`
 	Description string `json:"description"`
 	Default     bool   `json:"default"`
+}
+
+type nmsTelemetrySnapshotOptions struct {
+	paths           []string
+	timeout         time.Duration
+	maxPayloadBytes int
 }
 
 type webDatastore struct {
@@ -924,17 +942,29 @@ func (s metricsSource) handleNMSTelemetrySnapshot(w http.ResponseWriter, r *http
 		writeWebJSONError(w, http.StatusServiceUnavailable, "telemetry API is not available")
 		return
 	}
+	opts, err := nmsTelemetrySnapshotOptionsFromRequest(r)
+	if err != nil {
+		writeWebJSONError(w, http.StatusBadRequest, err.Error())
+		return
+	}
 	now := time.Now()
-	events, err := s.collectNMSTelemetrySnapshot(r.Context(), nmsTelemetrySnapshotPaths(r))
+	ctx, cancel := context.WithTimeout(r.Context(), opts.timeout)
+	defer cancel()
+	events, payloadBytes, err := s.collectNMSTelemetrySnapshot(ctx, opts)
 	if err != nil {
 		status := http.StatusInternalServerError
-		if strings.Contains(err.Error(), "unsupported telemetry path") {
+		switch {
+		case strings.Contains(err.Error(), "unsupported telemetry path"):
 			status = http.StatusBadRequest
+		case errors.Is(err, errNMSTelemetrySnapshotTooLarge):
+			status = http.StatusRequestEntityTooLarge
+		case errors.Is(err, context.DeadlineExceeded), errors.Is(err, context.Canceled):
+			status = http.StatusGatewayTimeout
 		}
 		writeWebJSONError(w, status, err.Error())
 		return
 	}
-	writeWebJSON(w, http.StatusOK, newNMSTelemetrySnapshotResponse(now, events))
+	writeWebJSON(w, http.StatusOK, newNMSTelemetrySnapshotResponse(now, events, opts, payloadBytes))
 }
 
 func (s metricsSource) handleWebConfig(w http.ResponseWriter, r *http.Request) {
@@ -1420,16 +1450,50 @@ func newNMSTelemetryCatalogResponse(now time.Time) nmsTelemetryCatalogResponse {
 	}
 }
 
-func (s metricsSource) collectNMSTelemetrySnapshot(ctx context.Context, paths []string) ([]nbgrpc.TelemetryEvent, error) {
+func (s metricsSource) collectNMSTelemetrySnapshot(ctx context.Context, opts nmsTelemetrySnapshotOptions) ([]nbgrpc.TelemetryEvent, int, error) {
 	var events []nbgrpc.TelemetryEvent
-	err := s.telemetryAPI.SubscribeTelemetry(ctx, paths, 0, true, func(event nbgrpc.TelemetryEvent) error {
+	payloadBytes := 0
+	err := s.telemetryAPI.SubscribeTelemetry(ctx, opts.paths, 0, true, func(event nbgrpc.TelemetryEvent) error {
+		payloadBytes += len(event.JSONPayload)
+		if payloadBytes > opts.maxPayloadBytes {
+			return fmt.Errorf("%w: %d bytes exceeds max_payload_bytes %d", errNMSTelemetrySnapshotTooLarge, payloadBytes, opts.maxPayloadBytes)
+		}
 		events = append(events, event)
 		return nil
 	})
 	if err != nil {
-		return nil, err
+		return nil, payloadBytes, err
 	}
-	return events, nil
+	return events, payloadBytes, nil
+}
+
+func nmsTelemetrySnapshotOptionsFromRequest(r *http.Request) (nmsTelemetrySnapshotOptions, error) {
+	opts := nmsTelemetrySnapshotOptions{
+		paths:           nmsTelemetrySnapshotPaths(r),
+		timeout:         defaultNMSTelemetrySnapshotTimeout,
+		maxPayloadBytes: defaultNMSTelemetrySnapshotMaxPayloadBytes,
+	}
+	if raw := strings.TrimSpace(r.URL.Query().Get("timeout")); raw != "" {
+		timeout, err := time.ParseDuration(raw)
+		if err != nil || timeout <= 0 {
+			return opts, fmt.Errorf("invalid telemetry snapshot timeout %q", raw)
+		}
+		if timeout > maxNMSTelemetrySnapshotTimeout {
+			return opts, fmt.Errorf("telemetry snapshot timeout %s exceeds max %s", timeout, maxNMSTelemetrySnapshotTimeout)
+		}
+		opts.timeout = timeout
+	}
+	if raw := strings.TrimSpace(r.URL.Query().Get("max_payload_bytes")); raw != "" {
+		maxPayloadBytes, err := strconv.Atoi(raw)
+		if err != nil || maxPayloadBytes <= 0 {
+			return opts, fmt.Errorf("invalid telemetry snapshot max_payload_bytes %q", raw)
+		}
+		if maxPayloadBytes > maxNMSTelemetrySnapshotMaxPayloadBytes {
+			return opts, fmt.Errorf("telemetry snapshot max_payload_bytes %d exceeds max %d", maxPayloadBytes, maxNMSTelemetrySnapshotMaxPayloadBytes)
+		}
+		opts.maxPayloadBytes = maxPayloadBytes
+	}
+	return opts, nil
 }
 
 func nmsTelemetrySnapshotPaths(r *http.Request) []string {
@@ -1445,7 +1509,7 @@ func nmsTelemetrySnapshotPaths(r *http.Request) []string {
 	return paths
 }
 
-func newNMSTelemetrySnapshotResponse(now time.Time, events []nbgrpc.TelemetryEvent) nmsTelemetrySnapshotResponse {
+func newNMSTelemetrySnapshotResponse(now time.Time, events []nbgrpc.TelemetryEvent, opts nmsTelemetrySnapshotOptions, payloadBytes int) nmsTelemetrySnapshotResponse {
 	responseEvents := make([]nmsTelemetrySnapshotEvent, 0, len(events))
 	paths := make([]string, 0, len(events))
 	for _, event := range events {
@@ -1459,6 +1523,9 @@ func newNMSTelemetrySnapshotResponse(now time.Time, events []nbgrpc.TelemetryEve
 		EventSchemaVersion: nbgrpc.TelemetryEventSchemaVersion(),
 		Encoding:           nbgrpc.TelemetryEncoding(),
 		Paths:              paths,
+		PayloadBytes:       payloadBytes,
+		MaxPayloadBytes:    opts.maxPayloadBytes,
+		TimeoutMs:          opts.timeout.Milliseconds(),
 		Events:             responseEvents,
 	}
 }

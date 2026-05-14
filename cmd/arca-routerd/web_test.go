@@ -338,8 +338,46 @@ func TestNMSTelemetrySnapshotEndpoint(t *testing.T) {
 	if len(resp.Paths) != 2 || resp.Paths[0] != "/system" || resp.Paths[1] != "/interfaces" {
 		t.Fatalf("Paths = %#v, want emitted paths", resp.Paths)
 	}
+	wantPayloadBytes := len(`{"hostname":"edge01"}`) + len(`{"interfaces":[]}`)
+	if resp.PayloadBytes != wantPayloadBytes || resp.MaxPayloadBytes != defaultNMSTelemetrySnapshotMaxPayloadBytes {
+		t.Fatalf("payload budget = %d/%d, want %d/%d", resp.PayloadBytes, resp.MaxPayloadBytes, wantPayloadBytes, defaultNMSTelemetrySnapshotMaxPayloadBytes)
+	}
+	if resp.TimeoutMs != defaultNMSTelemetrySnapshotTimeout.Milliseconds() {
+		t.Fatalf("TimeoutMs = %d, want %d", resp.TimeoutMs, defaultNMSTelemetrySnapshotTimeout.Milliseconds())
+	}
 	if len(resp.Events) != 2 || resp.Events[0].Path != "/system" || string(resp.Events[0].Payload) != `{"hostname":"edge01"}` {
 		t.Fatalf("Events = %#v, want system payload event", resp.Events)
+	}
+}
+
+func TestNMSTelemetrySnapshotEndpointRejectsOversizedPayload(t *testing.T) {
+	telemetry := &webTelemetryTestAPI{events: []nbgrpc.TelemetryEvent{
+		{
+			Sequence:      1,
+			Path:          "/routes",
+			EventType:     "snapshot",
+			Encoding:      nbgrpc.TelemetryEncoding(),
+			SchemaVersion: nbgrpc.TelemetryEventSchemaVersion(),
+			JSONPayload:   `{"routes":[1,2,3]}`,
+		},
+	}}
+
+	req := httptest.NewRequest(http.MethodGet, "/api/nms/v1/telemetry/snapshot?path=/routes&max_payload_bytes=4", nil)
+	rec := httptest.NewRecorder()
+	metricsSource{telemetryAPI: telemetry}.handleNMSTelemetrySnapshot(rec, req)
+
+	if rec.Code != http.StatusRequestEntityTooLarge {
+		t.Fatalf("status = %d, want %d: %s", rec.Code, http.StatusRequestEntityTooLarge, rec.Body.String())
+	}
+}
+
+func TestNMSTelemetrySnapshotEndpointRejectsInvalidTimeout(t *testing.T) {
+	req := httptest.NewRequest(http.MethodGet, "/api/nms/v1/telemetry/snapshot?timeout=1h", nil)
+	rec := httptest.NewRecorder()
+	metricsSource{telemetryAPI: &webTelemetryTestAPI{}}.handleNMSTelemetrySnapshot(rec, req)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want %d: %s", rec.Code, http.StatusBadRequest, rec.Body.String())
 	}
 }
 

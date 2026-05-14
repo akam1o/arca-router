@@ -2,7 +2,7 @@
 
 ## v0.8.x - Overlay and Streaming Telemetry (current)
 
-- **NMS telemetry snapshot API**: `/api/nms/v1/telemetry/snapshot` exposes one-shot structured telemetry snapshots over the Web API for HTTP-only collectors, with repeated `path` query parameters and the same telemetry event payloads used by the gRPC stream
+- **NMS telemetry snapshot API**: `/api/nms/v1/telemetry/snapshot` exposes one-shot structured telemetry snapshots over the Web API for HTTP-only collectors, with repeated `path` query parameters, timeout and payload byte budget guardrails, and the same telemetry event payloads used by the gRPC stream
 - **VPP QoS capability diagnostics**: VPP southbound initialization now records class-of-service dataplane capability detection, including metadata binding, scheduler, policer, and operational counter support, and exposes the result through metrics and the Web/NMS status API
 - **NMS telemetry catalog API**: `/api/nms/v1/telemetry/paths` exposes the supported structured telemetry paths, default path set, event schema version, and payload encoding for collector discovery
 - **NMS operational status API**: the Web API now exposes `/api/nms/v1/status`, a schema-versioned JSON envelope for external NMS and collectors that need a stable read-only operational status shape
