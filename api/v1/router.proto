@@ -77,6 +77,9 @@ service StateService {
   // GetVRRPText returns FRR VRRP output for CLI display.
   rpc GetVRRPText(GetVRRPTextRequest) returns (GetVRRPTextResponse);
 
+  // GetBFDText returns FRR BFD output for CLI display.
+  rpc GetBFDText(GetBFDTextRequest) returns (GetBFDTextResponse);
+
   // GetLCPReconciliation returns VPP LCP reconciliation state.
   rpc GetLCPReconciliation(GetLCPReconciliationRequest) returns (GetLCPReconciliationResponse);
 
@@ -309,6 +312,16 @@ message GetOSPFNeighborsTextResponse {
 message GetVRRPTextRequest {}
 
 message GetVRRPTextResponse {
+  string output = 1;
+}
+
+message GetBFDTextRequest {
+  string peer_address = 1;
+  bool brief = 2;
+  bool counters = 3;
+}
+
+message GetBFDTextResponse {
   string output = 1;
 }
 

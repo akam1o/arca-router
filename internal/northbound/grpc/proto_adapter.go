@@ -263,6 +263,14 @@ func (a *stateServiceAdapter) GetVRRPText(ctx context.Context, _ *apiv1.GetVRRPT
 	return &apiv1.GetVRRPTextResponse{Output: output}, nil
 }
 
+func (a *stateServiceAdapter) GetBFDText(ctx context.Context, req *apiv1.GetBFDTextRequest) (*apiv1.GetBFDTextResponse, error) {
+	output, err := a.server.GetBFDText(ctx, req.GetPeerAddress(), req.GetBrief(), req.GetCounters())
+	if err != nil {
+		return nil, err
+	}
+	return &apiv1.GetBFDTextResponse{Output: output}, nil
+}
+
 func (a *stateServiceAdapter) GetLCPReconciliation(ctx context.Context, _ *apiv1.GetLCPReconciliationRequest) (*apiv1.GetLCPReconciliationResponse, error) {
 	info, err := a.server.GetLCPReconciliation(ctx)
 	if err != nil {

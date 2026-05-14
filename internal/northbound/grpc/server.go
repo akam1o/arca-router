@@ -668,6 +668,30 @@ func (s *Server) GetVRRPText(ctx context.Context) (string, error) {
 	return runOperationalVtyshCommand(ctx, "show vrrp")
 }
 
+// GetBFDText returns FRR BFD output.
+func (s *Server) GetBFDText(ctx context.Context, peerAddress string, brief, counters bool) (string, error) {
+	if peerAddress != "" && brief {
+		return "", fmt.Errorf("'show bfd peer' does not support brief output")
+	}
+	if brief && counters {
+		return "", fmt.Errorf("'show bfd brief' does not support counters")
+	}
+	command := "show bfd peers"
+	if peerAddress != "" {
+		if _, err := netip.ParseAddr(peerAddress); err != nil {
+			return "", fmt.Errorf("invalid BFD peer address %q", peerAddress)
+		}
+		command = "show bfd peer " + peerAddress
+	}
+	if brief {
+		command += " brief"
+	}
+	if counters {
+		command += " counters"
+	}
+	return runOperationalVtyshCommand(ctx, command)
+}
+
 // GetLCPReconciliation returns cached VPP LCP reconciliation state.
 func (s *Server) GetLCPReconciliation(ctx context.Context) (*LCPReconciliationInfo, error) {
 	if s.lcpSource == nil {

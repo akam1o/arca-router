@@ -687,6 +687,7 @@ const (
 	StateService_GetBGPNeighborText_FullMethodName   = "/arca.router.v1.StateService/GetBGPNeighborText"
 	StateService_GetOSPFNeighborsText_FullMethodName = "/arca.router.v1.StateService/GetOSPFNeighborsText"
 	StateService_GetVRRPText_FullMethodName          = "/arca.router.v1.StateService/GetVRRPText"
+	StateService_GetBFDText_FullMethodName           = "/arca.router.v1.StateService/GetBFDText"
 	StateService_GetLCPReconciliation_FullMethodName = "/arca.router.v1.StateService/GetLCPReconciliation"
 	StateService_GetHAStatus_FullMethodName          = "/arca.router.v1.StateService/GetHAStatus"
 	StateService_GetClassOfService_FullMethodName    = "/arca.router.v1.StateService/GetClassOfService"
@@ -715,6 +716,8 @@ type StateServiceClient interface {
 	GetOSPFNeighborsText(ctx context.Context, in *GetOSPFNeighborsTextRequest, opts ...grpc.CallOption) (*GetOSPFNeighborsTextResponse, error)
 	// GetVRRPText returns FRR VRRP output for CLI display.
 	GetVRRPText(ctx context.Context, in *GetVRRPTextRequest, opts ...grpc.CallOption) (*GetVRRPTextResponse, error)
+	// GetBFDText returns FRR BFD output for CLI display.
+	GetBFDText(ctx context.Context, in *GetBFDTextRequest, opts ...grpc.CallOption) (*GetBFDTextResponse, error)
 	// GetLCPReconciliation returns VPP LCP reconciliation state.
 	GetLCPReconciliation(ctx context.Context, in *GetLCPReconciliationRequest, opts ...grpc.CallOption) (*GetLCPReconciliationResponse, error)
 	// GetHAStatus returns control-plane HA convergence state.
@@ -813,6 +816,16 @@ func (c *stateServiceClient) GetVRRPText(ctx context.Context, in *GetVRRPTextReq
 	return out, nil
 }
 
+func (c *stateServiceClient) GetBFDText(ctx context.Context, in *GetBFDTextRequest, opts ...grpc.CallOption) (*GetBFDTextResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(GetBFDTextResponse)
+	err := c.cc.Invoke(ctx, StateService_GetBFDText_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 func (c *stateServiceClient) GetLCPReconciliation(ctx context.Context, in *GetLCPReconciliationRequest, opts ...grpc.CallOption) (*GetLCPReconciliationResponse, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(GetLCPReconciliationResponse)
@@ -875,6 +888,8 @@ type StateServiceServer interface {
 	GetOSPFNeighborsText(context.Context, *GetOSPFNeighborsTextRequest) (*GetOSPFNeighborsTextResponse, error)
 	// GetVRRPText returns FRR VRRP output for CLI display.
 	GetVRRPText(context.Context, *GetVRRPTextRequest) (*GetVRRPTextResponse, error)
+	// GetBFDText returns FRR BFD output for CLI display.
+	GetBFDText(context.Context, *GetBFDTextRequest) (*GetBFDTextResponse, error)
 	// GetLCPReconciliation returns VPP LCP reconciliation state.
 	GetLCPReconciliation(context.Context, *GetLCPReconciliationRequest) (*GetLCPReconciliationResponse, error)
 	// GetHAStatus returns control-plane HA convergence state.
@@ -916,6 +931,9 @@ func (UnimplementedStateServiceServer) GetOSPFNeighborsText(context.Context, *Ge
 }
 func (UnimplementedStateServiceServer) GetVRRPText(context.Context, *GetVRRPTextRequest) (*GetVRRPTextResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method GetVRRPText not implemented")
+}
+func (UnimplementedStateServiceServer) GetBFDText(context.Context, *GetBFDTextRequest) (*GetBFDTextResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method GetBFDText not implemented")
 }
 func (UnimplementedStateServiceServer) GetLCPReconciliation(context.Context, *GetLCPReconciliationRequest) (*GetLCPReconciliationResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method GetLCPReconciliation not implemented")
@@ -1094,6 +1112,24 @@ func _StateService_GetVRRPText_Handler(srv interface{}, ctx context.Context, dec
 	return interceptor(ctx, in, info, handler)
 }
 
+func _StateService_GetBFDText_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(GetBFDTextRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(StateServiceServer).GetBFDText(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: StateService_GetBFDText_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(StateServiceServer).GetBFDText(ctx, req.(*GetBFDTextRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 func _StateService_GetLCPReconciliation_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(GetLCPReconciliationRequest)
 	if err := dec(in); err != nil {
@@ -1204,6 +1240,10 @@ var StateService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "GetVRRPText",
 			Handler:    _StateService_GetVRRPText_Handler,
+		},
+		{
+			MethodName: "GetBFDText",
+			Handler:    _StateService_GetBFDText_Handler,
 		},
 		{
 			MethodName: "GetLCPReconciliation",

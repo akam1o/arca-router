@@ -20,6 +20,10 @@ type fakeInteractiveClient struct {
 	bgpNeighborText string
 	ospfText        string
 	vrrpText        string
+	bfdText         string
+	bfdPeerAddress  string
+	bfdBrief        bool
+	bfdCounters     bool
 	lcpInfo         *grpcclient.LCPReconciliationInfo
 	haInfo          *grpcclient.HAStatusInfo
 	cosInfo         *grpcclient.ClassOfServiceInfo
@@ -131,6 +135,16 @@ func (f *fakeInteractiveClient) GetVRRPText(ctx context.Context) (string, error)
 		return "vrrp output\n", nil
 	}
 	return f.vrrpText, nil
+}
+
+func (f *fakeInteractiveClient) GetBFDText(ctx context.Context, peerAddress string, brief, counters bool) (string, error) {
+	f.bfdPeerAddress = peerAddress
+	f.bfdBrief = brief
+	f.bfdCounters = counters
+	if f.bfdText == "" {
+		return "bfd output\n", nil
+	}
+	return f.bfdText, nil
 }
 
 func (f *fakeInteractiveClient) GetLCPReconciliation(ctx context.Context) (*grpcclient.LCPReconciliationInfo, error) {
@@ -386,6 +400,25 @@ func TestCmdShowVRRPReturnsOutput(t *testing.T) {
 	}
 }
 
+func TestCmdShowBFDReturnsOutput(t *testing.T) {
+	ctx := context.Background()
+	client := &fakeInteractiveClient{}
+	sh := &interactiveShell{
+		client:    client,
+		hostname:  "router",
+		mode:      modeOperational,
+		sessionID: "session-1",
+	}
+
+	err := sh.cmdShow(ctx, []string{"bfd", "peer", "192.0.2.2", "counters"})
+	if err != nil {
+		t.Fatalf("cmdShow(bfd peer counters) error = %v", err)
+	}
+	if client.bfdPeerAddress != "192.0.2.2" || client.bfdBrief || !client.bfdCounters {
+		t.Fatalf("BFD options = peer %q brief %v counters %v, want peer counters", client.bfdPeerAddress, client.bfdBrief, client.bfdCounters)
+	}
+}
+
 func TestCmdShowLCPReturnsOutput(t *testing.T) {
 	ctx := context.Background()
 	client := &fakeInteractiveClient{lcpInfo: &grpcclient.LCPReconciliationInfo{
@@ -487,6 +520,17 @@ func TestOneShotShowVRRPReturnsSuccess(t *testing.T) {
 	}
 }
 
+func TestOneShotShowBFDReturnsSuccess(t *testing.T) {
+	client := &fakeInteractiveClient{}
+	code := oneShotShow(context.Background(), client, []string{"bfd", "brief"}, &cliFlags{})
+	if code != ExitSuccess {
+		t.Fatalf("oneShotShow(bfd brief) = %d, want %d", code, ExitSuccess)
+	}
+	if !client.bfdBrief || client.bfdCounters || client.bfdPeerAddress != "" {
+		t.Fatalf("BFD options = peer %q brief %v counters %v, want brief", client.bfdPeerAddress, client.bfdBrief, client.bfdCounters)
+	}
+}
+
 func TestOneShotShowLCPReturnsSuccess(t *testing.T) {
 	client := &fakeInteractiveClient{}
 	code := oneShotShow(context.Background(), client, []string{"lcp"}, &cliFlags{})
@@ -508,6 +552,44 @@ func TestOneShotShowClassOfServiceReturnsSuccess(t *testing.T) {
 	code := oneShotShow(context.Background(), client, []string{"class-of-service"}, &cliFlags{})
 	if code != ExitSuccess {
 		t.Fatalf("oneShotShow(class-of-service) = %d, want %d", code, ExitSuccess)
+	}
+}
+
+func TestBFDTextOptions(t *testing.T) {
+	tests := []struct {
+		name         string
+		args         []string
+		wantPeer     string
+		wantBrief    bool
+		wantCounters bool
+		wantErr      bool
+	}{
+		{name: "default"},
+		{name: "brief", args: []string{"brief"}, wantBrief: true},
+		{name: "counters", args: []string{"counters"}, wantCounters: true},
+		{name: "peer", args: []string{"peer", "192.0.2.2"}, wantPeer: "192.0.2.2"},
+		{name: "peer counters", args: []string{"peer", "192.0.2.2", "counters"}, wantPeer: "192.0.2.2", wantCounters: true},
+		{name: "unknown", args: []string{"detail"}, wantErr: true},
+		{name: "peer missing address", args: []string{"peer"}, wantErr: true},
+		{name: "peer bad extra", args: []string{"peer", "192.0.2.2", "brief"}, wantErr: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			gotPeer, gotBrief, gotCounters, err := bfdTextOptions(tt.args)
+			if tt.wantErr {
+				if err == nil {
+					t.Fatalf("bfdTextOptions(%v) error = nil, want error", tt.args)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("bfdTextOptions(%v) error = %v", tt.args, err)
+			}
+			if gotPeer != tt.wantPeer || gotBrief != tt.wantBrief || gotCounters != tt.wantCounters {
+				t.Fatalf("bfdTextOptions(%v) = %q, %v, %v; want %q, %v, %v",
+					tt.args, gotPeer, gotBrief, gotCounters, tt.wantPeer, tt.wantBrief, tt.wantCounters)
+			}
+		})
 	}
 }
 
