@@ -13,7 +13,7 @@ arca-router is a software router with Junos-compatible configuration syntax, pow
 
 ## Status
 
-arca-router is currently in the v0.7.x core router parity phase. This README
+arca-router is currently in the v0.8.x overlay and streaming telemetry phase. This README
 describes the current unified daemon path; detailed release history is kept in
 [`CHANGELOG.md`](CHANGELOG.md), and future scope is tracked in
 [`ROADMAP.md`](ROADMAP.md).
@@ -24,7 +24,7 @@ Current capabilities:
 - Junos-like `set` configuration syntax with a thin `arca` client
 - Struct-first configuration model with diff-based 2-phase commit and rollback
 - FRR transactional apply through the management candidate datastore
-- v0.6/v0.7 config foundations for clustering, VRRP, MPLS, routing instances, QoS, IPv6 parity, and BFD
+- v0.6-v0.8 config and observability foundations for clustering, VRRP, MPLS, routing instances, QoS, IPv6 parity, BFD, EVPN/VXLAN, streaming telemetry, and NMS APIs
 - Prometheus, health, SNMP, Web UI, Grafana observability, and authenticated Web config workflow
 - SQLite or etcd-backed candidate/running datastore with commit history and etcd config sync
 
@@ -52,7 +52,7 @@ Current capabilities:
 
 ---
 
-## Quick Start (v0.7.x)
+## Quick Start (v0.8.x)
 
 Requires VPP 24.10+ and FRR 8.0+ with the standard arca-router FRR daemon set enabled.
 
@@ -354,7 +354,7 @@ arca-router/
 │   │   └── main.go             # Single process: VPP + FRR + NETCONF + gRPC
 │   └── arca/                   # Thin gRPC CLI client
 │       └── main.go             # Communicates via Unix socket
-├── internal/                   # v0.6.x/v0.7.x core packages
+├── internal/                   # v0.6.x-v0.8.x core packages
 │   ├── model/                  # Canonical config & state types
 │   │   ├── config.go           # RouterConfig (struct-first model)
 │   │   ├── state.go            # OperationalState
