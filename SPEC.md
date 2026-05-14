@@ -616,6 +616,8 @@ The internal gRPC interface state API and `arca show interfaces` use the same ma
 
 The internal gRPC route state API reads FRR JSON route output for both IPv4 and IPv6 tables and returns structured route entries with prefix, next-hop, protocol, metric, interface, and active-path status. Prefix filters must be valid CIDR prefixes; protocol filters accept the FRR protocol names used by the route table, with `ospf3` normalized to `ospf6`.
 
+The internal gRPC BGP neighbor state API reads FRR JSON summary output and returns structured peer address, remote AS, state, uptime, received-prefix, and sent-prefix counters. When FRR reports the same peer under multiple address families, arca-router returns one peer entry with prefix counters combined and the longest observed uptime.
+
 The server hello advertises the arca-router YANG module capability as `urn:arca:router:config:1.0?module=arca-router&revision=2025-12-27`.
 
 ### User Management
