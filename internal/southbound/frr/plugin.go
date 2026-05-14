@@ -103,8 +103,8 @@ func validateTransactionalBFDProtocolBindings(diff *engine.ConfigDiff) error {
 	if diff.BGPChanged && bgpHasBFDProfiles(diff.NewBGP) {
 		return fmt.Errorf("BGP BFD profiles require FRR file backend until BGP BFD profile management operations are implemented")
 	}
-	if diff.OSPFChanged && ospfHasBFDProtocolBindings(diff.NewOSPF) {
-		return fmt.Errorf("OSPF BFD protocol bindings require FRR file backend until OSPF interface BFD management operations are implemented")
+	if diff.OSPFChanged && ospfHasBFDProfiles(diff.NewOSPF) {
+		return fmt.Errorf("OSPF BFD profiles require FRR file backend until OSPF BFD profile management operations are implemented")
 	}
 	if diff.OSPF3Changed && ospfHasBFDProtocolBindings(diff.NewOSPF3) {
 		return fmt.Errorf("OSPFv3 BFD protocol bindings require FRR file backend until ospf6d management operations are implemented")
@@ -119,8 +119,8 @@ func validateRouterConfigTransactionalBFDProtocolBindings(cfg *model.RouterConfi
 	if bgpHasBFDProfiles(cfg.Protocols.BGP) {
 		return fmt.Errorf("BGP BFD profiles require FRR file backend until BGP BFD profile management operations are implemented")
 	}
-	if ospfHasBFDProtocolBindings(cfg.Protocols.OSPF) {
-		return fmt.Errorf("OSPF BFD protocol bindings require FRR file backend until OSPF interface BFD management operations are implemented")
+	if ospfHasBFDProfiles(cfg.Protocols.OSPF) {
+		return fmt.Errorf("OSPF BFD profiles require FRR file backend until OSPF BFD profile management operations are implemented")
 	}
 	if ospfHasBFDProtocolBindings(cfg.Protocols.OSPF3) {
 		return fmt.Errorf("OSPFv3 BFD protocol bindings require FRR file backend until ospf6d management operations are implemented")
@@ -155,6 +155,23 @@ func ospfHasBFDProtocolBindings(cfg *model.OSPFConfig) bool {
 		}
 		for _, iface := range area.Interfaces {
 			if iface != nil && (iface.BFD || iface.BFDProfile != "") {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func ospfHasBFDProfiles(cfg *model.OSPFConfig) bool {
+	if cfg == nil {
+		return false
+	}
+	for _, area := range cfg.Areas {
+		if area == nil {
+			continue
+		}
+		for _, iface := range area.Interfaces {
+			if iface != nil && iface.BFDProfile != "" {
 				return true
 			}
 		}

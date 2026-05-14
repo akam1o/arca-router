@@ -147,6 +147,7 @@ func BuildMgmtOperations(cfg *Config) ([]MgmtOperation, error) {
 		deleteOp(staticProtocolBase()),
 		deleteOp(bgpProtocolDeleteBase()),
 		deleteOp(ospfProtocolBase()),
+		deleteOp(ospfInterfaceConfigBase()),
 		deleteOp("/frr-vrf:lib"),
 		deleteOp("/frr-filter:lib"),
 		deleteOp("/frr-route-map:lib"),
@@ -183,8 +184,8 @@ func validateTransactionalBFDProtocolBindings(cfg *Config) error {
 			}
 		}
 	}
-	if cfg.OSPF != nil && ospfHasBFDProtocolBindings(cfg.OSPF) {
-		return NewInvalidConfigError("OSPF BFD protocol bindings are not supported by the transactional FRR backend until OSPF interface BFD management operations are implemented")
+	if cfg.OSPF != nil && ospfHasBFDProfiles(cfg.OSPF) {
+		return NewInvalidConfigError("OSPF BFD profiles are not supported by the transactional FRR backend until OSPF BFD profile management operations are implemented")
 	}
 	if cfg.OSPF3 != nil && ospfHasBFDProtocolBindings(cfg.OSPF3) {
 		return NewInvalidConfigError("OSPFv3 BFD protocol bindings are not supported by the transactional FRR backend until ospf6d management operations are implemented")
@@ -198,6 +199,18 @@ func ospfHasBFDProtocolBindings(cfg *OSPFConfig) bool {
 	}
 	for _, iface := range cfg.Interfaces {
 		if iface.BFD || iface.BFDProfile != "" {
+			return true
+		}
+	}
+	return false
+}
+
+func ospfHasBFDProfiles(cfg *OSPFConfig) bool {
+	if cfg == nil {
+		return false
+	}
+	for _, iface := range cfg.Interfaces {
+		if iface.BFDProfile != "" {
 			return true
 		}
 	}
@@ -466,6 +479,31 @@ func buildOSPFOps(cfg *OSPFConfig) []MgmtOperation {
 			base := ospfProtocolBase() + "/frr-ospfd:ospf/passive-interface" + keyPred("interface", iface.Name)
 			ops = append(ops, setOp(base+"/interface", iface.Name))
 		}
+		if ospfInterfaceMgmtConfigured(iface) {
+			ops = append(ops, buildOSPFInterfaceOps(iface)...)
+		}
+	}
+	return ops
+}
+
+func ospfInterfaceMgmtConfigured(iface OSPFInterface) bool {
+	return iface.Metric > 0 || iface.Priority != nil || iface.BFD
+}
+
+func buildOSPFInterfaceOps(iface OSPFInterface) []MgmtOperation {
+	base := ospfInterfaceInstanceBase(iface.Name)
+	ops := []MgmtOperation{
+		setOp(interfaceBase(iface.Name)+"/name", iface.Name),
+		setOp(base+"/id", defaultOSPFInterfaceInstanceID),
+	}
+	if iface.Metric > 0 {
+		ops = append(ops, setOp(base+"/cost", strconv.Itoa(iface.Metric)))
+	}
+	if iface.Priority != nil {
+		ops = append(ops, setOp(base+"/priority", strconv.Itoa(*iface.Priority)))
+	}
+	if iface.BFD {
+		ops = append(ops, setOp(base+"/bfd", "true"))
 	}
 	return ops
 }
@@ -618,6 +656,7 @@ func buildVRRPOps(cfg *VRRPConfig) ([]MgmtOperation, error) {
 }
 
 const defaultVRFName = "default"
+const defaultOSPFInterfaceInstanceID = "0"
 
 func buildVRFOps(vrfs []VRFConfig) []MgmtOperation {
 	if len(vrfs) == 0 {
@@ -703,6 +742,14 @@ func bgpProtocolDeleteBase() string {
 
 func ospfProtocolBase() string {
 	return protocolBase("frr-ospfd:ospf", "ospf")
+}
+
+func ospfInterfaceConfigBase() string {
+	return "/frr-interface:lib/interface/frr-ospfd:ospf"
+}
+
+func ospfInterfaceInstanceBase(interfaceName string) string {
+	return interfaceBase(interfaceName) + "/frr-ospfd:ospf/instance" + keyPred("id", defaultOSPFInterfaceInstanceID)
 }
 
 func protocolBase(protocolType, name string) string {
