@@ -344,12 +344,21 @@ func (a *stateServiceAdapter) GetHAStatus(ctx context.Context, _ *apiv1.GetHASta
 		FrrVrrpActiveGroups:     uint32(info.FRRVRRPActiveGroups),
 		FrrVrrpIssues:           append([]string(nil), info.FRRVRRPIssues...),
 		FrrVrrpLastError:        info.FRRVRRPLastError,
+		FrrBfdConfiguredPeers:   uint32(info.FRRBFDConfiguredPeers),
+		FrrBfdObservedPeers:     uint32(info.FRRBFDObservedPeers),
+		FrrBfdUpPeers:           uint32(info.FRRBFDUpPeers),
+		FrrBfdDownPeers:         uint32(info.FRRBFDDownPeers),
+		FrrBfdIssues:            append([]string(nil), info.FRRBFDIssues...),
+		FrrBfdLastError:         info.FRRBFDLastError,
 		VppLcpPairs:             uint32(info.VPPLCPPairs),
 		VppLcpInconsistencies:   append([]string(nil), info.VPPLCPInconsistencies...),
 		VppLcpLastError:         info.VPPLCPLastError,
 	}
 	if !info.FRRVRRPLastCheck.IsZero() {
 		resp.FrrVrrpLastCheck = info.FRRVRRPLastCheck.UTC().Format(time.RFC3339Nano)
+	}
+	if !info.FRRBFDLastCheck.IsZero() {
+		resp.FrrBfdLastCheck = info.FRRBFDLastCheck.UTC().Format(time.RFC3339Nano)
 	}
 	if !info.VPPLCPLastCheck.IsZero() {
 		resp.VppLcpLastCheck = info.VPPLCPLastCheck.UTC().Format(time.RFC3339Nano)

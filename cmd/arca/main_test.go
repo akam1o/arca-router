@@ -1058,6 +1058,64 @@ func TestHAState(t *testing.T) {
 	}
 }
 
+func TestHABFDState(t *testing.T) {
+	now := time.Unix(1700000400, 0)
+	tests := []struct {
+		name string
+		info *grpcclient.HAStatusInfo
+		want string
+	}{
+		{name: "nil", info: nil, want: "not configured"},
+		{name: "empty", info: &grpcclient.HAStatusInfo{}, want: "not configured"},
+		{
+			name: "converged",
+			info: &grpcclient.HAStatusInfo{
+				FRRBFDLastCheck:       now,
+				FRRBFDConfiguredPeers: 2,
+				FRRBFDObservedPeers:   2,
+				FRRBFDUpPeers:         2,
+			},
+			want: "2/2 up",
+		},
+		{
+			name: "issues",
+			info: &grpcclient.HAStatusInfo{
+				FRRBFDLastCheck:       now,
+				FRRBFDConfiguredPeers: 2,
+				FRRBFDObservedPeers:   2,
+				FRRBFDUpPeers:         1,
+				FRRBFDDownPeers:       1,
+			},
+			want: "1/2 up (issues)",
+		},
+		{
+			name: "unknown",
+			info: &grpcclient.HAStatusInfo{
+				FRRBFDConfiguredPeers: 1,
+				FRRBFDObservedPeers:   1,
+				FRRBFDUpPeers:         1,
+			},
+			want: "1/1 up (unknown)",
+		},
+		{
+			name: "observed only",
+			info: &grpcclient.HAStatusInfo{
+				FRRBFDLastCheck:     now,
+				FRRBFDObservedPeers: 1,
+				FRRBFDUpPeers:       1,
+			},
+			want: "1/1 up",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := haBFDState(tt.info); got != tt.want {
+				t.Fatalf("haBFDState() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
 func TestRollbackRejectsInvalidNumber(t *testing.T) {
 	ctx := context.Background()
 

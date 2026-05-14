@@ -394,6 +394,12 @@ func (c *Client) GetHAStatus(ctx context.Context) (*HAStatusInfo, error) {
 		FRRVRRPActiveGroups:     int(resp.GetFrrVrrpActiveGroups()),
 		FRRVRRPIssues:           append([]string(nil), resp.GetFrrVrrpIssues()...),
 		FRRVRRPLastError:        resp.GetFrrVrrpLastError(),
+		FRRBFDConfiguredPeers:   int(resp.GetFrrBfdConfiguredPeers()),
+		FRRBFDObservedPeers:     int(resp.GetFrrBfdObservedPeers()),
+		FRRBFDUpPeers:           int(resp.GetFrrBfdUpPeers()),
+		FRRBFDDownPeers:         int(resp.GetFrrBfdDownPeers()),
+		FRRBFDIssues:            append([]string(nil), resp.GetFrrBfdIssues()...),
+		FRRBFDLastError:         resp.GetFrrBfdLastError(),
 		VPPLCPPairs:             int(resp.GetVppLcpPairs()),
 		VPPLCPInconsistencies:   append([]string(nil), resp.GetVppLcpInconsistencies()...),
 		VPPLCPLastError:         resp.GetVppLcpLastError(),
@@ -402,6 +408,12 @@ func (c *Client) GetHAStatus(ctx context.Context) (*HAStatusInfo, error) {
 		parsed, err := time.Parse(time.RFC3339Nano, rawLastCheck)
 		if err == nil {
 			info.FRRVRRPLastCheck = parsed
+		}
+	}
+	if rawLastCheck := resp.GetFrrBfdLastCheck(); rawLastCheck != "" {
+		parsed, err := time.Parse(time.RFC3339Nano, rawLastCheck)
+		if err == nil {
+			info.FRRBFDLastCheck = parsed
 		}
 	}
 	if rawLastCheck := resp.GetVppLcpLastCheck(); rawLastCheck != "" {
@@ -687,6 +699,13 @@ type HAStatusInfo struct {
 	FRRVRRPActiveGroups     int
 	FRRVRRPIssues           []string
 	FRRVRRPLastError        string
+	FRRBFDLastCheck         time.Time
+	FRRBFDConfiguredPeers   int
+	FRRBFDObservedPeers     int
+	FRRBFDUpPeers           int
+	FRRBFDDownPeers         int
+	FRRBFDIssues            []string
+	FRRBFDLastError         string
 	VPPLCPLastCheck         time.Time
 	VPPLCPPairs             int
 	VPPLCPInconsistencies   []string
