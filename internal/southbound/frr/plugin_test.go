@@ -218,7 +218,7 @@ func TestValidateChangesRejectsBGPBFDProfileWithTransactionalBackend(t *testing.
 	}
 }
 
-func TestValidateChangesRejectsOSPFBFDBindingWithTransactionalBackend(t *testing.T) {
+func TestValidateChangesAllowsOSPFBFDBindingWithTransactionalBackend(t *testing.T) {
 	newCfg := model.NewRouterConfig()
 	newCfg.Protocols = &model.ProtocolsConfig{
 		OSPF: &model.OSPFConfig{Areas: map[string]*model.OSPFArea{
@@ -232,8 +232,27 @@ func TestValidateChangesRejectsOSPFBFDBindingWithTransactionalBackend(t *testing
 	diff := engine.ComputeDiff(model.NewRouterConfig(), newCfg)
 
 	err := NewFRRPlugin(testLogger()).ValidateChanges(context.Background(), diff)
-	if err == nil || !strings.Contains(err.Error(), "OSPF BFD protocol bindings require FRR file backend") {
-		t.Fatalf("ValidateChanges() error = %v, want OSPF BFD transactional rejection", err)
+	if err != nil {
+		t.Fatalf("ValidateChanges() error = %v, want nil", err)
+	}
+}
+
+func TestValidateChangesRejectsOSPFBFDProfileWithTransactionalBackend(t *testing.T) {
+	newCfg := model.NewRouterConfig()
+	newCfg.Protocols = &model.ProtocolsConfig{
+		OSPF: &model.OSPFConfig{Areas: map[string]*model.OSPFArea{
+			"0.0.0.0": {
+				Interfaces: map[string]*model.OSPFInterface{
+					"ge-0/0/0": {BFD: true, BFDProfile: "fast"},
+				},
+			},
+		}},
+	}
+	diff := engine.ComputeDiff(model.NewRouterConfig(), newCfg)
+
+	err := NewFRRPlugin(testLogger()).ValidateChanges(context.Background(), diff)
+	if err == nil || !strings.Contains(err.Error(), "OSPF BFD profiles require FRR file backend") {
+		t.Fatalf("ValidateChanges() error = %v, want OSPF BFD profile transactional rejection", err)
 	}
 }
 

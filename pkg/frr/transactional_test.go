@@ -258,10 +258,10 @@ func TestBuildMgmtOperationsRejectsUnsupportedBFDProtocolBindings(t *testing.T) 
 			name: "ospf",
 			cfg: &Config{
 				OSPF: &OSPFConfig{
-					Interfaces: []OSPFInterface{{Name: "ge0-0-0", BFD: true}},
+					Interfaces: []OSPFInterface{{Name: "ge0-0-0", BFD: true, BFDProfile: "fast"}},
 				},
 			},
-			want: "OSPF BFD protocol bindings",
+			want: "OSPF BFD profiles",
 		},
 	}
 	for _, tt := range tests {
@@ -271,6 +271,40 @@ func TestBuildMgmtOperationsRejectsUnsupportedBFDProtocolBindings(t *testing.T) 
 				t.Fatalf("BuildMgmtOperations() error = %v, want %q", err, tt.want)
 			}
 		})
+	}
+}
+
+func TestBuildMgmtOperationsOSPFInterfaceAttributes(t *testing.T) {
+	priority := 10
+	ops, err := BuildMgmtOperations(&Config{
+		OSPF: &OSPFConfig{
+			RouterID: "192.0.2.1",
+			Networks: []OSPFNetwork{
+				{Prefix: "192.0.2.0/24", AreaID: "0.0.0.0"},
+			},
+			Interfaces: []OSPFInterface{
+				{Name: "ge0-0-0", Passive: true, Metric: 20, Priority: &priority, BFD: true},
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("BuildMgmtOperations() error = %v", err)
+	}
+	commands := commandsFromOps(ops)
+	for _, want := range []string{
+		"mgmt delete-config /frr-interface:lib/interface/frr-ospfd:ospf",
+		"mgmt set-config /frr-routing:routing/control-plane-protocols/control-plane-protocol[type='frr-ospfd:ospf'][name='ospf'][vrf='default']/frr-ospfd:ospf/router-id 192.0.2.1",
+		"mgmt set-config /frr-routing:routing/control-plane-protocols/control-plane-protocol[type='frr-ospfd:ospf'][name='ospf'][vrf='default']/frr-ospfd:ospf/network[prefix='192.0.2.0/24']/area 0.0.0.0",
+		"mgmt set-config /frr-routing:routing/control-plane-protocols/control-plane-protocol[type='frr-ospfd:ospf'][name='ospf'][vrf='default']/frr-ospfd:ospf/passive-interface[interface='ge0-0-0']/interface ge0-0-0",
+		"mgmt set-config /frr-interface:lib/interface[name='ge0-0-0']/name ge0-0-0",
+		"mgmt set-config /frr-interface:lib/interface[name='ge0-0-0']/frr-ospfd:ospf/instance[id='0']/id 0",
+		"mgmt set-config /frr-interface:lib/interface[name='ge0-0-0']/frr-ospfd:ospf/instance[id='0']/cost 20",
+		"mgmt set-config /frr-interface:lib/interface[name='ge0-0-0']/frr-ospfd:ospf/instance[id='0']/priority 10",
+		"mgmt set-config /frr-interface:lib/interface[name='ge0-0-0']/frr-ospfd:ospf/instance[id='0']/bfd true",
+	} {
+		if !strings.Contains(commands, want) {
+			t.Fatalf("commands missing %q:\n%s", want, commands)
+		}
 	}
 }
 
