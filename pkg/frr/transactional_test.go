@@ -26,7 +26,7 @@ func TestBuildMgmtOperationsStaticAndBGP(t *testing.T) {
 			ASN:      65000,
 			RouterID: "192.0.2.1",
 			Neighbors: []BGPNeighbor{
-				{IP: "198.51.100.2", RemoteAS: 65001, Description: "upstream peer", RouteMapIn: "IMPORT"},
+				{IP: "198.51.100.2", RemoteAS: 65001, Description: "upstream peer", RouteMapIn: "IMPORT", BFD: true},
 			},
 		},
 	}
@@ -41,6 +41,7 @@ func TestBuildMgmtOperationsStaticAndBGP(t *testing.T) {
 		"mgmt set-config /frr-routing:routing/control-plane-protocols/control-plane-protocol[type='frr-staticd:staticd'][name='staticd'][vrf='default']/frr-staticd:staticd/route-list[prefix='203.0.113.0/24'][src-prefix='::/0'][afi-safi='frr-routing:ipv4-unicast']/path-list[table-id='0'][nh-type='ip4'][vrf='default'][gateway='192.0.2.1'][interface='']/distance 10",
 		"mgmt set-config /frr-routing:routing/control-plane-protocols/control-plane-protocol[type='frr-bgp:bgp'][name='bgp'][vrf='default']/frr-bgp:bgp/global/local-as 65000",
 		`mgmt set-config /frr-routing:routing/control-plane-protocols/control-plane-protocol[type='frr-bgp:bgp'][name='bgp'][vrf='default']/frr-bgp:bgp/neighbors/neighbor[remote-address='198.51.100.2']/description "upstream peer"`,
+		"mgmt set-config /frr-routing:routing/control-plane-protocols/control-plane-protocol[type='frr-bgp:bgp'][name='bgp'][vrf='default']/frr-bgp:bgp/neighbors/neighbor[remote-address='198.51.100.2']/bfd-options/enable true",
 		"mgmt set-config /frr-routing:routing/control-plane-protocols/control-plane-protocol[type='frr-bgp:bgp'][name='bgp'][vrf='default']/frr-bgp:bgp/neighbors/neighbor[remote-address='198.51.100.2']/afi-safis/afi-safi[afi-safi-name='frr-routing:ipv4-unicast']/ipv4-unicast/filter-config/rmap-import IMPORT",
 	} {
 		if !strings.Contains(commands, want) {
@@ -235,28 +236,76 @@ func TestBuildMgmtOperationsRejectsUnsupportedBFDPeerShape(t *testing.T) {
 	}
 }
 
-func TestBuildMgmtOperationsRejectsBFDProtocolBindings(t *testing.T) {
-	_, err := BuildMgmtOperations(&Config{
-		BGP: &BGPConfig{
-			ASN: 65000,
-			Neighbors: []BGPNeighbor{
-				{IP: "192.0.2.2", RemoteAS: 65001, BFD: true, BFDProfile: "fast"},
+func TestBuildMgmtOperationsRejectsUnsupportedBFDProtocolBindings(t *testing.T) {
+	tests := []struct {
+		name string
+		cfg  *Config
+		want string
+	}{
+		{
+			name: "bgp profile",
+			cfg: &Config{
+				BGP: &BGPConfig{
+					ASN: 65000,
+					Neighbors: []BGPNeighbor{
+						{IP: "192.0.2.2", RemoteAS: 65001, BFDProfile: "fast"},
+					},
+				},
 			},
+			want: "BGP BFD profiles",
 		},
-	})
-	if err == nil || !strings.Contains(err.Error(), "BFD protocol bindings") {
-		t.Fatalf("BuildMgmtOperations() error = %v, want BFD protocol binding unsupported", err)
+		{
+			name: "ospf",
+			cfg: &Config{
+				OSPF: &OSPFConfig{
+					Interfaces: []OSPFInterface{{Name: "ge0-0-0", BFD: true}},
+				},
+			},
+			want: "OSPF BFD protocol bindings",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := BuildMgmtOperations(tt.cfg)
+			if err == nil || !strings.Contains(err.Error(), tt.want) {
+				t.Fatalf("BuildMgmtOperations() error = %v, want %q", err, tt.want)
+			}
+		})
 	}
 }
 
-func TestBuildMgmtOperationsRejectsBFDStaticRoutes(t *testing.T) {
-	_, err := BuildMgmtOperations(&Config{
+func TestBuildMgmtOperationsStaticRouteBFD(t *testing.T) {
+	ops, err := BuildMgmtOperations(&Config{
 		StaticRoutes: []StaticRoute{
-			{Prefix: "203.0.113.0/24", NextHop: "192.0.2.2", BFD: true, BFDProfile: "fast"},
+			{
+				Prefix:      "203.0.113.0/24",
+				NextHop:     "192.0.2.2",
+				BFD:         true,
+				BFDProfile:  "fast",
+				BFDSource:   "192.0.2.1",
+				BFDMultihop: true,
+			},
+			{
+				Prefix:  "2001:db8::/64",
+				NextHop: "2001:db8::1",
+				IsIPv6:  true,
+				BFD:     true,
+			},
 		},
 	})
-	if err == nil || !strings.Contains(err.Error(), "BFD static routes") {
-		t.Fatalf("BuildMgmtOperations() error = %v, want BFD static route unsupported", err)
+	if err != nil {
+		t.Fatalf("BuildMgmtOperations() error = %v", err)
+	}
+	commands := commandsFromOps(ops)
+	for _, want := range []string{
+		"mgmt set-config /frr-routing:routing/control-plane-protocols/control-plane-protocol[type='frr-staticd:staticd'][name='staticd'][vrf='default']/frr-staticd:staticd/route-list[prefix='203.0.113.0/24'][src-prefix='::/0'][afi-safi='frr-routing:ipv4-unicast']/path-list[table-id='0'][nh-type='ip4'][vrf='default'][gateway='192.0.2.2'][interface='']/bfd-monitoring/multi-hop true",
+		"mgmt set-config /frr-routing:routing/control-plane-protocols/control-plane-protocol[type='frr-staticd:staticd'][name='staticd'][vrf='default']/frr-staticd:staticd/route-list[prefix='203.0.113.0/24'][src-prefix='::/0'][afi-safi='frr-routing:ipv4-unicast']/path-list[table-id='0'][nh-type='ip4'][vrf='default'][gateway='192.0.2.2'][interface='']/bfd-monitoring/source 192.0.2.1",
+		"mgmt set-config /frr-routing:routing/control-plane-protocols/control-plane-protocol[type='frr-staticd:staticd'][name='staticd'][vrf='default']/frr-staticd:staticd/route-list[prefix='203.0.113.0/24'][src-prefix='::/0'][afi-safi='frr-routing:ipv4-unicast']/path-list[table-id='0'][nh-type='ip4'][vrf='default'][gateway='192.0.2.2'][interface='']/bfd-monitoring/profile fast",
+		"mgmt set-config /frr-routing:routing/control-plane-protocols/control-plane-protocol[type='frr-staticd:staticd'][name='staticd'][vrf='default']/frr-staticd:staticd/route-list[prefix='2001:db8::/64'][src-prefix='::/0'][afi-safi='frr-routing:ipv6-unicast']/path-list[table-id='0'][nh-type='ip6'][vrf='default'][gateway='2001:db8::1'][interface='']/bfd-monitoring/multi-hop false",
+	} {
+		if !strings.Contains(commands, want) {
+			t.Fatalf("commands missing %q:\n%s", want, commands)
+		}
 	}
 }
 

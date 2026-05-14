@@ -139,11 +139,8 @@ func BuildMgmtOperations(cfg *Config) ([]MgmtOperation, error) {
 	if cfg.OSPF3 != nil {
 		return nil, NewInvalidConfigError("OSPFv3 is not supported by the transactional FRR backend because FRR does not expose core ospf6d YANG paths")
 	}
-	if hasBFDProtocolBindings(cfg) {
-		return nil, NewInvalidConfigError("BFD protocol bindings are not supported by the transactional FRR backend until protocol-specific BFD management operations are implemented")
-	}
-	if hasStaticRouteBFD(cfg.StaticRoutes) {
-		return nil, NewInvalidConfigError("BFD static routes are not supported by the transactional FRR backend until staticd BFD management operations are implemented")
+	if err := validateTransactionalBFDProtocolBindings(cfg); err != nil {
+		return nil, err
 	}
 	var ops []MgmtOperation
 	ops = append(ops,
@@ -175,24 +172,24 @@ func BuildMgmtOperations(cfg *Config) ([]MgmtOperation, error) {
 	return ops, nil
 }
 
-func hasBFDProtocolBindings(cfg *Config) bool {
+func validateTransactionalBFDProtocolBindings(cfg *Config) error {
 	if cfg == nil {
-		return false
+		return nil
 	}
 	if cfg.BGP != nil {
 		for _, neighbor := range cfg.BGP.Neighbors {
-			if neighbor.BFD || neighbor.BFDProfile != "" {
-				return true
+			if neighbor.BFDProfile != "" {
+				return NewInvalidConfigError("BGP BFD profiles are not supported by the transactional FRR backend until BGP BFD profile management operations are implemented")
 			}
 		}
 	}
 	if cfg.OSPF != nil && ospfHasBFDProtocolBindings(cfg.OSPF) {
-		return true
+		return NewInvalidConfigError("OSPF BFD protocol bindings are not supported by the transactional FRR backend until OSPF interface BFD management operations are implemented")
 	}
 	if cfg.OSPF3 != nil && ospfHasBFDProtocolBindings(cfg.OSPF3) {
-		return true
+		return NewInvalidConfigError("OSPFv3 BFD protocol bindings are not supported by the transactional FRR backend until ospf6d management operations are implemented")
 	}
-	return false
+	return nil
 }
 
 func ospfHasBFDProtocolBindings(cfg *OSPFConfig) bool {
@@ -201,15 +198,6 @@ func ospfHasBFDProtocolBindings(cfg *OSPFConfig) bool {
 	}
 	for _, iface := range cfg.Interfaces {
 		if iface.BFD || iface.BFDProfile != "" {
-			return true
-		}
-	}
-	return false
-}
-
-func hasStaticRouteBFD(routes []StaticRoute) bool {
-	for _, route := range routes {
-		if route.BFD || route.BFDProfile != "" || route.BFDSource != "" || route.BFDMultihop {
 			return true
 		}
 	}
@@ -382,6 +370,25 @@ func buildStaticRouteOps(routes []StaticRoute) []MgmtOperation {
 			setOp(pathBase+"/interface", ""),
 			setOp(pathBase+"/distance", strconv.Itoa(distance)),
 		)
+		if staticRouteBFDConfigured(route) {
+			ops = append(ops, buildStaticRouteBFDMonitoringOps(pathBase, route)...)
+		}
+	}
+	return ops
+}
+
+func staticRouteBFDConfigured(route StaticRoute) bool {
+	return route.BFD || route.BFDProfile != "" || route.BFDSource != "" || route.BFDMultihop
+}
+
+func buildStaticRouteBFDMonitoringOps(pathBase string, route StaticRoute) []MgmtOperation {
+	base := pathBase + "/bfd-monitoring"
+	ops := []MgmtOperation{setOp(base+"/multi-hop", strconv.FormatBool(route.BFDMultihop))}
+	if route.BFDSource != "" {
+		ops = append(ops, setOp(base+"/source", route.BFDSource))
+	}
+	if route.BFDProfile != "" {
+		ops = append(ops, setOp(base+"/profile", route.BFDProfile))
 	}
 	return ops
 }
@@ -413,6 +420,9 @@ func buildBGPOps(cfg *BGPConfig) []MgmtOperation {
 			} else {
 				ops = append(ops, setOp(base+"/update-source/interface", neighbor.UpdateSource))
 			}
+		}
+		if neighbor.BFD {
+			ops = append(ops, setOp(base+"/bfd-options/enable", "true"))
 		}
 		afi := "frr-routing:ipv4-unicast"
 		afiContainer := "ipv4-unicast"
