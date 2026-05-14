@@ -53,6 +53,82 @@ func TestBuildMgmtOperationsStaticAndBGP(t *testing.T) {
 	}
 }
 
+func TestBuildMgmtOperationsRejectsInvalidBGP(t *testing.T) {
+	tests := []struct {
+		name string
+		bgp  *BGPConfig
+		want string
+	}{
+		{
+			name: "missing asn",
+			bgp: &BGPConfig{
+				Neighbors: []BGPNeighbor{{IP: "192.0.2.2", RemoteAS: 65001}},
+			},
+			want: "BGP ASN is required",
+		},
+		{
+			name: "invalid router id",
+			bgp: &BGPConfig{
+				ASN:      65000,
+				RouterID: "2001:db8::1",
+				Neighbors: []BGPNeighbor{
+					{IP: "192.0.2.2", RemoteAS: 65001},
+				},
+			},
+			want: "invalid BGP router-id",
+		},
+		{
+			name: "missing neighbor ip",
+			bgp: &BGPConfig{
+				ASN:       65000,
+				Neighbors: []BGPNeighbor{{RemoteAS: 65001}},
+			},
+			want: "BGP neighbor IP is required",
+		},
+		{
+			name: "invalid neighbor ip",
+			bgp: &BGPConfig{
+				ASN:       65000,
+				Neighbors: []BGPNeighbor{{IP: "not-an-ip", RemoteAS: 65001}},
+			},
+			want: "invalid BGP neighbor IP",
+		},
+		{
+			name: "missing remote as",
+			bgp: &BGPConfig{
+				ASN:       65000,
+				Neighbors: []BGPNeighbor{{IP: "192.0.2.2"}},
+			},
+			want: "remote-as is required",
+		},
+		{
+			name: "ipv4 marked ipv6",
+			bgp: &BGPConfig{
+				ASN:       65000,
+				Neighbors: []BGPNeighbor{{IP: "192.0.2.2", RemoteAS: 65001, IsIPv6: true}},
+			},
+			want: "address family does not match",
+		},
+		{
+			name: "ipv6 marked ipv4",
+			bgp: &BGPConfig{
+				ASN:       65000,
+				Neighbors: []BGPNeighbor{{IP: "2001:db8::2", RemoteAS: 65001}},
+			},
+			want: "address family does not match",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := BuildMgmtOperations(&Config{BGP: tt.bgp})
+			if err == nil || !strings.Contains(err.Error(), tt.want) {
+				t.Fatalf("BuildMgmtOperations() error = %v, want %q", err, tt.want)
+			}
+		})
+	}
+}
+
 func TestBuildMgmtOperationsVRRP(t *testing.T) {
 	ops, err := BuildMgmtOperations(&Config{
 		VRRP: &VRRPConfig{Groups: []VRRPGroup{

@@ -11,6 +11,7 @@
 - **Standard FRR BFD daemon**: `bfdd` is documented and checked as part of the required arca-router FRR daemon set for BFD support
 - **Route policy validation**: legacy and canonical config validation reject invalid IPv4/IPv6 prefix-list entries, unknown policy-statement prefix-list references, invalid route-policy protocols, neighbors, AS-path regexes, and community values before apply
 - **BGP policy reference validation**: BGP group import/export policies are validated against configured policy-statements before FRR generation
+- **Transactional BGP validation**: direct FRR management operations reject invalid BGP ASN, router-id, neighbor IP, remote-as, and address-family mismatches before building the candidate
 - **Route policy prefix-list aggregation**: FRR generation aggregates same-family prefix-list matches per route-map entry so IPv4 and IPv6 policy matches render deterministically through both file and transactional backends
 - **Route-map backend selection**: route-map source-protocol, peer, and AS-path matches fall back to the FRR file backend instead of being silently dropped by transactional apply
 - **Transactional route-map reference validation**: direct FRR management operations reject BGP and VRF route-map references that are not included in the generated route-map set
