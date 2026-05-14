@@ -301,6 +301,9 @@ func frrBFDRequiresFileBackend(cfg *pkgfrr.BFDConfig) bool {
 		if peer.Multihop && peer.LocalAddress == "" {
 			return true
 		}
+		if !peer.Multihop && peer.Interface == "" {
+			return true
+		}
 	}
 	return false
 }
