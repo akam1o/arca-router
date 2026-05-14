@@ -19,6 +19,7 @@ type fakeInteractiveClient struct {
 	routeProtocol    string
 	routeFamily      string
 	routingInstances []grpcclient.RoutingInstanceInfo
+	bgpNeighbors     []grpcclient.BGPNeighborInfo
 	bgpSummaryText   string
 	bgpNeighborText  string
 	ospfText         string
@@ -39,6 +40,7 @@ type fakeInteractiveClient struct {
 	commitCalls      int
 	bfdStatusCalls   int
 	routingCalls     int
+	bgpNeighborCalls int
 	listHistoryCalls int
 	rollbackCalls    int
 	validateCalls    int
@@ -111,7 +113,8 @@ func (f *fakeInteractiveClient) GetRoutingInstances(ctx context.Context) ([]grpc
 }
 
 func (f *fakeInteractiveClient) GetBGPNeighbors(ctx context.Context) ([]grpcclient.BGPNeighborInfo, error) {
-	return nil, nil
+	f.bgpNeighborCalls++
+	return f.bgpNeighbors, nil
 }
 
 func (f *fakeInteractiveClient) GetRouteText(ctx context.Context, protoFilter, addressFamily string) (string, error) {
@@ -581,6 +584,27 @@ func TestCmdShowRoutingInstancesReturnsOutput(t *testing.T) {
 	}
 }
 
+func TestCmdShowBGPNeighborsUsesStructuredState(t *testing.T) {
+	ctx := context.Background()
+	client := &fakeInteractiveClient{bgpNeighbors: []grpcclient.BGPNeighborInfo{
+		{PeerAddress: "2001:db8::2", PeerAS: 65001, State: "Established", UptimeSecs: 3661, PrefixReceived: 10, PrefixSent: 20},
+	}}
+	sh := &interactiveShell{
+		client:    client,
+		hostname:  "router",
+		mode:      modeOperational,
+		sessionID: "session-1",
+	}
+
+	err := sh.cmdShow(ctx, []string{"bgp", "neighbors"})
+	if err != nil {
+		t.Fatalf("cmdShow(bgp neighbors) error = %v", err)
+	}
+	if client.bgpNeighborCalls != 1 {
+		t.Fatalf("BGP neighbor calls = %d, want 1", client.bgpNeighborCalls)
+	}
+}
+
 func TestInterfaceQueueSummary(t *testing.T) {
 	got := interfaceQueueSummary(grpcclient.InterfaceInfo{
 		RxQueues: []grpcclient.InterfaceRxQueueInfo{
@@ -744,6 +768,17 @@ func TestOneShotShowRoutingInstancesReturnsSuccess(t *testing.T) {
 	}
 }
 
+func TestOneShotShowBGPNeighborsReturnsSuccess(t *testing.T) {
+	client := &fakeInteractiveClient{bgpNeighbors: []grpcclient.BGPNeighborInfo{{PeerAddress: "192.0.2.2", PeerAS: 65001, State: "Established"}}}
+	code := oneShotShow(context.Background(), client, []string{"bgp", "neighbors"}, &cliFlags{})
+	if code != ExitSuccess {
+		t.Fatalf("oneShotShow(bgp neighbors) = %d, want %d", code, ExitSuccess)
+	}
+	if client.bgpNeighborCalls != 1 {
+		t.Fatalf("BGP neighbor calls = %d, want 1", client.bgpNeighborCalls)
+	}
+}
+
 func TestRouteTextOptions(t *testing.T) {
 	tests := []struct {
 		name       string
@@ -890,6 +925,27 @@ func TestBFDOperationalState(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			if got := bfdOperationalState(tt.info); got != tt.want {
 				t.Fatalf("bfdOperationalState() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestFormatBGPUptime(t *testing.T) {
+	tests := []struct {
+		name    string
+		seconds uint64
+		want    string
+	}{
+		{name: "zero", want: "-"},
+		{name: "seconds", seconds: 7, want: "7s"},
+		{name: "minutes", seconds: 67, want: "1m07s"},
+		{name: "hours", seconds: 3661, want: "1h01m01s"},
+		{name: "days", seconds: 90061, want: "1d01h01m01s"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := formatBGPUptime(tt.seconds); got != tt.want {
+				t.Fatalf("formatBGPUptime(%d) = %q, want %q", tt.seconds, got, tt.want)
 			}
 		})
 	}

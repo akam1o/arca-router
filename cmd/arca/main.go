@@ -94,8 +94,9 @@ Show subcommands:
   interfaces                  Show interface status
   interfaces <name>           Show specific interface details
   routing-instances [name]    Show routing-instance table mapping
-  bgp summary                 Show BGP summary
-  bgp neighbor <ip>           Show BGP neighbor details
+  bgp neighbors               Show BGP neighbor status
+  bgp summary                 Show raw BGP summary
+  bgp neighbor <ip>           Show raw BGP neighbor details
   ospf neighbor               Show OSPFv2 neighbors
   ospf3 neighbor              Show OSPFv3 neighbors
   vrrp                        Show VRRP status
@@ -225,10 +226,22 @@ func oneShotShow(ctx context.Context, client showClient, args []string, f *cliFl
 
 	case "bgp":
 		if len(args) < 2 {
-			fmt.Fprintf(os.Stderr, "Error: 'show bgp' requires a subcommand (summary or neighbor)\n")
+			fmt.Fprintf(os.Stderr, "Error: 'show bgp' requires a subcommand (neighbors, summary, or neighbor)\n")
 			return ExitUsageError
 		}
 		switch args[1] {
+		case "neighbors":
+			if len(args) > 2 {
+				fmt.Fprintf(os.Stderr, "Error: 'show bgp neighbors' does not accept extra arguments\n")
+				return ExitUsageError
+			}
+			neighbors, err := client.GetBGPNeighbors(ctx)
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+				return ExitOperationError
+			}
+			printBGPNeighbors(neighbors)
+			return ExitSuccess
 		case "summary":
 			output, err := client.GetBGPSummaryText(ctx)
 			if err != nil {
@@ -385,13 +398,13 @@ type interactiveClient interface {
 	AcquireLock(context.Context, string, string) error
 	ReleaseLock(context.Context, string) error
 	GetRoutes(context.Context, string, string) ([]grpcclient.RouteInfo, error)
-	GetBGPNeighbors(context.Context) ([]grpcclient.BGPNeighborInfo, error)
 }
 
 type showClient interface {
 	GetRunning(context.Context) (string, uint64, error)
 	GetInterfaces(context.Context, string) ([]grpcclient.InterfaceInfo, error)
 	GetRoutingInstances(context.Context) ([]grpcclient.RoutingInstanceInfo, error)
+	GetBGPNeighbors(context.Context) ([]grpcclient.BGPNeighborInfo, error)
 	GetRouteText(context.Context, string, string) (string, error)
 	GetBGPSummaryText(context.Context) (string, error)
 	GetBGPNeighborText(context.Context, string) (string, error)
@@ -718,9 +731,19 @@ func (sh *interactiveShell) cmdShow(ctx context.Context, args []string) error {
 			return fmt.Errorf("'show bgp' not available in configuration mode")
 		}
 		if len(args) < 2 {
-			return fmt.Errorf("'show bgp' requires a subcommand (summary or neighbor)")
+			return fmt.Errorf("'show bgp' requires a subcommand (neighbors, summary, or neighbor)")
 		}
 		switch args[1] {
+		case "neighbors":
+			if len(args) > 2 {
+				return fmt.Errorf("'show bgp neighbors' does not accept extra arguments")
+			}
+			neighbors, err := sh.client.GetBGPNeighbors(ctx)
+			if err != nil {
+				return err
+			}
+			printBGPNeighbors(neighbors)
+			return nil
 		case "summary":
 			output, err := sh.client.GetBGPSummaryText(ctx)
 			if err != nil {
@@ -1049,8 +1072,9 @@ func (sh *interactiveShell) showHelp() {
 		fmt.Println("  show configuration            Show running configuration")
 		fmt.Println("  show interfaces [<name>]      Show interface status")
 		fmt.Println("  show routing-instances [name] Show routing-instance table mapping")
-		fmt.Println("  show bgp summary              Show BGP summary")
-		fmt.Println("  show bgp neighbor <ip>        Show BGP neighbor details")
+		fmt.Println("  show bgp neighbors            Show BGP neighbor status")
+		fmt.Println("  show bgp summary              Show raw BGP summary")
+		fmt.Println("  show bgp neighbor <ip>        Show raw BGP neighbor details")
 		fmt.Println("  show ospf neighbor            Show OSPFv2 neighbors")
 		fmt.Println("  show ospf3 neighbor           Show OSPFv3 neighbors")
 		fmt.Println("  show vrrp                     Show VRRP status")
@@ -1222,6 +1246,55 @@ func formatRoutingInstanceList(values []string) string {
 		return "-"
 	}
 	return strings.Join(values, ",")
+}
+
+func printBGPNeighbors(neighbors []grpcclient.BGPNeighborInfo) {
+	if len(neighbors) == 0 {
+		fmt.Println("No BGP neighbors found")
+		return
+	}
+	fmt.Printf("%-39s %-10s %-16s %-14s %-12s %-12s\n",
+		"Peer", "AS", "State", "Uptime", "Prefixes in", "Prefixes out")
+	fmt.Println(strings.Repeat("-", 109))
+	for _, neighbor := range neighbors {
+		fmt.Printf("%-39s %-10d %-16s %-14s %-12d %-12d\n",
+			formatBGPValue(neighbor.PeerAddress),
+			neighbor.PeerAS,
+			formatBGPValue(neighbor.State),
+			formatBGPUptime(neighbor.UptimeSecs),
+			neighbor.PrefixReceived,
+			neighbor.PrefixSent,
+		)
+	}
+}
+
+func formatBGPValue(value string) string {
+	if value == "" {
+		return "-"
+	}
+	return value
+}
+
+func formatBGPUptime(seconds uint64) string {
+	if seconds == 0 {
+		return "-"
+	}
+	days := seconds / 86400
+	seconds %= 86400
+	hours := seconds / 3600
+	seconds %= 3600
+	minutes := seconds / 60
+	seconds %= 60
+	if days > 0 {
+		return fmt.Sprintf("%dd%02dh%02dm%02ds", days, hours, minutes, seconds)
+	}
+	if hours > 0 {
+		return fmt.Sprintf("%dh%02dm%02ds", hours, minutes, seconds)
+	}
+	if minutes > 0 {
+		return fmt.Sprintf("%dm%02ds", minutes, seconds)
+	}
+	return fmt.Sprintf("%ds", seconds)
 }
 
 func printLCPReconciliation(info *grpcclient.LCPReconciliationInfo) {
