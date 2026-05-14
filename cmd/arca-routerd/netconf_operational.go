@@ -4,6 +4,7 @@ import (
 	"context"
 
 	"github.com/akam1o/arca-router/internal/model"
+	sbfrr "github.com/akam1o/arca-router/internal/southbound/frr"
 	"github.com/akam1o/arca-router/pkg/netconf"
 )
 
@@ -11,18 +12,26 @@ type interfaceStateCollector interface {
 	CollectState(ctx context.Context) (map[string]*model.InterfaceState, error)
 }
 
-type netconfOperationalStateProvider struct {
-	collector interfaceStateCollector
+type netconfBFDStatusSource interface {
+	BFDOperationalStatus() sbfrr.BFDOperationalStatus
 }
 
-func newNETCONFOperationalStateProvider(collector interfaceStateCollector) netconf.OperationalStateProvider {
-	if collector == nil {
+type netconfOperationalStateProvider struct {
+	collector interfaceStateCollector
+	bfdSource netconfBFDStatusSource
+}
+
+func newNETCONFOperationalStateProvider(collector interfaceStateCollector, bfdSource netconfBFDStatusSource) netconf.OperationalStateProvider {
+	if collector == nil && bfdSource == nil {
 		return nil
 	}
-	return &netconfOperationalStateProvider{collector: collector}
+	return &netconfOperationalStateProvider{collector: collector, bfdSource: bfdSource}
 }
 
 func (p *netconfOperationalStateProvider) InterfaceStates(ctx context.Context) (map[string]*netconf.InterfaceOperationalState, error) {
+	if p.collector == nil {
+		return nil, nil
+	}
 	states, err := p.collector.CollectState(ctx)
 	if err != nil {
 		return nil, err
@@ -64,6 +73,42 @@ func (p *netconfOperationalStateProvider) InterfaceStates(ctx context.Context) (
 			converted.Queues = convertInterfaceOperationalQueues(state.Queues)
 		}
 		result[stateName] = converted
+	}
+	return result, nil
+}
+
+func (p *netconfOperationalStateProvider) BFDStatus(ctx context.Context) (*netconf.BFDOperationalState, error) {
+	_ = ctx
+	if p.bfdSource == nil {
+		return nil, nil
+	}
+	status := p.bfdSource.BFDOperationalStatus()
+	result := &netconf.BFDOperationalState{
+		LastRun:           status.LastRun,
+		ConfiguredPeers:   status.ConfiguredPeers,
+		ObservedPeers:     status.ObservedPeers,
+		UpPeers:           status.UpPeers,
+		DownPeers:         status.DownPeers,
+		SessionDownEvents: uint64(status.SessionDownEvents),
+		RxFailPackets:     uint64(status.RxFailPackets),
+		Issues:            append([]string(nil), status.Issues...),
+		LastError:         status.LastError,
+		Peers:             make([]netconf.BFDPeerOperationalState, 0, len(status.Peers)),
+	}
+	for _, peer := range status.Peers {
+		result.Peers = append(result.Peers, netconf.BFDPeerOperationalState{
+			Peer:              peer.Peer,
+			LocalAddress:      peer.LocalAddress,
+			Interface:         peer.Interface,
+			VRF:               peer.VRF,
+			Status:            peer.Status,
+			Diagnostic:        peer.Diagnostic,
+			RemoteDiagnostic:  peer.RemoteDiagnostic,
+			Observed:          peer.Observed,
+			Up:                peer.Up,
+			SessionDownEvents: uint64(peer.SessionDownEvents),
+			RxFailPackets:     uint64(peer.RxFailPackets),
+		})
 	}
 	return result, nil
 }

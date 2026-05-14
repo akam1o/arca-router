@@ -620,6 +620,8 @@ The internal gRPC BGP neighbor state API reads FRR JSON summary output and retur
 
 The internal gRPC BFD state API returns arca-routerd's cached FRR BFD convergence snapshot, including configured/observed/up/down peer counts, aggregate session-down and RX-fail counters, per-peer state, diagnostics, and convergence issues.
 
+NETCONF `<get>` exposes the same cached BFD operational state under `state/protocols/bfd`, including aggregate counters, per-peer diagnostics, convergence issues, and the last collection error.
+
 The server hello advertises the arca-router YANG module capability as `urn:arca:router:config:1.0?module=arca-router&revision=2025-12-27`.
 
 ### User Management

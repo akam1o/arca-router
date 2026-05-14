@@ -40,7 +40,7 @@ func TestBuildOperationalDataUsesRunningConfig(t *testing.T) {
 	}
 	cfg.Protocols = &config.ProtocolConfig{BGP: &config.BGPConfig{}}
 
-	data, err := buildOperationalData(cfg, nil, time.Date(2026, 5, 12, 4, 0, 0, 0, time.UTC), nil)
+	data, err := buildOperationalData(cfg, nil, time.Date(2026, 5, 12, 4, 0, 0, 0, time.UTC), nil, nil)
 	if err != nil {
 		t.Fatalf("buildOperationalData() error = %v", err)
 	}
@@ -91,7 +91,7 @@ func TestBuildOperationalDataUsesLiveInterfaceState(t *testing.T) {
 				},
 			},
 		},
-	})
+	}, nil)
 	if err != nil {
 		t.Fatalf("buildOperationalData() error = %v", err)
 	}
@@ -123,5 +123,76 @@ func TestBuildOperationalDataUsesLiveInterfaceState(t *testing.T) {
 		if !bytes.Contains(data, []byte(want)) {
 			t.Fatalf("operational data missing %q:\n%s", want, data)
 		}
+	}
+}
+
+func TestBuildOperationalDataWritesBFDState(t *testing.T) {
+	cfg := config.NewConfig()
+	data, err := buildOperationalData(cfg, nil, time.Date(2026, 5, 12, 4, 0, 0, 0, time.UTC), nil, &BFDOperationalState{
+		LastRun:           time.Date(2026, 5, 14, 6, 0, 0, 0, time.UTC),
+		ConfiguredPeers:   2,
+		ObservedPeers:     2,
+		UpPeers:           1,
+		DownPeers:         1,
+		SessionDownEvents: 3,
+		RxFailPackets:     4,
+		Issues:            []string{"FRR BFD peer 192.0.2.3 is down"},
+		LastError:         "read FRR BFD status failed",
+		Peers: []BFDPeerOperationalState{
+			{
+				Peer:              "192.0.2.3",
+				LocalAddress:      "192.0.2.1",
+				Interface:         "ge-0/0/1",
+				VRF:               "BLUE",
+				Status:            "down",
+				Diagnostic:        "control detection time expired",
+				RemoteDiagnostic:  "none",
+				Observed:          true,
+				Up:                false,
+				SessionDownEvents: 3,
+				RxFailPackets:     4,
+			},
+			{
+				Peer:      "192.0.2.2",
+				Interface: "ge-0/0/0",
+				Status:    "up",
+				Observed:  true,
+				Up:        true,
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("buildOperationalData() error = %v", err)
+	}
+
+	for _, want := range []string{
+		`<state xmlns="urn:arca:router:config:1.0">`,
+		"<bfd>",
+		"<last-run>2026-05-14T06:00:00Z</last-run>",
+		"<configured-peers>2</configured-peers>",
+		"<observed-peers>2</observed-peers>",
+		"<up-peers>1</up-peers>",
+		"<down-peers>1</down-peers>",
+		"<session-down-events>3</session-down-events>",
+		"<rx-fail-packets>4</rx-fail-packets>",
+		"<address>192.0.2.2</address>",
+		"<address>192.0.2.3</address>",
+		"<local-address>192.0.2.1</local-address>",
+		"<interface>ge-0/0/1</interface>",
+		"<vrf>BLUE</vrf>",
+		"<status>down</status>",
+		"<diagnostic>control detection time expired</diagnostic>",
+		"<remote-diagnostic>none</remote-diagnostic>",
+		"<observed>true</observed>",
+		"<up>false</up>",
+		"<issue>FRR BFD peer 192.0.2.3 is down</issue>",
+		"<last-error>read FRR BFD status failed</last-error>",
+	} {
+		if !bytes.Contains(data, []byte(want)) {
+			t.Fatalf("operational data missing %q:\n%s", want, data)
+		}
+	}
+	if bytes.Index(data, []byte("<address>192.0.2.2</address>")) > bytes.Index(data, []byte("<address>192.0.2.3</address>")) {
+		t.Fatalf("BFD peers are not sorted:\n%s", data)
 	}
 }

@@ -1,11 +1,16 @@
 package netconf
 
-import "context"
+import (
+	"context"
+	"time"
+)
 
 // OperationalStateProvider supplies live state for NETCONF <get> replies.
 type OperationalStateProvider interface {
 	// InterfaceStates returns interface state keyed by management-plane interface name.
 	InterfaceStates(ctx context.Context) (map[string]*InterfaceOperationalState, error)
+	// BFDStatus returns cached BFD protocol operational state.
+	BFDStatus(ctx context.Context) (*BFDOperationalState, error)
 }
 
 // InterfaceOperationalState is a transport-neutral interface state snapshot.
@@ -50,4 +55,33 @@ type InterfaceOperationalTxQueue struct {
 	QueueID uint32
 	Shared  bool
 	Threads []uint32
+}
+
+// BFDOperationalState holds cached BFD convergence and failure counters.
+type BFDOperationalState struct {
+	LastRun           time.Time
+	ConfiguredPeers   int
+	ObservedPeers     int
+	UpPeers           int
+	DownPeers         int
+	SessionDownEvents uint64
+	RxFailPackets     uint64
+	Peers             []BFDPeerOperationalState
+	Issues            []string
+	LastError         string
+}
+
+// BFDPeerOperationalState describes one BFD peer in operational output.
+type BFDPeerOperationalState struct {
+	Peer              string
+	LocalAddress      string
+	Interface         string
+	VRF               string
+	Status            string
+	Diagnostic        string
+	RemoteDiagnostic  string
+	Observed          bool
+	Up                bool
+	SessionDownEvents uint64
+	RxFailPackets     uint64
 }

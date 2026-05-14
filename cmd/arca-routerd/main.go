@@ -392,7 +392,7 @@ func run(ctx context.Context, f *daemonFlags, log *logger.Logger) error {
 			f,
 			datastoreConfig,
 			eng,
-			newNETCONFOperationalStateProvider(vppPlugin),
+			newNETCONFOperationalStateProvider(vppPlugin, frrPlugin),
 			log,
 			effectiveNETCONFListen(f.netconfListen, eng.RunningSnapshot()),
 		)

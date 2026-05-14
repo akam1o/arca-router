@@ -3,8 +3,10 @@ package main
 import (
 	"context"
 	"testing"
+	"time"
 
 	"github.com/akam1o/arca-router/internal/model"
+	sbfrr "github.com/akam1o/arca-router/internal/southbound/frr"
 )
 
 type fakeInterfaceStateCollector struct {
@@ -16,9 +18,17 @@ func (c fakeInterfaceStateCollector) CollectState(ctx context.Context) (map[stri
 	return c.states, c.err
 }
 
+type fakeNETCONFBFDStatusSource struct {
+	status sbfrr.BFDOperationalStatus
+}
+
+func (s fakeNETCONFBFDStatusSource) BFDOperationalStatus() sbfrr.BFDOperationalStatus {
+	return s.status
+}
+
 func TestNewNETCONFOperationalStateProviderNilCollector(t *testing.T) {
-	if provider := newNETCONFOperationalStateProvider(nil); provider != nil {
-		t.Fatalf("newNETCONFOperationalStateProvider(nil) = %#v, want nil", provider)
+	if provider := newNETCONFOperationalStateProvider(nil, nil); provider != nil {
+		t.Fatalf("newNETCONFOperationalStateProvider(nil, nil) = %#v, want nil", provider)
 	}
 }
 
@@ -52,7 +62,7 @@ func TestNETCONFOperationalStateProviderConvertsInterfaceState(t *testing.T) {
 				},
 			},
 		},
-	})
+	}, nil)
 
 	states, err := provider.InterfaceStates(context.Background())
 	if err != nil {
@@ -78,5 +88,54 @@ func TestNETCONFOperationalStateProviderConvertsInterfaceState(t *testing.T) {
 	}
 	if got := state.Queues.Tx[0]; got.QueueID != 0 || !got.Shared || len(got.Threads) != 2 || got.Threads[0] != 0 || got.Threads[1] != 2 {
 		t.Fatalf("tx queue = %#v", got)
+	}
+}
+
+func TestNETCONFOperationalStateProviderConvertsBFDStatus(t *testing.T) {
+	lastRun := time.Date(2026, 5, 14, 6, 0, 0, 0, time.UTC)
+	provider := newNETCONFOperationalStateProvider(nil, fakeNETCONFBFDStatusSource{status: sbfrr.BFDOperationalStatus{
+		LastRun:           lastRun,
+		ConfiguredPeers:   1,
+		ObservedPeers:     1,
+		UpPeers:           0,
+		DownPeers:         1,
+		SessionDownEvents: 2,
+		RxFailPackets:     3,
+		Issues:            []string{"peer down"},
+		LastError:         "last read failed",
+		Peers: []sbfrr.BFDPeerOperationalStatus{
+			{
+				Peer:              "192.0.2.2",
+				LocalAddress:      "192.0.2.1",
+				Interface:         "ge-0/0/0",
+				VRF:               "BLUE",
+				Status:            "down",
+				Diagnostic:        "control detection time expired",
+				RemoteDiagnostic:  "none",
+				Observed:          true,
+				Up:                false,
+				SessionDownEvents: 2,
+				RxFailPackets:     3,
+			},
+		},
+	}})
+
+	status, err := provider.BFDStatus(context.Background())
+	if err != nil {
+		t.Fatalf("BFDStatus() error = %v", err)
+	}
+	if status == nil {
+		t.Fatal("BFDStatus() = nil")
+	}
+	if !status.LastRun.Equal(lastRun) || status.ConfiguredPeers != 1 || status.DownPeers != 1 ||
+		status.SessionDownEvents != 2 || status.RxFailPackets != 3 || status.LastError != "last read failed" {
+		t.Fatalf("BFDStatus() = %#v, want converted aggregate state", status)
+	}
+	if len(status.Issues) != 1 || status.Issues[0] != "peer down" {
+		t.Fatalf("BFDStatus().Issues = %#v, want peer down", status.Issues)
+	}
+	if len(status.Peers) != 1 || status.Peers[0].Peer != "192.0.2.2" || status.Peers[0].VRF != "BLUE" ||
+		status.Peers[0].Status != "down" || status.Peers[0].SessionDownEvents != 2 || status.Peers[0].RxFailPackets != 3 {
+		t.Fatalf("BFDStatus().Peers = %#v, want converted peer state", status.Peers)
 	}
 }
