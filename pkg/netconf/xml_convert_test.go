@@ -179,6 +179,48 @@ func TestXMLBFDProtocolBindingsRoundTrip(t *testing.T) {
 	}
 }
 
+func TestXMLBFDStaticRouteRoundTrip(t *testing.T) {
+	cfg := &config.Config{
+		RoutingOptions: &config.RoutingOptions{
+			StaticRoutes: []*config.StaticRoute{
+				{
+					Prefix:      "203.0.113.0/24",
+					NextHop:     "192.0.2.2",
+					BFD:         true,
+					BFDProfile:  "fast",
+					BFDSource:   "192.0.2.1",
+					BFDMultihop: true,
+				},
+			},
+		},
+	}
+
+	xmlData, err := ConfigToXML(cfg, nil)
+	if err != nil {
+		t.Fatalf("ConfigToXML() error = %v", err)
+	}
+	xmlStr := string(xmlData)
+	for _, want := range []string{
+		"<bfd>true</bfd>",
+		"<bfd-profile>fast</bfd-profile>",
+		"<bfd-source>192.0.2.1</bfd-source>",
+		"<bfd-multihop>true</bfd-multihop>",
+	} {
+		if !strings.Contains(xmlStr, want) {
+			t.Fatalf("ConfigToXML() missing %q:\n%s", want, xmlStr)
+		}
+	}
+
+	roundTrip, err := XMLToConfig(xmlData, DefaultOpMerge)
+	if err != nil {
+		t.Fatalf("XMLToConfig() error = %v", err)
+	}
+	route := roundTrip.RoutingOptions.StaticRoutes[0]
+	if !route.BFD || route.BFDProfile != "fast" || route.BFDSource != "192.0.2.1" || !route.BFDMultihop {
+		t.Fatalf("Static route BFD = %#v, want source/profile/multihop", route)
+	}
+}
+
 func TestConfigToXMLMarshalsAsSingleDataReply(t *testing.T) {
 	cfg := &config.Config{
 		System:     &config.SystemConfig{HostName: "router1"},

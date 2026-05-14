@@ -68,7 +68,7 @@ func (c *Config) Validate() error {
 
 	// Validate routing options
 	if c.RoutingOptions != nil {
-		if err := c.RoutingOptions.Validate(); err != nil {
+		if err := c.RoutingOptions.validate(c); err != nil {
 			return err
 		}
 	}
@@ -449,6 +449,10 @@ func keys(m map[string]bool) []string {
 
 // Validate validates routing options configuration
 func (ro *RoutingOptions) Validate() error {
+	return ro.validate(nil)
+}
+
+func (ro *RoutingOptions) validate(cfg *Config) error {
 	if ro == nil {
 		return nil
 	}
@@ -489,7 +493,7 @@ func (ro *RoutingOptions) Validate() error {
 
 	// Validate static routes
 	for _, sr := range ro.StaticRoutes {
-		if err := validateStaticRoute(sr); err != nil {
+		if err := validateStaticRoute(cfg, sr); err != nil {
 			return err
 		}
 	}
@@ -498,7 +502,7 @@ func (ro *RoutingOptions) Validate() error {
 }
 
 // validateStaticRoute validates a static route
-func validateStaticRoute(sr *StaticRoute) error {
+func validateStaticRoute(cfg *Config, sr *StaticRoute) error {
 	if sr == nil {
 		return errors.New(
 			errors.ErrCodeConfigValidation,
@@ -518,7 +522,7 @@ func validateStaticRoute(sr *StaticRoute) error {
 		)
 	}
 
-	_, _, err := net.ParseCIDR(sr.Prefix)
+	_, prefixNet, err := net.ParseCIDR(sr.Prefix)
 	if err != nil {
 		return errors.New(
 			errors.ErrCodeConfigValidation,
@@ -538,12 +542,30 @@ func validateStaticRoute(sr *StaticRoute) error {
 		)
 	}
 
-	if net.ParseIP(sr.NextHop) == nil {
+	nextHopIP := net.ParseIP(sr.NextHop)
+	if nextHopIP == nil {
 		return errors.New(
 			errors.ErrCodeConfigValidation,
 			fmt.Sprintf("Invalid next-hop for static route %s: %s", sr.Prefix, sr.NextHop),
 			"Next-hop must be a valid IP address",
 			"Use a valid IPv4 or IPv6 address",
+		)
+	}
+
+	if prefixNet.IP.To4() == nil && nextHopIP.To4() != nil {
+		return errors.New(
+			errors.ErrCodeConfigValidation,
+			fmt.Sprintf("Static route %s has IPv4 next-hop for IPv6 prefix: %s", sr.Prefix, sr.NextHop),
+			"Static route next-hop family must match the prefix family",
+			"Use an IPv6 next-hop for IPv6 routes",
+		)
+	}
+	if prefixNet.IP.To4() != nil && nextHopIP.To4() == nil {
+		return errors.New(
+			errors.ErrCodeConfigValidation,
+			fmt.Sprintf("Static route %s has IPv6 next-hop for IPv4 prefix: %s", sr.Prefix, sr.NextHop),
+			"Static route next-hop family must match the prefix family",
+			"Use an IPv4 next-hop for IPv4 routes",
 		)
 	}
 
@@ -554,6 +576,47 @@ func validateStaticRoute(sr *StaticRoute) error {
 			fmt.Sprintf("Invalid distance for static route %s: %d", sr.Prefix, sr.Distance),
 			"Distance must be between 0 and 255",
 			"Use a valid distance value",
+		)
+	}
+
+	if sr.BFDProfile != "" {
+		if err := validateBFDProfileReference(cfg, fmt.Sprintf("Static route %s", sr.Prefix), sr.BFDProfile); err != nil {
+			return err
+		}
+	}
+	if sr.BFDSource != "" {
+		sourceIP := net.ParseIP(sr.BFDSource)
+		if sourceIP == nil {
+			return errors.New(
+				errors.ErrCodeConfigValidation,
+				fmt.Sprintf("Invalid BFD source for static route %s: %s", sr.Prefix, sr.BFDSource),
+				"BFD source must be a valid IP address",
+				"Use a valid IPv4 or IPv6 source address",
+			)
+		}
+		if (nextHopIP.To4() == nil) != (sourceIP.To4() == nil) {
+			return errors.New(
+				errors.ErrCodeConfigValidation,
+				fmt.Sprintf("Static route %s has BFD source family mismatch: %s", sr.Prefix, sr.BFDSource),
+				"BFD source address family must match the next-hop family",
+				"Use a BFD source address with the same IP family as the next-hop",
+			)
+		}
+	}
+	if (sr.BFDProfile != "" || sr.BFDSource != "" || sr.BFDMultihop) && !sr.BFD {
+		return errors.New(
+			errors.ErrCodeConfigValidation,
+			fmt.Sprintf("Static route %s has BFD options without BFD enabled", sr.Prefix),
+			"Static route BFD options require BFD to be enabled",
+			"Add 'bfd' before static route BFD options",
+		)
+	}
+	if sr.Distance > 0 && (sr.BFD || sr.BFDProfile != "" || sr.BFDSource != "" || sr.BFDMultihop) {
+		return errors.New(
+			errors.ErrCodeConfigValidation,
+			fmt.Sprintf("Static route %s combines distance with BFD", sr.Prefix),
+			"FRR static route BFD monitoring does not support administrative distance in the documented command form",
+			"Remove distance or BFD from this static route",
 		)
 	}
 

@@ -40,7 +40,19 @@ func GenerateStaticRouteConfig(routes []StaticRoute) (string, error) {
 			routeCmd = "ipv6 route"
 		}
 
-		if route.Distance > 0 {
+		if route.BFD || route.BFDProfile != "" || route.BFDSource != "" || route.BFDMultihop {
+			fmt.Fprintf(&b, "%s %s %s bfd", routeCmd, route.Prefix, route.NextHop)
+			if route.BFDMultihop {
+				b.WriteString(" multi-hop")
+			}
+			if route.BFDSource != "" {
+				fmt.Fprintf(&b, " source %s", route.BFDSource)
+			}
+			if route.BFDProfile != "" {
+				fmt.Fprintf(&b, " profile %s", route.BFDProfile)
+			}
+			b.WriteString("\n")
+		} else if route.Distance > 0 {
 			fmt.Fprintf(&b, "%s %s %s %d\n", routeCmd, route.Prefix, route.NextHop, route.Distance)
 		} else {
 			fmt.Fprintf(&b, "%s %s %s\n", routeCmd, route.Prefix, route.NextHop)
@@ -76,6 +88,25 @@ func validateStaticRoute(route *StaticRoute) error {
 	// Validate distance range (1-255 in FRR, 0 means default)
 	if route.Distance < 0 || route.Distance > 255 {
 		return NewInvalidConfigError(fmt.Sprintf("static route %s: invalid distance %d (must be 0-255)", route.Prefix, route.Distance))
+	}
+
+	if route.Distance > 0 && (route.BFD || route.BFDProfile != "" || route.BFDSource != "" || route.BFDMultihop) {
+		return NewInvalidConfigError(fmt.Sprintf("static route %s: distance is not supported with BFD monitoring", route.Prefix))
+	}
+
+	if route.BFDSource != "" {
+		sourceIP := net.ParseIP(route.BFDSource)
+		if sourceIP == nil {
+			return NewInvalidConfigError(fmt.Sprintf("static route %s: invalid BFD source IP: %s", route.Prefix, route.BFDSource))
+		}
+		nextHopIP := net.ParseIP(route.NextHop)
+		if (nextHopIP.To4() == nil) != (sourceIP.To4() == nil) {
+			return NewInvalidConfigError(fmt.Sprintf("static route %s: BFD source family does not match next-hop", route.Prefix))
+		}
+	}
+
+	if (route.BFDProfile != "" || route.BFDSource != "" || route.BFDMultihop) && !route.BFD {
+		return NewInvalidConfigError(fmt.Sprintf("static route %s: BFD options require BFD to be enabled", route.Prefix))
 	}
 
 	return nil

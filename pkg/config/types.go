@@ -192,6 +192,18 @@ type StaticRoute struct {
 
 	// Distance is the administrative distance (metric)
 	Distance int `json:"distance,omitempty"`
+
+	// BFD enables BFD monitoring for this static route
+	BFD bool `json:"bfd,omitempty"`
+
+	// BFDProfile selects the BFD profile for this static route
+	BFDProfile string `json:"bfd-profile,omitempty"`
+
+	// BFDSource selects the source address for the BFD session
+	BFDSource string `json:"bfd-source,omitempty"`
+
+	// BFDMultihop enables multihop BFD for this static route
+	BFDMultihop bool `json:"bfd-multihop,omitempty"`
 }
 
 // RoutingInstance represents a routing instance, initially focused on VRF/L3VPN.

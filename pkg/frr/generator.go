@@ -538,9 +538,13 @@ func convertStaticRoutes(arcaRoutes []*config.StaticRoute) ([]StaticRoute, error
 
 	for _, route := range arcaRoutes {
 		frrRoute := StaticRoute{
-			Prefix:   route.Prefix,
-			NextHop:  route.NextHop,
-			Distance: route.Distance,
+			Prefix:      route.Prefix,
+			NextHop:     route.NextHop,
+			Distance:    route.Distance,
+			BFD:         route.BFD,
+			BFDProfile:  route.BFDProfile,
+			BFDSource:   route.BFDSource,
+			BFDMultihop: route.BFDMultihop,
 		}
 
 		// Determine IPv4 or IPv6 from prefix

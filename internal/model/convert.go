@@ -98,9 +98,13 @@ func FromLegacyConfig(old *config.Config) *RouterConfig {
 		}
 		for _, sr := range old.RoutingOptions.StaticRoutes {
 			c.Routing.StaticRoutes = append(c.Routing.StaticRoutes, &StaticRoute{
-				Prefix:   sr.Prefix,
-				NextHop:  sr.NextHop,
-				Distance: sr.Distance,
+				Prefix:      sr.Prefix,
+				NextHop:     sr.NextHop,
+				Distance:    sr.Distance,
+				BFD:         sr.BFD,
+				BFDProfile:  sr.BFDProfile,
+				BFDSource:   sr.BFDSource,
+				BFDMultihop: sr.BFDMultihop,
 			})
 		}
 	}
@@ -446,9 +450,13 @@ func (c *RouterConfig) ToLegacyConfig() *config.Config {
 		}
 		for _, sr := range c.Routing.StaticRoutes {
 			old.RoutingOptions.StaticRoutes = append(old.RoutingOptions.StaticRoutes, &config.StaticRoute{
-				Prefix:   sr.Prefix,
-				NextHop:  sr.NextHop,
-				Distance: sr.Distance,
+				Prefix:      sr.Prefix,
+				NextHop:     sr.NextHop,
+				Distance:    sr.Distance,
+				BFD:         sr.BFD,
+				BFDProfile:  sr.BFDProfile,
+				BFDSource:   sr.BFDSource,
+				BFDMultihop: sr.BFDMultihop,
 			})
 		}
 	}

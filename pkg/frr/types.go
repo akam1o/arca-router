@@ -214,6 +214,18 @@ type StaticRoute struct {
 
 	// IsIPv6 indicates if this is an IPv6 route
 	IsIPv6 bool
+
+	// BFD enables BFD monitoring for this static route
+	BFD bool
+
+	// BFDProfile selects the BFD profile for this static route
+	BFDProfile string
+
+	// BFDSource selects the source address for the BFD session
+	BFDSource string
+
+	// BFDMultihop enables multihop BFD for this static route
+	BFDMultihop bool
 }
 
 // PrefixList represents an FRR prefix-list configuration.

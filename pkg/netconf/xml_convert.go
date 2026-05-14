@@ -377,6 +377,34 @@ func writeRoutingOptionsXML(buf *bytes.Buffer, ro *config.RoutingOptions) error 
 				fmt.Fprintf(buf, "        <distance>%d</distance>\n", route.Distance)
 			}
 
+			if route.BFD || route.BFDProfile != "" || route.BFDSource != "" || route.BFDMultihop {
+				buf.WriteString(`        <bfd>true</bfd>`)
+				buf.WriteString("\n")
+			}
+
+			if route.BFDProfile != "" {
+				buf.WriteString(`        <bfd-profile>`)
+				if err := xml.EscapeText(buf, []byte(route.BFDProfile)); err != nil {
+					return err
+				}
+				buf.WriteString(`</bfd-profile>`)
+				buf.WriteString("\n")
+			}
+
+			if route.BFDSource != "" {
+				buf.WriteString(`        <bfd-source>`)
+				if err := xml.EscapeText(buf, []byte(route.BFDSource)); err != nil {
+					return err
+				}
+				buf.WriteString(`</bfd-source>`)
+				buf.WriteString("\n")
+			}
+
+			if route.BFDMultihop {
+				buf.WriteString(`        <bfd-multihop>true</bfd-multihop>`)
+				buf.WriteString("\n")
+			}
+
 			buf.WriteString(`      </route>`)
 			buf.WriteString("\n")
 		}
@@ -1244,9 +1272,13 @@ func XMLToConfig(xmlData []byte, defaultOp DefaultOperation) (*config.Config, er
 			RouterID         string `xml:"router-id"`
 			AutonomousSystem uint32 `xml:"autonomous-system"`
 			StaticRoutes     []struct {
-				Prefix   string `xml:"prefix"`
-				NextHop  string `xml:"next-hop"`
-				Distance int    `xml:"distance"`
+				Prefix      string `xml:"prefix"`
+				NextHop     string `xml:"next-hop"`
+				Distance    int    `xml:"distance"`
+				BFD         bool   `xml:"bfd"`
+				BFDProfile  string `xml:"bfd-profile"`
+				BFDSource   string `xml:"bfd-source"`
+				BFDMultihop bool   `xml:"bfd-multihop"`
 			} `xml:"static-routes>route"`
 		} `xml:"routing"`
 		RoutingInstances []struct {
@@ -1416,9 +1448,13 @@ func XMLToConfig(xmlData []byte, defaultOp DefaultOperation) (*config.Config, er
 		for _, route := range root.Routing.StaticRoutes {
 			cfg.RoutingOptions.StaticRoutes = append(cfg.RoutingOptions.StaticRoutes,
 				&config.StaticRoute{
-					Prefix:   route.Prefix,
-					NextHop:  route.NextHop,
-					Distance: route.Distance,
+					Prefix:      route.Prefix,
+					NextHop:     route.NextHop,
+					Distance:    route.Distance,
+					BFD:         route.BFD || route.BFDProfile != "" || route.BFDSource != "" || route.BFDMultihop,
+					BFDProfile:  route.BFDProfile,
+					BFDSource:   route.BFDSource,
+					BFDMultihop: route.BFDMultihop,
 				})
 		}
 	}
@@ -1604,14 +1640,18 @@ var allowedConfigElementPaths = map[string]struct{}{
 	"config/interfaces/interface/unit/family/name":    {},
 	"config/interfaces/interface/unit/family/address": {},
 
-	"config/routing":                              {},
-	"config/routing/router-id":                    {},
-	"config/routing/autonomous-system":            {},
-	"config/routing/static-routes":                {},
-	"config/routing/static-routes/route":          {},
-	"config/routing/static-routes/route/prefix":   {},
-	"config/routing/static-routes/route/next-hop": {},
-	"config/routing/static-routes/route/distance": {},
+	"config/routing":                                  {},
+	"config/routing/router-id":                        {},
+	"config/routing/autonomous-system":                {},
+	"config/routing/static-routes":                    {},
+	"config/routing/static-routes/route":              {},
+	"config/routing/static-routes/route/prefix":       {},
+	"config/routing/static-routes/route/next-hop":     {},
+	"config/routing/static-routes/route/distance":     {},
+	"config/routing/static-routes/route/bfd":          {},
+	"config/routing/static-routes/route/bfd-profile":  {},
+	"config/routing/static-routes/route/bfd-source":   {},
+	"config/routing/static-routes/route/bfd-multihop": {},
 
 	"config/routing-instances":                              {},
 	"config/routing-instances/instance":                     {},
@@ -1742,11 +1782,15 @@ var configTextContentPaths = map[string]struct{}{
 	"config/interfaces/interface/unit/family/name":    {},
 	"config/interfaces/interface/unit/family/address": {},
 
-	"config/routing/router-id":                    {},
-	"config/routing/autonomous-system":            {},
-	"config/routing/static-routes/route/prefix":   {},
-	"config/routing/static-routes/route/next-hop": {},
-	"config/routing/static-routes/route/distance": {},
+	"config/routing/router-id":                        {},
+	"config/routing/autonomous-system":                {},
+	"config/routing/static-routes/route/prefix":       {},
+	"config/routing/static-routes/route/next-hop":     {},
+	"config/routing/static-routes/route/distance":     {},
+	"config/routing/static-routes/route/bfd":          {},
+	"config/routing/static-routes/route/bfd-profile":  {},
+	"config/routing/static-routes/route/bfd-source":   {},
+	"config/routing/static-routes/route/bfd-multihop": {},
 
 	"config/routing-instances/instance/name":                {},
 	"config/routing-instances/instance/instance-type":       {},
@@ -2539,6 +2583,18 @@ func countConfigElements(cfg *config.Config) int {
 				count += 3 // <route> + <prefix> + <next-hop>
 				if route.Distance > 0 {
 					count++ // <distance>
+				}
+				if route.BFD || route.BFDProfile != "" || route.BFDSource != "" || route.BFDMultihop {
+					count++ // <bfd>
+				}
+				if route.BFDProfile != "" {
+					count++ // <bfd-profile>
+				}
+				if route.BFDSource != "" {
+					count++ // <bfd-source>
+				}
+				if route.BFDMultihop {
+					count++ // <bfd-multihop>
 				}
 			}
 		}

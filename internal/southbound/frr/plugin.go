@@ -84,6 +84,9 @@ func (p *FRRPlugin) ValidateChanges(ctx context.Context, diff *engine.ConfigDiff
 	if p.mode == pkgfrr.BackendModeTransactional && diffHasBFDProtocolBindings(diff) {
 		return fmt.Errorf("BFD protocol bindings require FRR file backend until frr-bfdd management operations are implemented")
 	}
+	if p.mode == pkgfrr.BackendModeTransactional && diffHasStaticRouteBFD(diff) {
+		return fmt.Errorf("BFD static routes require FRR file backend until frr-bfdd management operations are implemented")
+	}
 	if p.mode == pkgfrr.BackendModeTransactional && diff.NewOSPF3 != nil {
 		return fmt.Errorf("OSPFv3 requires FRR file backend until core ospf6d YANG paths are available")
 	}
@@ -147,6 +150,35 @@ func ospfHasBFDProtocolBindings(cfg *model.OSPFConfig) bool {
 			if iface != nil && (iface.BFD || iface.BFDProfile != "") {
 				return true
 			}
+		}
+	}
+	return false
+}
+
+func diffHasStaticRouteBFD(diff *engine.ConfigDiff) bool {
+	if diff == nil {
+		return false
+	}
+	if routerConfigHasStaticRouteBFD(diff.NewConfig) {
+		return true
+	}
+	if diff.StaticRoutesChanged && (staticRoutesHaveBFD(diff.OldStaticRoutes) || staticRoutesHaveBFD(diff.NewStaticRoutes)) {
+		return true
+	}
+	return false
+}
+
+func routerConfigHasStaticRouteBFD(cfg *model.RouterConfig) bool {
+	if cfg == nil || cfg.Routing == nil {
+		return false
+	}
+	return staticRoutesHaveBFD(cfg.Routing.StaticRoutes)
+}
+
+func staticRoutesHaveBFD(routes []*model.StaticRoute) bool {
+	for _, route := range routes {
+		if route != nil && (route.BFD || route.BFDProfile != "" || route.BFDSource != "" || route.BFDMultihop) {
+			return true
 		}
 	}
 	return false

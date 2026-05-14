@@ -625,18 +625,51 @@ func (p *Parser) parseStaticRoute(ro *RoutingOptions) error {
 		NextHop: nextHop,
 	}
 
-	// Optional: distance
-	if p.current.Type == TokenWord && p.current.Value == "distance" {
-		p.nextToken()
-		if p.current.Type != TokenNumber {
-			return p.error("expected distance value")
+	for p.current.Type == TokenWord {
+		switch p.current.Value {
+		case "distance":
+			p.nextToken()
+			if p.current.Type != TokenNumber {
+				return p.error("expected distance value")
+			}
+			distance, err := strconv.Atoi(p.current.Value)
+			if err != nil {
+				return p.error(fmt.Sprintf("invalid distance value: %s", p.current.Value))
+			}
+			staticRoute.Distance = distance
+			p.nextToken()
+		case "bfd":
+			staticRoute.BFD = true
+			p.nextToken()
+		case "profile":
+			if !staticRoute.BFD {
+				return p.error("expected 'bfd' before static route BFD profile")
+			}
+			p.nextToken()
+			if p.current.Type != TokenWord && p.current.Type != TokenString {
+				return p.error("expected BFD profile name")
+			}
+			staticRoute.BFDProfile = p.current.Value
+			p.nextToken()
+		case "source":
+			if !staticRoute.BFD {
+				return p.error("expected 'bfd' before static route BFD source")
+			}
+			p.nextToken()
+			if p.current.Type != TokenWord {
+				return p.error("expected BFD source address")
+			}
+			staticRoute.BFDSource = p.current.Value
+			p.nextToken()
+		case "multi-hop", "multihop":
+			if !staticRoute.BFD {
+				return p.error("expected 'bfd' before static route BFD multi-hop")
+			}
+			staticRoute.BFDMultihop = true
+			p.nextToken()
+		default:
+			return p.error(fmt.Sprintf("unsupported static route parameter: %s", p.current.Value))
 		}
-		distance, err := strconv.Atoi(p.current.Value)
-		if err != nil {
-			return p.error(fmt.Sprintf("invalid distance value: %s", p.current.Value))
-		}
-		staticRoute.Distance = distance
-		p.nextToken()
 	}
 
 	// Check for duplicate prefix

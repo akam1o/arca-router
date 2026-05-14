@@ -213,9 +213,13 @@ type RoutingConfig struct {
 
 // StaticRoute represents a static route entry.
 type StaticRoute struct {
-	Prefix   string `json:"prefix"`
-	NextHop  string `json:"next-hop"`
-	Distance int    `json:"distance,omitempty"`
+	Prefix      string `json:"prefix"`
+	NextHop     string `json:"next-hop"`
+	Distance    int    `json:"distance,omitempty"`
+	BFD         bool   `json:"bfd,omitempty"`
+	BFDProfile  string `json:"bfd-profile,omitempty"`
+	BFDSource   string `json:"bfd-source,omitempty"`
+	BFDMultihop bool   `json:"bfd-multihop,omitempty"`
 }
 
 // RoutingInstance represents a routing instance, initially focused on VRF/L3VPN.

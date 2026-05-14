@@ -114,11 +114,36 @@ func (c *RouterConfig) validateRouting() error {
 		}
 	}
 	for _, route := range c.Routing.StaticRoutes {
-		if _, _, err := net.ParseCIDR(route.Prefix); err != nil {
+		_, prefixNet, err := net.ParseCIDR(route.Prefix)
+		if err != nil {
 			return fmt.Errorf("static route: invalid prefix %q: %w", route.Prefix, err)
 		}
-		if net.ParseIP(route.NextHop) == nil {
+		nextHopIP := net.ParseIP(route.NextHop)
+		if nextHopIP == nil {
 			return fmt.Errorf("static route %s: invalid next-hop %q", route.Prefix, route.NextHop)
+		}
+		if (prefixNet.IP.To4() == nil) != (nextHopIP.To4() == nil) {
+			return fmt.Errorf("static route %s: next-hop family does not match prefix", route.Prefix)
+		}
+		if route.BFDProfile != "" {
+			if err := c.validateBFDProfileReference(fmt.Sprintf("static route %s", route.Prefix), route.BFDProfile); err != nil {
+				return err
+			}
+		}
+		if route.BFDSource != "" {
+			sourceIP := net.ParseIP(route.BFDSource)
+			if sourceIP == nil {
+				return fmt.Errorf("static route %s: invalid BFD source %q", route.Prefix, route.BFDSource)
+			}
+			if (nextHopIP.To4() == nil) != (sourceIP.To4() == nil) {
+				return fmt.Errorf("static route %s: BFD source family does not match next-hop", route.Prefix)
+			}
+		}
+		if (route.BFDProfile != "" || route.BFDSource != "" || route.BFDMultihop) && !route.BFD {
+			return fmt.Errorf("static route %s: BFD options require BFD to be enabled", route.Prefix)
+		}
+		if route.Distance > 0 && (route.BFD || route.BFDProfile != "" || route.BFDSource != "" || route.BFDMultihop) {
+			return fmt.Errorf("static route %s: distance is not supported with BFD monitoring", route.Prefix)
 		}
 	}
 	return nil

@@ -198,6 +198,19 @@ func TestValidateChangesRejectsBFDProtocolBindingWithTransactionalBackend(t *tes
 	}
 }
 
+func TestValidateChangesRejectsBFDStaticRouteWithTransactionalBackend(t *testing.T) {
+	newCfg := model.NewRouterConfig()
+	newCfg.Routing = &model.RoutingConfig{StaticRoutes: []*model.StaticRoute{
+		{Prefix: "203.0.113.0/24", NextHop: "192.0.2.2", BFD: true, BFDProfile: "fast"},
+	}}
+	diff := engine.ComputeDiff(model.NewRouterConfig(), newCfg)
+
+	err := NewFRRPlugin(testLogger()).ValidateChanges(context.Background(), diff)
+	if err == nil || !strings.Contains(err.Error(), "BFD static routes require FRR file backend") {
+		t.Fatalf("ValidateChanges() error = %v, want BFD static route transactional rejection", err)
+	}
+}
+
 func TestValidateChangesAllowsOSPF3WithFileBackend(t *testing.T) {
 	newCfg := model.NewRouterConfig()
 	newCfg.Protocols = &model.ProtocolsConfig{
@@ -229,6 +242,19 @@ func TestValidateChangesAllowsBFDProtocolBindingWithFileBackend(t *testing.T) {
 			},
 		}},
 	}
+	diff := engine.ComputeDiff(model.NewRouterConfig(), newCfg)
+
+	err := NewFRRPluginWithApplyMode(testLogger(), pkgfrr.BackendModeFile).ValidateChanges(context.Background(), diff)
+	if err != nil {
+		t.Fatalf("ValidateChanges() error = %v, want nil", err)
+	}
+}
+
+func TestValidateChangesAllowsBFDStaticRouteWithFileBackend(t *testing.T) {
+	newCfg := model.NewRouterConfig()
+	newCfg.Routing = &model.RoutingConfig{StaticRoutes: []*model.StaticRoute{
+		{Prefix: "203.0.113.0/24", NextHop: "192.0.2.2", BFD: true, BFDProfile: "fast"},
+	}}
 	diff := engine.ComputeDiff(model.NewRouterConfig(), newCfg)
 
 	err := NewFRRPluginWithApplyMode(testLogger(), pkgfrr.BackendModeFile).ValidateChanges(context.Background(), diff)

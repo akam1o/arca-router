@@ -218,13 +218,23 @@ func writeRoutingOptions(b *strings.Builder, ro *RoutingOptions) {
 		if route == nil {
 			continue
 		}
+		line := fmt.Sprintf("set routing-options static route %s next-hop %s", route.Prefix, route.NextHop)
 		if route.Distance > 0 {
-			writeLine(b, "set routing-options static route %s next-hop %s distance %d",
-				route.Prefix, route.NextHop, route.Distance)
-		} else {
-			writeLine(b, "set routing-options static route %s next-hop %s",
-				route.Prefix, route.NextHop)
+			line += fmt.Sprintf(" distance %d", route.Distance)
 		}
+		if route.BFD || route.BFDProfile != "" || route.BFDSource != "" || route.BFDMultihop {
+			line += " bfd"
+			if route.BFDMultihop {
+				line += " multi-hop"
+			}
+			if route.BFDSource != "" {
+				line += fmt.Sprintf(" source %s", route.BFDSource)
+			}
+			if route.BFDProfile != "" {
+				line += fmt.Sprintf(" profile %s", EscapeValue(route.BFDProfile))
+			}
+		}
+		writeLine(b, "%s", line)
 	}
 }
 

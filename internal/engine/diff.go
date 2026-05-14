@@ -478,7 +478,9 @@ func staticRoutesEqual(a, b []*model.StaticRoute) bool {
 		return false
 	}
 	for i := range a {
-		if a[i].Prefix != b[i].Prefix || a[i].NextHop != b[i].NextHop || a[i].Distance != b[i].Distance {
+		if a[i].Prefix != b[i].Prefix || a[i].NextHop != b[i].NextHop || a[i].Distance != b[i].Distance ||
+			a[i].BFD != b[i].BFD || a[i].BFDProfile != b[i].BFDProfile || a[i].BFDSource != b[i].BFDSource ||
+			a[i].BFDMultihop != b[i].BFDMultihop {
 			return false
 		}
 	}

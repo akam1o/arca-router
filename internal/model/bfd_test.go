@@ -35,6 +35,18 @@ func TestBFDLegacyConversionRoundTrip(t *testing.T) {
 			},
 		}},
 	}
+	legacy.RoutingOptions = &config.RoutingOptions{
+		StaticRoutes: []*config.StaticRoute{
+			{
+				Prefix:      "203.0.113.0/24",
+				NextHop:     "192.0.2.2",
+				BFD:         true,
+				BFDProfile:  "fast",
+				BFDSource:   "192.0.2.1",
+				BFDMultihop: true,
+			},
+		},
+	}
 
 	modelCfg := FromLegacyConfig(legacy)
 	if modelCfg.Protocols == nil || modelCfg.Protocols.BFD == nil {
@@ -52,6 +64,10 @@ func TestBFDLegacyConversionRoundTrip(t *testing.T) {
 	}
 	if got := roundTrip.Protocols.OSPF.Areas["0.0.0.0"].Interfaces["ge-0/0/0"].BFDProfile; got != "fast" {
 		t.Fatalf("OSPF BFD profile = %q, want fast", got)
+	}
+	route := roundTrip.RoutingOptions.StaticRoutes[0]
+	if !route.BFD || route.BFDProfile != "fast" || route.BFDSource != "192.0.2.1" || !route.BFDMultihop {
+		t.Fatalf("Static route BFD = %#v, want profile/source/multihop", route)
 	}
 }
 

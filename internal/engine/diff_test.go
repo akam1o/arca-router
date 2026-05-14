@@ -176,3 +176,18 @@ func TestComputeDiffDetectsOSPFBFDBindingChanges(t *testing.T) {
 		t.Fatalf("OSPF BFD binding change not detected: %#v", diff)
 	}
 }
+
+func TestComputeDiffDetectsStaticRouteBFDChanges(t *testing.T) {
+	oldCfg := model.NewRouterConfig()
+	oldCfg.Routing = &model.RoutingConfig{StaticRoutes: []*model.StaticRoute{
+		{Prefix: "203.0.113.0/24", NextHop: "192.0.2.2"},
+	}}
+	newCfg := oldCfg.Clone()
+	newCfg.Routing.StaticRoutes[0].BFD = true
+	newCfg.Routing.StaticRoutes[0].BFDProfile = "fast"
+
+	diff := ComputeDiff(oldCfg, newCfg)
+	if !diff.StaticRoutesChanged {
+		t.Fatalf("Static route BFD change not detected: %#v", diff)
+	}
+}

@@ -257,12 +257,19 @@ set routing-options router-id 10.0.1.1
 **構文**:
 ```
 set routing-options static route <prefix> next-hop <ip-address> [distance <value>]
+set routing-options static route <prefix> next-hop <ip-address> bfd
+set routing-options static route <prefix> next-hop <ip-address> bfd source <ip-address>
+set routing-options static route <prefix> next-hop <ip-address> bfd profile <profile-name>
+set routing-options static route <prefix> next-hop <ip-address> bfd multi-hop
 ```
 
 **パラメータ**:
 - `<prefix>`: 宛先プレフィックス（CIDR）
 - `<ip-address>`: 次ホップ IP アドレス
 - `<value>`: 任意の administrative distance（1-255、デフォルト: 1）
+- `<profile-name>`: `protocols bfd profile` 配下に定義済みの profile 名
+
+**注**: FRR の static route BFD command は administrative distance 付きの形式を持たないため、`distance` と `bfd` は同時に指定できません。
 
 **例**:
 ```
@@ -271,6 +278,9 @@ set routing-options static route 0.0.0.0/0 next-hop 10.0.1.254
 
 # Specific route with custom distance
 set routing-options static route 192.168.100.0/24 next-hop 192.168.1.254 distance 10
+
+# BFD monitored static route
+set routing-options static route 203.0.113.0/24 next-hop 192.0.2.2 bfd source 192.0.2.1 profile fast
 ```
 
 ---
@@ -427,6 +437,10 @@ set protocols ospf area <area-id> interface <interface-name> bfd
 set protocols ospf area <area-id> interface <interface-name> bfd profile <profile-name>
 set protocols ospf3 area <area-id> interface <interface-name> bfd
 set protocols ospf3 area <area-id> interface <interface-name> bfd profile <profile-name>
+set routing-options static route <prefix> next-hop <ip-address> bfd
+set routing-options static route <prefix> next-hop <ip-address> bfd source <ip-address>
+set routing-options static route <prefix> next-hop <ip-address> bfd profile <profile-name>
+set routing-options static route <prefix> next-hop <ip-address> bfd multi-hop
 ```
 
 **パラメータ**:
@@ -447,9 +461,10 @@ set protocols bfd peer 192.0.2.2 profile fast
 set protocols bgp group EBGP neighbor 192.0.2.2 bfd profile fast
 set protocols ospf area 0.0.0.0 interface ge-0/0/0 bfd profile fast
 set protocols ospf3 area 0.0.0.0 interface ge-0/0/0 bfd profile fast
+set routing-options static route 203.0.113.0/24 next-hop 192.0.2.2 bfd source 192.0.2.1 profile fast
 ```
 
-BFD peer/profile と BGP/OSPF/OSPFv3 binding は parser、serializer、validation、internal model、diff、NETCONF XML/YANG、FRR file backend に対応します。BFD の FRR transactional backend は `frr-bfdd` management operation mapping が実装されるまで未対応のため、BFD を適用する場合は `--frr-apply-mode=file` を使用します。
+BFD peer/profile、BGP/OSPF/OSPFv3 binding、static route BFD monitoring は parser、serializer、validation、internal model、diff、NETCONF XML/YANG、FRR file backend に対応します。BFD の FRR transactional backend は `frr-bfdd` management operation mapping が実装されるまで未対応のため、BFD を適用する場合は `--frr-apply-mode=file` を使用します。
 
 ### スタティックルート
 
@@ -1036,7 +1051,7 @@ set security rate-limit per-user 20
 
 標準 backend は `transactional` です。FRR 側で `/etc/frr/daemons` の `mgmtd=yes` と、`arca-router` service user からの `vtysh` access（通常は `frrvty` group）が必要です。
 
-arca-router 標準の FRR daemon set は `bgpd`、`ospfd`、`zebra`、`staticd`、`mgmtd`、`vrrpd`、`bfdd` です。transactional backend は FRR の interface tree 配下にある `frr-vrrpd` YANG model を使って VRRP を適用します。BFD peer/profile と BGP/OSPF/OSPFv3 binding は `frr-bfdd` management operation mapping が実装されるまで `file` backend で適用します。`file` backend は full FRR config を書き出し、`frr-reload.py` で適用します。復旧・互換用途として保持しており、利用する場合は service user が `/etc/frr/frr.conf` に書き込むための追加権限が必要です。
+arca-router 標準の FRR daemon set は `bgpd`、`ospfd`、`zebra`、`staticd`、`mgmtd`、`vrrpd`、`bfdd` です。transactional backend は FRR の interface tree 配下にある `frr-vrrpd` YANG model を使って VRRP を適用します。BFD peer/profile、BGP/OSPF/OSPFv3 binding、static route BFD monitoring は `frr-bfdd` management operation mapping が実装されるまで `file` backend で適用します。`file` backend は full FRR config を書き出し、`frr-reload.py` で適用します。復旧・互換用途として保持しており、利用する場合は service user が `/etc/frr/frr.conf` に書き込むための追加権限が必要です。
 
 ### Prometheus と health
 

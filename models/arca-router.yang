@@ -181,6 +181,28 @@ module arca-router {
           default 1;
           description "Administrative distance (metric)";
         }
+
+        leaf bfd {
+          type boolean;
+          default false;
+          description "Enable BFD monitoring for this static route";
+        }
+
+        leaf bfd-profile {
+          type string;
+          description "BFD profile used by this static route";
+        }
+
+        leaf bfd-source {
+          type string;
+          description "Source address used by the static route BFD session";
+        }
+
+        leaf bfd-multihop {
+          type boolean;
+          default false;
+          description "Enable multihop BFD for this static route";
+        }
       }
     }
   }
