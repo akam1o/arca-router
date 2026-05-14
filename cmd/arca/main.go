@@ -95,12 +95,13 @@ Show subcommands:
   interfaces <name>           Show specific interface details
   bgp summary                 Show BGP summary
   bgp neighbor <ip>           Show BGP neighbor details
-  ospf neighbor               Show OSPF neighbors
+  ospf neighbor               Show OSPFv2 neighbors
+  ospf3 neighbor              Show OSPFv3 neighbors
   vrrp                        Show VRRP status
   bfd [brief|counters]        Show BFD status
   bfd peer <ip> [counters]    Show BFD peer details
-  route                       Show routing table
-  route protocol <proto>      Show routes by protocol
+  route [inet|inet6]                 Show routing table
+  route [inet|inet6] protocol <proto> Show routes by protocol
 
 Options:
   -socket <path>     arca-routerd gRPC socket (default: %s)
@@ -237,12 +238,20 @@ func oneShotShow(ctx context.Context, client showClient, args []string, f *cliFl
 			return ExitUsageError
 		}
 
-	case "ospf":
+	case "ospf", "ospf3":
 		if len(args) < 2 || args[1] != "neighbor" {
-			fmt.Fprintf(os.Stderr, "Error: 'show ospf' requires 'neighbor' subcommand\n")
+			fmt.Fprintf(os.Stderr, "Error: 'show %s' requires 'neighbor' subcommand\n", subcmd)
 			return ExitUsageError
 		}
-		output, err := client.GetOSPFNeighborsText(ctx)
+		if len(args) > 2 {
+			fmt.Fprintf(os.Stderr, "Error: 'show %s neighbor' does not accept extra arguments\n", subcmd)
+			return ExitUsageError
+		}
+		addressFamily := routeAddressFamilyIPv4
+		if subcmd == "ospf3" {
+			addressFamily = routeAddressFamilyIPv6
+		}
+		output, err := client.GetOSPFNeighborsText(ctx, addressFamily)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 			return ExitOperationError
@@ -301,12 +310,12 @@ func oneShotShow(ctx context.Context, client showClient, args []string, f *cliFl
 		return ExitSuccess
 
 	case "route":
-		protoFilter, err := routeProtocolFilter(args[1:])
+		protoFilter, addressFamily, err := routeTextOptions(args[1:])
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 			return ExitUsageError
 		}
-		output, err := client.GetRouteText(ctx, protoFilter)
+		output, err := client.GetRouteText(ctx, protoFilter, addressFamily)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 			return ExitOperationError
@@ -352,10 +361,10 @@ type interactiveClient interface {
 type showClient interface {
 	GetRunning(context.Context) (string, uint64, error)
 	GetInterfaces(context.Context, string) ([]grpcclient.InterfaceInfo, error)
-	GetRouteText(context.Context, string) (string, error)
+	GetRouteText(context.Context, string, string) (string, error)
 	GetBGPSummaryText(context.Context) (string, error)
 	GetBGPNeighborText(context.Context, string) (string, error)
-	GetOSPFNeighborsText(context.Context) (string, error)
+	GetOSPFNeighborsText(context.Context, string) (string, error)
 	GetVRRPText(context.Context) (string, error)
 	GetBFDText(context.Context, string, bool, bool) (string, error)
 	GetLCPReconciliation(context.Context) (*grpcclient.LCPReconciliationInfo, error)
@@ -686,14 +695,21 @@ func (sh *interactiveShell) cmdShow(ctx context.Context, args []string) error {
 			return fmt.Errorf("unknown bgp subcommand '%s'", args[1])
 		}
 
-	case "ospf":
+	case "ospf", "ospf3":
 		if sh.mode == modeConfiguration {
-			return fmt.Errorf("'show ospf' not available in configuration mode")
+			return fmt.Errorf("'show %s' not available in configuration mode", subcmd)
 		}
 		if len(args) < 2 || args[1] != "neighbor" {
-			return fmt.Errorf("'show ospf' requires 'neighbor' subcommand")
+			return fmt.Errorf("'show %s' requires 'neighbor' subcommand", subcmd)
 		}
-		output, err := sh.client.GetOSPFNeighborsText(ctx)
+		if len(args) > 2 {
+			return fmt.Errorf("'show %s neighbor' does not accept extra arguments", subcmd)
+		}
+		addressFamily := routeAddressFamilyIPv4
+		if subcmd == "ospf3" {
+			addressFamily = routeAddressFamilyIPv6
+		}
+		output, err := sh.client.GetOSPFNeighborsText(ctx, addressFamily)
 		if err != nil {
 			return err
 		}
@@ -763,11 +779,11 @@ func (sh *interactiveShell) cmdShow(ctx context.Context, args []string) error {
 		if sh.mode == modeConfiguration {
 			return fmt.Errorf("'show route' not available in configuration mode")
 		}
-		protoFilter, err := routeProtocolFilter(args[1:])
+		protoFilter, addressFamily, err := routeTextOptions(args[1:])
 		if err != nil {
 			return err
 		}
-		output, err := sh.client.GetRouteText(ctx, protoFilter)
+		output, err := sh.client.GetRouteText(ctx, protoFilter, addressFamily)
 		if err != nil {
 			return err
 		}
@@ -975,15 +991,16 @@ func (sh *interactiveShell) showHelp() {
 		fmt.Println("  show interfaces [<name>]      Show interface status")
 		fmt.Println("  show bgp summary              Show BGP summary")
 		fmt.Println("  show bgp neighbor <ip>        Show BGP neighbor details")
-		fmt.Println("  show ospf neighbor            Show OSPF neighbors")
+		fmt.Println("  show ospf neighbor            Show OSPFv2 neighbors")
+		fmt.Println("  show ospf3 neighbor           Show OSPFv3 neighbors")
 		fmt.Println("  show vrrp                     Show VRRP status")
 		fmt.Println("  show bfd [brief|counters]     Show BFD status")
 		fmt.Println("  show bfd peer <ip> [counters] Show BFD peer details")
 		fmt.Println("  show lcp                      Show VPP LCP reconciliation status")
 		fmt.Println("  show ha                       Show HA convergence status")
 		fmt.Println("  show class-of-service         Show class-of-service intent")
-		fmt.Println("  show route                    Show routing table")
-		fmt.Println("  show route protocol <proto>   Show routes by protocol")
+		fmt.Println("  show route [inet|inet6]                 Show routing table")
+		fmt.Println("  show route [inet|inet6] protocol <proto> Show routes by protocol")
 		fmt.Println("  exit, quit                    Exit interactive CLI")
 	} else {
 		fmt.Println("Configuration mode commands:")
@@ -1231,24 +1248,29 @@ func printCommandOutput(output string) {
 	}
 }
 
-func routeProtocolFilter(args []string) (string, error) {
+func routeTextOptions(args []string) (protocol, addressFamily string, err error) {
+	addressFamily = routeAddressFamilyIPv4
+	if len(args) > 0 && isRouteAddressFamily(args[0]) {
+		addressFamily = args[0]
+		args = args[1:]
+	}
 	if len(args) == 0 {
-		return "", nil
+		return "", addressFamily, nil
 	}
 	if args[0] != "protocol" {
-		return "", fmt.Errorf("'show route' accepts 'protocol <proto>' or no arguments")
+		return "", "", fmt.Errorf("'show route' accepts '[inet|inet6] protocol <proto>' or no arguments")
 	}
 	if len(args) < 2 {
-		return "", fmt.Errorf("'protocol' requires a protocol name")
+		return "", "", fmt.Errorf("'protocol' requires a protocol name")
 	}
 	if len(args) > 2 {
-		return "", fmt.Errorf("'show route protocol' does not accept extra arguments")
+		return "", "", fmt.Errorf("'show route protocol' does not accept extra arguments")
 	}
-	protocol := args[1]
-	if !validRouteProtocols[protocol] {
-		return "", fmt.Errorf("invalid protocol '%s'. Valid: bgp, ospf, static, connected, kernel", protocol)
+	protocol = args[1]
+	if !validRouteProtocol(protocol, addressFamily) {
+		return "", "", fmt.Errorf("invalid protocol '%s' for %s. Valid: %s", protocol, addressFamily, validRouteProtocolList(addressFamily))
 	}
-	return protocol, nil
+	return protocol, addressFamily, nil
 }
 
 func bfdTextOptions(args []string) (peerAddress string, brief bool, counters bool, err error) {
@@ -1282,12 +1304,44 @@ func bfdTextOptions(args []string) (peerAddress string, brief bool, counters boo
 	}
 }
 
-var validRouteProtocols = map[string]bool{
+const (
+	routeAddressFamilyIPv4 = "inet"
+	routeAddressFamilyIPv6 = "inet6"
+)
+
+var validIPv4RouteProtocols = map[string]bool{
 	"bgp":       true,
 	"ospf":      true,
 	"static":    true,
 	"connected": true,
 	"kernel":    true,
+}
+
+var validIPv6RouteProtocols = map[string]bool{
+	"bgp":       true,
+	"ospf3":     true,
+	"ospf6":     true,
+	"static":    true,
+	"connected": true,
+	"kernel":    true,
+}
+
+func isRouteAddressFamily(value string) bool {
+	return value == routeAddressFamilyIPv4 || value == routeAddressFamilyIPv6
+}
+
+func validRouteProtocol(protocol, addressFamily string) bool {
+	if addressFamily == routeAddressFamilyIPv6 {
+		return validIPv6RouteProtocols[protocol]
+	}
+	return validIPv4RouteProtocols[protocol]
+}
+
+func validRouteProtocolList(addressFamily string) string {
+	if addressFamily == routeAddressFamilyIPv6 {
+		return "bgp, ospf3, ospf6, static, connected, kernel"
+	}
+	return "bgp, ospf, static, connected, kernel"
 }
 
 // --- Utilities ---

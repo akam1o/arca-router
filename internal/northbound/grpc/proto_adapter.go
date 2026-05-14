@@ -224,7 +224,7 @@ func (a *stateServiceAdapter) GetBGPNeighbors(ctx context.Context, _ *apiv1.GetB
 }
 
 func (a *stateServiceAdapter) GetRouteText(ctx context.Context, req *apiv1.GetRouteTextRequest) (*apiv1.GetRouteTextResponse, error) {
-	output, err := a.server.GetRouteText(ctx, req.GetProtocolFilter())
+	output, err := a.server.GetRouteText(ctx, req.GetProtocolFilter(), req.GetAddressFamily())
 	if err != nil {
 		return nil, err
 	}
@@ -247,8 +247,8 @@ func (a *stateServiceAdapter) GetBGPNeighborText(ctx context.Context, req *apiv1
 	return &apiv1.GetBGPNeighborTextResponse{Output: output}, nil
 }
 
-func (a *stateServiceAdapter) GetOSPFNeighborsText(ctx context.Context, _ *apiv1.GetOSPFNeighborsTextRequest) (*apiv1.GetOSPFNeighborsTextResponse, error) {
-	output, err := a.server.GetOSPFNeighborsText(ctx)
+func (a *stateServiceAdapter) GetOSPFNeighborsText(ctx context.Context, req *apiv1.GetOSPFNeighborsTextRequest) (*apiv1.GetOSPFNeighborsTextResponse, error) {
+	output, err := a.server.GetOSPFNeighborsText(ctx, req.GetAddressFamily())
 	if err != nil {
 		return nil, err
 	}

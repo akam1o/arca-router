@@ -285,8 +285,11 @@ func TestOperationalStateEndpointsReadVPPAndFRR(t *testing.T) {
 	}
 	t.Cleanup(func() { runOperationalVtyshCommand = oldVtysh })
 
-	if output, err := srv.GetRouteText(ctx, "ospf"); err != nil || output != "show ip route ospf\n" {
+	if output, err := srv.GetRouteText(ctx, "ospf", ""); err != nil || output != "show ip route ospf\n" {
 		t.Fatalf("GetRouteText() = %q, %v", output, err)
+	}
+	if output, err := srv.GetRouteText(ctx, "ospf3", "inet6"); err != nil || output != "show ipv6 route ospf6\n" {
+		t.Fatalf("GetRouteText(inet6) = %q, %v", output, err)
 	}
 	if output, err := srv.GetBGPSummaryText(ctx); err != nil || output != "show bgp summary\n" {
 		t.Fatalf("GetBGPSummaryText() = %q, %v", output, err)
@@ -294,8 +297,11 @@ func TestOperationalStateEndpointsReadVPPAndFRR(t *testing.T) {
 	if output, err := srv.GetBGPNeighborText(ctx, "192.0.2.1"); err != nil || output != "show bgp neighbor 192.0.2.1\n" {
 		t.Fatalf("GetBGPNeighborText() = %q, %v", output, err)
 	}
-	if output, err := srv.GetOSPFNeighborsText(ctx); err != nil || output != "show ip ospf neighbor\n" {
+	if output, err := srv.GetOSPFNeighborsText(ctx, ""); err != nil || output != "show ip ospf neighbor\n" {
 		t.Fatalf("GetOSPFNeighborsText() = %q, %v", output, err)
+	}
+	if output, err := srv.GetOSPFNeighborsText(ctx, "inet6"); err != nil || output != "show ipv6 ospf6 neighbor\n" {
+		t.Fatalf("GetOSPFNeighborsText(inet6) = %q, %v", output, err)
 	}
 	if output, err := srv.GetVRRPText(ctx); err != nil || output != "show vrrp\n" {
 		t.Fatalf("GetVRRPText() = %q, %v", output, err)
@@ -306,11 +312,17 @@ func TestOperationalStateEndpointsReadVPPAndFRR(t *testing.T) {
 	if output, err := srv.GetBFDText(ctx, "192.0.2.2", false, true); err != nil || output != "show bfd peer 192.0.2.2 counters\n" {
 		t.Fatalf("GetBFDText(peer counters) = %q, %v", output, err)
 	}
-	if len(commands) != 7 {
-		t.Fatalf("vtysh commands = %v, want 7 commands", commands)
+	if len(commands) != 9 {
+		t.Fatalf("vtysh commands = %v, want 9 commands", commands)
 	}
-	if _, err := srv.GetRouteText(ctx, "rip"); err == nil || !strings.Contains(err.Error(), "invalid route protocol") {
+	if _, err := srv.GetRouteText(ctx, "rip", ""); err == nil || !strings.Contains(err.Error(), "invalid route protocol") {
 		t.Fatalf("GetRouteText(invalid) error = %v, want invalid protocol", err)
+	}
+	if _, err := srv.GetRouteText(ctx, "ospf", "inet6"); err == nil || !strings.Contains(err.Error(), "invalid route protocol") {
+		t.Fatalf("GetRouteText(invalid inet6) error = %v, want invalid protocol", err)
+	}
+	if _, err := srv.GetOSPFNeighborsText(ctx, "link-state"); err == nil || !strings.Contains(err.Error(), "invalid address family") {
+		t.Fatalf("GetOSPFNeighborsText(invalid family) error = %v, want invalid address family", err)
 	}
 	if _, err := srv.GetBGPNeighborText(ctx, "not-an-address"); err == nil || !strings.Contains(err.Error(), "invalid BGP neighbor address") {
 		t.Fatalf("GetBGPNeighborText(invalid) error = %v, want invalid peer address", err)

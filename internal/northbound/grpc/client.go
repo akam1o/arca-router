@@ -250,10 +250,13 @@ func (c *Client) GetBGPNeighbors(ctx context.Context) ([]BGPNeighborInfo, error)
 }
 
 // GetRouteText returns FRR routing table output.
-func (c *Client) GetRouteText(ctx context.Context, protoFilter string) (string, error) {
+func (c *Client) GetRouteText(ctx context.Context, protoFilter, addressFamily string) (string, error) {
 	ctx, cancel := contextWithDefaultTimeout(ctx)
 	defer cancel()
-	resp, err := c.state.GetRouteText(ctx, &apiv1.GetRouteTextRequest{ProtocolFilter: protoFilter})
+	resp, err := c.state.GetRouteText(ctx, &apiv1.GetRouteTextRequest{
+		ProtocolFilter: protoFilter,
+		AddressFamily:  addressFamily,
+	})
 	if err != nil {
 		return "", err
 	}
@@ -283,10 +286,10 @@ func (c *Client) GetBGPNeighborText(ctx context.Context, peerAddress string) (st
 }
 
 // GetOSPFNeighborsText returns FRR OSPF neighbor output.
-func (c *Client) GetOSPFNeighborsText(ctx context.Context) (string, error) {
+func (c *Client) GetOSPFNeighborsText(ctx context.Context, addressFamily string) (string, error) {
 	ctx, cancel := contextWithDefaultTimeout(ctx)
 	defer cancel()
-	resp, err := c.state.GetOSPFNeighborsText(ctx, &apiv1.GetOSPFNeighborsTextRequest{})
+	resp, err := c.state.GetOSPFNeighborsText(ctx, &apiv1.GetOSPFNeighborsTextRequest{AddressFamily: addressFamily})
 	if err != nil {
 		return "", err
 	}

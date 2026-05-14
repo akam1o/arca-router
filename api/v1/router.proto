@@ -283,6 +283,7 @@ message BGPNeighborState {
 
 message GetRouteTextRequest {
   string protocol_filter = 1;
+  string address_family = 2;
 }
 
 message GetRouteTextResponse {
@@ -303,7 +304,9 @@ message GetBGPNeighborTextResponse {
   string output = 1;
 }
 
-message GetOSPFNeighborsTextRequest {}
+message GetOSPFNeighborsTextRequest {
+  string address_family = 1;
+}
 
 message GetOSPFNeighborsTextResponse {
   string output = 1;

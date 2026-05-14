@@ -232,8 +232,10 @@ arca show configuration
 # Check managed interface state, counters, QoS profile, and queue placement through arca-routerd
 arca show interfaces
 arca show route
+arca show route inet6
 arca show bgp summary
 arca show ospf neighbor
+arca show ospf3 neighbor
 arca show vrrp
 arca show bfd
 arca show bfd counters

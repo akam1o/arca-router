@@ -16,9 +16,12 @@ type fakeInteractiveClient struct {
 	releaseLockErr  error
 	history         []grpcclient.CommitInfo
 	routeText       string
+	routeProtocol   string
+	routeFamily     string
 	bgpSummaryText  string
 	bgpNeighborText string
 	ospfText        string
+	ospfFamily      string
 	vrrpText        string
 	bfdText         string
 	bfdPeerAddress  string
@@ -102,7 +105,9 @@ func (f *fakeInteractiveClient) GetBGPNeighbors(ctx context.Context) ([]grpcclie
 	return nil, nil
 }
 
-func (f *fakeInteractiveClient) GetRouteText(ctx context.Context, protoFilter string) (string, error) {
+func (f *fakeInteractiveClient) GetRouteText(ctx context.Context, protoFilter, addressFamily string) (string, error) {
+	f.routeProtocol = protoFilter
+	f.routeFamily = addressFamily
 	if f.routeText == "" {
 		return "route output\n", nil
 	}
@@ -123,7 +128,8 @@ func (f *fakeInteractiveClient) GetBGPNeighborText(ctx context.Context, peerAddr
 	return f.bgpNeighborText, nil
 }
 
-func (f *fakeInteractiveClient) GetOSPFNeighborsText(ctx context.Context) (string, error) {
+func (f *fakeInteractiveClient) GetOSPFNeighborsText(ctx context.Context, addressFamily string) (string, error) {
+	f.ospfFamily = addressFamily
 	if f.ospfText == "" {
 		return "ospf neighbor output\n", nil
 	}
@@ -382,6 +388,28 @@ func TestCmdShowOSPFNeighborReturnsOutput(t *testing.T) {
 	if err != nil {
 		t.Fatalf("cmdShow(ospf neighbor) error = %v", err)
 	}
+	if client.ospfFamily != routeAddressFamilyIPv4 {
+		t.Fatalf("OSPF address family = %q, want %q", client.ospfFamily, routeAddressFamilyIPv4)
+	}
+}
+
+func TestCmdShowOSPF3NeighborReturnsOutput(t *testing.T) {
+	ctx := context.Background()
+	client := &fakeInteractiveClient{}
+	sh := &interactiveShell{
+		client:    client,
+		hostname:  "router",
+		mode:      modeOperational,
+		sessionID: "session-1",
+	}
+
+	err := sh.cmdShow(ctx, []string{"ospf3", "neighbor"})
+	if err != nil {
+		t.Fatalf("cmdShow(ospf3 neighbor) error = %v", err)
+	}
+	if client.ospfFamily != routeAddressFamilyIPv6 {
+		t.Fatalf("OSPF3 address family = %q, want %q", client.ospfFamily, routeAddressFamilyIPv6)
+	}
 }
 
 func TestCmdShowVRRPReturnsOutput(t *testing.T) {
@@ -510,6 +538,31 @@ func TestOneShotShowOSPFNeighborReturnsSuccess(t *testing.T) {
 	if code != ExitSuccess {
 		t.Fatalf("oneShotShow(ospf neighbor) = %d, want %d", code, ExitSuccess)
 	}
+	if client.ospfFamily != routeAddressFamilyIPv4 {
+		t.Fatalf("OSPF address family = %q, want %q", client.ospfFamily, routeAddressFamilyIPv4)
+	}
+}
+
+func TestOneShotShowOSPF3NeighborReturnsSuccess(t *testing.T) {
+	client := &fakeInteractiveClient{}
+	code := oneShotShow(context.Background(), client, []string{"ospf3", "neighbor"}, &cliFlags{})
+	if code != ExitSuccess {
+		t.Fatalf("oneShotShow(ospf3 neighbor) = %d, want %d", code, ExitSuccess)
+	}
+	if client.ospfFamily != routeAddressFamilyIPv6 {
+		t.Fatalf("OSPF3 address family = %q, want %q", client.ospfFamily, routeAddressFamilyIPv6)
+	}
+}
+
+func TestOneShotShowRouteInet6ProtocolReturnsSuccess(t *testing.T) {
+	client := &fakeInteractiveClient{}
+	code := oneShotShow(context.Background(), client, []string{"route", "inet6", "protocol", "ospf3"}, &cliFlags{})
+	if code != ExitSuccess {
+		t.Fatalf("oneShotShow(route inet6 protocol ospf3) = %d, want %d", code, ExitSuccess)
+	}
+	if client.routeFamily != routeAddressFamilyIPv6 || client.routeProtocol != "ospf3" {
+		t.Fatalf("route options = family %q protocol %q, want inet6/ospf3", client.routeFamily, client.routeProtocol)
+	}
 }
 
 func TestOneShotShowVRRPReturnsSuccess(t *testing.T) {
@@ -552,6 +605,43 @@ func TestOneShotShowClassOfServiceReturnsSuccess(t *testing.T) {
 	code := oneShotShow(context.Background(), client, []string{"class-of-service"}, &cliFlags{})
 	if code != ExitSuccess {
 		t.Fatalf("oneShotShow(class-of-service) = %d, want %d", code, ExitSuccess)
+	}
+}
+
+func TestRouteTextOptions(t *testing.T) {
+	tests := []struct {
+		name       string
+		args       []string
+		wantProto  string
+		wantFamily string
+		wantErr    bool
+	}{
+		{name: "default", wantFamily: routeAddressFamilyIPv4},
+		{name: "inet", args: []string{"inet"}, wantFamily: routeAddressFamilyIPv4},
+		{name: "inet6", args: []string{"inet6"}, wantFamily: routeAddressFamilyIPv6},
+		{name: "ipv4 protocol", args: []string{"protocol", "ospf"}, wantProto: "ospf", wantFamily: routeAddressFamilyIPv4},
+		{name: "ipv6 protocol", args: []string{"inet6", "protocol", "ospf3"}, wantProto: "ospf3", wantFamily: routeAddressFamilyIPv6},
+		{name: "unknown address family", args: []string{"ipv6"}, wantErr: true},
+		{name: "missing protocol", args: []string{"protocol"}, wantErr: true},
+		{name: "ipv4 ospf3", args: []string{"protocol", "ospf3"}, wantErr: true},
+		{name: "ipv6 ospf", args: []string{"inet6", "protocol", "ospf"}, wantErr: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			gotProto, gotFamily, err := routeTextOptions(tt.args)
+			if tt.wantErr {
+				if err == nil {
+					t.Fatalf("routeTextOptions(%v) error = nil, want error", tt.args)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("routeTextOptions(%v) error = %v", tt.args, err)
+			}
+			if gotProto != tt.wantProto || gotFamily != tt.wantFamily {
+				t.Fatalf("routeTextOptions(%v) = %q, %q; want %q, %q", tt.args, gotProto, gotFamily, tt.wantProto, tt.wantFamily)
+			}
+		})
 	}
 }
 

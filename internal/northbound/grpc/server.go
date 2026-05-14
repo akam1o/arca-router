@@ -634,13 +634,19 @@ func (s *Server) GetBGPNeighbors(ctx context.Context) ([]BGPNeighborInfo, error)
 }
 
 // GetRouteText returns FRR routing table output.
-func (s *Server) GetRouteText(ctx context.Context, protoFilter string) (string, error) {
-	command := "show ip route"
+func (s *Server) GetRouteText(ctx context.Context, protoFilter, addressFamily string) (string, error) {
+	family, err := normalizeAddressFamily(addressFamily)
+	if err != nil {
+		return "", err
+	}
+
+	command := routeTextCommand(family)
 	if protoFilter != "" {
-		if !validRouteProtocols[protoFilter] {
-			return "", fmt.Errorf("invalid route protocol %q", protoFilter)
+		protocol, err := routeProtocolForFamily(protoFilter, family)
+		if err != nil {
+			return "", err
 		}
-		command += " " + protoFilter
+		command += " " + protocol
 	}
 	return runOperationalVtyshCommand(ctx, command)
 }
@@ -659,7 +665,14 @@ func (s *Server) GetBGPNeighborText(ctx context.Context, peerAddress string) (st
 }
 
 // GetOSPFNeighborsText returns FRR OSPF neighbor output.
-func (s *Server) GetOSPFNeighborsText(ctx context.Context) (string, error) {
+func (s *Server) GetOSPFNeighborsText(ctx context.Context, addressFamily string) (string, error) {
+	family, err := normalizeAddressFamily(addressFamily)
+	if err != nil {
+		return "", err
+	}
+	if family == addressFamilyIPv6 {
+		return runOperationalVtyshCommand(ctx, "show ipv6 ospf6 neighbor")
+	}
 	return runOperationalVtyshCommand(ctx, "show ip ospf neighbor")
 }
 
@@ -777,12 +790,58 @@ func unsupportedOperationalStateError(name string) error {
 	return fmt.Errorf("%s is not available via gRPC yet; use VPP/FRR tools directly or NETCONF <get> for configuration-derived state", name)
 }
 
-var validRouteProtocols = map[string]bool{
+const (
+	addressFamilyIPv4 = "inet"
+	addressFamilyIPv6 = "inet6"
+)
+
+var validIPv4RouteProtocols = map[string]bool{
 	"bgp":       true,
 	"ospf":      true,
 	"static":    true,
 	"connected": true,
 	"kernel":    true,
+}
+
+var validIPv6RouteProtocols = map[string]string{
+	"bgp":       "bgp",
+	"ospf3":     "ospf6",
+	"ospf6":     "ospf6",
+	"static":    "static",
+	"connected": "connected",
+	"kernel":    "kernel",
+}
+
+func normalizeAddressFamily(addressFamily string) (string, error) {
+	switch addressFamily {
+	case "", addressFamilyIPv4:
+		return addressFamilyIPv4, nil
+	case addressFamilyIPv6:
+		return addressFamilyIPv6, nil
+	default:
+		return "", fmt.Errorf("invalid address family %q", addressFamily)
+	}
+}
+
+func routeTextCommand(addressFamily string) string {
+	if addressFamily == addressFamilyIPv6 {
+		return "show ipv6 route"
+	}
+	return "show ip route"
+}
+
+func routeProtocolForFamily(protocol, addressFamily string) (string, error) {
+	if addressFamily == addressFamilyIPv6 {
+		frrProtocol, ok := validIPv6RouteProtocols[protocol]
+		if !ok {
+			return "", fmt.Errorf("invalid route protocol %q for %s", protocol, addressFamily)
+		}
+		return frrProtocol, nil
+	}
+	if !validIPv4RouteProtocols[protocol] {
+		return "", fmt.Errorf("invalid route protocol %q", protocol)
+	}
+	return protocol, nil
 }
 
 func sortedForwardingClassNames(classes map[string]*model.ForwardingClass) []string {
