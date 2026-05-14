@@ -589,6 +589,84 @@ func TestBuildMgmtOperationsOSPFInterfaceAttributes(t *testing.T) {
 	}
 }
 
+func TestBuildMgmtOperationsRejectsInvalidStaticRoutes(t *testing.T) {
+	tests := []struct {
+		name  string
+		route StaticRoute
+		want  string
+	}{
+		{
+			name:  "missing prefix",
+			route: StaticRoute{NextHop: "192.0.2.1"},
+			want:  "static route prefix is required",
+		},
+		{
+			name:  "invalid prefix",
+			route: StaticRoute{Prefix: "192.0.2.0", NextHop: "192.0.2.1"},
+			want:  "invalid static route prefix",
+		},
+		{
+			name:  "missing next-hop",
+			route: StaticRoute{Prefix: "192.0.2.0/24"},
+			want:  "next-hop is required",
+		},
+		{
+			name:  "invalid next-hop",
+			route: StaticRoute{Prefix: "192.0.2.0/24", NextHop: "not-an-ip"},
+			want:  "invalid next-hop IP",
+		},
+		{
+			name:  "invalid distance",
+			route: StaticRoute{Prefix: "192.0.2.0/24", NextHop: "192.0.2.1", Distance: 256},
+			want:  "invalid distance",
+		},
+		{
+			name:  "next-hop family mismatch",
+			route: StaticRoute{Prefix: "2001:db8::/64", NextHop: "192.0.2.1", IsIPv6: true},
+			want:  "next-hop family does not match prefix",
+		},
+		{
+			name:  "ipv4 marked ipv6",
+			route: StaticRoute{Prefix: "192.0.2.0/24", NextHop: "192.0.2.1", IsIPv6: true},
+			want:  "address family does not match",
+		},
+		{
+			name:  "ipv6 marked ipv4",
+			route: StaticRoute{Prefix: "2001:db8::/64", NextHop: "2001:db8::1"},
+			want:  "address family does not match",
+		},
+		{
+			name:  "bfd option without bfd",
+			route: StaticRoute{Prefix: "192.0.2.0/24", NextHop: "192.0.2.1", BFDSource: "192.0.2.2"},
+			want:  "BFD options require BFD to be enabled",
+		},
+		{
+			name:  "distance with bfd",
+			route: StaticRoute{Prefix: "192.0.2.0/24", NextHop: "192.0.2.1", Distance: 10, BFD: true},
+			want:  "distance is not supported with BFD monitoring",
+		},
+		{
+			name:  "invalid bfd source",
+			route: StaticRoute{Prefix: "192.0.2.0/24", NextHop: "192.0.2.1", BFD: true, BFDSource: "not-an-ip"},
+			want:  "invalid BFD source IP",
+		},
+		{
+			name:  "bfd source family mismatch",
+			route: StaticRoute{Prefix: "192.0.2.0/24", NextHop: "192.0.2.1", BFD: true, BFDSource: "2001:db8::1"},
+			want:  "BFD source family does not match next-hop",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := BuildMgmtOperations(&Config{StaticRoutes: []StaticRoute{tt.route}})
+			if err == nil || !strings.Contains(err.Error(), tt.want) {
+				t.Fatalf("BuildMgmtOperations() error = %v, want %q", err, tt.want)
+			}
+		})
+	}
+}
+
 func TestBuildMgmtOperationsStaticRouteBFD(t *testing.T) {
 	ops, err := BuildMgmtOperations(&Config{
 		BFD: &BFDConfig{
