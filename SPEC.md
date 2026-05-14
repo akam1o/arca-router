@@ -620,7 +620,7 @@ The internal gRPC BGP neighbor state API reads FRR JSON summary output and retur
 
 The internal gRPC OSPF neighbor state API reads FRR JSON neighbor output for OSPFv2 and OSPFv3 and returns structured router ID, neighbor address, interface, state, role, priority, dead timer, and uptime fields.
 
-NETCONF `<get>` exposes the same live route table state under `state/routes` and BGP neighbor state under `state/protocols/bgp`, using the FRR JSON operational readers shared with the internal gRPC state APIs.
+NETCONF `<get>` exposes the same live route table state under `state/routes`, BGP neighbor state under `state/protocols/bgp`, and OSPFv2/OSPFv3 neighbor state under `state/protocols/ospf` and `state/protocols/ospf3`, using the FRR JSON operational readers shared with the internal gRPC state APIs.
 
 The internal gRPC routing-instance state API returns running routing-instance intent with deterministic IPv4/IPv6 VPP table IDs, interface bindings, import/export targets, and import/export policy chains.
 

@@ -833,6 +833,88 @@ module arca-router {
         }
       }
 
+      container ospf {
+        description "OSPFv2 neighbor operational state.";
+
+        list neighbor {
+          description "Per-neighbor OSPFv2 operational state.";
+
+          leaf router-id {
+            type string;
+            description "OSPF neighbor router ID.";
+          }
+          leaf address {
+            type string;
+            description "OSPF neighbor address.";
+          }
+          leaf interface {
+            type string;
+            description "Interface associated with the adjacency.";
+          }
+          leaf state {
+            type string;
+            description "OSPF adjacency state.";
+          }
+          leaf role {
+            type string;
+            description "Neighbor role reported by FRR.";
+          }
+          leaf priority {
+            type uint32;
+            description "OSPF neighbor priority.";
+          }
+          leaf dead-time-seconds {
+            type uint64;
+            description "Remaining dead timer in seconds.";
+          }
+          leaf uptime-seconds {
+            type uint64;
+            description "Adjacency uptime in seconds.";
+          }
+        }
+      }
+
+      container ospf3 {
+        description "OSPFv3 neighbor operational state.";
+
+        list neighbor {
+          description "Per-neighbor OSPFv3 operational state.";
+
+          leaf router-id {
+            type string;
+            description "OSPFv3 neighbor router ID.";
+          }
+          leaf address {
+            type string;
+            description "OSPFv3 neighbor address.";
+          }
+          leaf interface {
+            type string;
+            description "Interface associated with the adjacency.";
+          }
+          leaf state {
+            type string;
+            description "OSPFv3 adjacency state.";
+          }
+          leaf role {
+            type string;
+            description "Neighbor role reported by FRR.";
+          }
+          leaf priority {
+            type uint32;
+            description "OSPFv3 neighbor priority.";
+          }
+          leaf dead-time-seconds {
+            type uint64;
+            description "Remaining dead timer in seconds.";
+          }
+          leaf uptime-seconds {
+            type uint64;
+            description "Adjacency uptime in seconds.";
+          }
+        }
+      }
+
       container bfd {
         description "Cached BFD convergence state and failure counters.";
 

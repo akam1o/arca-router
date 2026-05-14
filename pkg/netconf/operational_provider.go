@@ -13,6 +13,8 @@ type OperationalStateProvider interface {
 	Routes(ctx context.Context) ([]RouteOperationalState, error)
 	// BGPNeighbors returns live BGP neighbor state.
 	BGPNeighbors(ctx context.Context) ([]BGPNeighborOperationalState, error)
+	// OSPFNeighbors returns live OSPFv2 or OSPFv3 neighbor state.
+	OSPFNeighbors(ctx context.Context, ipv6 bool) ([]OSPFNeighborOperationalState, error)
 	// BFDStatus returns cached BFD protocol operational state.
 	BFDStatus(ctx context.Context) (*BFDOperationalState, error)
 }
@@ -79,6 +81,18 @@ type BGPNeighborOperationalState struct {
 	UptimeSecs     uint64
 	PrefixReceived uint32
 	PrefixSent     uint32
+}
+
+// OSPFNeighborOperationalState describes one OSPF adjacency in operational output.
+type OSPFNeighborOperationalState struct {
+	RouterID     string
+	Address      string
+	Interface    string
+	State        string
+	Role         string
+	Priority     uint32
+	DeadTimeSecs uint64
+	UptimeSecs   uint64
 }
 
 // InterfaceOperationalRxQueue maps an RX queue to a VPP worker.
