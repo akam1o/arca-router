@@ -139,14 +139,11 @@ func BuildMgmtOperations(cfg *Config) ([]MgmtOperation, error) {
 	if cfg.OSPF3 != nil {
 		return nil, NewInvalidConfigError("OSPFv3 is not supported by the transactional FRR backend because FRR does not expose core ospf6d YANG paths")
 	}
-	if cfg.BFD != nil {
-		return nil, NewInvalidConfigError("BFD is not supported by the transactional FRR backend until frr-bfdd management operations are implemented")
-	}
 	if hasBFDProtocolBindings(cfg) {
-		return nil, NewInvalidConfigError("BFD protocol bindings are not supported by the transactional FRR backend until frr-bfdd management operations are implemented")
+		return nil, NewInvalidConfigError("BFD protocol bindings are not supported by the transactional FRR backend until protocol-specific BFD management operations are implemented")
 	}
 	if hasStaticRouteBFD(cfg.StaticRoutes) {
-		return nil, NewInvalidConfigError("BFD static routes are not supported by the transactional FRR backend until frr-bfdd management operations are implemented")
+		return nil, NewInvalidConfigError("BFD static routes are not supported by the transactional FRR backend until staticd BFD management operations are implemented")
 	}
 	var ops []MgmtOperation
 	ops = append(ops,
@@ -156,6 +153,7 @@ func BuildMgmtOperations(cfg *Config) ([]MgmtOperation, error) {
 		deleteOp("/frr-vrf:lib"),
 		deleteOp("/frr-filter:lib"),
 		deleteOp("/frr-route-map:lib"),
+		deleteOp("/frr-bfdd:bfdd"),
 		deleteOp(vrrpConfigBase()),
 	)
 	ops = append(ops, buildStaticRouteOps(cfg.StaticRoutes)...)
@@ -163,6 +161,11 @@ func BuildMgmtOperations(cfg *Config) ([]MgmtOperation, error) {
 	ops = append(ops, buildOSPFOps(cfg.OSPF)...)
 	ops = append(ops, buildPrefixListOps(cfg.PrefixLists)...)
 	ops = append(ops, buildRouteMapOps(cfg.RouteMaps, cfg.PrefixLists)...)
+	bfdOps, err := buildBFDConfigOps(cfg.BFD)
+	if err != nil {
+		return nil, err
+	}
+	ops = append(ops, bfdOps...)
 	ops = append(ops, buildVRFOps(cfg.VRFs)...)
 	vrrpOps, err := buildVRRPOps(cfg.VRRP)
 	if err != nil {
@@ -211,6 +214,127 @@ func hasStaticRouteBFD(routes []StaticRoute) bool {
 		}
 	}
 	return false
+}
+
+func buildBFDConfigOps(cfg *BFDConfig) ([]MgmtOperation, error) {
+	if cfg == nil || (len(cfg.Profiles) == 0 && len(cfg.Peers) == 0) {
+		return nil, nil
+	}
+	if err := validateBFDConfig(cfg); err != nil {
+		return nil, err
+	}
+
+	base := "/frr-bfdd:bfdd/bfd"
+	var ops []MgmtOperation
+
+	profiles := append([]BFDProfile(nil), cfg.Profiles...)
+	sort.Slice(profiles, func(i, j int) bool { return profiles[i].Name < profiles[j].Name })
+	for _, profile := range profiles {
+		profileBase := base + "/profile" + keyPred("name", profile.Name)
+		ops = append(ops, setOp(profileBase+"/name", profile.Name))
+		ops = appendBFDSessionCommonOps(ops, profileBase, profile.DetectMultiplier, profile.ReceiveInterval, profile.TransmitInterval, profile.PassiveMode, false)
+		ops = appendBFDSessionEchoOps(ops, profileBase, profile.EchoMode)
+	}
+
+	peers := append([]BFDPeer(nil), cfg.Peers...)
+	sort.Slice(peers, func(i, j int) bool {
+		if peers[i].Address != peers[j].Address {
+			return peers[i].Address < peers[j].Address
+		}
+		if peers[i].VRF != peers[j].VRF {
+			return peers[i].VRF < peers[j].VRF
+		}
+		return peers[i].Interface < peers[j].Interface
+	})
+	for _, peer := range peers {
+		peerOps, err := buildBFDPeerOps(base, peer)
+		if err != nil {
+			return nil, err
+		}
+		ops = append(ops, peerOps...)
+	}
+
+	return ops, nil
+}
+
+func buildBFDPeerOps(base string, peer BFDPeer) ([]MgmtOperation, error) {
+	vrf := peer.VRF
+	if vrf == "" {
+		vrf = "default"
+	}
+
+	if peer.Multihop {
+		if peer.LocalAddress == "" {
+			return nil, NewInvalidConfigError(fmt.Sprintf("BFD multihop peer %s requires local-address for transactional apply", peer.Address))
+		}
+		peerBase := base + "/sessions/multi-hop" +
+			keyPred("source-addr", peer.LocalAddress) +
+			keyPred("dest-addr", peer.Address) +
+			keyPred("vrf", vrf)
+		ops := []MgmtOperation{
+			setOp(peerBase+"/source-addr", peer.LocalAddress),
+			setOp(peerBase+"/dest-addr", peer.Address),
+			setOp(peerBase+"/vrf", vrf),
+		}
+		ops = appendBFDPeerCommonOps(ops, peerBase, peer)
+		return ops, nil
+	}
+
+	if peer.Interface == "" {
+		return nil, NewInvalidConfigError(fmt.Sprintf("BFD single-hop peer %s requires interface for transactional apply", peer.Address))
+	}
+	peerBase := base + "/sessions/single-hop" +
+		keyPred("dest-addr", peer.Address) +
+		keyPred("interface", peer.Interface) +
+		keyPred("vrf", vrf)
+	ops := []MgmtOperation{
+		setOp(peerBase+"/dest-addr", peer.Address),
+		setOp(peerBase+"/interface", peer.Interface),
+		setOp(peerBase+"/vrf", vrf),
+	}
+	if peer.LocalAddress != "" {
+		ops = append(ops, setOp(peerBase+"/source-addr", peer.LocalAddress))
+	}
+	ops = appendBFDPeerCommonOps(ops, peerBase, peer)
+	ops = appendBFDSessionEchoOps(ops, peerBase, peer.EchoMode)
+	return ops, nil
+}
+
+func appendBFDPeerCommonOps(ops []MgmtOperation, base string, peer BFDPeer) []MgmtOperation {
+	if peer.Profile != "" {
+		ops = append(ops, setOp(base+"/profile", peer.Profile))
+	}
+	return appendBFDSessionCommonOps(ops, base, peer.DetectMultiplier, peer.ReceiveInterval, peer.TransmitInterval, peer.PassiveMode, peer.Shutdown)
+}
+
+func appendBFDSessionCommonOps(ops []MgmtOperation, base string, detectMultiplier, receiveInterval, transmitInterval int, passiveMode, administrativeDown bool) []MgmtOperation {
+	if detectMultiplier != 0 {
+		ops = append(ops, setOp(base+"/detection-multiplier", strconv.Itoa(detectMultiplier)))
+	}
+	if transmitInterval != 0 {
+		ops = append(ops, setOp(base+"/desired-transmission-interval", strconv.Itoa(millisecondsToMicroseconds(transmitInterval))))
+	}
+	if receiveInterval != 0 {
+		ops = append(ops, setOp(base+"/required-receive-interval", strconv.Itoa(millisecondsToMicroseconds(receiveInterval))))
+	}
+	if passiveMode {
+		ops = append(ops, setOp(base+"/passive-mode", "true"))
+	}
+	if administrativeDown {
+		ops = append(ops, setOp(base+"/administrative-down", "true"))
+	}
+	return ops
+}
+
+func appendBFDSessionEchoOps(ops []MgmtOperation, base string, echoMode bool) []MgmtOperation {
+	if echoMode {
+		ops = append(ops, setOp(base+"/echo-mode", "true"))
+	}
+	return ops
+}
+
+func millisecondsToMicroseconds(value int) int {
+	return value * 1000
 }
 
 func buildStaticRouteOps(routes []StaticRoute) []MgmtOperation {
