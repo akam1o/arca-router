@@ -29,6 +29,9 @@ func TestBuildMgmtOperationsStaticAndBGP(t *testing.T) {
 				{IP: "198.51.100.2", RemoteAS: 65001, Description: "upstream peer", RouteMapIn: "IMPORT", BFD: true},
 			},
 		},
+		RouteMaps: []RouteMap{
+			{Name: "IMPORT", Entries: []RouteMapEntry{{Seq: 10, Action: "permit"}}},
+		},
 	}
 
 	ops, err := BuildMgmtOperations(cfg)
@@ -208,6 +211,10 @@ func TestBuildMgmtOperationsRejectsUnsupportedRouteMapMatches(t *testing.T) {
 
 func TestBuildMgmtOperationsVRFVPN(t *testing.T) {
 	ops, err := BuildMgmtOperations(&Config{
+		RouteMaps: []RouteMap{
+			{Name: "BLUE-IN", Entries: []RouteMapEntry{{Seq: 10, Action: "permit"}}},
+			{Name: "BLUE-OUT", Entries: []RouteMapEntry{{Seq: 10, Action: "permit"}}},
+		},
 		VRFs: []VRFConfig{
 			{
 				Name:               "BLUE",
@@ -239,6 +246,57 @@ func TestBuildMgmtOperationsVRFVPN(t *testing.T) {
 		if !strings.Contains(commands, want) {
 			t.Fatalf("commands missing %q:\n%s", want, commands)
 		}
+	}
+}
+
+func TestBuildMgmtOperationsRejectsUnknownRouteMapReferences(t *testing.T) {
+	tests := []struct {
+		name string
+		cfg  *Config
+		want string
+	}{
+		{
+			name: "bgp import",
+			cfg: &Config{BGP: &BGPConfig{ASN: 65000, Neighbors: []BGPNeighbor{
+				{IP: "192.0.2.2", RemoteAS: 65001, RouteMapIn: "MISSING-IN"},
+			}}},
+			want: "BGP neighbor 192.0.2.2 import references unknown route-map MISSING-IN",
+		},
+		{
+			name: "bgp export",
+			cfg: &Config{BGP: &BGPConfig{ASN: 65000, Neighbors: []BGPNeighbor{
+				{IP: "192.0.2.2", RemoteAS: 65001, RouteMapOut: "MISSING-OUT"},
+			}}},
+			want: "BGP neighbor 192.0.2.2 export references unknown route-map MISSING-OUT",
+		},
+		{
+			name: "vrf import",
+			cfg: &Config{VRFs: []VRFConfig{
+				{Name: "BLUE", ASN: 65000, ImportTargets: []string{"65000:100"}, ImportRouteMap: "MISSING-IN"},
+			}},
+			want: "VRF BLUE import references unknown route-map MISSING-IN",
+		},
+		{
+			name: "vrf export",
+			cfg: &Config{VRFs: []VRFConfig{
+				{Name: "BLUE", ASN: 65000, RouteDistinguisher: "65000:100", ExportTargets: []string{"65000:100"}, ExportRouteMap: "MISSING-OUT"},
+			}},
+			want: "VRF BLUE export references unknown route-map MISSING-OUT",
+		},
+		{
+			name: "empty route-map name",
+			cfg:  &Config{RouteMaps: []RouteMap{{Name: ""}}},
+			want: "route-map name is required",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := BuildMgmtOperations(tt.cfg)
+			if err == nil || !strings.Contains(err.Error(), tt.want) {
+				t.Fatalf("BuildMgmtOperations() error = %v, want %q", err, tt.want)
+			}
+		})
 	}
 }
 
