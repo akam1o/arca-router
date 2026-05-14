@@ -190,7 +190,7 @@ func convertPolicyStatementsWithMapping(policyStatementsMap map[string]*config.P
 					entry.MatchPrefixLists = expandedLists
 				}
 				if term.From.Protocol != "" {
-					entry.MatchProtocol = term.From.Protocol
+					entry.MatchProtocol = frrSourceProtocol(term.From.Protocol)
 				}
 				if term.From.Neighbor != "" {
 					entry.MatchNeighbor = term.From.Neighbor
@@ -234,6 +234,17 @@ func convertPolicyStatementsWithMapping(policyStatementsMap map[string]*config.P
 	}
 
 	return frrRouteMaps, asPathLists, nil
+}
+
+func frrSourceProtocol(protocol string) string {
+	switch protocol {
+	case "direct":
+		return "connected"
+	case "ospf3":
+		return "ospf6"
+	default:
+		return protocol
+	}
 }
 
 // GeneratePrefixListConfig generates FRR prefix-list configuration.

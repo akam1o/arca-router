@@ -162,7 +162,7 @@ func BuildMgmtOperations(cfg *Config) ([]MgmtOperation, error) {
 	ops = append(ops, buildBGPOps(cfg.BGP)...)
 	ops = append(ops, buildOSPFOps(cfg.OSPF)...)
 	ops = append(ops, buildPrefixListOps(cfg.PrefixLists)...)
-	ops = append(ops, buildRouteMapOps(cfg.RouteMaps)...)
+	ops = append(ops, buildRouteMapOps(cfg.RouteMaps, cfg.PrefixLists)...)
 	ops = append(ops, buildVRFOps(cfg.VRFs)...)
 	vrrpOps, err := buildVRRPOps(cfg.VRRP)
 	if err != nil {
@@ -371,10 +371,11 @@ func buildPrefixListOps(prefixLists []PrefixList) []MgmtOperation {
 	return ops
 }
 
-func buildRouteMapOps(routeMaps []RouteMap) []MgmtOperation {
+func buildRouteMapOps(routeMaps []RouteMap, prefixLists []PrefixList) []MgmtOperation {
 	if len(routeMaps) == 0 {
 		return nil
 	}
+	ipv6PrefixLists := ipv6PrefixListSet(prefixLists)
 	var ops []MgmtOperation
 	maps := append([]RouteMap(nil), routeMaps...)
 	sort.Slice(maps, func(i, j int) bool { return maps[i].Name < maps[j].Name })
@@ -390,9 +391,13 @@ func buildRouteMapOps(routeMaps []RouteMap) []MgmtOperation {
 				setOp(entryBase+"/action", entry.Action),
 			)
 			for _, prefixList := range entry.MatchPrefixLists {
-				matchBase := entryBase + "/match-condition" + keyPred("condition", "frr-route-map:ipv4-prefix-list")
+				condition := "frr-route-map:ipv4-prefix-list"
+				if ipv6PrefixLists[prefixList] {
+					condition = "frr-route-map:ipv6-prefix-list"
+				}
+				matchBase := entryBase + "/match-condition" + keyPred("condition", condition)
 				ops = append(ops,
-					setOp(matchBase+"/condition", "frr-route-map:ipv4-prefix-list"),
+					setOp(matchBase+"/condition", condition),
 					setOp(matchBase+"/rmap-match-condition/list-name", prefixList),
 				)
 			}
@@ -413,6 +418,16 @@ func buildRouteMapOps(routeMaps []RouteMap) []MgmtOperation {
 		}
 	}
 	return ops
+}
+
+func ipv6PrefixListSet(prefixLists []PrefixList) map[string]bool {
+	ipv6Lists := make(map[string]bool, len(prefixLists))
+	for _, prefixList := range prefixLists {
+		if prefixList.IsIPv6 {
+			ipv6Lists[prefixList.Name] = true
+		}
+	}
+	return ipv6Lists
 }
 
 func buildVRRPOps(cfg *VRRPConfig) ([]MgmtOperation, error) {
