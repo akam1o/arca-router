@@ -1435,6 +1435,79 @@ func TestApplyCandidateCommandPreservesOSPFInterfaceAttributes(t *testing.T) {
 	}
 }
 
+func TestApplyCandidateCommandReplacesBFDAttributes(t *testing.T) {
+	candidate := strings.Join([]string{
+		"set protocols bfd profile fast receive-interval 150",
+		"set protocols bfd profile fast transmit-interval 150",
+		"set protocols bfd profile fast detect-multiplier 3",
+		"set protocols bfd profile fast passive-mode",
+		"set protocols bfd peer 192.0.2.2 local-address 192.0.2.1",
+		"set protocols bfd peer 192.0.2.2 profile fast",
+		"set protocols bfd peer 192.0.2.2 multihop",
+		"set protocols bfd peer 192.0.2.2 shutdown",
+		"set protocols bgp group EBGP neighbor 192.0.2.2 bfd",
+		"set protocols ospf area 0.0.0.0 interface ge-0/0/0 bfd",
+		"set protocols ospf3 area 0.0.0.0 interface ge-0/0/0 bfd profile fast",
+	}, "\n")
+
+	updated, err := applyCandidateCommand(candidate, strings.Join([]string{
+		"set protocols bfd profile fast receive-interval 300",
+		"set protocols bfd profile fast detect-multiplier 5",
+		"set protocols bfd peer 192.0.2.2 local-address 192.0.2.10",
+		"set protocols bfd peer 192.0.2.2 profile slow",
+		"set protocols bgp group EBGP neighbor 192.0.2.2 bfd profile slow",
+		"set protocols ospf area 0.0.0.0 interface ge-0/0/0 bfd profile slow",
+		"set protocols ospf3 area 0.0.0.0 interface ge-0/0/0 bfd",
+	}, "\n"))
+	if err != nil {
+		t.Fatalf("applyCandidateCommand() error = %v", err)
+	}
+	updatedLines := strings.Split(updated, "\n")
+	for _, oldLine := range []string{
+		"set protocols bfd profile fast receive-interval 150",
+		"set protocols bfd profile fast detect-multiplier 3",
+		"set protocols bfd peer 192.0.2.2 local-address 192.0.2.1",
+		"set protocols bfd peer 192.0.2.2 profile fast",
+		"set protocols bgp group EBGP neighbor 192.0.2.2 bfd",
+		"set protocols ospf area 0.0.0.0 interface ge-0/0/0 bfd",
+		"set protocols ospf3 area 0.0.0.0 interface ge-0/0/0 bfd profile fast",
+	} {
+		if containsLine(updatedLines, oldLine) {
+			t.Fatalf("updated candidate retained old line %q:\n%s", oldLine, updated)
+		}
+	}
+	for _, want := range []string{
+		"set protocols bfd profile fast receive-interval 300",
+		"set protocols bfd profile fast transmit-interval 150",
+		"set protocols bfd profile fast detect-multiplier 5",
+		"set protocols bfd profile fast passive-mode",
+		"set protocols bfd peer 192.0.2.2 local-address 192.0.2.10",
+		"set protocols bfd peer 192.0.2.2 profile slow",
+		"set protocols bfd peer 192.0.2.2 multihop",
+		"set protocols bfd peer 192.0.2.2 shutdown",
+		"set protocols bgp group EBGP neighbor 192.0.2.2 bfd profile slow",
+		"set protocols ospf area 0.0.0.0 interface ge-0/0/0 bfd profile slow",
+		"set protocols ospf3 area 0.0.0.0 interface ge-0/0/0 bfd",
+	} {
+		if !containsLine(updatedLines, want) {
+			t.Fatalf("updated candidate missing %q:\n%s", want, updated)
+		}
+		if got := countCandidateLines(updatedLines, want); got != 1 {
+			t.Fatalf("updated candidate contains %q %d times, want 1:\n%s", want, got, updated)
+		}
+	}
+}
+
+func countCandidateLines(lines []string, target string) int {
+	count := 0
+	for _, line := range lines {
+		if line == target {
+			count++
+		}
+	}
+	return count
+}
+
 func TestApplyCandidateCommandReplacesV06ScalarAttributes(t *testing.T) {
 	candidate := strings.Join([]string{
 		"set system services web-ui port 8080",

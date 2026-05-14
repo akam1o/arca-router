@@ -1454,6 +1454,21 @@ func replacementPrefixes(path []string) []string {
 	}
 	if len(path) >= 4 && path[0] == "protocols" {
 		switch path[1] {
+		case "bfd":
+			if len(path) >= 5 {
+				switch path[2] {
+				case "profile":
+					switch path[4] {
+					case "receive-interval", "transmit-interval", "detect-multiplier", "echo-mode", "passive-mode":
+						return prefix(5)
+					}
+				case "peer":
+					switch path[4] {
+					case "local-address", "interface", "profile", "multihop", "shutdown", "detect-multiplier", "receive-interval", "transmit-interval":
+						return prefix(5)
+					}
+				}
+			}
 		case "mpls":
 			return nil
 		case "vrrp":
@@ -1469,7 +1484,7 @@ func replacementPrefixes(path []string) []string {
 			}
 			if len(path) >= 7 && path[2] == "area" && path[4] == "interface" {
 				switch path[6] {
-				case "passive", "metric", "priority":
+				case "passive", "metric", "priority", "bfd":
 					return prefix(7)
 				}
 			}
@@ -1481,7 +1496,7 @@ func replacementPrefixes(path []string) []string {
 				case "neighbor":
 					if len(path) >= 8 {
 						switch path[6] {
-						case "peer-as", "description", "local-address":
+						case "peer-as", "description", "local-address", "bfd":
 							return prefix(7)
 						}
 					}
