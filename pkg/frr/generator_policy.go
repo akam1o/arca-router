@@ -389,6 +389,9 @@ func GeneratePrefixListConfig(prefixLists []PrefixList) (string, error) {
 	if len(prefixLists) == 0 {
 		return "", nil
 	}
+	if err := validatePolicyObjects(prefixLists, nil); err != nil {
+		return "", err
+	}
 
 	var b strings.Builder
 
@@ -413,6 +416,9 @@ func GeneratePrefixListConfig(prefixLists []PrefixList) (string, error) {
 func GenerateRouteMapConfig(routeMaps []RouteMap, prefixLists []PrefixList) (string, error) {
 	if len(routeMaps) == 0 {
 		return "", nil
+	}
+	if err := validatePolicyObjects(prefixLists, routeMaps); err != nil {
+		return "", err
 	}
 
 	// Build map of prefix-list names to IPv6 flag
@@ -465,6 +471,85 @@ func GenerateRouteMapConfig(routeMaps []RouteMap, prefixLists []PrefixList) (str
 	}
 
 	return b.String(), nil
+}
+
+func validatePolicyObjects(prefixLists []PrefixList, routeMaps []RouteMap) error {
+	prefixListNames := make(map[string]struct{}, len(prefixLists))
+	prefixListKeys := make(map[string]struct{}, len(prefixLists))
+	for _, list := range prefixLists {
+		if strings.TrimSpace(list.Name) == "" {
+			return NewInvalidConfigError("prefix-list name is required")
+		}
+		key := prefixListKey(list.Name, list.IsIPv6)
+		if _, ok := prefixListKeys[key]; ok {
+			return NewInvalidConfigError(fmt.Sprintf("prefix-list %s is duplicated", list.Name))
+		}
+		prefixListKeys[key] = struct{}{}
+		prefixListNames[list.Name] = struct{}{}
+
+		sequences := make(map[int]struct{}, len(list.Entries))
+		for _, entry := range list.Entries {
+			if entry.Seq <= 0 {
+				return NewInvalidConfigError(fmt.Sprintf("prefix-list %s entry sequence must be positive", list.Name))
+			}
+			if _, ok := sequences[entry.Seq]; ok {
+				return NewInvalidConfigError(fmt.Sprintf("prefix-list %s entry %d is duplicated", list.Name, entry.Seq))
+			}
+			sequences[entry.Seq] = struct{}{}
+			if !validPolicyAction(entry.Action) {
+				return NewInvalidConfigError(fmt.Sprintf("prefix-list %s entry %d has invalid action %s", list.Name, entry.Seq, entry.Action))
+			}
+			_, prefixNet, err := net.ParseCIDR(entry.Prefix)
+			if err != nil {
+				return NewInvalidConfigError(fmt.Sprintf("prefix-list %s entry %d has invalid prefix %s", list.Name, entry.Seq, entry.Prefix))
+			}
+			prefixIPv6 := prefixNet.IP.To4() == nil
+			if prefixIPv6 != list.IsIPv6 {
+				return NewInvalidConfigError(fmt.Sprintf("prefix-list %s entry %d address family does not match configured address family", list.Name, entry.Seq))
+			}
+		}
+	}
+
+	routeMapNames := make(map[string]struct{}, len(routeMaps))
+	for _, routeMap := range routeMaps {
+		if strings.TrimSpace(routeMap.Name) == "" {
+			return NewInvalidConfigError("route-map name is required")
+		}
+		if _, ok := routeMapNames[routeMap.Name]; ok {
+			return NewInvalidConfigError(fmt.Sprintf("route-map %s is duplicated", routeMap.Name))
+		}
+		routeMapNames[routeMap.Name] = struct{}{}
+
+		sequences := make(map[int]struct{}, len(routeMap.Entries))
+		for _, entry := range routeMap.Entries {
+			if entry.Seq <= 0 {
+				return NewInvalidConfigError(fmt.Sprintf("route-map %s entry sequence must be positive", routeMap.Name))
+			}
+			if _, ok := sequences[entry.Seq]; ok {
+				return NewInvalidConfigError(fmt.Sprintf("route-map %s entry %d is duplicated", routeMap.Name, entry.Seq))
+			}
+			sequences[entry.Seq] = struct{}{}
+			if !validPolicyAction(entry.Action) {
+				return NewInvalidConfigError(fmt.Sprintf("route-map %s entry %d has invalid action %s", routeMap.Name, entry.Seq, entry.Action))
+			}
+			for _, prefixList := range entry.MatchPrefixLists {
+				if strings.TrimSpace(prefixList) == "" {
+					return NewInvalidConfigError(fmt.Sprintf("route-map %s entry %d references empty prefix-list", routeMap.Name, entry.Seq))
+				}
+				if _, ok := prefixListNames[prefixList]; !ok {
+					return NewInvalidConfigError(fmt.Sprintf("route-map %s entry %d references unknown prefix-list %s", routeMap.Name, entry.Seq, prefixList))
+				}
+			}
+			if entry.MatchNeighbor != "" && net.ParseIP(entry.MatchNeighbor) == nil {
+				return NewInvalidConfigError(fmt.Sprintf("route-map %s entry %d has invalid peer match %s", routeMap.Name, entry.Seq, entry.MatchNeighbor))
+			}
+		}
+	}
+	return nil
+}
+
+func prefixListKey(name string, isIPv6 bool) string {
+	return fmt.Sprintf("%t\x00%s", isIPv6, name)
 }
 
 // GenerateASPathAccessListConfig generates FRR AS-path access-list configuration.
