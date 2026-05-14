@@ -18,6 +18,22 @@ func TestBFDLegacyConversionRoundTrip(t *testing.T) {
 				"192.0.2.2": {Address: "192.0.2.2", LocalAddress: "192.0.2.1", Interface: "ge-0/0/0", Profile: "fast"},
 			},
 		},
+		BGP: &config.BGPConfig{Groups: map[string]*config.BGPGroup{
+			"EBGP": {
+				Type: "external",
+				Neighbors: map[string]*config.BGPNeighbor{
+					"192.0.2.2": {IP: "192.0.2.2", PeerAS: 65001, BFD: true, BFDProfile: "fast"},
+				},
+			},
+		}},
+		OSPF: &config.OSPFConfig{Areas: map[string]*config.OSPFArea{
+			"0.0.0.0": {
+				AreaID: "0.0.0.0",
+				Interfaces: map[string]*config.OSPFInterface{
+					"ge-0/0/0": {Name: "ge-0/0/0", BFD: true, BFDProfile: "fast"},
+				},
+			},
+		}},
 	}
 
 	modelCfg := FromLegacyConfig(legacy)
@@ -30,6 +46,12 @@ func TestBFDLegacyConversionRoundTrip(t *testing.T) {
 	}
 	if got := roundTrip.Protocols.BFD.Peers["192.0.2.2"].Profile; got != "fast" {
 		t.Fatalf("BFD peer profile = %q, want fast", got)
+	}
+	if got := roundTrip.Protocols.BGP.Groups["EBGP"].Neighbors["192.0.2.2"].BFDProfile; got != "fast" {
+		t.Fatalf("BGP BFD profile = %q, want fast", got)
+	}
+	if got := roundTrip.Protocols.OSPF.Areas["0.0.0.0"].Interfaces["ge-0/0/0"].BFDProfile; got != "fast" {
+		t.Fatalf("OSPF BFD profile = %q, want fast", got)
 	}
 }
 
@@ -46,5 +68,28 @@ func TestValidateBFDUnknownInterface(t *testing.T) {
 	err := cfg.Validate()
 	if err == nil || !strings.Contains(err.Error(), "interface") {
 		t.Fatalf("Validate() error = %v, want interface reference error", err)
+	}
+}
+
+func TestValidateBFDProtocolBindingProfileReference(t *testing.T) {
+	cfg := NewRouterConfig()
+	cfg.Protocols = &ProtocolsConfig{
+		BFD: &BFDConfig{Profiles: map[string]*BFDProfile{
+			"fast": {ReceiveInterval: 150},
+		}},
+		BGP: &BGPConfig{Groups: map[string]*BGPGroup{
+			"EBGP": {
+				Type: "external",
+				Neighbors: map[string]*BGPNeighbor{
+					"192.0.2.2": {PeerAS: 65001, BFD: true, BFDProfile: "missing"},
+				},
+			},
+		}},
+	}
+	cfg.Routing = &RoutingConfig{AutonomousSystem: 65000}
+
+	err := cfg.Validate()
+	if err == nil || !strings.Contains(err.Error(), "missing") {
+		t.Fatalf("Validate() error = %v, want missing BFD profile error", err)
 	}
 }

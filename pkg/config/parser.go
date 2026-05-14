@@ -1145,6 +1145,17 @@ func (p *Parser) parseBGPNeighbor(group *BGPGroup) error {
 		neighbor.LocalAddress = p.current.Value
 		p.nextToken()
 		return nil
+	case "bfd":
+		neighbor.BFD = true
+		if p.current.Type == TokenWord && p.current.Value == "profile" {
+			p.nextToken()
+			if p.current.Type != TokenWord && p.current.Type != TokenString {
+				return p.error("expected BFD profile name")
+			}
+			neighbor.BFDProfile = p.current.Value
+			p.nextToken()
+		}
+		return nil
 	default:
 		return p.error(fmt.Sprintf("unsupported neighbor parameter: %s", param))
 	}
@@ -1287,6 +1298,16 @@ func (p *Parser) parseOSPFArea(ospf *OSPFConfig) error {
 			ospfIf.Priority = priority
 			ospfIf.PrioritySet = true
 			p.nextToken()
+		case "bfd":
+			ospfIf.BFD = true
+			if p.current.Type == TokenWord && p.current.Value == "profile" {
+				p.nextToken()
+				if p.current.Type != TokenWord && p.current.Type != TokenString {
+					return p.error("expected BFD profile name")
+				}
+				ospfIf.BFDProfile = p.current.Value
+				p.nextToken()
+			}
 		default:
 			// Not an OSPF interface parameter, break the loop
 			return nil

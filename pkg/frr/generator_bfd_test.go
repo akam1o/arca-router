@@ -64,6 +64,44 @@ func TestGenerateFRRConfigConvertsBFD(t *testing.T) {
 	}
 }
 
+func TestGenerateFRRConfigConvertsBFDProtocolBindings(t *testing.T) {
+	cfg := config.NewConfig()
+	cfg.Interfaces["ge-0/0/0"] = &config.Interface{Units: map[int]*config.Unit{0: {Family: map[string]*config.Family{"inet": {Addresses: []string{"192.0.2.1/24"}}}}}}
+	cfg.RoutingOptions = &config.RoutingOptions{
+		AutonomousSystem: 65000,
+		RouterID:         "192.0.2.1",
+	}
+	cfg.Protocols = &config.ProtocolConfig{
+		BGP: &config.BGPConfig{Groups: map[string]*config.BGPGroup{
+			"EBGP": {
+				Type: "external",
+				Neighbors: map[string]*config.BGPNeighbor{
+					"192.0.2.2": {IP: "192.0.2.2", PeerAS: 65001, BFD: true, BFDProfile: "fast"},
+				},
+			},
+		}},
+		OSPF: &config.OSPFConfig{Areas: map[string]*config.OSPFArea{
+			"0.0.0.0": {
+				AreaID: "0.0.0.0",
+				Interfaces: map[string]*config.OSPFInterface{
+					"ge-0/0/0": {Name: "ge-0/0/0", BFD: true, BFDProfile: "fast"},
+				},
+			},
+		}},
+	}
+
+	frrCfg, err := GenerateFRRConfig(cfg)
+	if err != nil {
+		t.Fatalf("GenerateFRRConfig() error = %v", err)
+	}
+	if got := frrCfg.BGP.Neighbors[0].BFDProfile; got != "fast" {
+		t.Fatalf("BGP BFD profile = %q, want fast", got)
+	}
+	if got := frrCfg.OSPF.Interfaces[0].BFDProfile; got != "fast" {
+		t.Fatalf("OSPF BFD profile = %q, want fast", got)
+	}
+}
+
 func TestGenerateBFDConfigRejectsMultihopEchoMode(t *testing.T) {
 	_, err := GenerateBFDConfig(&BFDConfig{
 		Peers: []BFDPeer{{Address: "192.0.2.2", Multihop: true, EchoMode: true}},

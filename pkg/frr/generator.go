@@ -285,8 +285,10 @@ func convertBGPConfig(cfg *config.Config, ifaceMapping map[string]string) (*BGPC
 	for _, group := range arcaBGP.Groups {
 		for _, neighbor := range group.Neighbors {
 			frrNeighbor := BGPNeighbor{
-				IP:       neighbor.IP,
-				RemoteAS: neighbor.PeerAS,
+				IP:         neighbor.IP,
+				RemoteAS:   neighbor.PeerAS,
+				BFD:        neighbor.BFD,
+				BFDProfile: neighbor.BFDProfile,
 			}
 
 			// Add description (include group name)
@@ -477,10 +479,12 @@ func convertOSPFConfig(cfg *config.Config, arcaOSPF *config.OSPFConfig, ifaceMap
 
 			// Add interface-specific configuration
 			frrIface := OSPFInterface{
-				Name:    linuxName,
-				AreaID:  area.AreaID,
-				Passive: iface.Passive,
-				Metric:  iface.Metric,
+				Name:       linuxName,
+				AreaID:     area.AreaID,
+				Passive:    iface.Passive,
+				Metric:     iface.Metric,
+				BFD:        iface.BFD,
+				BFDProfile: iface.BFDProfile,
 			}
 
 			// Set priority only if explicitly configured.

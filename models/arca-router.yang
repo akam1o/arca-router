@@ -382,6 +382,17 @@ module arca-router {
             type string;
             description "Local address for BGP peering";
           }
+
+          leaf bfd {
+            type boolean;
+            default false;
+            description "Enable BFD failure detection for this neighbor";
+          }
+
+          leaf bfd-profile {
+            type string;
+            description "BFD profile used by this neighbor";
+          }
         }
       }
     }
@@ -433,6 +444,80 @@ module arca-router {
             }
             default 1;
             description "OSPF priority for DR election";
+          }
+
+          leaf bfd {
+            type boolean;
+            default false;
+            description "Enable BFD failure detection on this interface";
+          }
+
+          leaf bfd-profile {
+            type string;
+            description "BFD profile used by this interface";
+          }
+        }
+      }
+    }
+
+    container ospf3 {
+      description "OSPFv3 protocol configuration";
+
+      leaf router-id {
+        type string {
+          pattern '[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+';
+        }
+        description "OSPFv3 router ID (overrides global router-id)";
+      }
+
+      list area {
+        key "area-id";
+        description "OSPFv3 area configuration";
+
+        leaf area-id {
+          type string;
+          description "OSPFv3 area ID (e.g., 0.0.0.0 or 0)";
+        }
+
+        list interface {
+          key "name";
+          description "Interface in this OSPFv3 area";
+
+          leaf name {
+            type string;
+            description "Interface name";
+          }
+
+          leaf passive {
+            type boolean;
+            default false;
+            description "Passive interface flag";
+          }
+
+          leaf metric {
+            type uint16 {
+              range "1..65535";
+            }
+            description "OSPFv3 metric for this interface";
+          }
+
+          leaf priority {
+            type uint8 {
+              range "0..255";
+            }
+            default 1;
+            description "OSPFv3 priority for DR election";
+          }
+
+          leaf bfd {
+            type boolean;
+            default false;
+            description "Enable BFD failure detection on this interface";
+          }
+
+          leaf bfd-profile {
+            type string;
+            description "BFD profile used by this interface";
           }
         }
       }

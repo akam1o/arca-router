@@ -413,7 +413,8 @@ func bgpEqual(a, b *model.BGPConfig) bool {
 			if !ok {
 				return false
 			}
-			if an.PeerAS != bn.PeerAS || an.Description != bn.Description || an.LocalAddress != bn.LocalAddress {
+			if an.PeerAS != bn.PeerAS || an.Description != bn.Description || an.LocalAddress != bn.LocalAddress ||
+				an.BFD != bn.BFD || an.BFDProfile != bn.BFDProfile {
 				return false
 			}
 		}
@@ -447,7 +448,8 @@ func ospfEqual(a, b *model.OSPFConfig) bool {
 			if !ok {
 				return false
 			}
-			if ai.Passive != bi.Passive || ai.Metric != bi.Metric {
+			if ai.Passive != bi.Passive || ai.Metric != bi.Metric ||
+				ai.BFD != bi.BFD || ai.BFDProfile != bi.BFDProfile {
 				return false
 			}
 			if (ai.Priority == nil) != (bi.Priority == nil) {

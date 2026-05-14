@@ -142,6 +142,9 @@ func BuildMgmtOperations(cfg *Config) ([]MgmtOperation, error) {
 	if cfg.BFD != nil {
 		return nil, NewInvalidConfigError("BFD is not supported by the transactional FRR backend until frr-bfdd management operations are implemented")
 	}
+	if hasBFDProtocolBindings(cfg) {
+		return nil, NewInvalidConfigError("BFD protocol bindings are not supported by the transactional FRR backend until frr-bfdd management operations are implemented")
+	}
 	var ops []MgmtOperation
 	ops = append(ops,
 		deleteOp(staticProtocolBase()),
@@ -164,6 +167,38 @@ func BuildMgmtOperations(cfg *Config) ([]MgmtOperation, error) {
 	}
 	ops = append(ops, vrrpOps...)
 	return ops, nil
+}
+
+func hasBFDProtocolBindings(cfg *Config) bool {
+	if cfg == nil {
+		return false
+	}
+	if cfg.BGP != nil {
+		for _, neighbor := range cfg.BGP.Neighbors {
+			if neighbor.BFD || neighbor.BFDProfile != "" {
+				return true
+			}
+		}
+	}
+	if cfg.OSPF != nil && ospfHasBFDProtocolBindings(cfg.OSPF) {
+		return true
+	}
+	if cfg.OSPF3 != nil && ospfHasBFDProtocolBindings(cfg.OSPF3) {
+		return true
+	}
+	return false
+}
+
+func ospfHasBFDProtocolBindings(cfg *OSPFConfig) bool {
+	if cfg == nil {
+		return false
+	}
+	for _, iface := range cfg.Interfaces {
+		if iface.BFD || iface.BFDProfile != "" {
+			return true
+		}
+	}
+	return false
 }
 
 func buildStaticRouteOps(routes []StaticRoute) []MgmtOperation {

@@ -69,7 +69,7 @@ func GenerateOSPFConfig(cfg *OSPFConfig) (string, error) {
 
 		// OSPFv3 carries area membership on the interface itself, so a plain
 		// area binding still needs an interface section.
-		hasConfig := iface.Passive || iface.Metric > 0 || iface.Priority != nil
+		hasConfig := iface.Passive || iface.Metric > 0 || iface.Priority != nil || iface.BFD || iface.BFDProfile != ""
 		if cfg.IsOSPFv3 {
 			hasConfig = hasConfig || iface.AreaID != ""
 		}
@@ -89,6 +89,11 @@ func GenerateOSPFConfig(cfg *OSPFConfig) (string, error) {
 				if iface.Priority != nil {
 					fmt.Fprintf(&b, " ipv6 ospf6 priority %d\n", *iface.Priority)
 				}
+				if iface.BFDProfile != "" {
+					fmt.Fprintf(&b, " ipv6 ospf6 bfd profile %s\n", iface.BFDProfile)
+				} else if iface.BFD {
+					b.WriteString(" ipv6 ospf6 bfd\n")
+				}
 			} else {
 				// OSPFv2 interface configuration
 				if iface.Passive {
@@ -99,6 +104,11 @@ func GenerateOSPFConfig(cfg *OSPFConfig) (string, error) {
 				}
 				if iface.Priority != nil {
 					fmt.Fprintf(&b, " ip ospf priority %d\n", *iface.Priority)
+				}
+				if iface.BFDProfile != "" {
+					fmt.Fprintf(&b, " ip ospf bfd profile %s\n", iface.BFDProfile)
+				} else if iface.BFD {
+					b.WriteString(" ip ospf bfd\n")
 				}
 			}
 

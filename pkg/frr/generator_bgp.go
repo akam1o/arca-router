@@ -51,6 +51,12 @@ func GenerateBGPConfig(cfg *BGPConfig) (string, error) {
 		if n.UpdateSource != "" {
 			fmt.Fprintf(&b, " neighbor %s update-source %s\n", n.IP, n.UpdateSource)
 		}
+
+		if n.BFDProfile != "" {
+			fmt.Fprintf(&b, " neighbor %s bfd profile %s\n", n.IP, n.BFDProfile)
+		} else if n.BFD {
+			fmt.Fprintf(&b, " neighbor %s bfd\n", n.IP)
+		}
 	}
 
 	// Address families

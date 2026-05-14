@@ -135,6 +135,45 @@ func TestGenerateOSPFConfig(t *testing.T) {
 			wantErr: false,
 		},
 		{
+			name: "OSPF with BFD profile",
+			cfg: &OSPFConfig{
+				RouterID: "10.0.1.1",
+				Interfaces: []OSPFInterface{
+					{
+						Name:       "ge0-0-1",
+						AreaID:     "0",
+						BFD:        true,
+						BFDProfile: "fast",
+					},
+				},
+			},
+			want: []string{
+				"interface ge0-0-1",
+				"ip ospf bfd profile fast",
+			},
+			wantErr: false,
+		},
+		{
+			name: "OSPFv3 with BFD profile",
+			cfg: &OSPFConfig{
+				IsOSPFv3: true,
+				Interfaces: []OSPFInterface{
+					{
+						Name:       "ge0-0-0",
+						AreaID:     "0.0.0.0",
+						BFD:        true,
+						BFDProfile: "fast",
+					},
+				},
+			},
+			want: []string{
+				"interface ge0-0-0",
+				"ipv6 ospf6 area 0.0.0.0",
+				"ipv6 ospf6 bfd profile fast",
+			},
+			wantErr: false,
+		},
+		{
 			name:    "nil config",
 			cfg:     nil,
 			want:    []string{},
