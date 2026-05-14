@@ -93,11 +93,19 @@ Show subcommands:
   configuration protocols     Show routing protocol configuration
   interfaces                  Show interface status
   interfaces <name>           Show specific interface details
-  bgp summary                 Show BGP summary
-  bgp neighbor <ip>           Show BGP neighbor details
-  ospf neighbor               Show OSPF neighbors
-  route                       Show routing table
-  route protocol <proto>      Show routes by protocol
+  routing-instances [name]    Show routing-instance table mapping
+  routes [prefix <cidr>] [protocol <proto>] Show route status
+  bgp neighbors               Show BGP neighbor status
+  bgp summary                 Show raw BGP summary
+  bgp neighbor <ip>           Show raw BGP neighbor details
+  ospf neighbor               Show OSPFv2 neighbors
+  ospf3 neighbor              Show OSPFv3 neighbors
+  vrrp                        Show VRRP status
+  bfd status                  Show BFD operational state
+  bfd [brief|counters]        Show raw BFD status
+  bfd peer <ip> [counters]    Show BFD peer details
+  route [inet|inet6]                 Show routing table
+  route [inet|inet6] protocol <proto> Show routes by protocol
 
 Options:
   -socket <path>     arca-routerd gRPC socket (default: %s)
@@ -203,12 +211,52 @@ func oneShotShow(ctx context.Context, client showClient, args []string, f *cliFl
 		printInterfaces(ifaces)
 		return ExitSuccess
 
+	case "routing-instances":
+		nameFilter, err := routingInstancesNameFilter(args[1:])
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+			return ExitUsageError
+		}
+		instances, err := client.GetRoutingInstances(ctx)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+			return ExitOperationError
+		}
+		printRoutingInstances(filterRoutingInstances(instances, nameFilter))
+		return ExitSuccess
+
+	case "routes":
+		prefixFilter, protoFilter, err := routeStateOptions(args[1:])
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+			return ExitUsageError
+		}
+		routes, err := client.GetRoutes(ctx, prefixFilter, protoFilter)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+			return ExitOperationError
+		}
+		printRoutes(routes)
+		return ExitSuccess
+
 	case "bgp":
 		if len(args) < 2 {
-			fmt.Fprintf(os.Stderr, "Error: 'show bgp' requires a subcommand (summary or neighbor)\n")
+			fmt.Fprintf(os.Stderr, "Error: 'show bgp' requires a subcommand (neighbors, summary, or neighbor)\n")
 			return ExitUsageError
 		}
 		switch args[1] {
+		case "neighbors":
+			if len(args) > 2 {
+				fmt.Fprintf(os.Stderr, "Error: 'show bgp neighbors' does not accept extra arguments\n")
+				return ExitUsageError
+			}
+			neighbors, err := client.GetBGPNeighbors(ctx)
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+				return ExitOperationError
+			}
+			printBGPNeighbors(neighbors)
+			return ExitSuccess
 		case "summary":
 			output, err := client.GetBGPSummaryText(ctx)
 			if err != nil {
@@ -234,12 +282,29 @@ func oneShotShow(ctx context.Context, client showClient, args []string, f *cliFl
 			return ExitUsageError
 		}
 
-	case "ospf":
+	case "ospf", "ospf3":
 		if len(args) < 2 || args[1] != "neighbor" {
-			fmt.Fprintf(os.Stderr, "Error: 'show ospf' requires 'neighbor' subcommand\n")
+			fmt.Fprintf(os.Stderr, "Error: 'show %s' requires 'neighbor' subcommand\n", subcmd)
 			return ExitUsageError
 		}
-		output, err := client.GetOSPFNeighborsText(ctx)
+		if len(args) > 2 {
+			fmt.Fprintf(os.Stderr, "Error: 'show %s neighbor' does not accept extra arguments\n", subcmd)
+			return ExitUsageError
+		}
+		addressFamily := routeAddressFamilyIPv4
+		if subcmd == "ospf3" {
+			addressFamily = routeAddressFamilyIPv6
+		}
+		neighbors, err := client.GetOSPFNeighbors(ctx, addressFamily)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+			return ExitOperationError
+		}
+		printOSPFNeighbors(neighbors)
+		return ExitSuccess
+
+	case "vrrp":
+		output, err := client.GetVRRPText(ctx)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 			return ExitOperationError
@@ -247,8 +312,27 @@ func oneShotShow(ctx context.Context, client showClient, args []string, f *cliFl
 		printCommandOutput(output)
 		return ExitSuccess
 
-	case "vrrp":
-		output, err := client.GetVRRPText(ctx)
+	case "bfd":
+		statusRequested, err := bfdStatusRequested(args[1:])
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+			return ExitUsageError
+		}
+		if statusRequested {
+			info, err := client.GetBFDStatus(ctx)
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+				return ExitOperationError
+			}
+			printBFDStatus(info)
+			return ExitSuccess
+		}
+		peerAddress, brief, counters, err := bfdTextOptions(args[1:])
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+			return ExitUsageError
+		}
+		output, err := client.GetBFDText(ctx, peerAddress, brief, counters)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 			return ExitOperationError
@@ -284,12 +368,12 @@ func oneShotShow(ctx context.Context, client showClient, args []string, f *cliFl
 		return ExitSuccess
 
 	case "route":
-		protoFilter, err := routeProtocolFilter(args[1:])
+		protoFilter, addressFamily, err := routeTextOptions(args[1:])
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 			return ExitUsageError
 		}
-		output, err := client.GetRouteText(ctx, protoFilter)
+		output, err := client.GetRouteText(ctx, protoFilter, addressFamily)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 			return ExitOperationError
@@ -328,18 +412,22 @@ type interactiveClient interface {
 	ListHistory(context.Context, int, int) ([]grpcclient.CommitInfo, error)
 	AcquireLock(context.Context, string, string) error
 	ReleaseLock(context.Context, string) error
-	GetRoutes(context.Context, string, string) ([]grpcclient.RouteInfo, error)
-	GetBGPNeighbors(context.Context) ([]grpcclient.BGPNeighborInfo, error)
 }
 
 type showClient interface {
 	GetRunning(context.Context) (string, uint64, error)
 	GetInterfaces(context.Context, string) ([]grpcclient.InterfaceInfo, error)
-	GetRouteText(context.Context, string) (string, error)
+	GetRoutingInstances(context.Context) ([]grpcclient.RoutingInstanceInfo, error)
+	GetRoutes(context.Context, string, string) ([]grpcclient.RouteInfo, error)
+	GetBGPNeighbors(context.Context) ([]grpcclient.BGPNeighborInfo, error)
+	GetOSPFNeighbors(context.Context, string) ([]grpcclient.OSPFNeighborInfo, error)
+	GetRouteText(context.Context, string, string) (string, error)
 	GetBGPSummaryText(context.Context) (string, error)
 	GetBGPNeighborText(context.Context, string) (string, error)
-	GetOSPFNeighborsText(context.Context) (string, error)
+	GetOSPFNeighborsText(context.Context, string) (string, error)
 	GetVRRPText(context.Context) (string, error)
+	GetBFDText(context.Context, string, bool, bool) (string, error)
+	GetBFDStatus(context.Context) (*grpcclient.BFDStatusInfo, error)
 	GetLCPReconciliation(context.Context) (*grpcclient.LCPReconciliationInfo, error)
 	GetHAStatus(context.Context) (*grpcclient.HAStatusInfo, error)
 	GetClassOfService(context.Context) (*grpcclient.ClassOfServiceInfo, error)
@@ -639,14 +727,54 @@ func (sh *interactiveShell) cmdShow(ctx context.Context, args []string) error {
 		printInterfaces(ifaces)
 		return nil
 
+	case "routing-instances":
+		if sh.mode == modeConfiguration {
+			return fmt.Errorf("'show routing-instances' not available in configuration mode")
+		}
+		nameFilter, err := routingInstancesNameFilter(args[1:])
+		if err != nil {
+			return err
+		}
+		instances, err := sh.client.GetRoutingInstances(ctx)
+		if err != nil {
+			return err
+		}
+		printRoutingInstances(filterRoutingInstances(instances, nameFilter))
+		return nil
+
+	case "routes":
+		if sh.mode == modeConfiguration {
+			return fmt.Errorf("'show routes' not available in configuration mode")
+		}
+		prefixFilter, protoFilter, err := routeStateOptions(args[1:])
+		if err != nil {
+			return err
+		}
+		routes, err := sh.client.GetRoutes(ctx, prefixFilter, protoFilter)
+		if err != nil {
+			return err
+		}
+		printRoutes(routes)
+		return nil
+
 	case "bgp":
 		if sh.mode == modeConfiguration {
 			return fmt.Errorf("'show bgp' not available in configuration mode")
 		}
 		if len(args) < 2 {
-			return fmt.Errorf("'show bgp' requires a subcommand (summary or neighbor)")
+			return fmt.Errorf("'show bgp' requires a subcommand (neighbors, summary, or neighbor)")
 		}
 		switch args[1] {
+		case "neighbors":
+			if len(args) > 2 {
+				return fmt.Errorf("'show bgp neighbors' does not accept extra arguments")
+			}
+			neighbors, err := sh.client.GetBGPNeighbors(ctx)
+			if err != nil {
+				return err
+			}
+			printBGPNeighbors(neighbors)
+			return nil
 		case "summary":
 			output, err := sh.client.GetBGPSummaryText(ctx)
 			if err != nil {
@@ -668,18 +796,25 @@ func (sh *interactiveShell) cmdShow(ctx context.Context, args []string) error {
 			return fmt.Errorf("unknown bgp subcommand '%s'", args[1])
 		}
 
-	case "ospf":
+	case "ospf", "ospf3":
 		if sh.mode == modeConfiguration {
-			return fmt.Errorf("'show ospf' not available in configuration mode")
+			return fmt.Errorf("'show %s' not available in configuration mode", subcmd)
 		}
 		if len(args) < 2 || args[1] != "neighbor" {
-			return fmt.Errorf("'show ospf' requires 'neighbor' subcommand")
+			return fmt.Errorf("'show %s' requires 'neighbor' subcommand", subcmd)
 		}
-		output, err := sh.client.GetOSPFNeighborsText(ctx)
+		if len(args) > 2 {
+			return fmt.Errorf("'show %s neighbor' does not accept extra arguments", subcmd)
+		}
+		addressFamily := routeAddressFamilyIPv4
+		if subcmd == "ospf3" {
+			addressFamily = routeAddressFamilyIPv6
+		}
+		neighbors, err := sh.client.GetOSPFNeighbors(ctx, addressFamily)
 		if err != nil {
 			return err
 		}
-		printCommandOutput(output)
+		printOSPFNeighbors(neighbors)
 		return nil
 
 	case "vrrp":
@@ -687,6 +822,33 @@ func (sh *interactiveShell) cmdShow(ctx context.Context, args []string) error {
 			return fmt.Errorf("'show vrrp' not available in configuration mode")
 		}
 		output, err := sh.client.GetVRRPText(ctx)
+		if err != nil {
+			return err
+		}
+		printCommandOutput(output)
+		return nil
+
+	case "bfd":
+		if sh.mode == modeConfiguration {
+			return fmt.Errorf("'show bfd' not available in configuration mode")
+		}
+		statusRequested, err := bfdStatusRequested(args[1:])
+		if err != nil {
+			return err
+		}
+		if statusRequested {
+			info, err := sh.client.GetBFDStatus(ctx)
+			if err != nil {
+				return err
+			}
+			printBFDStatus(info)
+			return nil
+		}
+		peerAddress, brief, counters, err := bfdTextOptions(args[1:])
+		if err != nil {
+			return err
+		}
+		output, err := sh.client.GetBFDText(ctx, peerAddress, brief, counters)
 		if err != nil {
 			return err
 		}
@@ -730,11 +892,11 @@ func (sh *interactiveShell) cmdShow(ctx context.Context, args []string) error {
 		if sh.mode == modeConfiguration {
 			return fmt.Errorf("'show route' not available in configuration mode")
 		}
-		protoFilter, err := routeProtocolFilter(args[1:])
+		protoFilter, addressFamily, err := routeTextOptions(args[1:])
 		if err != nil {
 			return err
 		}
-		output, err := sh.client.GetRouteText(ctx, protoFilter)
+		output, err := sh.client.GetRouteText(ctx, protoFilter, addressFamily)
 		if err != nil {
 			return err
 		}
@@ -940,15 +1102,22 @@ func (sh *interactiveShell) showHelp() {
 		fmt.Println("  configure                     Enter configuration mode")
 		fmt.Println("  show configuration            Show running configuration")
 		fmt.Println("  show interfaces [<name>]      Show interface status")
-		fmt.Println("  show bgp summary              Show BGP summary")
-		fmt.Println("  show bgp neighbor <ip>        Show BGP neighbor details")
-		fmt.Println("  show ospf neighbor            Show OSPF neighbors")
+		fmt.Println("  show routing-instances [name] Show routing-instance table mapping")
+		fmt.Println("  show routes [prefix <cidr>] [protocol <proto>] Show route status")
+		fmt.Println("  show bgp neighbors            Show BGP neighbor status")
+		fmt.Println("  show bgp summary              Show raw BGP summary")
+		fmt.Println("  show bgp neighbor <ip>        Show raw BGP neighbor details")
+		fmt.Println("  show ospf neighbor            Show OSPFv2 neighbors")
+		fmt.Println("  show ospf3 neighbor           Show OSPFv3 neighbors")
 		fmt.Println("  show vrrp                     Show VRRP status")
+		fmt.Println("  show bfd status               Show BFD operational state")
+		fmt.Println("  show bfd [brief|counters]     Show raw BFD status")
+		fmt.Println("  show bfd peer <ip> [counters] Show BFD peer details")
 		fmt.Println("  show lcp                      Show VPP LCP reconciliation status")
 		fmt.Println("  show ha                       Show HA convergence status")
 		fmt.Println("  show class-of-service         Show class-of-service intent")
-		fmt.Println("  show route                    Show routing table")
-		fmt.Println("  show route protocol <proto>   Show routes by protocol")
+		fmt.Println("  show route [inet|inet6]                 Show routing table")
+		fmt.Println("  show route [inet|inet6] protocol <proto> Show routes by protocol")
 		fmt.Println("  exit, quit                    Exit interactive CLI")
 	} else {
 		fmt.Println("Configuration mode commands:")
@@ -982,13 +1151,13 @@ func printInterfaces(ifaces []grpcclient.InterfaceInfo) {
 		fmt.Println("No interfaces found")
 		return
 	}
-	fmt.Printf("%-20s %-8s %-8s %-6s %-18s %-10s %-12s %-12s %-16s %s\n",
-		"Interface", "Admin", "Oper", "MTU", "MAC", "Speed", "RX-Packets", "TX-Packets", "QoS", "Queues")
-	fmt.Println(strings.Repeat("-", 143))
+	fmt.Printf("%-20s %-8s %-8s %-6s %-18s %-10s %-12s %-12s %-16s %-15s %s\n",
+		"Interface", "Admin", "Oper", "MTU", "MAC", "Speed", "RX-Packets", "TX-Packets", "QoS", "Tables", "Queues")
+	fmt.Println(strings.Repeat("-", 159))
 	for _, iface := range ifaces {
-		fmt.Printf("%-20s %-8s %-8s %-6d %-18s %-10d %-12d %-12d %-16s %s\n",
+		fmt.Printf("%-20s %-8s %-8s %-6d %-18s %-10d %-12d %-12d %-16s %-15s %s\n",
 			iface.Name, iface.AdminStatus, iface.OperStatus,
-			iface.MTU, iface.MAC, iface.Speed, iface.RxPackets, iface.TxPackets, interfaceQoSProfile(iface), interfaceQueueSummary(iface))
+			iface.MTU, iface.MAC, iface.Speed, iface.RxPackets, iface.TxPackets, interfaceQoSProfile(iface), interfaceTableSummary(iface), interfaceQueueSummary(iface))
 	}
 }
 
@@ -997,6 +1166,16 @@ func interfaceQoSProfile(iface grpcclient.InterfaceInfo) string {
 		return "-"
 	}
 	return iface.QoSProfile
+}
+
+func interfaceTableSummary(iface grpcclient.InterfaceInfo) string {
+	if iface.IPv4TableID == 0 && iface.IPv6TableID == 0 {
+		return "-"
+	}
+	if iface.IPv4TableID == iface.IPv6TableID {
+		return fmt.Sprintf("v4/v6:%d", iface.IPv4TableID)
+	}
+	return fmt.Sprintf("v4:%d v6:%d", iface.IPv4TableID, iface.IPv6TableID)
 }
 
 func interfaceQueueSummary(iface grpcclient.InterfaceInfo) string {
@@ -1032,6 +1211,172 @@ func formatQueueThreads(threads []uint32) string {
 	return "[" + strings.Join(parts, ",") + "]"
 }
 
+func printRoutingInstances(instances []grpcclient.RoutingInstanceInfo) {
+	if len(instances) == 0 {
+		fmt.Println("No routing instances found")
+		return
+	}
+	fmt.Printf("%-24s %-8s %-18s %-15s %s\n", "Instance", "Type", "RD", "VPP tables", "Interfaces")
+	fmt.Println(strings.Repeat("-", 98))
+	for _, instance := range instances {
+		fmt.Printf("%-24s %-8s %-18s %-15s %s\n",
+			instance.Name,
+			formatRoutingInstanceValue(instance.InstanceType),
+			formatRoutingInstanceValue(instance.RouteDistinguisher),
+			routingInstanceTableSummary(instance),
+			formatRoutingInstanceList(instance.Interfaces),
+		)
+	}
+
+	if !routingInstancesHavePolicy(instances) {
+		return
+	}
+	fmt.Println()
+	fmt.Println("Import/export")
+	fmt.Printf("%-24s %-32s %-32s %-24s %-24s\n", "Instance", "Import RT", "Export RT", "Import policy", "Export policy")
+	fmt.Println(strings.Repeat("-", 140))
+	for _, instance := range instances {
+		fmt.Printf("%-24s %-32s %-32s %-24s %-24s\n",
+			instance.Name,
+			formatRoutingInstanceList(instance.ImportTargets),
+			formatRoutingInstanceList(instance.ExportTargets),
+			formatRoutingInstanceList(instance.ImportPolicies),
+			formatRoutingInstanceList(instance.ExportPolicies),
+		)
+	}
+}
+
+func routingInstanceTableSummary(instance grpcclient.RoutingInstanceInfo) string {
+	if instance.IPv4TableID == 0 && instance.IPv6TableID == 0 {
+		return "-"
+	}
+	if instance.IPv4TableID == instance.IPv6TableID {
+		return fmt.Sprintf("v4/v6:%d", instance.IPv4TableID)
+	}
+	return fmt.Sprintf("v4:%d v6:%d", instance.IPv4TableID, instance.IPv6TableID)
+}
+
+func routingInstancesHavePolicy(instances []grpcclient.RoutingInstanceInfo) bool {
+	for _, instance := range instances {
+		if len(instance.ImportTargets) > 0 || len(instance.ExportTargets) > 0 ||
+			len(instance.ImportPolicies) > 0 || len(instance.ExportPolicies) > 0 {
+			return true
+		}
+	}
+	return false
+}
+
+func formatRoutingInstanceValue(value string) string {
+	if value == "" {
+		return "-"
+	}
+	return value
+}
+
+func formatRoutingInstanceList(values []string) string {
+	if len(values) == 0 {
+		return "-"
+	}
+	return strings.Join(values, ",")
+}
+
+func printRoutes(routes []grpcclient.RouteInfo) {
+	if len(routes) == 0 {
+		fmt.Println("No routes found")
+		return
+	}
+	fmt.Printf("%-43s %-39s %-12s %-8s %-16s %-8s\n",
+		"Prefix", "Next hop", "Protocol", "Metric", "Interface", "Active")
+	fmt.Println(strings.Repeat("-", 131))
+	for _, route := range routes {
+		fmt.Printf("%-43s %-39s %-12s %-8d %-16s %-8s\n",
+			formatRouteValue(route.Prefix),
+			formatRouteValue(route.NextHop),
+			formatRouteValue(route.Protocol),
+			route.Metric,
+			formatRouteValue(route.Interface),
+			yesNo(route.Active),
+		)
+	}
+}
+
+func formatRouteValue(value string) string {
+	if value == "" {
+		return "-"
+	}
+	return value
+}
+
+func printBGPNeighbors(neighbors []grpcclient.BGPNeighborInfo) {
+	if len(neighbors) == 0 {
+		fmt.Println("No BGP neighbors found")
+		return
+	}
+	fmt.Printf("%-39s %-10s %-16s %-14s %-12s %-12s\n",
+		"Peer", "AS", "State", "Uptime", "Prefixes in", "Prefixes out")
+	fmt.Println(strings.Repeat("-", 109))
+	for _, neighbor := range neighbors {
+		fmt.Printf("%-39s %-10d %-16s %-14s %-12d %-12d\n",
+			formatBGPValue(neighbor.PeerAddress),
+			neighbor.PeerAS,
+			formatBGPValue(neighbor.State),
+			formatBGPUptime(neighbor.UptimeSecs),
+			neighbor.PrefixReceived,
+			neighbor.PrefixSent,
+		)
+	}
+}
+
+func printOSPFNeighbors(neighbors []grpcclient.OSPFNeighborInfo) {
+	if len(neighbors) == 0 {
+		fmt.Println("No OSPF neighbors found")
+		return
+	}
+	fmt.Printf("%-15s %-39s %-16s %-14s %-10s %-10s %-10s\n",
+		"Router ID", "Address", "Interface", "State", "Role", "Dead", "Uptime")
+	fmt.Println(strings.Repeat("-", 122))
+	for _, neighbor := range neighbors {
+		fmt.Printf("%-15s %-39s %-16s %-14s %-10s %-10s %-10s\n",
+			formatBGPValue(neighbor.RouterID),
+			formatBGPValue(neighbor.Address),
+			formatBGPValue(neighbor.Interface),
+			formatBGPValue(neighbor.State),
+			formatBGPValue(neighbor.Role),
+			formatBGPUptime(neighbor.DeadTimeSecs),
+			formatBGPUptime(neighbor.UptimeSecs),
+		)
+	}
+}
+
+func formatBGPValue(value string) string {
+	if value == "" {
+		return "-"
+	}
+	return value
+}
+
+func formatBGPUptime(seconds uint64) string {
+	if seconds == 0 {
+		return "-"
+	}
+	days := seconds / 86400
+	seconds %= 86400
+	hours := seconds / 3600
+	seconds %= 3600
+	minutes := seconds / 60
+	seconds %= 60
+	if days > 0 {
+		return fmt.Sprintf("%dd%02dh%02dm%02ds", days, hours, minutes, seconds)
+	}
+	if hours > 0 {
+		return fmt.Sprintf("%dh%02dm%02ds", hours, minutes, seconds)
+	}
+	if minutes > 0 {
+		return fmt.Sprintf("%dm%02ds", minutes, seconds)
+	}
+	return fmt.Sprintf("%ds", seconds)
+}
+
 func printLCPReconciliation(info *grpcclient.LCPReconciliationInfo) {
 	if info == nil {
 		fmt.Println("No LCP reconciliation status found")
@@ -1065,6 +1410,8 @@ func printHAStatus(info *grpcclient.HAStatusInfo) {
 	fmt.Printf("%-18s %s\n", "Cluster sync", clusterSyncState(info))
 	fmt.Printf("%-18s %d/%d\n", "FRR VRRP", info.FRRVRRPActiveGroups, info.FRRVRRPConfiguredGroups)
 	fmt.Printf("%-18s %s\n", "FRR last check", formatOptionalTime(info.FRRVRRPLastCheck))
+	fmt.Printf("%-18s %s\n", "FRR BFD", haBFDState(info))
+	fmt.Printf("%-18s %s\n", "BFD last check", formatOptionalTime(info.FRRBFDLastCheck))
 	fmt.Printf("%-18s %s\n", "VPP LCP", lcpReconciliationState(&grpcclient.LCPReconciliationInfo{
 		LastRun:         info.VPPLCPLastCheck,
 		PairCount:       info.VPPLCPPairs,
@@ -1075,6 +1422,58 @@ func printHAStatus(info *grpcclient.HAStatusInfo) {
 	if len(info.Issues) == 0 {
 		return
 	}
+	fmt.Println("Issues")
+	for _, issue := range info.Issues {
+		fmt.Printf("  - %s\n", issue)
+	}
+}
+
+func printBFDStatus(info *grpcclient.BFDStatusInfo) {
+	if !hasBFDStatus(info) {
+		fmt.Println("No BFD operational status found")
+		return
+	}
+	fmt.Printf("%-18s %s\n", "State", bfdOperationalState(info))
+	fmt.Printf("%-18s %s\n", "Last check", formatOptionalTime(info.LastRun))
+	fmt.Printf("%-18s %d\n", "Configured peers", info.ConfiguredPeers)
+	fmt.Printf("%-18s %d\n", "Observed peers", info.ObservedPeers)
+	fmt.Printf("%-18s %d\n", "Up peers", info.UpPeers)
+	fmt.Printf("%-18s %d\n", "Down peers", info.DownPeers)
+	fmt.Printf("%-18s %d\n", "Session down", info.SessionDownEvents)
+	fmt.Printf("%-18s %d\n", "RX fail packets", info.RxFailPackets)
+	if info.LastError != "" {
+		fmt.Printf("%-18s %s\n", "Last error", info.LastError)
+	}
+	if len(info.Peers) > 0 {
+		fmt.Println()
+		fmt.Println("Peers")
+		fmt.Printf("%-39s %-39s %-16s %-12s %-10s %-8s %-12s %-12s\n",
+			"Peer", "Local", "Interface", "VRF", "Status", "Up", "Down events", "RX fails")
+		fmt.Println(strings.Repeat("-", 158))
+		for _, peer := range info.Peers {
+			fmt.Printf("%-39s %-39s %-16s %-12s %-10s %-8s %-12d %-12d\n",
+				formatBFDValue(peer.Peer),
+				formatBFDValue(peer.LocalAddress),
+				formatBFDValue(peer.Interface),
+				formatBFDValue(peer.VRF),
+				formatBFDValue(peer.Status),
+				yesNo(peer.Up),
+				peer.SessionDownEvents,
+				peer.RxFailPackets,
+			)
+			if peer.Diagnostic != "" || peer.RemoteDiagnostic != "" || !peer.Observed {
+				fmt.Printf("  diagnostic: %s remote: %s observed: %s\n",
+					formatBFDValue(peer.Diagnostic),
+					formatBFDValue(peer.RemoteDiagnostic),
+					yesNo(peer.Observed),
+				)
+			}
+		}
+	}
+	if len(info.Issues) == 0 {
+		return
+	}
+	fmt.Println()
 	fmt.Println("Issues")
 	for _, issue := range info.Issues {
 		fmt.Printf("  - %s\n", issue)
@@ -1162,6 +1561,61 @@ func clusterSyncState(info *grpcclient.HAStatusInfo) string {
 	return "mismatch"
 }
 
+func haBFDState(info *grpcclient.HAStatusInfo) string {
+	if info == nil || (info.FRRBFDConfiguredPeers == 0 && info.FRRBFDObservedPeers == 0) {
+		return "not configured"
+	}
+	totalPeers := info.FRRBFDConfiguredPeers
+	if totalPeers == 0 {
+		totalPeers = info.FRRBFDObservedPeers
+	}
+	state := fmt.Sprintf("%d/%d up", info.FRRBFDUpPeers, totalPeers)
+	if info.FRRBFDLastError != "" || len(info.FRRBFDIssues) > 0 ||
+		info.FRRBFDDownPeers > 0 || info.FRRBFDUpPeers < info.FRRBFDConfiguredPeers {
+		return state + " (issues)"
+	}
+	if info.FRRBFDLastCheck.IsZero() {
+		return state + " (unknown)"
+	}
+	return state
+}
+
+func hasBFDStatus(info *grpcclient.BFDStatusInfo) bool {
+	if info == nil {
+		return false
+	}
+	return !info.LastRun.IsZero() ||
+		info.ConfiguredPeers != 0 ||
+		info.ObservedPeers != 0 ||
+		info.UpPeers != 0 ||
+		info.DownPeers != 0 ||
+		info.SessionDownEvents != 0 ||
+		info.RxFailPackets != 0 ||
+		len(info.Peers) != 0 ||
+		len(info.Issues) != 0 ||
+		info.LastError != ""
+}
+
+func bfdOperationalState(info *grpcclient.BFDStatusInfo) string {
+	if !hasBFDStatus(info) {
+		return "unknown"
+	}
+	if info.LastError != "" {
+		return "check failed"
+	}
+	if len(info.Issues) > 0 || info.DownPeers > 0 {
+		return "issues"
+	}
+	return "converged"
+}
+
+func formatBFDValue(value string) string {
+	if value == "" {
+		return "-"
+	}
+	return value
+}
+
 func yesNo(value bool) string {
 	if value {
 		return "yes"
@@ -1196,32 +1650,174 @@ func printCommandOutput(output string) {
 	}
 }
 
-func routeProtocolFilter(args []string) (string, error) {
+func routeTextOptions(args []string) (protocol, addressFamily string, err error) {
+	addressFamily = routeAddressFamilyIPv4
+	if len(args) > 0 && isRouteAddressFamily(args[0]) {
+		addressFamily = args[0]
+		args = args[1:]
+	}
+	if len(args) == 0 {
+		return "", addressFamily, nil
+	}
+	if args[0] != "protocol" {
+		return "", "", fmt.Errorf("'show route' accepts '[inet|inet6] protocol <proto>' or no arguments")
+	}
+	if len(args) < 2 {
+		return "", "", fmt.Errorf("'protocol' requires a protocol name")
+	}
+	if len(args) > 2 {
+		return "", "", fmt.Errorf("'show route protocol' does not accept extra arguments")
+	}
+	protocol = args[1]
+	if !validRouteProtocol(protocol, addressFamily) {
+		return "", "", fmt.Errorf("invalid protocol '%s' for %s. Valid: %s", protocol, addressFamily, validRouteProtocolList(addressFamily))
+	}
+	return protocol, addressFamily, nil
+}
+
+func routeStateOptions(args []string) (prefix, protocol string, err error) {
+	for len(args) > 0 {
+		switch args[0] {
+		case "prefix":
+			if prefix != "" {
+				return "", "", fmt.Errorf("'show routes' accepts prefix only once")
+			}
+			if len(args) < 2 {
+				return "", "", fmt.Errorf("'show routes prefix' requires a CIDR prefix")
+			}
+			prefix = args[1]
+			args = args[2:]
+		case "protocol":
+			if protocol != "" {
+				return "", "", fmt.Errorf("'show routes' accepts protocol only once")
+			}
+			if len(args) < 2 {
+				return "", "", fmt.Errorf("'show routes protocol' requires a protocol name")
+			}
+			protocol = args[1]
+			if !validRouteStateProtocol(protocol) {
+				return "", "", fmt.Errorf("invalid protocol '%s'. Valid: %s", protocol, validRouteStateProtocolList())
+			}
+			args = args[2:]
+		default:
+			return "", "", fmt.Errorf("'show routes' accepts '[prefix <cidr>] [protocol <proto>]'")
+		}
+	}
+	return prefix, protocol, nil
+}
+
+func bfdTextOptions(args []string) (peerAddress string, brief bool, counters bool, err error) {
+	if len(args) == 0 {
+		return "", false, false, nil
+	}
+	switch args[0] {
+	case "brief":
+		if len(args) > 1 {
+			return "", false, false, fmt.Errorf("'show bfd brief' does not accept extra arguments")
+		}
+		return "", true, false, nil
+	case "counters":
+		if len(args) > 1 {
+			return "", false, false, fmt.Errorf("'show bfd counters' does not accept extra arguments")
+		}
+		return "", false, true, nil
+	case "peer":
+		if len(args) < 2 {
+			return "", false, false, fmt.Errorf("'show bfd peer' requires an IP address")
+		}
+		if len(args) > 3 {
+			return "", false, false, fmt.Errorf("'show bfd peer' accepts only an optional counters argument")
+		}
+		if len(args) == 3 && args[2] != "counters" {
+			return "", false, false, fmt.Errorf("'show bfd peer' accepts only an optional counters argument")
+		}
+		return args[1], false, len(args) == 3, nil
+	case "status":
+		return "", false, false, fmt.Errorf("'show bfd status' is handled as structured operational state")
+	default:
+		return "", false, false, fmt.Errorf("'show bfd' accepts status, brief, counters, peer <ip>, or no arguments")
+	}
+}
+
+func bfdStatusRequested(args []string) (bool, error) {
+	if len(args) == 0 || args[0] != "status" {
+		return false, nil
+	}
+	if len(args) > 1 {
+		return false, fmt.Errorf("'show bfd status' does not accept extra arguments")
+	}
+	return true, nil
+}
+
+func routingInstancesNameFilter(args []string) (string, error) {
 	if len(args) == 0 {
 		return "", nil
 	}
-	if args[0] != "protocol" {
-		return "", fmt.Errorf("'show route' accepts 'protocol <proto>' or no arguments")
+	if len(args) > 1 {
+		return "", fmt.Errorf("'show routing-instances' accepts at most one instance name")
 	}
-	if len(args) < 2 {
-		return "", fmt.Errorf("'protocol' requires a protocol name")
-	}
-	if len(args) > 2 {
-		return "", fmt.Errorf("'show route protocol' does not accept extra arguments")
-	}
-	protocol := args[1]
-	if !validRouteProtocols[protocol] {
-		return "", fmt.Errorf("invalid protocol '%s'. Valid: bgp, ospf, static, connected, kernel", protocol)
-	}
-	return protocol, nil
+	return args[0], nil
 }
 
-var validRouteProtocols = map[string]bool{
+func filterRoutingInstances(instances []grpcclient.RoutingInstanceInfo, name string) []grpcclient.RoutingInstanceInfo {
+	if name == "" {
+		return instances
+	}
+	filtered := make([]grpcclient.RoutingInstanceInfo, 0, 1)
+	for _, instance := range instances {
+		if instance.Name == name {
+			filtered = append(filtered, instance)
+		}
+	}
+	return filtered
+}
+
+const (
+	routeAddressFamilyIPv4 = "inet"
+	routeAddressFamilyIPv6 = "inet6"
+)
+
+var validIPv4RouteProtocols = map[string]bool{
 	"bgp":       true,
 	"ospf":      true,
 	"static":    true,
 	"connected": true,
 	"kernel":    true,
+}
+
+var validIPv6RouteProtocols = map[string]bool{
+	"bgp":       true,
+	"ospf3":     true,
+	"ospf6":     true,
+	"static":    true,
+	"connected": true,
+	"kernel":    true,
+}
+
+func isRouteAddressFamily(value string) bool {
+	return value == routeAddressFamilyIPv4 || value == routeAddressFamilyIPv6
+}
+
+func validRouteProtocol(protocol, addressFamily string) bool {
+	if addressFamily == routeAddressFamilyIPv6 {
+		return validIPv6RouteProtocols[protocol]
+	}
+	return validIPv4RouteProtocols[protocol]
+}
+
+func validRouteProtocolList(addressFamily string) string {
+	if addressFamily == routeAddressFamilyIPv6 {
+		return "bgp, ospf3, ospf6, static, connected, kernel"
+	}
+	return "bgp, ospf, static, connected, kernel"
+}
+
+func validRouteStateProtocol(protocol string) bool {
+	return validIPv4RouteProtocols[protocol] || validIPv6RouteProtocols[protocol]
+}
+
+func validRouteStateProtocolList() string {
+	return "bgp, ospf, ospf3, ospf6, static, connected, kernel"
 }
 
 // --- Utilities ---

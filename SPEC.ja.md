@@ -1,4 +1,4 @@
-# arca-router 設定仕様（v0.6.x）
+# arca-router 設定仕様（v0.7.x）
 
 このドキュメントは arca-router の設定構文とセマンティクスを定義します。
 
@@ -13,9 +13,9 @@ arca-router は Junos 風の `set` コマンド構文を採用しています。
 3. **NETCONF/SSH**: NETCONF（RFC 6241）によるリモート設定。デーモンに内蔵され、同じ datastore/engine を利用
 4. **ファイルブートストラップ**: 設定済み datastore に running 設定がない場合のみ、起動時に `/etc/arca-router/arca-router.conf` を読み込み
 
-### v0.6.x アーキテクチャ
+### v0.6.x / v0.7.x アーキテクチャ
 
-v0.6.x は統合デーモン経路を advanced features 向けに拡張します：
+v0.6.x は統合デーモン経路を advanced features 向けに拡張し、v0.7.x は core router parity の不足分を追加します：
 
 - **構造体ファースト設定モデル**: 設定は Go 構造体（`internal/model.RouterConfig`）で表現。テキストはシリアライズの一形式。
 - **SQLite または etcd candidate/running datastore**: single-node では SQLite が標準。clustered deployment では etcd を選択できます。
@@ -25,13 +25,13 @@ v0.6.x は統合デーモン経路を advanced features 向けに拡張します
 - **復旧用 FRR file backend**: `--frr-apply-mode=file` は復旧・互換用途の full-file reload 経路として保持。
 - **gRPC 内部 API**: `arca` は Unix ソケット gRPC（`api/v1/router.proto`、デフォルト `/run/arca-router/routerd.sock`）経由でデーモンと通信。
 - **2 フェーズコミット**: 全プラグイン検証 → 全プラグイン適用 → 障害時ロールバック。
-- **Advanced configuration model**: clustering、MPLS、VRRP、routing instances、class of service、Web UI service settings を構造体ファースト model と diff engine で扱います。
+- **Advanced and parity configuration model**: clustering、MPLS、VRRP、routing instances、class of service、Web UI service settings、IPv6 parity、BFD を構造体ファースト model と diff engine で扱います。
 - **Cluster datastore selection**: `arca-routerd` と embedded NETCONF は同じ SQLite または etcd datastore backend を共有します。
 - **Observability**: 任意で Prometheus `/metrics`、`/healthz`、認証付き config validate/commit API を備えた Web UI dashboard、read-only SNMPv2c、パッケージ同梱 Grafana dashboard を提供。
 
 この仕様で扱うコマンド名は `arca-routerd` と `arca` のみです。廃止済みの command entrypoint はメンテナンス対象外です。
 
-> **互換性メモ**: `set` コマンド構文と NETCONF 設定モデルは維持します。自動移行ツールは v0.6.x の対象外です。
+> **互換性メモ**: `set` コマンド構文と NETCONF 設定モデルは維持します。自動移行ツールは v0.6.x 以降の対象外です。
 
 ---
 
@@ -44,6 +44,7 @@ v0.6.x は統合デーモン経路を advanced features 向けに拡張します
 5. [プロトコル](#protocols)
    - [BGP](#bgp-configuration)
    - [OSPF](#ospf-configuration)
+   - [BFD](#bfd-configuration)
    - [スタティックルート](#static-routes)
 6. [Policy Options](#policy-options)
    - [Prefix Lists](#prefix-lists)
@@ -256,12 +257,19 @@ set routing-options router-id 10.0.1.1
 **構文**:
 ```
 set routing-options static route <prefix> next-hop <ip-address> [distance <value>]
+set routing-options static route <prefix> next-hop <ip-address> bfd
+set routing-options static route <prefix> next-hop <ip-address> bfd source <ip-address>
+set routing-options static route <prefix> next-hop <ip-address> bfd profile <profile-name>
+set routing-options static route <prefix> next-hop <ip-address> bfd multi-hop
 ```
 
 **パラメータ**:
 - `<prefix>`: 宛先プレフィックス（CIDR）
 - `<ip-address>`: 次ホップ IP アドレス
 - `<value>`: 任意の administrative distance（1-255、デフォルト: 1）
+- `<profile-name>`: `protocols bfd profile` 配下に定義済みの profile 名
+
+**注**: FRR の static route BFD command は administrative distance 付きの形式を持たないため、`distance` と `bfd` は同時に指定できません。
 
 **例**:
 ```
@@ -270,6 +278,9 @@ set routing-options static route 0.0.0.0/0 next-hop 10.0.1.254
 
 # Specific route with custom distance
 set routing-options static route 192.168.100.0/24 next-hop 192.168.1.254 distance 10
+
+# BFD monitored static route
+set routing-options static route 203.0.113.0/24 next-hop 192.0.2.2 bfd source 192.0.2.1 profile fast
 ```
 
 ---
@@ -384,6 +395,76 @@ set protocols ospf area 0.0.0.0 interface ge-0/0/1 passive
 set protocols ospf area 0.0.0.0 interface ge-0/0/1 metric 100
 set protocols ospf area 0.0.0.0 interface ge-0/0/1 priority 1
 ```
+
+<a id="bfd-configuration"></a>
+### BFD 設定
+
+#### BFD Profile
+
+**構文**:
+```
+set protocols bfd profile <profile-name> receive-interval <milliseconds>
+set protocols bfd profile <profile-name> transmit-interval <milliseconds>
+set protocols bfd profile <profile-name> detect-multiplier <multiplier>
+set protocols bfd profile <profile-name> echo-mode
+set protocols bfd profile <profile-name> passive-mode
+```
+
+#### BFD Peer
+
+**構文**:
+```
+set protocols bfd peer <ip-address> local-address <ip-address>
+set protocols bfd peer <ip-address> interface <interface-name>
+set protocols bfd peer <ip-address> vrf <routing-instance-name>
+set protocols bfd peer <ip-address> multihop
+set protocols bfd peer <ip-address> profile <profile-name>
+set protocols bfd peer <ip-address> receive-interval <milliseconds>
+set protocols bfd peer <ip-address> transmit-interval <milliseconds>
+set protocols bfd peer <ip-address> detect-multiplier <multiplier>
+set protocols bfd peer <ip-address> echo-mode
+set protocols bfd peer <ip-address> passive-mode
+set protocols bfd peer <ip-address> shutdown
+```
+
+#### BFD Protocol Binding
+
+**構文**:
+```
+set protocols bgp group <group-name> neighbor <ip-address> bfd
+set protocols bgp group <group-name> neighbor <ip-address> bfd profile <profile-name>
+set protocols ospf area <area-id> interface <interface-name> bfd
+set protocols ospf area <area-id> interface <interface-name> bfd profile <profile-name>
+set protocols ospf3 area <area-id> interface <interface-name> bfd
+set protocols ospf3 area <area-id> interface <interface-name> bfd profile <profile-name>
+set routing-options static route <prefix> next-hop <ip-address> bfd
+set routing-options static route <prefix> next-hop <ip-address> bfd source <ip-address>
+set routing-options static route <prefix> next-hop <ip-address> bfd profile <profile-name>
+set routing-options static route <prefix> next-hop <ip-address> bfd multi-hop
+```
+
+**パラメータ**:
+- `<milliseconds>`: BFD timer。`10` から `60000` の範囲
+- `<multiplier>`: detection multiplier。`2` から `255` の範囲
+- `<interface-name>`: `interfaces` 配下に定義済みのインターフェース名
+- `<routing-instance-name>`: `routing-instances` 配下に定義済みの VRF 名、または `default`
+- `<profile-name>`: `protocols bfd profile` 配下に定義済みの profile 名
+
+**例**:
+```
+set protocols bfd profile fast receive-interval 150
+set protocols bfd profile fast transmit-interval 150
+set protocols bfd profile fast detect-multiplier 3
+set protocols bfd peer 192.0.2.2 interface ge-0/0/0
+set protocols bfd peer 192.0.2.2 local-address 192.0.2.1
+set protocols bfd peer 192.0.2.2 profile fast
+set protocols bgp group EBGP neighbor 192.0.2.2 bfd profile fast
+set protocols ospf area 0.0.0.0 interface ge-0/0/0 bfd profile fast
+set protocols ospf3 area 0.0.0.0 interface ge-0/0/0 bfd profile fast
+set routing-options static route 203.0.113.0/24 next-hop 192.0.2.2 bfd source 192.0.2.1 profile fast
+```
+
+BFD peer/profile、BGP/OSPF/OSPFv3 binding、static route BFD monitoring は parser、serializer、validation、internal model、diff、NETCONF XML/YANG、FRR apply backend に対応します。標準の transactional backend は explicit BFD peer/profile、static route BFD monitoring、profile なし BGP BFD、profile なし OSPF BFD を management operation として適用します。BGP/OSPF の BFD profile binding と OSPFv3 は、対応する FRR management YANG path が揃うまで file backend へ自動 fallback します。
 
 ### スタティックルート
 
@@ -502,7 +583,7 @@ set protocols bgp group external import PREFER-CUSTOMER
 
 Class-of-service interface binding は、managed VPP interface に output traffic-control profile intent として適用されます。VRRP と L3VPN control-plane configuration は FRR file backend と標準の transactional FRR backend の両方で適用されます。
 
-MPLS、VRRP、OSPF、routing-instance、class-of-service の interface 参照は `interfaces` 配下に定義された interface を指す必要があります。未知の interface 参照は southbound apply 前の validation で失敗します。Routing-instance の VPN import/export 設定は、必要な import/export target、route distinguisher、または `routing-options autonomous-system` が不足している場合も apply 前の validation で失敗します。
+MPLS、VRRP、OSPF、BFD、routing-instance、class-of-service の interface 参照は `interfaces` 配下に定義された interface を指す必要があります。未知の interface 参照は southbound apply 前の validation で失敗します。Routing-instance の VPN import/export 設定は、必要な import/export target、route distinguisher、または `routing-options autonomous-system` が不足している場合も apply 前の validation で失敗します。
 
 ### Prometheus service
 
@@ -970,7 +1051,7 @@ set security rate-limit per-user 20
 
 標準 backend は `transactional` です。FRR 側で `/etc/frr/daemons` の `mgmtd=yes` と、`arca-router` service user からの `vtysh` access（通常は `frrvty` group）が必要です。
 
-arca-router 標準の FRR daemon set は `bgpd`、`ospfd`、`zebra`、`staticd`、`mgmtd`、`vrrpd` です。transactional backend は FRR の interface tree 配下にある `frr-vrrpd` YANG model を使って VRRP を適用します。`file` backend は full FRR config を書き出し、`frr-reload.py` で適用します。復旧・互換用途として保持しており、利用する場合は service user が `/etc/frr/frr.conf` に書き込むための追加権限が必要です。
+arca-router 標準の FRR daemon set は `bgpd`、`ospfd`、`ospf6d`、`zebra`、`staticd`、`mgmtd`、`vrrpd`、`bfdd` です。transactional backend は FRR の interface tree 配下にある `frr-vrrpd` YANG model で VRRP を適用し、`frr-bfdd` で explicit BFD peer/profile、`frr-staticd` で static route BFD monitoring、`frr-bgp` で profile なし BGP BFD、`frr-ospfd` で profile なし OSPF BFD を適用します。BGP/OSPF の BFD profile binding と OSPFv3 は、対応する FRR management YANG path が揃うまで file backend へ自動 fallback します。`file` backend は full FRR config を書き出し、`frr-reload.py` で適用します。復旧・互換用途として保持しており、明示的に利用する場合や自動 fallback 対象の機能を使う場合は、service user が `/etc/frr/frr.conf` に書き込むための追加権限が必要です。
 
 ### Prometheus と health
 

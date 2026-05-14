@@ -122,15 +122,28 @@ func TestWebStatusEndpoint(t *testing.T) {
 			LastCheck:       time.Unix(1700000100, 0),
 			LastApply:       time.Unix(1700000200, 0),
 		}},
-		frr: fakeFRRVRRPSource{status: sbfrr.VRRPOperationalStatus{
-			LastRun:          time.Unix(1700000300, 0),
-			ConfiguredGroups: 1,
-			ObservedGroups:   1,
-			ActiveGroups:     1,
-			Groups: []sbfrr.VRRPGroupOperationalStatus{
-				{Interface: "ge0-0-0", ID: 10, VirtualAddress: "192.0.2.1", State: "Master", Observed: true, Active: true},
+		frr: fakeFRRVRRPSource{
+			vrrpStatus: sbfrr.VRRPOperationalStatus{
+				LastRun:          time.Unix(1700000300, 0),
+				ConfiguredGroups: 1,
+				ObservedGroups:   1,
+				ActiveGroups:     1,
+				Groups: []sbfrr.VRRPGroupOperationalStatus{
+					{Interface: "ge0-0-0", ID: 10, VirtualAddress: "192.0.2.1", State: "Master", Observed: true, Active: true},
+				},
 			},
-		}},
+			bfdStatus: sbfrr.BFDOperationalStatus{
+				LastRun:           time.Unix(1700000400, 0),
+				ConfiguredPeers:   1,
+				ObservedPeers:     1,
+				UpPeers:           1,
+				SessionDownEvents: 2,
+				RxFailPackets:     1,
+				Peers: []sbfrr.BFDPeerOperationalStatus{
+					{Peer: "192.0.2.2", Status: "up", Observed: true, Up: true, SessionDownEvents: 2, RxFailPackets: 1},
+				},
+			},
+		},
 		vpp: fakeVPPReconciliationSource{status: sbvpp.LCPReconciliationStatus{
 			LastRun:         time.Unix(1700000000, 0),
 			PairCount:       2,
@@ -174,6 +187,14 @@ func TestWebStatusEndpoint(t *testing.T) {
 	if len(status.FRR.VRRP.Groups) != 1 || status.FRR.VRRP.Groups[0].State != "Master" ||
 		!status.FRR.VRRP.Groups[0].Observed || !status.FRR.VRRP.Groups[0].Active {
 		t.Fatalf("FRR VRRP groups = %#v, want active group detail", status.FRR.VRRP.Groups)
+	}
+	if status.FRR.BFD.ConfiguredPeers != 1 || status.FRR.BFD.UpPeers != 1 ||
+		status.FRR.BFD.SessionDownEvents != 2 || status.FRR.BFD.LastCheck == "" {
+		t.Fatalf("FRR BFD status = %#v, want active peer status", status.FRR.BFD)
+	}
+	if len(status.FRR.BFD.Peers) != 1 || status.FRR.BFD.Peers[0].Status != "up" ||
+		!status.FRR.BFD.Peers[0].Observed || !status.FRR.BFD.Peers[0].Up {
+		t.Fatalf("FRR BFD peers = %#v, want active peer detail", status.FRR.BFD.Peers)
 	}
 	if status.VPP.LCP.PairCount != 2 || status.VPP.LCP.InconsistencyCount != 1 || status.VPP.LCP.LastReconcile == "" {
 		t.Fatalf("VPP LCP status = %#v, want pair count and inconsistency status", status.VPP.LCP)

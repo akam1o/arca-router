@@ -114,11 +114,36 @@ func (c *RouterConfig) validateRouting() error {
 		}
 	}
 	for _, route := range c.Routing.StaticRoutes {
-		if _, _, err := net.ParseCIDR(route.Prefix); err != nil {
+		_, prefixNet, err := net.ParseCIDR(route.Prefix)
+		if err != nil {
 			return fmt.Errorf("static route: invalid prefix %q: %w", route.Prefix, err)
 		}
-		if net.ParseIP(route.NextHop) == nil {
+		nextHopIP := net.ParseIP(route.NextHop)
+		if nextHopIP == nil {
 			return fmt.Errorf("static route %s: invalid next-hop %q", route.Prefix, route.NextHop)
+		}
+		if (prefixNet.IP.To4() == nil) != (nextHopIP.To4() == nil) {
+			return fmt.Errorf("static route %s: next-hop family does not match prefix", route.Prefix)
+		}
+		if route.BFDProfile != "" {
+			if err := c.validateBFDProfileReference(fmt.Sprintf("static route %s", route.Prefix), route.BFDProfile); err != nil {
+				return err
+			}
+		}
+		if route.BFDSource != "" {
+			sourceIP := net.ParseIP(route.BFDSource)
+			if sourceIP == nil {
+				return fmt.Errorf("static route %s: invalid BFD source %q", route.Prefix, route.BFDSource)
+			}
+			if (nextHopIP.To4() == nil) != (sourceIP.To4() == nil) {
+				return fmt.Errorf("static route %s: BFD source family does not match next-hop", route.Prefix)
+			}
+		}
+		if (route.BFDProfile != "" || route.BFDSource != "" || route.BFDMultihop) && !route.BFD {
+			return fmt.Errorf("static route %s: BFD options require BFD to be enabled", route.Prefix)
+		}
+		if route.Distance > 0 && (route.BFD || route.BFDProfile != "" || route.BFDSource != "" || route.BFDMultihop) {
+			return fmt.Errorf("static route %s: distance is not supported with BFD monitoring", route.Prefix)
 		}
 	}
 	return nil
@@ -224,26 +249,24 @@ func (c *RouterConfig) validateProtocols() error {
 	if c.Protocols == nil {
 		return nil
 	}
+	if bfd := c.Protocols.BFD; bfd != nil {
+		if err := c.validateBFD(bfd); err != nil {
+			return err
+		}
+	}
 	if bgp := c.Protocols.BGP; bgp != nil {
 		if err := c.validateBGP(bgp); err != nil {
 			return err
 		}
 	}
 	if ospf := c.Protocols.OSPF; ospf != nil {
-		if ospf.RouterID != "" {
-			if net.ParseIP(ospf.RouterID) == nil {
-				return fmt.Errorf("ospf: invalid router-id %q", ospf.RouterID)
-			}
+		if err := c.validateOSPF("ospf", ospf); err != nil {
+			return err
 		}
-		for areaName, area := range ospf.Areas {
-			if area == nil {
-				return fmt.Errorf("ospf area %s is nil", areaName)
-			}
-			for ifName := range area.Interfaces {
-				if err := c.validateInterfaceReference(fmt.Sprintf("ospf area %s", areaName), ifName); err != nil {
-					return err
-				}
-			}
+	}
+	if ospf3 := c.Protocols.OSPF3; ospf3 != nil {
+		if err := c.validateOSPF("ospf3", ospf3); err != nil {
+			return err
 		}
 	}
 	if mpls := c.Protocols.MPLS; mpls != nil {
@@ -278,6 +301,88 @@ func (c *RouterConfig) validateProtocols() error {
 	return nil
 }
 
+func (c *RouterConfig) validateBFD(bfd *BFDConfig) error {
+	for name, profile := range bfd.Profiles {
+		if profile == nil {
+			return fmt.Errorf("bfd profile %s is nil", name)
+		}
+		if err := validateModelBFDTimers(fmt.Sprintf("bfd profile %s", name), profile.DetectMultiplier, profile.ReceiveInterval, profile.TransmitInterval); err != nil {
+			return err
+		}
+	}
+	for address, peer := range bfd.Peers {
+		if peer == nil {
+			return fmt.Errorf("bfd peer %s is nil", address)
+		}
+		if net.ParseIP(address) == nil {
+			return fmt.Errorf("bfd peer %s: invalid peer address", address)
+		}
+		if peer.LocalAddress != "" && net.ParseIP(peer.LocalAddress) == nil {
+			return fmt.Errorf("bfd peer %s: invalid local-address %q", address, peer.LocalAddress)
+		}
+		if peer.Interface != "" {
+			if err := c.validateInterfaceReference(fmt.Sprintf("bfd peer %s", address), peer.Interface); err != nil {
+				return err
+			}
+		}
+		if peer.VRF != "" && peer.VRF != "default" {
+			if c.RoutingInstances == nil || c.RoutingInstances[peer.VRF] == nil {
+				return fmt.Errorf("bfd peer %s: routing-instance %q is not configured", address, peer.VRF)
+			}
+		}
+		if peer.Profile != "" && bfd.Profiles[peer.Profile] == nil {
+			return fmt.Errorf("bfd peer %s: profile %q is not configured", address, peer.Profile)
+		}
+		if peer.Multihop && peer.EchoMode {
+			return fmt.Errorf("bfd peer %s: echo-mode is not supported with multihop", address)
+		}
+		if peer.Multihop && peer.Profile != "" && bfd.Profiles[peer.Profile] != nil && bfd.Profiles[peer.Profile].EchoMode {
+			return fmt.Errorf("bfd peer %s: echo-mode profile %q is not supported with multihop", address, peer.Profile)
+		}
+		if err := validateModelBFDTimers(fmt.Sprintf("bfd peer %s", address), peer.DetectMultiplier, peer.ReceiveInterval, peer.TransmitInterval); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func validateModelBFDTimers(context string, detectMultiplier, receiveInterval, transmitInterval int) error {
+	if detectMultiplier < 0 || detectMultiplier > 255 || detectMultiplier == 1 {
+		return fmt.Errorf("%s: detect-multiplier must be omitted or 2-255, got %d", context, detectMultiplier)
+	}
+	if receiveInterval < 0 || receiveInterval > 60000 || (receiveInterval > 0 && receiveInterval < 10) {
+		return fmt.Errorf("%s: receive-interval must be omitted or 10-60000, got %d", context, receiveInterval)
+	}
+	if transmitInterval < 0 || transmitInterval > 60000 || (transmitInterval > 0 && transmitInterval < 10) {
+		return fmt.Errorf("%s: transmit-interval must be omitted or 10-60000, got %d", context, transmitInterval)
+	}
+	return nil
+}
+
+func (c *RouterConfig) validateOSPF(protocol string, ospf *OSPFConfig) error {
+	if ospf.RouterID != "" {
+		if net.ParseIP(ospf.RouterID) == nil {
+			return fmt.Errorf("%s: invalid router-id %q", protocol, ospf.RouterID)
+		}
+	}
+	for areaName, area := range ospf.Areas {
+		if area == nil {
+			return fmt.Errorf("%s area %s is nil", protocol, areaName)
+		}
+		for ifName := range area.Interfaces {
+			if err := c.validateInterfaceReference(fmt.Sprintf("%s area %s", protocol, areaName), ifName); err != nil {
+				return err
+			}
+			if area.Interfaces[ifName] != nil && area.Interfaces[ifName].BFDProfile != "" {
+				if err := c.validateBFDProfileReference(fmt.Sprintf("%s area %s interface %s", protocol, areaName, ifName), area.Interfaces[ifName].BFDProfile); err != nil {
+					return err
+				}
+			}
+		}
+	}
+	return nil
+}
+
 func (c *RouterConfig) validateBGP(bgp *BGPConfig) error {
 	// BGP requires AS number from routing-options
 	if c.Routing == nil || c.Routing.AutonomousSystem == 0 {
@@ -295,20 +400,35 @@ func (c *RouterConfig) validateBGP(bgp *BGPConfig) error {
 			if neighbor.PeerAS == 0 {
 				return fmt.Errorf("bgp group %s neighbor %s: peer-as is required", groupName, ip)
 			}
-		}
-		// Validate import/export policy references
-		if group.Import != "" && c.Policy != nil {
-			if _, ok := c.Policy.PolicyStatements[group.Import]; !ok {
-				return fmt.Errorf("bgp group %s: import policy %q not found in policy-options",
-					groupName, group.Import)
+			if neighbor.BFDProfile != "" {
+				if err := c.validateBFDProfileReference(fmt.Sprintf("bgp group %s neighbor %s", groupName, ip), neighbor.BFDProfile); err != nil {
+					return err
+				}
 			}
 		}
-		if group.Export != "" && c.Policy != nil {
-			if _, ok := c.Policy.PolicyStatements[group.Export]; !ok {
-				return fmt.Errorf("bgp group %s: export policy %q not found in policy-options",
-					groupName, group.Export)
+		if group.Import != "" {
+			if err := c.validatePolicyStatementReference(fmt.Sprintf("bgp group %s import", groupName), group.Import); err != nil {
+				return err
 			}
 		}
+		if group.Export != "" {
+			if err := c.validatePolicyStatementReference(fmt.Sprintf("bgp group %s export", groupName), group.Export); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+func (c *RouterConfig) validateBFDProfileReference(context, profileName string) error {
+	if strings.TrimSpace(profileName) == "" {
+		return fmt.Errorf("%s: empty BFD profile reference", context)
+	}
+	if c.Protocols == nil || c.Protocols.BFD == nil || c.Protocols.BFD.Profiles == nil {
+		return fmt.Errorf("%s: BFD profile %q not found in protocols bfd", context, profileName)
+	}
+	if c.Protocols.BFD.Profiles[profileName] == nil {
+		return fmt.Errorf("%s: BFD profile %q not found in protocols bfd", context, profileName)
 	}
 	return nil
 }
@@ -318,13 +438,93 @@ func (c *RouterConfig) validatePolicy() error {
 		return nil
 	}
 	for name, pl := range c.Policy.PrefixLists {
+		if strings.TrimSpace(name) == "" {
+			return fmt.Errorf("policy-options prefix-list name is empty")
+		}
+		if pl == nil {
+			return fmt.Errorf("policy-options prefix-list %s is nil", name)
+		}
 		for _, prefix := range pl.Prefixes {
 			if _, _, err := net.ParseCIDR(prefix); err != nil {
 				return fmt.Errorf("prefix-list %s: invalid prefix %q: %w", name, prefix, err)
 			}
 		}
 	}
+	for name, statement := range c.Policy.PolicyStatements {
+		if strings.TrimSpace(name) == "" {
+			return fmt.Errorf("policy-options policy-statement name is empty")
+		}
+		if statement == nil {
+			return fmt.Errorf("policy-options policy-statement %s is nil", name)
+		}
+		if err := c.validatePolicyStatement(name, statement); err != nil {
+			return err
+		}
+	}
 	return nil
+}
+
+func (c *RouterConfig) validatePolicyStatement(name string, statement *PolicyStatement) error {
+	for _, term := range statement.Terms {
+		if term == nil {
+			return fmt.Errorf("policy-statement %s: nil term", name)
+		}
+		if strings.TrimSpace(term.Name) == "" {
+			return fmt.Errorf("policy-statement %s: empty term name", name)
+		}
+		if term.From != nil {
+			for _, listName := range term.From.PrefixLists {
+				if strings.TrimSpace(listName) == "" {
+					return fmt.Errorf("policy-statement %s term %s: empty prefix-list reference", name, term.Name)
+				}
+				if c.Policy.PrefixLists == nil || c.Policy.PrefixLists[listName] == nil {
+					return fmt.Errorf("policy-statement %s term %s: prefix-list %q not found in policy-options", name, term.Name, listName)
+				}
+			}
+			if term.From.Protocol != "" && !isValidRoutePolicyProtocol(term.From.Protocol) {
+				return fmt.Errorf("policy-statement %s term %s: invalid protocol %q", name, term.Name, term.From.Protocol)
+			}
+			if term.From.Neighbor != "" && net.ParseIP(term.From.Neighbor) == nil {
+				return fmt.Errorf("policy-statement %s term %s: invalid neighbor %q", name, term.Name, term.From.Neighbor)
+			}
+			if term.From.ASPath != "" {
+				if _, err := regexp.Compile(term.From.ASPath); err != nil {
+					return fmt.Errorf("policy-statement %s term %s: invalid as-path %q: %w", name, term.Name, term.From.ASPath, err)
+				}
+			}
+		}
+		if term.Then != nil && term.Then.Community != "" && !isValidPolicyCommunity(term.Then.Community) {
+			return fmt.Errorf("policy-statement %s term %s: invalid community %q", name, term.Name, term.Then.Community)
+		}
+	}
+	return nil
+}
+
+func isValidRoutePolicyProtocol(protocol string) bool {
+	switch protocol {
+	case "bgp", "ospf", "ospf3", "static", "connected", "direct", "kernel", "rip":
+		return true
+	default:
+		return false
+	}
+}
+
+func isValidPolicyCommunity(community string) bool {
+	switch community {
+	case "no-export", "no-advertise", "local-AS", "no-peer":
+		return true
+	default:
+		parts := strings.Split(community, ":")
+		if len(parts) != 2 || parts[0] == "" || parts[1] == "" {
+			return false
+		}
+		asn, err := strconv.ParseUint(parts[0], 10, 32)
+		if err != nil || asn > 65535 {
+			return false
+		}
+		value, err := strconv.ParseUint(parts[1], 10, 32)
+		return err == nil && value <= 65535
+	}
 }
 
 func (c *RouterConfig) validateClassOfService() error {
@@ -396,6 +596,10 @@ func (c *RouterConfig) ResolveRouterID(protocol string) string {
 	case "ospf":
 		if c.Protocols != nil && c.Protocols.OSPF != nil && c.Protocols.OSPF.RouterID != "" {
 			return c.Protocols.OSPF.RouterID
+		}
+	case "ospf3":
+		if c.Protocols != nil && c.Protocols.OSPF3 != nil && c.Protocols.OSPF3.RouterID != "" {
+			return c.Protocols.OSPF3.RouterID
 		}
 	}
 	if c.Routing != nil && c.Routing.RouterID != "" {

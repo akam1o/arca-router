@@ -18,9 +18,11 @@ import (
 	apiv1 "github.com/akam1o/arca-router/api/v1"
 	"github.com/akam1o/arca-router/internal/engine"
 	"github.com/akam1o/arca-router/internal/model"
+	sbfrr "github.com/akam1o/arca-router/internal/southbound/frr"
 	"github.com/akam1o/arca-router/internal/store"
 	"github.com/akam1o/arca-router/pkg/cli"
 	pkgconfig "github.com/akam1o/arca-router/pkg/config"
+	pkgfrr "github.com/akam1o/arca-router/pkg/frr"
 	pkgvpp "github.com/akam1o/arca-router/pkg/vpp"
 	"github.com/google/uuid"
 	googlegrpc "google.golang.org/grpc"
@@ -37,6 +39,10 @@ type Server struct {
 	stateCollector interfaceStateCollector
 	lcpSource      lcpReconciliationSource
 	haSource       haStatusSource
+	bfdSource      bfdOperationalSource
+	routeReader    pkgfrr.RouteStatusReader
+	bgpReader      pkgfrr.BGPSummaryStatusReader
+	ospfReader     pkgfrr.OSPFNeighborStatusReader
 }
 
 var (
@@ -63,13 +69,20 @@ type haStatusSource interface {
 	HAStatusInfo() HAStatusInfo
 }
 
+type bfdOperationalSource interface {
+	BFDOperationalStatus() sbfrr.BFDOperationalStatus
+}
+
 // NewServer creates a new gRPC server.
 func NewServer(eng *engine.Engine, st store.ConfigStore, log *slog.Logger) *Server {
 	return &Server{
-		engine:   eng,
-		store:    st,
-		sessions: NewSessionManager(),
-		log:      log.With("component", "grpc"),
+		engine:      eng,
+		store:       st,
+		sessions:    NewSessionManager(),
+		log:         log.With("component", "grpc"),
+		routeReader: newOperationalRouteStatusReader(),
+		bgpReader:   newOperationalBGPSummaryStatusReader(),
+		ospfReader:  newOperationalOSPFNeighborStatusReader(),
 	}
 }
 
@@ -103,6 +116,31 @@ func (s *Server) SetLCPReconciliationSource(source lcpReconciliationSource) {
 // SetHAStatusSource installs a control-plane HA status source.
 func (s *Server) SetHAStatusSource(source haStatusSource) {
 	s.haSource = source
+}
+
+// SetBFDOperationalSource installs an FRR BFD operational state source.
+func (s *Server) SetBFDOperationalSource(source bfdOperationalSource) {
+	s.bfdSource = source
+}
+
+func newOperationalRouteStatusReader() pkgfrr.RouteStatusReader {
+	return pkgfrr.NewVtyshRouteStatusReaderWithRunner(runOperationalVtyshBytesCommand)
+}
+
+func newOperationalBGPSummaryStatusReader() pkgfrr.BGPSummaryStatusReader {
+	return pkgfrr.NewVtyshBGPSummaryStatusReaderWithRunner(runOperationalVtyshBytesCommand)
+}
+
+func newOperationalOSPFNeighborStatusReader() pkgfrr.OSPFNeighborStatusReader {
+	return pkgfrr.NewVtyshOSPFNeighborStatusReaderWithRunner(runOperationalVtyshBytesCommand)
+}
+
+func runOperationalVtyshBytesCommand(ctx context.Context, command string) ([]byte, error) {
+	output, err := runOperationalVtyshCommand(ctx, command)
+	if err != nil {
+		return nil, err
+	}
+	return []byte(output), nil
 }
 
 // --- ConfigService implementation ---
@@ -495,6 +533,8 @@ func (s *Server) getCollectedInterfaces(ctx context.Context, nameFilter string) 
 			MTU:         state.MTU,
 			MAC:         state.MAC,
 			QoSProfile:  state.QoSProfile,
+			IPv4TableID: state.IPv4TableID,
+			IPv6TableID: state.IPv6TableID,
 		}
 		if counters := state.Counters; counters != nil {
 			info.RxPackets = counters.RxPackets
@@ -554,6 +594,16 @@ func (s *Server) getDirectVPPInterfaces(ctx context.Context, nameFilter string) 
 			OperStatus:  upDown(iface.LinkUp),
 			MAC:         iface.MAC.String(),
 			QoSProfile:  iface.QoSProfile,
+		}
+		if tableID, err := client.GetInterfaceTable(ctx, iface.SwIfIndex, false); err != nil {
+			s.log.Debug("failed to get VPP interface IPv4 table", slog.String("interface", iface.Name), slog.Any("error", err))
+		} else {
+			info.IPv4TableID = tableID
+		}
+		if tableID, err := client.GetInterfaceTable(ctx, iface.SwIfIndex, true); err != nil {
+			s.log.Debug("failed to get VPP interface IPv6 table", slog.String("interface", iface.Name), slog.Any("error", err))
+		} else {
+			info.IPv6TableID = tableID
 		}
 		if counters, ok := countersByIndex[iface.SwIfIndex]; ok {
 			info.RxPackets = counters.RxPackets
@@ -625,22 +675,124 @@ func txQueueInfosFromVPP(queues []pkgvpp.InterfaceTxQueuePlacement) []InterfaceT
 
 // GetRoutes returns routing table entries.
 func (s *Server) GetRoutes(ctx context.Context, prefixFilter, protoFilter string) ([]RouteInfo, error) {
-	return nil, unsupportedOperationalStateError("route state")
+	var parsedPrefix string
+	if strings.TrimSpace(prefixFilter) != "" {
+		prefix, err := netip.ParsePrefix(strings.TrimSpace(prefixFilter))
+		if err != nil {
+			return nil, fmt.Errorf("invalid route prefix filter %q", prefixFilter)
+		}
+		parsedPrefix = prefix.String()
+	}
+
+	reader := s.routeReader
+	if reader == nil {
+		reader = newOperationalRouteStatusReader()
+	}
+	status, err := reader.ReadRouteStatus(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if status == nil {
+		return nil, nil
+	}
+
+	routes := make([]RouteInfo, 0, len(status.Routes))
+	for _, route := range status.Routes {
+		info := routeInfoFromFRRRoute(route)
+		if parsedPrefix != "" && info.Prefix != parsedPrefix {
+			continue
+		}
+		if !routeProtocolFilterMatches(info.Protocol, protoFilter) {
+			continue
+		}
+		routes = append(routes, info)
+	}
+	sort.Slice(routes, func(i, j int) bool {
+		return routeInfoSortKey(routes[i]) < routeInfoSortKey(routes[j])
+	})
+	return routes, nil
 }
 
 // GetBGPNeighbors returns BGP neighbor state.
 func (s *Server) GetBGPNeighbors(ctx context.Context) ([]BGPNeighborInfo, error) {
-	return nil, unsupportedOperationalStateError("BGP neighbor state")
+	reader := s.bgpReader
+	if reader == nil {
+		reader = newOperationalBGPSummaryStatusReader()
+	}
+	status, err := reader.ReadBGPSummaryStatus(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if status == nil {
+		return nil, nil
+	}
+	neighbors := make([]BGPNeighborInfo, 0, len(status.Neighbors))
+	for _, neighbor := range status.Neighbors {
+		neighbors = append(neighbors, BGPNeighborInfo{
+			PeerAddress:    neighbor.PeerAddress,
+			PeerAS:         neighbor.PeerAS,
+			State:          neighbor.State,
+			UptimeSecs:     neighbor.UptimeSecs,
+			PrefixReceived: neighbor.PrefixReceived,
+			PrefixSent:     neighbor.PrefixSent,
+		})
+	}
+	sort.Slice(neighbors, func(i, j int) bool {
+		return neighbors[i].PeerAddress < neighbors[j].PeerAddress
+	})
+	return neighbors, nil
+}
+
+// GetOSPFNeighbors returns OSPFv2 or OSPFv3 neighbor state.
+func (s *Server) GetOSPFNeighbors(ctx context.Context, addressFamily string) ([]OSPFNeighborInfo, error) {
+	family, err := normalizeAddressFamily(addressFamily)
+	if err != nil {
+		return nil, err
+	}
+	reader := s.ospfReader
+	if reader == nil {
+		reader = newOperationalOSPFNeighborStatusReader()
+	}
+	status, err := reader.ReadOSPFNeighborStatus(ctx, family == addressFamilyIPv6)
+	if err != nil {
+		return nil, err
+	}
+	if status == nil {
+		return nil, nil
+	}
+	neighbors := make([]OSPFNeighborInfo, 0, len(status.Neighbors))
+	for _, neighbor := range status.Neighbors {
+		neighbors = append(neighbors, OSPFNeighborInfo{
+			RouterID:     neighbor.RouterID,
+			Address:      neighbor.Address,
+			Interface:    neighbor.Interface,
+			State:        neighbor.State,
+			Role:         neighbor.Role,
+			Priority:     neighbor.Priority,
+			DeadTimeSecs: neighbor.DeadTimeSecs,
+			UptimeSecs:   neighbor.UptimeSecs,
+		})
+	}
+	sort.Slice(neighbors, func(i, j int) bool {
+		return ospfNeighborInfoSortKey(neighbors[i]) < ospfNeighborInfoSortKey(neighbors[j])
+	})
+	return neighbors, nil
 }
 
 // GetRouteText returns FRR routing table output.
-func (s *Server) GetRouteText(ctx context.Context, protoFilter string) (string, error) {
-	command := "show ip route"
+func (s *Server) GetRouteText(ctx context.Context, protoFilter, addressFamily string) (string, error) {
+	family, err := normalizeAddressFamily(addressFamily)
+	if err != nil {
+		return "", err
+	}
+
+	command := routeTextCommand(family)
 	if protoFilter != "" {
-		if !validRouteProtocols[protoFilter] {
-			return "", fmt.Errorf("invalid route protocol %q", protoFilter)
+		protocol, err := routeProtocolForFamily(protoFilter, family)
+		if err != nil {
+			return "", err
 		}
-		command += " " + protoFilter
+		command += " " + protocol
 	}
 	return runOperationalVtyshCommand(ctx, command)
 }
@@ -659,13 +811,87 @@ func (s *Server) GetBGPNeighborText(ctx context.Context, peerAddress string) (st
 }
 
 // GetOSPFNeighborsText returns FRR OSPF neighbor output.
-func (s *Server) GetOSPFNeighborsText(ctx context.Context) (string, error) {
+func (s *Server) GetOSPFNeighborsText(ctx context.Context, addressFamily string) (string, error) {
+	family, err := normalizeAddressFamily(addressFamily)
+	if err != nil {
+		return "", err
+	}
+	if family == addressFamilyIPv6 {
+		return runOperationalVtyshCommand(ctx, "show ipv6 ospf6 neighbor")
+	}
 	return runOperationalVtyshCommand(ctx, "show ip ospf neighbor")
 }
 
 // GetVRRPText returns FRR VRRP output.
 func (s *Server) GetVRRPText(ctx context.Context) (string, error) {
 	return runOperationalVtyshCommand(ctx, "show vrrp")
+}
+
+// GetBFDText returns FRR BFD output.
+func (s *Server) GetBFDText(ctx context.Context, peerAddress string, brief, counters bool) (string, error) {
+	if peerAddress != "" && brief {
+		return "", fmt.Errorf("'show bfd peer' does not support brief output")
+	}
+	if brief && counters {
+		return "", fmt.Errorf("'show bfd brief' does not support counters")
+	}
+	command := "show bfd peers"
+	if peerAddress != "" {
+		if _, err := netip.ParseAddr(peerAddress); err != nil {
+			return "", fmt.Errorf("invalid BFD peer address %q", peerAddress)
+		}
+		command = "show bfd peer " + peerAddress
+	}
+	if brief {
+		command += " brief"
+	}
+	if counters {
+		command += " counters"
+	}
+	return runOperationalVtyshCommand(ctx, command)
+}
+
+// GetBFDStatus returns cached FRR BFD operational state.
+func (s *Server) GetBFDStatus(ctx context.Context) (*BFDStatusInfo, error) {
+	if s.bfdSource == nil {
+		return nil, unsupportedOperationalStateError("FRR BFD operational state")
+	}
+	status := s.bfdSource.BFDOperationalStatus()
+	info := &BFDStatusInfo{
+		LastRun:           status.LastRun,
+		ConfiguredPeers:   status.ConfiguredPeers,
+		ObservedPeers:     status.ObservedPeers,
+		UpPeers:           status.UpPeers,
+		DownPeers:         status.DownPeers,
+		SessionDownEvents: uint64(status.SessionDownEvents),
+		RxFailPackets:     uint64(status.RxFailPackets),
+		Issues:            append([]string(nil), status.Issues...),
+		LastError:         status.LastError,
+		Peers:             make([]BFDPeerInfo, 0, len(status.Peers)),
+	}
+	for _, peer := range status.Peers {
+		info.Peers = append(info.Peers, BFDPeerInfo{
+			Peer:              peer.Peer,
+			LocalAddress:      peer.LocalAddress,
+			Interface:         peer.Interface,
+			VRF:               peer.VRF,
+			Status:            peer.Status,
+			Diagnostic:        peer.Diagnostic,
+			RemoteDiagnostic:  peer.RemoteDiagnostic,
+			Observed:          peer.Observed,
+			Up:                peer.Up,
+			SessionDownEvents: uint64(peer.SessionDownEvents),
+			RxFailPackets:     uint64(peer.RxFailPackets),
+		})
+	}
+	sort.Slice(info.Peers, func(i, j int) bool {
+		return bfdPeerSortKey(info.Peers[i]) < bfdPeerSortKey(info.Peers[j])
+	})
+	return info, nil
+}
+
+func bfdPeerSortKey(peer BFDPeerInfo) string {
+	return peer.Peer + "\x00" + peer.LocalAddress + "\x00" + peer.Interface + "\x00" + peer.VRF
 }
 
 // GetLCPReconciliation returns cached VPP LCP reconciliation state.
@@ -684,6 +910,44 @@ func (s *Server) GetHAStatus(ctx context.Context) (*HAStatusInfo, error) {
 	}
 	info := s.haSource.HAStatusInfo()
 	return &info, nil
+}
+
+// GetRoutingInstances returns running routing-instance intent and table mapping.
+func (s *Server) GetRoutingInstances(ctx context.Context) ([]RoutingInstanceInfo, error) {
+	_ = ctx
+	if s.engine == nil {
+		return nil, nil
+	}
+	cfg := s.engine.Running()
+	if cfg == nil || len(cfg.RoutingInstances) == 0 {
+		return nil, nil
+	}
+	plans, err := model.RoutingInstanceTablePlans(cfg.RoutingInstances)
+	if err != nil {
+		return nil, err
+	}
+
+	instances := make([]RoutingInstanceInfo, 0, len(cfg.RoutingInstances))
+	for _, name := range sortedRoutingInstanceNames(cfg.RoutingInstances) {
+		instance := cfg.RoutingInstances[name]
+		if instance == nil {
+			continue
+		}
+		plan := plans[name]
+		instances = append(instances, RoutingInstanceInfo{
+			Name:               name,
+			InstanceType:       runningRoutingInstanceType(instance),
+			RouteDistinguisher: instance.RouteDistinguisher,
+			IPv4TableID:        plan.TableID,
+			IPv6TableID:        plan.TableID,
+			ImportTargets:      routingInstanceImportTargets(instance),
+			ExportTargets:      routingInstanceExportTargets(instance),
+			ImportPolicies:     append([]string(nil), instance.VRFImport...),
+			ExportPolicies:     append([]string(nil), instance.VRFExport...),
+			Interfaces:         append([]string(nil), plan.Interfaces...),
+		})
+	}
+	return instances, nil
 }
 
 // GetClassOfService returns running class-of-service intent.
@@ -753,12 +1017,93 @@ func unsupportedOperationalStateError(name string) error {
 	return fmt.Errorf("%s is not available via gRPC yet; use VPP/FRR tools directly or NETCONF <get> for configuration-derived state", name)
 }
 
-var validRouteProtocols = map[string]bool{
+const (
+	addressFamilyIPv4 = "inet"
+	addressFamilyIPv6 = "inet6"
+)
+
+var validIPv4RouteProtocols = map[string]bool{
 	"bgp":       true,
 	"ospf":      true,
 	"static":    true,
 	"connected": true,
 	"kernel":    true,
+}
+
+var validIPv6RouteProtocols = map[string]string{
+	"bgp":       "bgp",
+	"ospf3":     "ospf6",
+	"ospf6":     "ospf6",
+	"static":    "static",
+	"connected": "connected",
+	"kernel":    "kernel",
+}
+
+func normalizeAddressFamily(addressFamily string) (string, error) {
+	switch addressFamily {
+	case "", addressFamilyIPv4:
+		return addressFamilyIPv4, nil
+	case addressFamilyIPv6:
+		return addressFamilyIPv6, nil
+	default:
+		return "", fmt.Errorf("invalid address family %q", addressFamily)
+	}
+}
+
+func routeTextCommand(addressFamily string) string {
+	if addressFamily == addressFamilyIPv6 {
+		return "show ipv6 route"
+	}
+	return "show ip route"
+}
+
+func routeInfoFromFRRRoute(route pkgfrr.RouteStatusEntry) RouteInfo {
+	return RouteInfo{
+		Prefix:    route.Prefix,
+		NextHop:   route.NextHop,
+		Protocol:  normalizeRouteProtocolName(route.Protocol),
+		Metric:    route.Metric,
+		Interface: route.Interface,
+		Active:    route.Active,
+	}
+}
+
+func routeProtocolFilterMatches(protocol, filter string) bool {
+	filter = normalizeRouteProtocolName(filter)
+	if filter == "" {
+		return true
+	}
+	return normalizeRouteProtocolName(protocol) == filter
+}
+
+func normalizeRouteProtocolName(protocol string) string {
+	protocol = strings.ToLower(strings.TrimSpace(protocol))
+	switch protocol {
+	case "connect", "direct", "directlyconnected":
+		return "connected"
+	case "ospfv3", "ospf3":
+		return "ospf6"
+	default:
+		return protocol
+	}
+}
+
+func routeInfoSortKey(route RouteInfo) string {
+	return route.Prefix + "\x00" + route.Protocol + "\x00" + route.NextHop + "\x00" + route.Interface
+}
+
+func routeProtocolForFamily(protocol, addressFamily string) (string, error) {
+	if addressFamily == addressFamilyIPv6 {
+		frrProtocol, ok := validIPv6RouteProtocols[protocol]
+		if !ok {
+			return "", fmt.Errorf("invalid route protocol %q for %s", protocol, addressFamily)
+		}
+		return frrProtocol, nil
+	}
+	if !validIPv4RouteProtocols[protocol] {
+		return "", fmt.Errorf("invalid route protocol %q", protocol)
+	}
+	return protocol, nil
 }
 
 func sortedForwardingClassNames(classes map[string]*model.ForwardingClass) []string {
@@ -786,6 +1131,46 @@ func sortedClassOfServiceInterfaceNames(interfaces map[string]*model.CoSInterfac
 	}
 	sort.Strings(names)
 	return names
+}
+
+func sortedRoutingInstanceNames(instances map[string]*model.RoutingInstance) []string {
+	names := make([]string, 0, len(instances))
+	for name := range instances {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	return names
+}
+
+func runningRoutingInstanceType(instance *model.RoutingInstance) string {
+	if instance == nil || instance.InstanceType == "" {
+		return "vrf"
+	}
+	return instance.InstanceType
+}
+
+func routingInstanceImportTargets(instance *model.RoutingInstance) []string {
+	if instance == nil {
+		return nil
+	}
+	targets := make([]string, 0, len(instance.VRFTargetImport)+1)
+	if instance.VRFTarget != "" {
+		targets = append(targets, instance.VRFTarget)
+	}
+	targets = append(targets, instance.VRFTargetImport...)
+	return targets
+}
+
+func routingInstanceExportTargets(instance *model.RoutingInstance) []string {
+	if instance == nil {
+		return nil
+	}
+	targets := make([]string, 0, len(instance.VRFTargetExport)+1)
+	if instance.VRFTarget != "" {
+		targets = append(targets, instance.VRFTarget)
+	}
+	targets = append(targets, instance.VRFTargetExport...)
+	return targets
 }
 
 func upDown(up bool) string {
@@ -1069,6 +1454,21 @@ func replacementPrefixes(path []string) []string {
 	}
 	if len(path) >= 4 && path[0] == "protocols" {
 		switch path[1] {
+		case "bfd":
+			if len(path) >= 5 {
+				switch path[2] {
+				case "profile":
+					switch path[4] {
+					case "receive-interval", "transmit-interval", "detect-multiplier", "echo-mode", "passive-mode":
+						return prefix(5)
+					}
+				case "peer":
+					switch path[4] {
+					case "local-address", "interface", "profile", "multihop", "shutdown", "detect-multiplier", "receive-interval", "transmit-interval":
+						return prefix(5)
+					}
+				}
+			}
 		case "mpls":
 			return nil
 		case "vrrp":
@@ -1078,13 +1478,13 @@ func replacementPrefixes(path []string) []string {
 					return prefix(5)
 				}
 			}
-		case "ospf":
+		case "ospf", "ospf3":
 			if path[2] == "router-id" {
 				return prefix(3)
 			}
 			if len(path) >= 7 && path[2] == "area" && path[4] == "interface" {
 				switch path[6] {
-				case "passive", "metric", "priority":
+				case "passive", "metric", "priority", "bfd":
 					return prefix(7)
 				}
 			}
@@ -1096,7 +1496,7 @@ func replacementPrefixes(path []string) []string {
 				case "neighbor":
 					if len(path) >= 8 {
 						switch path[6] {
-						case "peer-as", "description", "local-address":
+						case "peer-as", "description", "local-address", "bfd":
 							return prefix(7)
 						}
 					}

@@ -28,6 +28,10 @@ func convertPolicyOptions(cfg *config.Config) ([]PrefixList, []RouteMap, []ASPat
 	if err != nil {
 		return nil, nil, nil, err
 	}
+	prefixLists, routeMaps, err = aggregateRouteMapPrefixListMatches(prefixLists, routeMaps)
+	if err != nil {
+		return nil, nil, nil, err
+	}
 
 	return prefixLists, routeMaps, asPathLists, nil
 }
@@ -190,7 +194,7 @@ func convertPolicyStatementsWithMapping(policyStatementsMap map[string]*config.P
 					entry.MatchPrefixLists = expandedLists
 				}
 				if term.From.Protocol != "" {
-					entry.MatchProtocol = term.From.Protocol
+					entry.MatchProtocol = frrSourceProtocol(term.From.Protocol)
 				}
 				if term.From.Neighbor != "" {
 					entry.MatchNeighbor = term.From.Neighbor
@@ -236,10 +240,157 @@ func convertPolicyStatementsWithMapping(policyStatementsMap map[string]*config.P
 	return frrRouteMaps, asPathLists, nil
 }
 
+func aggregateRouteMapPrefixListMatches(prefixLists []PrefixList, routeMaps []RouteMap) ([]PrefixList, []RouteMap, error) {
+	if len(routeMaps) == 0 {
+		return prefixLists, routeMaps, nil
+	}
+	prefixListByName := make(map[string]PrefixList, len(prefixLists))
+	for _, list := range prefixLists {
+		prefixListByName[list.Name] = list
+	}
+
+	aggregatedPrefixLists := append([]PrefixList(nil), prefixLists...)
+	normalizedRouteMaps := append([]RouteMap(nil), routeMaps...)
+	for routeMapIndex := range normalizedRouteMaps {
+		routeMap := &normalizedRouteMaps[routeMapIndex]
+		routeMap.Entries = append([]RouteMapEntry(nil), routeMap.Entries...)
+		for entryIndex := range routeMap.Entries {
+			entry := &routeMap.Entries[entryIndex]
+			if len(entry.MatchPrefixLists) == 0 {
+				continue
+			}
+			ipv4Names, ipv6Names, err := splitRouteMapPrefixListFamilies(routeMap.Name, entry.Seq, entry.MatchPrefixLists, prefixListByName)
+			if err != nil {
+				return nil, nil, err
+			}
+			if len(entry.MatchPrefixLists) == 1 {
+				entry.MatchPrefixLists = append(ipv4Names, ipv6Names...)
+				continue
+			}
+			var normalized []string
+			if len(ipv4Names) > 1 {
+				listName := uniqueAggregatePrefixListName(aggregateRouteMapPrefixListName(routeMap.Name, entry.Seq, false), prefixListByName)
+				list := aggregatePrefixLists(listName, false, ipv4Names, prefixListByName)
+				aggregatedPrefixLists = append(aggregatedPrefixLists, list)
+				prefixListByName[list.Name] = list
+				normalized = append(normalized, list.Name)
+			} else {
+				normalized = append(normalized, ipv4Names...)
+			}
+			if len(ipv6Names) > 1 {
+				listName := uniqueAggregatePrefixListName(aggregateRouteMapPrefixListName(routeMap.Name, entry.Seq, true), prefixListByName)
+				list := aggregatePrefixLists(listName, true, ipv6Names, prefixListByName)
+				aggregatedPrefixLists = append(aggregatedPrefixLists, list)
+				prefixListByName[list.Name] = list
+				normalized = append(normalized, list.Name)
+			} else {
+				normalized = append(normalized, ipv6Names...)
+			}
+			entry.MatchPrefixLists = normalized
+		}
+	}
+	return aggregatedPrefixLists, normalizedRouteMaps, nil
+}
+
+func splitRouteMapPrefixListFamilies(routeMapName string, seq int, names []string, prefixListByName map[string]PrefixList) ([]string, []string, error) {
+	var ipv4Names []string
+	var ipv6Names []string
+	seen := make(map[string]bool, len(names))
+	for _, name := range names {
+		if seen[name] {
+			continue
+		}
+		seen[name] = true
+		list, ok := prefixListByName[name]
+		if !ok {
+			return nil, nil, fmt.Errorf("route-map %s entry %d references unknown prefix-list %s", routeMapName, seq, name)
+		}
+		if list.IsIPv6 {
+			ipv6Names = append(ipv6Names, name)
+			continue
+		}
+		ipv4Names = append(ipv4Names, name)
+	}
+	return ipv4Names, ipv6Names, nil
+}
+
+func aggregatePrefixLists(name string, ipv6 bool, sourceNames []string, prefixListByName map[string]PrefixList) PrefixList {
+	list := PrefixList{Name: name, IsIPv6: ipv6}
+	seen := make(map[string]bool)
+	for _, sourceName := range sourceNames {
+		source := prefixListByName[sourceName]
+		entries := append([]PrefixListEntry(nil), source.Entries...)
+		sort.Slice(entries, func(i, j int) bool { return entries[i].Seq < entries[j].Seq })
+		for _, entry := range entries {
+			key := entry.Action + "\x00" + entry.Prefix
+			if seen[key] {
+				continue
+			}
+			seen[key] = true
+			list.Entries = append(list.Entries, PrefixListEntry{
+				Seq:    (len(list.Entries) + 1) * 10,
+				Action: entry.Action,
+				Prefix: entry.Prefix,
+			})
+		}
+	}
+	return list
+}
+
+func uniqueAggregatePrefixListName(base string, prefixListByName map[string]PrefixList) string {
+	if _, exists := prefixListByName[base]; !exists {
+		return base
+	}
+	for i := 2; ; i++ {
+		name := fmt.Sprintf("%s-%d", base, i)
+		if _, exists := prefixListByName[name]; !exists {
+			return name
+		}
+	}
+}
+
+func aggregateRouteMapPrefixListName(routeMapName string, seq int, ipv6 bool) string {
+	family := "V4"
+	if ipv6 {
+		family = "V6"
+	}
+	var b strings.Builder
+	b.WriteString("ARCA-")
+	wrote := false
+	for _, r := range strings.ToUpper(routeMapName) {
+		if (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') {
+			b.WriteRune(r)
+			wrote = true
+			continue
+		}
+		if wrote {
+			b.WriteRune('-')
+		}
+	}
+	if !wrote {
+		b.WriteString("ROUTE-MAP")
+	}
+	return fmt.Sprintf("%s-%d-%s", strings.TrimRight(b.String(), "-"), seq, family)
+}
+
+func frrSourceProtocol(protocol string) string {
+	switch protocol {
+	case "direct":
+		return "connected"
+	case "ospf3":
+		return "ospf6"
+	default:
+		return protocol
+	}
+}
+
 // GeneratePrefixListConfig generates FRR prefix-list configuration.
 func GeneratePrefixListConfig(prefixLists []PrefixList) (string, error) {
 	if len(prefixLists) == 0 {
 		return "", nil
+	}
+	if err := validatePolicyObjects(prefixLists, nil); err != nil {
+		return "", err
 	}
 
 	var b strings.Builder
@@ -265,6 +416,9 @@ func GeneratePrefixListConfig(prefixLists []PrefixList) (string, error) {
 func GenerateRouteMapConfig(routeMaps []RouteMap, prefixLists []PrefixList) (string, error) {
 	if len(routeMaps) == 0 {
 		return "", nil
+	}
+	if err := validatePolicyObjects(prefixLists, routeMaps); err != nil {
+		return "", err
 	}
 
 	// Build map of prefix-list names to IPv6 flag
@@ -319,10 +473,123 @@ func GenerateRouteMapConfig(routeMaps []RouteMap, prefixLists []PrefixList) (str
 	return b.String(), nil
 }
 
+func validatePolicyObjects(prefixLists []PrefixList, routeMaps []RouteMap) error {
+	prefixListNames := make(map[string]struct{}, len(prefixLists))
+	prefixListKeys := make(map[string]struct{}, len(prefixLists))
+	for _, list := range prefixLists {
+		if strings.TrimSpace(list.Name) == "" {
+			return NewInvalidConfigError("prefix-list name is required")
+		}
+		key := prefixListKey(list.Name, list.IsIPv6)
+		if _, ok := prefixListKeys[key]; ok {
+			return NewInvalidConfigError(fmt.Sprintf("prefix-list %s is duplicated", list.Name))
+		}
+		prefixListKeys[key] = struct{}{}
+		prefixListNames[list.Name] = struct{}{}
+
+		sequences := make(map[int]struct{}, len(list.Entries))
+		for _, entry := range list.Entries {
+			if entry.Seq <= 0 {
+				return NewInvalidConfigError(fmt.Sprintf("prefix-list %s entry sequence must be positive", list.Name))
+			}
+			if _, ok := sequences[entry.Seq]; ok {
+				return NewInvalidConfigError(fmt.Sprintf("prefix-list %s entry %d is duplicated", list.Name, entry.Seq))
+			}
+			sequences[entry.Seq] = struct{}{}
+			if !validPolicyAction(entry.Action) {
+				return NewInvalidConfigError(fmt.Sprintf("prefix-list %s entry %d has invalid action %s", list.Name, entry.Seq, entry.Action))
+			}
+			_, prefixNet, err := net.ParseCIDR(entry.Prefix)
+			if err != nil {
+				return NewInvalidConfigError(fmt.Sprintf("prefix-list %s entry %d has invalid prefix %s", list.Name, entry.Seq, entry.Prefix))
+			}
+			prefixIPv6 := prefixNet.IP.To4() == nil
+			if prefixIPv6 != list.IsIPv6 {
+				return NewInvalidConfigError(fmt.Sprintf("prefix-list %s entry %d address family does not match configured address family", list.Name, entry.Seq))
+			}
+		}
+	}
+
+	routeMapNames := make(map[string]struct{}, len(routeMaps))
+	for _, routeMap := range routeMaps {
+		if strings.TrimSpace(routeMap.Name) == "" {
+			return NewInvalidConfigError("route-map name is required")
+		}
+		if _, ok := routeMapNames[routeMap.Name]; ok {
+			return NewInvalidConfigError(fmt.Sprintf("route-map %s is duplicated", routeMap.Name))
+		}
+		routeMapNames[routeMap.Name] = struct{}{}
+
+		sequences := make(map[int]struct{}, len(routeMap.Entries))
+		for _, entry := range routeMap.Entries {
+			if entry.Seq <= 0 {
+				return NewInvalidConfigError(fmt.Sprintf("route-map %s entry sequence must be positive", routeMap.Name))
+			}
+			if _, ok := sequences[entry.Seq]; ok {
+				return NewInvalidConfigError(fmt.Sprintf("route-map %s entry %d is duplicated", routeMap.Name, entry.Seq))
+			}
+			sequences[entry.Seq] = struct{}{}
+			if !validPolicyAction(entry.Action) {
+				return NewInvalidConfigError(fmt.Sprintf("route-map %s entry %d has invalid action %s", routeMap.Name, entry.Seq, entry.Action))
+			}
+			for _, prefixList := range entry.MatchPrefixLists {
+				if strings.TrimSpace(prefixList) == "" {
+					return NewInvalidConfigError(fmt.Sprintf("route-map %s entry %d references empty prefix-list", routeMap.Name, entry.Seq))
+				}
+				if _, ok := prefixListNames[prefixList]; !ok {
+					return NewInvalidConfigError(fmt.Sprintf("route-map %s entry %d references unknown prefix-list %s", routeMap.Name, entry.Seq, prefixList))
+				}
+			}
+			if entry.MatchNeighbor != "" && net.ParseIP(entry.MatchNeighbor) == nil {
+				return NewInvalidConfigError(fmt.Sprintf("route-map %s entry %d has invalid peer match %s", routeMap.Name, entry.Seq, entry.MatchNeighbor))
+			}
+		}
+	}
+	return nil
+}
+
+func prefixListKey(name string, isIPv6 bool) string {
+	return fmt.Sprintf("%t\x00%s", isIPv6, name)
+}
+
+func validateASPathAccessLists(asPathLists []ASPathAccessList) error {
+	names := make(map[string]struct{}, len(asPathLists))
+	for _, list := range asPathLists {
+		if strings.TrimSpace(list.Name) == "" {
+			return NewInvalidConfigError("AS-path access-list name is required")
+		}
+		if _, ok := names[list.Name]; ok {
+			return NewInvalidConfigError(fmt.Sprintf("AS-path access-list %s is duplicated", list.Name))
+		}
+		names[list.Name] = struct{}{}
+
+		sequences := make(map[int]struct{}, len(list.Entries))
+		for _, entry := range list.Entries {
+			if entry.Seq <= 0 {
+				return NewInvalidConfigError(fmt.Sprintf("AS-path access-list %s entry sequence must be positive", list.Name))
+			}
+			if _, ok := sequences[entry.Seq]; ok {
+				return NewInvalidConfigError(fmt.Sprintf("AS-path access-list %s entry %d is duplicated", list.Name, entry.Seq))
+			}
+			sequences[entry.Seq] = struct{}{}
+			if !validPolicyAction(entry.Action) {
+				return NewInvalidConfigError(fmt.Sprintf("AS-path access-list %s entry %d has invalid action %s", list.Name, entry.Seq, entry.Action))
+			}
+			if strings.TrimSpace(entry.Regex) == "" {
+				return NewInvalidConfigError(fmt.Sprintf("AS-path access-list %s entry %d regex is required", list.Name, entry.Seq))
+			}
+		}
+	}
+	return nil
+}
+
 // GenerateASPathAccessListConfig generates FRR AS-path access-list configuration.
 func GenerateASPathAccessListConfig(asPathLists []ASPathAccessList) (string, error) {
 	if len(asPathLists) == 0 {
 		return "", nil
+	}
+	if err := validateASPathAccessLists(asPathLists); err != nil {
+		return "", err
 	}
 
 	var b strings.Builder

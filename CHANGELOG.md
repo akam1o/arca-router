@@ -1,6 +1,37 @@
 # Changelog
 
-## v0.6.x - Advanced Features (current)
+## v0.7.x - Core Router Parity (current)
+
+- **BFD peer/profile configuration**: parser, serializer, validation, internal model, diff, NETCONF XML/YANG, FRR file backend generation, and transactional `frr-bfdd` operations cover `protocols bfd profile` and `protocols bfd peer`
+- **BFD protocol bindings**: BGP neighbors and OSPF/OSPFv3 interfaces can enable BFD directly, including reusable `protocols bfd profile` references
+- **BFD static route monitoring**: static routes can be monitored by BFD with optional source address, multihop, and BFD profile settings in the FRR apply backends
+- **Transactional static route validation**: direct FRR management operations reject invalid static route prefix, next-hop, distance, address-family, and BFD option combinations before building the candidate
+- **Static route generation validation**: FRR generation rejects duplicate static route paths and address-family mismatches before file or transactional apply emits route configuration
+- **Static route BFD profile validation**: transactional FRR apply rejects static route BFD profile references that are not part of the generated BFD profile set
+- **BFD VRF reference validation**: transactional FRR apply rejects explicit BFD peers that reference VRFs outside the generated VRF set before building the candidate
+- **BFD duplicate detection**: FRR config generation rejects duplicate BFD profiles and peers before file or transactional apply emits overlapping daemon configuration
+- **BFD backend fallback**: the default transactional FRR backend applies explicit BFD sessions/profiles, static route BFD, profile-less BGP BFD, and profile-less OSPF BFD; arca-routerd falls back to the file backend for BGP/OSPF BFD profile bindings and OSPFv3 until FRR exposes those management YANG paths
+- **BFD candidate editing**: candidate `set` replacement handles BFD profile, peer, BGP neighbor, and OSPF/OSPFv3 interface binding paths so updated BFD settings do not leave stale set lines behind
+- **Standard FRR BFD daemon**: `bfdd` is documented and checked as part of the required arca-router FRR daemon set for BFD support
+- **FRR apply preflight ordering**: transactional apply now builds and validates management operations before preparing VRRP Linux interfaces, and both FRR apply backends reject invalid VRRP groups before host-side VRRP preparation
+- **FRR validation preflight**: the FRR southbound plugin now generates FRR artifacts and validates transactional management operations during commit validation, while preserving file-backend fallback for unsupported mgmtd paths
+- **Route policy validation**: legacy and canonical config validation reject invalid IPv4/IPv6 prefix-list entries, unknown policy-statement prefix-list references, invalid route-policy protocols, neighbors, AS-path regexes, and community values before apply
+- **Policy generation validation**: FRR generation rejects invalid or duplicate prefix-list and route-map objects, unknown route-map prefix-list references, and invalid route-map peer matches before file or transactional apply emits policy configuration
+- **AS-path generation validation**: FRR generation rejects invalid or duplicate AS-path access-list objects before file backend emits BGP policy configuration
+- **Generated policy reference validation**: FRR config generation rejects BGP/VRF route-map references and route-map AS-path matches that point to missing generated policy objects before file backend emits configuration
+- **BGP generation validation**: FRR generation rejects invalid BGP router IDs, duplicate neighbors, and neighbor address-family mismatches before file or transactional apply emits BGP configuration
+- **Transactional policy object validation**: direct FRR management operations reject invalid prefix-list and route-map names, sequence numbers, actions, prefixes, and address-family mismatches before building the candidate
+- **BGP policy reference validation**: BGP group import/export policies are validated against configured policy-statements before FRR generation
+- **Transactional BGP validation**: direct FRR management operations reject invalid BGP ASN, router-id, neighbor IP, remote-as, and address-family mismatches before building the candidate
+- **OSPF generation validation**: FRR generation rejects duplicate OSPF networks/interfaces, OSPFv2 IPv6 networks, and unsupported OSPFv3 network statements before file or transactional apply emits OSPF configuration
+- **Transactional OSPF validation**: direct FRR management operations reject invalid OSPF router-id, network, area-id, interface, metric, and priority state before building the candidate
+- **Route policy prefix-list aggregation**: FRR generation aggregates same-family prefix-list matches per route-map entry so IPv4 and IPv6 policy matches render deterministically through both file and transactional backends
+- **Route-map backend selection**: route-map source-protocol, peer, and AS-path matches fall back to the FRR file backend instead of being silently dropped by transactional apply
+- **Transactional route-map reference validation**: direct FRR management operations reject BGP and VRF route-map references that are not included in the generated route-map set
+- **BFD peer backend selection**: interface-less single-hop and source-less multihop BFD peers fall back to the FRR file backend because FRR mgmtd requires those fields as transactional session keys
+- **Transactional VRF VPN validation**: direct FRR management operations reject invalid VRF VPN state such as missing ASN, missing route distinguisher, invalid route-targets, and route-map import/export without matching targets
+
+## v0.6.x - Advanced Features (previous)
 
 - **Advanced configuration model**: parser, serializer, validation, clone, conversion, and diff support for clustering, MPLS, VRRP, routing instances, class of service, and Web UI service settings
 - **Candidate command replacement**: v0.6 scalar settings replace existing candidate lines instead of accumulating duplicates

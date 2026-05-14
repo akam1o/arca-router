@@ -148,6 +148,8 @@ func (a *stateServiceAdapter) GetInterfaces(ctx context.Context, req *apiv1.GetI
 			Mtu:         iface.MTU,
 			Mac:         iface.MAC,
 			QosProfile:  iface.QoSProfile,
+			Ipv4TableId: iface.IPv4TableID,
+			Ipv6TableId: iface.IPv6TableID,
 			RxPackets:   iface.RxPackets,
 			TxPackets:   iface.TxPackets,
 			RxBytes:     iface.RxBytes,
@@ -223,8 +225,29 @@ func (a *stateServiceAdapter) GetBGPNeighbors(ctx context.Context, _ *apiv1.GetB
 	return resp, nil
 }
 
+func (a *stateServiceAdapter) GetOSPFNeighbors(ctx context.Context, req *apiv1.GetOSPFNeighborsRequest) (*apiv1.GetOSPFNeighborsResponse, error) {
+	neighbors, err := a.server.GetOSPFNeighbors(ctx, req.GetAddressFamily())
+	if err != nil {
+		return nil, err
+	}
+	resp := &apiv1.GetOSPFNeighborsResponse{Neighbors: make([]*apiv1.OSPFNeighborState, 0, len(neighbors))}
+	for _, neighbor := range neighbors {
+		resp.Neighbors = append(resp.Neighbors, &apiv1.OSPFNeighborState{
+			RouterId:     neighbor.RouterID,
+			Address:      neighbor.Address,
+			Interface:    neighbor.Interface,
+			State:        neighbor.State,
+			Role:         neighbor.Role,
+			Priority:     neighbor.Priority,
+			DeadTimeSecs: neighbor.DeadTimeSecs,
+			UptimeSecs:   neighbor.UptimeSecs,
+		})
+	}
+	return resp, nil
+}
+
 func (a *stateServiceAdapter) GetRouteText(ctx context.Context, req *apiv1.GetRouteTextRequest) (*apiv1.GetRouteTextResponse, error) {
-	output, err := a.server.GetRouteText(ctx, req.GetProtocolFilter())
+	output, err := a.server.GetRouteText(ctx, req.GetProtocolFilter(), req.GetAddressFamily())
 	if err != nil {
 		return nil, err
 	}
@@ -247,8 +270,8 @@ func (a *stateServiceAdapter) GetBGPNeighborText(ctx context.Context, req *apiv1
 	return &apiv1.GetBGPNeighborTextResponse{Output: output}, nil
 }
 
-func (a *stateServiceAdapter) GetOSPFNeighborsText(ctx context.Context, _ *apiv1.GetOSPFNeighborsTextRequest) (*apiv1.GetOSPFNeighborsTextResponse, error) {
-	output, err := a.server.GetOSPFNeighborsText(ctx)
+func (a *stateServiceAdapter) GetOSPFNeighborsText(ctx context.Context, req *apiv1.GetOSPFNeighborsTextRequest) (*apiv1.GetOSPFNeighborsTextResponse, error) {
+	output, err := a.server.GetOSPFNeighborsText(ctx, req.GetAddressFamily())
 	if err != nil {
 		return nil, err
 	}
@@ -261,6 +284,50 @@ func (a *stateServiceAdapter) GetVRRPText(ctx context.Context, _ *apiv1.GetVRRPT
 		return nil, err
 	}
 	return &apiv1.GetVRRPTextResponse{Output: output}, nil
+}
+
+func (a *stateServiceAdapter) GetBFDText(ctx context.Context, req *apiv1.GetBFDTextRequest) (*apiv1.GetBFDTextResponse, error) {
+	output, err := a.server.GetBFDText(ctx, req.GetPeerAddress(), req.GetBrief(), req.GetCounters())
+	if err != nil {
+		return nil, err
+	}
+	return &apiv1.GetBFDTextResponse{Output: output}, nil
+}
+
+func (a *stateServiceAdapter) GetBFDStatus(ctx context.Context, _ *apiv1.GetBFDStatusRequest) (*apiv1.GetBFDStatusResponse, error) {
+	info, err := a.server.GetBFDStatus(ctx)
+	if err != nil {
+		return nil, err
+	}
+	resp := &apiv1.GetBFDStatusResponse{
+		ConfiguredPeers:   uint32(info.ConfiguredPeers),
+		ObservedPeers:     uint32(info.ObservedPeers),
+		UpPeers:           uint32(info.UpPeers),
+		DownPeers:         uint32(info.DownPeers),
+		SessionDownEvents: info.SessionDownEvents,
+		RxFailPackets:     info.RxFailPackets,
+		Issues:            append([]string(nil), info.Issues...),
+		LastError:         info.LastError,
+	}
+	if !info.LastRun.IsZero() {
+		resp.LastRun = info.LastRun.UTC().Format(time.RFC3339Nano)
+	}
+	for _, peer := range info.Peers {
+		resp.Peers = append(resp.Peers, &apiv1.BFDPeerState{
+			Peer:              peer.Peer,
+			LocalAddress:      peer.LocalAddress,
+			Interface:         peer.Interface,
+			Vrf:               peer.VRF,
+			Status:            peer.Status,
+			Diagnostic:        peer.Diagnostic,
+			RemoteDiagnostic:  peer.RemoteDiagnostic,
+			Observed:          peer.Observed,
+			Up:                peer.Up,
+			SessionDownEvents: peer.SessionDownEvents,
+			RxFailPackets:     peer.RxFailPackets,
+		})
+	}
+	return resp, nil
 }
 
 func (a *stateServiceAdapter) GetLCPReconciliation(ctx context.Context, _ *apiv1.GetLCPReconciliationRequest) (*apiv1.GetLCPReconciliationResponse, error) {
@@ -298,6 +365,12 @@ func (a *stateServiceAdapter) GetHAStatus(ctx context.Context, _ *apiv1.GetHASta
 		FrrVrrpActiveGroups:     uint32(info.FRRVRRPActiveGroups),
 		FrrVrrpIssues:           append([]string(nil), info.FRRVRRPIssues...),
 		FrrVrrpLastError:        info.FRRVRRPLastError,
+		FrrBfdConfiguredPeers:   uint32(info.FRRBFDConfiguredPeers),
+		FrrBfdObservedPeers:     uint32(info.FRRBFDObservedPeers),
+		FrrBfdUpPeers:           uint32(info.FRRBFDUpPeers),
+		FrrBfdDownPeers:         uint32(info.FRRBFDDownPeers),
+		FrrBfdIssues:            append([]string(nil), info.FRRBFDIssues...),
+		FrrBfdLastError:         info.FRRBFDLastError,
 		VppLcpPairs:             uint32(info.VPPLCPPairs),
 		VppLcpInconsistencies:   append([]string(nil), info.VPPLCPInconsistencies...),
 		VppLcpLastError:         info.VPPLCPLastError,
@@ -305,8 +378,34 @@ func (a *stateServiceAdapter) GetHAStatus(ctx context.Context, _ *apiv1.GetHASta
 	if !info.FRRVRRPLastCheck.IsZero() {
 		resp.FrrVrrpLastCheck = info.FRRVRRPLastCheck.UTC().Format(time.RFC3339Nano)
 	}
+	if !info.FRRBFDLastCheck.IsZero() {
+		resp.FrrBfdLastCheck = info.FRRBFDLastCheck.UTC().Format(time.RFC3339Nano)
+	}
 	if !info.VPPLCPLastCheck.IsZero() {
 		resp.VppLcpLastCheck = info.VPPLCPLastCheck.UTC().Format(time.RFC3339Nano)
+	}
+	return resp, nil
+}
+
+func (a *stateServiceAdapter) GetRoutingInstances(ctx context.Context, _ *apiv1.GetRoutingInstancesRequest) (*apiv1.GetRoutingInstancesResponse, error) {
+	instances, err := a.server.GetRoutingInstances(ctx)
+	if err != nil {
+		return nil, err
+	}
+	resp := &apiv1.GetRoutingInstancesResponse{Instances: make([]*apiv1.RoutingInstanceState, 0, len(instances))}
+	for _, instance := range instances {
+		resp.Instances = append(resp.Instances, &apiv1.RoutingInstanceState{
+			Name:               instance.Name,
+			InstanceType:       instance.InstanceType,
+			RouteDistinguisher: instance.RouteDistinguisher,
+			Ipv4TableId:        instance.IPv4TableID,
+			Ipv6TableId:        instance.IPv6TableID,
+			ImportTargets:      append([]string(nil), instance.ImportTargets...),
+			ExportTargets:      append([]string(nil), instance.ExportTargets...),
+			ImportPolicies:     append([]string(nil), instance.ImportPolicies...),
+			ExportPolicies:     append([]string(nil), instance.ExportPolicies...),
+			Interfaces:         append([]string(nil), instance.Interfaces...),
+		})
 	}
 	return resp, nil
 }

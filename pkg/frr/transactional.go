@@ -120,11 +120,11 @@ func NewTransactionalApplierWithPreparer(client MgmtClient, preparer VRRPSystemP
 
 // ApplyConfig converts the generated FRR config into management operations and commits them.
 func (a *TransactionalApplier) ApplyConfig(ctx context.Context, _ string, cfg *Config) error {
-	if err := prepareVRRPSystem(ctx, a.vrrpPreparer, cfg); err != nil {
-		return err
-	}
 	ops, err := BuildMgmtOperations(cfg)
 	if err != nil {
+		return err
+	}
+	if err := prepareVRRPSystem(ctx, a.vrrpPreparer, cfg); err != nil {
 		return err
 	}
 	return a.client.Apply(ctx, ops)
@@ -136,21 +136,65 @@ func BuildMgmtOperations(cfg *Config) ([]MgmtOperation, error) {
 	if cfg == nil {
 		return nil, NewInvalidConfigError("FRR config is nil")
 	}
+	if cfg.OSPF3 != nil {
+		return nil, NewInvalidConfigError("OSPFv3 is not supported by the transactional FRR backend because FRR does not expose core ospf6d YANG paths")
+	}
+	if err := validateTransactionalBGP(cfg); err != nil {
+		return nil, err
+	}
+	if err := validateTransactionalStaticRoutes(cfg); err != nil {
+		return nil, err
+	}
+	if err := validateTransactionalBFDProtocolBindings(cfg); err != nil {
+		return nil, err
+	}
+	if err := validateTransactionalOSPF(cfg); err != nil {
+		return nil, err
+	}
+	if err := validateTransactionalStaticRouteBFDProfiles(cfg); err != nil {
+		return nil, err
+	}
+	if err := validateTransactionalBFDVRFReferences(cfg); err != nil {
+		return nil, err
+	}
+	if err := validateTransactionalRouteMapSupport(cfg); err != nil {
+		return nil, err
+	}
+	if err := validateTransactionalPolicyObjects(cfg); err != nil {
+		return nil, err
+	}
+	if err := validateTransactionalVRFVPN(cfg); err != nil {
+		return nil, err
+	}
+	if err := validateTransactionalRouteMapReferences(cfg); err != nil {
+		return nil, err
+	}
+	prefixLists, routeMaps, err := aggregateRouteMapPrefixListMatches(cfg.PrefixLists, cfg.RouteMaps)
+	if err != nil {
+		return nil, NewInvalidConfigError(err.Error())
+	}
 	var ops []MgmtOperation
 	ops = append(ops,
 		deleteOp(staticProtocolBase()),
 		deleteOp(bgpProtocolDeleteBase()),
 		deleteOp(ospfProtocolBase()),
+		deleteOp(ospfInterfaceConfigBase()),
 		deleteOp("/frr-vrf:lib"),
 		deleteOp("/frr-filter:lib"),
 		deleteOp("/frr-route-map:lib"),
+		deleteOp("/frr-bfdd:bfdd"),
 		deleteOp(vrrpConfigBase()),
 	)
 	ops = append(ops, buildStaticRouteOps(cfg.StaticRoutes)...)
 	ops = append(ops, buildBGPOps(cfg.BGP)...)
 	ops = append(ops, buildOSPFOps(cfg.OSPF)...)
-	ops = append(ops, buildPrefixListOps(cfg.PrefixLists)...)
-	ops = append(ops, buildRouteMapOps(cfg.RouteMaps)...)
+	ops = append(ops, buildPrefixListOps(prefixLists)...)
+	ops = append(ops, buildRouteMapOps(routeMaps, prefixLists)...)
+	bfdOps, err := buildBFDConfigOps(cfg.BFD)
+	if err != nil {
+		return nil, err
+	}
+	ops = append(ops, bfdOps...)
 	ops = append(ops, buildVRFOps(cfg.VRFs)...)
 	vrrpOps, err := buildVRRPOps(cfg.VRRP)
 	if err != nil {
@@ -158,6 +202,378 @@ func BuildMgmtOperations(cfg *Config) ([]MgmtOperation, error) {
 	}
 	ops = append(ops, vrrpOps...)
 	return ops, nil
+}
+
+func validateTransactionalBGP(cfg *Config) error {
+	if cfg == nil || cfg.BGP == nil {
+		return nil
+	}
+	return validateBGPConfig(cfg.BGP)
+}
+
+func validateTransactionalStaticRoutes(cfg *Config) error {
+	if cfg == nil {
+		return nil
+	}
+	return validateStaticRoutes(cfg.StaticRoutes)
+}
+
+func validateTransactionalBFDProtocolBindings(cfg *Config) error {
+	if cfg == nil {
+		return nil
+	}
+	if cfg.BGP != nil {
+		for _, neighbor := range cfg.BGP.Neighbors {
+			if neighbor.BFDProfile != "" {
+				return NewInvalidConfigError("BGP BFD profiles are not supported by the transactional FRR backend until BGP BFD profile management operations are implemented")
+			}
+		}
+	}
+	if cfg.OSPF != nil && ospfHasBFDProfiles(cfg.OSPF) {
+		return NewInvalidConfigError("OSPF BFD profiles are not supported by the transactional FRR backend until OSPF BFD profile management operations are implemented")
+	}
+	if cfg.OSPF3 != nil && ospfHasBFDProtocolBindings(cfg.OSPF3) {
+		return NewInvalidConfigError("OSPFv3 BFD protocol bindings are not supported by the transactional FRR backend until ospf6d management operations are implemented")
+	}
+	return nil
+}
+
+func validateTransactionalOSPF(cfg *Config) error {
+	if cfg == nil || cfg.OSPF == nil {
+		return nil
+	}
+	if cfg.OSPF.IsOSPFv3 {
+		return NewInvalidConfigError("OSPFv3 is not supported by the transactional FRR backend because FRR does not expose core ospf6d YANG paths")
+	}
+	return validateOSPFConfig(cfg.OSPF)
+}
+
+func validateTransactionalStaticRouteBFDProfiles(cfg *Config) error {
+	if cfg == nil {
+		return nil
+	}
+	profiles := make(map[string]struct{})
+	if cfg.BFD != nil {
+		for _, profile := range cfg.BFD.Profiles {
+			profiles[profile.Name] = struct{}{}
+		}
+	}
+	for _, route := range cfg.StaticRoutes {
+		if route.BFDProfile == "" {
+			continue
+		}
+		if _, ok := profiles[route.BFDProfile]; !ok {
+			return NewInvalidConfigError(fmt.Sprintf("static route %s references unknown BFD profile %s", route.Prefix, route.BFDProfile))
+		}
+	}
+	return nil
+}
+
+func validateTransactionalBFDVRFReferences(cfg *Config) error {
+	if cfg == nil || cfg.BFD == nil {
+		return nil
+	}
+	vrfs := make(map[string]struct{}, len(cfg.VRFs))
+	for _, vrf := range cfg.VRFs {
+		vrfs[vrf.Name] = struct{}{}
+	}
+	for _, peer := range cfg.BFD.Peers {
+		if peer.VRF == "" || peer.VRF == defaultVRFName {
+			continue
+		}
+		if _, ok := vrfs[peer.VRF]; !ok {
+			return NewInvalidConfigError(fmt.Sprintf("BFD peer %s references unknown VRF %s", peer.Address, peer.VRF))
+		}
+	}
+	return nil
+}
+
+func validateTransactionalPolicyObjects(cfg *Config) error {
+	if cfg == nil {
+		return nil
+	}
+	return validatePolicyObjects(cfg.PrefixLists, cfg.RouteMaps)
+}
+
+func validPolicyAction(action string) bool {
+	return action == "permit" || action == "deny"
+}
+
+func validateTransactionalRouteMapReferences(cfg *Config) error {
+	return validateFRRRouteMapReferences(cfg)
+}
+
+func validateFRRRouteMapReferences(cfg *Config) error {
+	if cfg == nil {
+		return nil
+	}
+	routeMaps := make(map[string]struct{}, len(cfg.RouteMaps))
+	for _, routeMap := range cfg.RouteMaps {
+		if strings.TrimSpace(routeMap.Name) == "" {
+			return NewInvalidConfigError("route-map name is required")
+		}
+		routeMaps[routeMap.Name] = struct{}{}
+	}
+	if cfg.BGP != nil {
+		for _, neighbor := range cfg.BGP.Neighbors {
+			if err := validateRouteMapReference(routeMaps, fmt.Sprintf("BGP neighbor %s import", neighbor.IP), neighbor.RouteMapIn); err != nil {
+				return err
+			}
+			if err := validateRouteMapReference(routeMaps, fmt.Sprintf("BGP neighbor %s export", neighbor.IP), neighbor.RouteMapOut); err != nil {
+				return err
+			}
+		}
+	}
+	for _, vrf := range cfg.VRFs {
+		if err := validateRouteMapReference(routeMaps, fmt.Sprintf("VRF %s import", vrf.Name), vrf.ImportRouteMap); err != nil {
+			return err
+		}
+		if err := validateRouteMapReference(routeMaps, fmt.Sprintf("VRF %s export", vrf.Name), vrf.ExportRouteMap); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func validateRouteMapReference(routeMaps map[string]struct{}, context, name string) error {
+	if name == "" {
+		return nil
+	}
+	if _, ok := routeMaps[name]; !ok {
+		return NewInvalidConfigError(fmt.Sprintf("%s references unknown route-map %s", context, name))
+	}
+	return nil
+}
+
+func validateTransactionalVRFVPN(cfg *Config) error {
+	if cfg == nil {
+		return nil
+	}
+	for _, vrf := range cfg.VRFs {
+		if strings.TrimSpace(vrf.Name) == "" {
+			return NewInvalidConfigError("VRF name is required")
+		}
+		importTargetCount := len(vrf.ImportTargets)
+		exportTargetCount := len(vrf.ExportTargets)
+		for _, target := range vrf.ImportTargets {
+			if !validRouteTargetValue(target) {
+				return NewInvalidConfigError(fmt.Sprintf("VRF %s: invalid import route-target %s", vrf.Name, target))
+			}
+		}
+		for _, target := range vrf.ExportTargets {
+			if !validRouteTargetValue(target) {
+				return NewInvalidConfigError(fmt.Sprintf("VRF %s: invalid export route-target %s", vrf.Name, target))
+			}
+		}
+		if vrf.ImportRouteMap != "" && importTargetCount == 0 {
+			return NewInvalidConfigError(fmt.Sprintf("VRF %s: route-map import requires an import route-target", vrf.Name))
+		}
+		if vrf.ExportRouteMap != "" && exportTargetCount == 0 {
+			return NewInvalidConfigError(fmt.Sprintf("VRF %s: route-map export requires an export route-target", vrf.Name))
+		}
+		if exportTargetCount > 0 {
+			if vrf.RouteDistinguisher == "" {
+				return NewInvalidConfigError(fmt.Sprintf("VRF %s: route-distinguisher is required for VPN export", vrf.Name))
+			}
+			if !validRouteDistinguisher(vrf.RouteDistinguisher) {
+				return NewInvalidConfigError(fmt.Sprintf("VRF %s: invalid route-distinguisher %s", vrf.Name, vrf.RouteDistinguisher))
+			}
+		}
+		if vrfHasVPNConfig(vrf) && vrf.ASN == 0 {
+			return NewInvalidConfigError(fmt.Sprintf("VRF %s: BGP ASN is required for VPN import/export", vrf.Name))
+		}
+	}
+	return nil
+}
+
+func validRouteTargetValue(target string) bool {
+	return validColonUintPair(strings.TrimPrefix(target, "target:"))
+}
+
+func validRouteDistinguisher(rd string) bool {
+	return validColonUintPair(rd)
+}
+
+func validColonUintPair(value string) bool {
+	left, right, ok := strings.Cut(value, ":")
+	if !ok || left == "" || right == "" {
+		return false
+	}
+	if _, err := strconv.ParseUint(left, 10, 32); err != nil {
+		return false
+	}
+	if _, err := strconv.ParseUint(right, 10, 32); err != nil {
+		return false
+	}
+	return true
+}
+
+func validateTransactionalRouteMapSupport(cfg *Config) error {
+	if cfg == nil {
+		return nil
+	}
+	for _, routeMap := range cfg.RouteMaps {
+		for _, entry := range routeMap.Entries {
+			if entry.MatchProtocol != "" {
+				return NewInvalidConfigError(fmt.Sprintf("route-map %s entry %d match source-protocol is not supported by the transactional FRR backend until route-map source-protocol management operations are implemented", routeMap.Name, entry.Seq))
+			}
+			if entry.MatchNeighbor != "" {
+				return NewInvalidConfigError(fmt.Sprintf("route-map %s entry %d match peer is not supported by the transactional FRR backend until route-map peer management operations are implemented", routeMap.Name, entry.Seq))
+			}
+			if entry.MatchASPath != "" {
+				return NewInvalidConfigError(fmt.Sprintf("route-map %s entry %d match as-path is not supported by the transactional FRR backend until AS-path route-map management operations are implemented", routeMap.Name, entry.Seq))
+			}
+		}
+	}
+	if len(cfg.ASPathAccessLists) > 0 {
+		return NewInvalidConfigError("AS-path access-lists are not supported by the transactional FRR backend until AS-path management operations are implemented")
+	}
+	return nil
+}
+
+func ospfHasBFDProtocolBindings(cfg *OSPFConfig) bool {
+	if cfg == nil {
+		return false
+	}
+	for _, iface := range cfg.Interfaces {
+		if iface.BFD || iface.BFDProfile != "" {
+			return true
+		}
+	}
+	return false
+}
+
+func ospfHasBFDProfiles(cfg *OSPFConfig) bool {
+	if cfg == nil {
+		return false
+	}
+	for _, iface := range cfg.Interfaces {
+		if iface.BFDProfile != "" {
+			return true
+		}
+	}
+	return false
+}
+
+func buildBFDConfigOps(cfg *BFDConfig) ([]MgmtOperation, error) {
+	if cfg == nil || (len(cfg.Profiles) == 0 && len(cfg.Peers) == 0) {
+		return nil, nil
+	}
+	if err := validateBFDConfig(cfg); err != nil {
+		return nil, err
+	}
+
+	base := "/frr-bfdd:bfdd/bfd"
+	var ops []MgmtOperation
+
+	profiles := append([]BFDProfile(nil), cfg.Profiles...)
+	sort.Slice(profiles, func(i, j int) bool { return profiles[i].Name < profiles[j].Name })
+	for _, profile := range profiles {
+		profileBase := base + "/profile" + keyPred("name", profile.Name)
+		ops = append(ops, setOp(profileBase+"/name", profile.Name))
+		ops = appendBFDSessionCommonOps(ops, profileBase, profile.DetectMultiplier, profile.ReceiveInterval, profile.TransmitInterval, profile.PassiveMode, false)
+		ops = appendBFDSessionEchoOps(ops, profileBase, profile.EchoMode)
+	}
+
+	peers := append([]BFDPeer(nil), cfg.Peers...)
+	sort.Slice(peers, func(i, j int) bool {
+		if peers[i].Address != peers[j].Address {
+			return peers[i].Address < peers[j].Address
+		}
+		if peers[i].VRF != peers[j].VRF {
+			return peers[i].VRF < peers[j].VRF
+		}
+		return peers[i].Interface < peers[j].Interface
+	})
+	for _, peer := range peers {
+		peerOps, err := buildBFDPeerOps(base, peer)
+		if err != nil {
+			return nil, err
+		}
+		ops = append(ops, peerOps...)
+	}
+
+	return ops, nil
+}
+
+func buildBFDPeerOps(base string, peer BFDPeer) ([]MgmtOperation, error) {
+	vrf := peer.VRF
+	if vrf == "" {
+		vrf = "default"
+	}
+
+	if peer.Multihop {
+		if peer.LocalAddress == "" {
+			return nil, NewInvalidConfigError(fmt.Sprintf("BFD multihop peer %s requires local-address for transactional apply", peer.Address))
+		}
+		peerBase := base + "/sessions/multi-hop" +
+			keyPred("source-addr", peer.LocalAddress) +
+			keyPred("dest-addr", peer.Address) +
+			keyPred("vrf", vrf)
+		ops := []MgmtOperation{
+			setOp(peerBase+"/source-addr", peer.LocalAddress),
+			setOp(peerBase+"/dest-addr", peer.Address),
+			setOp(peerBase+"/vrf", vrf),
+		}
+		ops = appendBFDPeerCommonOps(ops, peerBase, peer)
+		return ops, nil
+	}
+
+	if peer.Interface == "" {
+		return nil, NewInvalidConfigError(fmt.Sprintf("BFD single-hop peer %s requires interface for transactional apply", peer.Address))
+	}
+	peerBase := base + "/sessions/single-hop" +
+		keyPred("dest-addr", peer.Address) +
+		keyPred("interface", peer.Interface) +
+		keyPred("vrf", vrf)
+	ops := []MgmtOperation{
+		setOp(peerBase+"/dest-addr", peer.Address),
+		setOp(peerBase+"/interface", peer.Interface),
+		setOp(peerBase+"/vrf", vrf),
+	}
+	if peer.LocalAddress != "" {
+		ops = append(ops, setOp(peerBase+"/source-addr", peer.LocalAddress))
+	}
+	ops = appendBFDPeerCommonOps(ops, peerBase, peer)
+	ops = appendBFDSessionEchoOps(ops, peerBase, peer.EchoMode)
+	return ops, nil
+}
+
+func appendBFDPeerCommonOps(ops []MgmtOperation, base string, peer BFDPeer) []MgmtOperation {
+	if peer.Profile != "" {
+		ops = append(ops, setOp(base+"/profile", peer.Profile))
+	}
+	return appendBFDSessionCommonOps(ops, base, peer.DetectMultiplier, peer.ReceiveInterval, peer.TransmitInterval, peer.PassiveMode, peer.Shutdown)
+}
+
+func appendBFDSessionCommonOps(ops []MgmtOperation, base string, detectMultiplier, receiveInterval, transmitInterval int, passiveMode, administrativeDown bool) []MgmtOperation {
+	if detectMultiplier != 0 {
+		ops = append(ops, setOp(base+"/detection-multiplier", strconv.Itoa(detectMultiplier)))
+	}
+	if transmitInterval != 0 {
+		ops = append(ops, setOp(base+"/desired-transmission-interval", strconv.Itoa(millisecondsToMicroseconds(transmitInterval))))
+	}
+	if receiveInterval != 0 {
+		ops = append(ops, setOp(base+"/required-receive-interval", strconv.Itoa(millisecondsToMicroseconds(receiveInterval))))
+	}
+	if passiveMode {
+		ops = append(ops, setOp(base+"/passive-mode", "true"))
+	}
+	if administrativeDown {
+		ops = append(ops, setOp(base+"/administrative-down", "true"))
+	}
+	return ops
+}
+
+func appendBFDSessionEchoOps(ops []MgmtOperation, base string, echoMode bool) []MgmtOperation {
+	if echoMode {
+		ops = append(ops, setOp(base+"/echo-mode", "true"))
+	}
+	return ops
+}
+
+func millisecondsToMicroseconds(value int) int {
+	return value * 1000
 }
 
 func buildStaticRouteOps(routes []StaticRoute) []MgmtOperation {
@@ -205,6 +621,25 @@ func buildStaticRouteOps(routes []StaticRoute) []MgmtOperation {
 			setOp(pathBase+"/interface", ""),
 			setOp(pathBase+"/distance", strconv.Itoa(distance)),
 		)
+		if staticRouteBFDConfigured(route) {
+			ops = append(ops, buildStaticRouteBFDMonitoringOps(pathBase, route)...)
+		}
+	}
+	return ops
+}
+
+func staticRouteBFDConfigured(route StaticRoute) bool {
+	return route.BFD || route.BFDProfile != "" || route.BFDSource != "" || route.BFDMultihop
+}
+
+func buildStaticRouteBFDMonitoringOps(pathBase string, route StaticRoute) []MgmtOperation {
+	base := pathBase + "/bfd-monitoring"
+	ops := []MgmtOperation{setOp(base+"/multi-hop", strconv.FormatBool(route.BFDMultihop))}
+	if route.BFDSource != "" {
+		ops = append(ops, setOp(base+"/source", route.BFDSource))
+	}
+	if route.BFDProfile != "" {
+		ops = append(ops, setOp(base+"/profile", route.BFDProfile))
 	}
 	return ops
 }
@@ -236,6 +671,9 @@ func buildBGPOps(cfg *BGPConfig) []MgmtOperation {
 			} else {
 				ops = append(ops, setOp(base+"/update-source/interface", neighbor.UpdateSource))
 			}
+		}
+		if neighbor.BFD {
+			ops = append(ops, setOp(base+"/bfd-options/enable", "true"))
 		}
 		afi := "frr-routing:ipv4-unicast"
 		afiContainer := "ipv4-unicast"
@@ -279,6 +717,31 @@ func buildOSPFOps(cfg *OSPFConfig) []MgmtOperation {
 			base := ospfProtocolBase() + "/frr-ospfd:ospf/passive-interface" + keyPred("interface", iface.Name)
 			ops = append(ops, setOp(base+"/interface", iface.Name))
 		}
+		if ospfInterfaceMgmtConfigured(iface) {
+			ops = append(ops, buildOSPFInterfaceOps(iface)...)
+		}
+	}
+	return ops
+}
+
+func ospfInterfaceMgmtConfigured(iface OSPFInterface) bool {
+	return iface.Metric > 0 || iface.Priority != nil || iface.BFD
+}
+
+func buildOSPFInterfaceOps(iface OSPFInterface) []MgmtOperation {
+	base := ospfInterfaceInstanceBase(iface.Name)
+	ops := []MgmtOperation{
+		setOp(interfaceBase(iface.Name)+"/name", iface.Name),
+		setOp(base+"/id", defaultOSPFInterfaceInstanceID),
+	}
+	if iface.Metric > 0 {
+		ops = append(ops, setOp(base+"/cost", strconv.Itoa(iface.Metric)))
+	}
+	if iface.Priority != nil {
+		ops = append(ops, setOp(base+"/priority", strconv.Itoa(*iface.Priority)))
+	}
+	if iface.BFD {
+		ops = append(ops, setOp(base+"/bfd", "true"))
 	}
 	return ops
 }
@@ -318,10 +781,11 @@ func buildPrefixListOps(prefixLists []PrefixList) []MgmtOperation {
 	return ops
 }
 
-func buildRouteMapOps(routeMaps []RouteMap) []MgmtOperation {
+func buildRouteMapOps(routeMaps []RouteMap, prefixLists []PrefixList) []MgmtOperation {
 	if len(routeMaps) == 0 {
 		return nil
 	}
+	ipv6PrefixLists := ipv6PrefixListSet(prefixLists)
 	var ops []MgmtOperation
 	maps := append([]RouteMap(nil), routeMaps...)
 	sort.Slice(maps, func(i, j int) bool { return maps[i].Name < maps[j].Name })
@@ -337,9 +801,13 @@ func buildRouteMapOps(routeMaps []RouteMap) []MgmtOperation {
 				setOp(entryBase+"/action", entry.Action),
 			)
 			for _, prefixList := range entry.MatchPrefixLists {
-				matchBase := entryBase + "/match-condition" + keyPred("condition", "frr-route-map:ipv4-prefix-list")
+				condition := "frr-route-map:ipv4-prefix-list"
+				if ipv6PrefixLists[prefixList] {
+					condition = "frr-route-map:ipv6-prefix-list"
+				}
+				matchBase := entryBase + "/match-condition" + keyPred("condition", condition)
 				ops = append(ops,
-					setOp(matchBase+"/condition", "frr-route-map:ipv4-prefix-list"),
+					setOp(matchBase+"/condition", condition),
 					setOp(matchBase+"/rmap-match-condition/list-name", prefixList),
 				)
 			}
@@ -362,9 +830,22 @@ func buildRouteMapOps(routeMaps []RouteMap) []MgmtOperation {
 	return ops
 }
 
+func ipv6PrefixListSet(prefixLists []PrefixList) map[string]bool {
+	ipv6Lists := make(map[string]bool, len(prefixLists))
+	for _, prefixList := range prefixLists {
+		if prefixList.IsIPv6 {
+			ipv6Lists[prefixList.Name] = true
+		}
+	}
+	return ipv6Lists
+}
+
 func buildVRRPOps(cfg *VRRPConfig) ([]MgmtOperation, error) {
 	if cfg == nil || len(cfg.Groups) == 0 {
 		return nil, nil
+	}
+	if err := validateVRRPConfig(cfg); err != nil {
+		return nil, err
 	}
 	groups := append([]VRRPGroup(nil), cfg.Groups...)
 	sort.Slice(groups, func(i, j int) bool {
@@ -377,19 +858,7 @@ func buildVRRPOps(cfg *VRRPConfig) ([]MgmtOperation, error) {
 	var ops []MgmtOperation
 	createdInterfaces := make(map[string]bool)
 	for _, group := range groups {
-		if group.Interface == "" {
-			return nil, NewInvalidConfigError(fmt.Sprintf("VRRP group %d missing interface", group.ID))
-		}
-		if group.ID < 1 || group.ID > 255 {
-			return nil, NewInvalidConfigError(fmt.Sprintf("VRRP group id must be 1-255, got %d", group.ID))
-		}
 		virtualAddress := net.ParseIP(group.VirtualAddress)
-		if virtualAddress == nil {
-			return nil, NewInvalidConfigError(fmt.Sprintf("VRRP group %d has invalid virtual address %q", group.ID, group.VirtualAddress))
-		}
-		if group.Priority < 0 || group.Priority > 254 {
-			return nil, NewInvalidConfigError(fmt.Sprintf("VRRP group %d priority must be 1-254 when configured, got %d", group.ID, group.Priority))
-		}
 		if !createdInterfaces[group.Interface] {
 			ops = append(ops, setOp(interfaceBase(group.Interface)+"/name", group.Interface))
 			createdInterfaces[group.Interface] = true
@@ -416,6 +885,7 @@ func buildVRRPOps(cfg *VRRPConfig) ([]MgmtOperation, error) {
 }
 
 const defaultVRFName = "default"
+const defaultOSPFInterfaceInstanceID = "0"
 
 func buildVRFOps(vrfs []VRFConfig) []MgmtOperation {
 	if len(vrfs) == 0 {
@@ -501,6 +971,14 @@ func bgpProtocolDeleteBase() string {
 
 func ospfProtocolBase() string {
 	return protocolBase("frr-ospfd:ospf", "ospf")
+}
+
+func ospfInterfaceConfigBase() string {
+	return "/frr-interface:lib/interface/frr-ospfd:ospf"
+}
+
+func ospfInterfaceInstanceBase(interfaceName string) string {
+	return interfaceBase(interfaceName) + "/frr-ospfd:ospf/instance" + keyPred("id", defaultOSPFInterfaceInstanceID)
 }
 
 func protocolBase(protocolType, name string) string {

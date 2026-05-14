@@ -91,3 +91,103 @@ func TestComputeDiffDetectsV06AdvancedChanges(t *testing.T) {
 		t.Fatalf("v0.6 flags not set: %#v", diff)
 	}
 }
+
+func TestComputeDiffDetectsOSPF3Changes(t *testing.T) {
+	newCfg := model.NewRouterConfig()
+	newCfg.Protocols = &model.ProtocolsConfig{
+		OSPF3: &model.OSPFConfig{
+			Areas: map[string]*model.OSPFArea{
+				"0.0.0.0": {
+					Interfaces: map[string]*model.OSPFInterface{
+						"ge-0/0/0": {Metric: 20},
+					},
+				},
+			},
+		},
+	}
+
+	diff := ComputeDiff(model.NewRouterConfig(), newCfg)
+	if !diff.OSPF3Changed || diff.NewOSPF3 == nil {
+		t.Fatalf("OSPF3 change not detected: %#v", diff)
+	}
+	if !diff.HasChanges() {
+		t.Fatal("HasChanges() = false, want true")
+	}
+}
+
+func TestComputeDiffDetectsBFDChanges(t *testing.T) {
+	newCfg := model.NewRouterConfig()
+	newCfg.Protocols = &model.ProtocolsConfig{
+		BFD: &model.BFDConfig{
+			Peers: map[string]*model.BFDPeer{
+				"192.0.2.2": {Profile: "fast"},
+			},
+		},
+	}
+
+	diff := ComputeDiff(model.NewRouterConfig(), newCfg)
+	if !diff.BFDChanged || diff.NewBFD == nil {
+		t.Fatalf("BFD change not detected: %#v", diff)
+	}
+	if !diff.HasChanges() {
+		t.Fatal("HasChanges() = false, want true")
+	}
+}
+
+func TestComputeDiffDetectsBGPBFDBindingChanges(t *testing.T) {
+	oldCfg := model.NewRouterConfig()
+	oldCfg.Protocols = &model.ProtocolsConfig{
+		BGP: &model.BGPConfig{Groups: map[string]*model.BGPGroup{
+			"EBGP": {
+				Type: "external",
+				Neighbors: map[string]*model.BGPNeighbor{
+					"192.0.2.2": {PeerAS: 65001},
+				},
+			},
+		}},
+	}
+	newCfg := oldCfg.Clone()
+	newCfg.Protocols.BGP.Groups["EBGP"].Neighbors["192.0.2.2"].BFD = true
+	newCfg.Protocols.BGP.Groups["EBGP"].Neighbors["192.0.2.2"].BFDProfile = "fast"
+
+	diff := ComputeDiff(oldCfg, newCfg)
+	if !diff.BGPChanged {
+		t.Fatalf("BGP BFD binding change not detected: %#v", diff)
+	}
+}
+
+func TestComputeDiffDetectsOSPFBFDBindingChanges(t *testing.T) {
+	oldCfg := model.NewRouterConfig()
+	oldCfg.Protocols = &model.ProtocolsConfig{
+		OSPF: &model.OSPFConfig{Areas: map[string]*model.OSPFArea{
+			"0.0.0.0": {
+				Interfaces: map[string]*model.OSPFInterface{
+					"ge-0/0/0": {Metric: 10},
+				},
+			},
+		}},
+	}
+	newCfg := oldCfg.Clone()
+	newCfg.Protocols.OSPF.Areas["0.0.0.0"].Interfaces["ge-0/0/0"].BFD = true
+	newCfg.Protocols.OSPF.Areas["0.0.0.0"].Interfaces["ge-0/0/0"].BFDProfile = "fast"
+
+	diff := ComputeDiff(oldCfg, newCfg)
+	if !diff.OSPFChanged {
+		t.Fatalf("OSPF BFD binding change not detected: %#v", diff)
+	}
+}
+
+func TestComputeDiffDetectsStaticRouteBFDChanges(t *testing.T) {
+	oldCfg := model.NewRouterConfig()
+	oldCfg.Routing = &model.RoutingConfig{StaticRoutes: []*model.StaticRoute{
+		{Prefix: "203.0.113.0/24", NextHop: "192.0.2.2"},
+	}}
+	newCfg := oldCfg.Clone()
+	newCfg.Routing.StaticRoutes[0].BFD = true
+	newCfg.Routing.StaticRoutes[0].BFDProfile = "fast"
+
+	diff := ComputeDiff(oldCfg, newCfg)
+	if !diff.StaticRoutesChanged {
+		t.Fatalf("Static route BFD change not detected: %#v", diff)
+	}
+}

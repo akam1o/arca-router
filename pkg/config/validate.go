@@ -68,7 +68,7 @@ func (c *Config) Validate() error {
 
 	// Validate routing options
 	if c.RoutingOptions != nil {
-		if err := c.RoutingOptions.Validate(); err != nil {
+		if err := c.RoutingOptions.validate(c); err != nil {
 			return err
 		}
 	}
@@ -86,6 +86,12 @@ func (c *Config) Validate() error {
 		}
 	}
 
+	if c.PolicyOptions != nil {
+		if err := c.PolicyOptions.Validate(); err != nil {
+			return err
+		}
+	}
+
 	if c.ClassOfService != nil {
 		if err := c.ClassOfService.Validate(); err != nil {
 			return err
@@ -95,6 +101,88 @@ func (c *Config) Validate() error {
 		}
 	}
 
+	return nil
+}
+
+// Validate validates policy-options configuration.
+func (po *PolicyOptions) Validate() error {
+	if po == nil {
+		return nil
+	}
+	for name, list := range po.PrefixLists {
+		if strings.TrimSpace(name) == "" {
+			return errors.New(errors.ErrCodeConfigValidation, "Policy prefix-list name is empty", "Prefix-list names must be specified", "Use a non-empty policy-options prefix-list name")
+		}
+		if list == nil {
+			return errors.New(errors.ErrCodeConfigValidation, fmt.Sprintf("Policy prefix-list %s is nil", name), "Prefix-list configuration is invalid", "Remove or recreate the prefix-list")
+		}
+		for _, prefix := range list.Prefixes {
+			if _, _, err := net.ParseCIDR(prefix); err != nil {
+				return errors.New(
+					errors.ErrCodeConfigValidation,
+					fmt.Sprintf("Policy prefix-list %s has invalid prefix %q", name, prefix),
+					"Prefix-list entries must be valid IPv4 or IPv6 CIDR prefixes",
+					"Use a value like 192.0.2.0/24 or 2001:db8::/32",
+				)
+			}
+		}
+	}
+	for name, statement := range po.PolicyStatements {
+		if strings.TrimSpace(name) == "" {
+			return errors.New(errors.ErrCodeConfigValidation, "Policy statement name is empty", "Policy statement names must be specified", "Use a non-empty policy-options policy-statement name")
+		}
+		if statement == nil {
+			return errors.New(errors.ErrCodeConfigValidation, fmt.Sprintf("Policy statement %s is nil", name), "Policy statement configuration is invalid", "Remove or recreate the policy-statement")
+		}
+		if err := po.validatePolicyStatement(name, statement); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (po *PolicyOptions) validatePolicyStatement(name string, statement *PolicyStatement) error {
+	for _, term := range statement.Terms {
+		if term == nil {
+			return errors.New(errors.ErrCodeConfigValidation, fmt.Sprintf("Policy statement %s has a nil term", name), "Policy terms must be valid", "Remove or recreate the policy term")
+		}
+		if strings.TrimSpace(term.Name) == "" {
+			return errors.New(errors.ErrCodeConfigValidation, fmt.Sprintf("Policy statement %s has an empty term name", name), "Policy terms must have names", "Use a non-empty policy term name")
+		}
+		if term.From != nil {
+			for _, listName := range term.From.PrefixLists {
+				if strings.TrimSpace(listName) == "" {
+					return errors.New(errors.ErrCodeConfigValidation, fmt.Sprintf("Policy statement %s term %s references an empty prefix-list", name, term.Name), "Prefix-list references must be specified", "Use a configured policy-options prefix-list name")
+				}
+				if po.PrefixLists == nil || po.PrefixLists[listName] == nil {
+					return errors.New(
+						errors.ErrCodeConfigValidation,
+						fmt.Sprintf("Policy statement %s term %s references unknown prefix-list %s", name, term.Name, listName),
+						"Referenced prefix-list must exist before it is used",
+						fmt.Sprintf("Create policy-options prefix-list %s", listName),
+					)
+				}
+			}
+			if term.From.Protocol != "" {
+				if err := validateProtocol(term.From.Protocol); err != nil {
+					return errors.New(errors.ErrCodeConfigValidation, fmt.Sprintf("Policy statement %s term %s has invalid protocol %q", name, term.Name, term.From.Protocol), err.Error(), "Use one of bgp, ospf, ospf3, static, connected, direct, kernel, or rip")
+				}
+			}
+			if term.From.Neighbor != "" && net.ParseIP(term.From.Neighbor) == nil {
+				return errors.New(errors.ErrCodeConfigValidation, fmt.Sprintf("Policy statement %s term %s has invalid neighbor %q", name, term.Name, term.From.Neighbor), "Neighbor matches must be valid IP addresses", "Use a valid IPv4 or IPv6 address")
+			}
+			if term.From.ASPath != "" {
+				if _, err := regexp.Compile(term.From.ASPath); err != nil {
+					return errors.New(errors.ErrCodeConfigValidation, fmt.Sprintf("Policy statement %s term %s has invalid as-path %q", name, term.Name, term.From.ASPath), "AS path match must be a valid regular expression", "Use a valid AS path regular expression")
+				}
+			}
+		}
+		if term.Then != nil && term.Then.Community != "" {
+			if err := validateCommunity(term.Then.Community); err != nil {
+				return errors.New(errors.ErrCodeConfigValidation, fmt.Sprintf("Policy statement %s term %s has invalid community %q", name, term.Name, term.Then.Community), err.Error(), "Use ASN:number or a supported well-known community")
+			}
+		}
+	}
 	return nil
 }
 
@@ -449,6 +537,10 @@ func keys(m map[string]bool) []string {
 
 // Validate validates routing options configuration
 func (ro *RoutingOptions) Validate() error {
+	return ro.validate(nil)
+}
+
+func (ro *RoutingOptions) validate(cfg *Config) error {
 	if ro == nil {
 		return nil
 	}
@@ -489,7 +581,7 @@ func (ro *RoutingOptions) Validate() error {
 
 	// Validate static routes
 	for _, sr := range ro.StaticRoutes {
-		if err := validateStaticRoute(sr); err != nil {
+		if err := validateStaticRoute(cfg, sr); err != nil {
 			return err
 		}
 	}
@@ -498,7 +590,7 @@ func (ro *RoutingOptions) Validate() error {
 }
 
 // validateStaticRoute validates a static route
-func validateStaticRoute(sr *StaticRoute) error {
+func validateStaticRoute(cfg *Config, sr *StaticRoute) error {
 	if sr == nil {
 		return errors.New(
 			errors.ErrCodeConfigValidation,
@@ -518,7 +610,7 @@ func validateStaticRoute(sr *StaticRoute) error {
 		)
 	}
 
-	_, _, err := net.ParseCIDR(sr.Prefix)
+	_, prefixNet, err := net.ParseCIDR(sr.Prefix)
 	if err != nil {
 		return errors.New(
 			errors.ErrCodeConfigValidation,
@@ -538,12 +630,30 @@ func validateStaticRoute(sr *StaticRoute) error {
 		)
 	}
 
-	if net.ParseIP(sr.NextHop) == nil {
+	nextHopIP := net.ParseIP(sr.NextHop)
+	if nextHopIP == nil {
 		return errors.New(
 			errors.ErrCodeConfigValidation,
 			fmt.Sprintf("Invalid next-hop for static route %s: %s", sr.Prefix, sr.NextHop),
 			"Next-hop must be a valid IP address",
 			"Use a valid IPv4 or IPv6 address",
+		)
+	}
+
+	if prefixNet.IP.To4() == nil && nextHopIP.To4() != nil {
+		return errors.New(
+			errors.ErrCodeConfigValidation,
+			fmt.Sprintf("Static route %s has IPv4 next-hop for IPv6 prefix: %s", sr.Prefix, sr.NextHop),
+			"Static route next-hop family must match the prefix family",
+			"Use an IPv6 next-hop for IPv6 routes",
+		)
+	}
+	if prefixNet.IP.To4() != nil && nextHopIP.To4() == nil {
+		return errors.New(
+			errors.ErrCodeConfigValidation,
+			fmt.Sprintf("Static route %s has IPv6 next-hop for IPv4 prefix: %s", sr.Prefix, sr.NextHop),
+			"Static route next-hop family must match the prefix family",
+			"Use an IPv4 next-hop for IPv4 routes",
 		)
 	}
 
@@ -554,6 +664,47 @@ func validateStaticRoute(sr *StaticRoute) error {
 			fmt.Sprintf("Invalid distance for static route %s: %d", sr.Prefix, sr.Distance),
 			"Distance must be between 0 and 255",
 			"Use a valid distance value",
+		)
+	}
+
+	if sr.BFDProfile != "" {
+		if err := validateBFDProfileReference(cfg, fmt.Sprintf("Static route %s", sr.Prefix), sr.BFDProfile); err != nil {
+			return err
+		}
+	}
+	if sr.BFDSource != "" {
+		sourceIP := net.ParseIP(sr.BFDSource)
+		if sourceIP == nil {
+			return errors.New(
+				errors.ErrCodeConfigValidation,
+				fmt.Sprintf("Invalid BFD source for static route %s: %s", sr.Prefix, sr.BFDSource),
+				"BFD source must be a valid IP address",
+				"Use a valid IPv4 or IPv6 source address",
+			)
+		}
+		if (nextHopIP.To4() == nil) != (sourceIP.To4() == nil) {
+			return errors.New(
+				errors.ErrCodeConfigValidation,
+				fmt.Sprintf("Static route %s has BFD source family mismatch: %s", sr.Prefix, sr.BFDSource),
+				"BFD source address family must match the next-hop family",
+				"Use a BFD source address with the same IP family as the next-hop",
+			)
+		}
+	}
+	if (sr.BFDProfile != "" || sr.BFDSource != "" || sr.BFDMultihop) && !sr.BFD {
+		return errors.New(
+			errors.ErrCodeConfigValidation,
+			fmt.Sprintf("Static route %s has BFD options without BFD enabled", sr.Prefix),
+			"Static route BFD options require BFD to be enabled",
+			"Add 'bfd' before static route BFD options",
+		)
+	}
+	if sr.Distance > 0 && (sr.BFD || sr.BFDProfile != "" || sr.BFDSource != "" || sr.BFDMultihop) {
+		return errors.New(
+			errors.ErrCodeConfigValidation,
+			fmt.Sprintf("Static route %s combines distance with BFD", sr.Prefix),
+			"FRR static route BFD monitoring does not support administrative distance in the documented command form",
+			"Remove distance or BFD from this static route",
 		)
 	}
 
@@ -663,6 +814,12 @@ func (pc *ProtocolConfig) Validate(cfg *Config) error {
 		return nil
 	}
 
+	if pc.BFD != nil {
+		if err := pc.BFD.Validate(cfg); err != nil {
+			return err
+		}
+	}
+
 	// Validate BGP
 	if pc.BGP != nil {
 		if err := pc.BGP.Validate(cfg); err != nil {
@@ -673,6 +830,13 @@ func (pc *ProtocolConfig) Validate(cfg *Config) error {
 	// Validate OSPF
 	if pc.OSPF != nil {
 		if err := pc.OSPF.Validate(cfg); err != nil {
+			return err
+		}
+	}
+
+	// Validate OSPFv3
+	if pc.OSPF3 != nil {
+		if err := pc.OSPF3.ValidateOSPF3(cfg); err != nil {
 			return err
 		}
 	}
@@ -698,6 +862,72 @@ func (pc *ProtocolConfig) Validate(cfg *Config) error {
 		}
 	}
 
+	return nil
+}
+
+// Validate validates BFD configuration.
+func (b *BFDConfig) Validate(cfg *Config) error {
+	if b == nil {
+		return nil
+	}
+	for name, profile := range b.Profiles {
+		if profile == nil {
+			return errors.New(errors.ErrCodeConfigValidation, fmt.Sprintf("BFD profile %s is nil", name), "BFD profile is invalid", "Remove or recreate the profile")
+		}
+		if err := validateBFDTimers(fmt.Sprintf("BFD profile %s", name), profile.DetectMultiplier, profile.ReceiveInterval, profile.TransmitInterval); err != nil {
+			return err
+		}
+	}
+	for address, peer := range b.Peers {
+		if peer == nil {
+			return errors.New(errors.ErrCodeConfigValidation, fmt.Sprintf("BFD peer %s is nil", address), "BFD peer is invalid", "Remove or recreate the peer")
+		}
+		peerAddress := peer.Address
+		if peerAddress == "" {
+			peerAddress = address
+		}
+		if net.ParseIP(peerAddress) == nil {
+			return errors.New(errors.ErrCodeConfigValidation, fmt.Sprintf("Invalid BFD peer address: %s", peerAddress), "BFD peer address must be a valid IP address", "Use a valid IPv4 or IPv6 address")
+		}
+		if peer.LocalAddress != "" && net.ParseIP(peer.LocalAddress) == nil {
+			return errors.New(errors.ErrCodeConfigValidation, fmt.Sprintf("Invalid BFD local-address for %s: %s", peerAddress, peer.LocalAddress), "BFD local-address must be a valid IP address", "Use a valid IPv4 or IPv6 address")
+		}
+		if peer.Interface != "" {
+			if err := validateConfiguredInterfaceReference(cfg, fmt.Sprintf("BFD peer %s", peerAddress), peer.Interface); err != nil {
+				return err
+			}
+		}
+		if peer.VRF != "" && peer.VRF != "default" {
+			if cfg == nil || cfg.RoutingInstances == nil || cfg.RoutingInstances[peer.VRF] == nil {
+				return errors.New(errors.ErrCodeConfigValidation, fmt.Sprintf("BFD peer %s references unknown routing-instance %s", peerAddress, peer.VRF), "BFD peer VRF must reference an existing routing instance or default", fmt.Sprintf("Create routing-instances %s or use default", peer.VRF))
+			}
+		}
+		if peer.Profile != "" && b.Profiles[peer.Profile] == nil {
+			return errors.New(errors.ErrCodeConfigValidation, fmt.Sprintf("BFD peer %s references unknown profile %s", peerAddress, peer.Profile), "BFD peer profile must be defined before it is referenced", fmt.Sprintf("Create protocols bfd profile %s", peer.Profile))
+		}
+		if peer.Multihop && peer.EchoMode {
+			return errors.New(errors.ErrCodeConfigValidation, fmt.Sprintf("BFD peer %s enables echo-mode with multihop", peerAddress), "FRR BFD echo-mode is not supported on multihop sessions", "Remove echo-mode or multihop from the peer")
+		}
+		if peer.Multihop && peer.Profile != "" && b.Profiles[peer.Profile] != nil && b.Profiles[peer.Profile].EchoMode {
+			return errors.New(errors.ErrCodeConfigValidation, fmt.Sprintf("BFD peer %s uses echo-mode profile %s with multihop", peerAddress, peer.Profile), "FRR BFD echo-mode is not supported on multihop sessions", "Use a profile without echo-mode for multihop peers")
+		}
+		if err := validateBFDTimers(fmt.Sprintf("BFD peer %s", peerAddress), peer.DetectMultiplier, peer.ReceiveInterval, peer.TransmitInterval); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func validateBFDTimers(context string, detectMultiplier, receiveInterval, transmitInterval int) error {
+	if detectMultiplier < 0 || detectMultiplier > 255 || detectMultiplier == 1 {
+		return errors.New(errors.ErrCodeConfigValidation, fmt.Sprintf("%s has invalid detect-multiplier: %d", context, detectMultiplier), "BFD detect-multiplier must be omitted or between 2 and 255", "Use detect-multiplier 3 for common deployments")
+	}
+	if receiveInterval < 0 || receiveInterval > 60000 || (receiveInterval > 0 && receiveInterval < 10) {
+		return errors.New(errors.ErrCodeConfigValidation, fmt.Sprintf("%s has invalid receive-interval: %d", context, receiveInterval), "BFD receive-interval must be omitted or between 10 and 60000 milliseconds", "Use receive-interval 300 for common deployments")
+	}
+	if transmitInterval < 0 || transmitInterval > 60000 || (transmitInterval > 0 && transmitInterval < 10) {
+		return errors.New(errors.ErrCodeConfigValidation, fmt.Sprintf("%s has invalid transmit-interval: %d", context, transmitInterval), "BFD transmit-interval must be omitted or between 10 and 60000 milliseconds", "Use transmit-interval 300 for common deployments")
+	}
 	return nil
 }
 
@@ -753,7 +983,7 @@ func (bgp *BGPConfig) Validate(cfg *Config) error {
 	}
 
 	for groupName, group := range bgp.Groups {
-		if err := validateBGPGroup(groupName, group); err != nil {
+		if err := validateBGPGroup(cfg, groupName, group); err != nil {
 			return err
 		}
 	}
@@ -762,7 +992,7 @@ func (bgp *BGPConfig) Validate(cfg *Config) error {
 }
 
 // validateBGPGroup validates a BGP group
-func validateBGPGroup(groupName string, group *BGPGroup) error {
+func validateBGPGroup(cfg *Config, groupName string, group *BGPGroup) error {
 	if group == nil {
 		return errors.New(
 			errors.ErrCodeConfigValidation,
@@ -802,7 +1032,17 @@ func validateBGPGroup(groupName string, group *BGPGroup) error {
 	}
 
 	for neighborIP, neighbor := range group.Neighbors {
-		if err := validateBGPNeighbor(groupName, neighborIP, neighbor); err != nil {
+		if err := validateBGPNeighbor(cfg, groupName, neighborIP, neighbor); err != nil {
+			return err
+		}
+	}
+	if group.Import != "" {
+		if err := validatePolicyStatementReference(cfg, fmt.Sprintf("BGP group %s import", groupName), group.Import); err != nil {
+			return err
+		}
+	}
+	if group.Export != "" {
+		if err := validatePolicyStatementReference(cfg, fmt.Sprintf("BGP group %s export", groupName), group.Export); err != nil {
 			return err
 		}
 	}
@@ -811,7 +1051,7 @@ func validateBGPGroup(groupName string, group *BGPGroup) error {
 }
 
 // validateBGPNeighbor validates a BGP neighbor
-func validateBGPNeighbor(groupName, neighborIP string, neighbor *BGPNeighbor) error {
+func validateBGPNeighbor(cfg *Config, groupName, neighborIP string, neighbor *BGPNeighbor) error {
 	if neighbor == nil {
 		return errors.New(
 			errors.ErrCodeConfigValidation,
@@ -863,11 +1103,26 @@ func validateBGPNeighbor(groupName, neighborIP string, neighbor *BGPNeighbor) er
 		}
 	}
 
+	if neighbor.BFDProfile != "" {
+		if err := validateBFDProfileReference(cfg, fmt.Sprintf("BGP neighbor %s in group %s", neighborIP, groupName), neighbor.BFDProfile); err != nil {
+			return err
+		}
+	}
+
 	return nil
 }
 
 // Validate validates OSPF configuration
 func (ospf *OSPFConfig) Validate(cfg *Config) error {
+	return ospf.validate(cfg, "OSPF", "ospf", true)
+}
+
+// ValidateOSPF3 validates OSPFv3 configuration.
+func (ospf *OSPFConfig) ValidateOSPF3(cfg *Config) error {
+	return ospf.validate(cfg, "OSPF3", "ospf3", false)
+}
+
+func (ospf *OSPFConfig) validate(cfg *Config, protocolLabel, protocolCommand string, requireRouterID bool) error {
 	if ospf == nil {
 		return nil
 	}
@@ -878,29 +1133,29 @@ func (ospf *OSPFConfig) Validate(cfg *Config) error {
 		routerID = cfg.RoutingOptions.RouterID
 	}
 
-	if routerID == "" {
+	if routerID == "" && requireRouterID {
 		return errors.New(
 			errors.ErrCodeConfigValidation,
-			"OSPF configured but no router-id set",
-			"OSPF requires a router ID",
-			"Set 'routing-options router-id <ip>' or 'protocols ospf router-id <ip>'",
+			fmt.Sprintf("%s configured but no router-id set", protocolLabel),
+			fmt.Sprintf("%s requires a router ID", protocolLabel),
+			fmt.Sprintf("Set 'routing-options router-id <ip>' or 'protocols %s router-id <ip>'", protocolCommand),
 		)
 	}
 
 	// Validate router-id format
-	if net.ParseIP(routerID) == nil {
+	if routerID != "" && net.ParseIP(routerID) == nil {
 		return errors.New(
 			errors.ErrCodeConfigValidation,
-			fmt.Sprintf("Invalid OSPF router-id: %s", routerID),
+			fmt.Sprintf("Invalid %s router-id: %s", protocolLabel, routerID),
 			"Router ID must be a valid IPv4 address",
 			"Use a valid IPv4 address",
 		)
 	}
 
-	if net.ParseIP(routerID).To4() == nil {
+	if routerID != "" && net.ParseIP(routerID).To4() == nil {
 		return errors.New(
 			errors.ErrCodeConfigValidation,
-			fmt.Sprintf("OSPF router-id must be IPv4: %s", routerID),
+			fmt.Sprintf("%s router-id must be IPv4: %s", protocolLabel, routerID),
 			"Router ID must be an IPv4 address, not IPv6",
 			"Use an IPv4 address",
 		)
@@ -910,14 +1165,14 @@ func (ospf *OSPFConfig) Validate(cfg *Config) error {
 	if len(ospf.Areas) == 0 {
 		return errors.New(
 			errors.ErrCodeConfigValidation,
-			"OSPF configured but no areas defined",
-			"OSPF requires at least one area",
-			"Add an area using 'set protocols ospf area <area-id> interface <name>'",
+			fmt.Sprintf("%s configured but no areas defined", protocolLabel),
+			fmt.Sprintf("%s requires at least one area", protocolLabel),
+			fmt.Sprintf("Add an area using 'set protocols %s area <area-id> interface <name>'", protocolCommand),
 		)
 	}
 
 	for areaID, area := range ospf.Areas {
-		if err := validateOSPFArea(areaID, area, cfg); err != nil {
+		if err := validateOSPFArea(protocolLabel, protocolCommand, areaID, area, cfg); err != nil {
 			return err
 		}
 	}
@@ -926,12 +1181,12 @@ func (ospf *OSPFConfig) Validate(cfg *Config) error {
 }
 
 // validateOSPFArea validates an OSPF area
-func validateOSPFArea(areaID string, area *OSPFArea, cfg *Config) error {
+func validateOSPFArea(protocolLabel, protocolCommand, areaID string, area *OSPFArea, cfg *Config) error {
 	if area == nil {
 		return errors.New(
 			errors.ErrCodeConfigValidation,
-			fmt.Sprintf("OSPF area %s is nil", areaID),
-			"Internal error: OSPF area object is nil",
+			fmt.Sprintf("%s area %s is nil", protocolLabel, areaID),
+			fmt.Sprintf("Internal error: %s area object is nil", protocolLabel),
 			"Report this issue to the maintainers",
 		)
 	}
@@ -943,7 +1198,7 @@ func validateOSPFArea(areaID string, area *OSPFArea, cfg *Config) error {
 		if parsedIP.To4() == nil {
 			return errors.New(
 				errors.ErrCodeConfigValidation,
-				fmt.Sprintf("Invalid OSPF area ID: %s", areaID),
+				fmt.Sprintf("Invalid %s area ID: %s", protocolLabel, areaID),
 				"Area ID must be in dotted decimal IPv4 format (e.g., 0.0.0.0), not IPv6",
 				"Use an IPv4 address or integer format",
 			)
@@ -954,7 +1209,7 @@ func validateOSPFArea(areaID string, area *OSPFArea, cfg *Config) error {
 		if areaID != "0" && !regexp.MustCompile(`^\d+$`).MatchString(areaID) {
 			return errors.New(
 				errors.ErrCodeConfigValidation,
-				fmt.Sprintf("Invalid OSPF area ID: %s", areaID),
+				fmt.Sprintf("Invalid %s area ID: %s", protocolLabel, areaID),
 				"Area ID must be in dotted decimal format (e.g., 0.0.0.0) or integer (e.g., 0)",
 				"Use a valid area ID format",
 			)
@@ -965,14 +1220,14 @@ func validateOSPFArea(areaID string, area *OSPFArea, cfg *Config) error {
 	if len(area.Interfaces) == 0 {
 		return errors.New(
 			errors.ErrCodeConfigValidation,
-			fmt.Sprintf("OSPF area %s has no interfaces", areaID),
-			"OSPF area must have at least one interface",
-			"Add an interface using 'set protocols ospf area <area-id> interface <name>'",
+			fmt.Sprintf("%s area %s has no interfaces", protocolLabel, areaID),
+			fmt.Sprintf("%s area must have at least one interface", protocolLabel),
+			fmt.Sprintf("Add an interface using 'set protocols %s area <area-id> interface <name>'", protocolCommand),
 		)
 	}
 
 	for ifName, ospfIf := range area.Interfaces {
-		if err := validateOSPFInterface(areaID, ifName, ospfIf, cfg); err != nil {
+		if err := validateOSPFInterface(protocolLabel, areaID, ifName, ospfIf, cfg); err != nil {
 			return err
 		}
 	}
@@ -981,17 +1236,17 @@ func validateOSPFArea(areaID string, area *OSPFArea, cfg *Config) error {
 }
 
 // validateOSPFInterface validates an OSPF interface
-func validateOSPFInterface(areaID, ifName string, ospfIf *OSPFInterface, cfg *Config) error {
+func validateOSPFInterface(protocolLabel, areaID, ifName string, ospfIf *OSPFInterface, cfg *Config) error {
 	if ospfIf == nil {
 		return errors.New(
 			errors.ErrCodeConfigValidation,
-			fmt.Sprintf("OSPF interface %s in area %s is nil", ifName, areaID),
-			"Internal error: OSPF interface object is nil",
+			fmt.Sprintf("%s interface %s in area %s is nil", protocolLabel, ifName, areaID),
+			fmt.Sprintf("Internal error: %s interface object is nil", protocolLabel),
 			"Report this issue to the maintainers",
 		)
 	}
 
-	if err := validateConfiguredInterfaceReference(cfg, fmt.Sprintf("OSPF area %s", areaID), ifName); err != nil {
+	if err := validateConfiguredInterfaceReference(cfg, fmt.Sprintf("%s area %s", protocolLabel, areaID), ifName); err != nil {
 		return err
 	}
 
@@ -999,8 +1254,8 @@ func validateOSPFInterface(areaID, ifName string, ospfIf *OSPFInterface, cfg *Co
 	if ospfIf.Metric < 0 || ospfIf.Metric > 65535 {
 		return errors.New(
 			errors.ErrCodeConfigValidation,
-			fmt.Sprintf("Invalid OSPF metric for interface %s in area %s: %d", ifName, areaID, ospfIf.Metric),
-			"OSPF metric must be between 0 and 65535",
+			fmt.Sprintf("Invalid %s metric for interface %s in area %s: %d", protocolLabel, ifName, areaID, ospfIf.Metric),
+			fmt.Sprintf("%s metric must be between 0 and 65535", protocolLabel),
 			"Use a valid metric value",
 		)
 	}
@@ -1009,12 +1264,46 @@ func validateOSPFInterface(areaID, ifName string, ospfIf *OSPFInterface, cfg *Co
 	if ospfIf.Priority < 0 || ospfIf.Priority > 255 {
 		return errors.New(
 			errors.ErrCodeConfigValidation,
-			fmt.Sprintf("Invalid OSPF priority for interface %s in area %s: %d", ifName, areaID, ospfIf.Priority),
-			"OSPF priority must be between 0 and 255",
+			fmt.Sprintf("Invalid %s priority for interface %s in area %s: %d", protocolLabel, ifName, areaID, ospfIf.Priority),
+			fmt.Sprintf("%s priority must be between 0 and 255", protocolLabel),
 			"Use a valid priority value",
 		)
 	}
 
+	if ospfIf.BFDProfile != "" {
+		if err := validateBFDProfileReference(cfg, fmt.Sprintf("%s interface %s in area %s", protocolLabel, ifName, areaID), ospfIf.BFDProfile); err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
+func validateBFDProfileReference(cfg *Config, context, profileName string) error {
+	if strings.TrimSpace(profileName) == "" {
+		return errors.New(
+			errors.ErrCodeConfigValidation,
+			fmt.Sprintf("%s references an empty BFD profile", context),
+			"BFD profile reference must not be empty",
+			"Use a configured protocols bfd profile name",
+		)
+	}
+	if cfg == nil || cfg.Protocols == nil || cfg.Protocols.BFD == nil || cfg.Protocols.BFD.Profiles == nil {
+		return errors.New(
+			errors.ErrCodeConfigValidation,
+			fmt.Sprintf("%s references BFD profile %s but no BFD profiles are configured", context, profileName),
+			"BFD profile must be defined before it is referenced",
+			fmt.Sprintf("Create protocols bfd profile %s", profileName),
+		)
+	}
+	if cfg.Protocols.BFD.Profiles[profileName] == nil {
+		return errors.New(
+			errors.ErrCodeConfigValidation,
+			fmt.Sprintf("%s references unknown BFD profile %s", context, profileName),
+			"BFD profile must be defined before it is referenced",
+			fmt.Sprintf("Create protocols bfd profile %s", profileName),
+		)
+	}
 	return nil
 }
 

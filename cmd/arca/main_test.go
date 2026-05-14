@@ -11,27 +11,46 @@ import (
 )
 
 type fakeInteractiveClient struct {
-	acquireLockErr  error
-	discardErr      error
-	releaseLockErr  error
-	history         []grpcclient.CommitInfo
-	routeText       string
-	bgpSummaryText  string
-	bgpNeighborText string
-	ospfText        string
-	vrrpText        string
-	lcpInfo         *grpcclient.LCPReconciliationInfo
-	haInfo          *grpcclient.HAStatusInfo
-	cosInfo         *grpcclient.ClassOfServiceInfo
+	acquireLockErr   error
+	discardErr       error
+	releaseLockErr   error
+	history          []grpcclient.CommitInfo
+	routeText        string
+	routeProtocol    string
+	routeFamily      string
+	routePrefix      string
+	routeStateProto  string
+	routes           []grpcclient.RouteInfo
+	routingInstances []grpcclient.RoutingInstanceInfo
+	bgpNeighbors     []grpcclient.BGPNeighborInfo
+	bgpSummaryText   string
+	bgpNeighborText  string
+	ospfNeighbors    []grpcclient.OSPFNeighborInfo
+	ospfText         string
+	ospfFamily       string
+	vrrpText         string
+	bfdText          string
+	bfdInfo          *grpcclient.BFDStatusInfo
+	bfdPeerAddress   string
+	bfdBrief         bool
+	bfdCounters      bool
+	lcpInfo          *grpcclient.LCPReconciliationInfo
+	haInfo           *grpcclient.HAStatusInfo
+	cosInfo          *grpcclient.ClassOfServiceInfo
 
-	acquireLockCalls int
-	discardCalls     int
-	releaseLockCalls int
-	commitCalls      int
-	listHistoryCalls int
-	rollbackCalls    int
-	validateCalls    int
-	editTexts        []string
+	acquireLockCalls  int
+	discardCalls      int
+	releaseLockCalls  int
+	commitCalls       int
+	routeCalls        int
+	bfdStatusCalls    int
+	routingCalls      int
+	bgpNeighborCalls  int
+	ospfNeighborCalls int
+	listHistoryCalls  int
+	rollbackCalls     int
+	validateCalls     int
+	editTexts         []string
 }
 
 func (f *fakeInteractiveClient) GetRunning(ctx context.Context) (string, uint64, error) {
@@ -91,14 +110,31 @@ func (f *fakeInteractiveClient) GetInterfaces(ctx context.Context, nameFilter st
 }
 
 func (f *fakeInteractiveClient) GetRoutes(ctx context.Context, prefixFilter, protoFilter string) ([]grpcclient.RouteInfo, error) {
-	return nil, nil
+	f.routeCalls++
+	f.routePrefix = prefixFilter
+	f.routeStateProto = protoFilter
+	return f.routes, nil
+}
+
+func (f *fakeInteractiveClient) GetRoutingInstances(ctx context.Context) ([]grpcclient.RoutingInstanceInfo, error) {
+	f.routingCalls++
+	return f.routingInstances, nil
 }
 
 func (f *fakeInteractiveClient) GetBGPNeighbors(ctx context.Context) ([]grpcclient.BGPNeighborInfo, error) {
-	return nil, nil
+	f.bgpNeighborCalls++
+	return f.bgpNeighbors, nil
 }
 
-func (f *fakeInteractiveClient) GetRouteText(ctx context.Context, protoFilter string) (string, error) {
+func (f *fakeInteractiveClient) GetOSPFNeighbors(ctx context.Context, addressFamily string) ([]grpcclient.OSPFNeighborInfo, error) {
+	f.ospfNeighborCalls++
+	f.ospfFamily = addressFamily
+	return f.ospfNeighbors, nil
+}
+
+func (f *fakeInteractiveClient) GetRouteText(ctx context.Context, protoFilter, addressFamily string) (string, error) {
+	f.routeProtocol = protoFilter
+	f.routeFamily = addressFamily
 	if f.routeText == "" {
 		return "route output\n", nil
 	}
@@ -119,7 +155,8 @@ func (f *fakeInteractiveClient) GetBGPNeighborText(ctx context.Context, peerAddr
 	return f.bgpNeighborText, nil
 }
 
-func (f *fakeInteractiveClient) GetOSPFNeighborsText(ctx context.Context) (string, error) {
+func (f *fakeInteractiveClient) GetOSPFNeighborsText(ctx context.Context, addressFamily string) (string, error) {
+	f.ospfFamily = addressFamily
 	if f.ospfText == "" {
 		return "ospf neighbor output\n", nil
 	}
@@ -131,6 +168,24 @@ func (f *fakeInteractiveClient) GetVRRPText(ctx context.Context) (string, error)
 		return "vrrp output\n", nil
 	}
 	return f.vrrpText, nil
+}
+
+func (f *fakeInteractiveClient) GetBFDText(ctx context.Context, peerAddress string, brief, counters bool) (string, error) {
+	f.bfdPeerAddress = peerAddress
+	f.bfdBrief = brief
+	f.bfdCounters = counters
+	if f.bfdText == "" {
+		return "bfd output\n", nil
+	}
+	return f.bfdText, nil
+}
+
+func (f *fakeInteractiveClient) GetBFDStatus(ctx context.Context) (*grpcclient.BFDStatusInfo, error) {
+	f.bfdStatusCalls++
+	if f.bfdInfo != nil {
+		return f.bfdInfo, nil
+	}
+	return &grpcclient.BFDStatusInfo{}, nil
 }
 
 func (f *fakeInteractiveClient) GetLCPReconciliation(ctx context.Context) (*grpcclient.LCPReconciliationInfo, error) {
@@ -356,7 +411,7 @@ func TestShowHistoryRejectsInvalidLimit(t *testing.T) {
 
 func TestCmdShowOSPFNeighborReturnsOutput(t *testing.T) {
 	ctx := context.Background()
-	client := &fakeInteractiveClient{}
+	client := &fakeInteractiveClient{ospfNeighbors: []grpcclient.OSPFNeighborInfo{{RouterID: "10.0.0.2", State: "Full"}}}
 	sh := &interactiveShell{
 		client:    client,
 		hostname:  "router",
@@ -367,6 +422,34 @@ func TestCmdShowOSPFNeighborReturnsOutput(t *testing.T) {
 	err := sh.cmdShow(ctx, []string{"ospf", "neighbor"})
 	if err != nil {
 		t.Fatalf("cmdShow(ospf neighbor) error = %v", err)
+	}
+	if client.ospfFamily != routeAddressFamilyIPv4 {
+		t.Fatalf("OSPF address family = %q, want %q", client.ospfFamily, routeAddressFamilyIPv4)
+	}
+	if client.ospfNeighborCalls != 1 {
+		t.Fatalf("OSPF neighbor calls = %d, want 1", client.ospfNeighborCalls)
+	}
+}
+
+func TestCmdShowOSPF3NeighborReturnsOutput(t *testing.T) {
+	ctx := context.Background()
+	client := &fakeInteractiveClient{ospfNeighbors: []grpcclient.OSPFNeighborInfo{{RouterID: "10.0.0.3", State: "Full"}}}
+	sh := &interactiveShell{
+		client:    client,
+		hostname:  "router",
+		mode:      modeOperational,
+		sessionID: "session-1",
+	}
+
+	err := sh.cmdShow(ctx, []string{"ospf3", "neighbor"})
+	if err != nil {
+		t.Fatalf("cmdShow(ospf3 neighbor) error = %v", err)
+	}
+	if client.ospfFamily != routeAddressFamilyIPv6 {
+		t.Fatalf("OSPF3 address family = %q, want %q", client.ospfFamily, routeAddressFamilyIPv6)
+	}
+	if client.ospfNeighborCalls != 1 {
+		t.Fatalf("OSPF3 neighbor calls = %d, want 1", client.ospfNeighborCalls)
 	}
 }
 
@@ -383,6 +466,55 @@ func TestCmdShowVRRPReturnsOutput(t *testing.T) {
 	err := sh.cmdShow(ctx, []string{"vrrp"})
 	if err != nil {
 		t.Fatalf("cmdShow(vrrp) error = %v", err)
+	}
+}
+
+func TestCmdShowBFDReturnsOutput(t *testing.T) {
+	ctx := context.Background()
+	client := &fakeInteractiveClient{}
+	sh := &interactiveShell{
+		client:    client,
+		hostname:  "router",
+		mode:      modeOperational,
+		sessionID: "session-1",
+	}
+
+	err := sh.cmdShow(ctx, []string{"bfd", "peer", "192.0.2.2", "counters"})
+	if err != nil {
+		t.Fatalf("cmdShow(bfd peer counters) error = %v", err)
+	}
+	if client.bfdPeerAddress != "192.0.2.2" || client.bfdBrief || !client.bfdCounters {
+		t.Fatalf("BFD options = peer %q brief %v counters %v, want peer counters", client.bfdPeerAddress, client.bfdBrief, client.bfdCounters)
+	}
+}
+
+func TestCmdShowBFDStatusUsesStructuredState(t *testing.T) {
+	ctx := context.Background()
+	client := &fakeInteractiveClient{bfdInfo: &grpcclient.BFDStatusInfo{
+		LastRun:         time.Now(),
+		ConfiguredPeers: 1,
+		ObservedPeers:   1,
+		UpPeers:         1,
+		Peers: []grpcclient.BFDPeerInfo{
+			{Peer: "192.0.2.2", Interface: "ge-0/0/0", Status: "up", Observed: true, Up: true},
+		},
+	}}
+	sh := &interactiveShell{
+		client:    client,
+		hostname:  "router",
+		mode:      modeOperational,
+		sessionID: "session-1",
+	}
+
+	err := sh.cmdShow(ctx, []string{"bfd", "status"})
+	if err != nil {
+		t.Fatalf("cmdShow(bfd status) error = %v", err)
+	}
+	if client.bfdStatusCalls != 1 {
+		t.Fatalf("BFD status calls = %d, want 1", client.bfdStatusCalls)
+	}
+	if client.bfdPeerAddress != "" || client.bfdBrief || client.bfdCounters {
+		t.Fatalf("BFD text options = peer %q brief %v counters %v, want unused", client.bfdPeerAddress, client.bfdBrief, client.bfdCounters)
 	}
 }
 
@@ -445,6 +577,82 @@ func TestCmdShowClassOfServiceReturnsOutput(t *testing.T) {
 	}
 }
 
+func TestCmdShowRoutingInstancesReturnsOutput(t *testing.T) {
+	ctx := context.Background()
+	client := &fakeInteractiveClient{routingInstances: []grpcclient.RoutingInstanceInfo{
+		{
+			Name:               "BLUE",
+			InstanceType:       "vrf",
+			RouteDistinguisher: "65000:100",
+			IPv4TableID:        100,
+			IPv6TableID:        100,
+			Interfaces:         []string{"ge-0/0/0"},
+		},
+	}}
+	sh := &interactiveShell{
+		client:    client,
+		hostname:  "router",
+		mode:      modeOperational,
+		sessionID: "session-1",
+	}
+
+	err := sh.cmdShow(ctx, []string{"routing-instances", "BLUE"})
+	if err != nil {
+		t.Fatalf("cmdShow(routing-instances BLUE) error = %v", err)
+	}
+	if client.routingCalls != 1 {
+		t.Fatalf("routing instance calls = %d, want 1", client.routingCalls)
+	}
+}
+
+func TestCmdShowBGPNeighborsUsesStructuredState(t *testing.T) {
+	ctx := context.Background()
+	client := &fakeInteractiveClient{bgpNeighbors: []grpcclient.BGPNeighborInfo{
+		{PeerAddress: "2001:db8::2", PeerAS: 65001, State: "Established", UptimeSecs: 3661, PrefixReceived: 10, PrefixSent: 20},
+	}}
+	sh := &interactiveShell{
+		client:    client,
+		hostname:  "router",
+		mode:      modeOperational,
+		sessionID: "session-1",
+	}
+
+	err := sh.cmdShow(ctx, []string{"bgp", "neighbors"})
+	if err != nil {
+		t.Fatalf("cmdShow(bgp neighbors) error = %v", err)
+	}
+	if client.bgpNeighborCalls != 1 {
+		t.Fatalf("BGP neighbor calls = %d, want 1", client.bgpNeighborCalls)
+	}
+}
+
+func TestCmdShowRoutesUsesStructuredState(t *testing.T) {
+	ctx := context.Background()
+	client := &fakeInteractiveClient{routes: []grpcclient.RouteInfo{
+		{Prefix: "2001:db8::/64", NextHop: "fe80::1", Protocol: "bgp", Metric: 20, Interface: "ge-0/0/0", Active: true},
+	}}
+	sh := &interactiveShell{
+		client:    client,
+		hostname:  "router",
+		mode:      modeOperational,
+		sessionID: "session-1",
+	}
+
+	err := sh.cmdShow(ctx, []string{"routes", "prefix", "2001:db8::/64", "protocol", "bgp"})
+	if err != nil {
+		t.Fatalf("cmdShow(routes) error = %v", err)
+	}
+	if client.routeCalls != 1 {
+		t.Fatalf("route calls = %d, want 1", client.routeCalls)
+	}
+	if client.routePrefix != "2001:db8::/64" || client.routeStateProto != "bgp" {
+		t.Fatalf("route filters = prefix %q proto %q, want prefix/proto", client.routePrefix, client.routeStateProto)
+	}
+	if client.routeFamily != "" || client.routeProtocol != "" {
+		t.Fatalf("raw route filters = family %q proto %q, want unused", client.routeFamily, client.routeProtocol)
+	}
+}
+
 func TestInterfaceQueueSummary(t *testing.T) {
 	got := interfaceQueueSummary(grpcclient.InterfaceInfo{
 		RxQueues: []grpcclient.InterfaceRxQueueInfo{
@@ -471,11 +679,81 @@ func TestInterfaceQoSProfile(t *testing.T) {
 	}
 }
 
+func TestInterfaceTableSummary(t *testing.T) {
+	if got := interfaceTableSummary(grpcclient.InterfaceInfo{IPv4TableID: 100, IPv6TableID: 100}); got != "v4/v6:100" {
+		t.Fatalf("interfaceTableSummary() = %q, want v4/v6:100", got)
+	}
+	if got := interfaceTableSummary(grpcclient.InterfaceInfo{IPv4TableID: 100, IPv6TableID: 200}); got != "v4:100 v6:200" {
+		t.Fatalf("interfaceTableSummary(split) = %q, want v4:100 v6:200", got)
+	}
+	if got := interfaceTableSummary(grpcclient.InterfaceInfo{}); got != "-" {
+		t.Fatalf("interfaceTableSummary(empty) = %q, want -", got)
+	}
+}
+
+func TestRoutingInstanceTableSummary(t *testing.T) {
+	if got := routingInstanceTableSummary(grpcclient.RoutingInstanceInfo{IPv4TableID: 100, IPv6TableID: 100}); got != "v4/v6:100" {
+		t.Fatalf("routingInstanceTableSummary() = %q, want v4/v6:100", got)
+	}
+	if got := routingInstanceTableSummary(grpcclient.RoutingInstanceInfo{IPv4TableID: 100, IPv6TableID: 200}); got != "v4:100 v6:200" {
+		t.Fatalf("routingInstanceTableSummary(split) = %q, want v4:100 v6:200", got)
+	}
+	if got := routingInstanceTableSummary(grpcclient.RoutingInstanceInfo{}); got != "-" {
+		t.Fatalf("routingInstanceTableSummary(empty) = %q, want -", got)
+	}
+}
+
+func TestRoutingInstancesNameFilter(t *testing.T) {
+	got, err := routingInstancesNameFilter([]string{"BLUE"})
+	if err != nil || got != "BLUE" {
+		t.Fatalf("routingInstancesNameFilter(BLUE) = %q, %v; want BLUE, nil", got, err)
+	}
+	if _, err := routingInstancesNameFilter([]string{"BLUE", "RED"}); err == nil {
+		t.Fatal("routingInstancesNameFilter(extra) error = nil, want error")
+	}
+	instances := []grpcclient.RoutingInstanceInfo{{Name: "BLUE"}, {Name: "RED"}}
+	filtered := filterRoutingInstances(instances, "RED")
+	if len(filtered) != 1 || filtered[0].Name != "RED" {
+		t.Fatalf("filterRoutingInstances() = %#v, want RED", filtered)
+	}
+}
+
 func TestOneShotShowOSPFNeighborReturnsSuccess(t *testing.T) {
-	client := &fakeInteractiveClient{}
+	client := &fakeInteractiveClient{ospfNeighbors: []grpcclient.OSPFNeighborInfo{{RouterID: "10.0.0.2", State: "Full"}}}
 	code := oneShotShow(context.Background(), client, []string{"ospf", "neighbor"}, &cliFlags{})
 	if code != ExitSuccess {
 		t.Fatalf("oneShotShow(ospf neighbor) = %d, want %d", code, ExitSuccess)
+	}
+	if client.ospfFamily != routeAddressFamilyIPv4 {
+		t.Fatalf("OSPF address family = %q, want %q", client.ospfFamily, routeAddressFamilyIPv4)
+	}
+	if client.ospfNeighborCalls != 1 {
+		t.Fatalf("OSPF neighbor calls = %d, want 1", client.ospfNeighborCalls)
+	}
+}
+
+func TestOneShotShowOSPF3NeighborReturnsSuccess(t *testing.T) {
+	client := &fakeInteractiveClient{ospfNeighbors: []grpcclient.OSPFNeighborInfo{{RouterID: "10.0.0.3", State: "Full"}}}
+	code := oneShotShow(context.Background(), client, []string{"ospf3", "neighbor"}, &cliFlags{})
+	if code != ExitSuccess {
+		t.Fatalf("oneShotShow(ospf3 neighbor) = %d, want %d", code, ExitSuccess)
+	}
+	if client.ospfFamily != routeAddressFamilyIPv6 {
+		t.Fatalf("OSPF3 address family = %q, want %q", client.ospfFamily, routeAddressFamilyIPv6)
+	}
+	if client.ospfNeighborCalls != 1 {
+		t.Fatalf("OSPF3 neighbor calls = %d, want 1", client.ospfNeighborCalls)
+	}
+}
+
+func TestOneShotShowRouteInet6ProtocolReturnsSuccess(t *testing.T) {
+	client := &fakeInteractiveClient{}
+	code := oneShotShow(context.Background(), client, []string{"route", "inet6", "protocol", "ospf3"}, &cliFlags{})
+	if code != ExitSuccess {
+		t.Fatalf("oneShotShow(route inet6 protocol ospf3) = %d, want %d", code, ExitSuccess)
+	}
+	if client.routeFamily != routeAddressFamilyIPv6 || client.routeProtocol != "ospf3" {
+		t.Fatalf("route options = family %q protocol %q, want inet6/ospf3", client.routeFamily, client.routeProtocol)
 	}
 }
 
@@ -484,6 +762,28 @@ func TestOneShotShowVRRPReturnsSuccess(t *testing.T) {
 	code := oneShotShow(context.Background(), client, []string{"vrrp"}, &cliFlags{})
 	if code != ExitSuccess {
 		t.Fatalf("oneShotShow(vrrp) = %d, want %d", code, ExitSuccess)
+	}
+}
+
+func TestOneShotShowBFDReturnsSuccess(t *testing.T) {
+	client := &fakeInteractiveClient{}
+	code := oneShotShow(context.Background(), client, []string{"bfd", "brief"}, &cliFlags{})
+	if code != ExitSuccess {
+		t.Fatalf("oneShotShow(bfd brief) = %d, want %d", code, ExitSuccess)
+	}
+	if !client.bfdBrief || client.bfdCounters || client.bfdPeerAddress != "" {
+		t.Fatalf("BFD options = peer %q brief %v counters %v, want brief", client.bfdPeerAddress, client.bfdBrief, client.bfdCounters)
+	}
+}
+
+func TestOneShotShowBFDStatusReturnsSuccess(t *testing.T) {
+	client := &fakeInteractiveClient{bfdInfo: &grpcclient.BFDStatusInfo{LastRun: time.Now(), ConfiguredPeers: 1}}
+	code := oneShotShow(context.Background(), client, []string{"bfd", "status"}, &cliFlags{})
+	if code != ExitSuccess {
+		t.Fatalf("oneShotShow(bfd status) = %d, want %d", code, ExitSuccess)
+	}
+	if client.bfdStatusCalls != 1 {
+		t.Fatalf("BFD status calls = %d, want 1", client.bfdStatusCalls)
 	}
 }
 
@@ -511,6 +811,187 @@ func TestOneShotShowClassOfServiceReturnsSuccess(t *testing.T) {
 	}
 }
 
+func TestOneShotShowRoutingInstancesReturnsSuccess(t *testing.T) {
+	client := &fakeInteractiveClient{routingInstances: []grpcclient.RoutingInstanceInfo{{Name: "BLUE", IPv4TableID: 100, IPv6TableID: 100}}}
+	code := oneShotShow(context.Background(), client, []string{"routing-instances"}, &cliFlags{})
+	if code != ExitSuccess {
+		t.Fatalf("oneShotShow(routing-instances) = %d, want %d", code, ExitSuccess)
+	}
+	if client.routingCalls != 1 {
+		t.Fatalf("routing instance calls = %d, want 1", client.routingCalls)
+	}
+}
+
+func TestOneShotShowBGPNeighborsReturnsSuccess(t *testing.T) {
+	client := &fakeInteractiveClient{bgpNeighbors: []grpcclient.BGPNeighborInfo{{PeerAddress: "192.0.2.2", PeerAS: 65001, State: "Established"}}}
+	code := oneShotShow(context.Background(), client, []string{"bgp", "neighbors"}, &cliFlags{})
+	if code != ExitSuccess {
+		t.Fatalf("oneShotShow(bgp neighbors) = %d, want %d", code, ExitSuccess)
+	}
+	if client.bgpNeighborCalls != 1 {
+		t.Fatalf("BGP neighbor calls = %d, want 1", client.bgpNeighborCalls)
+	}
+}
+
+func TestOneShotShowRoutesReturnsSuccess(t *testing.T) {
+	client := &fakeInteractiveClient{routes: []grpcclient.RouteInfo{{Prefix: "192.0.2.0/24", Protocol: "connected", Active: true}}}
+	code := oneShotShow(context.Background(), client, []string{"routes", "protocol", "connected"}, &cliFlags{})
+	if code != ExitSuccess {
+		t.Fatalf("oneShotShow(routes) = %d, want %d", code, ExitSuccess)
+	}
+	if client.routeCalls != 1 {
+		t.Fatalf("route calls = %d, want 1", client.routeCalls)
+	}
+	if client.routeStateProto != "connected" {
+		t.Fatalf("route protocol filter = %q, want connected", client.routeStateProto)
+	}
+}
+
+func TestRouteTextOptions(t *testing.T) {
+	tests := []struct {
+		name       string
+		args       []string
+		wantProto  string
+		wantFamily string
+		wantErr    bool
+	}{
+		{name: "default", wantFamily: routeAddressFamilyIPv4},
+		{name: "inet", args: []string{"inet"}, wantFamily: routeAddressFamilyIPv4},
+		{name: "inet6", args: []string{"inet6"}, wantFamily: routeAddressFamilyIPv6},
+		{name: "ipv4 protocol", args: []string{"protocol", "ospf"}, wantProto: "ospf", wantFamily: routeAddressFamilyIPv4},
+		{name: "ipv6 protocol", args: []string{"inet6", "protocol", "ospf3"}, wantProto: "ospf3", wantFamily: routeAddressFamilyIPv6},
+		{name: "unknown address family", args: []string{"ipv6"}, wantErr: true},
+		{name: "missing protocol", args: []string{"protocol"}, wantErr: true},
+		{name: "ipv4 ospf3", args: []string{"protocol", "ospf3"}, wantErr: true},
+		{name: "ipv6 ospf", args: []string{"inet6", "protocol", "ospf"}, wantErr: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			gotProto, gotFamily, err := routeTextOptions(tt.args)
+			if tt.wantErr {
+				if err == nil {
+					t.Fatalf("routeTextOptions(%v) error = nil, want error", tt.args)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("routeTextOptions(%v) error = %v", tt.args, err)
+			}
+			if gotProto != tt.wantProto || gotFamily != tt.wantFamily {
+				t.Fatalf("routeTextOptions(%v) = %q, %q; want %q, %q", tt.args, gotProto, gotFamily, tt.wantProto, tt.wantFamily)
+			}
+		})
+	}
+}
+
+func TestRouteStateOptions(t *testing.T) {
+	tests := []struct {
+		name       string
+		args       []string
+		wantPrefix string
+		wantProto  string
+		wantErr    bool
+	}{
+		{name: "default"},
+		{name: "prefix", args: []string{"prefix", "192.0.2.0/24"}, wantPrefix: "192.0.2.0/24"},
+		{name: "protocol", args: []string{"protocol", "ospf3"}, wantProto: "ospf3"},
+		{name: "prefix protocol", args: []string{"prefix", "2001:db8::/64", "protocol", "bgp"}, wantPrefix: "2001:db8::/64", wantProto: "bgp"},
+		{name: "protocol prefix", args: []string{"protocol", "connected", "prefix", "192.0.2.0/24"}, wantPrefix: "192.0.2.0/24", wantProto: "connected"},
+		{name: "unknown", args: []string{"inet6"}, wantErr: true},
+		{name: "missing prefix", args: []string{"prefix"}, wantErr: true},
+		{name: "duplicate prefix", args: []string{"prefix", "192.0.2.0/24", "prefix", "198.51.100.0/24"}, wantErr: true},
+		{name: "missing protocol", args: []string{"protocol"}, wantErr: true},
+		{name: "invalid protocol", args: []string{"protocol", "rip"}, wantErr: true},
+		{name: "duplicate protocol", args: []string{"protocol", "bgp", "protocol", "static"}, wantErr: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			gotPrefix, gotProto, err := routeStateOptions(tt.args)
+			if tt.wantErr {
+				if err == nil {
+					t.Fatalf("routeStateOptions(%v) error = nil, want error", tt.args)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("routeStateOptions(%v) error = %v", tt.args, err)
+			}
+			if gotPrefix != tt.wantPrefix || gotProto != tt.wantProto {
+				t.Fatalf("routeStateOptions(%v) = %q, %q; want %q, %q", tt.args, gotPrefix, gotProto, tt.wantPrefix, tt.wantProto)
+			}
+		})
+	}
+}
+
+func TestBFDTextOptions(t *testing.T) {
+	tests := []struct {
+		name         string
+		args         []string
+		wantPeer     string
+		wantBrief    bool
+		wantCounters bool
+		wantErr      bool
+	}{
+		{name: "default"},
+		{name: "brief", args: []string{"brief"}, wantBrief: true},
+		{name: "counters", args: []string{"counters"}, wantCounters: true},
+		{name: "peer", args: []string{"peer", "192.0.2.2"}, wantPeer: "192.0.2.2"},
+		{name: "peer counters", args: []string{"peer", "192.0.2.2", "counters"}, wantPeer: "192.0.2.2", wantCounters: true},
+		{name: "unknown", args: []string{"detail"}, wantErr: true},
+		{name: "peer missing address", args: []string{"peer"}, wantErr: true},
+		{name: "peer bad extra", args: []string{"peer", "192.0.2.2", "brief"}, wantErr: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			gotPeer, gotBrief, gotCounters, err := bfdTextOptions(tt.args)
+			if tt.wantErr {
+				if err == nil {
+					t.Fatalf("bfdTextOptions(%v) error = nil, want error", tt.args)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("bfdTextOptions(%v) error = %v", tt.args, err)
+			}
+			if gotPeer != tt.wantPeer || gotBrief != tt.wantBrief || gotCounters != tt.wantCounters {
+				t.Fatalf("bfdTextOptions(%v) = %q, %v, %v; want %q, %v, %v",
+					tt.args, gotPeer, gotBrief, gotCounters, tt.wantPeer, tt.wantBrief, tt.wantCounters)
+			}
+		})
+	}
+}
+
+func TestBFDStatusRequested(t *testing.T) {
+	tests := []struct {
+		name    string
+		args    []string
+		want    bool
+		wantErr bool
+	}{
+		{name: "default"},
+		{name: "status", args: []string{"status"}, want: true},
+		{name: "status extra", args: []string{"status", "detail"}, wantErr: true},
+		{name: "brief", args: []string{"brief"}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := bfdStatusRequested(tt.args)
+			if tt.wantErr {
+				if err == nil {
+					t.Fatalf("bfdStatusRequested(%v) error = nil, want error", tt.args)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("bfdStatusRequested(%v) error = %v", tt.args, err)
+			}
+			if got != tt.want {
+				t.Fatalf("bfdStatusRequested(%v) = %v, want %v", tt.args, got, tt.want)
+			}
+		})
+	}
+}
+
 func TestLCPReconciliationState(t *testing.T) {
 	now := time.Now()
 	tests := []struct {
@@ -533,6 +1014,50 @@ func TestLCPReconciliationState(t *testing.T) {
 	}
 }
 
+func TestBFDOperationalState(t *testing.T) {
+	now := time.Now()
+	tests := []struct {
+		name string
+		info *grpcclient.BFDStatusInfo
+		want string
+	}{
+		{name: "nil", info: nil, want: "unknown"},
+		{name: "empty", info: &grpcclient.BFDStatusInfo{}, want: "unknown"},
+		{name: "error", info: &grpcclient.BFDStatusInfo{LastRun: now, LastError: "failed"}, want: "check failed"},
+		{name: "issue", info: &grpcclient.BFDStatusInfo{LastRun: now, Issues: []string{"peer missing"}}, want: "issues"},
+		{name: "down", info: &grpcclient.BFDStatusInfo{LastRun: now, DownPeers: 1}, want: "issues"},
+		{name: "converged", info: &grpcclient.BFDStatusInfo{LastRun: now, ConfiguredPeers: 1, ObservedPeers: 1, UpPeers: 1}, want: "converged"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := bfdOperationalState(tt.info); got != tt.want {
+				t.Fatalf("bfdOperationalState() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestFormatBGPUptime(t *testing.T) {
+	tests := []struct {
+		name    string
+		seconds uint64
+		want    string
+	}{
+		{name: "zero", want: "-"},
+		{name: "seconds", seconds: 7, want: "7s"},
+		{name: "minutes", seconds: 67, want: "1m07s"},
+		{name: "hours", seconds: 3661, want: "1h01m01s"},
+		{name: "days", seconds: 90061, want: "1d01h01m01s"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := formatBGPUptime(tt.seconds); got != tt.want {
+				t.Fatalf("formatBGPUptime(%d) = %q, want %q", tt.seconds, got, tt.want)
+			}
+		})
+	}
+}
+
 func TestHAState(t *testing.T) {
 	tests := []struct {
 		name string
@@ -548,6 +1073,64 @@ func TestHAState(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			if got := haState(tt.info); got != tt.want {
 				t.Fatalf("haState() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestHABFDState(t *testing.T) {
+	now := time.Unix(1700000400, 0)
+	tests := []struct {
+		name string
+		info *grpcclient.HAStatusInfo
+		want string
+	}{
+		{name: "nil", info: nil, want: "not configured"},
+		{name: "empty", info: &grpcclient.HAStatusInfo{}, want: "not configured"},
+		{
+			name: "converged",
+			info: &grpcclient.HAStatusInfo{
+				FRRBFDLastCheck:       now,
+				FRRBFDConfiguredPeers: 2,
+				FRRBFDObservedPeers:   2,
+				FRRBFDUpPeers:         2,
+			},
+			want: "2/2 up",
+		},
+		{
+			name: "issues",
+			info: &grpcclient.HAStatusInfo{
+				FRRBFDLastCheck:       now,
+				FRRBFDConfiguredPeers: 2,
+				FRRBFDObservedPeers:   2,
+				FRRBFDUpPeers:         1,
+				FRRBFDDownPeers:       1,
+			},
+			want: "1/2 up (issues)",
+		},
+		{
+			name: "unknown",
+			info: &grpcclient.HAStatusInfo{
+				FRRBFDConfiguredPeers: 1,
+				FRRBFDObservedPeers:   1,
+				FRRBFDUpPeers:         1,
+			},
+			want: "1/1 up (unknown)",
+		},
+		{
+			name: "observed only",
+			info: &grpcclient.HAStatusInfo{
+				FRRBFDLastCheck:     now,
+				FRRBFDObservedPeers: 1,
+				FRRBFDUpPeers:       1,
+			},
+			want: "1/1 up",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := haBFDState(tt.info); got != tt.want {
+				t.Fatalf("haBFDState() = %q, want %q", got, tt.want)
 			}
 		})
 	}

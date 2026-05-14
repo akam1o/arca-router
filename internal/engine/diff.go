@@ -20,18 +20,24 @@ type ConfigDiff struct {
 	InterfacesChanged map[string]*InterfaceChange
 
 	// Protocol changes
-	BGPChanged  bool
-	OldBGP      *model.BGPConfig
-	NewBGP      *model.BGPConfig
-	OSPFChanged bool
-	OldOSPF     *model.OSPFConfig
-	NewOSPF     *model.OSPFConfig
-	MPLSChanged bool
-	OldMPLS     *model.MPLSConfig
-	NewMPLS     *model.MPLSConfig
-	VRRPChanged bool
-	OldVRRP     *model.VRRPConfig
-	NewVRRP     *model.VRRPConfig
+	BFDChanged   bool
+	OldBFD       *model.BFDConfig
+	NewBFD       *model.BFDConfig
+	BGPChanged   bool
+	OldBGP       *model.BGPConfig
+	NewBGP       *model.BGPConfig
+	OSPFChanged  bool
+	OldOSPF      *model.OSPFConfig
+	NewOSPF      *model.OSPFConfig
+	OSPF3Changed bool
+	OldOSPF3     *model.OSPFConfig
+	NewOSPF3     *model.OSPFConfig
+	MPLSChanged  bool
+	OldMPLS      *model.MPLSConfig
+	NewMPLS      *model.MPLSConfig
+	VRRPChanged  bool
+	OldVRRP      *model.VRRPConfig
+	NewVRRP      *model.VRRPConfig
 
 	// Routing changes
 	StaticRoutesChanged     bool
@@ -90,8 +96,10 @@ func (d *ConfigDiff) HasChanges() bool {
 	return len(d.InterfacesAdded) > 0 ||
 		len(d.InterfacesRemoved) > 0 ||
 		len(d.InterfacesChanged) > 0 ||
+		d.BFDChanged ||
 		d.BGPChanged ||
 		d.OSPFChanged ||
+		d.OSPF3Changed ||
 		d.MPLSChanged ||
 		d.VRRPChanged ||
 		d.StaticRoutesChanged ||
@@ -221,6 +229,14 @@ func containsAddress(addrs []UnitAddress, target UnitAddress) bool {
 }
 
 func computeProtocolDiff(old, new *model.RouterConfig, diff *ConfigDiff) {
+	oldBFD := getBFD(old)
+	newBFD := getBFD(new)
+	if !reflect.DeepEqual(oldBFD, newBFD) {
+		diff.BFDChanged = true
+		diff.OldBFD = oldBFD
+		diff.NewBFD = newBFD
+	}
+
 	oldBGP := getBGP(old)
 	newBGP := getBGP(new)
 	if !bgpEqual(oldBGP, newBGP) {
@@ -235,6 +251,14 @@ func computeProtocolDiff(old, new *model.RouterConfig, diff *ConfigDiff) {
 		diff.OSPFChanged = true
 		diff.OldOSPF = oldOSPF
 		diff.NewOSPF = newOSPF
+	}
+
+	oldOSPF3 := getOSPF3(old)
+	newOSPF3 := getOSPF3(new)
+	if !ospfEqual(oldOSPF3, newOSPF3) {
+		diff.OSPF3Changed = true
+		diff.OldOSPF3 = oldOSPF3
+		diff.NewOSPF3 = newOSPF3
 	}
 
 	oldMPLS := getMPLS(old)
@@ -314,6 +338,13 @@ func computeSecurityDiff(old, new *model.RouterConfig, diff *ConfigDiff) {
 
 // Equality helpers — simple deep comparison for each subsection.
 
+func getBFD(c *model.RouterConfig) *model.BFDConfig {
+	if c.Protocols == nil {
+		return nil
+	}
+	return c.Protocols.BFD
+}
+
 func getBGP(c *model.RouterConfig) *model.BGPConfig {
 	if c.Protocols == nil {
 		return nil
@@ -326,6 +357,13 @@ func getOSPF(c *model.RouterConfig) *model.OSPFConfig {
 		return nil
 	}
 	return c.Protocols.OSPF
+}
+
+func getOSPF3(c *model.RouterConfig) *model.OSPFConfig {
+	if c.Protocols == nil {
+		return nil
+	}
+	return c.Protocols.OSPF3
 }
 
 func getMPLS(c *model.RouterConfig) *model.MPLSConfig {
@@ -375,7 +413,8 @@ func bgpEqual(a, b *model.BGPConfig) bool {
 			if !ok {
 				return false
 			}
-			if an.PeerAS != bn.PeerAS || an.Description != bn.Description || an.LocalAddress != bn.LocalAddress {
+			if an.PeerAS != bn.PeerAS || an.Description != bn.Description || an.LocalAddress != bn.LocalAddress ||
+				an.BFD != bn.BFD || an.BFDProfile != bn.BFDProfile {
 				return false
 			}
 		}
@@ -409,7 +448,8 @@ func ospfEqual(a, b *model.OSPFConfig) bool {
 			if !ok {
 				return false
 			}
-			if ai.Passive != bi.Passive || ai.Metric != bi.Metric {
+			if ai.Passive != bi.Passive || ai.Metric != bi.Metric ||
+				ai.BFD != bi.BFD || ai.BFDProfile != bi.BFDProfile {
 				return false
 			}
 			if (ai.Priority == nil) != (bi.Priority == nil) {
@@ -438,7 +478,9 @@ func staticRoutesEqual(a, b []*model.StaticRoute) bool {
 		return false
 	}
 	for i := range a {
-		if a[i].Prefix != b[i].Prefix || a[i].NextHop != b[i].NextHop || a[i].Distance != b[i].Distance {
+		if a[i].Prefix != b[i].Prefix || a[i].NextHop != b[i].NextHop || a[i].Distance != b[i].Distance ||
+			a[i].BFD != b[i].BFD || a[i].BFDProfile != b[i].BFDProfile || a[i].BFDSource != b[i].BFDSource ||
+			a[i].BFDMultihop != b[i].BFDMultihop {
 			return false
 		}
 	}

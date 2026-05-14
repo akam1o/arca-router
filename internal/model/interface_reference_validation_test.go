@@ -50,6 +50,21 @@ func TestInterfaceReferenceValidationRejectsUnknownInterfaces(t *testing.T) {
 			want: `ospf area 0.0.0.0: interface "ge-0/0/0" is not configured`,
 		},
 		{
+			name: "ospf3",
+			configure: func(cfg *RouterConfig) {
+				cfg.Protocols = &ProtocolsConfig{
+					OSPF3: &OSPFConfig{Areas: map[string]*OSPFArea{
+						"0.0.0.0": {
+							Interfaces: map[string]*OSPFInterface{
+								"ge-0/0/0": {},
+							},
+						},
+					}},
+				}
+			},
+			want: `ospf3 area 0.0.0.0: interface "ge-0/0/0" is not configured`,
+		},
+		{
 			name: "routing-instance",
 			configure: func(cfg *RouterConfig) {
 				cfg.RoutingInstances = map[string]*RoutingInstance{

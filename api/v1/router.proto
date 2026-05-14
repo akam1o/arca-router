@@ -62,6 +62,9 @@ service StateService {
   // GetBGPNeighbors returns BGP neighbor state.
   rpc GetBGPNeighbors(GetBGPNeighborsRequest) returns (GetBGPNeighborsResponse);
 
+  // GetOSPFNeighbors returns OSPFv2 or OSPFv3 neighbor state.
+  rpc GetOSPFNeighbors(GetOSPFNeighborsRequest) returns (GetOSPFNeighborsResponse);
+
   // GetRouteText returns FRR route output for CLI display.
   rpc GetRouteText(GetRouteTextRequest) returns (GetRouteTextResponse);
 
@@ -77,11 +80,20 @@ service StateService {
   // GetVRRPText returns FRR VRRP output for CLI display.
   rpc GetVRRPText(GetVRRPTextRequest) returns (GetVRRPTextResponse);
 
+  // GetBFDText returns FRR BFD output for CLI display.
+  rpc GetBFDText(GetBFDTextRequest) returns (GetBFDTextResponse);
+
+  // GetBFDStatus returns cached FRR BFD operational state.
+  rpc GetBFDStatus(GetBFDStatusRequest) returns (GetBFDStatusResponse);
+
   // GetLCPReconciliation returns VPP LCP reconciliation state.
   rpc GetLCPReconciliation(GetLCPReconciliationRequest) returns (GetLCPReconciliationResponse);
 
   // GetHAStatus returns control-plane HA convergence state.
   rpc GetHAStatus(GetHAStatusRequest) returns (GetHAStatusResponse);
+
+  // GetRoutingInstances returns running routing-instance intent and table mapping.
+  rpc GetRoutingInstances(GetRoutingInstancesRequest) returns (GetRoutingInstancesResponse);
 
   // GetClassOfService returns running class-of-service intent.
   rpc GetClassOfService(GetClassOfServiceRequest) returns (GetClassOfServiceResponse);
@@ -231,6 +243,8 @@ message InterfaceState {
   repeated InterfaceRxQueue rx_queues = 13;
   repeated InterfaceTxQueue tx_queues = 14;
   string qos_profile = 15;
+  uint32 ipv4_table_id = 16;
+  uint32 ipv6_table_id = 17;
 }
 
 message InterfaceRxQueue {
@@ -278,8 +292,28 @@ message BGPNeighborState {
   uint32 prefix_sent = 6;
 }
 
+message GetOSPFNeighborsRequest {
+  string address_family = 1;
+}
+
+message GetOSPFNeighborsResponse {
+  repeated OSPFNeighborState neighbors = 1;
+}
+
+message OSPFNeighborState {
+  string router_id = 1;
+  string address = 2;
+  string interface = 3;
+  string state = 4;
+  string role = 5;
+  uint32 priority = 6;
+  uint64 dead_time_secs = 7;
+  uint64 uptime_secs = 8;
+}
+
 message GetRouteTextRequest {
   string protocol_filter = 1;
+  string address_family = 2;
 }
 
 message GetRouteTextResponse {
@@ -300,7 +334,9 @@ message GetBGPNeighborTextResponse {
   string output = 1;
 }
 
-message GetOSPFNeighborsTextRequest {}
+message GetOSPFNeighborsTextRequest {
+  string address_family = 1;
+}
 
 message GetOSPFNeighborsTextResponse {
   string output = 1;
@@ -310,6 +346,45 @@ message GetVRRPTextRequest {}
 
 message GetVRRPTextResponse {
   string output = 1;
+}
+
+message GetBFDTextRequest {
+  string peer_address = 1;
+  bool brief = 2;
+  bool counters = 3;
+}
+
+message GetBFDTextResponse {
+  string output = 1;
+}
+
+message GetBFDStatusRequest {}
+
+message GetBFDStatusResponse {
+  string last_run = 1;
+  uint32 configured_peers = 2;
+  uint32 observed_peers = 3;
+  uint32 up_peers = 4;
+  uint32 down_peers = 5;
+  uint64 session_down_events = 6;
+  uint64 rx_fail_packets = 7;
+  repeated BFDPeerState peers = 8;
+  repeated string issues = 9;
+  string last_error = 10;
+}
+
+message BFDPeerState {
+  string peer = 1;
+  string local_address = 2;
+  string interface = 3;
+  string vrf = 4;
+  string status = 5;
+  string diagnostic = 6;
+  string remote_diagnostic = 7;
+  bool observed = 8;
+  bool up = 9;
+  uint64 session_down_events = 10;
+  uint64 rx_fail_packets = 11;
 }
 
 message GetLCPReconciliationRequest {}
@@ -342,6 +417,32 @@ message GetHAStatusResponse {
   uint32 vpp_lcp_pairs = 16;
   repeated string vpp_lcp_inconsistencies = 17;
   string vpp_lcp_last_error = 18;
+  string frr_bfd_last_check = 19;
+  uint32 frr_bfd_configured_peers = 20;
+  uint32 frr_bfd_observed_peers = 21;
+  uint32 frr_bfd_up_peers = 22;
+  uint32 frr_bfd_down_peers = 23;
+  repeated string frr_bfd_issues = 24;
+  string frr_bfd_last_error = 25;
+}
+
+message GetRoutingInstancesRequest {}
+
+message GetRoutingInstancesResponse {
+  repeated RoutingInstanceState instances = 1;
+}
+
+message RoutingInstanceState {
+  string name = 1;
+  string instance_type = 2;
+  string route_distinguisher = 3;
+  uint32 ipv4_table_id = 4;
+  uint32 ipv6_table_id = 5;
+  repeated string import_targets = 6;
+  repeated string export_targets = 7;
+  repeated string import_policies = 8;
+  repeated string export_policies = 9;
+  repeated string interfaces = 10;
 }
 
 message GetClassOfServiceRequest {}

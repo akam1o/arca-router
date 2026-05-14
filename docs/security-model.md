@@ -30,7 +30,7 @@
 | **実行ユーザー** | `arca-router` (専用ユーザー) | root実行を避け、権限を制限 |
 | **プライマリグループ** | `arca-router` | 設定ファイル所有権管理 |
 | **セカンダリグループ** | `vpp`, `frrvty` | VPP API と FRR vtysh/mgmtd へのアクセス |
-| **復旧用追加グループ** | `frr` | `--frr-apply-mode=file` 利用時のみ `/etc/frr/frr.conf` へ書き込み |
+| **復旧・fallback 用追加グループ** | `frr` | `--frr-apply-mode=file` または OSPFv3 / BFD profile binding の自動 file fallback 利用時に `/etc/frr/frr.conf` へ書き込み |
 | **ホームディレクトリ** | `/var/lib/arca-router` | 状態ファイル・キャッシュ保存先 |
 
 #### 専用ユーザー作成（RPM postinstallスクリプトで実施）
@@ -49,7 +49,7 @@ fi
 usermod -aG vpp arca-router
 usermod -aG frrvty arca-router
 
-# Optional: only required for --frr-apply-mode=file
+# Optional: only required for --frr-apply-mode=file or automatic file fallback
 usermod -aG frr arca-router
 ```
 
@@ -63,7 +63,7 @@ usermod -aG frr arca-router
 |------|-----------|------|
 | VPP API socket接続 (`/run/vpp/api.sock`) | `vpp`グループ所属 | VPP APIアクセス |
 | FRR設定適用 (`vtysh` management commit) | `frrvty`グループ所属 | FRR設定管理 |
-| FRR設定ファイル書き込み (`/etc/frr/frr.conf`) | `frr`グループ所属 | 復旧用 `--frr-apply-mode=file` のみ |
+| FRR設定ファイル書き込み (`/etc/frr/frr.conf`) | `frr`グループ所属 | 復旧用 `--frr-apply-mode=file` または OSPFv3 / BFD profile binding の自動 file fallback のみ |
 | LCP (Linux Control Plane) / VRRP macvlan 操作 | `CAP_NET_ADMIN` | netlink/TAP/macvlan操作 |
 | VPP FIB操作（経路同期） | `CAP_NET_ADMIN` | Kernel routing table操作 |
 | NETCONF/SNMP privileged port bind | `CAP_NET_BIND_SERVICE` | 830/TCP と任意の 161/UDP |
@@ -302,10 +302,10 @@ func (c *govppClient) Connect(ctx context.Context) error {
 | 操作 | 必要な権限 | 実装方法 |
 |------|-----------|---------|
 | FRR設定適用 | `frrvty`グループ | 標準は `vtysh` の management commit、復旧用 `file` backend では `frr-reload.py` または `vtysh -f` |
-| FRR設定ファイル書き込み | `frr`グループ | 復旧用 `--frr-apply-mode=file` のみ `/etc/frr/frr.conf`へ直接書き込み（0660） |
+| FRR設定ファイル書き込み | `frr`グループ | 復旧用 `--frr-apply-mode=file` または OSPFv3 / BFD profile binding の自動 file fallback のみ `/etc/frr/frr.conf`へ直接書き込み（0660） |
 | FRR状態確認（arca用） | `frrvty`グループ | `vtysh -c 'show running-config'` |
 
-**注**: v0.5以降の標準経路では、arca-routerd は FRR management candidate に変更を投入し、commit check/apply で適用する。標準の FRR daemon set は `bgpd`、`ospfd`、`zebra`、`staticd`、`mgmtd`、`vrrpd`。`frrvty`グループはarca（vtysh経由）とFRR設定適用時に必要。復旧・互換用途の `--frr-apply-mode=file` では従来通り `frr.conf` を直接書き込み、`frr-reload.py` で適用する。
+**注**: v0.5以降の標準経路では、arca-routerd は FRR management candidate に変更を投入し、commit check/apply で適用する。標準の FRR daemon set は `bgpd`、`ospfd`、`ospf6d`、`zebra`、`staticd`、`mgmtd`、`vrrpd`、`bfdd`。`frrvty`グループはarca（vtysh経由）とFRR設定適用時に必要。復旧・互換用途の `--frr-apply-mode=file` と、OSPFv3 / BFD profile binding の自動 file fallback では従来通り `frr.conf` を直接書き込み、`frr-reload.py` で適用する。
 
 **権限確認フロー**:
 
@@ -384,22 +384,23 @@ sudo systemctl restart vpp
 
 **原因**:
 - ユーザーが`frrvty`グループに所属していない
-- FRRで`mgmtd`または`vrrpd`が有効化されていない
-- `--frr-apply-mode=file`利用時のみ、ユーザーが`frr`グループに所属していない
-- `--frr-apply-mode=file`利用時のみ、`/etc/frr/frr.conf`の権限が正しくない
+- FRRで`mgmtd`、`vrrpd`、または`bfdd`が有効化されていない
+- `--frr-apply-mode=file`または自動 file fallback 利用時のみ、ユーザーが`frr`グループに所属していない
+- `--frr-apply-mode=file`または自動 file fallback 利用時のみ、`/etc/frr/frr.conf`の権限が正しくない
 
 **解決方法**:
 
 ```bash
 # Add user to FRR access groups
 sudo usermod -aG frrvty arca-router
-sudo usermod -aG frr arca-router  # only required for --frr-apply-mode=file
+sudo usermod -aG frr arca-router  # only required for --frr-apply-mode=file or automatic file fallback
 
 # Enable standard arca-router daemons in /etc/frr/daemons
 grep '^mgmtd=yes' /etc/frr/daemons
 grep '^vrrpd=yes' /etc/frr/daemons
+grep '^bfdd=yes' /etc/frr/daemons
 
-# Fix FRR config permissions (only required for --frr-apply-mode=file)
+# Fix FRR config permissions (only required for --frr-apply-mode=file or automatic file fallback)
 sudo chown root:frr /etc/frr/frr.conf
 sudo chmod 0660 /etc/frr/frr.conf
 

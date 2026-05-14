@@ -35,6 +35,15 @@ func GenerateFRRConfig(cfg *config.Config) (*Config, error) {
 		return nil, NewGenerateError("failed to build interface mapping", err)
 	}
 
+	// Convert BFD configuration
+	if cfg.Protocols != nil && cfg.Protocols.BFD != nil {
+		bfdConfig, err := convertBFDConfig(cfg.Protocols.BFD, frrConfig.InterfaceMapping)
+		if err != nil {
+			return nil, NewGenerateError("failed to convert BFD configuration", err)
+		}
+		frrConfig.BFD = bfdConfig
+	}
+
 	// Convert BGP configuration
 	if cfg.Protocols != nil && cfg.Protocols.BGP != nil {
 		bgpConfig, err := convertBGPConfig(cfg, frrConfig.InterfaceMapping)
@@ -46,11 +55,20 @@ func GenerateFRRConfig(cfg *config.Config) (*Config, error) {
 
 	// Convert OSPF configuration
 	if cfg.Protocols != nil && cfg.Protocols.OSPF != nil {
-		ospfConfig, err := convertOSPFConfig(cfg, frrConfig.InterfaceMapping)
+		ospfConfig, err := convertOSPFConfig(cfg, cfg.Protocols.OSPF, frrConfig.InterfaceMapping, false)
 		if err != nil {
 			return nil, NewGenerateError("failed to convert OSPF configuration", err)
 		}
 		frrConfig.OSPF = ospfConfig
+	}
+
+	// Convert OSPFv3 configuration
+	if cfg.Protocols != nil && cfg.Protocols.OSPF3 != nil {
+		ospf3Config, err := convertOSPFConfig(cfg, cfg.Protocols.OSPF3, frrConfig.InterfaceMapping, true)
+		if err != nil {
+			return nil, NewGenerateError("failed to convert OSPFv3 configuration", err)
+		}
+		frrConfig.OSPF3 = ospf3Config
 	}
 
 	// Convert VRRP configuration
@@ -105,6 +123,9 @@ func GenerateFRRConfig(cfg *config.Config) (*Config, error) {
 func GenerateFRRConfigFile(frrConfig *Config) (string, error) {
 	if frrConfig == nil {
 		return "", fmt.Errorf("FRR config is nil")
+	}
+	if err := validateFRRConfigReferences(frrConfig); err != nil {
+		return "", err
 	}
 
 	var b strings.Builder
@@ -165,6 +186,15 @@ func GenerateFRRConfigFile(frrConfig *Config) (string, error) {
 		b.WriteString(routeMapConfig)
 	}
 
+	// BFD configuration
+	if frrConfig.BFD != nil {
+		bfdConfig, err := GenerateBFDConfig(frrConfig.BFD)
+		if err != nil {
+			return "", err
+		}
+		b.WriteString(bfdConfig)
+	}
+
 	// BGP configuration
 	if frrConfig.BGP != nil {
 		bgpConfig, err := GenerateBGPConfig(frrConfig.BGP)
@@ -181,6 +211,15 @@ func GenerateFRRConfigFile(frrConfig *Config) (string, error) {
 			return "", err
 		}
 		b.WriteString(ospfConfig)
+	}
+
+	// OSPFv3 configuration
+	if frrConfig.OSPF3 != nil {
+		ospf3Config, err := GenerateOSPFConfig(frrConfig.OSPF3)
+		if err != nil {
+			return "", err
+		}
+		b.WriteString(ospf3Config)
 	}
 
 	// VRRP configuration
@@ -207,6 +246,39 @@ func GenerateFRRConfigFile(frrConfig *Config) (string, error) {
 	b.WriteString("end\n")
 
 	return b.String(), nil
+}
+
+func validateFRRConfigReferences(frrConfig *Config) error {
+	if err := validatePolicyObjects(frrConfig.PrefixLists, frrConfig.RouteMaps); err != nil {
+		return err
+	}
+	if err := validateASPathAccessLists(frrConfig.ASPathAccessLists); err != nil {
+		return err
+	}
+	if err := validateFRRRouteMapReferences(frrConfig); err != nil {
+		return err
+	}
+	return validateRouteMapASPathReferences(frrConfig.RouteMaps, frrConfig.ASPathAccessLists)
+}
+
+func validateRouteMapASPathReferences(routeMaps []RouteMap, asPathLists []ASPathAccessList) error {
+	asPathListNames := make(map[string]struct{}, len(asPathLists))
+	for _, list := range asPathLists {
+		if strings.TrimSpace(list.Name) != "" {
+			asPathListNames[list.Name] = struct{}{}
+		}
+	}
+	for _, routeMap := range routeMaps {
+		for _, entry := range routeMap.Entries {
+			if strings.TrimSpace(entry.MatchASPath) == "" {
+				continue
+			}
+			if _, ok := asPathListNames[entry.MatchASPath]; !ok {
+				return NewInvalidConfigError(fmt.Sprintf("route-map %s entry %d references unknown AS-path access-list %s", routeMap.Name, entry.Seq, entry.MatchASPath))
+			}
+		}
+	}
+	return nil
 }
 
 // buildInterfaceMapping creates a mapping from Junos interface names to Linux interface names.
@@ -249,8 +321,10 @@ func convertBGPConfig(cfg *config.Config, ifaceMapping map[string]string) (*BGPC
 	for _, group := range arcaBGP.Groups {
 		for _, neighbor := range group.Neighbors {
 			frrNeighbor := BGPNeighbor{
-				IP:       neighbor.IP,
-				RemoteAS: neighbor.PeerAS,
+				IP:         neighbor.IP,
+				RemoteAS:   neighbor.PeerAS,
+				BFD:        neighbor.BFD,
+				BFDProfile: neighbor.BFDProfile,
 			}
 
 			// Add description (include group name)
@@ -316,28 +390,90 @@ func convertBGPConfig(cfg *config.Config, ifaceMapping map[string]string) (*BGPC
 	return frrBGP, nil
 }
 
+func convertBFDConfig(arcaBFD *config.BFDConfig, ifaceMapping map[string]string) (*BFDConfig, error) {
+	if arcaBFD == nil {
+		return nil, nil
+	}
+	frrBFD := &BFDConfig{
+		Profiles: make([]BFDProfile, 0, len(arcaBFD.Profiles)),
+		Peers:    make([]BFDPeer, 0, len(arcaBFD.Peers)),
+	}
+	for name, profile := range arcaBFD.Profiles {
+		if profile == nil {
+			continue
+		}
+		frrBFD.Profiles = append(frrBFD.Profiles, BFDProfile{
+			Name:             name,
+			DetectMultiplier: profile.DetectMultiplier,
+			ReceiveInterval:  profile.ReceiveInterval,
+			TransmitInterval: profile.TransmitInterval,
+			EchoMode:         profile.EchoMode,
+			PassiveMode:      profile.PassiveMode,
+		})
+	}
+	for address, peer := range arcaBFD.Peers {
+		if peer == nil {
+			continue
+		}
+		peerAddress := peer.Address
+		if peerAddress == "" {
+			peerAddress = address
+		}
+		frrPeer := BFDPeer{
+			Address:          peerAddress,
+			LocalAddress:     peer.LocalAddress,
+			VRF:              peer.VRF,
+			Multihop:         peer.Multihop,
+			Profile:          peer.Profile,
+			DetectMultiplier: peer.DetectMultiplier,
+			ReceiveInterval:  peer.ReceiveInterval,
+			TransmitInterval: peer.TransmitInterval,
+			EchoMode:         peer.EchoMode,
+			PassiveMode:      peer.PassiveMode,
+			Shutdown:         peer.Shutdown,
+		}
+		if peer.Interface != "" {
+			linuxName, ok := ifaceMapping[peer.Interface]
+			if !ok {
+				return nil, fmt.Errorf("BFD peer %s interface %s not found in interface mapping", peerAddress, peer.Interface)
+			}
+			frrPeer.Interface = linuxName
+		}
+		frrBFD.Peers = append(frrBFD.Peers, frrPeer)
+	}
+	if len(frrBFD.Profiles) == 0 && len(frrBFD.Peers) == 0 {
+		return nil, nil
+	}
+	return frrBFD, nil
+}
+
 // convertOSPFConfig converts arca-router OSPF config to FRR OSPF config.
-func convertOSPFConfig(cfg *config.Config, ifaceMapping map[string]string) (*OSPFConfig, error) {
-	arcaOSPF := cfg.Protocols.OSPF
+func convertOSPFConfig(cfg *config.Config, arcaOSPF *config.OSPFConfig, ifaceMapping map[string]string, isOSPFv3 bool) (*OSPFConfig, error) {
 	if arcaOSPF == nil {
 		return nil, nil
 	}
+	label := "OSPF"
+	commandPath := "protocols ospf"
+	if isOSPFv3 {
+		label = "OSPFv3"
+		commandPath = "protocols ospf3"
+	}
 
-	// Determine router-id priority: protocols ospf router-id > routing-options router-id
+	// Determine router-id priority: protocol router-id > routing-options router-id
 	routerID := arcaOSPF.RouterID
 	if routerID == "" && cfg.RoutingOptions != nil {
 		routerID = cfg.RoutingOptions.RouterID
 	}
 
-	if routerID == "" {
-		return nil, fmt.Errorf("OSPF requires router-id (either in routing-options or protocols ospf)")
+	if routerID == "" && !isOSPFv3 {
+		return nil, fmt.Errorf("%s requires router-id (either in routing-options or %s)", label, commandPath)
 	}
 
 	frrOSPF := &OSPFConfig{
 		RouterID:   routerID,
 		Networks:   make([]OSPFNetwork, 0),
 		Interfaces: make([]OSPFInterface, 0),
-		IsOSPFv3:   false, // Phase 2: OSPFv2 only
+		IsOSPFv3:   isOSPFv3,
 	}
 
 	// Convert OSPF areas and interfaces
@@ -348,46 +484,47 @@ func convertOSPFConfig(cfg *config.Config, ifaceMapping map[string]string) (*OSP
 			// Convert Junos interface name to Linux name
 			linuxName, ok := ifaceMapping[junosName]
 			if !ok {
-				return nil, fmt.Errorf("OSPF interface %s not found in interface mapping", junosName)
+				return nil, fmt.Errorf("%s interface %s not found in interface mapping", label, junosName)
 			}
 
-			// Get interface prefix for network statement
 			arcaIface, exists := cfg.Interfaces[junosName]
 			if !exists {
-				return nil, fmt.Errorf("OSPF interface %s not found in interfaces configuration", junosName)
+				return nil, fmt.Errorf("%s interface %s not found in interfaces configuration", label, junosName)
 			}
 
-			// Add network statements for each address on this interface
-			for _, unit := range arcaIface.Units {
-				for familyName, family := range unit.Family {
-					if familyName == "inet" {
+			if !isOSPFv3 {
+				// Add network statements for each IPv4 address on this interface.
+				for _, unit := range arcaIface.Units {
+					for familyName, family := range unit.Family {
+						if familyName != "inet" {
+							continue
+						}
 						for _, addr := range family.Addresses {
-							// Parse address to get network prefix
 							_, ipnet, err := net.ParseCIDR(addr)
 							if err != nil {
-								continue // Skip invalid addresses
+								continue
 							}
-
 							frrOSPF.Networks = append(frrOSPF.Networks, OSPFNetwork{
 								Prefix: ipnet.String(),
 								AreaID: area.AreaID,
 							})
 						}
 					}
-					// Phase 2: IPv6 (inet6) not supported yet
 				}
 			}
 
 			// Add interface-specific configuration
 			frrIface := OSPFInterface{
-				Name:    linuxName,
-				AreaID:  area.AreaID,
-				Passive: iface.Passive,
-				Metric:  iface.Metric,
+				Name:       linuxName,
+				AreaID:     area.AreaID,
+				Passive:    iface.Passive,
+				Metric:     iface.Metric,
+				BFD:        iface.BFD,
+				BFDProfile: iface.BFDProfile,
 			}
 
-			// Set priority only if explicitly configured (>= 0 is valid, including 0 for DR non-participation)
-			if iface.Priority >= 0 {
+			// Set priority only if explicitly configured.
+			if iface.PrioritySet || iface.Priority != 0 {
 				priority := iface.Priority
 				frrIface.Priority = &priority
 			}
@@ -437,9 +574,13 @@ func convertStaticRoutes(arcaRoutes []*config.StaticRoute) ([]StaticRoute, error
 
 	for _, route := range arcaRoutes {
 		frrRoute := StaticRoute{
-			Prefix:   route.Prefix,
-			NextHop:  route.NextHop,
-			Distance: route.Distance,
+			Prefix:      route.Prefix,
+			NextHop:     route.NextHop,
+			Distance:    route.Distance,
+			BFD:         route.BFD,
+			BFDProfile:  route.BFDProfile,
+			BFDSource:   route.BFDSource,
+			BFDMultihop: route.BFDMultihop,
 		}
 
 		// Determine IPv4 or IPv6 from prefix

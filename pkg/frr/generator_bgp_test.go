@@ -56,6 +56,26 @@ func TestGenerateBGPConfig(t *testing.T) {
 			wantErr: false,
 		},
 		{
+			name: "BGP with BFD profile",
+			cfg: &BGPConfig{
+				ASN:         65001,
+				IPv4Unicast: true,
+				Neighbors: []BGPNeighbor{
+					{
+						IP:         "10.0.2.2",
+						RemoteAS:   65002,
+						BFD:        true,
+						BFDProfile: "fast",
+					},
+				},
+			},
+			want: []string{
+				"neighbor 10.0.2.2 remote-as 65002",
+				"neighbor 10.0.2.2 bfd profile fast",
+			},
+			wantErr: false,
+		},
+		{
 			name: "BGP with multiple neighbors (sorted)",
 			cfg: &BGPConfig{
 				ASN:         65001,
@@ -162,6 +182,58 @@ func TestGenerateBGPConfig(t *testing.T) {
 						t.Errorf("GenerateBGPConfig() output missing expected string:\nWant: %s\nGot:\n%s", want, got)
 					}
 				}
+			}
+		})
+	}
+}
+
+func TestGenerateBGPConfigRejectsInvalidConfig(t *testing.T) {
+	tests := []struct {
+		name string
+		cfg  *BGPConfig
+		want string
+	}{
+		{
+			name: "invalid router id",
+			cfg: &BGPConfig{
+				ASN:      65001,
+				RouterID: "2001:db8::1",
+			},
+			want: "invalid BGP router-id",
+		},
+		{
+			name: "duplicate neighbor",
+			cfg: &BGPConfig{
+				ASN: 65001,
+				Neighbors: []BGPNeighbor{
+					{IP: "192.0.2.2", RemoteAS: 65002},
+					{IP: "192.0.2.2", RemoteAS: 65003},
+				},
+			},
+			want: "BGP neighbor 192.0.2.2 is duplicated",
+		},
+		{
+			name: "ipv4 marked ipv6",
+			cfg: &BGPConfig{
+				ASN:       65001,
+				Neighbors: []BGPNeighbor{{IP: "192.0.2.2", RemoteAS: 65002, IsIPv6: true}},
+			},
+			want: "address family does not match configured address family",
+		},
+		{
+			name: "ipv6 marked ipv4",
+			cfg: &BGPConfig{
+				ASN:       65001,
+				Neighbors: []BGPNeighbor{{IP: "2001:db8::2", RemoteAS: 65002}},
+			},
+			want: "address family does not match configured address family",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := GenerateBGPConfig(tt.cfg)
+			if err == nil || !strings.Contains(err.Error(), tt.want) {
+				t.Fatalf("GenerateBGPConfig() error = %v, want %q", err, tt.want)
 			}
 		})
 	}

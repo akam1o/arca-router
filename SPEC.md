@@ -546,7 +546,7 @@ VRRP group IDs must be numeric and between `1` and `255`. VRRP priority must be 
 
 Before applying FRR VRRP configuration, arca-routerd prepares the Linux state expected by FRR `vrrpd`: arca-owned macvlan interfaces named `arv4-<id>-<hash>` or `arv6-<id>-<hash>` are created on the LCP interface, assigned the RFC VRRP virtual MAC, configured with the virtual address as `/32` or `/128`, and brought up. The prepared interface names are persisted in `/var/lib/arca-router/vrrp-interfaces.json` so stale arca-owned macvlan interfaces can be removed after daemon restart. This requires `CAP_NET_ADMIN`, which is included in the packaged systemd unit.
 
-arca-routerd reads FRR VRRP operational state through `vtysh -c "show vrrp json"`. Post-failover convergence is exposed as read-only status, including per-group FRR VRRP state in `/api/status` and the Web UI. HA convergence is considered configured when chassis clustering is enabled and at least one VRRP group exists. It is considered converged only when the cluster has at least two nodes, etcd cluster sync is configured and aligned with the daemon datastore, etcd config synchronization is healthy, every configured FRR VRRP group is observed in an active `Master` or `Backup` state, and VPP LCP reconciliation has run without errors or inconsistencies.
+arca-routerd reads FRR VRRP operational state through `vtysh -c "show vrrp json"`. Post-failover convergence is exposed as read-only status, including per-group FRR VRRP state in `/api/status` and the Web UI. HA convergence is considered configured when chassis clustering is enabled and at least one VRRP group exists. It is considered converged only when the cluster has at least two nodes, etcd cluster sync is configured and aligned with the daemon datastore, etcd config synchronization is healthy, every configured FRR VRRP group is observed in an active `Master` or `Backup` state, configured FRR BFD peers are observed and up, and VPP LCP reconciliation has run without errors or inconsistencies.
 
 ### MPLS and Routing Instances
 
@@ -568,7 +568,7 @@ Only `instance-type vrf` is accepted in v0.6. Route distinguishers use `<asn>:<n
 
 `protocols mpls interface` enables MPLS forwarding on the corresponding managed VPP interface. Removing the stanza disables MPLS forwarding before the interface is removed from VPP. MPLS and routing-instance interface references must resolve to configured interfaces.
 
-For VPP dataplane plumbing, each routing instance gets IPv4 and IPv6 FIB tables. When `route-distinguisher <asn>:<number>` is configured, `<number>` is used as the deterministic VPP table ID; otherwise arca-router derives a stable non-zero table ID from the routing-instance name. Interfaces listed under the routing instance are rebound to those tables, and configured addresses are removed and restored around table changes so existing addresses move with the binding.
+For VPP dataplane plumbing, each routing instance gets IPv4 and IPv6 FIB tables. When `route-distinguisher <asn>:<number>` is configured, `<number>` is used as the deterministic VPP table ID; otherwise arca-router derives a stable non-zero table ID from the routing-instance name. Interfaces listed under the routing instance are rebound to those tables, and configured addresses are removed and restored around table changes so existing addresses move with the binding. Live interface state reports the bound IPv4 and IPv6 VPP table IDs for operator verification. The internal gRPC state API, NETCONF `<get>` `state/routing-instances`, and `arca show routing-instances [name]` summarize routing-instance table IDs, interfaces, targets, and import/export policy chains from the same deterministic table plan.
 
 For FRR control-plane plumbing, routing instances render FRR VRF entries and per-VRF BGP VPN import/export configuration. Bare `vrf-target` applies to both `rt vpn import` and `rt vpn export`; directional targets apply only to their direction. Export requires `route-distinguisher` and automatically enables `label vpn export auto`. `vrf-import` and `vrf-export` are applied as `route-map vpn import` and `route-map vpn export`; when multiple policies are configured, arca-router generates an ordered synthetic route-map for FRR's single route-map slot.
 
@@ -610,9 +610,25 @@ set security netconf ssh port 830
 
 NETCONF XML get-config/edit-config supports the v0.6 management-plane model for `system services`, `chassis cluster`, `protocols mpls`, `protocols vrrp`, `routing-instances`, `class-of-service`, and non-sensitive `security netconf` / `security rate-limit` settings. Security user secrets are intentionally not emitted in NETCONF XML replies.
 
-NETCONF `<get>` returns config-derived system/routing state and, when arca-routerd can collect VPP state, live managed interface admin/oper status, physical address, bound `qos-profile`, counters (`rx-packets`, `tx-packets`, `rx-bytes`, `tx-bytes`, `rx-errors`, `tx-errors`, `drops`), and VPP RX/TX queue placement. If live collection fails, interface output falls back to configured addresses with unknown operational status.
+NETCONF `<get>` returns config-derived system/routing state and, when arca-routerd can collect VPP state, live managed interface admin/oper status, physical address, bound `qos-profile`, VPP table bindings (`ipv4-table-id`, `ipv6-table-id`), counters (`rx-packets`, `tx-packets`, `rx-bytes`, `tx-bytes`, `rx-errors`, `tx-errors`, `drops`), and VPP RX/TX queue placement. If live collection fails, interface output falls back to configured addresses with unknown operational status.
 
-The internal gRPC interface state API and `arca show interfaces` use the same managed VPP interface state source, so interface filters use configured names such as `ge-0/0/0` and expose the same bound QoS profile, packet counters, and queue placement summary for local operators.
+The internal gRPC interface state API and `arca show interfaces` use the same managed VPP interface state source, so interface filters use configured names such as `ge-0/0/0` and expose the same bound QoS profile, VPP table binding, packet counters, and queue placement summary for local operators.
+
+The internal gRPC route state API reads FRR JSON route output for both IPv4 and IPv6 tables and returns structured route entries with prefix, next-hop, protocol, metric, interface, and active-path status. Prefix filters must be valid CIDR prefixes; protocol filters accept the FRR protocol names used by the route table, with `ospf3` normalized to `ospf6`.
+
+The internal gRPC BGP neighbor state API reads FRR JSON summary output and returns structured peer address, remote AS, state, uptime, received-prefix, and sent-prefix counters. When FRR reports the same peer under multiple address families, arca-router returns one peer entry with prefix counters combined and the longest observed uptime.
+
+The internal gRPC OSPF neighbor state API reads FRR JSON neighbor output for OSPFv2 and OSPFv3 and returns structured router ID, neighbor address, interface, state, role, priority, dead timer, and uptime fields.
+
+NETCONF `<get>` exposes the same live route table state under `state/routes`, BGP neighbor state under `state/protocols/bgp`, and OSPFv2/OSPFv3 neighbor state under `state/protocols/ospf` and `state/protocols/ospf3`, using the FRR JSON operational readers shared with the internal gRPC state APIs.
+
+The internal gRPC routing-instance state API returns running routing-instance intent with deterministic IPv4/IPv6 VPP table IDs, interface bindings, import/export targets, and import/export policy chains.
+
+The internal gRPC BFD state API returns arca-routerd's cached FRR BFD convergence snapshot, including configured/observed/up/down peer counts, aggregate session-down and RX-fail counters, per-peer state, diagnostics, and convergence issues.
+
+NETCONF `<get>` exposes the same cached BFD operational state under `state/protocols/bfd`, including aggregate counters, per-peer diagnostics, convergence issues, and the last collection error.
+
+The CLI exposes the cached BFD snapshot through `arca show bfd status`. Raw FRR BFD output remains available through `arca show bfd`, `arca show bfd brief`, `arca show bfd counters`, and `arca show bfd peer <ip> [counters]`.
 
 The server hello advertises the arca-router YANG module capability as `urn:arca:router:config:1.0?module=arca-router&revision=2025-12-27`.
 
@@ -958,7 +974,7 @@ Common options:
 
 The default backend is `transactional`. It requires FRR `mgmtd=yes` in `/etc/frr/daemons` and `vtysh` access for the `arca-router` service user, typically through the `frrvty` group.
 
-The standard FRR daemon set for arca-router is `bgpd`, `ospfd`, `zebra`, `staticd`, `mgmtd`, and `vrrpd`. The transactional backend applies VRRP through the FRR `frr-vrrpd` YANG model under the interface tree. The `file` backend writes a full FRR config and applies it with `frr-reload.py`. It is retained for recovery and compatibility; deployments that use it must grant the service user the additional permissions needed to write `/etc/frr/frr.conf`.
+The standard FRR daemon set for arca-router is `bgpd`, `ospfd`, `ospf6d`, `zebra`, `staticd`, `mgmtd`, `vrrpd`, and `bfdd`. The transactional backend applies VRRP through the FRR `frr-vrrpd` YANG model under the interface tree, explicit BFD profiles/sessions through `frr-bfdd`, static route BFD monitoring through `frr-staticd`, profile-less BGP neighbor BFD enablement through `frr-bgp`, and profile-less OSPF interface BFD through `frr-ospfd`. arca-routerd automatically falls back to the file backend for OSPFv3 and BGP/OSPF BFD profile bindings until FRR exposes those management YANG paths. The `file` backend writes a full FRR config and applies it with `frr-reload.py`. It is retained for recovery and compatibility; deployments that use it directly or through automatic fallback must grant the service user the additional permissions needed to write `/etc/frr/frr.conf`.
 
 ### Prometheus and Health
 
@@ -1060,10 +1076,14 @@ arca show interfaces
 arca show interfaces ge-0/0/0
 
 # Routing table
+arca show routes
+arca show routes protocol bgp
+arca show routes prefix 2001:db8::/64
 arca show route
 arca show route protocol bgp
 
 # BGP summary
+arca show bgp neighbors
 arca show bgp summary
 
 # BGP neighbors
@@ -1088,7 +1108,7 @@ arca show class-of-service
 arca show configuration
 ```
 
-`show interfaces` prints live managed VPP admin/oper status, bound QoS profile, packet counters, and RX/TX queue placement when available. Name filters use configured interface names such as `ge-0/0/0`. `show vrrp` prints FRR `show vrrp` output through arca-routerd for local HA inspection. `show lcp` prints the cached VPP LCP reconciliation state used by HA convergence checks. `show ha` prints the same HA convergence summary used by Web UI, Prometheus, and SNMP. `show class-of-service` prints running CoS intent and reports `intent-only` for scheduler/policer enforcement while VPP enforcement support is staged separately.
+`show interfaces` prints live managed VPP admin/oper status, bound QoS profile, packet counters, and RX/TX queue placement when available. Name filters use configured interface names such as `ge-0/0/0`. `show routes` prints structured IPv4/IPv6 route state from the internal gRPC state API and supports optional `prefix <cidr>` and `protocol <proto>` filters; `show route` retains raw FRR route output. `show bgp neighbors` prints structured BGP neighbor state from the internal gRPC state API, while `show bgp summary` and `show bgp neighbor <ip>` retain raw FRR output. `show ospf neighbor` and `show ospf3 neighbor` print structured OSPF neighbor state from the same gRPC state API. `show vrrp` prints FRR `show vrrp` output through arca-routerd for local HA inspection. `show lcp` prints the cached VPP LCP reconciliation state used by HA convergence checks. `show ha` prints the same HA convergence summary used by Web UI, Prometheus, and SNMP, including FRR VRRP, configured FRR BFD peer health, and VPP LCP reconciliation status. `show class-of-service` prints running CoS intent and reports `intent-only` for scheduler/policer enforcement while VPP enforcement support is staged separately.
 
 Interactive mode also supports `show history [N]` in configuration mode for commit history.
 

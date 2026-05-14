@@ -392,7 +392,7 @@ func run(ctx context.Context, f *daemonFlags, log *logger.Logger) error {
 			f,
 			datastoreConfig,
 			eng,
-			newNETCONFOperationalStateProvider(vppPlugin),
+			newNETCONFOperationalStateProvider(vppPlugin, frrPlugin),
 			log,
 			effectiveNETCONFListen(f.netconfListen, eng.RunningSnapshot()),
 		)
@@ -421,6 +421,7 @@ func run(ctx context.Context, f *daemonFlags, log *logger.Logger) error {
 	grpcServer := nbgrpc.NewServer(eng, configStore, slog.Default())
 	grpcServer.SetInterfaceStateCollector(vppPlugin)
 	grpcServer.SetLCPReconciliationSource(newGRPCLCPReconciliationSource(vppPlugin))
+	grpcServer.SetBFDOperationalSource(frrPlugin)
 
 	observabilitySource := metricsSource{
 		startedAt:     time.Now(),

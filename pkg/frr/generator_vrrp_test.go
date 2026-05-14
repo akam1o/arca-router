@@ -31,6 +31,18 @@ func TestGenerateVRRPConfig(t *testing.T) {
 	}
 }
 
+func TestGenerateVRRPConfigRejectsDuplicateGroups(t *testing.T) {
+	_, err := GenerateVRRPConfig(&VRRPConfig{
+		Groups: []VRRPGroup{
+			{ID: 10, Interface: "ge0-0-0", VirtualAddress: "192.0.2.254"},
+			{ID: 10, Interface: "ge0-0-0", VirtualAddress: "192.0.2.253"},
+		},
+	})
+	if err == nil || !strings.Contains(err.Error(), "duplicated") {
+		t.Fatalf("GenerateVRRPConfig() error = %v, want duplicate group error", err)
+	}
+}
+
 func TestGenerateFRRConfigConvertsVRRP(t *testing.T) {
 	frrCfg, err := GenerateFRRConfig(&config.Config{
 		Interfaces: map[string]*config.Interface{

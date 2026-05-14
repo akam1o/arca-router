@@ -33,6 +33,194 @@ func TestConfigToXMLWritesExplicitOSPFPriorityZero(t *testing.T) {
 	}
 }
 
+func TestConfigToXMLWritesOSPF3(t *testing.T) {
+	cfg := &config.Config{
+		Protocols: &config.ProtocolConfig{
+			OSPF3: &config.OSPFConfig{
+				Areas: map[string]*config.OSPFArea{
+					"0.0.0.0": {
+						AreaID: "0.0.0.0",
+						Interfaces: map[string]*config.OSPFInterface{
+							"ge-0/0/0": {Name: "ge-0/0/0", Metric: 20},
+						},
+					},
+				},
+			},
+		},
+	}
+
+	xmlData, err := ConfigToXML(cfg, nil)
+	if err != nil {
+		t.Fatalf("ConfigToXML() error = %v", err)
+	}
+	xmlStr := string(xmlData)
+	for _, want := range []string{"<ospf3>", "<metric>20</metric>", "</ospf3>"} {
+		if !strings.Contains(xmlStr, want) {
+			t.Fatalf("ConfigToXML() missing %q:\n%s", want, xmlStr)
+		}
+	}
+}
+
+func TestConfigToXMLWritesBFD(t *testing.T) {
+	cfg := &config.Config{
+		Protocols: &config.ProtocolConfig{
+			BFD: &config.BFDConfig{
+				Profiles: map[string]*config.BFDProfile{
+					"fast": {Name: "fast", DetectMultiplier: 3, ReceiveInterval: 150, TransmitInterval: 150},
+				},
+				Peers: map[string]*config.BFDPeer{
+					"192.0.2.2": {Address: "192.0.2.2", LocalAddress: "192.0.2.1", Interface: "ge-0/0/0", Profile: "fast"},
+				},
+			},
+		},
+	}
+
+	xmlData, err := ConfigToXML(cfg, nil)
+	if err != nil {
+		t.Fatalf("ConfigToXML() error = %v", err)
+	}
+	xmlStr := string(xmlData)
+	for _, want := range []string{"<bfd>", "<profile>", "<name>fast</name>", "<peer>", "<address>192.0.2.2</address>", "<interface>ge-0/0/0</interface>"} {
+		if !strings.Contains(xmlStr, want) {
+			t.Fatalf("ConfigToXML() missing %q:\n%s", want, xmlStr)
+		}
+	}
+}
+
+func TestXMLToConfigParsesBFD(t *testing.T) {
+	xmlData := []byte(`
+<config>
+  <protocols xmlns="urn:arca:router:config:1.0">
+    <bfd>
+      <profile>
+        <name>fast</name>
+        <detect-multiplier>3</detect-multiplier>
+        <receive-interval>150</receive-interval>
+        <transmit-interval>150</transmit-interval>
+      </profile>
+      <peer>
+        <address>192.0.2.2</address>
+        <local-address>192.0.2.1</local-address>
+        <interface>ge-0/0/0</interface>
+        <profile>fast</profile>
+      </peer>
+    </bfd>
+  </protocols>
+</config>`)
+
+	cfg, err := XMLToConfig(xmlData, DefaultOpMerge)
+	if err != nil {
+		t.Fatalf("XMLToConfig() error = %v", err)
+	}
+	if cfg.Protocols == nil || cfg.Protocols.BFD == nil {
+		t.Fatalf("XMLToConfig() dropped BFD: %#v", cfg.Protocols)
+	}
+	if got := cfg.Protocols.BFD.Peers["192.0.2.2"].Profile; got != "fast" {
+		t.Fatalf("BFD peer profile = %q, want fast", got)
+	}
+}
+
+func TestXMLBFDProtocolBindingsRoundTrip(t *testing.T) {
+	cfg := &config.Config{
+		Protocols: &config.ProtocolConfig{
+			BGP: &config.BGPConfig{Groups: map[string]*config.BGPGroup{
+				"EBGP": {
+					Type: "external",
+					Neighbors: map[string]*config.BGPNeighbor{
+						"192.0.2.2": {IP: "192.0.2.2", PeerAS: 65001, BFD: true, BFDProfile: "fast"},
+					},
+				},
+			}},
+			OSPF: &config.OSPFConfig{Areas: map[string]*config.OSPFArea{
+				"0.0.0.0": {
+					AreaID: "0.0.0.0",
+					Interfaces: map[string]*config.OSPFInterface{
+						"ge-0/0/0": {Name: "ge-0/0/0", BFD: true, BFDProfile: "fast"},
+					},
+				},
+			}},
+			OSPF3: &config.OSPFConfig{Areas: map[string]*config.OSPFArea{
+				"0.0.0.0": {
+					AreaID: "0.0.0.0",
+					Interfaces: map[string]*config.OSPFInterface{
+						"ge-0/0/0": {Name: "ge-0/0/0", BFD: true, BFDProfile: "fast"},
+					},
+				},
+			}},
+		},
+	}
+
+	xmlData, err := ConfigToXML(cfg, nil)
+	if err != nil {
+		t.Fatalf("ConfigToXML() error = %v", err)
+	}
+	xmlStr := string(xmlData)
+	for _, want := range []string{"<bfd>true</bfd>", "<bfd-profile>fast</bfd-profile>"} {
+		if !strings.Contains(xmlStr, want) {
+			t.Fatalf("ConfigToXML() missing %q:\n%s", want, xmlStr)
+		}
+	}
+
+	roundTrip, err := XMLToConfig(xmlData, DefaultOpMerge)
+	if err != nil {
+		t.Fatalf("XMLToConfig() error = %v", err)
+	}
+	neighbor := roundTrip.Protocols.BGP.Groups["EBGP"].Neighbors["192.0.2.2"]
+	if neighbor == nil || !neighbor.BFD || neighbor.BFDProfile != "fast" {
+		t.Fatalf("BGP BFD binding = %#v, want profile fast", neighbor)
+	}
+	ospfIface := roundTrip.Protocols.OSPF.Areas["0.0.0.0"].Interfaces["ge-0/0/0"]
+	if ospfIface == nil || !ospfIface.BFD || ospfIface.BFDProfile != "fast" {
+		t.Fatalf("OSPF BFD binding = %#v, want profile fast", ospfIface)
+	}
+	ospf3Iface := roundTrip.Protocols.OSPF3.Areas["0.0.0.0"].Interfaces["ge-0/0/0"]
+	if ospf3Iface == nil || !ospf3Iface.BFD || ospf3Iface.BFDProfile != "fast" {
+		t.Fatalf("OSPF3 BFD binding = %#v, want profile fast", ospf3Iface)
+	}
+}
+
+func TestXMLBFDStaticRouteRoundTrip(t *testing.T) {
+	cfg := &config.Config{
+		RoutingOptions: &config.RoutingOptions{
+			StaticRoutes: []*config.StaticRoute{
+				{
+					Prefix:      "203.0.113.0/24",
+					NextHop:     "192.0.2.2",
+					BFD:         true,
+					BFDProfile:  "fast",
+					BFDSource:   "192.0.2.1",
+					BFDMultihop: true,
+				},
+			},
+		},
+	}
+
+	xmlData, err := ConfigToXML(cfg, nil)
+	if err != nil {
+		t.Fatalf("ConfigToXML() error = %v", err)
+	}
+	xmlStr := string(xmlData)
+	for _, want := range []string{
+		"<bfd>true</bfd>",
+		"<bfd-profile>fast</bfd-profile>",
+		"<bfd-source>192.0.2.1</bfd-source>",
+		"<bfd-multihop>true</bfd-multihop>",
+	} {
+		if !strings.Contains(xmlStr, want) {
+			t.Fatalf("ConfigToXML() missing %q:\n%s", want, xmlStr)
+		}
+	}
+
+	roundTrip, err := XMLToConfig(xmlData, DefaultOpMerge)
+	if err != nil {
+		t.Fatalf("XMLToConfig() error = %v", err)
+	}
+	route := roundTrip.RoutingOptions.StaticRoutes[0]
+	if !route.BFD || route.BFDProfile != "fast" || route.BFDSource != "192.0.2.1" || !route.BFDMultihop {
+		t.Fatalf("Static route BFD = %#v, want source/profile/multihop", route)
+	}
+}
+
 func TestConfigToXMLMarshalsAsSingleDataReply(t *testing.T) {
 	cfg := &config.Config{
 		System:     &config.SystemConfig{HostName: "router1"},
@@ -349,6 +537,42 @@ func TestXMLToConfigPreservesExplicitOSPFPriorityZero(t *testing.T) {
 
 	setCommands := config.ToSetCommands(cfg)
 	want := "set protocols ospf area 0.0.0.0 interface ge-0/0/0 priority 0"
+	if !strings.Contains(setCommands, want) {
+		t.Fatalf("ToSetCommands() = %q, want %q", setCommands, want)
+	}
+}
+
+func TestXMLToConfigParsesOSPF3(t *testing.T) {
+	xmlData := []byte(`
+<config>
+  <protocols>
+    <ospf3>
+      <router-id>10.0.1.2</router-id>
+      <area>
+        <name>0.0.0.0</name>
+        <area-id>0.0.0.0</area-id>
+        <interface>
+          <name>ge-0/0/0</name>
+          <metric>20</metric>
+        </interface>
+      </area>
+    </ospf3>
+  </protocols>
+</config>`)
+
+	cfg, err := XMLToConfig(xmlData, DefaultOpMerge)
+	if err != nil {
+		t.Fatalf("XMLToConfig() error = %v", err)
+	}
+	if cfg.Protocols == nil || cfg.Protocols.OSPF3 == nil {
+		t.Fatalf("XMLToConfig() OSPF3 = nil: %#v", cfg.Protocols)
+	}
+	if cfg.Protocols.OSPF3.RouterID != "10.0.1.2" {
+		t.Fatalf("OSPF3 router-id = %q, want 10.0.1.2", cfg.Protocols.OSPF3.RouterID)
+	}
+
+	setCommands := config.ToSetCommands(cfg)
+	want := "set protocols ospf3 area 0.0.0.0 interface ge-0/0/0 metric 20"
 	if !strings.Contains(setCommands, want) {
 		t.Fatalf("ToSetCommands() = %q, want %q", setCommands, want)
 	}

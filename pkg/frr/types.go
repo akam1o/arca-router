@@ -15,8 +15,14 @@ type Config struct {
 	// BGP holds BGP configuration
 	BGP *BGPConfig
 
+	// BFD holds Bidirectional Forwarding Detection configuration
+	BFD *BFDConfig
+
 	// OSPF holds OSPF configuration
 	OSPF *OSPFConfig
+
+	// OSPF3 holds OSPFv3 configuration
+	OSPF3 *OSPFConfig
 
 	// VRRP holds VRRP configuration
 	VRRP *VRRPConfig
@@ -59,6 +65,38 @@ type BGPConfig struct {
 	IPv6Unicast bool
 }
 
+// BFDConfig represents FRR BFD configuration.
+type BFDConfig struct {
+	Profiles []BFDProfile
+	Peers    []BFDPeer
+}
+
+// BFDProfile represents an FRR BFD profile.
+type BFDProfile struct {
+	Name             string
+	DetectMultiplier int
+	ReceiveInterval  int
+	TransmitInterval int
+	EchoMode         bool
+	PassiveMode      bool
+}
+
+// BFDPeer represents an FRR BFD peer.
+type BFDPeer struct {
+	Address          string
+	LocalAddress     string
+	Interface        string
+	VRF              string
+	Multihop         bool
+	Profile          string
+	DetectMultiplier int
+	ReceiveInterval  int
+	TransmitInterval int
+	EchoMode         bool
+	PassiveMode      bool
+	Shutdown         bool
+}
+
 // BGPNeighbor represents a BGP neighbor configuration in FRR format.
 type BGPNeighbor struct {
 	// IP is the neighbor IP address
@@ -73,6 +111,12 @@ type BGPNeighbor struct {
 	// UpdateSource is the source interface or IP for BGP connection
 	// Can be either an interface name (Linux format) or IP address
 	UpdateSource string
+
+	// BFD enables BFD failure detection for this neighbor
+	BFD bool
+
+	// BFDProfile selects the BFD profile for this neighbor
+	BFDProfile string
 
 	// IsIPv6 indicates if this is an IPv6 neighbor
 	IsIPv6 bool
@@ -124,6 +168,12 @@ type OSPFInterface struct {
 
 	// Priority is the OSPF priority for this interface (nil = not set)
 	Priority *int
+
+	// BFD enables BFD failure detection on this OSPF interface
+	BFD bool
+
+	// BFDProfile selects the BFD profile for this OSPF interface
+	BFDProfile string
 }
 
 // VRRPConfig represents FRR VRRP configuration.
@@ -164,6 +214,18 @@ type StaticRoute struct {
 
 	// IsIPv6 indicates if this is an IPv6 route
 	IsIPv6 bool
+
+	// BFD enables BFD monitoring for this static route
+	BFD bool
+
+	// BFDProfile selects the BFD profile for this static route
+	BFDProfile string
+
+	// BFDSource selects the source address for the BFD session
+	BFDSource string
+
+	// BFDMultihop enables multihop BFD for this static route
+	BFDMultihop bool
 }
 
 // PrefixList represents an FRR prefix-list configuration.

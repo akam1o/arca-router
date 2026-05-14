@@ -13,9 +13,8 @@ func GenerateBGPConfig(cfg *BGPConfig) (string, error) {
 	if cfg == nil {
 		return "", nil
 	}
-
-	if cfg.ASN == 0 {
-		return "", NewInvalidConfigError("BGP ASN is required")
+	if err := validateBGPConfig(cfg); err != nil {
+		return "", err
 	}
 
 	var b strings.Builder
@@ -38,10 +37,6 @@ func GenerateBGPConfig(cfg *BGPConfig) (string, error) {
 
 	// BGP neighbors
 	for _, n := range neighbors {
-		if err := validateBGPNeighbor(&n); err != nil {
-			return "", err
-		}
-
 		fmt.Fprintf(&b, " neighbor %s remote-as %d\n", n.IP, n.RemoteAS)
 
 		if n.Description != "" {
@@ -50,6 +45,12 @@ func GenerateBGPConfig(cfg *BGPConfig) (string, error) {
 
 		if n.UpdateSource != "" {
 			fmt.Fprintf(&b, " neighbor %s update-source %s\n", n.IP, n.UpdateSource)
+		}
+
+		if n.BFDProfile != "" {
+			fmt.Fprintf(&b, " neighbor %s bfd profile %s\n", n.IP, n.BFDProfile)
+		} else if n.BFD {
+			fmt.Fprintf(&b, " neighbor %s bfd\n", n.IP)
 		}
 	}
 
@@ -99,6 +100,35 @@ func GenerateBGPConfig(cfg *BGPConfig) (string, error) {
 	b.WriteString("!\n")
 
 	return b.String(), nil
+}
+
+func validateBGPConfig(cfg *BGPConfig) error {
+	if cfg.ASN == 0 {
+		return NewInvalidConfigError("BGP ASN is required")
+	}
+	if cfg.RouterID != "" {
+		routerID := net.ParseIP(cfg.RouterID)
+		if routerID == nil || routerID.To4() == nil {
+			return NewInvalidConfigError(fmt.Sprintf("invalid BGP router-id: %s", cfg.RouterID))
+		}
+	}
+	neighbors := make(map[string]struct{}, len(cfg.Neighbors))
+	for _, neighbor := range cfg.Neighbors {
+		if err := validateBGPNeighbor(&neighbor); err != nil {
+			return err
+		}
+		peerIP := net.ParseIP(neighbor.IP)
+		peerKey := peerIP.String()
+		if _, ok := neighbors[peerKey]; ok {
+			return NewInvalidConfigError(fmt.Sprintf("BGP neighbor %s is duplicated", neighbor.IP))
+		}
+		neighbors[peerKey] = struct{}{}
+		isIPv6 := peerIP.To4() == nil
+		if isIPv6 != neighbor.IsIPv6 {
+			return NewInvalidConfigError(fmt.Sprintf("BGP neighbor %s address family does not match configured address family", neighbor.IP))
+		}
+	}
+	return nil
 }
 
 // validateBGPNeighbor validates a BGP neighbor configuration.

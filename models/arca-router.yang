@@ -181,6 +181,28 @@ module arca-router {
           default 1;
           description "Administrative distance (metric)";
         }
+
+        leaf bfd {
+          type boolean;
+          default false;
+          description "Enable BFD monitoring for this static route";
+        }
+
+        leaf bfd-profile {
+          type string;
+          description "BFD profile used by this static route";
+        }
+
+        leaf bfd-source {
+          type string;
+          description "Source address used by the static route BFD session";
+        }
+
+        leaf bfd-multihop {
+          type boolean;
+          default false;
+          description "Enable multihop BFD for this static route";
+        }
       }
     }
   }
@@ -233,6 +255,92 @@ module arca-router {
 
   container protocols {
     description "Routing protocol configuration";
+
+    container bfd {
+      description "Bidirectional Forwarding Detection configuration.";
+
+      list profile {
+        key "name";
+
+        leaf name {
+          type string;
+        }
+        leaf detect-multiplier {
+          type uint8 {
+            range "2..255";
+          }
+        }
+        leaf receive-interval {
+          type uint16 {
+            range "10..60000";
+          }
+        }
+        leaf transmit-interval {
+          type uint16 {
+            range "10..60000";
+          }
+        }
+        leaf echo-mode {
+          type boolean;
+          default false;
+        }
+        leaf passive-mode {
+          type boolean;
+          default false;
+        }
+      }
+
+      list peer {
+        key "address";
+
+        leaf address {
+          type string;
+        }
+        leaf local-address {
+          type string;
+        }
+        leaf interface {
+          type string;
+        }
+        leaf vrf {
+          type string;
+        }
+        leaf multihop {
+          type boolean;
+          default false;
+        }
+        leaf profile {
+          type string;
+        }
+        leaf detect-multiplier {
+          type uint8 {
+            range "2..255";
+          }
+        }
+        leaf receive-interval {
+          type uint16 {
+            range "10..60000";
+          }
+        }
+        leaf transmit-interval {
+          type uint16 {
+            range "10..60000";
+          }
+        }
+        leaf echo-mode {
+          type boolean;
+          default false;
+        }
+        leaf passive-mode {
+          type boolean;
+          default false;
+        }
+        leaf shutdown {
+          type boolean;
+          default false;
+        }
+      }
+    }
 
     container bgp {
       description "BGP protocol configuration";
@@ -296,6 +404,17 @@ module arca-router {
             type string;
             description "Local address for BGP peering";
           }
+
+          leaf bfd {
+            type boolean;
+            default false;
+            description "Enable BFD failure detection for this neighbor";
+          }
+
+          leaf bfd-profile {
+            type string;
+            description "BFD profile used by this neighbor";
+          }
         }
       }
     }
@@ -347,6 +466,80 @@ module arca-router {
             }
             default 1;
             description "OSPF priority for DR election";
+          }
+
+          leaf bfd {
+            type boolean;
+            default false;
+            description "Enable BFD failure detection on this interface";
+          }
+
+          leaf bfd-profile {
+            type string;
+            description "BFD profile used by this interface";
+          }
+        }
+      }
+    }
+
+    container ospf3 {
+      description "OSPFv3 protocol configuration";
+
+      leaf router-id {
+        type string {
+          pattern '[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+';
+        }
+        description "OSPFv3 router ID (overrides global router-id)";
+      }
+
+      list area {
+        key "area-id";
+        description "OSPFv3 area configuration";
+
+        leaf area-id {
+          type string;
+          description "OSPFv3 area ID (e.g., 0.0.0.0 or 0)";
+        }
+
+        list interface {
+          key "name";
+          description "Interface in this OSPFv3 area";
+
+          leaf name {
+            type string;
+            description "Interface name";
+          }
+
+          leaf passive {
+            type boolean;
+            default false;
+            description "Passive interface flag";
+          }
+
+          leaf metric {
+            type uint16 {
+              range "1..65535";
+            }
+            description "OSPFv3 metric for this interface";
+          }
+
+          leaf priority {
+            type uint8 {
+              range "0..255";
+            }
+            default 1;
+            description "OSPFv3 priority for DR election";
+          }
+
+          leaf bfd {
+            type boolean;
+            default false;
+            description "Enable BFD failure detection on this interface";
+          }
+
+          leaf bfd-profile {
+            type string;
+            description "BFD profile used by this interface";
           }
         }
       }
@@ -521,8 +714,295 @@ module arca-router {
          through ietf-interfaces.";
     }
 
+    container routes {
+      description "Live IPv4 and IPv6 route table entries.";
+
+      list route {
+        description "One route entry or nexthop path.";
+
+        leaf prefix {
+          type string;
+          description "Route destination prefix.";
+        }
+        leaf next-hop {
+          type string;
+          description "Route nexthop address.";
+        }
+        leaf protocol {
+          type string;
+          description "Protocol that installed the route.";
+        }
+        leaf metric {
+          type uint32;
+          description "Route metric.";
+        }
+        leaf interface {
+          type string;
+          description "Outgoing interface.";
+        }
+        leaf active {
+          type boolean;
+          description "Whether the path is active in FRR.";
+        }
+      }
+    }
+
+    container routing-instances {
+      description "Running routing-instance intent and VPP table bindings.";
+
+      list instance {
+        key "name";
+        description "Per-routing-instance table mapping and policy summary.";
+
+        leaf name {
+          type string;
+          description "Routing-instance name.";
+        }
+        leaf instance-type {
+          type string;
+          description "Routing-instance type.";
+        }
+        leaf route-distinguisher {
+          type string;
+          description "Configured route distinguisher.";
+        }
+        leaf ipv4-table-id {
+          type uint32;
+          description "Bound VPP IPv4 table ID.";
+        }
+        leaf ipv6-table-id {
+          type uint32;
+          description "Bound VPP IPv6 table ID.";
+        }
+        leaf-list import-target {
+          type string;
+          description "VPN import route target.";
+        }
+        leaf-list export-target {
+          type string;
+          description "VPN export route target.";
+        }
+        leaf-list import-policy {
+          type string;
+          description "Ordered import policy chain.";
+        }
+        leaf-list export-policy {
+          type string;
+          description "Ordered export policy chain.";
+        }
+        leaf-list interface {
+          type string;
+          description "Interface bound to the routing-instance tables.";
+        }
+      }
+    }
+
     container protocols {
-      description "Reserved for protocol operational state.";
+      description "Protocol operational state.";
+
+      container bgp {
+        description "BGP neighbor operational state.";
+
+        list neighbor {
+          description "Per-neighbor BGP operational state.";
+
+          leaf peer-address {
+            type string;
+            description "BGP peer address.";
+          }
+          leaf peer-as {
+            type uint32;
+            description "Remote peer AS number.";
+          }
+          leaf state {
+            type string;
+            description "BGP finite-state-machine state.";
+          }
+          leaf uptime-seconds {
+            type uint64;
+            description "Peer uptime in seconds.";
+          }
+          leaf prefix-received {
+            type uint32;
+            description "Received prefix count.";
+          }
+          leaf prefix-sent {
+            type uint32;
+            description "Sent prefix count.";
+          }
+        }
+      }
+
+      container ospf {
+        description "OSPFv2 neighbor operational state.";
+
+        list neighbor {
+          description "Per-neighbor OSPFv2 operational state.";
+
+          leaf router-id {
+            type string;
+            description "OSPF neighbor router ID.";
+          }
+          leaf address {
+            type string;
+            description "OSPF neighbor address.";
+          }
+          leaf interface {
+            type string;
+            description "Interface associated with the adjacency.";
+          }
+          leaf state {
+            type string;
+            description "OSPF adjacency state.";
+          }
+          leaf role {
+            type string;
+            description "Neighbor role reported by FRR.";
+          }
+          leaf priority {
+            type uint32;
+            description "OSPF neighbor priority.";
+          }
+          leaf dead-time-seconds {
+            type uint64;
+            description "Remaining dead timer in seconds.";
+          }
+          leaf uptime-seconds {
+            type uint64;
+            description "Adjacency uptime in seconds.";
+          }
+        }
+      }
+
+      container ospf3 {
+        description "OSPFv3 neighbor operational state.";
+
+        list neighbor {
+          description "Per-neighbor OSPFv3 operational state.";
+
+          leaf router-id {
+            type string;
+            description "OSPFv3 neighbor router ID.";
+          }
+          leaf address {
+            type string;
+            description "OSPFv3 neighbor address.";
+          }
+          leaf interface {
+            type string;
+            description "Interface associated with the adjacency.";
+          }
+          leaf state {
+            type string;
+            description "OSPFv3 adjacency state.";
+          }
+          leaf role {
+            type string;
+            description "Neighbor role reported by FRR.";
+          }
+          leaf priority {
+            type uint32;
+            description "OSPFv3 neighbor priority.";
+          }
+          leaf dead-time-seconds {
+            type uint64;
+            description "Remaining dead timer in seconds.";
+          }
+          leaf uptime-seconds {
+            type uint64;
+            description "Adjacency uptime in seconds.";
+          }
+        }
+      }
+
+      container bfd {
+        description "Cached BFD convergence state and failure counters.";
+
+        leaf last-run {
+          type string;
+          description "RFC3339 timestamp of the latest BFD state collection.";
+        }
+        leaf configured-peers {
+          type uint32;
+          description "Number of BFD peers expected from configuration.";
+        }
+        leaf observed-peers {
+          type uint32;
+          description "Number of BFD peers observed in FRR runtime state.";
+        }
+        leaf up-peers {
+          type uint32;
+          description "Number of observed BFD peers in up state.";
+        }
+        leaf down-peers {
+          type uint32;
+          description "Number of configured or observed BFD peers not up.";
+        }
+        leaf session-down-events {
+          type uint64;
+          description "Aggregate BFD session down events.";
+        }
+        leaf rx-fail-packets {
+          type uint64;
+          description "Aggregate BFD RX failure packet counter.";
+        }
+        list peer {
+          description "Per-peer BFD operational state.";
+
+          leaf address {
+            type string;
+            description "BFD peer address.";
+          }
+          leaf local-address {
+            type string;
+            description "Local address used for the BFD session.";
+          }
+          leaf interface {
+            type string;
+            description "Interface associated with the BFD session.";
+          }
+          leaf vrf {
+            type string;
+            description "VRF associated with the BFD session.";
+          }
+          leaf status {
+            type string;
+            description "FRR BFD peer status.";
+          }
+          leaf diagnostic {
+            type string;
+            description "Local BFD diagnostic string.";
+          }
+          leaf remote-diagnostic {
+            type string;
+            description "Remote BFD diagnostic string.";
+          }
+          leaf observed {
+            type boolean;
+            description "Whether FRR reported the peer.";
+          }
+          leaf up {
+            type boolean;
+            description "Whether the peer is currently up.";
+          }
+          leaf session-down-events {
+            type uint64;
+            description "Peer session down event counter.";
+          }
+          leaf rx-fail-packets {
+            type uint64;
+            description "Peer RX failure packet counter.";
+          }
+        }
+        leaf-list issue {
+          type string;
+          description "Convergence issue detected by arca-routerd.";
+        }
+        leaf last-error {
+          type string;
+          description "Last BFD state collection error.";
+        }
+      }
     }
   }
 }

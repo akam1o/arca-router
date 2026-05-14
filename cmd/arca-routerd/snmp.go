@@ -53,6 +53,15 @@ const (
 	snmpOIDCoSProfiles       = arcaSNMPBaseOID + ".27.0"
 	snmpOIDCoSBindings       = arcaSNMPBaseOID + ".28.0"
 	snmpOIDCoSIntentOnly     = arcaSNMPBaseOID + ".29.0"
+	snmpOIDFRRBFDConfigured  = arcaSNMPBaseOID + ".30.0"
+	snmpOIDFRRBFDObserved    = arcaSNMPBaseOID + ".31.0"
+	snmpOIDFRRBFDUp          = arcaSNMPBaseOID + ".32.0"
+	snmpOIDFRRBFDDownPeers   = arcaSNMPBaseOID + ".33.0"
+	snmpOIDFRRBFDSessionDown = arcaSNMPBaseOID + ".34.0"
+	snmpOIDFRRBFDRxFail      = arcaSNMPBaseOID + ".35.0"
+	snmpOIDFRRBFDIssues      = arcaSNMPBaseOID + ".36.0"
+	snmpOIDFRRBFDError       = arcaSNMPBaseOID + ".37.0"
+	snmpOIDFRRBFDLastRun     = arcaSNMPBaseOID + ".38.0"
 
 	defaultSNMPPort      = 161
 	defaultSNMPCommunity = "public"
@@ -412,6 +421,81 @@ func snmpOIDs(source metricsSource) []*snmpserver.PDUValueControlItem {
 				return snmpserver.Asn1IntegerWrap(0), nil
 			},
 			Document: "arcaRouterClassOfServiceIntentOnly",
+		},
+		{
+			OID:  snmpOIDFRRBFDConfigured,
+			Type: gosnmp.Gauge32,
+			OnGet: func() (interface{}, error) {
+				return snmpserver.Asn1Gauge32Wrap(uint(source.snapshot(time.Now()).FRRBFDConfiguredPeers)), nil
+			},
+			Document: "arcaRouterFrrBfdConfiguredPeers",
+		},
+		{
+			OID:  snmpOIDFRRBFDObserved,
+			Type: gosnmp.Gauge32,
+			OnGet: func() (interface{}, error) {
+				return snmpserver.Asn1Gauge32Wrap(uint(source.snapshot(time.Now()).FRRBFDObservedPeers)), nil
+			},
+			Document: "arcaRouterFrrBfdObservedPeers",
+		},
+		{
+			OID:  snmpOIDFRRBFDUp,
+			Type: gosnmp.Gauge32,
+			OnGet: func() (interface{}, error) {
+				return snmpserver.Asn1Gauge32Wrap(uint(source.snapshot(time.Now()).FRRBFDUpPeers)), nil
+			},
+			Document: "arcaRouterFrrBfdUpPeers",
+		},
+		{
+			OID:  snmpOIDFRRBFDDownPeers,
+			Type: gosnmp.Gauge32,
+			OnGet: func() (interface{}, error) {
+				return snmpserver.Asn1Gauge32Wrap(uint(source.snapshot(time.Now()).FRRBFDDownPeers)), nil
+			},
+			Document: "arcaRouterFrrBfdDownPeers",
+		},
+		{
+			OID:  snmpOIDFRRBFDSessionDown,
+			Type: gosnmp.Counter64,
+			OnGet: func() (interface{}, error) {
+				return snmpserver.Asn1Counter64Wrap(uint64(source.snapshot(time.Now()).FRRBFDSessionDownEvents)), nil
+			},
+			Document: "arcaRouterFrrBfdSessionDownEvents",
+		},
+		{
+			OID:  snmpOIDFRRBFDRxFail,
+			Type: gosnmp.Counter64,
+			OnGet: func() (interface{}, error) {
+				return snmpserver.Asn1Counter64Wrap(uint64(source.snapshot(time.Now()).FRRBFDRxFailPackets)), nil
+			},
+			Document: "arcaRouterFrrBfdRxFailPackets",
+		},
+		{
+			OID:  snmpOIDFRRBFDIssues,
+			Type: gosnmp.Gauge32,
+			OnGet: func() (interface{}, error) {
+				return snmpserver.Asn1Gauge32Wrap(uint(len(source.snapshot(time.Now()).FRRBFDIssues))), nil
+			},
+			Document: "arcaRouterFrrBfdConvergenceIssues",
+		},
+		{
+			OID:  snmpOIDFRRBFDError,
+			Type: gosnmp.Integer,
+			OnGet: func() (interface{}, error) {
+				if source.snapshot(time.Now()).FRRBFDError != "" {
+					return snmpserver.Asn1IntegerWrap(1), nil
+				}
+				return snmpserver.Asn1IntegerWrap(0), nil
+			},
+			Document: "arcaRouterFrrBfdStatusError",
+		},
+		{
+			OID:  snmpOIDFRRBFDLastRun,
+			Type: gosnmp.Gauge32,
+			OnGet: func() (interface{}, error) {
+				return snmpserver.Asn1Gauge32Wrap(uint(unixTimestampSeconds(source.snapshot(time.Now()).FRRBFDLastRun))), nil
+			},
+			Document: "arcaRouterFrrBfdLastCheck",
 		},
 	}
 }

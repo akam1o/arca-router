@@ -49,6 +49,15 @@ Exported metrics:
 - `arca_router_frr_vrrp_issues`
 - `arca_router_frr_vrrp_error`
 - `arca_router_frr_vrrp_last_check_timestamp_seconds`
+- `arca_router_frr_bfd_configured_peers`
+- `arca_router_frr_bfd_observed_peers`
+- `arca_router_frr_bfd_up_peers`
+- `arca_router_frr_bfd_down_peers`
+- `arca_router_frr_bfd_session_down_events`
+- `arca_router_frr_bfd_rx_fail_packets`
+- `arca_router_frr_bfd_issues`
+- `arca_router_frr_bfd_error`
+- `arca_router_frr_bfd_last_check_timestamp_seconds`
 - `arca_router_vpp_lcp_pairs`
 - `arca_router_vpp_lcp_inconsistencies`
 - `arca_router_vpp_lcp_reconcile_error`
@@ -97,7 +106,7 @@ Endpoints:
 - `POST /api/config/validate`
 - `POST /api/config/commit`
 
-The Web UI is intended for trusted management networks. It exposes the same daemon status used by the metrics endpoint, including datastore backend, etcd config sync health, cluster sync alignment, FRR VRRP operational state, HA convergence, and VPP LCP reconciliation state. It also exposes the running configuration in set-command format through `/api/config`, renders it in the dashboard editor, shows recent commit history from `/api/config/history`, and can validate or commit edited set-command text.
+The Web UI is intended for trusted management networks. It exposes the same daemon status used by the metrics endpoint, including datastore backend, etcd config sync health, cluster sync alignment, FRR VRRP and BFD operational state, HA convergence, and VPP LCP reconciliation state. It also exposes the running configuration in set-command format through `/api/config`, renders it in the dashboard editor, shows recent commit history from `/api/config/history`, and can validate or commit edited set-command text.
 
 HA convergence is evaluated when chassis clustering is enabled and at least one VRRP group is configured. The status is converged only when there are at least two cluster nodes, etcd cluster sync is configured and aligned with the daemon datastore, the etcd config synchronizer is healthy, FRR VRRP operational state reports every configured group as active, and VPP LCP reconciliation has run without errors or inconsistencies.
 
@@ -185,6 +194,20 @@ arca-router custom OIDs currently use the provisional experimental base `1.3.6.1
 | `1.3.6.1.3.9950.1.22.0` | `arcaRouterFrrVrrpConvergenceIssues` |
 | `1.3.6.1.3.9950.1.23.0` | `arcaRouterFrrVrrpStatusError` |
 | `1.3.6.1.3.9950.1.24.0` | `arcaRouterFrrVrrpLastCheck` |
+| `1.3.6.1.3.9950.1.25.0` | `arcaRouterClassOfServiceConfigured` |
+| `1.3.6.1.3.9950.1.26.0` | `arcaRouterClassOfServiceForwardingClasses` |
+| `1.3.6.1.3.9950.1.27.0` | `arcaRouterClassOfServiceTrafficControlProfiles` |
+| `1.3.6.1.3.9950.1.28.0` | `arcaRouterClassOfServiceInterfaceBindings` |
+| `1.3.6.1.3.9950.1.29.0` | `arcaRouterClassOfServiceIntentOnly` |
+| `1.3.6.1.3.9950.1.30.0` | `arcaRouterFrrBfdConfiguredPeers` |
+| `1.3.6.1.3.9950.1.31.0` | `arcaRouterFrrBfdObservedPeers` |
+| `1.3.6.1.3.9950.1.32.0` | `arcaRouterFrrBfdUpPeers` |
+| `1.3.6.1.3.9950.1.33.0` | `arcaRouterFrrBfdDownPeers` |
+| `1.3.6.1.3.9950.1.34.0` | `arcaRouterFrrBfdSessionDownEvents` |
+| `1.3.6.1.3.9950.1.35.0` | `arcaRouterFrrBfdRxFailPackets` |
+| `1.3.6.1.3.9950.1.36.0` | `arcaRouterFrrBfdConvergenceIssues` |
+| `1.3.6.1.3.9950.1.37.0` | `arcaRouterFrrBfdStatusError` |
+| `1.3.6.1.3.9950.1.38.0` | `arcaRouterFrrBfdLastCheck` |
 
 Example:
 

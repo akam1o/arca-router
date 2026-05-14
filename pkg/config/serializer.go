@@ -218,13 +218,23 @@ func writeRoutingOptions(b *strings.Builder, ro *RoutingOptions) {
 		if route == nil {
 			continue
 		}
+		line := fmt.Sprintf("set routing-options static route %s next-hop %s", route.Prefix, route.NextHop)
 		if route.Distance > 0 {
-			writeLine(b, "set routing-options static route %s next-hop %s distance %d",
-				route.Prefix, route.NextHop, route.Distance)
-		} else {
-			writeLine(b, "set routing-options static route %s next-hop %s",
-				route.Prefix, route.NextHop)
+			line += fmt.Sprintf(" distance %d", route.Distance)
 		}
+		if route.BFD || route.BFDProfile != "" || route.BFDSource != "" || route.BFDMultihop {
+			line += " bfd"
+			if route.BFDMultihop {
+				line += " multi-hop"
+			}
+			if route.BFDSource != "" {
+				line += fmt.Sprintf(" source %s", route.BFDSource)
+			}
+			if route.BFDProfile != "" {
+				line += fmt.Sprintf(" profile %s", EscapeValue(route.BFDProfile))
+			}
+		}
+		writeLine(b, "%s", line)
 	}
 }
 
@@ -267,10 +277,79 @@ func writeProtocols(b *strings.Builder, pc *ProtocolConfig) {
 	if pc == nil {
 		return
 	}
+	writeBFD(b, pc.BFD)
 	writeBGP(b, pc.BGP)
-	writeOSPF(b, pc.OSPF)
+	writeOSPF(b, "ospf", pc.OSPF)
+	writeOSPF(b, "ospf3", pc.OSPF3)
 	writeMPLS(b, pc.MPLS)
 	writeVRRP(b, pc.VRRP)
+}
+
+func writeBFD(b *strings.Builder, bfd *BFDConfig) {
+	if bfd == nil {
+		return
+	}
+	for _, name := range sortedKeys(bfd.Profiles) {
+		profile := bfd.Profiles[name]
+		if profile == nil {
+			continue
+		}
+		if profile.ReceiveInterval != 0 {
+			writeLine(b, "set protocols bfd profile %s receive-interval %d", EscapeValue(name), profile.ReceiveInterval)
+		}
+		if profile.TransmitInterval != 0 {
+			writeLine(b, "set protocols bfd profile %s transmit-interval %d", EscapeValue(name), profile.TransmitInterval)
+		}
+		if profile.DetectMultiplier != 0 {
+			writeLine(b, "set protocols bfd profile %s detect-multiplier %d", EscapeValue(name), profile.DetectMultiplier)
+		}
+		if profile.EchoMode {
+			writeLine(b, "set protocols bfd profile %s echo-mode", EscapeValue(name))
+		}
+		if profile.PassiveMode {
+			writeLine(b, "set protocols bfd profile %s passive-mode", EscapeValue(name))
+		}
+	}
+	for _, address := range sortedKeys(bfd.Peers) {
+		peer := bfd.Peers[address]
+		if peer == nil {
+			continue
+		}
+		base := fmt.Sprintf("set protocols bfd peer %s", EscapeValue(address))
+		if peer.LocalAddress != "" {
+			writeLine(b, "%s local-address %s", base, EscapeValue(peer.LocalAddress))
+		}
+		if peer.Interface != "" {
+			writeLine(b, "%s interface %s", base, peer.Interface)
+		}
+		if peer.VRF != "" {
+			writeLine(b, "%s vrf %s", base, EscapeValue(peer.VRF))
+		}
+		if peer.Multihop {
+			writeLine(b, "%s multihop", base)
+		}
+		if peer.Profile != "" {
+			writeLine(b, "%s profile %s", base, EscapeValue(peer.Profile))
+		}
+		if peer.ReceiveInterval != 0 {
+			writeLine(b, "%s receive-interval %d", base, peer.ReceiveInterval)
+		}
+		if peer.TransmitInterval != 0 {
+			writeLine(b, "%s transmit-interval %d", base, peer.TransmitInterval)
+		}
+		if peer.DetectMultiplier != 0 {
+			writeLine(b, "%s detect-multiplier %d", base, peer.DetectMultiplier)
+		}
+		if peer.EchoMode {
+			writeLine(b, "%s echo-mode", base)
+		}
+		if peer.PassiveMode {
+			writeLine(b, "%s passive-mode", base)
+		}
+		if peer.Shutdown {
+			writeLine(b, "%s shutdown", base)
+		}
+	}
 }
 
 func writeMPLS(b *strings.Builder, mpls *MPLSConfig) {
@@ -343,16 +422,23 @@ func writeBGP(b *strings.Builder, bgp *BGPConfig) {
 				writeLine(b, "set protocols bgp group %s neighbor %s local-address %s",
 					groupName, neighborIP, neighbor.LocalAddress)
 			}
+			if neighbor.BFDProfile != "" {
+				writeLine(b, "set protocols bgp group %s neighbor %s bfd profile %s",
+					groupName, neighborIP, EscapeValue(neighbor.BFDProfile))
+			} else if neighbor.BFD {
+				writeLine(b, "set protocols bgp group %s neighbor %s bfd",
+					groupName, neighborIP)
+			}
 		}
 	}
 }
 
-func writeOSPF(b *strings.Builder, ospf *OSPFConfig) {
+func writeOSPF(b *strings.Builder, protocol string, ospf *OSPFConfig) {
 	if ospf == nil {
 		return
 	}
 	if ospf.RouterID != "" {
-		writeLine(b, "set protocols ospf router-id %s", ospf.RouterID)
+		writeLine(b, "set protocols %s router-id %s", protocol, ospf.RouterID)
 	}
 	for _, areaName := range sortedKeys(ospf.Areas) {
 		area := ospf.Areas[areaName]
@@ -364,7 +450,7 @@ func writeOSPF(b *strings.Builder, ospf *OSPFConfig) {
 			if ospfIface == nil {
 				continue
 			}
-			base := fmt.Sprintf("set protocols ospf area %s interface %s", areaName, ifaceName)
+			base := fmt.Sprintf("set protocols %s area %s interface %s", protocol, areaName, ifaceName)
 			wrote := false
 			if ospfIface.Passive {
 				writeLine(b, "%s passive", base)
@@ -376,6 +462,13 @@ func writeOSPF(b *strings.Builder, ospf *OSPFConfig) {
 			}
 			if ospfIface.PrioritySet || ospfIface.Priority > 0 {
 				writeLine(b, "%s priority %d", base, ospfIface.Priority)
+				wrote = true
+			}
+			if ospfIface.BFDProfile != "" {
+				writeLine(b, "%s bfd profile %s", base, EscapeValue(ospfIface.BFDProfile))
+				wrote = true
+			} else if ospfIface.BFD {
+				writeLine(b, "%s bfd", base)
 				wrote = true
 			}
 			if !wrote {

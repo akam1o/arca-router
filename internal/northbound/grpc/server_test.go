@@ -13,6 +13,7 @@ import (
 
 	"github.com/akam1o/arca-router/internal/engine"
 	"github.com/akam1o/arca-router/internal/model"
+	sbfrr "github.com/akam1o/arca-router/internal/southbound/frr"
 	"github.com/akam1o/arca-router/internal/store"
 	pkgconfig "github.com/akam1o/arca-router/pkg/config"
 	pkgvpp "github.com/akam1o/arca-router/pkg/vpp"
@@ -65,6 +66,14 @@ type fakeHAStatusSource struct {
 
 func (f fakeHAStatusSource) HAStatusInfo() HAStatusInfo {
 	return f.info
+}
+
+type fakeBFDOperationalSource struct {
+	status sbfrr.BFDOperationalStatus
+}
+
+func (f fakeBFDOperationalSource) BFDOperationalStatus() sbfrr.BFDOperationalStatus {
+	return f.status
 }
 
 func (f *fakeStore) GetLatestSnapshot(ctx context.Context) (*model.ConfigSnapshot, error) {
@@ -246,6 +255,14 @@ func TestOperationalStateEndpointsReadVPPAndFRR(t *testing.T) {
 	if err := vppClient.SetQoSProfile(ctx, iface.SwIfIndex, pkgvpp.QoSProfile{Name: "WAN"}); err != nil {
 		t.Fatalf("mock VPP SetQoSProfile() error = %v", err)
 	}
+	for _, isIPv6 := range []bool{false, true} {
+		if err := vppClient.AddIPTable(ctx, pkgvpp.IPTable{ID: 100, IsIPv6: isIPv6, Name: "BLUE"}); err != nil {
+			t.Fatalf("mock VPP AddIPTable(IPv6=%t) error = %v", isIPv6, err)
+		}
+		if err := vppClient.SetInterfaceTable(ctx, iface.SwIfIndex, 100, isIPv6); err != nil {
+			t.Fatalf("mock VPP SetInterfaceTable(IPv6=%t) error = %v", isIPv6, err)
+		}
+	}
 	if err := vppClient.Close(); err != nil {
 		t.Fatalf("mock VPP Close() error = %v", err)
 	}
@@ -270,6 +287,9 @@ func TestOperationalStateEndpointsReadVPPAndFRR(t *testing.T) {
 	if ifaces[0].QoSProfile != "WAN" {
 		t.Fatalf("GetInterfaces()[0] QoSProfile = %q, want WAN", ifaces[0].QoSProfile)
 	}
+	if ifaces[0].IPv4TableID != 100 || ifaces[0].IPv6TableID != 100 {
+		t.Fatalf("GetInterfaces()[0] table IDs = %d/%d, want 100/100", ifaces[0].IPv4TableID, ifaces[0].IPv6TableID)
+	}
 	if len(ifaces[0].RxQueues) != 1 || ifaces[0].RxQueues[0].WorkerID != 1 || ifaces[0].RxQueues[0].Mode != "polling" {
 		t.Fatalf("GetInterfaces()[0] RX queues = %#v, want VPP queue placement", ifaces[0].RxQueues)
 	}
@@ -285,8 +305,11 @@ func TestOperationalStateEndpointsReadVPPAndFRR(t *testing.T) {
 	}
 	t.Cleanup(func() { runOperationalVtyshCommand = oldVtysh })
 
-	if output, err := srv.GetRouteText(ctx, "ospf"); err != nil || output != "show ip route ospf\n" {
+	if output, err := srv.GetRouteText(ctx, "ospf", ""); err != nil || output != "show ip route ospf\n" {
 		t.Fatalf("GetRouteText() = %q, %v", output, err)
+	}
+	if output, err := srv.GetRouteText(ctx, "ospf3", "inet6"); err != nil || output != "show ipv6 route ospf6\n" {
+		t.Fatalf("GetRouteText(inet6) = %q, %v", output, err)
 	}
 	if output, err := srv.GetBGPSummaryText(ctx); err != nil || output != "show bgp summary\n" {
 		t.Fatalf("GetBGPSummaryText() = %q, %v", output, err)
@@ -294,20 +317,256 @@ func TestOperationalStateEndpointsReadVPPAndFRR(t *testing.T) {
 	if output, err := srv.GetBGPNeighborText(ctx, "192.0.2.1"); err != nil || output != "show bgp neighbor 192.0.2.1\n" {
 		t.Fatalf("GetBGPNeighborText() = %q, %v", output, err)
 	}
-	if output, err := srv.GetOSPFNeighborsText(ctx); err != nil || output != "show ip ospf neighbor\n" {
+	if output, err := srv.GetOSPFNeighborsText(ctx, ""); err != nil || output != "show ip ospf neighbor\n" {
 		t.Fatalf("GetOSPFNeighborsText() = %q, %v", output, err)
+	}
+	if output, err := srv.GetOSPFNeighborsText(ctx, "inet6"); err != nil || output != "show ipv6 ospf6 neighbor\n" {
+		t.Fatalf("GetOSPFNeighborsText(inet6) = %q, %v", output, err)
 	}
 	if output, err := srv.GetVRRPText(ctx); err != nil || output != "show vrrp\n" {
 		t.Fatalf("GetVRRPText() = %q, %v", output, err)
 	}
-	if len(commands) != 5 {
-		t.Fatalf("vtysh commands = %v, want 5 commands", commands)
+	if output, err := srv.GetBFDText(ctx, "", true, false); err != nil || output != "show bfd peers brief\n" {
+		t.Fatalf("GetBFDText(brief) = %q, %v", output, err)
 	}
-	if _, err := srv.GetRouteText(ctx, "rip"); err == nil || !strings.Contains(err.Error(), "invalid route protocol") {
+	if output, err := srv.GetBFDText(ctx, "192.0.2.2", false, true); err != nil || output != "show bfd peer 192.0.2.2 counters\n" {
+		t.Fatalf("GetBFDText(peer counters) = %q, %v", output, err)
+	}
+	if len(commands) != 9 {
+		t.Fatalf("vtysh commands = %v, want 9 commands", commands)
+	}
+	if _, err := srv.GetRouteText(ctx, "rip", ""); err == nil || !strings.Contains(err.Error(), "invalid route protocol") {
 		t.Fatalf("GetRouteText(invalid) error = %v, want invalid protocol", err)
+	}
+	if _, err := srv.GetRouteText(ctx, "ospf", "inet6"); err == nil || !strings.Contains(err.Error(), "invalid route protocol") {
+		t.Fatalf("GetRouteText(invalid inet6) error = %v, want invalid protocol", err)
+	}
+	if _, err := srv.GetOSPFNeighborsText(ctx, "link-state"); err == nil || !strings.Contains(err.Error(), "invalid address family") {
+		t.Fatalf("GetOSPFNeighborsText(invalid family) error = %v, want invalid address family", err)
 	}
 	if _, err := srv.GetBGPNeighborText(ctx, "not-an-address"); err == nil || !strings.Contains(err.Error(), "invalid BGP neighbor address") {
 		t.Fatalf("GetBGPNeighborText(invalid) error = %v, want invalid peer address", err)
+	}
+	if _, err := srv.GetBFDText(ctx, "not-an-address", false, false); err == nil || !strings.Contains(err.Error(), "invalid BFD peer address") {
+		t.Fatalf("GetBFDText(invalid peer) error = %v, want invalid peer address", err)
+	}
+	if _, err := srv.GetBFDText(ctx, "192.0.2.2", true, false); err == nil || !strings.Contains(err.Error(), "does not support brief") {
+		t.Fatalf("GetBFDText(peer brief) error = %v, want brief unsupported", err)
+	}
+}
+
+func TestGetRoutesUsesFRRJSON(t *testing.T) {
+	srv := NewServer(engine.NewEngine(nil, testLogger()), &fakeStore{}, testLogger())
+	ctx := context.Background()
+
+	var commands []string
+	oldVtysh := runOperationalVtyshCommand
+	runOperationalVtyshCommand = func(ctx context.Context, command string) (string, error) {
+		commands = append(commands, command)
+		switch command {
+		case "show ip route json":
+			return `{
+				"10.0.0.0/24": [
+					{
+						"protocol": "bgp",
+						"metric": 20,
+						"selected": true,
+						"nexthops": [
+							{"ip": "192.0.2.1", "interfaceName": "ge0-0-0", "active": true}
+						]
+					}
+				],
+				"192.0.2.0/24": [
+					{"protocol": "connected", "selected": true, "interfaceName": "ge0-0-1"}
+				]
+			}`, nil
+		case "show ipv6 route json":
+			return `{
+				"2001:db8:100::/64": [
+					{
+						"protocol": "ospf6",
+						"selected": true,
+						"nexthops": [
+							{"ip": "2001:db8::2", "interfaceName": "ge0-0-2", "active": true}
+						]
+					}
+				]
+			}`, nil
+		default:
+			t.Fatalf("unexpected vtysh command %q", command)
+			return "", nil
+		}
+	}
+	t.Cleanup(func() { runOperationalVtyshCommand = oldVtysh })
+
+	routes, err := srv.GetRoutes(ctx, "", "")
+	if err != nil {
+		t.Fatalf("GetRoutes() error = %v", err)
+	}
+	if len(commands) != 2 || commands[0] != "show ip route json" || commands[1] != "show ipv6 route json" {
+		t.Fatalf("vtysh commands = %#v, want IPv4 and IPv6 route JSON", commands)
+	}
+	if len(routes) != 3 {
+		t.Fatalf("GetRoutes() returned %d routes, want 3", len(routes))
+	}
+	if got := routes[0]; got.Prefix != "10.0.0.0/24" || got.NextHop != "192.0.2.1" ||
+		got.Protocol != "bgp" || got.Metric != 20 || got.Interface != "ge0-0-0" || !got.Active {
+		t.Fatalf("GetRoutes()[0] = %#v, want parsed BGP route", got)
+	}
+
+	routes, err = srv.GetRoutes(ctx, "", "ospf3")
+	if err != nil {
+		t.Fatalf("GetRoutes(ospf3) error = %v", err)
+	}
+	if len(routes) != 1 || routes[0].Prefix != "2001:db8:100::/64" || routes[0].Protocol != "ospf6" {
+		t.Fatalf("GetRoutes(ospf3) = %#v, want IPv6 OSPF route", routes)
+	}
+
+	routes, err = srv.GetRoutes(ctx, "192.0.2.0/24", "")
+	if err != nil {
+		t.Fatalf("GetRoutes(prefix) error = %v", err)
+	}
+	if len(routes) != 1 || routes[0].Protocol != "connected" {
+		t.Fatalf("GetRoutes(prefix) = %#v, want connected route", routes)
+	}
+
+	if _, err := srv.GetRoutes(ctx, "not-a-prefix", ""); err == nil || !strings.Contains(err.Error(), "invalid route prefix filter") {
+		t.Fatalf("GetRoutes(invalid prefix) error = %v, want invalid prefix", err)
+	}
+}
+
+func TestGetBGPNeighborsUsesFRRJSON(t *testing.T) {
+	srv := NewServer(engine.NewEngine(nil, testLogger()), &fakeStore{}, testLogger())
+	ctx := context.Background()
+
+	var commands []string
+	oldVtysh := runOperationalVtyshCommand
+	runOperationalVtyshCommand = func(ctx context.Context, command string) (string, error) {
+		commands = append(commands, command)
+		if command != "show bgp summary json" {
+			t.Fatalf("unexpected vtysh command %q", command)
+		}
+		return `{
+			"ipv4Unicast": {
+				"peers": {
+					"192.0.2.2": {
+						"remoteAs": 65001,
+						"state": "Established",
+						"peerUptime": "00:01:30",
+						"pfxRcd": 10,
+						"pfxSnt": 3
+					}
+				}
+			},
+			"ipv6Unicast": {
+				"peers": {
+					"2001:db8::2": {
+						"remoteAs": 65002,
+						"state": "Active",
+						"peerUptimeMsec": 42000,
+						"pfxRcd": 0,
+						"pfxSnt": 1
+					}
+				}
+			}
+		}`, nil
+	}
+	t.Cleanup(func() { runOperationalVtyshCommand = oldVtysh })
+
+	neighbors, err := srv.GetBGPNeighbors(ctx)
+	if err != nil {
+		t.Fatalf("GetBGPNeighbors() error = %v", err)
+	}
+	if len(commands) != 1 || commands[0] != "show bgp summary json" {
+		t.Fatalf("vtysh commands = %#v, want BGP summary JSON", commands)
+	}
+	if len(neighbors) != 2 {
+		t.Fatalf("GetBGPNeighbors() returned %d neighbors, want 2", len(neighbors))
+	}
+	if got := neighbors[0]; got.PeerAddress != "192.0.2.2" || got.PeerAS != 65001 ||
+		got.State != "Established" || got.UptimeSecs != 90 ||
+		got.PrefixReceived != 10 || got.PrefixSent != 3 {
+		t.Fatalf("GetBGPNeighbors()[0] = %#v, want IPv4 peer state", got)
+	}
+	if got := neighbors[1]; got.PeerAddress != "2001:db8::2" || got.PeerAS != 65002 ||
+		got.State != "Active" || got.UptimeSecs != 42 ||
+		got.PrefixReceived != 0 || got.PrefixSent != 1 {
+		t.Fatalf("GetBGPNeighbors()[1] = %#v, want IPv6 peer state", got)
+	}
+}
+
+func TestGetOSPFNeighborsUsesFRRJSON(t *testing.T) {
+	srv := NewServer(engine.NewEngine(nil, testLogger()), &fakeStore{}, testLogger())
+	ctx := context.Background()
+
+	var commands []string
+	oldVtysh := runOperationalVtyshCommand
+	runOperationalVtyshCommand = func(ctx context.Context, command string) (string, error) {
+		commands = append(commands, command)
+		switch command {
+		case "show ip ospf neighbor json":
+			return `{
+				"neighbors": {
+					"10.0.0.2": [
+						{
+							"ifaceAddress": "192.0.2.2",
+							"ifaceName": "ge0-0-0",
+							"nbrState": "Full/DROther",
+							"priority": 1,
+							"deadTime": "00:00:31",
+							"upTimeInMsec": 65000
+						}
+					]
+				}
+			}`, nil
+		case "show ipv6 ospf6 neighbor json":
+			return `{
+				"neighbors": [
+					{
+						"neighborId": "10.0.0.3",
+						"linkLocalAddress": "fe80::1",
+						"interfaceName": "ge0-0-1",
+						"state": "Full",
+						"role": "Backup",
+						"deadTime": "35.000s",
+						"duration": "00:01:05"
+					}
+				]
+			}`, nil
+		default:
+			t.Fatalf("unexpected vtysh command %q", command)
+			return "", nil
+		}
+	}
+	t.Cleanup(func() { runOperationalVtyshCommand = oldVtysh })
+
+	neighbors, err := srv.GetOSPFNeighbors(ctx, "")
+	if err != nil {
+		t.Fatalf("GetOSPFNeighbors() error = %v", err)
+	}
+	if len(neighbors) != 1 {
+		t.Fatalf("GetOSPFNeighbors() returned %d neighbors, want 1", len(neighbors))
+	}
+	if got := neighbors[0]; got.RouterID != "10.0.0.2" || got.Address != "192.0.2.2" ||
+		got.Interface != "ge0-0-0" || got.State != "Full" || got.Role != "DROther" ||
+		got.DeadTimeSecs != 31 || got.UptimeSecs != 65 {
+		t.Fatalf("GetOSPFNeighbors()[0] = %#v, want IPv4 neighbor state", got)
+	}
+
+	neighbors, err = srv.GetOSPFNeighbors(ctx, addressFamilyIPv6)
+	if err != nil {
+		t.Fatalf("GetOSPFNeighbors(inet6) error = %v", err)
+	}
+	if len(neighbors) != 1 {
+		t.Fatalf("GetOSPFNeighbors(inet6) returned %d neighbors, want 1", len(neighbors))
+	}
+	if got := neighbors[0]; got.RouterID != "10.0.0.3" || got.Address != "fe80::1" ||
+		got.Interface != "ge0-0-1" || got.State != "Full" || got.Role != "Backup" ||
+		got.DeadTimeSecs != 35 || got.UptimeSecs != 65 {
+		t.Fatalf("GetOSPFNeighbors(inet6)[0] = %#v, want IPv6 neighbor state", got)
+	}
+	if strings.Join(commands, "\n") != "show ip ospf neighbor json\nshow ipv6 ospf6 neighbor json" {
+		t.Fatalf("vtysh commands = %#v, want OSPFv2 then OSPFv3 JSON", commands)
 	}
 }
 
@@ -323,6 +582,8 @@ func TestGetInterfacesUsesManagedStateCollector(t *testing.T) {
 				MTU:         1500,
 				MAC:         "02:00:00:00:00:01",
 				QoSProfile:  "WAN",
+				IPv4TableID: 100,
+				IPv6TableID: 100,
 				Counters: &model.InterfaceCounters{
 					RxPackets: 10,
 					TxPackets: 20,
@@ -362,7 +623,7 @@ func TestGetInterfacesUsesManagedStateCollector(t *testing.T) {
 	if got.Name != "ge-0/0/0" || got.AdminStatus != "up" || got.OperStatus != "down" || got.Speed != 10_000_000_000 || got.MTU != 1500 || got.MAC != "02:00:00:00:00:01" {
 		t.Fatalf("GetInterfaces()[0] = %#v, want managed interface state", got)
 	}
-	if got.QoSProfile != "WAN" || got.RxPackets != 10 || got.TxPackets != 20 || got.RxBytes != 100 || got.TxBytes != 200 || got.RxErrors != 1 || got.TxErrors != 2 {
+	if got.QoSProfile != "WAN" || got.IPv4TableID != 100 || got.IPv6TableID != 100 || got.RxPackets != 10 || got.TxPackets != 20 || got.RxBytes != 100 || got.TxBytes != 200 || got.RxErrors != 1 || got.TxErrors != 2 {
 		t.Fatalf("GetInterfaces()[0] counters/QoS = %#v, want collector values", got)
 	}
 	if len(got.RxQueues) != 1 || got.RxQueues[0].WorkerID != 3 || got.RxQueues[0].Mode != "adaptive" {
@@ -391,9 +652,66 @@ func TestGetLCPReconciliationUsesSource(t *testing.T) {
 	}
 }
 
+func TestGetBFDStatusUsesSource(t *testing.T) {
+	srv := NewServer(engine.NewEngine(nil, testLogger()), &fakeStore{}, testLogger())
+	lastRun := time.Unix(1700000500, 0).UTC()
+	srv.SetBFDOperationalSource(fakeBFDOperationalSource{status: sbfrr.BFDOperationalStatus{
+		LastRun:           lastRun,
+		ConfiguredPeers:   2,
+		ObservedPeers:     2,
+		UpPeers:           1,
+		DownPeers:         1,
+		SessionDownEvents: 3,
+		RxFailPackets:     4,
+		Issues:            []string{"FRR BFD peer 192.0.2.3 is not up: down"},
+		Peers: []sbfrr.BFDPeerOperationalStatus{
+			{
+				Peer:              "192.0.2.3",
+				LocalAddress:      "192.0.2.1",
+				Interface:         "ge0-0-1",
+				Status:            "down",
+				Diagnostic:        "control detection time expired",
+				RemoteDiagnostic:  "ok",
+				Observed:          true,
+				Up:                false,
+				SessionDownEvents: 3,
+				RxFailPackets:     4,
+			},
+			{
+				Peer:              "192.0.2.2",
+				LocalAddress:      "192.0.2.1",
+				Interface:         "ge0-0-0",
+				VRF:               "default",
+				Status:            "up",
+				Observed:          true,
+				Up:                true,
+				SessionDownEvents: 0,
+				RxFailPackets:     0,
+			},
+		},
+	}})
+
+	info, err := srv.GetBFDStatus(context.Background())
+	if err != nil {
+		t.Fatalf("GetBFDStatus() error = %v", err)
+	}
+	if info.LastRun != lastRun || info.ConfiguredPeers != 2 || info.ObservedPeers != 2 ||
+		info.UpPeers != 1 || info.DownPeers != 1 || info.SessionDownEvents != 3 || info.RxFailPackets != 4 {
+		t.Fatalf("GetBFDStatus() = %#v, want BFD aggregate counters", info)
+	}
+	if len(info.Peers) != 2 || info.Peers[0].Peer != "192.0.2.2" || !info.Peers[0].Up ||
+		info.Peers[1].Peer != "192.0.2.3" || info.Peers[1].Up || info.Peers[1].Diagnostic == "" {
+		t.Fatalf("GetBFDStatus().Peers = %#v, want sorted peer detail", info.Peers)
+	}
+	if len(info.Issues) != 1 || !strings.Contains(info.Issues[0], "not up") {
+		t.Fatalf("GetBFDStatus().Issues = %#v, want issue detail", info.Issues)
+	}
+}
+
 func TestGetHAStatusUsesSource(t *testing.T) {
 	srv := NewServer(engine.NewEngine(nil, testLogger()), &fakeStore{}, testLogger())
 	lastRun := time.Unix(1700000300, 0).UTC()
+	bfdLastRun := time.Unix(1700000400, 0).UTC()
 	srv.SetHAStatusSource(fakeHAStatusSource{info: HAStatusInfo{
 		Configured:              true,
 		Converged:               false,
@@ -407,6 +725,12 @@ func TestGetHAStatusUsesSource(t *testing.T) {
 		FRRVRRPConfiguredGroups: 1,
 		FRRVRRPObservedGroups:   1,
 		FRRVRRPActiveGroups:     0,
+		FRRBFDLastCheck:         bfdLastRun,
+		FRRBFDConfiguredPeers:   1,
+		FRRBFDObservedPeers:     1,
+		FRRBFDUpPeers:           0,
+		FRRBFDDownPeers:         1,
+		FRRBFDIssues:            []string{"FRR BFD peer 192.0.2.2 is down"},
 	}})
 
 	info, err := srv.GetHAStatus(context.Background())
@@ -414,7 +738,9 @@ func TestGetHAStatusUsesSource(t *testing.T) {
 		t.Fatalf("GetHAStatus() error = %v", err)
 	}
 	if !info.Configured || info.Converged || info.VRRPGroups != 1 || info.FRRVRRPLastCheck != lastRun ||
-		info.FRRVRRPActiveGroups != 0 || len(info.Issues) != 1 {
+		info.FRRVRRPActiveGroups != 0 || info.FRRBFDLastCheck != bfdLastRun ||
+		info.FRRBFDConfiguredPeers != 1 || info.FRRBFDDownPeers != 1 || len(info.FRRBFDIssues) != 1 ||
+		len(info.Issues) != 1 {
 		t.Fatalf("GetHAStatus() = %#v, want source status", info)
 	}
 }
@@ -460,6 +786,53 @@ func TestGetClassOfServiceReturnsRunningConfig(t *testing.T) {
 		info.Interfaces[0].OutputTrafficControlProfile != "WAN" ||
 		info.Interfaces[0].EnforcementStatus != "intent-only" {
 		t.Fatalf("Interfaces = %#v, want interface binding", info.Interfaces)
+	}
+}
+
+func TestGetRoutingInstancesReturnsRunningConfig(t *testing.T) {
+	eng := engine.NewEngine(nil, testLogger())
+	eng.InitializeRunning(&model.RouterConfig{
+		RoutingInstances: map[string]*model.RoutingInstance{
+			"BLUE": {
+				InstanceType:       "vrf",
+				RouteDistinguisher: "65000:100",
+				VRFTarget:          "target:65000:100",
+				VRFTargetImport:    []string{"target:65000:101"},
+				VRFTargetExport:    []string{"target:65000:102"},
+				VRFImport:          []string{"BLUE-IN"},
+				VRFExport:          []string{"BLUE-OUT"},
+				Interfaces:         []string{"ge-0/0/1", "ge-0/0/0"},
+			},
+			"RED": {
+				Interfaces: []string{"ge-0/0/2"},
+			},
+		},
+	}, 1)
+	srv := NewServer(eng, &fakeStore{}, testLogger())
+
+	instances, err := srv.GetRoutingInstances(context.Background())
+	if err != nil {
+		t.Fatalf("GetRoutingInstances() error = %v", err)
+	}
+	if len(instances) != 2 {
+		t.Fatalf("GetRoutingInstances() returned %d instances, want 2: %#v", len(instances), instances)
+	}
+	blue := instances[0]
+	if blue.Name != "BLUE" || blue.InstanceType != "vrf" || blue.RouteDistinguisher != "65000:100" ||
+		blue.IPv4TableID != 100 || blue.IPv6TableID != 100 {
+		t.Fatalf("BLUE routing instance = %#v, want RD-derived table", blue)
+	}
+	if strings.Join(blue.ImportTargets, ",") != "target:65000:100,target:65000:101" ||
+		strings.Join(blue.ExportTargets, ",") != "target:65000:100,target:65000:102" ||
+		strings.Join(blue.ImportPolicies, ",") != "BLUE-IN" ||
+		strings.Join(blue.ExportPolicies, ",") != "BLUE-OUT" ||
+		strings.Join(blue.Interfaces, ",") != "ge-0/0/0,ge-0/0/1" {
+		t.Fatalf("BLUE routing instance lists = %#v, want targets/policies/interfaces", blue)
+	}
+	red := instances[1]
+	if red.Name != "RED" || red.InstanceType != "vrf" || red.IPv4TableID == 0 || red.IPv6TableID != red.IPv4TableID ||
+		strings.Join(red.Interfaces, ",") != "ge-0/0/2" {
+		t.Fatalf("RED routing instance = %#v, want derived table", red)
 	}
 }
 
@@ -1060,6 +1433,79 @@ func TestApplyCandidateCommandPreservesOSPFInterfaceAttributes(t *testing.T) {
 			t.Fatalf("updated candidate missing %q:\n%s", want, updated)
 		}
 	}
+}
+
+func TestApplyCandidateCommandReplacesBFDAttributes(t *testing.T) {
+	candidate := strings.Join([]string{
+		"set protocols bfd profile fast receive-interval 150",
+		"set protocols bfd profile fast transmit-interval 150",
+		"set protocols bfd profile fast detect-multiplier 3",
+		"set protocols bfd profile fast passive-mode",
+		"set protocols bfd peer 192.0.2.2 local-address 192.0.2.1",
+		"set protocols bfd peer 192.0.2.2 profile fast",
+		"set protocols bfd peer 192.0.2.2 multihop",
+		"set protocols bfd peer 192.0.2.2 shutdown",
+		"set protocols bgp group EBGP neighbor 192.0.2.2 bfd",
+		"set protocols ospf area 0.0.0.0 interface ge-0/0/0 bfd",
+		"set protocols ospf3 area 0.0.0.0 interface ge-0/0/0 bfd profile fast",
+	}, "\n")
+
+	updated, err := applyCandidateCommand(candidate, strings.Join([]string{
+		"set protocols bfd profile fast receive-interval 300",
+		"set protocols bfd profile fast detect-multiplier 5",
+		"set protocols bfd peer 192.0.2.2 local-address 192.0.2.10",
+		"set protocols bfd peer 192.0.2.2 profile slow",
+		"set protocols bgp group EBGP neighbor 192.0.2.2 bfd profile slow",
+		"set protocols ospf area 0.0.0.0 interface ge-0/0/0 bfd profile slow",
+		"set protocols ospf3 area 0.0.0.0 interface ge-0/0/0 bfd",
+	}, "\n"))
+	if err != nil {
+		t.Fatalf("applyCandidateCommand() error = %v", err)
+	}
+	updatedLines := strings.Split(updated, "\n")
+	for _, oldLine := range []string{
+		"set protocols bfd profile fast receive-interval 150",
+		"set protocols bfd profile fast detect-multiplier 3",
+		"set protocols bfd peer 192.0.2.2 local-address 192.0.2.1",
+		"set protocols bfd peer 192.0.2.2 profile fast",
+		"set protocols bgp group EBGP neighbor 192.0.2.2 bfd",
+		"set protocols ospf area 0.0.0.0 interface ge-0/0/0 bfd",
+		"set protocols ospf3 area 0.0.0.0 interface ge-0/0/0 bfd profile fast",
+	} {
+		if containsLine(updatedLines, oldLine) {
+			t.Fatalf("updated candidate retained old line %q:\n%s", oldLine, updated)
+		}
+	}
+	for _, want := range []string{
+		"set protocols bfd profile fast receive-interval 300",
+		"set protocols bfd profile fast transmit-interval 150",
+		"set protocols bfd profile fast detect-multiplier 5",
+		"set protocols bfd profile fast passive-mode",
+		"set protocols bfd peer 192.0.2.2 local-address 192.0.2.10",
+		"set protocols bfd peer 192.0.2.2 profile slow",
+		"set protocols bfd peer 192.0.2.2 multihop",
+		"set protocols bfd peer 192.0.2.2 shutdown",
+		"set protocols bgp group EBGP neighbor 192.0.2.2 bfd profile slow",
+		"set protocols ospf area 0.0.0.0 interface ge-0/0/0 bfd profile slow",
+		"set protocols ospf3 area 0.0.0.0 interface ge-0/0/0 bfd",
+	} {
+		if !containsLine(updatedLines, want) {
+			t.Fatalf("updated candidate missing %q:\n%s", want, updated)
+		}
+		if got := countCandidateLines(updatedLines, want); got != 1 {
+			t.Fatalf("updated candidate contains %q %d times, want 1:\n%s", want, got, updated)
+		}
+	}
+}
+
+func countCandidateLines(lines []string, target string) int {
+	count := 0
+	for _, line := range lines {
+		if line == target {
+			count++
+		}
+	}
+	return count
 }
 
 func TestApplyCandidateCommandReplacesV06ScalarAttributes(t *testing.T) {

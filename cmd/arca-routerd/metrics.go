@@ -40,6 +40,7 @@ type metricsSource struct {
 
 type frrVRRPSource interface {
 	VRRPOperationalStatus() sbfrr.VRRPOperationalStatus
+	BFDOperationalStatus() sbfrr.BFDOperationalStatus
 }
 
 type vppReconciliationSource interface {
@@ -82,6 +83,16 @@ type routerMetrics struct {
 	FRRVRRPGroups             []sbfrr.VRRPGroupOperationalStatus
 	FRRVRRPIssues             []string
 	FRRVRRPError              string
+	FRRBFDLastRun             time.Time
+	FRRBFDConfiguredPeers     int
+	FRRBFDObservedPeers       int
+	FRRBFDUpPeers             int
+	FRRBFDDownPeers           int
+	FRRBFDSessionDownEvents   int
+	FRRBFDRxFailPackets       int
+	FRRBFDPeers               []sbfrr.BFDPeerOperationalStatus
+	FRRBFDIssues              []string
+	FRRBFDError               string
 	VPPLCPReconcileLastRun    time.Time
 	VPPLCPPairs               int
 	VPPLCPInconsistencies     []string
@@ -167,6 +178,17 @@ func (s metricsSource) snapshot(now time.Time) routerMetrics {
 		metrics.FRRVRRPGroups = append([]sbfrr.VRRPGroupOperationalStatus(nil), vrrp.Groups...)
 		metrics.FRRVRRPIssues = append([]string(nil), vrrp.Issues...)
 		metrics.FRRVRRPError = vrrp.LastError
+		bfd := s.frr.BFDOperationalStatus()
+		metrics.FRRBFDLastRun = bfd.LastRun
+		metrics.FRRBFDConfiguredPeers = bfd.ConfiguredPeers
+		metrics.FRRBFDObservedPeers = bfd.ObservedPeers
+		metrics.FRRBFDUpPeers = bfd.UpPeers
+		metrics.FRRBFDDownPeers = bfd.DownPeers
+		metrics.FRRBFDSessionDownEvents = bfd.SessionDownEvents
+		metrics.FRRBFDRxFailPackets = bfd.RxFailPackets
+		metrics.FRRBFDPeers = append([]sbfrr.BFDPeerOperationalStatus(nil), bfd.Peers...)
+		metrics.FRRBFDIssues = append([]string(nil), bfd.Issues...)
+		metrics.FRRBFDError = bfd.LastError
 	}
 	if s.vpp != nil {
 		lcp := s.vpp.LCPReconciliationStatus()
@@ -267,6 +289,22 @@ func applyHAConvergenceStatus(metrics *routerMetrics, cfg *model.RouterConfig, h
 	}
 	if len(metrics.FRRVRRPIssues) > 0 {
 		issues = append(issues, "FRR VRRP status found convergence issues")
+	}
+	if metrics.FRRBFDConfiguredPeers > 0 {
+		if metrics.FRRBFDLastRun.IsZero() {
+			issues = append(issues, "FRR BFD status has not run")
+		}
+		if metrics.FRRBFDError != "" {
+			issues = append(issues, "FRR BFD status check failed")
+		}
+		if metrics.FRRBFDObservedPeers < metrics.FRRBFDConfiguredPeers {
+			issues = append(issues, "FRR BFD status is missing configured peers")
+		} else if metrics.FRRBFDDownPeers > 0 || metrics.FRRBFDUpPeers < metrics.FRRBFDConfiguredPeers {
+			issues = append(issues, "FRR BFD status has down peers")
+		}
+		if len(metrics.FRRBFDIssues) > 0 {
+			issues = append(issues, "FRR BFD status found convergence issues")
+		}
 	}
 	if !hasVPP {
 		issues = append(issues, "VPP LCP reconciliation status is unavailable")
@@ -424,7 +462,7 @@ func (s metricsSource) handleMetrics(w http.ResponseWriter, r *http.Request) {
 
 	writeMetricHelp(&b, "arca_router_ha_configured", "Whether control-plane HA is configured with chassis clustering and VRRP groups.")
 	writeMetricType(&b, "arca_router_ha_configured", "gauge")
-	writeMetricHelp(&b, "arca_router_ha_converged", "Whether configured control-plane HA has no detected config sync or VPP LCP convergence issues.")
+	writeMetricHelp(&b, "arca_router_ha_converged", "Whether configured control-plane HA has no detected config sync, FRR runtime, or VPP LCP convergence issues.")
 	writeMetricType(&b, "arca_router_ha_converged", "gauge")
 	writeMetricHelp(&b, "arca_router_ha_vrrp_groups", "Number of configured VRRP groups participating in control-plane HA.")
 	writeMetricType(&b, "arca_router_ha_vrrp_groups", "gauge")
@@ -453,6 +491,34 @@ func (s metricsSource) handleMetrics(w http.ResponseWriter, r *http.Request) {
 	writeMetricValue(&b, "arca_router_frr_vrrp_issues", float64(len(metrics.FRRVRRPIssues)))
 	writeMetricBool(&b, "arca_router_frr_vrrp_error", metrics.FRRVRRPError != "")
 	writeMetricValue(&b, "arca_router_frr_vrrp_last_check_timestamp_seconds", unixTimestampSeconds(metrics.FRRVRRPLastRun))
+
+	writeMetricHelp(&b, "arca_router_frr_bfd_configured_peers", "Number of BFD peers configured for FRR.")
+	writeMetricType(&b, "arca_router_frr_bfd_configured_peers", "gauge")
+	writeMetricHelp(&b, "arca_router_frr_bfd_observed_peers", "Number of BFD peers observed in FRR operational state.")
+	writeMetricType(&b, "arca_router_frr_bfd_observed_peers", "gauge")
+	writeMetricHelp(&b, "arca_router_frr_bfd_up_peers", "Number of observed FRR BFD peers in the up state.")
+	writeMetricType(&b, "arca_router_frr_bfd_up_peers", "gauge")
+	writeMetricHelp(&b, "arca_router_frr_bfd_down_peers", "Number of observed FRR BFD peers not in the up state.")
+	writeMetricType(&b, "arca_router_frr_bfd_down_peers", "gauge")
+	writeMetricHelp(&b, "arca_router_frr_bfd_session_down_events", "Total FRR BFD session-down events observed from peer counters.")
+	writeMetricType(&b, "arca_router_frr_bfd_session_down_events", "counter")
+	writeMetricHelp(&b, "arca_router_frr_bfd_rx_fail_packets", "Total FRR BFD receive-failure packets observed from peer counters.")
+	writeMetricType(&b, "arca_router_frr_bfd_rx_fail_packets", "counter")
+	writeMetricHelp(&b, "arca_router_frr_bfd_issues", "Number of detected FRR BFD operational convergence issues.")
+	writeMetricType(&b, "arca_router_frr_bfd_issues", "gauge")
+	writeMetricHelp(&b, "arca_router_frr_bfd_error", "Whether the latest FRR BFD operational status check failed.")
+	writeMetricType(&b, "arca_router_frr_bfd_error", "gauge")
+	writeMetricHelp(&b, "arca_router_frr_bfd_last_check_timestamp_seconds", "Unix timestamp of the latest FRR BFD operational status check.")
+	writeMetricType(&b, "arca_router_frr_bfd_last_check_timestamp_seconds", "gauge")
+	writeMetricValue(&b, "arca_router_frr_bfd_configured_peers", float64(metrics.FRRBFDConfiguredPeers))
+	writeMetricValue(&b, "arca_router_frr_bfd_observed_peers", float64(metrics.FRRBFDObservedPeers))
+	writeMetricValue(&b, "arca_router_frr_bfd_up_peers", float64(metrics.FRRBFDUpPeers))
+	writeMetricValue(&b, "arca_router_frr_bfd_down_peers", float64(metrics.FRRBFDDownPeers))
+	writeMetricValue(&b, "arca_router_frr_bfd_session_down_events", float64(metrics.FRRBFDSessionDownEvents))
+	writeMetricValue(&b, "arca_router_frr_bfd_rx_fail_packets", float64(metrics.FRRBFDRxFailPackets))
+	writeMetricValue(&b, "arca_router_frr_bfd_issues", float64(len(metrics.FRRBFDIssues)))
+	writeMetricBool(&b, "arca_router_frr_bfd_error", metrics.FRRBFDError != "")
+	writeMetricValue(&b, "arca_router_frr_bfd_last_check_timestamp_seconds", unixTimestampSeconds(metrics.FRRBFDLastRun))
 
 	writeMetricHelp(&b, "arca_router_vpp_lcp_pairs", "Number of VPP LCP pairs known after the latest reconciliation.")
 	writeMetricType(&b, "arca_router_vpp_lcp_pairs", "gauge")

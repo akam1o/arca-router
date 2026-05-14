@@ -99,6 +99,24 @@ func TestGenerateOSPFConfig(t *testing.T) {
 			wantErr: false,
 		},
 		{
+			name: "OSPFv3 with area binding only",
+			cfg: &OSPFConfig{
+				IsOSPFv3: true,
+				Interfaces: []OSPFInterface{
+					{
+						Name:   "ge0-0-0",
+						AreaID: "0.0.0.0",
+					},
+				},
+			},
+			want: []string{
+				"router ospf6",
+				"interface ge0-0-0",
+				"ipv6 ospf6 area 0.0.0.0",
+			},
+			wantErr: false,
+		},
+		{
 			name: "OSPF with passive interface only",
 			cfg: &OSPFConfig{
 				RouterID: "10.0.1.1",
@@ -113,6 +131,45 @@ func TestGenerateOSPFConfig(t *testing.T) {
 			want: []string{
 				"interface ge0-0-1",
 				"ip ospf passive",
+			},
+			wantErr: false,
+		},
+		{
+			name: "OSPF with BFD profile",
+			cfg: &OSPFConfig{
+				RouterID: "10.0.1.1",
+				Interfaces: []OSPFInterface{
+					{
+						Name:       "ge0-0-1",
+						AreaID:     "0",
+						BFD:        true,
+						BFDProfile: "fast",
+					},
+				},
+			},
+			want: []string{
+				"interface ge0-0-1",
+				"ip ospf bfd profile fast",
+			},
+			wantErr: false,
+		},
+		{
+			name: "OSPFv3 with BFD profile",
+			cfg: &OSPFConfig{
+				IsOSPFv3: true,
+				Interfaces: []OSPFInterface{
+					{
+						Name:       "ge0-0-0",
+						AreaID:     "0.0.0.0",
+						BFD:        true,
+						BFDProfile: "fast",
+					},
+				},
+			},
+			want: []string{
+				"interface ge0-0-0",
+				"ipv6 ospf6 area 0.0.0.0",
+				"ipv6 ospf6 bfd profile fast",
 			},
 			wantErr: false,
 		},
@@ -178,6 +235,65 @@ func TestGenerateOSPFConfig(t *testing.T) {
 						t.Errorf("GenerateOSPFConfig() output missing expected string:\nWant: %s\nGot:\n%s", want, got)
 					}
 				}
+			}
+		})
+	}
+}
+
+func TestGenerateOSPFConfigRejectsInvalidConfig(t *testing.T) {
+	tests := []struct {
+		name string
+		cfg  *OSPFConfig
+		want string
+	}{
+		{
+			name: "ospfv2 ipv6 network",
+			cfg: &OSPFConfig{
+				RouterID: "192.0.2.1",
+				Networks: []OSPFNetwork{
+					{Prefix: "2001:db8::/64", AreaID: "0.0.0.0"},
+				},
+			},
+			want: "address family does not match OSPFv2",
+		},
+		{
+			name: "duplicate network",
+			cfg: &OSPFConfig{
+				RouterID: "192.0.2.1",
+				Networks: []OSPFNetwork{
+					{Prefix: "192.0.2.0/24", AreaID: "0.0.0.0"},
+					{Prefix: "192.0.2.0/24", AreaID: "0.0.0.1"},
+				},
+			},
+			want: "OSPF network 192.0.2.0/24 is duplicated",
+		},
+		{
+			name: "duplicate interface",
+			cfg: &OSPFConfig{
+				RouterID: "192.0.2.1",
+				Interfaces: []OSPFInterface{
+					{Name: "ge0-0-0", AreaID: "0.0.0.0"},
+					{Name: "ge0-0-0", AreaID: "0.0.0.1"},
+				},
+			},
+			want: "OSPF interface ge0-0-0 is duplicated",
+		},
+		{
+			name: "ospfv3 network",
+			cfg: &OSPFConfig{
+				IsOSPFv3: true,
+				Networks: []OSPFNetwork{
+					{Prefix: "2001:db8::/64", AreaID: "0.0.0.0"},
+				},
+			},
+			want: "OSPFv3 network 2001:db8::/64 is not supported",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := GenerateOSPFConfig(tt.cfg)
+			if err == nil || !strings.Contains(err.Error(), tt.want) {
+				t.Fatalf("GenerateOSPFConfig() error = %v, want %q", err, tt.want)
 			}
 		})
 	}

@@ -249,11 +249,25 @@ func (c *Client) GetBGPNeighbors(ctx context.Context) ([]BGPNeighborInfo, error)
 	return bgpNeighborInfosFromProto(resp.GetNeighbors()), nil
 }
 
-// GetRouteText returns FRR routing table output.
-func (c *Client) GetRouteText(ctx context.Context, protoFilter string) (string, error) {
+// GetOSPFNeighbors returns OSPFv2 or OSPFv3 neighbor state.
+func (c *Client) GetOSPFNeighbors(ctx context.Context, addressFamily string) ([]OSPFNeighborInfo, error) {
 	ctx, cancel := contextWithDefaultTimeout(ctx)
 	defer cancel()
-	resp, err := c.state.GetRouteText(ctx, &apiv1.GetRouteTextRequest{ProtocolFilter: protoFilter})
+	resp, err := c.state.GetOSPFNeighbors(ctx, &apiv1.GetOSPFNeighborsRequest{AddressFamily: addressFamily})
+	if err != nil {
+		return nil, err
+	}
+	return ospfNeighborInfosFromProto(resp.GetNeighbors()), nil
+}
+
+// GetRouteText returns FRR routing table output.
+func (c *Client) GetRouteText(ctx context.Context, protoFilter, addressFamily string) (string, error) {
+	ctx, cancel := contextWithDefaultTimeout(ctx)
+	defer cancel()
+	resp, err := c.state.GetRouteText(ctx, &apiv1.GetRouteTextRequest{
+		ProtocolFilter: protoFilter,
+		AddressFamily:  addressFamily,
+	})
 	if err != nil {
 		return "", err
 	}
@@ -283,10 +297,10 @@ func (c *Client) GetBGPNeighborText(ctx context.Context, peerAddress string) (st
 }
 
 // GetOSPFNeighborsText returns FRR OSPF neighbor output.
-func (c *Client) GetOSPFNeighborsText(ctx context.Context) (string, error) {
+func (c *Client) GetOSPFNeighborsText(ctx context.Context, addressFamily string) (string, error) {
 	ctx, cancel := contextWithDefaultTimeout(ctx)
 	defer cancel()
-	resp, err := c.state.GetOSPFNeighborsText(ctx, &apiv1.GetOSPFNeighborsTextRequest{})
+	resp, err := c.state.GetOSPFNeighborsText(ctx, &apiv1.GetOSPFNeighborsTextRequest{AddressFamily: addressFamily})
 	if err != nil {
 		return "", err
 	}
@@ -302,6 +316,49 @@ func (c *Client) GetVRRPText(ctx context.Context) (string, error) {
 		return "", err
 	}
 	return resp.GetOutput(), nil
+}
+
+// GetBFDText returns FRR BFD output.
+func (c *Client) GetBFDText(ctx context.Context, peerAddress string, brief, counters bool) (string, error) {
+	ctx, cancel := contextWithDefaultTimeout(ctx)
+	defer cancel()
+	resp, err := c.state.GetBFDText(ctx, &apiv1.GetBFDTextRequest{
+		PeerAddress: peerAddress,
+		Brief:       brief,
+		Counters:    counters,
+	})
+	if err != nil {
+		return "", err
+	}
+	return resp.GetOutput(), nil
+}
+
+// GetBFDStatus returns cached FRR BFD operational state.
+func (c *Client) GetBFDStatus(ctx context.Context) (*BFDStatusInfo, error) {
+	ctx, cancel := contextWithDefaultTimeout(ctx)
+	defer cancel()
+	resp, err := c.state.GetBFDStatus(ctx, &apiv1.GetBFDStatusRequest{})
+	if err != nil {
+		return nil, err
+	}
+	info := &BFDStatusInfo{
+		ConfiguredPeers:   int(resp.GetConfiguredPeers()),
+		ObservedPeers:     int(resp.GetObservedPeers()),
+		UpPeers:           int(resp.GetUpPeers()),
+		DownPeers:         int(resp.GetDownPeers()),
+		SessionDownEvents: resp.GetSessionDownEvents(),
+		RxFailPackets:     resp.GetRxFailPackets(),
+		Issues:            append([]string(nil), resp.GetIssues()...),
+		LastError:         resp.GetLastError(),
+		Peers:             bfdPeerInfosFromProto(resp.GetPeers()),
+	}
+	if rawLastRun := resp.GetLastRun(); rawLastRun != "" {
+		parsed, err := time.Parse(time.RFC3339Nano, rawLastRun)
+		if err == nil {
+			info.LastRun = parsed
+		}
+	}
+	return info, nil
 }
 
 // GetLCPReconciliation returns cached VPP LCP reconciliation state.
@@ -348,6 +405,12 @@ func (c *Client) GetHAStatus(ctx context.Context) (*HAStatusInfo, error) {
 		FRRVRRPActiveGroups:     int(resp.GetFrrVrrpActiveGroups()),
 		FRRVRRPIssues:           append([]string(nil), resp.GetFrrVrrpIssues()...),
 		FRRVRRPLastError:        resp.GetFrrVrrpLastError(),
+		FRRBFDConfiguredPeers:   int(resp.GetFrrBfdConfiguredPeers()),
+		FRRBFDObservedPeers:     int(resp.GetFrrBfdObservedPeers()),
+		FRRBFDUpPeers:           int(resp.GetFrrBfdUpPeers()),
+		FRRBFDDownPeers:         int(resp.GetFrrBfdDownPeers()),
+		FRRBFDIssues:            append([]string(nil), resp.GetFrrBfdIssues()...),
+		FRRBFDLastError:         resp.GetFrrBfdLastError(),
 		VPPLCPPairs:             int(resp.GetVppLcpPairs()),
 		VPPLCPInconsistencies:   append([]string(nil), resp.GetVppLcpInconsistencies()...),
 		VPPLCPLastError:         resp.GetVppLcpLastError(),
@@ -358,6 +421,12 @@ func (c *Client) GetHAStatus(ctx context.Context) (*HAStatusInfo, error) {
 			info.FRRVRRPLastCheck = parsed
 		}
 	}
+	if rawLastCheck := resp.GetFrrBfdLastCheck(); rawLastCheck != "" {
+		parsed, err := time.Parse(time.RFC3339Nano, rawLastCheck)
+		if err == nil {
+			info.FRRBFDLastCheck = parsed
+		}
+	}
 	if rawLastCheck := resp.GetVppLcpLastCheck(); rawLastCheck != "" {
 		parsed, err := time.Parse(time.RFC3339Nano, rawLastCheck)
 		if err == nil {
@@ -365,6 +434,35 @@ func (c *Client) GetHAStatus(ctx context.Context) (*HAStatusInfo, error) {
 		}
 	}
 	return info, nil
+}
+
+// GetRoutingInstances returns running routing-instance intent and table mapping.
+func (c *Client) GetRoutingInstances(ctx context.Context) ([]RoutingInstanceInfo, error) {
+	ctx, cancel := contextWithDefaultTimeout(ctx)
+	defer cancel()
+	resp, err := c.state.GetRoutingInstances(ctx, &apiv1.GetRoutingInstancesRequest{})
+	if err != nil {
+		return nil, err
+	}
+	instances := make([]RoutingInstanceInfo, 0, len(resp.GetInstances()))
+	for _, instance := range resp.GetInstances() {
+		if instance == nil {
+			continue
+		}
+		instances = append(instances, RoutingInstanceInfo{
+			Name:               instance.GetName(),
+			InstanceType:       instance.GetInstanceType(),
+			RouteDistinguisher: instance.GetRouteDistinguisher(),
+			IPv4TableID:        instance.GetIpv4TableId(),
+			IPv6TableID:        instance.GetIpv6TableId(),
+			ImportTargets:      append([]string(nil), instance.GetImportTargets()...),
+			ExportTargets:      append([]string(nil), instance.GetExportTargets()...),
+			ImportPolicies:     append([]string(nil), instance.GetImportPolicies()...),
+			ExportPolicies:     append([]string(nil), instance.GetExportPolicies()...),
+			Interfaces:         append([]string(nil), instance.GetInterfaces()...),
+		})
+	}
+	return instances, nil
 }
 
 // GetClassOfService returns running class-of-service intent.
@@ -453,6 +551,8 @@ func interfaceInfosFromProto(interfaces []*apiv1.InterfaceState) []InterfaceInfo
 			MTU:         iface.GetMtu(),
 			MAC:         iface.GetMac(),
 			QoSProfile:  iface.GetQosProfile(),
+			IPv4TableID: iface.GetIpv4TableId(),
+			IPv6TableID: iface.GetIpv6TableId(),
 			RxPackets:   iface.GetRxPackets(),
 			TxPackets:   iface.GetTxPackets(),
 			RxBytes:     iface.GetRxBytes(),
@@ -520,6 +620,43 @@ func bgpNeighborInfosFromProto(neighbors []*apiv1.BGPNeighborState) []BGPNeighbo
 	return infos
 }
 
+func ospfNeighborInfosFromProto(neighbors []*apiv1.OSPFNeighborState) []OSPFNeighborInfo {
+	infos := make([]OSPFNeighborInfo, 0, len(neighbors))
+	for _, neighbor := range neighbors {
+		infos = append(infos, OSPFNeighborInfo{
+			RouterID:     neighbor.GetRouterId(),
+			Address:      neighbor.GetAddress(),
+			Interface:    neighbor.GetInterface(),
+			State:        neighbor.GetState(),
+			Role:         neighbor.GetRole(),
+			Priority:     neighbor.GetPriority(),
+			DeadTimeSecs: neighbor.GetDeadTimeSecs(),
+			UptimeSecs:   neighbor.GetUptimeSecs(),
+		})
+	}
+	return infos
+}
+
+func bfdPeerInfosFromProto(peers []*apiv1.BFDPeerState) []BFDPeerInfo {
+	infos := make([]BFDPeerInfo, 0, len(peers))
+	for _, peer := range peers {
+		infos = append(infos, BFDPeerInfo{
+			Peer:              peer.GetPeer(),
+			LocalAddress:      peer.GetLocalAddress(),
+			Interface:         peer.GetInterface(),
+			VRF:               peer.GetVrf(),
+			Status:            peer.GetStatus(),
+			Diagnostic:        peer.GetDiagnostic(),
+			RemoteDiagnostic:  peer.GetRemoteDiagnostic(),
+			Observed:          peer.GetObserved(),
+			Up:                peer.GetUp(),
+			SessionDownEvents: peer.GetSessionDownEvents(),
+			RxFailPackets:     peer.GetRxFailPackets(),
+		})
+	}
+	return infos
+}
+
 // --- Response types ---
 
 // CommitInfo represents a commit history entry.
@@ -540,6 +677,8 @@ type InterfaceInfo struct {
 	MTU         uint32
 	MAC         string
 	QoSProfile  string
+	IPv4TableID uint32
+	IPv6TableID uint32
 	RxPackets   uint64
 	TxPackets   uint64
 	RxBytes     uint64
@@ -588,10 +727,31 @@ type HAStatusInfo struct {
 	FRRVRRPActiveGroups     int
 	FRRVRRPIssues           []string
 	FRRVRRPLastError        string
+	FRRBFDLastCheck         time.Time
+	FRRBFDConfiguredPeers   int
+	FRRBFDObservedPeers     int
+	FRRBFDUpPeers           int
+	FRRBFDDownPeers         int
+	FRRBFDIssues            []string
+	FRRBFDLastError         string
 	VPPLCPLastCheck         time.Time
 	VPPLCPPairs             int
 	VPPLCPInconsistencies   []string
 	VPPLCPLastError         string
+}
+
+// RoutingInstanceInfo represents running routing-instance intent and table mapping.
+type RoutingInstanceInfo struct {
+	Name               string
+	InstanceType       string
+	RouteDistinguisher string
+	IPv4TableID        uint32
+	IPv6TableID        uint32
+	ImportTargets      []string
+	ExportTargets      []string
+	ImportPolicies     []string
+	ExportPolicies     []string
+	Interfaces         []string
 }
 
 // ClassOfServiceInfo represents running class-of-service intent.
@@ -641,6 +801,51 @@ type BGPNeighborInfo struct {
 	UptimeSecs     uint64
 	PrefixReceived uint32
 	PrefixSent     uint32
+}
+
+// OSPFNeighborInfo represents OSPFv2 or OSPFv3 neighbor state.
+type OSPFNeighborInfo struct {
+	RouterID     string
+	Address      string
+	Interface    string
+	State        string
+	Role         string
+	Priority     uint32
+	DeadTimeSecs uint64
+	UptimeSecs   uint64
+}
+
+func ospfNeighborInfoSortKey(neighbor OSPFNeighborInfo) string {
+	return neighbor.RouterID + "\x00" + neighbor.Interface + "\x00" + neighbor.Address
+}
+
+// BFDStatusInfo represents FRR BFD operational state.
+type BFDStatusInfo struct {
+	LastRun           time.Time
+	ConfiguredPeers   int
+	ObservedPeers     int
+	UpPeers           int
+	DownPeers         int
+	SessionDownEvents uint64
+	RxFailPackets     uint64
+	Peers             []BFDPeerInfo
+	Issues            []string
+	LastError         string
+}
+
+// BFDPeerInfo represents one FRR BFD peer state.
+type BFDPeerInfo struct {
+	Peer              string
+	LocalAddress      string
+	Interface         string
+	VRF               string
+	Status            string
+	Diagnostic        string
+	RemoteDiagnostic  string
+	Observed          bool
+	Up                bool
+	SessionDownEvents uint64
+	RxFailPackets     uint64
 }
 
 // SystemInfo represents system information.

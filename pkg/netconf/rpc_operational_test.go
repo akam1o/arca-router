@@ -40,7 +40,7 @@ func TestBuildOperationalDataUsesRunningConfig(t *testing.T) {
 	}
 	cfg.Protocols = &config.ProtocolConfig{BGP: &config.BGPConfig{}}
 
-	data, err := buildOperationalData(cfg, nil, time.Date(2026, 5, 12, 4, 0, 0, 0, time.UTC), nil)
+	data, err := buildOperationalData(cfg, nil, time.Date(2026, 5, 12, 4, 0, 0, 0, time.UTC), nil, nil, nil, nil, nil, nil)
 	if err != nil {
 		t.Fatalf("buildOperationalData() error = %v", err)
 	}
@@ -71,6 +71,8 @@ func TestBuildOperationalDataUsesLiveInterfaceState(t *testing.T) {
 			OperStatus:  "down",
 			MAC:         "02:00:00:00:00:01",
 			QoSProfile:  "WAN",
+			IPv4TableID: 100,
+			IPv6TableID: 100,
 			Counters: &InterfaceOperationalCounters{
 				RxPackets: 10,
 				TxPackets: 20,
@@ -89,7 +91,7 @@ func TestBuildOperationalDataUsesLiveInterfaceState(t *testing.T) {
 				},
 			},
 		},
-	})
+	}, nil, nil, nil, nil, nil)
 	if err != nil {
 		t.Fatalf("buildOperationalData() error = %v", err)
 	}
@@ -100,6 +102,8 @@ func TestBuildOperationalDataUsesLiveInterfaceState(t *testing.T) {
 		"<oper-status>down</oper-status>",
 		"<phys-address>02:00:00:00:00:01</phys-address>",
 		"<qos-profile>WAN</qos-profile>",
+		"<ipv4-table-id>100</ipv4-table-id>",
+		"<ipv6-table-id>100</ipv6-table-id>",
 		"<rx-packets>10</rx-packets>",
 		"<tx-packets>20</tx-packets>",
 		"<rx-bytes>1000</rx-bytes>",
@@ -119,5 +123,257 @@ func TestBuildOperationalDataUsesLiveInterfaceState(t *testing.T) {
 		if !bytes.Contains(data, []byte(want)) {
 			t.Fatalf("operational data missing %q:\n%s", want, data)
 		}
+	}
+}
+
+func TestBuildOperationalDataWritesBFDState(t *testing.T) {
+	cfg := config.NewConfig()
+	data, err := buildOperationalData(cfg, nil, time.Date(2026, 5, 12, 4, 0, 0, 0, time.UTC), nil, nil, nil, nil, nil, &BFDOperationalState{
+		LastRun:           time.Date(2026, 5, 14, 6, 0, 0, 0, time.UTC),
+		ConfiguredPeers:   2,
+		ObservedPeers:     2,
+		UpPeers:           1,
+		DownPeers:         1,
+		SessionDownEvents: 3,
+		RxFailPackets:     4,
+		Issues:            []string{"FRR BFD peer 192.0.2.3 is down"},
+		LastError:         "read FRR BFD status failed",
+		Peers: []BFDPeerOperationalState{
+			{
+				Peer:              "192.0.2.3",
+				LocalAddress:      "192.0.2.1",
+				Interface:         "ge-0/0/1",
+				VRF:               "BLUE",
+				Status:            "down",
+				Diagnostic:        "control detection time expired",
+				RemoteDiagnostic:  "none",
+				Observed:          true,
+				Up:                false,
+				SessionDownEvents: 3,
+				RxFailPackets:     4,
+			},
+			{
+				Peer:      "192.0.2.2",
+				Interface: "ge-0/0/0",
+				Status:    "up",
+				Observed:  true,
+				Up:        true,
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("buildOperationalData() error = %v", err)
+	}
+
+	for _, want := range []string{
+		`<state xmlns="urn:arca:router:config:1.0">`,
+		"<bfd>",
+		"<last-run>2026-05-14T06:00:00Z</last-run>",
+		"<configured-peers>2</configured-peers>",
+		"<observed-peers>2</observed-peers>",
+		"<up-peers>1</up-peers>",
+		"<down-peers>1</down-peers>",
+		"<session-down-events>3</session-down-events>",
+		"<rx-fail-packets>4</rx-fail-packets>",
+		"<address>192.0.2.2</address>",
+		"<address>192.0.2.3</address>",
+		"<local-address>192.0.2.1</local-address>",
+		"<interface>ge-0/0/1</interface>",
+		"<vrf>BLUE</vrf>",
+		"<status>down</status>",
+		"<diagnostic>control detection time expired</diagnostic>",
+		"<remote-diagnostic>none</remote-diagnostic>",
+		"<observed>true</observed>",
+		"<up>false</up>",
+		"<issue>FRR BFD peer 192.0.2.3 is down</issue>",
+		"<last-error>read FRR BFD status failed</last-error>",
+	} {
+		if !bytes.Contains(data, []byte(want)) {
+			t.Fatalf("operational data missing %q:\n%s", want, data)
+		}
+	}
+	if bytes.Index(data, []byte("<address>192.0.2.2</address>")) > bytes.Index(data, []byte("<address>192.0.2.3</address>")) {
+		t.Fatalf("BFD peers are not sorted:\n%s", data)
+	}
+}
+
+func TestBuildOperationalDataWritesRoutingInstanceState(t *testing.T) {
+	cfg := config.NewConfig()
+	cfg.RoutingInstances = map[string]*config.RoutingInstance{}
+	cfg.RoutingInstances["BLUE"] = &config.RoutingInstance{
+		InstanceType:       "vrf",
+		RouteDistinguisher: "65000:100",
+		VRFTarget:          "target:65000:100",
+		VRFTargetImport:    []string{"target:65000:101"},
+		VRFTargetExport:    []string{"target:65000:102"},
+		VRFImport:          []string{"BLUE-IN"},
+		VRFExport:          []string{"BLUE-OUT"},
+		Interfaces:         []string{"ge-0/0/1", "ge-0/0/0", "ge-0/0/1"},
+	}
+
+	data, err := buildOperationalData(cfg, nil, time.Date(2026, 5, 12, 4, 0, 0, 0, time.UTC), nil, nil, nil, nil, nil, nil)
+	if err != nil {
+		t.Fatalf("buildOperationalData() error = %v", err)
+	}
+
+	for _, want := range []string{
+		`<state xmlns="urn:arca:router:config:1.0">`,
+		"<routing-instances>",
+		"<instance>",
+		"<name>BLUE</name>",
+		"<instance-type>vrf</instance-type>",
+		"<route-distinguisher>65000:100</route-distinguisher>",
+		"<ipv4-table-id>100</ipv4-table-id>",
+		"<ipv6-table-id>100</ipv6-table-id>",
+		"<import-target>target:65000:100</import-target>",
+		"<import-target>target:65000:101</import-target>",
+		"<export-target>target:65000:100</export-target>",
+		"<export-target>target:65000:102</export-target>",
+		"<import-policy>BLUE-IN</import-policy>",
+		"<export-policy>BLUE-OUT</export-policy>",
+		"<interface>ge-0/0/0</interface>",
+		"<interface>ge-0/0/1</interface>",
+	} {
+		if !bytes.Contains(data, []byte(want)) {
+			t.Fatalf("operational data missing %q:\n%s", want, data)
+		}
+	}
+	if bytes.Index(data, []byte("<interface>ge-0/0/0</interface>")) > bytes.Index(data, []byte("<interface>ge-0/0/1</interface>")) {
+		t.Fatalf("routing-instance interfaces are not sorted:\n%s", data)
+	}
+	if bytes.Count(data, []byte("<interface>ge-0/0/1</interface>")) != 1 {
+		t.Fatalf("routing-instance interfaces are not deduplicated:\n%s", data)
+	}
+}
+
+func TestBuildOperationalDataWritesRouteState(t *testing.T) {
+	cfg := config.NewConfig()
+	data, err := buildOperationalData(cfg, nil, time.Date(2026, 5, 12, 4, 0, 0, 0, time.UTC), nil, []RouteOperationalState{
+		{
+			Prefix:    "2001:db8::/64",
+			NextHop:   "fe80::1",
+			Protocol:  "bgp",
+			Metric:    20,
+			Interface: "ge-0/0/0",
+			Active:    true,
+		},
+	}, nil, nil, nil, nil)
+	if err != nil {
+		t.Fatalf("buildOperationalData() error = %v", err)
+	}
+
+	for _, want := range []string{
+		`<state xmlns="urn:arca:router:config:1.0">`,
+		"<routes>",
+		"<route>",
+		"<prefix>2001:db8::/64</prefix>",
+		"<next-hop>fe80::1</next-hop>",
+		"<protocol>bgp</protocol>",
+		"<metric>20</metric>",
+		"<interface>ge-0/0/0</interface>",
+		"<active>true</active>",
+	} {
+		if !bytes.Contains(data, []byte(want)) {
+			t.Fatalf("operational data missing %q:\n%s", want, data)
+		}
+	}
+}
+
+func TestBuildOperationalDataWritesBGPNeighborState(t *testing.T) {
+	cfg := config.NewConfig()
+	data, err := buildOperationalData(cfg, nil, time.Date(2026, 5, 12, 4, 0, 0, 0, time.UTC), nil, nil, []BGPNeighborOperationalState{
+		{
+			PeerAddress:    "2001:db8::2",
+			PeerAS:         65001,
+			State:          "Established",
+			UptimeSecs:     3661,
+			PrefixReceived: 10,
+			PrefixSent:     20,
+		},
+	}, nil, nil, nil)
+	if err != nil {
+		t.Fatalf("buildOperationalData() error = %v", err)
+	}
+
+	for _, want := range []string{
+		`<state xmlns="urn:arca:router:config:1.0">`,
+		"<protocols>",
+		"<bgp>",
+		"<neighbor>",
+		"<peer-address>2001:db8::2</peer-address>",
+		"<peer-as>65001</peer-as>",
+		"<state>Established</state>",
+		"<uptime-seconds>3661</uptime-seconds>",
+		"<prefix-received>10</prefix-received>",
+		"<prefix-sent>20</prefix-sent>",
+	} {
+		if !bytes.Contains(data, []byte(want)) {
+			t.Fatalf("operational data missing %q:\n%s", want, data)
+		}
+	}
+}
+
+func TestBuildOperationalDataWritesOSPFNeighborState(t *testing.T) {
+	cfg := config.NewConfig()
+	data, err := buildOperationalData(cfg, nil, time.Date(2026, 5, 12, 4, 0, 0, 0, time.UTC), nil, nil, nil, []OSPFNeighborOperationalState{
+		{
+			RouterID:     "10.0.0.3",
+			Address:      "192.0.2.3",
+			Interface:    "ge-0/0/1",
+			State:        "Full",
+			Role:         "DR",
+			Priority:     2,
+			DeadTimeSecs: 30,
+			UptimeSecs:   120,
+		},
+		{
+			RouterID:     "10.0.0.2",
+			Address:      "192.0.2.2",
+			Interface:    "ge-0/0/0",
+			State:        "Full",
+			Role:         "DROther",
+			Priority:     1,
+			DeadTimeSecs: 31,
+			UptimeSecs:   65,
+		},
+	}, []OSPFNeighborOperationalState{
+		{
+			RouterID:     "10.0.0.4",
+			Address:      "fe80::2",
+			Interface:    "ge-0/0/2",
+			State:        "Full",
+			Role:         "Backup",
+			Priority:     3,
+			DeadTimeSecs: 32,
+			UptimeSecs:   95,
+		},
+	}, nil)
+	if err != nil {
+		t.Fatalf("buildOperationalData() error = %v", err)
+	}
+
+	for _, want := range []string{
+		`<state xmlns="urn:arca:router:config:1.0">`,
+		"<protocols>",
+		"<ospf>",
+		"<router-id>10.0.0.2</router-id>",
+		"<address>192.0.2.2</address>",
+		"<interface>ge-0/0/0</interface>",
+		"<state>Full</state>",
+		"<role>DROther</role>",
+		"<priority>1</priority>",
+		"<dead-time-seconds>31</dead-time-seconds>",
+		"<uptime-seconds>65</uptime-seconds>",
+		"<ospf3>",
+		"<router-id>10.0.0.4</router-id>",
+		"<address>fe80::2</address>",
+		"<role>Backup</role>",
+	} {
+		if !bytes.Contains(data, []byte(want)) {
+			t.Fatalf("operational data missing %q:\n%s", want, data)
+		}
+	}
+	if bytes.Index(data, []byte("<router-id>10.0.0.2</router-id>")) > bytes.Index(data, []byte("<router-id>10.0.0.3</router-id>")) {
+		t.Fatalf("OSPF neighbors are not sorted:\n%s", data)
 	}
 }

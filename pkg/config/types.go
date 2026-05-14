@@ -192,6 +192,18 @@ type StaticRoute struct {
 
 	// Distance is the administrative distance (metric)
 	Distance int `json:"distance,omitempty"`
+
+	// BFD enables BFD monitoring for this static route
+	BFD bool `json:"bfd,omitempty"`
+
+	// BFDProfile selects the BFD profile for this static route
+	BFDProfile string `json:"bfd-profile,omitempty"`
+
+	// BFDSource selects the source address for the BFD session
+	BFDSource string `json:"bfd-source,omitempty"`
+
+	// BFDMultihop enables multihop BFD for this static route
+	BFDMultihop bool `json:"bfd-multihop,omitempty"`
 }
 
 // RoutingInstance represents a routing instance, initially focused on VRF/L3VPN.
@@ -209,17 +221,55 @@ type RoutingInstance struct {
 
 // ProtocolConfig represents routing protocol configuration
 type ProtocolConfig struct {
+	// BFD holds Bidirectional Forwarding Detection configuration
+	BFD *BFDConfig `json:"bfd,omitempty"`
+
 	// BGP holds BGP protocol configuration
 	BGP *BGPConfig `json:"bgp,omitempty"`
 
 	// OSPF holds OSPF protocol configuration
 	OSPF *OSPFConfig `json:"ospf,omitempty"`
 
+	// OSPF3 holds OSPFv3 protocol configuration
+	OSPF3 *OSPFConfig `json:"ospf3,omitempty"`
+
 	// MPLS holds MPLS protocol configuration
 	MPLS *MPLSConfig `json:"mpls,omitempty"`
 
 	// VRRP holds VRRP high-availability groups
 	VRRP *VRRPConfig `json:"vrrp,omitempty"`
+}
+
+// BFDConfig represents Bidirectional Forwarding Detection configuration.
+type BFDConfig struct {
+	Profiles map[string]*BFDProfile `json:"profiles,omitempty"`
+	Peers    map[string]*BFDPeer    `json:"peers,omitempty"`
+}
+
+// BFDProfile represents reusable BFD timer and mode settings.
+type BFDProfile struct {
+	Name             string `json:"name"`
+	DetectMultiplier int    `json:"detect-multiplier,omitempty"`
+	ReceiveInterval  int    `json:"receive-interval,omitempty"`
+	TransmitInterval int    `json:"transmit-interval,omitempty"`
+	EchoMode         bool   `json:"echo-mode,omitempty"`
+	PassiveMode      bool   `json:"passive-mode,omitempty"`
+}
+
+// BFDPeer represents one BFD peer session.
+type BFDPeer struct {
+	Address          string `json:"address"`
+	LocalAddress     string `json:"local-address,omitempty"`
+	Interface        string `json:"interface,omitempty"`
+	VRF              string `json:"vrf,omitempty"`
+	Multihop         bool   `json:"multihop,omitempty"`
+	Profile          string `json:"profile,omitempty"`
+	DetectMultiplier int    `json:"detect-multiplier,omitempty"`
+	ReceiveInterval  int    `json:"receive-interval,omitempty"`
+	TransmitInterval int    `json:"transmit-interval,omitempty"`
+	EchoMode         bool   `json:"echo-mode,omitempty"`
+	PassiveMode      bool   `json:"passive-mode,omitempty"`
+	Shutdown         bool   `json:"shutdown,omitempty"`
 }
 
 // MPLSConfig represents MPLS forwarding configuration.
@@ -275,6 +325,12 @@ type BGPNeighbor struct {
 
 	// LocalAddress is the local address to use for peering
 	LocalAddress string `json:"local-address,omitempty"`
+
+	// BFD enables BFD failure detection for this neighbor
+	BFD bool `json:"bfd,omitempty"`
+
+	// BFDProfile selects the BFD profile for this neighbor
+	BFDProfile string `json:"bfd-profile,omitempty"`
 }
 
 // OSPFConfig represents OSPF protocol configuration
@@ -311,6 +367,12 @@ type OSPFInterface struct {
 
 	// PrioritySet records whether priority was explicitly configured.
 	PrioritySet bool `json:"-"`
+
+	// BFD enables BFD failure detection on this OSPF interface
+	BFD bool `json:"bfd,omitempty"`
+
+	// BFDProfile selects the BFD profile for this OSPF interface
+	BFDProfile string `json:"bfd-profile,omitempty"`
 }
 
 // PolicyOptions represents policy-options configuration

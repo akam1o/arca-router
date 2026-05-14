@@ -273,14 +273,59 @@ func TestGeneratePrefixListConfig(t *testing.T) {
 	}
 }
 
+func TestGeneratePrefixListConfigRejectsInvalidObjects(t *testing.T) {
+	tests := []struct {
+		name        string
+		prefixLists []PrefixList
+		want        string
+	}{
+		{
+			name:        "duplicate prefix-list",
+			prefixLists: []PrefixList{{Name: "CUSTOMER"}, {Name: "CUSTOMER"}},
+			want:        "prefix-list CUSTOMER is duplicated",
+		},
+		{
+			name: "duplicate sequence",
+			prefixLists: []PrefixList{{
+				Name: "CUSTOMER",
+				Entries: []PrefixListEntry{
+					{Seq: 10, Action: "permit", Prefix: "192.0.2.0/24"},
+					{Seq: 10, Action: "deny", Prefix: "198.51.100.0/24"},
+				},
+			}},
+			want: "prefix-list CUSTOMER entry 10 is duplicated",
+		},
+		{
+			name: "family mismatch",
+			prefixLists: []PrefixList{{
+				Name:   "CUSTOMER-V6",
+				IsIPv6: true,
+				Entries: []PrefixListEntry{
+					{Seq: 10, Action: "permit", Prefix: "192.0.2.0/24"},
+				},
+			}},
+			want: "address family does not match",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := GeneratePrefixListConfig(tt.prefixLists)
+			if err == nil || !strings.Contains(err.Error(), tt.want) {
+				t.Fatalf("GeneratePrefixListConfig() error = %v, want %q", err, tt.want)
+			}
+		})
+	}
+}
+
 // TestGenerateRouteMapConfig tests FRR route-map config generation
 func TestGenerateRouteMapConfig(t *testing.T) {
 	localPref := uint32(200)
 
 	tests := []struct {
-		name     string
-		input    []RouteMap
-		wantText []string
+		name        string
+		input       []RouteMap
+		prefixLists []PrefixList
+		wantText    []string
 	}{
 		{
 			name: "simple route-map with prefix-list",
@@ -295,6 +340,9 @@ func TestGenerateRouteMapConfig(t *testing.T) {
 						},
 					},
 				},
+			},
+			prefixLists: []PrefixList{
+				{Name: "MYLIST"},
 			},
 			wantText: []string{
 				"route-map MYPOLICY permit 10",
@@ -355,16 +403,41 @@ func TestGenerateRouteMapConfig(t *testing.T) {
 					},
 				},
 			},
+			prefixLists: []PrefixList{
+				{Name: "PRIVATE"},
+			},
 			wantText: []string{
 				"route-map DENY-POLICY deny 10",
 				"match ip address prefix-list PRIVATE",
+			},
+		},
+		{
+			name: "route-map with IPv6 prefix-list",
+			input: []RouteMap{
+				{
+					Name: "IPV6-POLICY",
+					Entries: []RouteMapEntry{
+						{
+							Seq:              10,
+							Action:           "permit",
+							MatchPrefixLists: []string{"IPV6LIST"},
+						},
+					},
+				},
+			},
+			prefixLists: []PrefixList{
+				{Name: "IPV6LIST", IsIPv6: true},
+			},
+			wantText: []string{
+				"route-map IPV6-POLICY permit 10",
+				"match ipv6 address prefix-list IPV6LIST",
 			},
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result, err := GenerateRouteMapConfig(tt.input, nil)
+			result, err := GenerateRouteMapConfig(tt.input, tt.prefixLists)
 			if err != nil {
 				t.Fatalf("GenerateRouteMapConfig() error = %v", err)
 			}
@@ -373,6 +446,152 @@ func TestGenerateRouteMapConfig(t *testing.T) {
 				if !strings.Contains(result, want) {
 					t.Errorf("Expected config to contain %q\nGot:\n%s", want, result)
 				}
+			}
+		})
+	}
+}
+
+func TestGenerateRouteMapConfigRejectsInvalidObjects(t *testing.T) {
+	tests := []struct {
+		name        string
+		routeMaps   []RouteMap
+		prefixLists []PrefixList
+		want        string
+	}{
+		{
+			name: "unknown prefix-list",
+			routeMaps: []RouteMap{{
+				Name: "IMPORT",
+				Entries: []RouteMapEntry{
+					{Seq: 10, Action: "permit", MatchPrefixLists: []string{"MISSING"}},
+				},
+			}},
+			want: "references unknown prefix-list MISSING",
+		},
+		{
+			name: "duplicate route-map",
+			routeMaps: []RouteMap{
+				{Name: "IMPORT", Entries: []RouteMapEntry{{Seq: 10, Action: "permit"}}},
+				{Name: "IMPORT", Entries: []RouteMapEntry{{Seq: 20, Action: "deny"}}},
+			},
+			want: "route-map IMPORT is duplicated",
+		},
+		{
+			name: "duplicate entry sequence",
+			routeMaps: []RouteMap{{
+				Name: "IMPORT",
+				Entries: []RouteMapEntry{
+					{Seq: 10, Action: "permit"},
+					{Seq: 10, Action: "deny"},
+				},
+			}},
+			want: "route-map IMPORT entry 10 is duplicated",
+		},
+		{
+			name: "invalid peer match",
+			routeMaps: []RouteMap{{
+				Name: "IMPORT",
+				Entries: []RouteMapEntry{
+					{Seq: 10, Action: "permit", MatchNeighbor: "not-an-ip"},
+				},
+			}},
+			want: "invalid peer match not-an-ip",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := GenerateRouteMapConfig(tt.routeMaps, tt.prefixLists)
+			if err == nil || !strings.Contains(err.Error(), tt.want) {
+				t.Fatalf("GenerateRouteMapConfig() error = %v, want %q", err, tt.want)
+			}
+		})
+	}
+}
+
+func TestGenerateASPathAccessListConfig(t *testing.T) {
+	result, err := GenerateASPathAccessListConfig([]ASPathAccessList{{
+		Name: "CUSTOMER-AS",
+		Entries: []ASPathAccessListEntry{
+			{Seq: 10, Action: "permit", Regex: "^65001_"},
+			{Seq: 20, Action: "deny", Regex: "_64512$"},
+		},
+	}})
+	if err != nil {
+		t.Fatalf("GenerateASPathAccessListConfig() error = %v", err)
+	}
+
+	for _, want := range []string{
+		"bgp as-path access-list CUSTOMER-AS seq 10 permit ^65001_",
+		"bgp as-path access-list CUSTOMER-AS seq 20 deny _64512$",
+	} {
+		if !strings.Contains(result, want) {
+			t.Errorf("Expected config to contain %q\nGot:\n%s", want, result)
+		}
+	}
+}
+
+func TestGenerateASPathAccessListConfigRejectsInvalidObjects(t *testing.T) {
+	tests := []struct {
+		name        string
+		asPathLists []ASPathAccessList
+		want        string
+	}{
+		{
+			name: "empty name",
+			asPathLists: []ASPathAccessList{{
+				Entries: []ASPathAccessListEntry{{Seq: 10, Action: "permit", Regex: "^65001_"}},
+			}},
+			want: "AS-path access-list name is required",
+		},
+		{
+			name: "duplicate list",
+			asPathLists: []ASPathAccessList{
+				{Name: "CUSTOMER-AS", Entries: []ASPathAccessListEntry{{Seq: 10, Action: "permit", Regex: "^65001_"}}},
+				{Name: "CUSTOMER-AS", Entries: []ASPathAccessListEntry{{Seq: 20, Action: "deny", Regex: "_64512$"}}},
+			},
+			want: "AS-path access-list CUSTOMER-AS is duplicated",
+		},
+		{
+			name: "non-positive sequence",
+			asPathLists: []ASPathAccessList{{
+				Name:    "CUSTOMER-AS",
+				Entries: []ASPathAccessListEntry{{Seq: 0, Action: "permit", Regex: "^65001_"}},
+			}},
+			want: "AS-path access-list CUSTOMER-AS entry sequence must be positive",
+		},
+		{
+			name: "duplicate sequence",
+			asPathLists: []ASPathAccessList{{
+				Name: "CUSTOMER-AS",
+				Entries: []ASPathAccessListEntry{
+					{Seq: 10, Action: "permit", Regex: "^65001_"},
+					{Seq: 10, Action: "deny", Regex: "_64512$"},
+				},
+			}},
+			want: "AS-path access-list CUSTOMER-AS entry 10 is duplicated",
+		},
+		{
+			name: "invalid action",
+			asPathLists: []ASPathAccessList{{
+				Name:    "CUSTOMER-AS",
+				Entries: []ASPathAccessListEntry{{Seq: 10, Action: "drop", Regex: "^65001_"}},
+			}},
+			want: "AS-path access-list CUSTOMER-AS entry 10 has invalid action drop",
+		},
+		{
+			name: "empty regex",
+			asPathLists: []ASPathAccessList{{
+				Name:    "CUSTOMER-AS",
+				Entries: []ASPathAccessListEntry{{Seq: 10, Action: "permit"}},
+			}},
+			want: "AS-path access-list CUSTOMER-AS entry 10 regex is required",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := GenerateASPathAccessListConfig(tt.asPathLists)
+			if err == nil || !strings.Contains(err.Error(), tt.want) {
+				t.Fatalf("GenerateASPathAccessListConfig() error = %v, want %q", err, tt.want)
 			}
 		})
 	}
@@ -445,6 +664,70 @@ func TestConvertPolicyOptionsIntegration(t *testing.T) {
 	if !strings.Contains(rmConfig, "route-map DENY-PRIVATE") {
 		t.Error("Expected route-map DENY-PRIVATE in config")
 	}
+}
+
+func TestConvertPolicyOptionsAggregatesSameFamilyPrefixLists(t *testing.T) {
+	acceptTrue := true
+	cfg := &config.Config{
+		PolicyOptions: &config.PolicyOptions{
+			PrefixLists: map[string]*config.PrefixList{
+				"V4-A": {Name: "V4-A", Prefixes: []string{"192.0.2.0/24"}},
+				"V4-B": {Name: "V4-B", Prefixes: []string{"198.51.100.0/24"}},
+				"V6-A": {Name: "V6-A", Prefixes: []string{"2001:db8::/32"}},
+			},
+			PolicyStatements: map[string]*config.PolicyStatement{
+				"IMPORT": {
+					Name: "IMPORT",
+					Terms: []*config.PolicyTerm{
+						{
+							Name: "MATCH",
+							From: &config.PolicyMatchConditions{PrefixLists: []string{"V4-A", "V4-B", "V6-A"}},
+							Then: &config.PolicyActions{Accept: &acceptTrue},
+						},
+					},
+				},
+			},
+		},
+	}
+
+	prefixLists, routeMaps, _, err := convertPolicyOptions(cfg)
+	if err != nil {
+		t.Fatalf("convertPolicyOptions() error = %v", err)
+	}
+	if len(routeMaps) != 1 || len(routeMaps[0].Entries) != 1 {
+		t.Fatalf("routeMaps = %#v, want one route-map entry", routeMaps)
+	}
+	wantMatches := []string{"ARCA-IMPORT-10-V4", "V6-A"}
+	if got := routeMaps[0].Entries[0].MatchPrefixLists; strings.Join(got, ",") != strings.Join(wantMatches, ",") {
+		t.Fatalf("MatchPrefixLists = %#v, want %#v", got, wantMatches)
+	}
+	aggregate := findPrefixList(prefixLists, "ARCA-IMPORT-10-V4")
+	if aggregate == nil {
+		t.Fatalf("aggregate prefix-list not found in %#v", prefixLists)
+	}
+	if aggregate.IsIPv6 {
+		t.Fatalf("aggregate IsIPv6 = true, want false")
+	}
+	if got := prefixListPrefixes(*aggregate); strings.Join(got, ",") != "192.0.2.0/24,198.51.100.0/24" {
+		t.Fatalf("aggregate prefixes = %#v", got)
+	}
+}
+
+func findPrefixList(prefixLists []PrefixList, name string) *PrefixList {
+	for i := range prefixLists {
+		if prefixLists[i].Name == name {
+			return &prefixLists[i]
+		}
+	}
+	return nil
+}
+
+func prefixListPrefixes(prefixList PrefixList) []string {
+	prefixes := make([]string, 0, len(prefixList.Entries))
+	for _, entry := range prefixList.Entries {
+		prefixes = append(prefixes, entry.Prefix)
+	}
+	return prefixes
 }
 
 // TestIsIPv6Prefix tests IPv6 prefix detection
@@ -616,10 +899,20 @@ func TestRouteMapWithNeighborMatch(t *testing.T) {
 func TestRouteMapWithProtocolMatch(t *testing.T) {
 	acceptTrue := true
 
-	protocols := []string{"bgp", "ospf", "static", "connected"}
+	tests := []struct {
+		input string
+		want  string
+	}{
+		{input: "bgp", want: "bgp"},
+		{input: "ospf", want: "ospf"},
+		{input: "ospf3", want: "ospf6"},
+		{input: "static", want: "static"},
+		{input: "connected", want: "connected"},
+		{input: "direct", want: "connected"},
+	}
 
-	for _, proto := range protocols {
-		t.Run(proto, func(t *testing.T) {
+	for _, tt := range tests {
+		t.Run(tt.input, func(t *testing.T) {
 			input := map[string]*config.PolicyStatement{
 				"PROTO": {
 					Name: "PROTO",
@@ -627,7 +920,7 @@ func TestRouteMapWithProtocolMatch(t *testing.T) {
 						{
 							Name: "TERM1",
 							From: &config.PolicyMatchConditions{
-								Protocol: proto,
+								Protocol: tt.input,
 							},
 							Then: &config.PolicyActions{
 								Accept: &acceptTrue,
@@ -642,8 +935,8 @@ func TestRouteMapWithProtocolMatch(t *testing.T) {
 				t.Fatalf("convertPolicyStatements() error = %v", err)
 			}
 
-			if result[0].Entries[0].MatchProtocol != proto {
-				t.Errorf("Expected protocol %s, got %s", proto, result[0].Entries[0].MatchProtocol)
+			if result[0].Entries[0].MatchProtocol != tt.want {
+				t.Errorf("Expected protocol %s, got %s", tt.want, result[0].Entries[0].MatchProtocol)
 			}
 		})
 	}
@@ -978,7 +1271,7 @@ func TestGenerateRouteMapWithMultiplePrefixLists(t *testing.T) {
 		},
 	}
 
-	result, err := GenerateRouteMapConfig(input, nil)
+	result, err := GenerateRouteMapConfig(input, []PrefixList{{Name: "LIST1"}, {Name: "LIST2"}})
 	if err != nil {
 		t.Fatalf("GenerateRouteMapConfig() error = %v", err)
 	}
@@ -1059,7 +1352,7 @@ func TestRouteMapMultipleEntries(t *testing.T) {
 		},
 	}
 
-	result, err := GenerateRouteMapConfig(input, nil)
+	result, err := GenerateRouteMapConfig(input, []PrefixList{{Name: "LIST1"}, {Name: "LIST2"}})
 	if err != nil {
 		t.Fatalf("GenerateRouteMapConfig() error = %v", err)
 	}

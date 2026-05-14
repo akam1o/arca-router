@@ -98,9 +98,13 @@ func FromLegacyConfig(old *config.Config) *RouterConfig {
 		}
 		for _, sr := range old.RoutingOptions.StaticRoutes {
 			c.Routing.StaticRoutes = append(c.Routing.StaticRoutes, &StaticRoute{
-				Prefix:   sr.Prefix,
-				NextHop:  sr.NextHop,
-				Distance: sr.Distance,
+				Prefix:      sr.Prefix,
+				NextHop:     sr.NextHop,
+				Distance:    sr.Distance,
+				BFD:         sr.BFD,
+				BFDProfile:  sr.BFDProfile,
+				BFDSource:   sr.BFDSource,
+				BFDMultihop: sr.BFDMultihop,
 			})
 		}
 	}
@@ -108,6 +112,10 @@ func FromLegacyConfig(old *config.Config) *RouterConfig {
 	// Protocols
 	if old.Protocols != nil {
 		c.Protocols = &ProtocolsConfig{}
+
+		if old.Protocols.BFD != nil {
+			c.Protocols.BFD = bfdFromLegacy(old.Protocols.BFD)
+		}
 
 		if old.Protocols.BGP != nil {
 			c.Protocols.BGP = &BGPConfig{
@@ -125,6 +133,8 @@ func FromLegacyConfig(old *config.Config) *RouterConfig {
 						PeerAS:       n.PeerAS,
 						Description:  n.Description,
 						LocalAddress: n.LocalAddress,
+						BFD:          n.BFD,
+						BFDProfile:   n.BFDProfile,
 					}
 				}
 				c.Protocols.BGP.Groups[gName] = bg
@@ -132,27 +142,10 @@ func FromLegacyConfig(old *config.Config) *RouterConfig {
 		}
 
 		if old.Protocols.OSPF != nil {
-			c.Protocols.OSPF = &OSPFConfig{
-				RouterID: old.Protocols.OSPF.RouterID,
-				Areas:    make(map[string]*OSPFArea),
-			}
-			for aID, a := range old.Protocols.OSPF.Areas {
-				area := &OSPFArea{
-					Interfaces: make(map[string]*OSPFInterface),
-				}
-				for iName, i := range a.Interfaces {
-					oi := &OSPFInterface{
-						Passive: i.Passive,
-						Metric:  i.Metric,
-					}
-					if i.PrioritySet || i.Priority != 0 {
-						p := i.Priority
-						oi.Priority = &p
-					}
-					area.Interfaces[iName] = oi
-				}
-				c.Protocols.OSPF.Areas[aID] = area
-			}
+			c.Protocols.OSPF = ospfFromLegacy(old.Protocols.OSPF)
+		}
+		if old.Protocols.OSPF3 != nil {
+			c.Protocols.OSPF3 = ospfFromLegacy(old.Protocols.OSPF3)
 		}
 		if old.Protocols.MPLS != nil {
 			c.Protocols.MPLS = &MPLSConfig{Interfaces: append([]string{}, old.Protocols.MPLS.Interfaces...)}
@@ -286,6 +279,90 @@ func FromLegacyConfig(old *config.Config) *RouterConfig {
 	return c
 }
 
+func ospfFromLegacy(old *config.OSPFConfig) *OSPFConfig {
+	if old == nil {
+		return nil
+	}
+	ospf := &OSPFConfig{
+		RouterID: old.RouterID,
+		Areas:    make(map[string]*OSPFArea),
+	}
+	for aID, a := range old.Areas {
+		if a == nil {
+			ospf.Areas[aID] = nil
+			continue
+		}
+		area := &OSPFArea{
+			Interfaces: make(map[string]*OSPFInterface),
+		}
+		for iName, i := range a.Interfaces {
+			if i == nil {
+				area.Interfaces[iName] = nil
+				continue
+			}
+			oi := &OSPFInterface{
+				Passive:    i.Passive,
+				Metric:     i.Metric,
+				BFD:        i.BFD,
+				BFDProfile: i.BFDProfile,
+			}
+			if i.PrioritySet || i.Priority != 0 {
+				p := i.Priority
+				oi.Priority = &p
+			}
+			area.Interfaces[iName] = oi
+		}
+		ospf.Areas[aID] = area
+	}
+	return ospf
+}
+
+func bfdFromLegacy(old *config.BFDConfig) *BFDConfig {
+	if old == nil {
+		return nil
+	}
+	bfd := &BFDConfig{}
+	if old.Profiles != nil {
+		bfd.Profiles = make(map[string]*BFDProfile, len(old.Profiles))
+		for name, profile := range old.Profiles {
+			if profile == nil {
+				bfd.Profiles[name] = nil
+				continue
+			}
+			bfd.Profiles[name] = &BFDProfile{
+				DetectMultiplier: profile.DetectMultiplier,
+				ReceiveInterval:  profile.ReceiveInterval,
+				TransmitInterval: profile.TransmitInterval,
+				EchoMode:         profile.EchoMode,
+				PassiveMode:      profile.PassiveMode,
+			}
+		}
+	}
+	if old.Peers != nil {
+		bfd.Peers = make(map[string]*BFDPeer, len(old.Peers))
+		for address, peer := range old.Peers {
+			if peer == nil {
+				bfd.Peers[address] = nil
+				continue
+			}
+			bfd.Peers[address] = &BFDPeer{
+				LocalAddress:     peer.LocalAddress,
+				Interface:        peer.Interface,
+				VRF:              peer.VRF,
+				Multihop:         peer.Multihop,
+				Profile:          peer.Profile,
+				DetectMultiplier: peer.DetectMultiplier,
+				ReceiveInterval:  peer.ReceiveInterval,
+				TransmitInterval: peer.TransmitInterval,
+				EchoMode:         peer.EchoMode,
+				PassiveMode:      peer.PassiveMode,
+				Shutdown:         peer.Shutdown,
+			}
+		}
+	}
+	return bfd
+}
+
 // ToLegacyConfig converts the new internal model back to the legacy pkg/config.Config.
 // This is used during the migration period when some subsystems still expect the old type.
 func (c *RouterConfig) ToLegacyConfig() *config.Config {
@@ -373,9 +450,13 @@ func (c *RouterConfig) ToLegacyConfig() *config.Config {
 		}
 		for _, sr := range c.Routing.StaticRoutes {
 			old.RoutingOptions.StaticRoutes = append(old.RoutingOptions.StaticRoutes, &config.StaticRoute{
-				Prefix:   sr.Prefix,
-				NextHop:  sr.NextHop,
-				Distance: sr.Distance,
+				Prefix:      sr.Prefix,
+				NextHop:     sr.NextHop,
+				Distance:    sr.Distance,
+				BFD:         sr.BFD,
+				BFDProfile:  sr.BFDProfile,
+				BFDSource:   sr.BFDSource,
+				BFDMultihop: sr.BFDMultihop,
 			})
 		}
 	}
@@ -383,6 +464,9 @@ func (c *RouterConfig) ToLegacyConfig() *config.Config {
 	// Protocols
 	if c.Protocols != nil {
 		old.Protocols = &config.ProtocolConfig{}
+		if c.Protocols.BFD != nil {
+			old.Protocols.BFD = bfdToLegacy(c.Protocols.BFD)
+		}
 		if c.Protocols.BGP != nil {
 			old.Protocols.BGP = &config.BGPConfig{
 				Groups: make(map[string]*config.BGPGroup),
@@ -400,35 +484,18 @@ func (c *RouterConfig) ToLegacyConfig() *config.Config {
 						PeerAS:       n.PeerAS,
 						Description:  n.Description,
 						LocalAddress: n.LocalAddress,
+						BFD:          n.BFD,
+						BFDProfile:   n.BFDProfile,
 					}
 				}
 				old.Protocols.BGP.Groups[gName] = bg
 			}
 		}
 		if c.Protocols.OSPF != nil {
-			old.Protocols.OSPF = &config.OSPFConfig{
-				RouterID: c.Protocols.OSPF.RouterID,
-				Areas:    make(map[string]*config.OSPFArea),
-			}
-			for aID, a := range c.Protocols.OSPF.Areas {
-				area := &config.OSPFArea{
-					AreaID:     aID,
-					Interfaces: make(map[string]*config.OSPFInterface),
-				}
-				for iName, i := range a.Interfaces {
-					oi := &config.OSPFInterface{
-						Name:    iName,
-						Passive: i.Passive,
-						Metric:  i.Metric,
-					}
-					if i.Priority != nil {
-						oi.Priority = *i.Priority
-						oi.PrioritySet = true
-					}
-					area.Interfaces[iName] = oi
-				}
-				old.Protocols.OSPF.Areas[aID] = area
-			}
+			old.Protocols.OSPF = ospfToLegacy(c.Protocols.OSPF)
+		}
+		if c.Protocols.OSPF3 != nil {
+			old.Protocols.OSPF3 = ospfToLegacy(c.Protocols.OSPF3)
 		}
 		if c.Protocols.MPLS != nil {
 			old.Protocols.MPLS = &config.MPLSConfig{Interfaces: append([]string{}, c.Protocols.MPLS.Interfaces...)}
@@ -571,4 +638,92 @@ func (c *RouterConfig) ToLegacyConfig() *config.Config {
 	}
 
 	return old
+}
+
+func ospfToLegacy(c *OSPFConfig) *config.OSPFConfig {
+	if c == nil {
+		return nil
+	}
+	ospf := &config.OSPFConfig{
+		RouterID: c.RouterID,
+		Areas:    make(map[string]*config.OSPFArea),
+	}
+	for aID, a := range c.Areas {
+		if a == nil {
+			ospf.Areas[aID] = nil
+			continue
+		}
+		area := &config.OSPFArea{
+			AreaID:     aID,
+			Interfaces: make(map[string]*config.OSPFInterface),
+		}
+		for iName, i := range a.Interfaces {
+			if i == nil {
+				area.Interfaces[iName] = nil
+				continue
+			}
+			oi := &config.OSPFInterface{
+				Name:       iName,
+				Passive:    i.Passive,
+				Metric:     i.Metric,
+				BFD:        i.BFD,
+				BFDProfile: i.BFDProfile,
+			}
+			if i.Priority != nil {
+				oi.Priority = *i.Priority
+				oi.PrioritySet = true
+			}
+			area.Interfaces[iName] = oi
+		}
+		ospf.Areas[aID] = area
+	}
+	return ospf
+}
+
+func bfdToLegacy(c *BFDConfig) *config.BFDConfig {
+	if c == nil {
+		return nil
+	}
+	bfd := &config.BFDConfig{}
+	if c.Profiles != nil {
+		bfd.Profiles = make(map[string]*config.BFDProfile, len(c.Profiles))
+		for name, profile := range c.Profiles {
+			if profile == nil {
+				bfd.Profiles[name] = nil
+				continue
+			}
+			bfd.Profiles[name] = &config.BFDProfile{
+				Name:             name,
+				DetectMultiplier: profile.DetectMultiplier,
+				ReceiveInterval:  profile.ReceiveInterval,
+				TransmitInterval: profile.TransmitInterval,
+				EchoMode:         profile.EchoMode,
+				PassiveMode:      profile.PassiveMode,
+			}
+		}
+	}
+	if c.Peers != nil {
+		bfd.Peers = make(map[string]*config.BFDPeer, len(c.Peers))
+		for address, peer := range c.Peers {
+			if peer == nil {
+				bfd.Peers[address] = nil
+				continue
+			}
+			bfd.Peers[address] = &config.BFDPeer{
+				Address:          address,
+				LocalAddress:     peer.LocalAddress,
+				Interface:        peer.Interface,
+				VRF:              peer.VRF,
+				Multihop:         peer.Multihop,
+				Profile:          peer.Profile,
+				DetectMultiplier: peer.DetectMultiplier,
+				ReceiveInterval:  peer.ReceiveInterval,
+				TransmitInterval: peer.TransmitInterval,
+				EchoMode:         peer.EchoMode,
+				PassiveMode:      peer.PassiveMode,
+				Shutdown:         peer.Shutdown,
+			}
+		}
+	}
+	return bfd
 }

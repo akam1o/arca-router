@@ -49,17 +49,18 @@ sudo vi /etc/frr/daemons
 **Enable the following daemons**:
 
 ```bash
-# /etc/frr/daemons - REQUIRED for arca-router v0.6+
+# /etc/frr/daemons - REQUIRED for arca-router v0.7+
 
 bgpd=yes
 ospfd=yes
+ospf6d=yes
 zebra=yes
 staticd=yes
 mgmtd=yes
 vrrpd=yes
+bfdd=yes
 
 # Optional daemons (set to 'no' if not needed)
-ospf6d=no
 ripd=no
 ripngd=no
 isisd=no
@@ -70,7 +71,6 @@ eigrpd=no
 babeld=no
 sharpd=no
 pbrd=no
-bfdd=no
 fabricd=no
 pathd=no
 
@@ -89,19 +89,20 @@ staticd_options=""
 - `staticd`: Static route management
 - `mgmtd`: Transactional management datastore used by arca-router v0.5+
 - `vrrpd`: VRRP daemon used for appliance-style control-plane HA
+- `bfdd`: BFD peer monitoring daemon used for fast-failure detection
 
 ### 3. Configure FRR Apply Access
 
-By default, `arca-router` applies FRR changes, including VRRP groups, through the FRR management candidate datastore via `vtysh`. This requires `mgmtd=yes`, the standard `vrrpd=yes` HA daemon, and `frrvty` group access, but does not require direct writes to `/etc/frr/frr.conf`.
+By default, `arca-router` applies FRR changes through the FRR management candidate datastore via `vtysh`. This requires `mgmtd=yes`, the standard `vrrpd=yes` HA daemon, `bfdd=yes` for BFD workflows, and `frrvty` group access. The transactional backend covers VRRP, explicit BFD sessions/profiles, static route BFD monitoring, profile-less BGP BFD, and profile-less OSPF BFD. arca-routerd automatically falls back to the file backend for OSPFv3 and BGP/OSPF BFD profile bindings until FRR exposes those management YANG paths.
 
 When VRRP is configured, arca-routerd also prepares arca-owned Linux macvlan interfaces on the LCP interface before applying FRR. It stores prepared interface names in `/var/lib/arca-router/vrrp-interfaces.json` so cleanup survives daemon restarts. The packaged systemd unit grants `CAP_NET_ADMIN`, which is required for this macvlan and virtual-address reconciliation.
 
-arca-routerd polls FRR VRRP operational state with `vtysh -c "show vrrp json"` for HA convergence status. The `arca-router` service user must retain `frrvty` group access so this read-only command works in addition to transactional configuration applies.
+arca-routerd polls FRR VRRP operational state with `vtysh -c "show vrrp json"` for HA convergence status, and BFD operational state with `show bfd peers json` plus per-peer counter reads. The `arca-router` service user must retain `frrvty` group access so these read-only commands work in addition to transactional configuration applies.
 
-If you plan to use the recovery backend `--frr-apply-mode=file`, also allow the `frr` group to write `/etc/frr/frr.conf`:
+If you plan to use the recovery backend `--frr-apply-mode=file`, or OSPFv3 / BFD profile bindings that require the automatic file fallback, also allow the `frr` group to write `/etc/frr/frr.conf`:
 
 ```bash
-# Optional: only required for --frr-apply-mode=file
+# Optional: only required for --frr-apply-mode=file or automatic file fallback features
 sudo chown root:frr /etc/frr/frr.conf
 sudo chmod 0660 /etc/frr/frr.conf
 
@@ -118,12 +119,12 @@ ls -l /etc/frr/frr.conf
 # Required for transactional apply through vtysh
 sudo usermod -aG frrvty arca-router
 
-# Optional: only required for --frr-apply-mode=file
+# Optional: only required for --frr-apply-mode=file or automatic file fallback features
 sudo usermod -aG frr arca-router
 
 # Verify group membership
 groups arca-router
-# Expected: arca-router : arca-router vpp frrvty (and frr if file backend is enabled)
+# Expected: arca-router : arca-router vpp frrvty (and frr if file backend or fallback is enabled)
 ```
 
 ### 5. Start FRR Service
@@ -146,7 +147,7 @@ sudo systemctl status frr
 sudo systemctl status frr
 
 # Verify daemons are running
-ps aux | grep -E 'zebra|bgpd|ospfd|staticd|mgmtd|vrrpd'
+ps aux | grep -E 'zebra|bgpd|ospfd|ospf6d|staticd|mgmtd|vrrpd|bfdd'
 
 # Test FRR CLI (vtysh)
 sudo vtysh -c 'show version'
@@ -171,11 +172,13 @@ sudo vtysh -c 'show running-config'
    - Uses FRR management commands through `vtysh`
    - Runs candidate `commit check`, `commit apply`, then `write memory`
    - Requires `mgmtd=yes` and `frrvty` group access
+   - Automatically falls back to the file backend for OSPFv3 and BGP/OSPF BFD profile bindings
 
 2. **Method B: file backend** (recovery)
    - Enabled with `--frr-apply-mode=file`
    - Writes `/etc/frr/frr.conf`
    - Uses `/usr/lib/frr/frr-reload.py --reload`, then falls back to `vtysh -f /etc/frr/frr.conf`
+   - Required directly, or through automatic fallback, for OSPFv3 until FRR exposes core `ospf6d` management YANG paths
    - Packaged systemd units do not grant `/etc/frr` write access by default; add a local drop-in with the `frr` group and `ReadWritePaths=/etc/frr` before using this backend.
 
 **Validation**:
@@ -197,11 +200,11 @@ sudo tail -f /var/log/frr/frr.log
 
 **Common issues**:
 - **Daemon not enabled**: Check `/etc/frr/daemons` and ensure required daemons are set to `yes`
-- **Configuration syntax error**: Check the arca-routerd log for the failing backend command. For `--frr-apply-mode=file`, run `sudo vtysh --check /etc/frr/frr.conf` to validate the generated file.
+- **Configuration syntax error**: Check the arca-routerd log for the failing backend command. For `--frr-apply-mode=file` or automatic file fallback, run `sudo vtysh --check /etc/frr/frr.conf` to validate the generated file.
 
-### Permission Denied on /etc/frr/frr.conf (file backend only)
+### Permission Denied on /etc/frr/frr.conf (file backend or fallback only)
 
-**Symptom**: `arca-routerd --frr-apply-mode=file` fails with "permission denied" writing to `/etc/frr/frr.conf`
+**Symptom**: `arca-routerd --frr-apply-mode=file` or an OSPFv3 / BFD profile binding commit fails with "permission denied" writing to `/etc/frr/frr.conf`
 
 **Solution**:
 ```bash

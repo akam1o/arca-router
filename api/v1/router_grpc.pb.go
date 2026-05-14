@@ -682,13 +682,17 @@ const (
 	StateService_GetInterfaces_FullMethodName        = "/arca.router.v1.StateService/GetInterfaces"
 	StateService_GetRoutes_FullMethodName            = "/arca.router.v1.StateService/GetRoutes"
 	StateService_GetBGPNeighbors_FullMethodName      = "/arca.router.v1.StateService/GetBGPNeighbors"
+	StateService_GetOSPFNeighbors_FullMethodName     = "/arca.router.v1.StateService/GetOSPFNeighbors"
 	StateService_GetRouteText_FullMethodName         = "/arca.router.v1.StateService/GetRouteText"
 	StateService_GetBGPSummaryText_FullMethodName    = "/arca.router.v1.StateService/GetBGPSummaryText"
 	StateService_GetBGPNeighborText_FullMethodName   = "/arca.router.v1.StateService/GetBGPNeighborText"
 	StateService_GetOSPFNeighborsText_FullMethodName = "/arca.router.v1.StateService/GetOSPFNeighborsText"
 	StateService_GetVRRPText_FullMethodName          = "/arca.router.v1.StateService/GetVRRPText"
+	StateService_GetBFDText_FullMethodName           = "/arca.router.v1.StateService/GetBFDText"
+	StateService_GetBFDStatus_FullMethodName         = "/arca.router.v1.StateService/GetBFDStatus"
 	StateService_GetLCPReconciliation_FullMethodName = "/arca.router.v1.StateService/GetLCPReconciliation"
 	StateService_GetHAStatus_FullMethodName          = "/arca.router.v1.StateService/GetHAStatus"
+	StateService_GetRoutingInstances_FullMethodName  = "/arca.router.v1.StateService/GetRoutingInstances"
 	StateService_GetClassOfService_FullMethodName    = "/arca.router.v1.StateService/GetClassOfService"
 	StateService_GetSystemInfo_FullMethodName        = "/arca.router.v1.StateService/GetSystemInfo"
 )
@@ -705,6 +709,8 @@ type StateServiceClient interface {
 	GetRoutes(ctx context.Context, in *GetRoutesRequest, opts ...grpc.CallOption) (*GetRoutesResponse, error)
 	// GetBGPNeighbors returns BGP neighbor state.
 	GetBGPNeighbors(ctx context.Context, in *GetBGPNeighborsRequest, opts ...grpc.CallOption) (*GetBGPNeighborsResponse, error)
+	// GetOSPFNeighbors returns OSPFv2 or OSPFv3 neighbor state.
+	GetOSPFNeighbors(ctx context.Context, in *GetOSPFNeighborsRequest, opts ...grpc.CallOption) (*GetOSPFNeighborsResponse, error)
 	// GetRouteText returns FRR route output for CLI display.
 	GetRouteText(ctx context.Context, in *GetRouteTextRequest, opts ...grpc.CallOption) (*GetRouteTextResponse, error)
 	// GetBGPSummaryText returns FRR BGP summary output for CLI display.
@@ -715,10 +721,16 @@ type StateServiceClient interface {
 	GetOSPFNeighborsText(ctx context.Context, in *GetOSPFNeighborsTextRequest, opts ...grpc.CallOption) (*GetOSPFNeighborsTextResponse, error)
 	// GetVRRPText returns FRR VRRP output for CLI display.
 	GetVRRPText(ctx context.Context, in *GetVRRPTextRequest, opts ...grpc.CallOption) (*GetVRRPTextResponse, error)
+	// GetBFDText returns FRR BFD output for CLI display.
+	GetBFDText(ctx context.Context, in *GetBFDTextRequest, opts ...grpc.CallOption) (*GetBFDTextResponse, error)
+	// GetBFDStatus returns cached FRR BFD operational state.
+	GetBFDStatus(ctx context.Context, in *GetBFDStatusRequest, opts ...grpc.CallOption) (*GetBFDStatusResponse, error)
 	// GetLCPReconciliation returns VPP LCP reconciliation state.
 	GetLCPReconciliation(ctx context.Context, in *GetLCPReconciliationRequest, opts ...grpc.CallOption) (*GetLCPReconciliationResponse, error)
 	// GetHAStatus returns control-plane HA convergence state.
 	GetHAStatus(ctx context.Context, in *GetHAStatusRequest, opts ...grpc.CallOption) (*GetHAStatusResponse, error)
+	// GetRoutingInstances returns running routing-instance intent and table mapping.
+	GetRoutingInstances(ctx context.Context, in *GetRoutingInstancesRequest, opts ...grpc.CallOption) (*GetRoutingInstancesResponse, error)
 	// GetClassOfService returns running class-of-service intent.
 	GetClassOfService(ctx context.Context, in *GetClassOfServiceRequest, opts ...grpc.CallOption) (*GetClassOfServiceResponse, error)
 	// GetSystemInfo returns system information.
@@ -757,6 +769,16 @@ func (c *stateServiceClient) GetBGPNeighbors(ctx context.Context, in *GetBGPNeig
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(GetBGPNeighborsResponse)
 	err := c.cc.Invoke(ctx, StateService_GetBGPNeighbors_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *stateServiceClient) GetOSPFNeighbors(ctx context.Context, in *GetOSPFNeighborsRequest, opts ...grpc.CallOption) (*GetOSPFNeighborsResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(GetOSPFNeighborsResponse)
+	err := c.cc.Invoke(ctx, StateService_GetOSPFNeighbors_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
 	}
@@ -813,6 +835,26 @@ func (c *stateServiceClient) GetVRRPText(ctx context.Context, in *GetVRRPTextReq
 	return out, nil
 }
 
+func (c *stateServiceClient) GetBFDText(ctx context.Context, in *GetBFDTextRequest, opts ...grpc.CallOption) (*GetBFDTextResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(GetBFDTextResponse)
+	err := c.cc.Invoke(ctx, StateService_GetBFDText_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *stateServiceClient) GetBFDStatus(ctx context.Context, in *GetBFDStatusRequest, opts ...grpc.CallOption) (*GetBFDStatusResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(GetBFDStatusResponse)
+	err := c.cc.Invoke(ctx, StateService_GetBFDStatus_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 func (c *stateServiceClient) GetLCPReconciliation(ctx context.Context, in *GetLCPReconciliationRequest, opts ...grpc.CallOption) (*GetLCPReconciliationResponse, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(GetLCPReconciliationResponse)
@@ -827,6 +869,16 @@ func (c *stateServiceClient) GetHAStatus(ctx context.Context, in *GetHAStatusReq
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(GetHAStatusResponse)
 	err := c.cc.Invoke(ctx, StateService_GetHAStatus_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *stateServiceClient) GetRoutingInstances(ctx context.Context, in *GetRoutingInstancesRequest, opts ...grpc.CallOption) (*GetRoutingInstancesResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(GetRoutingInstancesResponse)
+	err := c.cc.Invoke(ctx, StateService_GetRoutingInstances_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
 	}
@@ -865,6 +917,8 @@ type StateServiceServer interface {
 	GetRoutes(context.Context, *GetRoutesRequest) (*GetRoutesResponse, error)
 	// GetBGPNeighbors returns BGP neighbor state.
 	GetBGPNeighbors(context.Context, *GetBGPNeighborsRequest) (*GetBGPNeighborsResponse, error)
+	// GetOSPFNeighbors returns OSPFv2 or OSPFv3 neighbor state.
+	GetOSPFNeighbors(context.Context, *GetOSPFNeighborsRequest) (*GetOSPFNeighborsResponse, error)
 	// GetRouteText returns FRR route output for CLI display.
 	GetRouteText(context.Context, *GetRouteTextRequest) (*GetRouteTextResponse, error)
 	// GetBGPSummaryText returns FRR BGP summary output for CLI display.
@@ -875,10 +929,16 @@ type StateServiceServer interface {
 	GetOSPFNeighborsText(context.Context, *GetOSPFNeighborsTextRequest) (*GetOSPFNeighborsTextResponse, error)
 	// GetVRRPText returns FRR VRRP output for CLI display.
 	GetVRRPText(context.Context, *GetVRRPTextRequest) (*GetVRRPTextResponse, error)
+	// GetBFDText returns FRR BFD output for CLI display.
+	GetBFDText(context.Context, *GetBFDTextRequest) (*GetBFDTextResponse, error)
+	// GetBFDStatus returns cached FRR BFD operational state.
+	GetBFDStatus(context.Context, *GetBFDStatusRequest) (*GetBFDStatusResponse, error)
 	// GetLCPReconciliation returns VPP LCP reconciliation state.
 	GetLCPReconciliation(context.Context, *GetLCPReconciliationRequest) (*GetLCPReconciliationResponse, error)
 	// GetHAStatus returns control-plane HA convergence state.
 	GetHAStatus(context.Context, *GetHAStatusRequest) (*GetHAStatusResponse, error)
+	// GetRoutingInstances returns running routing-instance intent and table mapping.
+	GetRoutingInstances(context.Context, *GetRoutingInstancesRequest) (*GetRoutingInstancesResponse, error)
 	// GetClassOfService returns running class-of-service intent.
 	GetClassOfService(context.Context, *GetClassOfServiceRequest) (*GetClassOfServiceResponse, error)
 	// GetSystemInfo returns system information.
@@ -902,6 +962,9 @@ func (UnimplementedStateServiceServer) GetRoutes(context.Context, *GetRoutesRequ
 func (UnimplementedStateServiceServer) GetBGPNeighbors(context.Context, *GetBGPNeighborsRequest) (*GetBGPNeighborsResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method GetBGPNeighbors not implemented")
 }
+func (UnimplementedStateServiceServer) GetOSPFNeighbors(context.Context, *GetOSPFNeighborsRequest) (*GetOSPFNeighborsResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method GetOSPFNeighbors not implemented")
+}
 func (UnimplementedStateServiceServer) GetRouteText(context.Context, *GetRouteTextRequest) (*GetRouteTextResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method GetRouteText not implemented")
 }
@@ -917,11 +980,20 @@ func (UnimplementedStateServiceServer) GetOSPFNeighborsText(context.Context, *Ge
 func (UnimplementedStateServiceServer) GetVRRPText(context.Context, *GetVRRPTextRequest) (*GetVRRPTextResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method GetVRRPText not implemented")
 }
+func (UnimplementedStateServiceServer) GetBFDText(context.Context, *GetBFDTextRequest) (*GetBFDTextResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method GetBFDText not implemented")
+}
+func (UnimplementedStateServiceServer) GetBFDStatus(context.Context, *GetBFDStatusRequest) (*GetBFDStatusResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method GetBFDStatus not implemented")
+}
 func (UnimplementedStateServiceServer) GetLCPReconciliation(context.Context, *GetLCPReconciliationRequest) (*GetLCPReconciliationResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method GetLCPReconciliation not implemented")
 }
 func (UnimplementedStateServiceServer) GetHAStatus(context.Context, *GetHAStatusRequest) (*GetHAStatusResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method GetHAStatus not implemented")
+}
+func (UnimplementedStateServiceServer) GetRoutingInstances(context.Context, *GetRoutingInstancesRequest) (*GetRoutingInstancesResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method GetRoutingInstances not implemented")
 }
 func (UnimplementedStateServiceServer) GetClassOfService(context.Context, *GetClassOfServiceRequest) (*GetClassOfServiceResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method GetClassOfService not implemented")
@@ -1000,6 +1072,24 @@ func _StateService_GetBGPNeighbors_Handler(srv interface{}, ctx context.Context,
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
 		return srv.(StateServiceServer).GetBGPNeighbors(ctx, req.(*GetBGPNeighborsRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _StateService_GetOSPFNeighbors_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(GetOSPFNeighborsRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(StateServiceServer).GetOSPFNeighbors(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: StateService_GetOSPFNeighbors_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(StateServiceServer).GetOSPFNeighbors(ctx, req.(*GetOSPFNeighborsRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
@@ -1094,6 +1184,42 @@ func _StateService_GetVRRPText_Handler(srv interface{}, ctx context.Context, dec
 	return interceptor(ctx, in, info, handler)
 }
 
+func _StateService_GetBFDText_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(GetBFDTextRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(StateServiceServer).GetBFDText(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: StateService_GetBFDText_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(StateServiceServer).GetBFDText(ctx, req.(*GetBFDTextRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _StateService_GetBFDStatus_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(GetBFDStatusRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(StateServiceServer).GetBFDStatus(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: StateService_GetBFDStatus_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(StateServiceServer).GetBFDStatus(ctx, req.(*GetBFDStatusRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 func _StateService_GetLCPReconciliation_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(GetLCPReconciliationRequest)
 	if err := dec(in); err != nil {
@@ -1126,6 +1252,24 @@ func _StateService_GetHAStatus_Handler(srv interface{}, ctx context.Context, dec
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
 		return srv.(StateServiceServer).GetHAStatus(ctx, req.(*GetHAStatusRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _StateService_GetRoutingInstances_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(GetRoutingInstancesRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(StateServiceServer).GetRoutingInstances(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: StateService_GetRoutingInstances_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(StateServiceServer).GetRoutingInstances(ctx, req.(*GetRoutingInstancesRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
@@ -1186,6 +1330,10 @@ var StateService_ServiceDesc = grpc.ServiceDesc{
 			Handler:    _StateService_GetBGPNeighbors_Handler,
 		},
 		{
+			MethodName: "GetOSPFNeighbors",
+			Handler:    _StateService_GetOSPFNeighbors_Handler,
+		},
+		{
 			MethodName: "GetRouteText",
 			Handler:    _StateService_GetRouteText_Handler,
 		},
@@ -1206,12 +1354,24 @@ var StateService_ServiceDesc = grpc.ServiceDesc{
 			Handler:    _StateService_GetVRRPText_Handler,
 		},
 		{
+			MethodName: "GetBFDText",
+			Handler:    _StateService_GetBFDText_Handler,
+		},
+		{
+			MethodName: "GetBFDStatus",
+			Handler:    _StateService_GetBFDStatus_Handler,
+		},
+		{
 			MethodName: "GetLCPReconciliation",
 			Handler:    _StateService_GetLCPReconciliation_Handler,
 		},
 		{
 			MethodName: "GetHAStatus",
 			Handler:    _StateService_GetHAStatus_Handler,
+		},
+		{
+			MethodName: "GetRoutingInstances",
+			Handler:    _StateService_GetRoutingInstances_Handler,
 		},
 		{
 			MethodName: "GetClassOfService",

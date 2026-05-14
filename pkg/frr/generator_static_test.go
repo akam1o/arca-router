@@ -3,6 +3,8 @@ package frr
 import (
 	"strings"
 	"testing"
+
+	"github.com/akam1o/arca-router/pkg/config"
 )
 
 func TestGenerateStaticRouteConfig(t *testing.T) {
@@ -65,6 +67,40 @@ func TestGenerateStaticRouteConfig(t *testing.T) {
 			},
 			want: []string{
 				"ipv6 route 2001:db8:1::/48 2001:db8::ffff 20",
+			},
+			wantErr: false,
+		},
+		{
+			name: "IPv4 static route with BFD profile",
+			routes: []StaticRoute{
+				{
+					Prefix:      "203.0.113.0/24",
+					NextHop:     "192.0.2.2",
+					BFD:         true,
+					BFDProfile:  "fast",
+					BFDSource:   "192.0.2.1",
+					BFDMultihop: true,
+				},
+			},
+			want: []string{
+				"ip route 203.0.113.0/24 192.0.2.2 bfd multi-hop source 192.0.2.1 profile fast",
+			},
+			wantErr: false,
+		},
+		{
+			name: "IPv6 static route with BFD profile",
+			routes: []StaticRoute{
+				{
+					Prefix:     "2001:db8:100::/64",
+					NextHop:    "2001:db8::1",
+					IsIPv6:     true,
+					BFD:        true,
+					BFDProfile: "fast",
+					BFDSource:  "2001:db8::2",
+				},
+			},
+			want: []string{
+				"ipv6 route 2001:db8:100::/64 2001:db8::1 bfd source 2001:db8::2 profile fast",
 			},
 			wantErr: false,
 		},
@@ -148,6 +184,13 @@ func TestGenerateStaticRouteConfig(t *testing.T) {
 			},
 			wantErr: true,
 		},
+		{
+			name: "BFD with distance",
+			routes: []StaticRoute{
+				{Prefix: "203.0.113.0/24", NextHop: "192.0.2.2", Distance: 10, BFD: true},
+			},
+			wantErr: true,
+		},
 	}
 
 	for _, tt := range tests {
@@ -164,6 +207,71 @@ func TestGenerateStaticRouteConfig(t *testing.T) {
 						t.Errorf("GenerateStaticRouteConfig() output missing expected string:\nWant: %s\nGot:\n%s", want, got)
 					}
 				}
+			}
+		})
+	}
+}
+
+func TestGenerateFRRConfigConvertsBFDStaticRoute(t *testing.T) {
+	cfg := config.NewConfig()
+	cfg.RoutingOptions = &config.RoutingOptions{
+		StaticRoutes: []*config.StaticRoute{
+			{
+				Prefix:      "203.0.113.0/24",
+				NextHop:     "192.0.2.2",
+				BFD:         true,
+				BFDProfile:  "fast",
+				BFDSource:   "192.0.2.1",
+				BFDMultihop: true,
+			},
+		},
+	}
+
+	frrCfg, err := GenerateFRRConfig(cfg)
+	if err != nil {
+		t.Fatalf("GenerateFRRConfig() error = %v", err)
+	}
+	if len(frrCfg.StaticRoutes) != 1 {
+		t.Fatalf("StaticRoutes = %d, want 1", len(frrCfg.StaticRoutes))
+	}
+	route := frrCfg.StaticRoutes[0]
+	if !route.BFD || route.BFDProfile != "fast" || route.BFDSource != "192.0.2.1" || !route.BFDMultihop {
+		t.Fatalf("Static route BFD = %#v, want source/profile/multihop", route)
+	}
+}
+
+func TestGenerateStaticRouteConfigRejectsDuplicateRoute(t *testing.T) {
+	_, err := GenerateStaticRouteConfig([]StaticRoute{
+		{Prefix: "203.0.113.0/24", NextHop: "192.0.2.1"},
+		{Prefix: "203.0.113.0/24", NextHop: "192.0.2.1", Distance: 10},
+	})
+	if err == nil || !strings.Contains(err.Error(), "static route 203.0.113.0/24 via 192.0.2.1 is duplicated") {
+		t.Fatalf("GenerateStaticRouteConfig() error = %v, want duplicate route error", err)
+	}
+}
+
+func TestGenerateStaticRouteConfigRejectsFamilyMismatch(t *testing.T) {
+	tests := []struct {
+		name   string
+		routes []StaticRoute
+		want   string
+	}{
+		{
+			name:   "next-hop family",
+			routes: []StaticRoute{{Prefix: "2001:db8::/64", NextHop: "192.0.2.1", IsIPv6: true}},
+			want:   "next-hop family does not match prefix",
+		},
+		{
+			name:   "configured family",
+			routes: []StaticRoute{{Prefix: "2001:db8::/64", NextHop: "2001:db8::1"}},
+			want:   "address family does not match configured address family",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := GenerateStaticRouteConfig(tt.routes)
+			if err == nil || !strings.Contains(err.Error(), tt.want) {
+				t.Fatalf("GenerateStaticRouteConfig() error = %v, want %q", err, tt.want)
 			}
 		})
 	}

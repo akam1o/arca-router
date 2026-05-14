@@ -32,11 +32,16 @@ func (s fakeConfigSyncRuntimeSource) ConfigSyncStatus() configSyncStatus {
 }
 
 type fakeFRRVRRPSource struct {
-	status sbfrr.VRRPOperationalStatus
+	vrrpStatus sbfrr.VRRPOperationalStatus
+	bfdStatus  sbfrr.BFDOperationalStatus
 }
 
 func (s fakeFRRVRRPSource) VRRPOperationalStatus() sbfrr.VRRPOperationalStatus {
-	return s.status
+	return s.vrrpStatus
+}
+
+func (s fakeFRRVRRPSource) BFDOperationalStatus() sbfrr.BFDOperationalStatus {
+	return s.bfdStatus
 }
 
 func TestEffectiveMetricsListenUsesFlagOverride(t *testing.T) {
@@ -141,12 +146,22 @@ func TestMetricsEndpointExportsRouterMetrics(t *testing.T) {
 			LastCheck:       time.Unix(1700000100, 0),
 			LastApply:       time.Unix(1700000200, 0),
 		}},
-		frr: fakeFRRVRRPSource{status: sbfrr.VRRPOperationalStatus{
-			LastRun:          time.Unix(1700000300, 0),
-			ConfiguredGroups: 1,
-			ObservedGroups:   1,
-			ActiveGroups:     1,
-		}},
+		frr: fakeFRRVRRPSource{
+			vrrpStatus: sbfrr.VRRPOperationalStatus{
+				LastRun:          time.Unix(1700000300, 0),
+				ConfiguredGroups: 1,
+				ObservedGroups:   1,
+				ActiveGroups:     1,
+			},
+			bfdStatus: sbfrr.BFDOperationalStatus{
+				LastRun:           time.Unix(1700000400, 0),
+				ConfiguredPeers:   1,
+				ObservedPeers:     1,
+				UpPeers:           1,
+				SessionDownEvents: 2,
+				RxFailPackets:     1,
+			},
+		},
 		vpp: fakeVPPReconciliationSource{status: sbvpp.LCPReconciliationStatus{
 			LastRun:         time.Unix(1700000000, 0),
 			PairCount:       2,
@@ -183,6 +198,15 @@ func TestMetricsEndpointExportsRouterMetrics(t *testing.T) {
 		"arca_router_frr_vrrp_issues 0",
 		"arca_router_frr_vrrp_error 0",
 		"arca_router_frr_vrrp_last_check_timestamp_seconds 1700000300",
+		"arca_router_frr_bfd_configured_peers 1",
+		"arca_router_frr_bfd_observed_peers 1",
+		"arca_router_frr_bfd_up_peers 1",
+		"arca_router_frr_bfd_down_peers 0",
+		"arca_router_frr_bfd_session_down_events 2",
+		"arca_router_frr_bfd_rx_fail_packets 1",
+		"arca_router_frr_bfd_issues 0",
+		"arca_router_frr_bfd_error 0",
+		"arca_router_frr_bfd_last_check_timestamp_seconds 1700000400",
 		"arca_router_vpp_lcp_pairs 2",
 		"arca_router_vpp_lcp_inconsistencies 1",
 		"arca_router_vpp_lcp_reconcile_error 0",
@@ -198,4 +222,88 @@ func TestMetricsEndpointExportsRouterMetrics(t *testing.T) {
 			t.Fatalf("/metrics missing %q:\n%s", want, text)
 		}
 	}
+}
+
+func TestHAConvergenceIncludesConfiguredBFDStatus(t *testing.T) {
+	now := time.Unix(1700000500, 0)
+	cfg := testHAConvergenceConfig()
+	metrics := testConvergedHAMetrics(now)
+	metrics.FRRBFDLastRun = now
+	metrics.FRRBFDConfiguredPeers = 1
+	metrics.FRRBFDObservedPeers = 1
+	metrics.FRRBFDDownPeers = 1
+
+	applyHAConvergenceStatus(&metrics, cfg, true)
+
+	if !metrics.HAConfigured {
+		t.Fatal("HAConfigured = false, want true")
+	}
+	if metrics.HAConverged {
+		t.Fatal("HAConverged = true, want false when a configured BFD peer is down")
+	}
+	if !containsString(metrics.HAIssues, "FRR BFD status has down peers") {
+		t.Fatalf("HAIssues = %#v, want BFD down peer issue", metrics.HAIssues)
+	}
+}
+
+func TestHAConvergenceIgnoresUnconfiguredBFDStatus(t *testing.T) {
+	now := time.Unix(1700000500, 0)
+	cfg := testHAConvergenceConfig()
+	metrics := testConvergedHAMetrics(now)
+
+	applyHAConvergenceStatus(&metrics, cfg, true)
+
+	if !metrics.HAConfigured || !metrics.HAConverged {
+		t.Fatalf("HA status = configured %v converged %v issues %#v, want converged without configured BFD", metrics.HAConfigured, metrics.HAConverged, metrics.HAIssues)
+	}
+	if len(metrics.HAIssues) != 0 {
+		t.Fatalf("HAIssues = %#v, want none", metrics.HAIssues)
+	}
+}
+
+func testHAConvergenceConfig() *model.RouterConfig {
+	cfg := model.NewRouterConfig()
+	cfg.Chassis = &model.ChassisConfig{
+		Cluster: &model.ClusterConfig{
+			Enabled: true,
+			Nodes: map[string]*model.ClusterNode{
+				"node0": {Address: "192.0.2.10"},
+				"node1": {Address: "192.0.2.11"},
+			},
+			Sync: &model.ClusterSyncConfig{
+				Etcd: &model.EtcdSyncConfig{Endpoints: []string{"https://etcd1:2379"}},
+			},
+		},
+	}
+	cfg.Protocols = &model.ProtocolsConfig{
+		VRRP: &model.VRRPConfig{Groups: map[string]*model.VRRPGroup{
+			"10": {Interface: "ge-0/0/0", VirtualAddress: "192.0.2.1", Priority: 110, Preempt: true},
+		}},
+	}
+	return cfg
+}
+
+func testConvergedHAMetrics(now time.Time) routerMetrics {
+	return routerMetrics{
+		ClusterNodeCount:        2,
+		ClusterEtcdSync:         true,
+		ClusterSyncAligned:      true,
+		ConfigSyncEnabled:       true,
+		ConfigSyncHealthy:       true,
+		FRRVRRPLastRun:          now,
+		FRRVRRPConfiguredGroups: 1,
+		FRRVRRPObservedGroups:   1,
+		FRRVRRPActiveGroups:     1,
+		VPPLCPReconcileLastRun:  now,
+		VPPLCPPairs:             1,
+	}
+}
+
+func containsString(values []string, want string) bool {
+	for _, value := range values {
+		if value == want {
+			return true
+		}
+	}
+	return false
 }

@@ -103,6 +103,7 @@ type webCoSStats struct {
 
 type webFRRStats struct {
 	VRRP webVRRPStats `json:"vrrp"`
+	BFD  webBFDStats  `json:"bfd"`
 }
 
 type webVRRPStats struct {
@@ -123,6 +124,34 @@ type webVRRPGroupStats struct {
 	State          string `json:"state"`
 	Observed       bool   `json:"observed"`
 	Active         bool   `json:"active"`
+}
+
+type webBFDStats struct {
+	LastCheck         string            `json:"last_check,omitempty"`
+	ConfiguredPeers   int               `json:"configured_peers"`
+	ObservedPeers     int               `json:"observed_peers"`
+	UpPeers           int               `json:"up_peers"`
+	DownPeers         int               `json:"down_peers"`
+	SessionDownEvents int               `json:"session_down_events"`
+	RxFailPackets     int               `json:"rx_fail_packets"`
+	Peers             []webBFDPeerStats `json:"peers,omitempty"`
+	IssueCount        int               `json:"issue_count"`
+	Issues            []string          `json:"issues,omitempty"`
+	LastError         string            `json:"last_error,omitempty"`
+}
+
+type webBFDPeerStats struct {
+	Peer              string `json:"peer"`
+	LocalAddress      string `json:"local_address,omitempty"`
+	Interface         string `json:"interface,omitempty"`
+	VRF               string `json:"vrf,omitempty"`
+	Status            string `json:"status"`
+	Diagnostic        string `json:"diagnostic,omitempty"`
+	RemoteDiagnostic  string `json:"remote_diagnostic,omitempty"`
+	Observed          bool   `json:"observed"`
+	Up                bool   `json:"up"`
+	SessionDownEvents int    `json:"session_down_events"`
+	RxFailPackets     int    `json:"rx_fail_packets"`
 }
 
 type webVPPStats struct {
@@ -190,49 +219,62 @@ type webAuthUser struct {
 }
 
 type webIndexData struct {
-	Status                 webStatus
-	Uptime                 string
-	NETCONFState           string
-	NETCONFStateClass      string
-	NETCONFConnections     string
-	ClusterState           string
-	ClusterStateClass      string
-	ClusterSyncState       string
-	ClusterSyncAlignment   string
-	ClusterNodeCount       string
-	ConfigSyncState        string
-	ConfigSyncStateClass   string
-	ConfigSyncRevision     string
-	ConfigSyncLastApply    string
-	HAState                string
-	HAStateClass           string
-	HAVRPGroups            string
-	HAIssues               string
-	ClassOfServiceState    string
-	ClassOfServiceClass    string
-	ClassOfServiceProfiles string
-	ClassOfServiceBindings string
-	ClassOfServiceClasses  string
-	FRRVRRPState           string
-	FRRVRRPStateClass      string
-	FRRVRRPActiveGroups    string
-	FRRVRRPGroups          []webVRRPGroupView
-	VPPLCPState            string
-	VPPLCPStateClass       string
-	VPPLCPPairs            string
-	VPPLCPInconsistencies  string
-	VPPLCPLastReconcile    string
-	DatastoreBackend       string
-	GeneratedAt            string
-	ConfigVersionString    string
-	RunningConfig          string
-	History                []webCommitEntry
+	Status                  webStatus
+	Uptime                  string
+	NETCONFState            string
+	NETCONFStateClass       string
+	NETCONFConnections      string
+	ClusterState            string
+	ClusterStateClass       string
+	ClusterSyncState        string
+	ClusterSyncAlignment    string
+	ClusterNodeCount        string
+	ConfigSyncState         string
+	ConfigSyncStateClass    string
+	ConfigSyncRevision      string
+	ConfigSyncLastApply     string
+	HAState                 string
+	HAStateClass            string
+	HAVRPGroups             string
+	HAIssues                string
+	ClassOfServiceState     string
+	ClassOfServiceClass     string
+	ClassOfServiceProfiles  string
+	ClassOfServiceBindings  string
+	ClassOfServiceClasses   string
+	FRRVRRPState            string
+	FRRVRRPStateClass       string
+	FRRVRRPActiveGroups     string
+	FRRVRRPGroups           []webVRRPGroupView
+	FRRBFDState             string
+	FRRBFDStateClass        string
+	FRRBFDUpPeers           string
+	FRRBFDSessionDownEvents string
+	FRRBFDRxFailPackets     string
+	FRRBFDPeers             []webBFDPeerView
+	VPPLCPState             string
+	VPPLCPStateClass        string
+	VPPLCPPairs             string
+	VPPLCPInconsistencies   string
+	VPPLCPLastReconcile     string
+	DatastoreBackend        string
+	GeneratedAt             string
+	ConfigVersionString     string
+	RunningConfig           string
+	History                 []webCommitEntry
 }
 
 type webVRRPGroupView struct {
 	Label      string
 	State      string
 	StateClass string
+}
+
+type webBFDPeerView struct {
+	Label      string
+	State      string
+	StateClass string
+	Counters   string
 }
 
 var webIndexTemplate = template.Must(template.New("web-index").Parse(`<!doctype html>
@@ -517,6 +559,13 @@ var webIndexTemplate = template.Must(template.New("web-index").Parse(`<!doctype 
           <div class="row"><span>Active VRRP groups</span><strong>{{.FRRVRRPActiveGroups}}</strong></div>
           {{range .FRRVRRPGroups}}
           <div class="row"><span>{{.Label}}</span><strong><span class="pill {{.StateClass}}">{{.State}}</span></strong></div>
+          {{end}}
+          <div class="row"><span>FRR BFD</span><strong><span class="pill {{.FRRBFDStateClass}}">{{.FRRBFDState}}</span></strong></div>
+          <div class="row"><span>Up BFD peers</span><strong>{{.FRRBFDUpPeers}}</strong></div>
+          <div class="row"><span>BFD session-down</span><strong>{{.FRRBFDSessionDownEvents}}</strong></div>
+          <div class="row"><span>BFD RX fail</span><strong>{{.FRRBFDRxFailPackets}}</strong></div>
+          {{range .FRRBFDPeers}}
+          <div class="row"><span>{{.Label}}</span><strong><span class="pill {{.StateClass}}">{{.State}}</span> {{.Counters}}</strong></div>
           {{end}}
           <div class="row"><span>VPP LCP</span><strong><span class="pill {{.VPPLCPStateClass}}">{{.VPPLCPState}}</span></strong></div>
           <div class="row"><span>Pairs</span><strong>{{.VPPLCPPairs}}</strong></div>
@@ -1250,6 +1299,19 @@ func newWebStatus(metrics routerMetrics) webStatus {
 				Issues:           append([]string(nil), metrics.FRRVRRPIssues...),
 				LastError:        metrics.FRRVRRPError,
 			},
+			BFD: webBFDStats{
+				LastCheck:         formatWebOptionalTime(metrics.FRRBFDLastRun),
+				ConfiguredPeers:   metrics.FRRBFDConfiguredPeers,
+				ObservedPeers:     metrics.FRRBFDObservedPeers,
+				UpPeers:           metrics.FRRBFDUpPeers,
+				DownPeers:         metrics.FRRBFDDownPeers,
+				SessionDownEvents: metrics.FRRBFDSessionDownEvents,
+				RxFailPackets:     metrics.FRRBFDRxFailPackets,
+				Peers:             webBFDPeers(metrics.FRRBFDPeers),
+				IssueCount:        len(metrics.FRRBFDIssues),
+				Issues:            append([]string(nil), metrics.FRRBFDIssues...),
+				LastError:         metrics.FRRBFDError,
+			},
 		},
 		VPP: webVPPStats{
 			LCP: webLCPSyncStats{
@@ -1281,6 +1343,26 @@ func webVRRPGroups(groups []sbfrr.VRRPGroupOperationalStatus) []webVRRPGroupStat
 			State:          group.State,
 			Observed:       group.Observed,
 			Active:         group.Active,
+		})
+	}
+	return result
+}
+
+func webBFDPeers(peers []sbfrr.BFDPeerOperationalStatus) []webBFDPeerStats {
+	result := make([]webBFDPeerStats, 0, len(peers))
+	for _, peer := range peers {
+		result = append(result, webBFDPeerStats{
+			Peer:              peer.Peer,
+			LocalAddress:      peer.LocalAddress,
+			Interface:         peer.Interface,
+			VRF:               peer.VRF,
+			Status:            peer.Status,
+			Diagnostic:        peer.Diagnostic,
+			RemoteDiagnostic:  peer.RemoteDiagnostic,
+			Observed:          peer.Observed,
+			Up:                peer.Up,
+			SessionDownEvents: peer.SessionDownEvents,
+			RxFailPackets:     peer.RxFailPackets,
 		})
 	}
 	return result
@@ -1358,6 +1440,20 @@ func newWebIndexData(status webStatus, now time.Time, runningConfig string, hist
 			frrVRRPStateClass = "neutral"
 		}
 	}
+	frrBFDState := "Not configured"
+	frrBFDStateClass := "neutral"
+	if status.FRR.BFD.ConfiguredPeers > 0 || status.FRR.BFD.ObservedPeers > 0 {
+		frrBFDState = "Converged"
+		frrBFDStateClass = "ok"
+		if status.FRR.BFD.LastError != "" || status.FRR.BFD.IssueCount > 0 ||
+			status.FRR.BFD.DownPeers > 0 || status.FRR.BFD.UpPeers < status.FRR.BFD.ConfiguredPeers {
+			frrBFDState = "Issues"
+			frrBFDStateClass = "warn"
+		} else if status.FRR.BFD.LastCheck == "" {
+			frrBFDState = "Unknown"
+			frrBFDStateClass = "neutral"
+		}
+	}
 	vppLCPState := "Consistent"
 	vppLCPStateClass := "ok"
 	if status.VPP.LCP.LastError != "" {
@@ -1372,43 +1468,49 @@ func newWebIndexData(status webStatus, now time.Time, runningConfig string, hist
 	}
 
 	return webIndexData{
-		Status:                 status,
-		Uptime:                 formatWebUptime(status.UptimeSeconds),
-		NETCONFState:           state,
-		NETCONFStateClass:      stateClass,
-		NETCONFConnections:     strconv.FormatUint(status.NETCONF.TotalConnections, 10),
-		ClusterState:           clusterState,
-		ClusterStateClass:      clusterStateClass,
-		ClusterSyncState:       clusterSyncState,
-		ClusterSyncAlignment:   clusterSyncAlignment,
-		ClusterNodeCount:       strconv.Itoa(status.Cluster.NodeCount),
-		ConfigSyncState:        configSyncState,
-		ConfigSyncStateClass:   configSyncStateClass,
-		ConfigSyncRevision:     configSyncRevision,
-		ConfigSyncLastApply:    formatWebOptionalDisplayTime(status.ConfigSync.LastApply),
-		HAState:                haState,
-		HAStateClass:           haStateClass,
-		HAVRPGroups:            strconv.Itoa(status.HA.VRRPGroups),
-		HAIssues:               strconv.Itoa(status.HA.IssueCount),
-		ClassOfServiceState:    cosState,
-		ClassOfServiceClass:    cosStateClass,
-		ClassOfServiceProfiles: strconv.Itoa(status.ClassOfService.TrafficControlProfiles),
-		ClassOfServiceBindings: strconv.Itoa(status.ClassOfService.InterfaceBindings),
-		ClassOfServiceClasses:  strconv.Itoa(status.ClassOfService.ForwardingClasses),
-		FRRVRRPState:           frrVRRPState,
-		FRRVRRPStateClass:      frrVRRPStateClass,
-		FRRVRRPActiveGroups:    fmt.Sprintf("%d/%d", status.FRR.VRRP.ActiveGroups, status.FRR.VRRP.ConfiguredGroups),
-		FRRVRRPGroups:          webVRRPGroupViews(status.FRR.VRRP.Groups),
-		VPPLCPState:            vppLCPState,
-		VPPLCPStateClass:       vppLCPStateClass,
-		VPPLCPPairs:            strconv.Itoa(status.VPP.LCP.PairCount),
-		VPPLCPInconsistencies:  strconv.Itoa(status.VPP.LCP.InconsistencyCount),
-		VPPLCPLastReconcile:    formatWebOptionalDisplayTime(status.VPP.LCP.LastReconcile),
-		DatastoreBackend:       status.Datastore.Backend,
-		GeneratedAt:            now.UTC().Format(time.RFC3339),
-		ConfigVersionString:    strconv.FormatUint(status.ConfigVersion, 10),
-		RunningConfig:          runningConfig,
-		History:                history,
+		Status:                  status,
+		Uptime:                  formatWebUptime(status.UptimeSeconds),
+		NETCONFState:            state,
+		NETCONFStateClass:       stateClass,
+		NETCONFConnections:      strconv.FormatUint(status.NETCONF.TotalConnections, 10),
+		ClusterState:            clusterState,
+		ClusterStateClass:       clusterStateClass,
+		ClusterSyncState:        clusterSyncState,
+		ClusterSyncAlignment:    clusterSyncAlignment,
+		ClusterNodeCount:        strconv.Itoa(status.Cluster.NodeCount),
+		ConfigSyncState:         configSyncState,
+		ConfigSyncStateClass:    configSyncStateClass,
+		ConfigSyncRevision:      configSyncRevision,
+		ConfigSyncLastApply:     formatWebOptionalDisplayTime(status.ConfigSync.LastApply),
+		HAState:                 haState,
+		HAStateClass:            haStateClass,
+		HAVRPGroups:             strconv.Itoa(status.HA.VRRPGroups),
+		HAIssues:                strconv.Itoa(status.HA.IssueCount),
+		ClassOfServiceState:     cosState,
+		ClassOfServiceClass:     cosStateClass,
+		ClassOfServiceProfiles:  strconv.Itoa(status.ClassOfService.TrafficControlProfiles),
+		ClassOfServiceBindings:  strconv.Itoa(status.ClassOfService.InterfaceBindings),
+		ClassOfServiceClasses:   strconv.Itoa(status.ClassOfService.ForwardingClasses),
+		FRRVRRPState:            frrVRRPState,
+		FRRVRRPStateClass:       frrVRRPStateClass,
+		FRRVRRPActiveGroups:     fmt.Sprintf("%d/%d", status.FRR.VRRP.ActiveGroups, status.FRR.VRRP.ConfiguredGroups),
+		FRRVRRPGroups:           webVRRPGroupViews(status.FRR.VRRP.Groups),
+		FRRBFDState:             frrBFDState,
+		FRRBFDStateClass:        frrBFDStateClass,
+		FRRBFDUpPeers:           webBFDPeerRatio(status.FRR.BFD),
+		FRRBFDSessionDownEvents: strconv.Itoa(status.FRR.BFD.SessionDownEvents),
+		FRRBFDRxFailPackets:     strconv.Itoa(status.FRR.BFD.RxFailPackets),
+		FRRBFDPeers:             webBFDPeerViews(status.FRR.BFD.Peers),
+		VPPLCPState:             vppLCPState,
+		VPPLCPStateClass:        vppLCPStateClass,
+		VPPLCPPairs:             strconv.Itoa(status.VPP.LCP.PairCount),
+		VPPLCPInconsistencies:   strconv.Itoa(status.VPP.LCP.InconsistencyCount),
+		VPPLCPLastReconcile:     formatWebOptionalDisplayTime(status.VPP.LCP.LastReconcile),
+		DatastoreBackend:        status.Datastore.Backend,
+		GeneratedAt:             now.UTC().Format(time.RFC3339),
+		ConfigVersionString:     strconv.FormatUint(status.ConfigVersion, 10),
+		RunningConfig:           runningConfig,
+		History:                 history,
 	}
 }
 
@@ -1433,6 +1535,56 @@ func webVRRPGroupStateClass(group webVRRPGroupStats) string {
 		return "ok"
 	}
 	return "warn"
+}
+
+func webBFDPeerViews(peers []webBFDPeerStats) []webBFDPeerView {
+	result := make([]webBFDPeerView, 0, len(peers))
+	for _, peer := range peers {
+		state := peer.Status
+		if state == "" {
+			state = "unknown"
+		}
+		result = append(result, webBFDPeerView{
+			Label:      webBFDPeerLabel(peer),
+			State:      state,
+			StateClass: webBFDPeerStateClass(peer),
+			Counters:   webBFDCounterText(peer),
+		})
+	}
+	return result
+}
+
+func webBFDPeerRatio(status webBFDStats) string {
+	total := status.ConfiguredPeers
+	if total == 0 {
+		total = status.ObservedPeers
+	}
+	return fmt.Sprintf("%d/%d", status.UpPeers, total)
+}
+
+func webBFDPeerLabel(peer webBFDPeerStats) string {
+	parts := []string{"bfd", peer.Peer}
+	if peer.Interface != "" {
+		parts = append(parts, peer.Interface)
+	}
+	if peer.VRF != "" {
+		parts = append(parts, "vrf "+peer.VRF)
+	}
+	return strings.Join(parts, " ")
+}
+
+func webBFDPeerStateClass(peer webBFDPeerStats) string {
+	if peer.Up {
+		return "ok"
+	}
+	return "warn"
+}
+
+func webBFDCounterText(peer webBFDPeerStats) string {
+	if peer.SessionDownEvents == 0 && peer.RxFailPackets == 0 {
+		return ""
+	}
+	return fmt.Sprintf("down %d / rx-fail %d", peer.SessionDownEvents, peer.RxFailPackets)
 }
 
 func formatWebUptime(seconds float64) string {

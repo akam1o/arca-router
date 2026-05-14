@@ -5,11 +5,9 @@ package vpp
 import (
 	"context"
 	"fmt"
-	"hash/fnv"
 	"log/slog"
 	"net"
 	"sort"
-	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -344,6 +342,16 @@ func (p *VPPPlugin) CollectState(ctx context.Context) (map[string]*model.Interfa
 			Name:       junosName,
 			MAC:        iface.MAC.String(),
 			QoSProfile: iface.QoSProfile,
+		}
+		if tableID, err := p.client.GetInterfaceTable(ctx, iface.SwIfIndex, false); err != nil {
+			p.log.Warn("Failed to get VPP interface IPv4 table", slog.String("interface", junosName), slog.Any("error", err))
+		} else {
+			state.IPv4TableID = tableID
+		}
+		if tableID, err := p.client.GetInterfaceTable(ctx, iface.SwIfIndex, true); err != nil {
+			p.log.Warn("Failed to get VPP interface IPv6 table", slog.String("interface", junosName), slog.Any("error", err))
+		} else {
+			state.IPv6TableID = tableID
 		}
 		if iface.AdminUp {
 			state.AdminStatus = "up"
@@ -827,84 +835,19 @@ func (p *VPPPlugin) applyRoutingInstanceChanges(ctx context.Context, diff *engin
 }
 
 func routingInstancePlanMap(instances map[string]*model.RoutingInstance) (map[string]routingInstancePlan, error) {
-	plans := make(map[string]routingInstancePlan)
-	if len(instances) == 0 {
-		return plans, nil
+	modelPlans, err := model.RoutingInstanceTablePlans(instances)
+	if err != nil {
+		return nil, err
 	}
-
-	names := make([]string, 0, len(instances))
-	for name := range instances {
-		names = append(names, name)
-	}
-	sort.Strings(names)
-
-	usedTables := make(map[uint32]string)
-	for _, name := range names {
-		instance := instances[name]
-		if instance == nil {
-			continue
-		}
-		if instance.InstanceType != "" && instance.InstanceType != "vrf" {
-			return nil, fmt.Errorf("routing-instance %s: unsupported instance-type %q", name, instance.InstanceType)
-		}
-		tableID, explicit, err := routingInstanceTableID(name, instance)
-		if err != nil {
-			return nil, fmt.Errorf("routing-instance %s: %w", name, err)
-		}
-		for {
-			if owner, exists := usedTables[tableID]; exists {
-				if explicit {
-					return nil, fmt.Errorf("routing-instance %s: table ID %d collides with %s", name, tableID, owner)
-				}
-				tableID++
-				if tableID == 0 {
-					return nil, fmt.Errorf("routing-instance %s: no usable VPP table ID", name)
-				}
-				continue
-			}
-			break
-		}
-		usedTables[tableID] = name
-		plans[name] = routingInstancePlan{
-			name:       name,
-			tableID:    tableID,
-			interfaces: uniqueSortedStrings(instance.Interfaces),
+	result := make(map[string]routingInstancePlan, len(modelPlans))
+	for name, plan := range modelPlans {
+		result[name] = routingInstancePlan{
+			name:       plan.Name,
+			tableID:    plan.TableID,
+			interfaces: append([]string(nil), plan.Interfaces...),
 		}
 	}
-	return plans, nil
-}
-
-func routingInstanceTableID(name string, instance *model.RoutingInstance) (uint32, bool, error) {
-	if instance != nil && instance.RouteDistinguisher != "" {
-		parts := strings.Split(instance.RouteDistinguisher, ":")
-		if len(parts) != 2 {
-			return 0, true, fmt.Errorf("route-distinguisher %q must use ASN:number format", instance.RouteDistinguisher)
-		}
-		value, err := strconv.ParseUint(parts[1], 10, 32)
-		if err != nil || value == 0 {
-			return 0, true, fmt.Errorf("route-distinguisher %q does not provide a usable VPP table ID", instance.RouteDistinguisher)
-		}
-		return uint32(value), true, nil
-	}
-
-	hash := fnv.New32a()
-	_, _ = hash.Write([]byte(name))
-	return 100000 + hash.Sum32()%900000, false, nil
-}
-
-func uniqueSortedStrings(values []string) []string {
-	set := make(map[string]bool)
-	for _, value := range values {
-		if value != "" {
-			set[value] = true
-		}
-	}
-	result := make([]string, 0, len(set))
-	for value := range set {
-		result = append(result, value)
-	}
-	sort.Strings(result)
-	return result
+	return result, nil
 }
 
 func routingInterfaceBindings(plans map[string]routingInstancePlan) map[string]uint32 {

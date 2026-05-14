@@ -34,6 +34,7 @@ type MockClient struct {
 	AddIPTableError             error
 	DeleteIPTableError          error
 	SetInterfaceTableError      error
+	GetInterfaceTableError      error
 	SetQoSProfileError          error
 	ClearQoSProfileError        error
 	ListInterfaceCountersError  error
@@ -591,6 +592,38 @@ func (m *MockClient) SetInterfaceTable(ctx context.Context, ifIndex uint32, tabl
 	return nil
 }
 
+// GetInterfaceTable returns the IPv4 or IPv6 FIB table bound to a mock interface.
+func (m *MockClient) GetInterfaceTable(ctx context.Context, ifIndex uint32, isIPv6 bool) (uint32, error) {
+	if err := ctx.Err(); err != nil {
+		return 0, err
+	}
+	if m.GetInterfaceTableError != nil {
+		return 0, m.GetInterfaceTableError
+	}
+
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	if !m.connected {
+		return 0, errors.New(
+			errors.ErrCodeVPPConnection,
+			"Not connected to VPP",
+			"VPP connection not established",
+			"Connect to VPP before getting interface tables",
+		)
+	}
+	if _, ok := m.interfaces[ifIndex]; !ok {
+		return 0, errors.New(
+			errors.ErrCodeVPPOperation,
+			fmt.Sprintf("Interface with index %d not found", ifIndex),
+			"Interface does not exist",
+			"Create the interface before getting its table",
+		)
+	}
+
+	return m.interfaceTable[interfaceTableKey{ifIndex: ifIndex, isIPv6: isIPv6}], nil
+}
+
 // IPTableExists reports whether a mock IP table exists.
 func (m *MockClient) IPTableExists(tableID uint32, isIPv6 bool) bool {
 	m.mu.RLock()
@@ -853,6 +886,7 @@ func (m *MockClient) Reset() {
 	m.AddIPTableError = nil
 	m.DeleteIPTableError = nil
 	m.SetInterfaceTableError = nil
+	m.GetInterfaceTableError = nil
 	m.SetQoSProfileError = nil
 	m.ClearQoSProfileError = nil
 	m.ListInterfaceCountersError = nil

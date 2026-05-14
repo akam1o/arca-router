@@ -106,10 +106,42 @@ type AddressFamily struct {
 
 // ProtocolsConfig holds routing protocol configurations.
 type ProtocolsConfig struct {
-	BGP  *BGPConfig  `json:"bgp,omitempty"`
-	OSPF *OSPFConfig `json:"ospf,omitempty"`
-	MPLS *MPLSConfig `json:"mpls,omitempty"`
-	VRRP *VRRPConfig `json:"vrrp,omitempty"`
+	BFD   *BFDConfig  `json:"bfd,omitempty"`
+	BGP   *BGPConfig  `json:"bgp,omitempty"`
+	OSPF  *OSPFConfig `json:"ospf,omitempty"`
+	OSPF3 *OSPFConfig `json:"ospf3,omitempty"`
+	MPLS  *MPLSConfig `json:"mpls,omitempty"`
+	VRRP  *VRRPConfig `json:"vrrp,omitempty"`
+}
+
+// BFDConfig represents Bidirectional Forwarding Detection configuration.
+type BFDConfig struct {
+	Profiles map[string]*BFDProfile `json:"profiles,omitempty"`
+	Peers    map[string]*BFDPeer    `json:"peers,omitempty"`
+}
+
+// BFDProfile represents reusable BFD timer and mode settings.
+type BFDProfile struct {
+	DetectMultiplier int  `json:"detect-multiplier,omitempty"`
+	ReceiveInterval  int  `json:"receive-interval,omitempty"`
+	TransmitInterval int  `json:"transmit-interval,omitempty"`
+	EchoMode         bool `json:"echo-mode,omitempty"`
+	PassiveMode      bool `json:"passive-mode,omitempty"`
+}
+
+// BFDPeer represents one BFD peer session.
+type BFDPeer struct {
+	LocalAddress     string `json:"local-address,omitempty"`
+	Interface        string `json:"interface,omitempty"`
+	VRF              string `json:"vrf,omitempty"`
+	Multihop         bool   `json:"multihop,omitempty"`
+	Profile          string `json:"profile,omitempty"`
+	DetectMultiplier int    `json:"detect-multiplier,omitempty"`
+	ReceiveInterval  int    `json:"receive-interval,omitempty"`
+	TransmitInterval int    `json:"transmit-interval,omitempty"`
+	EchoMode         bool   `json:"echo-mode,omitempty"`
+	PassiveMode      bool   `json:"passive-mode,omitempty"`
+	Shutdown         bool   `json:"shutdown,omitempty"`
 }
 
 // MPLSConfig represents MPLS forwarding configuration.
@@ -148,6 +180,8 @@ type BGPNeighbor struct {
 	PeerAS       uint32 `json:"peer-as"`
 	Description  string `json:"description,omitempty"`
 	LocalAddress string `json:"local-address,omitempty"`
+	BFD          bool   `json:"bfd,omitempty"`
+	BFDProfile   string `json:"bfd-profile,omitempty"`
 }
 
 // OSPFConfig represents OSPF configuration.
@@ -163,9 +197,11 @@ type OSPFArea struct {
 
 // OSPFInterface represents OSPF per-interface settings.
 type OSPFInterface struct {
-	Passive  bool `json:"passive,omitempty"`
-	Metric   int  `json:"metric,omitempty"`
-	Priority *int `json:"priority,omitempty"`
+	Passive    bool   `json:"passive,omitempty"`
+	Metric     int    `json:"metric,omitempty"`
+	Priority   *int   `json:"priority,omitempty"`
+	BFD        bool   `json:"bfd,omitempty"`
+	BFDProfile string `json:"bfd-profile,omitempty"`
 }
 
 // RoutingConfig holds routing options.
@@ -177,9 +213,13 @@ type RoutingConfig struct {
 
 // StaticRoute represents a static route entry.
 type StaticRoute struct {
-	Prefix   string `json:"prefix"`
-	NextHop  string `json:"next-hop"`
-	Distance int    `json:"distance,omitempty"`
+	Prefix      string `json:"prefix"`
+	NextHop     string `json:"next-hop"`
+	Distance    int    `json:"distance,omitempty"`
+	BFD         bool   `json:"bfd,omitempty"`
+	BFDProfile  string `json:"bfd-profile,omitempty"`
+	BFDSource   string `json:"bfd-source,omitempty"`
+	BFDMultihop bool   `json:"bfd-multihop,omitempty"`
 }
 
 // RoutingInstance represents a routing instance, initially focused on VRF/L3VPN.
