@@ -549,6 +549,7 @@ message TelemetryEvent {
   string schema_version = 7;
   uint64 payload_bytes = 8;
   string payload_schema = 9;
+  string cardinality = 10;
 }
 
 message ClassOfServiceCapabilities {

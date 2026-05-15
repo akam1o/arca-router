@@ -524,6 +524,7 @@ func telemetryEventToProto(event TelemetryEvent) *apiv1.TelemetryEvent {
 	resp := &apiv1.TelemetryEvent{
 		Sequence:      event.Sequence,
 		Path:          event.Path,
+		Cardinality:   event.Cardinality,
 		PayloadSchema: event.PayloadSchema,
 		EventType:     event.EventType,
 		Encoding:      event.Encoding,

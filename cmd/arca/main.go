@@ -1915,6 +1915,7 @@ type telemetryOutputEvent struct {
 	Sequence      uint64          `json:"sequence"`
 	Timestamp     string          `json:"timestamp,omitempty"`
 	Path          string          `json:"path"`
+	Cardinality   string          `json:"cardinality,omitempty"`
 	PayloadSchema string          `json:"payload_schema,omitempty"`
 	EventType     string          `json:"event_type"`
 	Encoding      string          `json:"encoding"`
@@ -2260,6 +2261,7 @@ func printTelemetryEvent(event *grpcclient.TelemetryEvent) error {
 		Sequence:      event.Sequence,
 		Timestamp:     timestamp,
 		Path:          event.Path,
+		Cardinality:   event.Cardinality,
 		PayloadSchema: event.PayloadSchema,
 		EventType:     event.EventType,
 		Encoding:      event.Encoding,

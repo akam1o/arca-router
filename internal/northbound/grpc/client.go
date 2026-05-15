@@ -620,6 +620,7 @@ func (s *TelemetryStream) Recv() (*TelemetryEvent, error) {
 	event := &TelemetryEvent{
 		Sequence:      resp.GetSequence(),
 		Path:          resp.GetPath(),
+		Cardinality:   resp.GetCardinality(),
 		PayloadSchema: resp.GetPayloadSchema(),
 		EventType:     resp.GetEventType(),
 		Encoding:      resp.GetEncoding(),

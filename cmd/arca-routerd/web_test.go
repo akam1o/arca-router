@@ -525,6 +525,7 @@ func TestNMSTelemetrySnapshotEndpoint(t *testing.T) {
 			Sequence:      1,
 			Timestamp:     time.Unix(1700000600, 123).UTC(),
 			Path:          "/system",
+			Cardinality:   "single",
 			PayloadSchema: "arca.telemetry.system.v1",
 			EventType:     "snapshot",
 			Encoding:      nbgrpc.TelemetryEncoding(),
@@ -535,6 +536,7 @@ func TestNMSTelemetrySnapshotEndpoint(t *testing.T) {
 			Sequence:      2,
 			Timestamp:     time.Unix(1700000601, 0).UTC(),
 			Path:          "/interfaces",
+			Cardinality:   "per-interface",
 			PayloadSchema: "arca.telemetry.interfaces.v1",
 			EventType:     "snapshot",
 			Encoding:      nbgrpc.TelemetryEncoding(),
@@ -578,6 +580,10 @@ func TestNMSTelemetrySnapshotEndpoint(t *testing.T) {
 	}
 	if len(resp.Events) != 2 || resp.Events[0].Path != "/system" || string(resp.Events[0].Payload) != `{"hostname":"edge01"}` {
 		t.Fatalf("Events = %#v, want system payload event", resp.Events)
+	}
+	if resp.Events[0].Cardinality != "single" || resp.Events[1].Cardinality != "per-interface" {
+		t.Fatalf("event cardinalities = %q/%q, want system/interfaces hints",
+			resp.Events[0].Cardinality, resp.Events[1].Cardinality)
 	}
 	if resp.Events[0].PayloadSchema != "arca.telemetry.system.v1" ||
 		resp.Events[1].PayloadSchema != "arca.telemetry.interfaces.v1" {

@@ -322,7 +322,7 @@ func TestClientServerConfigFlow(t *testing.T) {
 	}
 	if event.Path != "/config/running" || event.EventType != telemetryEventTypeSnapshot ||
 		event.Encoding != telemetryEncodingJSON || event.SchemaVersion != telemetrySchemaVersion ||
-		event.PayloadSchema != "arca.telemetry.config.running.v1" {
+		event.Cardinality != "single" || event.PayloadSchema != "arca.telemetry.config.running.v1" {
 		t.Fatalf("telemetry event = %#v, want config/running JSON snapshot", event)
 	}
 	var payload map[string]any
@@ -359,12 +359,13 @@ func TestSubscribeTelemetrySelectedSnapshots(t *testing.T) {
 	if len(events) != 2 {
 		t.Fatalf("SubscribeTelemetry() emitted %d events, want 2", len(events))
 	}
-	if events[0].Sequence != 1 || events[0].Path != "/system" || events[0].PayloadSchema != "arca.telemetry.system.v1" ||
-		events[0].EventType != telemetryEventTypeSnapshot {
+	if events[0].Sequence != 1 || events[0].Path != "/system" || events[0].Cardinality != "single" ||
+		events[0].PayloadSchema != "arca.telemetry.system.v1" || events[0].EventType != telemetryEventTypeSnapshot {
 		t.Fatalf("events[0] = %#v, want system snapshot sequence 1", events[0])
 	}
 	if events[1].Sequence != 2 || events[1].Path != "/config/running" ||
-		events[1].PayloadSchema != "arca.telemetry.config.running.v1" || events[1].EventType != telemetryEventTypeSnapshot {
+		events[1].Cardinality != "single" || events[1].PayloadSchema != "arca.telemetry.config.running.v1" ||
+		events[1].EventType != telemetryEventTypeSnapshot {
 		t.Fatalf("events[1] = %#v, want config snapshot sequence 2", events[1])
 	}
 	if !strings.Contains(events[0].JSONPayload, "router1") || !strings.Contains(events[1].JSONPayload, "router1") {
@@ -407,7 +408,8 @@ func TestSubscribeTelemetryRouteScaleSnapshot(t *testing.T) {
 		t.Fatalf("vtysh commands = %#v, want IPv4 and IPv6 route JSON", commands)
 	}
 	if len(events) != 1 || events[0].Sequence != 1 || events[0].Path != "/routes" ||
-		events[0].PayloadSchema != "arca.telemetry.routes.v1" || events[0].EventType != telemetryEventTypeSnapshot {
+		events[0].Cardinality != "per-route" || events[0].PayloadSchema != "arca.telemetry.routes.v1" ||
+		events[0].EventType != telemetryEventTypeSnapshot {
 		t.Fatalf("events = %#v, want one route snapshot", events)
 	}
 	if events[0].PayloadBytes != len(events[0].JSONPayload) {
@@ -484,7 +486,8 @@ func TestSubscribeTelemetryEVPNOverlaySnapshot(t *testing.T) {
 		t.Fatalf("SubscribeTelemetry(evpn) error = %v", err)
 	}
 	if len(events) != 1 || events[0].Path != "/overlays/evpn" ||
-		events[0].PayloadSchema != "arca.telemetry.overlays.evpn.v1" || events[0].EventType != telemetryEventTypeSnapshot {
+		events[0].Cardinality != "per-vni" || events[0].PayloadSchema != "arca.telemetry.overlays.evpn.v1" ||
+		events[0].EventType != telemetryEventTypeSnapshot {
 		t.Fatalf("events = %#v, want one EVPN overlay snapshot", events)
 	}
 	var payload telemetryEVPNPayload
@@ -532,7 +535,7 @@ func TestSubscribeTelemetryClassOfServiceIncludesQoSCapabilities(t *testing.T) {
 		t.Fatalf("SubscribeTelemetry(class-of-service) error = %v", err)
 	}
 	if len(events) != 1 || events[0].Path != "/class-of-service" ||
-		events[0].PayloadSchema != "arca.telemetry.class_of_service.v1" {
+		events[0].Cardinality != "per-intent-object" || events[0].PayloadSchema != "arca.telemetry.class_of_service.v1" {
 		t.Fatalf("events = %#v, want one class-of-service snapshot", events)
 	}
 	var payload struct {
