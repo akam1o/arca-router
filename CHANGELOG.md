@@ -2,6 +2,7 @@
 
 ## v0.8.x - Overlay and Streaming Telemetry (current)
 
+- **NMS collector path exclude filters**: the example HTTP collector can skip selected telemetry paths or aliases after catalog discovery before requesting bounded snapshots
 - **NMS collector catalog encoding filters**: the example HTTP collector can pass `-include-encoding` filters to telemetry catalog discovery before deriving snapshot paths
 - **NMS telemetry catalog encoding filters**: `/api/nms/v1/telemetry/paths` accepts repeated `encoding` query parameters for HTTP collector discovery
 - **Telemetry CLI catalog encoding filters**: `arca show telemetry paths` and `arca show telemetry paths live` can filter the catalog by payload encoding before showing collector inputs

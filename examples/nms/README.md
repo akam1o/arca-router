@@ -37,12 +37,13 @@ go run ./examples/nms \
   -timeout 5s \
   -max-payload-bytes 8388608
 
-# Discover all paths from the catalog, but skip high-cardinality route snapshots.
+# Discover all paths from the catalog, but skip selected paths and high-cardinality route snapshots.
 go run ./examples/nms \
   -base-url http://127.0.0.1:8080 \
   -user monitor \
   -password ReadOnly789 \
   -discover-paths \
+  -exclude-path /bfd \
   -exclude-cardinality per-route \
   -timeout 5s \
   -max-payload-bytes 8388608
