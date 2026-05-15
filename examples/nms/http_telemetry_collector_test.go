@@ -39,6 +39,7 @@ func TestParseCollectorConfigCatalogFilters(t *testing.T) {
 		"-exclude-cardinality", "per-route",
 		"-exclude-cardinality", "per-peer",
 		"-exclude-payload-schema", "arca.telemetry.bfd.v1",
+		"-exclude-encoding", "protobuf",
 	})
 	if err != nil {
 		t.Fatalf("parseCollectorConfig() error = %v", err)
@@ -72,6 +73,9 @@ func TestParseCollectorConfigCatalogFilters(t *testing.T) {
 	}
 	if len(cfg.excludedSchema) != 1 || cfg.excludedSchema[0] != "arca.telemetry.bfd.v1" {
 		t.Fatalf("excluded schemas = %#v, want BFD payload schema", cfg.excludedSchema)
+	}
+	if len(cfg.excludedEncoding) != 1 || cfg.excludedEncoding[0] != "protobuf" {
+		t.Fatalf("excluded encodings = %#v, want protobuf", cfg.excludedEncoding)
 	}
 }
 
@@ -293,6 +297,19 @@ func TestFilterSnapshotPathsByCardinality(t *testing.T) {
 	}
 }
 
+func TestFilterSnapshotPathsByEncoding(t *testing.T) {
+	catalog := telemetryCatalogResponse{Encoding: "json"}
+	paths := repeatedPathFlag{"/system", "/interfaces"}
+	got := filterSnapshotPathsByEncoding(paths, catalog, repeatedStringFlag{"protobuf"})
+	if len(got) != 2 || got[0] != "/system" || got[1] != "/interfaces" {
+		t.Fatalf("filterSnapshotPathsByEncoding(protobuf) = %#v, want original paths", got)
+	}
+	got = filterSnapshotPathsByEncoding(paths, catalog, repeatedStringFlag{" JSON "})
+	if len(got) != 0 {
+		t.Fatalf("filterSnapshotPathsByEncoding(json) = %#v, want none", got)
+	}
+}
+
 func TestFilterSnapshotPathsByPath(t *testing.T) {
 	catalog := telemetryCatalogResponse{Paths: []telemetryCatalogPath{
 		{Path: "/system"},
@@ -327,14 +344,14 @@ func TestFilterSnapshotPathsByPayloadSchema(t *testing.T) {
 
 func TestResolveSnapshotPathsRejectsEmptyFilteredSet(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		_, _ = w.Write([]byte(`{"paths":[{"path":"/routes","cardinality":"per-route","payload_schema":"arca.telemetry.routes.v1"}]}`))
+		_, _ = w.Write([]byte(`{"encoding":"json","paths":[{"path":"/routes","cardinality":"per-route","payload_schema":"arca.telemetry.routes.v1"}]}`))
 	}))
 	defer server.Close()
 
 	cfg, err := parseCollectorConfig([]string{
 		"-base-url", server.URL,
 		"-discover-paths",
-		"-exclude-cardinality", "per-route",
+		"-exclude-encoding", "json",
 	})
 	if err != nil {
 		t.Fatalf("parseCollectorConfig() error = %v", err)
