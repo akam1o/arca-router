@@ -60,6 +60,7 @@ type fakeInteractiveClient struct {
 	telemetryCatalogPaths         []string
 	telemetryCatalogCardinalities []string
 	telemetryCatalogSchemas       []string
+	telemetryCatalogEncodings     []string
 	telemetryCatalogDefaultOnly   bool
 	telemetryPaths                []string
 	telemetryInterval             time.Duration
@@ -248,6 +249,7 @@ func (f *fakeInteractiveClient) GetTelemetryCatalogWithFilter(ctx context.Contex
 	f.telemetryCatalogPaths = append([]string(nil), filter.Paths...)
 	f.telemetryCatalogCardinalities = append([]string(nil), filter.Cardinalities...)
 	f.telemetryCatalogSchemas = append([]string(nil), filter.PayloadSchemas...)
+	f.telemetryCatalogEncodings = append([]string(nil), filter.Encodings...)
 	f.telemetryCatalogDefaultOnly = filter.DefaultOnly
 	if len(f.telemetryCatalog.Paths) > 0 || len(f.telemetryCatalog.DefaultPaths) > 0 ||
 		f.telemetryCatalog.EventSchemaVersion != "" || f.telemetryCatalog.Encoding != "" {
@@ -257,6 +259,7 @@ func (f *fakeInteractiveClient) GetTelemetryCatalogWithFilter(ctx context.Contex
 			paths:          filter.Paths,
 			cardinalities:  filter.Cardinalities,
 			payloadSchemas: filter.PayloadSchemas,
+			encodings:      filter.Encodings,
 		})
 		return catalog, nil
 	}
@@ -1028,9 +1031,9 @@ func TestOneShotShowTelemetryPathsLiveUsesCatalogRPC(t *testing.T) {
 			{Path: "/routes", Description: "routes", Cardinality: "per-route", PayloadSchema: "arca.telemetry.routes.v1"},
 		},
 	}}
-	code := oneShotShow(context.Background(), client, []string{"telemetry", "paths", "live", "default", "path", "/system", "payload-schema", "arca.telemetry.system.v1"}, &cliFlags{})
+	code := oneShotShow(context.Background(), client, []string{"telemetry", "paths", "live", "default", "path", "/system", "payload-schema", "arca.telemetry.system.v1", "encoding", "json"}, &cliFlags{})
 	if code != ExitSuccess {
-		t.Fatalf("oneShotShow(telemetry paths live default path payload-schema) = %d, want %d", code, ExitSuccess)
+		t.Fatalf("oneShotShow(telemetry paths live default path payload-schema encoding) = %d, want %d", code, ExitSuccess)
 	}
 	if client.filteredTelemetryCatalogCalls != 1 {
 		t.Fatalf("filtered telemetry catalog calls = %d, want 1 live catalog RPC", client.filteredTelemetryCatalogCalls)
@@ -1046,6 +1049,9 @@ func TestOneShotShowTelemetryPathsLiveUsesCatalogRPC(t *testing.T) {
 	}
 	if len(client.telemetryCatalogSchemas) != 1 || client.telemetryCatalogSchemas[0] != "arca.telemetry.system.v1" {
 		t.Fatalf("telemetry catalog schemas = %#v, want system payload schema filter", client.telemetryCatalogSchemas)
+	}
+	if len(client.telemetryCatalogEncodings) != 1 || client.telemetryCatalogEncodings[0] != "json" {
+		t.Fatalf("telemetry catalog encodings = %#v, want json encoding filter", client.telemetryCatalogEncodings)
 	}
 	if client.telemetryCalls != 0 {
 		t.Fatalf("telemetry calls = %d, want catalog lookup without subscription", client.telemetryCalls)
@@ -1069,6 +1075,9 @@ func TestRunLocalOneShotTelemetryPaths(t *testing.T) {
 	if handled, code := runLocalOneShotCommand([]string{"show", "telemetry", "paths", "default"}); !handled || code != ExitSuccess {
 		t.Fatalf("runLocalOneShotCommand(show telemetry paths default) = handled %v code %d, want local success", handled, code)
 	}
+	if handled, code := runLocalOneShotCommand([]string{"show", "telemetry", "paths", "encoding", "json"}); !handled || code != ExitSuccess {
+		t.Fatalf("runLocalOneShotCommand(show telemetry paths encoding json) = handled %v code %d, want local success", handled, code)
+	}
 	if handled, _ := runLocalOneShotCommand([]string{"show", "telemetry", "paths", "live", "cardinality", "single"}); handled {
 		t.Fatal("runLocalOneShotCommand(show telemetry paths live cardinality) handled live catalog command locally")
 	}
@@ -1088,7 +1097,8 @@ func TestTelemetryCatalogCommand(t *testing.T) {
 		!isTelemetryCatalogCommand([]string{"paths", "default"}) ||
 		!isTelemetryCatalogCommand([]string{"paths", "default-only"}) ||
 		!isTelemetryCatalogCommand([]string{"paths", "path", "/evpn"}) ||
-		!isTelemetryCatalogCommand([]string{"catalog", "live", "path", "evpn", "payload-schema", "arca.telemetry.routes.v1"}) {
+		!isTelemetryCatalogCommand([]string{"paths", "encoding", "json"}) ||
+		!isTelemetryCatalogCommand([]string{"catalog", "live", "path", "evpn", "payload-schema", "arca.telemetry.routes.v1", "encoding", "json"}) {
 		t.Fatal("isTelemetryCatalogCommand() did not recognize filtered catalog commands")
 	}
 	if isTelemetryCatalogCommand([]string{"path", "/system"}) || isTelemetryCatalogCommand(nil) {
@@ -1096,6 +1106,7 @@ func TestTelemetryCatalogCommand(t *testing.T) {
 	}
 	if isTelemetryCatalogCommand([]string{"paths", "cardinality"}) ||
 		isTelemetryCatalogCommand([]string{"paths", "path"}) ||
+		isTelemetryCatalogCommand([]string{"paths", "encoding"}) ||
 		isTelemetryCatalogCommand([]string{"paths", "unknown"}) {
 		t.Fatal("isTelemetryCatalogCommand() recognized invalid catalog arguments")
 	}
@@ -1130,6 +1141,16 @@ func TestFilterTelemetryPathCatalog(t *testing.T) {
 	got = filterTelemetryPathCatalog(catalog, telemetryCatalogCLIOptions{defaultOnly: true})
 	if len(got) != 2 || got[0].Path != "/system" || got[1].Path != "/config/running" {
 		t.Fatalf("filterTelemetryPathCatalog(default only) = %#v, want default paths", got)
+	}
+
+	got = filterTelemetryPathCatalog(catalog, telemetryCatalogCLIOptions{encodings: []string{" JSON "}})
+	if len(got) != len(catalog) {
+		t.Fatalf("filterTelemetryPathCatalog(encoding) = %#v, want full catalog", got)
+	}
+
+	got = filterTelemetryPathCatalog(catalog, telemetryCatalogCLIOptions{encodings: []string{"protobuf"}})
+	if len(got) != 0 {
+		t.Fatalf("filterTelemetryPathCatalog(unsupported encoding) = %#v, want none", got)
 	}
 }
 

@@ -110,7 +110,7 @@ Show subcommands:
   bfd [brief|counters]        Show raw BFD status
   bfd peer <ip> [counters]    Show BFD peer details
   evpn                        Show EVPN/VXLAN overlay intent
-  telemetry paths [live] [default] [path <path>] [cardinality <hint>] [payload-schema <id>]
+  telemetry paths [live] [default] [path <path>] [cardinality <hint>] [payload-schema <id>] [encoding <encoding>]
                               Show supported telemetry path catalog
   telemetry [path <path>]... [interval <duration>] [count <events>]
                               Show telemetry events as JSON lines
@@ -1899,6 +1899,7 @@ func showTelemetry(ctx context.Context, client showClient, args []string) error 
 				Paths:          catalogOpts.paths,
 				Cardinalities:  catalogOpts.cardinalities,
 				PayloadSchemas: catalogOpts.payloadSchemas,
+				Encodings:      catalogOpts.encodings,
 				DefaultOnly:    catalogOpts.defaultOnly,
 			})
 			if err != nil {
@@ -1909,6 +1910,7 @@ func showTelemetry(ctx context.Context, client showClient, args []string) error 
 			catalogOpts.paths = nil
 			catalogOpts.cardinalities = nil
 			catalogOpts.payloadSchemas = nil
+			catalogOpts.encodings = nil
 		}
 		printTelemetryPathCatalog(filterTelemetryPathCatalog(catalog.Paths, catalogOpts))
 		return nil
@@ -1949,6 +1951,7 @@ type telemetryCatalogCLIOptions struct {
 	paths          []string
 	cardinalities  []string
 	payloadSchemas []string
+	encodings      []string
 }
 
 func isTelemetryCatalogCommand(args []string) bool {
@@ -2001,6 +2004,12 @@ func telemetryCatalogOptions(args []string) (telemetryCatalogCLIOptions, bool, e
 			}
 			opts.payloadSchemas = append(opts.payloadSchemas, args[1])
 			args = args[2:]
+		case "encoding":
+			if len(args) < 2 {
+				return opts, true, telemetryUsageError("'show telemetry paths encoding' requires a payload encoding")
+			}
+			opts.encodings = append(opts.encodings, args[1])
+			args = args[2:]
 		default:
 			return opts, true, telemetryUsageError("unknown telemetry catalog option: %s", args[0])
 		}
@@ -2012,7 +2021,13 @@ func filterTelemetryPathCatalog(catalog []grpcclient.TelemetryPathInfo, opts tel
 	paths := normalizedCatalogPathFilterSet(opts.paths)
 	cardinalities := normalizedCatalogFilterSet(opts.cardinalities)
 	payloadSchemas := normalizedCatalogFilterSet(opts.payloadSchemas)
-	if !opts.defaultOnly && len(paths) == 0 && len(cardinalities) == 0 && len(payloadSchemas) == 0 {
+	encodings := normalizedCatalogFilterSet(opts.encodings)
+	if len(encodings) > 0 {
+		if _, ok := encodings[normalizedCatalogFilterValue(grpcclient.TelemetryEncoding())]; !ok {
+			return nil
+		}
+	}
+	if !opts.defaultOnly && len(paths) == 0 && len(cardinalities) == 0 && len(payloadSchemas) == 0 && len(encodings) == 0 {
 		return catalog
 	}
 
