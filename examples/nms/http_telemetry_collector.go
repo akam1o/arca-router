@@ -26,6 +26,8 @@ const (
 	nmsTelemetrySnapshotV1 = "arca.nms.telemetry-snapshot.v1"
 	telemetryEventSchemaV1 = "arca.telemetry.v1"
 	telemetryEncodingJSON  = "json"
+	telemetryEventSnapshot = "snapshot"
+	telemetryEventError    = "error"
 )
 
 var defaultSnapshotPaths = []string{"/system", "/interfaces", "/overlays/evpn"}
@@ -410,6 +412,9 @@ func decodeSnapshotResponse(body []byte) (telemetrySnapshotResponse, error) {
 	if err := validateNMSResultCount("telemetry snapshot", "event_count", snapshot.EventCount, "events", len(snapshot.Events)); err != nil {
 		return snapshot, err
 	}
+	if err := validateTelemetrySnapshotEvents(snapshot.Events); err != nil {
+		return snapshot, err
+	}
 	return snapshot, nil
 }
 
@@ -429,6 +434,31 @@ func validateNMSTelemetryMetadata(kind, eventSchemaVersion, encoding string) err
 	}
 	if encoding != telemetryEncodingJSON {
 		return fmt.Errorf("%s encoding = %q, want %q", kind, encoding, telemetryEncodingJSON)
+	}
+	return nil
+}
+
+func validateTelemetrySnapshotEvents(events []telemetrySnapshotEvent) error {
+	for i, event := range events {
+		kind := fmt.Sprintf("telemetry snapshot events[%d]", i)
+		if event.SchemaVersion != telemetryEventSchemaV1 {
+			return fmt.Errorf("%s schema_version = %q, want %q", kind, event.SchemaVersion, telemetryEventSchemaV1)
+		}
+		if event.Encoding != telemetryEncodingJSON {
+			return fmt.Errorf("%s encoding = %q, want %q", kind, event.Encoding, telemetryEncodingJSON)
+		}
+		if event.EventType != telemetryEventSnapshot && event.EventType != telemetryEventError {
+			return fmt.Errorf("%s event_type = %q, want %q or %q", kind, event.EventType, telemetryEventSnapshot, telemetryEventError)
+		}
+		if strings.TrimSpace(event.Path) == "" {
+			return fmt.Errorf("%s path is empty", kind)
+		}
+		if len(event.Payload) == 0 {
+			return fmt.Errorf("%s payload is empty", kind)
+		}
+		if event.PayloadBytes != len(event.Payload) {
+			return fmt.Errorf("%s payload_bytes = %d, want len(payload) %d", kind, event.PayloadBytes, len(event.Payload))
+		}
 	}
 	return nil
 }
