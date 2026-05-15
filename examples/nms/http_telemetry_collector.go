@@ -16,22 +16,25 @@ import (
 )
 
 const (
-	defaultBaseURL         = "http://127.0.0.1:8080"
-	defaultSnapshotTimeout = 5 * time.Second
-	defaultMaxPayloadBytes = 8 << 20
-	defaultMaxEvents       = 64
-	nmsOperationalStatusV1 = "arca.nms.operational.v1"
-	nmsTelemetryCatalogV1  = "arca.nms.telemetry-catalog.v1"
-	nmsTelemetrySchemasV1  = "arca.nms.telemetry-schemas.v1"
-	nmsTelemetrySnapshotV1 = "arca.nms.telemetry-snapshot.v1"
-	telemetryEventSchemaV1 = "arca.telemetry.v1"
-	telemetryEncodingJSON  = "json"
-	telemetryEventSnapshot = "snapshot"
-	telemetryEventError    = "error"
-	nmsStatusCoSIntentOnly = "intent-only"
-	nmsStatusCoSDisabled   = "not configured"
-	nmsStatusBackendSQLite = "sqlite"
-	nmsStatusBackendEtcd   = "etcd"
+	defaultBaseURL          = "http://127.0.0.1:8080"
+	defaultSnapshotTimeout  = 5 * time.Second
+	maxSnapshotTimeout      = 30 * time.Second
+	defaultMaxPayloadBytes  = 8 << 20
+	maxSnapshotPayloadBytes = 64 << 20
+	defaultMaxEvents        = 64
+	maxSnapshotEvents       = 1024
+	nmsOperationalStatusV1  = "arca.nms.operational.v1"
+	nmsTelemetryCatalogV1   = "arca.nms.telemetry-catalog.v1"
+	nmsTelemetrySchemasV1   = "arca.nms.telemetry-schemas.v1"
+	nmsTelemetrySnapshotV1  = "arca.nms.telemetry-snapshot.v1"
+	telemetryEventSchemaV1  = "arca.telemetry.v1"
+	telemetryEncodingJSON   = "json"
+	telemetryEventSnapshot  = "snapshot"
+	telemetryEventError     = "error"
+	nmsStatusCoSIntentOnly  = "intent-only"
+	nmsStatusCoSDisabled    = "not configured"
+	nmsStatusBackendSQLite  = "sqlite"
+	nmsStatusBackendEtcd    = "etcd"
 )
 
 var (
@@ -1878,17 +1881,26 @@ func validateTelemetrySnapshotAggregates(snapshot telemetrySnapshotResponse) err
 	if snapshot.MaxPayloadBytes < 0 {
 		return fmt.Errorf("telemetry snapshot max_payload_bytes = %d, want non-negative value", snapshot.MaxPayloadBytes)
 	}
+	if snapshot.MaxPayloadBytes > maxSnapshotPayloadBytes {
+		return fmt.Errorf("telemetry snapshot max_payload_bytes = %d exceeds advertised cap %d", snapshot.MaxPayloadBytes, maxSnapshotPayloadBytes)
+	}
 	if snapshot.MaxPayloadBytes > 0 && snapshot.PayloadBytes > snapshot.MaxPayloadBytes {
 		return fmt.Errorf("telemetry snapshot payload_bytes = %d exceeds max_payload_bytes %d", snapshot.PayloadBytes, snapshot.MaxPayloadBytes)
 	}
 	if snapshot.MaxEvents < 0 {
 		return fmt.Errorf("telemetry snapshot max_events = %d, want non-negative value", snapshot.MaxEvents)
 	}
+	if snapshot.MaxEvents > maxSnapshotEvents {
+		return fmt.Errorf("telemetry snapshot max_events = %d exceeds advertised cap %d", snapshot.MaxEvents, maxSnapshotEvents)
+	}
 	if snapshot.MaxEvents > 0 && snapshot.EventCount > snapshot.MaxEvents {
 		return fmt.Errorf("telemetry snapshot event_count = %d exceeds max_events %d", snapshot.EventCount, snapshot.MaxEvents)
 	}
 	if snapshot.TimeoutMs < 0 {
 		return fmt.Errorf("telemetry snapshot timeout_ms = %d, want non-negative value", snapshot.TimeoutMs)
+	}
+	if snapshot.TimeoutMs > maxSnapshotTimeout.Milliseconds() {
+		return fmt.Errorf("telemetry snapshot timeout_ms = %d exceeds advertised cap %d", snapshot.TimeoutMs, maxSnapshotTimeout.Milliseconds())
 	}
 	return nil
 }
