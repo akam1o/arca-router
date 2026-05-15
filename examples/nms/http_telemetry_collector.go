@@ -28,6 +28,8 @@ const (
 	telemetryEncodingJSON  = "json"
 	telemetryEventSnapshot = "snapshot"
 	telemetryEventError    = "error"
+	nmsStatusCoSIntentOnly = "intent-only"
+	nmsStatusCoSDisabled   = "not configured"
 )
 
 var defaultSnapshotPaths = []string{"/system", "/interfaces", "/overlays/evpn"}
@@ -617,6 +619,9 @@ func validateNMSStatusSections(object map[string]json.RawMessage) error {
 	if err := validateNMSStatusStringArrayCount(ha, "ha", "issues", "issue_count"); err != nil {
 		return err
 	}
+	if err := validateNMSStatusHAConsistency(ha); err != nil {
+		return err
+	}
 
 	classOfService, err := validateNMSStatusObjectField(object, "class_of_service")
 	if err != nil {
@@ -633,6 +638,9 @@ func validateNMSStatusSections(object map[string]json.RawMessage) error {
 		return err
 	}
 	if err := validateNMSStatusIntFields(classOfService, "class_of_service", "forwarding_classes", "traffic_control_profiles", "interface_bindings"); err != nil {
+		return err
+	}
+	if err := validateNMSStatusCoSConsistency(classOfService); err != nil {
 		return err
 	}
 	capabilities, err := validateNMSStatusObjectFieldPath(classOfService, "capabilities", "class_of_service.capabilities")
@@ -1046,11 +1054,85 @@ func validateNMSStatusBFDPeer(index int, peer map[string]json.RawMessage) error 
 
 func validateNMSStatusCoSEnforcementStatus(status string) error {
 	switch strings.TrimSpace(status) {
-	case "not configured", "intent-only":
+	case nmsStatusCoSDisabled, nmsStatusCoSIntentOnly:
 		return nil
 	default:
-		return fmt.Errorf("nms status data class_of_service.enforcement_status = %q, want not configured or intent-only", status)
+		return fmt.Errorf("nms status data class_of_service.enforcement_status = %q, want %s or %s", status, nmsStatusCoSDisabled, nmsStatusCoSIntentOnly)
 	}
+}
+
+func validateNMSStatusHAConsistency(ha map[string]json.RawMessage) error {
+	configured, err := nmsStatusBoolFieldValuePath(ha, "configured", "ha.configured")
+	if err != nil {
+		return err
+	}
+	converged, err := nmsStatusBoolFieldValuePath(ha, "converged", "ha.converged")
+	if err != nil {
+		return err
+	}
+	vrrpGroups, err := nmsStatusIntFieldValuePath(ha, "vrrp_groups", "ha.vrrp_groups")
+	if err != nil {
+		return err
+	}
+	issueCount, err := nmsStatusIntFieldValuePath(ha, "issue_count", "ha.issue_count")
+	if err != nil {
+		return err
+	}
+	wantConfigured := vrrpGroups > 0
+	if configured != wantConfigured {
+		return fmt.Errorf("nms status data ha.configured = %t, want %t because ha.vrrp_groups = %d", configured, wantConfigured, vrrpGroups)
+	}
+	wantConverged := configured && issueCount == 0
+	if converged != wantConverged {
+		return fmt.Errorf("nms status data ha.converged = %t, want %t because ha.configured = %t and ha.issue_count = %d", converged, wantConverged, configured, issueCount)
+	}
+	return nil
+}
+
+func validateNMSStatusCoSConsistency(classOfService map[string]json.RawMessage) error {
+	configured, err := nmsStatusBoolFieldValuePath(classOfService, "configured", "class_of_service.configured")
+	if err != nil {
+		return err
+	}
+	intentOnly, err := nmsStatusBoolFieldValuePath(classOfService, "intent_only", "class_of_service.intent_only")
+	if err != nil {
+		return err
+	}
+	status, err := nmsStatusStringFieldValuePath(classOfService, "enforcement_status", "class_of_service.enforcement_status")
+	if err != nil {
+		return err
+	}
+	wantIntentOnly := configured
+	if intentOnly != wantIntentOnly {
+		return fmt.Errorf("nms status data class_of_service.intent_only = %t, want %t because class_of_service.configured = %t", intentOnly, wantIntentOnly, configured)
+	}
+	wantStatus := nmsStatusCoSDisabled
+	if configured {
+		wantStatus = nmsStatusCoSIntentOnly
+	}
+	if strings.TrimSpace(status) != wantStatus {
+		return fmt.Errorf("nms status data class_of_service.enforcement_status = %q, want %q because class_of_service.configured = %t", status, wantStatus, configured)
+	}
+	if configured {
+		return nil
+	}
+	for _, counter := range []struct {
+		field string
+		path  string
+	}{
+		{field: "forwarding_classes", path: "class_of_service.forwarding_classes"},
+		{field: "traffic_control_profiles", path: "class_of_service.traffic_control_profiles"},
+		{field: "interface_bindings", path: "class_of_service.interface_bindings"},
+	} {
+		value, err := nmsStatusIntFieldValuePath(classOfService, counter.field, counter.path)
+		if err != nil {
+			return err
+		}
+		if value != 0 {
+			return fmt.Errorf("nms status data %s = %d, want 0 when class_of_service.configured is false", counter.path, value)
+		}
+	}
+	return nil
 }
 
 func validateNMSStatusVRRPGroupState(path, state string, observed, active bool) error {
