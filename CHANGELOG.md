@@ -2,6 +2,7 @@
 
 ## v0.8.x - Overlay and Streaming Telemetry (current)
 
+- **NMS collector QoS capability validation**: the example HTTP collector now validates class-of-service capability diagnostics and last-check relationships before using status responses
 - **NMS collector schema field type validation**: the example HTTP collector now rejects unsupported telemetry payload field type hints before using schema registry responses
 - **NMS telemetry filter normalization**: `/api/nms/v1/telemetry/paths`, `/schemas`, and `/snapshot` now ignore empty metadata filter values and accept comma-separated filter lists
 - **NMS collector schema field uniqueness validation**: the example HTTP collector now rejects duplicate telemetry payload field names before using schema registry responses

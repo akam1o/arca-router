@@ -624,6 +624,18 @@ func TestDecodeStatusResponseRejectsInvalidEnvelope(t *testing.T) {
 		t.Fatalf("decodeStatusResponse() error = %v, want class_of_service.capabilities.last_error mismatch", err)
 	}
 	data = validStatusData()
+	data["class_of_service"].(map[string]any)["capabilities"].(map[string]any)["diagnostics"] = []string{}
+	err = decodeStatusResponse(statusEnvelope(data))
+	if err == nil || !strings.Contains(err.Error(), "class_of_service.capabilities.diagnostics") {
+		t.Fatalf("decodeStatusResponse() error = %v, want class_of_service.capabilities.diagnostics relationship mismatch", err)
+	}
+	data = validStatusData()
+	delete(data["class_of_service"].(map[string]any)["capabilities"].(map[string]any), "last_check")
+	err = decodeStatusResponse(statusEnvelope(data))
+	if err == nil || !strings.Contains(err.Error(), "class_of_service.capabilities.last_check") {
+		t.Fatalf("decodeStatusResponse() error = %v, want class_of_service.capabilities.last_check relationship mismatch", err)
+	}
+	data = validStatusData()
 	data["frr"].(map[string]any)["vrrp"].(map[string]any)["last_error"] = []string{"bad"}
 	err = decodeStatusResponse(statusEnvelope(data))
 	if err == nil || !strings.Contains(err.Error(), "frr.vrrp.last_error") {

@@ -716,16 +716,7 @@ func validateNMSStatusSections(object map[string]json.RawMessage, generatedAt ti
 	if err != nil {
 		return err
 	}
-	if err := validateNMSStatusBoolFields(capabilities, "class_of_service.capabilities", "metadata_binding_supported", "queue_scheduler_supported", "policer_supported", "counters_supported"); err != nil {
-		return err
-	}
-	if err := validateNMSStatusStringArrayFieldOptional(capabilities, "diagnostics", "class_of_service.capabilities.diagnostics"); err != nil {
-		return err
-	}
-	if err := validateNMSStatusRFC3339FieldAtOrBeforeOptional(capabilities, "last_check", "class_of_service.capabilities.last_check", generatedAt); err != nil {
-		return err
-	}
-	if err := validateNMSStatusStringFieldOptional(capabilities, "last_error", "class_of_service.capabilities.last_error"); err != nil {
+	if err := validateNMSStatusCoSCapabilities(capabilities, generatedAt); err != nil {
 		return err
 	}
 
@@ -1286,6 +1277,49 @@ func validateNMSStatusCoSConsistency(classOfService map[string]json.RawMessage) 
 		if value != 0 {
 			return fmt.Errorf("nms status data %s = %d, want 0 when class_of_service.configured is false", counter.path, value)
 		}
+	}
+	return nil
+}
+
+func validateNMSStatusCoSCapabilities(capabilities map[string]json.RawMessage, generatedAt time.Time) error {
+	metadataBinding, err := nmsStatusBoolFieldValuePath(capabilities, "metadata_binding_supported", "class_of_service.capabilities.metadata_binding_supported")
+	if err != nil {
+		return err
+	}
+	queueScheduler, err := nmsStatusBoolFieldValuePath(capabilities, "queue_scheduler_supported", "class_of_service.capabilities.queue_scheduler_supported")
+	if err != nil {
+		return err
+	}
+	policer, err := nmsStatusBoolFieldValuePath(capabilities, "policer_supported", "class_of_service.capabilities.policer_supported")
+	if err != nil {
+		return err
+	}
+	counters, err := nmsStatusBoolFieldValuePath(capabilities, "counters_supported", "class_of_service.capabilities.counters_supported")
+	if err != nil {
+		return err
+	}
+	diagnostics, err := nmsStatusStringArrayFieldLengthOptional(capabilities, "diagnostics", "class_of_service.capabilities.diagnostics")
+	if err != nil {
+		return err
+	}
+	_, hasLastCheck, err := nmsStatusRFC3339FieldTimeOptional(capabilities, "last_check", "class_of_service.capabilities.last_check")
+	if err != nil {
+		return err
+	}
+	if hasLastCheck {
+		if err := validateNMSStatusRFC3339FieldAtOrBeforeOptional(capabilities, "last_check", "class_of_service.capabilities.last_check", generatedAt); err != nil {
+			return err
+		}
+	}
+	_, hasLastError := capabilities["last_error"]
+	if err := validateNMSStatusStringFieldOptional(capabilities, "last_error", "class_of_service.capabilities.last_error"); err != nil {
+		return err
+	}
+	if hasLastError && diagnostics == 0 {
+		return fmt.Errorf("nms status data class_of_service.capabilities.diagnostics must be non-empty when class_of_service.capabilities.last_error is present")
+	}
+	if (metadataBinding || queueScheduler || policer || counters || diagnostics > 0 || hasLastError) && !hasLastCheck {
+		return fmt.Errorf("nms status data class_of_service.capabilities.last_check is required when capability support, diagnostics, or last_error is present")
 	}
 	return nil
 }
