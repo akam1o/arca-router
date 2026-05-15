@@ -30,6 +30,7 @@ func TestParseCollectorConfigDefaults(t *testing.T) {
 func TestParseCollectorConfigCatalogFilters(t *testing.T) {
 	cfg, err := parseCollectorConfig([]string{
 		"-discover-paths",
+		"-include-path", "evpn",
 		"-include-cardinality", "single",
 		"-include-payload-schema", "arca.telemetry.system.v1",
 		"-exclude-cardinality", "per-route",
@@ -44,6 +45,9 @@ func TestParseCollectorConfigCatalogFilters(t *testing.T) {
 	}
 	if len(cfg.paths) != 0 {
 		t.Fatalf("paths = %#v, want catalog-discovered paths", cfg.paths)
+	}
+	if len(cfg.includedPath) != 1 || cfg.includedPath[0] != "evpn" {
+		t.Fatalf("included paths = %#v, want evpn", cfg.includedPath)
 	}
 	if len(cfg.includedCard) != 1 || cfg.includedCard[0] != "single" {
 		t.Fatalf("included cardinalities = %#v, want single", cfg.includedCard)
@@ -61,7 +65,7 @@ func TestParseCollectorConfigCatalogFilters(t *testing.T) {
 
 func TestParseCollectorConfigIncludeFiltersUseCatalogPaths(t *testing.T) {
 	cfg, err := parseCollectorConfig([]string{
-		"-include-cardinality", "per-route",
+		"-include-path", "evpn",
 	})
 	if err != nil {
 		t.Fatalf("parseCollectorConfig() error = %v", err)
@@ -117,6 +121,7 @@ func TestCollectorEndpointURLForCatalogFilters(t *testing.T) {
 	cfg, err := parseCollectorConfig([]string{
 		"-mode", "catalog",
 		"-base-url", "http://router.example:8080/arca",
+		"-include-path", "evpn",
 		"-include-cardinality", "per-route",
 		"-include-cardinality", "per-vni",
 		"-include-payload-schema", "arca.telemetry.routes.v1",
@@ -136,6 +141,9 @@ func TestCollectorEndpointURLForCatalogFilters(t *testing.T) {
 		t.Fatalf("catalog URL = %q, want endpoint under /arca", got)
 	}
 	query := parsed.Query()
+	if query.Get("path") != "evpn" {
+		t.Fatalf("path query = %#v, want evpn", query["path"])
+	}
 	if strings.Join(query["cardinality"], ",") != "per-route,per-vni" {
 		t.Fatalf("cardinality query = %#v, want per-route and per-vni", query["cardinality"])
 	}
@@ -196,7 +204,7 @@ func TestFetchNMSUsesCatalogFiltersForSnapshotPaths(t *testing.T) {
 		case "/api/nms/v1/telemetry/paths":
 			catalogQuery = r.URL.Query()
 			_, _ = w.Write([]byte(`{"paths":[` +
-				`{"path":"/routes","cardinality":"per-route","payload_schema":"arca.telemetry.routes.v1"}` +
+				`{"path":"/overlays/evpn","cardinality":"per-vni","payload_schema":"arca.telemetry.overlays.evpn.v1"}` +
 				`]}`))
 		case "/api/nms/v1/telemetry/snapshot":
 			snapshotQuery = r.URL.Query()
@@ -209,8 +217,9 @@ func TestFetchNMSUsesCatalogFiltersForSnapshotPaths(t *testing.T) {
 
 	cfg, err := parseCollectorConfig([]string{
 		"-base-url", server.URL,
-		"-include-cardinality", "per-route",
-		"-include-payload-schema", "arca.telemetry.routes.v1",
+		"-include-path", "evpn",
+		"-include-cardinality", "per-vni",
+		"-include-payload-schema", "arca.telemetry.overlays.evpn.v1",
 	})
 	if err != nil {
 		t.Fatalf("parseCollectorConfig() error = %v", err)
@@ -222,14 +231,17 @@ func TestFetchNMSUsesCatalogFiltersForSnapshotPaths(t *testing.T) {
 	if !json.Valid(body) {
 		t.Fatalf("fetchNMS() body is invalid JSON: %s", string(body))
 	}
-	if catalogQuery.Get("cardinality") != "per-route" {
-		t.Fatalf("catalog cardinality query = %#v, want per-route", catalogQuery["cardinality"])
+	if catalogQuery.Get("path") != "evpn" {
+		t.Fatalf("catalog path query = %#v, want evpn", catalogQuery["path"])
 	}
-	if catalogQuery.Get("payload_schema") != "arca.telemetry.routes.v1" {
-		t.Fatalf("catalog payload_schema query = %#v, want routes schema", catalogQuery["payload_schema"])
+	if catalogQuery.Get("cardinality") != "per-vni" {
+		t.Fatalf("catalog cardinality query = %#v, want per-vni", catalogQuery["cardinality"])
+	}
+	if catalogQuery.Get("payload_schema") != "arca.telemetry.overlays.evpn.v1" {
+		t.Fatalf("catalog payload_schema query = %#v, want EVPN schema", catalogQuery["payload_schema"])
 	}
 	gotPaths := snapshotQuery["path"]
-	wantPaths := []string{"/routes"}
+	wantPaths := []string{"/overlays/evpn"}
 	if strings.Join(gotPaths, ",") != strings.Join(wantPaths, ",") {
 		t.Fatalf("snapshot paths = %#v, want %#v", gotPaths, wantPaths)
 	}
