@@ -534,12 +534,22 @@ func (c *Client) GetFilteredTelemetryCatalog(ctx context.Context, cardinalities 
 
 // GetPathFilteredTelemetryCatalog returns the daemon's supported telemetry path catalog after server-side path and metadata filters.
 func (c *Client) GetPathFilteredTelemetryCatalog(ctx context.Context, paths []string, cardinalities []string, payloadSchemas []string) (TelemetryCatalog, error) {
+	return c.GetTelemetryCatalogWithFilter(ctx, TelemetryCatalogFilter{
+		Paths:          paths,
+		Cardinalities:  cardinalities,
+		PayloadSchemas: payloadSchemas,
+	})
+}
+
+// GetTelemetryCatalogWithFilter returns the daemon's supported telemetry path catalog after server-side filters.
+func (c *Client) GetTelemetryCatalogWithFilter(ctx context.Context, filter TelemetryCatalogFilter) (TelemetryCatalog, error) {
 	ctx, cancel := contextWithDefaultTimeout(ctx)
 	defer cancel()
 	resp, err := c.telemetry.GetTelemetryCatalog(ctx, &apiv1.GetTelemetryCatalogRequest{
-		Path:          append([]string(nil), paths...),
-		Cardinality:   append([]string(nil), cardinalities...),
-		PayloadSchema: append([]string(nil), payloadSchemas...),
+		Path:          append([]string(nil), filter.Paths...),
+		Cardinality:   append([]string(nil), filter.Cardinalities...),
+		PayloadSchema: append([]string(nil), filter.PayloadSchemas...),
+		DefaultOnly:   filter.DefaultOnly,
 	})
 	if err != nil {
 		return TelemetryCatalog{}, err

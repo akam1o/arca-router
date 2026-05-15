@@ -115,6 +115,7 @@ type TelemetryCatalogFilter struct {
 	Paths          []string
 	Cardinalities  []string
 	PayloadSchemas []string
+	DefaultOnly    bool
 }
 
 // TelemetryEvent is one structured telemetry update emitted over gRPC.
@@ -178,12 +179,15 @@ func filterTelemetryPathCatalog(catalog []TelemetryPathInfo, filter TelemetryCat
 	paths := normalizedTelemetryCatalogPathFilterSet(filter.Paths)
 	cardinalities := normalizedTelemetryCatalogFilterSet(filter.Cardinalities)
 	payloadSchemas := normalizedTelemetryCatalogFilterSet(filter.PayloadSchemas)
-	if len(paths) == 0 && len(cardinalities) == 0 && len(payloadSchemas) == 0 {
+	if !filter.DefaultOnly && len(paths) == 0 && len(cardinalities) == 0 && len(payloadSchemas) == 0 {
 		return catalog
 	}
 
 	filtered := make([]TelemetryPathInfo, 0, len(catalog))
 	for _, info := range catalog {
+		if filter.DefaultOnly && !info.Default {
+			continue
+		}
 		if len(paths) > 0 && !telemetryCatalogPathMatches(info, paths) {
 			continue
 		}

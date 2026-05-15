@@ -500,6 +500,9 @@ message GetTelemetryCatalogRequest {
 
   // Optional canonical path or alias filters, such as "/routes" or "/evpn".
   repeated string path = 3;
+
+  // When true, return only paths that are part of the default subscription set.
+  bool default_only = 4;
 }
 
 message GetTelemetryCatalogResponse {
