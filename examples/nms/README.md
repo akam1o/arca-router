@@ -22,7 +22,8 @@ go run ./examples/nms \
   -path /interfaces \
   -path /overlays/evpn \
   -timeout 5s \
-  -max-payload-bytes 8388608
+  -max-payload-bytes 8388608 \
+  -max-events 64
 
 # Discover only selected default paths and path classes using server-side catalog filters.
 go run ./examples/nms \
@@ -35,7 +36,8 @@ go run ./examples/nms \
   -include-payload-schema arca.telemetry.overlays.evpn.v1 \
   -include-encoding json \
   -timeout 5s \
-  -max-payload-bytes 8388608
+  -max-payload-bytes 8388608 \
+  -max-events 64
 
 # Discover all paths from the catalog, but skip selected paths and high-cardinality route snapshots.
 go run ./examples/nms \
@@ -46,7 +48,8 @@ go run ./examples/nms \
   -exclude-path /bfd \
   -exclude-cardinality per-route \
   -timeout 5s \
-  -max-payload-bytes 8388608
+  -max-payload-bytes 8388608 \
+  -max-events 64
 
 # Discover all paths from the catalog, but skip selected payload schemas.
 go run ./examples/nms \
@@ -58,7 +61,8 @@ go run ./examples/nms \
   -exclude-payload-schema arca.telemetry.bfd.v1 \
   -exclude-encoding protobuf \
   -timeout 5s \
-  -max-payload-bytes 8388608
+  -max-payload-bytes 8388608 \
+  -max-events 64
 ```
 
 The example prints the returned JSON envelope with indentation so it can be piped into downstream tooling or inspected during collector integration tests.

@@ -19,6 +19,7 @@ const (
 	defaultBaseURL         = "http://127.0.0.1:8080"
 	defaultSnapshotTimeout = 5 * time.Second
 	defaultMaxPayloadBytes = 8 << 20
+	defaultMaxEvents       = 64
 )
 
 var defaultSnapshotPaths = []string{"/system", "/interfaces", "/overlays/evpn"}
@@ -41,6 +42,7 @@ type collectorConfig struct {
 	excludedEncoding repeatedStringFlag
 	timeout          time.Duration
 	maxPayloadBytes  int
+	maxEvents        int
 }
 
 type repeatedPathFlag []string
@@ -113,6 +115,7 @@ func parseCollectorConfig(args []string) (collectorConfig, error) {
 		mode:            "snapshot",
 		timeout:         defaultSnapshotTimeout,
 		maxPayloadBytes: defaultMaxPayloadBytes,
+		maxEvents:       defaultMaxEvents,
 	}
 	fs := flag.NewFlagSet("http-telemetry-collector", flag.ContinueOnError)
 	fs.SetOutput(io.Discard)
@@ -133,6 +136,7 @@ func parseCollectorConfig(args []string) (collectorConfig, error) {
 	fs.Var(&cfg.excludedEncoding, "exclude-encoding", "Telemetry payload encoding to exclude from snapshot mode; repeat for multiple values")
 	fs.DurationVar(&cfg.timeout, "timeout", cfg.timeout, "Snapshot timeout")
 	fs.IntVar(&cfg.maxPayloadBytes, "max-payload-bytes", cfg.maxPayloadBytes, "Snapshot payload byte budget")
+	fs.IntVar(&cfg.maxEvents, "max-events", cfg.maxEvents, "Snapshot event count budget")
 	if err := fs.Parse(args); err != nil {
 		return cfg, err
 	}
@@ -148,6 +152,9 @@ func parseCollectorConfig(args []string) (collectorConfig, error) {
 		}
 		if cfg.maxPayloadBytes <= 0 {
 			return cfg, fmt.Errorf("max-payload-bytes must be positive")
+		}
+		if cfg.maxEvents <= 0 {
+			return cfg, fmt.Errorf("max-events must be positive")
 		}
 		if len(cfg.paths) == 0 && !usesCatalogDiscovery(cfg) {
 			cfg.paths = append(repeatedPathFlag(nil), defaultSnapshotPaths...)
@@ -414,6 +421,7 @@ func collectorEndpointURL(cfg collectorConfig) (string, error) {
 		}
 		query.Set("timeout", cfg.timeout.String())
 		query.Set("max_payload_bytes", strconv.Itoa(cfg.maxPayloadBytes))
+		query.Set("max_events", strconv.Itoa(cfg.maxEvents))
 		u.RawQuery = query.Encode()
 	}
 	return u.String(), nil

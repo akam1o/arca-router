@@ -87,7 +87,7 @@ Focus: add data-center overlay support and richer external observability.
 - **Scale validation**
   - Route scale and telemetry cardinality regression coverage
   - NETCONF session count regression coverage
-  - Performance guardrails for high-churn environments
+  - NMS telemetry snapshot timeout, payload byte, and event count guardrails
 
 ## v0.9.x - NETCONF/YANG and Operational Safety
 

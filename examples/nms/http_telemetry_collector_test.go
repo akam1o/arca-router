@@ -22,6 +22,9 @@ func TestParseCollectorConfigDefaults(t *testing.T) {
 	if cfg.timeout != defaultSnapshotTimeout || cfg.maxPayloadBytes != defaultMaxPayloadBytes {
 		t.Fatalf("snapshot defaults = timeout %v max %d", cfg.timeout, cfg.maxPayloadBytes)
 	}
+	if cfg.maxEvents != defaultMaxEvents {
+		t.Fatalf("max events = %d, want %d", cfg.maxEvents, defaultMaxEvents)
+	}
 	if len(cfg.paths) != len(defaultSnapshotPaths) {
 		t.Fatalf("default paths = %#v, want %#v", cfg.paths, defaultSnapshotPaths)
 	}
@@ -126,6 +129,7 @@ func TestCollectorEndpointURLForSnapshot(t *testing.T) {
 		"-path", "/overlays/evpn",
 		"-timeout", "7s",
 		"-max-payload-bytes", "12345",
+		"-max-events", "9",
 	})
 	if err != nil {
 		t.Fatalf("parseCollectorConfig() error = %v", err)
@@ -142,6 +146,7 @@ func TestCollectorEndpointURLForSnapshot(t *testing.T) {
 		"path=%2Foverlays%2Fevpn",
 		"timeout=7s",
 		"max_payload_bytes=12345",
+		"max_events=9",
 	} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("snapshot URL = %q, missing %s", got, want)
@@ -407,6 +412,7 @@ func TestParseCollectorConfigRejectsInvalidValues(t *testing.T) {
 		{"-mode", "bad"},
 		{"-timeout", "0s"},
 		{"-max-payload-bytes", "0"},
+		{"-max-events", "0"},
 		{"-path", ""},
 	}
 	for _, args := range tests {

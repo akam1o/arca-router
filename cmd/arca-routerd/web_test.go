@@ -484,6 +484,9 @@ func TestNMSTelemetrySnapshotEndpoint(t *testing.T) {
 	if resp.PayloadBytes != wantPayloadBytes || resp.MaxPayloadBytes != defaultNMSTelemetrySnapshotMaxPayloadBytes {
 		t.Fatalf("payload budget = %d/%d, want %d/%d", resp.PayloadBytes, resp.MaxPayloadBytes, wantPayloadBytes, defaultNMSTelemetrySnapshotMaxPayloadBytes)
 	}
+	if resp.MaxEvents != defaultNMSTelemetrySnapshotMaxEvents {
+		t.Fatalf("MaxEvents = %d, want %d", resp.MaxEvents, defaultNMSTelemetrySnapshotMaxEvents)
+	}
 	if resp.TimeoutMs != defaultNMSTelemetrySnapshotTimeout.Milliseconds() {
 		t.Fatalf("TimeoutMs = %d, want %d", resp.TimeoutMs, defaultNMSTelemetrySnapshotTimeout.Milliseconds())
 	}
@@ -518,6 +521,46 @@ func TestNMSTelemetrySnapshotEndpointRejectsOversizedPayload(t *testing.T) {
 	}
 }
 
+func TestNMSTelemetrySnapshotEndpointRejectsTooManyEvents(t *testing.T) {
+	telemetry := &webTelemetryTestAPI{events: []nbgrpc.TelemetryEvent{
+		{
+			Sequence:      1,
+			Path:          "/system",
+			EventType:     "snapshot",
+			Encoding:      nbgrpc.TelemetryEncoding(),
+			SchemaVersion: nbgrpc.TelemetryEventSchemaVersion(),
+			JSONPayload:   `{"hostname":"edge01"}`,
+		},
+		{
+			Sequence:      2,
+			Path:          "/interfaces",
+			EventType:     "snapshot",
+			Encoding:      nbgrpc.TelemetryEncoding(),
+			SchemaVersion: nbgrpc.TelemetryEventSchemaVersion(),
+			JSONPayload:   `{"interfaces":[]}`,
+		},
+		{
+			Sequence:      3,
+			Path:          "/routes",
+			EventType:     "snapshot",
+			Encoding:      nbgrpc.TelemetryEncoding(),
+			SchemaVersion: nbgrpc.TelemetryEventSchemaVersion(),
+			JSONPayload:   `{"routes":[]}`,
+		},
+	}}
+
+	req := httptest.NewRequest(http.MethodGet, "/api/nms/v1/telemetry/snapshot?path=/system&path=/interfaces&path=/routes&max_events=1", nil)
+	rec := httptest.NewRecorder()
+	metricsSource{telemetryAPI: telemetry}.handleNMSTelemetrySnapshot(rec, req)
+
+	if rec.Code != http.StatusRequestEntityTooLarge {
+		t.Fatalf("status = %d, want %d: %s", rec.Code, http.StatusRequestEntityTooLarge, rec.Body.String())
+	}
+	if telemetry.sent != 2 {
+		t.Fatalf("sent events = %d, want stop on second event", telemetry.sent)
+	}
+}
+
 func TestNMSTelemetrySnapshotEndpointRejectsInvalidTimeout(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "/api/nms/v1/telemetry/snapshot?timeout=1h", nil)
 	rec := httptest.NewRecorder()
@@ -525,6 +568,24 @@ func TestNMSTelemetrySnapshotEndpointRejectsInvalidTimeout(t *testing.T) {
 
 	if rec.Code != http.StatusBadRequest {
 		t.Fatalf("status = %d, want %d: %s", rec.Code, http.StatusBadRequest, rec.Body.String())
+	}
+}
+
+func TestNMSTelemetrySnapshotEndpointRejectsInvalidMaxEvents(t *testing.T) {
+	tests := []string{
+		"/api/nms/v1/telemetry/snapshot?max_events=0",
+		"/api/nms/v1/telemetry/snapshot?max_events=2048",
+	}
+	for _, target := range tests {
+		t.Run(target, func(t *testing.T) {
+			req := httptest.NewRequest(http.MethodGet, target, nil)
+			rec := httptest.NewRecorder()
+			metricsSource{telemetryAPI: &webTelemetryTestAPI{}}.handleNMSTelemetrySnapshot(rec, req)
+
+			if rec.Code != http.StatusBadRequest {
+				t.Fatalf("status = %d, want %d: %s", rec.Code, http.StatusBadRequest, rec.Body.String())
+			}
+		})
 	}
 }
 
@@ -822,6 +883,7 @@ type webTelemetryTestAPI struct {
 	events []nbgrpc.TelemetryEvent
 	paths  []string
 	once   bool
+	sent   int
 	err    error
 }
 
@@ -832,6 +894,7 @@ func (a *webTelemetryTestAPI) SubscribeTelemetry(ctx context.Context, rawPaths [
 		return a.err
 	}
 	for _, event := range a.events {
+		a.sent++
 		if err := send(event); err != nil {
 			return err
 		}

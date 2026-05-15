@@ -40,9 +40,14 @@ const (
 	maxNMSTelemetrySnapshotTimeout             = 30 * time.Second
 	defaultNMSTelemetrySnapshotMaxPayloadBytes = 8 << 20
 	maxNMSTelemetrySnapshotMaxPayloadBytes     = 64 << 20
+	defaultNMSTelemetrySnapshotMaxEvents       = 64
+	maxNMSTelemetrySnapshotMaxEvents           = 1024
 )
 
-var errNMSTelemetrySnapshotTooLarge = errors.New("nms telemetry snapshot payload budget exceeded")
+var (
+	errNMSTelemetrySnapshotTooLarge      = errors.New("nms telemetry snapshot payload budget exceeded")
+	errNMSTelemetrySnapshotTooManyEvents = errors.New("nms telemetry snapshot event budget exceeded")
+)
 
 type webConfigAPI interface {
 	GetRunning(ctx context.Context) (string, uint64, error)
@@ -108,6 +113,7 @@ type nmsTelemetrySnapshotResponse struct {
 	Paths              []string                    `json:"paths"`
 	PayloadBytes       int                         `json:"payload_bytes"`
 	MaxPayloadBytes    int                         `json:"max_payload_bytes"`
+	MaxEvents          int                         `json:"max_events"`
 	TimeoutMs          int64                       `json:"timeout_ms"`
 	Events             []nmsTelemetrySnapshotEvent `json:"events"`
 }
@@ -144,6 +150,7 @@ type nmsTelemetrySnapshotOptions struct {
 	paths           []string
 	timeout         time.Duration
 	maxPayloadBytes int
+	maxEvents       int
 }
 
 type webDatastore struct {
@@ -985,7 +992,7 @@ func (s metricsSource) handleNMSTelemetrySnapshot(w http.ResponseWriter, r *http
 		switch {
 		case strings.Contains(err.Error(), "unsupported telemetry path"):
 			status = http.StatusBadRequest
-		case errors.Is(err, errNMSTelemetrySnapshotTooLarge):
+		case errors.Is(err, errNMSTelemetrySnapshotTooLarge), errors.Is(err, errNMSTelemetrySnapshotTooManyEvents):
 			status = http.StatusRequestEntityTooLarge
 		case errors.Is(err, context.DeadlineExceeded), errors.Is(err, context.Canceled):
 			status = http.StatusGatewayTimeout
@@ -1570,6 +1577,9 @@ func (s metricsSource) collectNMSTelemetrySnapshot(ctx context.Context, opts nms
 	var events []nbgrpc.TelemetryEvent
 	payloadBytes := 0
 	err := s.telemetryAPI.SubscribeTelemetry(ctx, opts.paths, 0, true, func(event nbgrpc.TelemetryEvent) error {
+		if len(events)+1 > opts.maxEvents {
+			return fmt.Errorf("%w: %d events exceeds max_events %d", errNMSTelemetrySnapshotTooManyEvents, len(events)+1, opts.maxEvents)
+		}
 		payloadBytes += telemetryEventPayloadBytes(event)
 		if payloadBytes > opts.maxPayloadBytes {
 			return fmt.Errorf("%w: %d bytes exceeds max_payload_bytes %d", errNMSTelemetrySnapshotTooLarge, payloadBytes, opts.maxPayloadBytes)
@@ -1588,6 +1598,7 @@ func nmsTelemetrySnapshotOptionsFromRequest(r *http.Request) (nmsTelemetrySnapsh
 		paths:           nmsTelemetrySnapshotPaths(r),
 		timeout:         defaultNMSTelemetrySnapshotTimeout,
 		maxPayloadBytes: defaultNMSTelemetrySnapshotMaxPayloadBytes,
+		maxEvents:       defaultNMSTelemetrySnapshotMaxEvents,
 	}
 	if raw := strings.TrimSpace(r.URL.Query().Get("timeout")); raw != "" {
 		timeout, err := time.ParseDuration(raw)
@@ -1608,6 +1619,16 @@ func nmsTelemetrySnapshotOptionsFromRequest(r *http.Request) (nmsTelemetrySnapsh
 			return opts, fmt.Errorf("telemetry snapshot max_payload_bytes %d exceeds max %d", maxPayloadBytes, maxNMSTelemetrySnapshotMaxPayloadBytes)
 		}
 		opts.maxPayloadBytes = maxPayloadBytes
+	}
+	if raw := strings.TrimSpace(r.URL.Query().Get("max_events")); raw != "" {
+		maxEvents, err := strconv.Atoi(raw)
+		if err != nil || maxEvents <= 0 {
+			return opts, fmt.Errorf("invalid telemetry snapshot max_events %q", raw)
+		}
+		if maxEvents > maxNMSTelemetrySnapshotMaxEvents {
+			return opts, fmt.Errorf("telemetry snapshot max_events %d exceeds max %d", maxEvents, maxNMSTelemetrySnapshotMaxEvents)
+		}
+		opts.maxEvents = maxEvents
 	}
 	return opts, nil
 }
@@ -1641,6 +1662,7 @@ func newNMSTelemetrySnapshotResponse(now time.Time, events []nbgrpc.TelemetryEve
 		Paths:              paths,
 		PayloadBytes:       payloadBytes,
 		MaxPayloadBytes:    opts.maxPayloadBytes,
+		MaxEvents:          opts.maxEvents,
 		TimeoutMs:          opts.timeout.Milliseconds(),
 		Events:             responseEvents,
 	}
