@@ -1047,6 +1047,8 @@ The Web API also exposes `GET /api/nms/v1/telemetry/paths` for collector discove
 
 HTTP-only collectors can request one-shot telemetry through `GET /api/nms/v1/telemetry/snapshot`. The endpoint accepts repeated `path` query parameters, such as `?path=/system&path=/interfaces`; omitting `path` uses the same default path set as the gRPC telemetry stream. It also accepts `timeout` as a Go duration string, defaulting to `5s` with a maximum of `30s`, and `max_payload_bytes`, defaulting to `8388608` with a maximum of `67108864`, so large paths such as `/routes` stay bounded. The response is a stable JSON envelope with `schema_version` set to `arca.nms.telemetry-snapshot.v1`, `event_schema_version`, `encoding`, emitted `paths`, `payload_bytes`, `max_payload_bytes`, `timeout_ms`, and `events` carrying the same structured telemetry event fields and JSON payloads as the gRPC stream.
 
+`examples/nms` includes a standard-library HTTP collector example for the status, telemetry catalog, and bounded telemetry snapshot endpoints.
+
 ### Web UI
 
 Start the Web UI with:

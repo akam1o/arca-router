@@ -383,7 +383,7 @@ arca-router/
 │   ├── systemd/                # systemd ユニットファイル
 │   └── package/                # nfpm パッケージング設定
 ├── docs/                       # ドキュメント
-├── examples/                   # サンプル設定
+├── examples/                   # サンプル設定と連携例
 └── Makefile                    # ビルド自動化
 ```
 

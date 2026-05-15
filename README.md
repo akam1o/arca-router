@@ -392,7 +392,7 @@ arca-router/
 │   ├── systemd/                # systemd unit files
 │   └── package/                # nfpm config and scripts
 ├── docs/                       # Documentation
-├── examples/                   # Sample configurations
+├── examples/                   # Sample configurations and integration examples
 └── Makefile                    # Build automation
 ```
 

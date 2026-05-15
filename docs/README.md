@@ -23,6 +23,7 @@ This directory contains user guides, design notes, and internal drafts for `arca
 
 ## Usage / Automation
 - `docs/ansible-integration.md`
+- `examples/nms/` - HTTP NMS collector examples
 
 ## Development / Release
 - [`ROADMAP.md`](../ROADMAP.md)
