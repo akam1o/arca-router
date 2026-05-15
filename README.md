@@ -257,6 +257,7 @@ arca show telemetry path /system path /interfaces path /overlays/evpn
 # Query the schema-versioned NMS status API when the Web API is enabled
 curl -u monitor:ReadOnly789 http://127.0.0.1:8080/api/nms/v1/status
 curl -u monitor:ReadOnly789 http://127.0.0.1:8080/api/nms/v1/telemetry/paths
+curl -u monitor:ReadOnly789 'http://127.0.0.1:8080/api/nms/v1/telemetry/paths?cardinality=per-route&payload_schema=arca.telemetry.routes.v1'
 curl -u monitor:ReadOnly789 'http://127.0.0.1:8080/api/nms/v1/telemetry/snapshot?path=/system&path=/interfaces&path=/overlays/evpn&timeout=5s&max_payload_bytes=8388608'
 
 # Check VPP/FRR directly (optional)

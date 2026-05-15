@@ -331,6 +331,43 @@ func TestNMSTelemetryCatalogEndpoint(t *testing.T) {
 	}
 }
 
+func TestNMSTelemetryCatalogEndpointFilters(t *testing.T) {
+	req := httptest.NewRequest(http.MethodGet, "/api/nms/v1/telemetry/paths?cardinality=per-route&payload_schema=arca.telemetry.routes.v1", nil)
+	rec := httptest.NewRecorder()
+	metricsSource{}.handleNMSTelemetryCatalog(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d", rec.Code, http.StatusOK)
+	}
+	var resp nmsTelemetryCatalogResponse
+	if err := json.NewDecoder(rec.Result().Body).Decode(&resp); err != nil {
+		t.Fatalf("Decode() error = %v", err)
+	}
+	if len(resp.Paths) != 1 || resp.Paths[0].Path != "/routes" {
+		t.Fatalf("filtered paths = %#v, want only /routes", resp.Paths)
+	}
+	if resp.Paths[0].Cardinality != "per-route" || resp.Paths[0].PayloadSchema != "arca.telemetry.routes.v1" {
+		t.Fatalf("filtered path = %#v, want route cardinality and schema", resp.Paths[0])
+	}
+}
+
+func TestNMSTelemetryCatalogEndpointAcceptsPayloadSchemaAlias(t *testing.T) {
+	req := httptest.NewRequest(http.MethodGet, "/api/nms/v1/telemetry/paths?payload-schema=ARCA.TELEMETRY.SYSTEM.V1", nil)
+	rec := httptest.NewRecorder()
+	metricsSource{}.handleNMSTelemetryCatalog(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d", rec.Code, http.StatusOK)
+	}
+	var resp nmsTelemetryCatalogResponse
+	if err := json.NewDecoder(rec.Result().Body).Decode(&resp); err != nil {
+		t.Fatalf("Decode() error = %v", err)
+	}
+	if len(resp.Paths) != 1 || resp.Paths[0].Path != "/system" {
+		t.Fatalf("filtered paths = %#v, want only /system", resp.Paths)
+	}
+}
+
 func TestNMSTelemetrySnapshotEndpoint(t *testing.T) {
 	telemetry := &webTelemetryTestAPI{events: []nbgrpc.TelemetryEvent{
 		{
