@@ -622,6 +622,46 @@ func TestFormatChangeImpactPreviewSummarizesRouteAndPolicyDiff(t *testing.T) {
 	}
 }
 
+func TestFormatChangeImpactPreviewSummarizesInterfaceDiff(t *testing.T) {
+	lines := formatChangeImpactPreview(strings.Join([]string{
+		"+ set interfaces ge-0/0/0 unit 0 family inet address 198.51.100.1/30",
+		"- set interfaces ge-0/0/1 disable",
+		"+ set interfaces ge-0/0/2 description \"LAN Interface\"",
+	}, "\n"), true)
+	got := strings.Join(lines, "\n")
+	for _, want := range []string{
+		"interfaces: +2 -1",
+		"interface diff:",
+		"add interface ge-0/0/0 address 198.51.100.1/30",
+		"remove interface ge-0/0/1 disable",
+		"add interface ge-0/0/2 description LAN Interface",
+		"warning: interface changes can affect link state or attached services",
+		"warning: interface address changes can alter connected route reachability",
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("formatChangeImpactPreview() = %q, want substring %q", got, want)
+		}
+	}
+}
+
+func TestFormatChangeImpactPreviewLimitsInterfaceDiffDetails(t *testing.T) {
+	var diff []string
+	for i := 0; i < maxChangeImpactInterfaceDetails+2; i++ {
+		diff = append(diff, fmt.Sprintf("+ set interfaces ge-0/0/%d description uplink-%d", i, i))
+	}
+	lines := formatChangeImpactPreview(strings.Join(diff, "\n"), true)
+	got := strings.Join(lines, "\n")
+	if !strings.Contains(got, "interfaces: +7 -0") {
+		t.Fatalf("formatChangeImpactPreview() = %q, want interface count", got)
+	}
+	if !strings.Contains(got, "... 2 more interface changes") {
+		t.Fatalf("formatChangeImpactPreview() = %q, want capped interface details", got)
+	}
+	if strings.Contains(got, "ge-0/0/6") {
+		t.Fatalf("formatChangeImpactPreview() = %q, want details capped before final interface", got)
+	}
+}
+
 func TestFormatChangeImpactPreviewSummarizesPolicyAndBGPRouteMapDiff(t *testing.T) {
 	lines := formatChangeImpactPreview(strings.Join([]string{
 		"+ set policy-options prefix-list CUSTOMER 10.100.0.0/16",

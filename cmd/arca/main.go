@@ -35,8 +35,9 @@ const (
 
 	defaultSocket = "/run/arca-router/routerd.sock"
 
-	maxChangeImpactRouteDetails  = 5
-	maxChangeImpactPolicyDetails = 5
+	maxChangeImpactInterfaceDetails = 5
+	maxChangeImpactRouteDetails     = 5
+	maxChangeImpactPolicyDetails    = 5
 )
 
 var errTelemetryUsage = errors.New("telemetry usage error")
@@ -1175,25 +1176,35 @@ func (sh *interactiveShell) classOfServicePreflightLines(ctx context.Context, di
 }
 
 type changeImpactPreview struct {
-	addedLines         int
-	removedLines       int
-	staticRoutes       changeImpactLineCount
-	staticRouteChanges []changeImpactRouteChange
-	policyOptions      changeImpactLineCount
-	policyChanges      []changeImpactPolicyChange
-	bgpPolicyBindings  []changeImpactBGPPolicyBinding
-	bgp                changeImpactLineCount
-	ospf               changeImpactLineCount
-	bfd                changeImpactLineCount
-	evpn               changeImpactLineCount
-	routingInstances   changeImpactLineCount
-	classOfService     changeImpactLineCount
-	defaultRouteChange bool
+	addedLines             int
+	removedLines           int
+	interfaces             changeImpactLineCount
+	interfaceChanges       []changeImpactInterfaceChange
+	staticRoutes           changeImpactLineCount
+	staticRouteChanges     []changeImpactRouteChange
+	policyOptions          changeImpactLineCount
+	policyChanges          []changeImpactPolicyChange
+	bgpPolicyBindings      []changeImpactBGPPolicyBinding
+	bgp                    changeImpactLineCount
+	ospf                   changeImpactLineCount
+	bfd                    changeImpactLineCount
+	evpn                   changeImpactLineCount
+	routingInstances       changeImpactLineCount
+	classOfService         changeImpactLineCount
+	interfaceAddressChange bool
+	defaultRouteChange     bool
 }
 
 type changeImpactLineCount struct {
 	added   int
 	removed int
+}
+
+type changeImpactInterfaceChange struct {
+	sign      byte
+	name      string
+	operation string
+	value     string
 }
 
 type changeImpactRouteChange struct {
@@ -1228,6 +1239,8 @@ func formatChangeImpactPreview(diffText string, hasChanges bool) []string {
 		"change impact preview:",
 		fmt.Sprintf("  changed lines: +%d -%d", preview.addedLines, preview.removedLines),
 	}
+	lines = appendChangeImpactLine(lines, "interfaces", preview.interfaces)
+	lines = appendInterfaceImpactLines(lines, preview.interfaceChanges)
 	lines = appendChangeImpactLine(lines, "static routes", preview.staticRoutes)
 	lines = appendStaticRouteImpactLines(lines, preview.staticRouteChanges)
 	lines = appendChangeImpactLine(lines, "policy-options", preview.policyOptions)
@@ -1240,6 +1253,12 @@ func formatChangeImpactPreview(diffText string, hasChanges bool) []string {
 	lines = appendChangeImpactLine(lines, "class-of-service", preview.classOfService)
 	if preview.defaultRouteChange {
 		lines = append(lines, "  warning: default route changes can affect all unmatched traffic")
+	}
+	if preview.interfaces.hasChanges() {
+		lines = append(lines, "  warning: interface changes can affect link state or attached services")
+	}
+	if preview.interfaceAddressChange {
+		lines = append(lines, "  warning: interface address changes can alter connected route reachability")
 	}
 	if preview.staticRoutes.removed > 0 {
 		lines = append(lines, "  warning: static route removals can withdraw forwarding entries")
@@ -1264,6 +1283,24 @@ func formatChangeImpactPreview(diffText string, hasChanges bool) []string {
 	}
 	if preview.classOfService.hasChanges() {
 		lines = append(lines, "  warning: class-of-service changes can alter traffic treatment")
+	}
+	return lines
+}
+
+func appendInterfaceImpactLines(lines []string, changes []changeImpactInterfaceChange) []string {
+	if len(changes) == 0 {
+		return lines
+	}
+	lines = append(lines, "  interface diff:")
+	limit := len(changes)
+	if limit > maxChangeImpactInterfaceDetails {
+		limit = maxChangeImpactInterfaceDetails
+	}
+	for _, change := range changes[:limit] {
+		lines = append(lines, "    "+change.summary())
+	}
+	if remaining := len(changes) - limit; remaining > 0 {
+		lines = append(lines, fmt.Sprintf("    ... %d more interface changes", remaining))
 	}
 	return lines
 }
@@ -1329,6 +1366,17 @@ func (c *changeImpactLineCount) add(sign byte) {
 	} else {
 		c.removed++
 	}
+}
+
+func (c changeImpactInterfaceChange) summary() string {
+	action := "add"
+	if c.sign == '-' {
+		action = "remove"
+	}
+	if c.value == "" {
+		return fmt.Sprintf("%s interface %s %s", action, c.name, c.operation)
+	}
+	return fmt.Sprintf("%s interface %s %s %s", action, c.name, c.operation, c.value)
 }
 
 func (c changeImpactRouteChange) summary() string {
@@ -1428,6 +1476,15 @@ func analyzeChangeImpact(diffText string) changeImpactPreview {
 		} else {
 			preview.removedLines++
 		}
+		if strings.HasPrefix(configLine, "set interfaces ") {
+			preview.interfaces.add(sign)
+			if change, ok := parseInterfaceImpactChange(sign, configLine); ok {
+				preview.interfaceChanges = append(preview.interfaceChanges, change)
+				if change.operation == "address" {
+					preview.interfaceAddressChange = true
+				}
+			}
+		}
 		if isStaticRouteConfigLine(configLine) {
 			preview.staticRoutes.add(sign)
 			if change, ok := parseStaticRouteImpactChange(sign, configLine); ok {
@@ -1503,6 +1560,41 @@ func parseStaticRouteImpactChange(sign byte, line string) (changeImpactRouteChan
 		return change, change.prefix != ""
 	}
 	return changeImpactRouteChange{}, false
+}
+
+func parseInterfaceImpactChange(sign byte, line string) (changeImpactInterfaceChange, bool) {
+	tokens := tokenize(line)
+	if len(tokens) < 3 || tokens[0] != "set" || tokens[1] != "interfaces" {
+		return changeImpactInterfaceChange{}, false
+	}
+	change := changeImpactInterfaceChange{
+		sign:      sign,
+		name:      tokens[2],
+		operation: "configuration",
+	}
+	for i := 3; i < len(tokens); i++ {
+		switch tokens[i] {
+		case "address":
+			change.operation = "address"
+			if i+1 < len(tokens) {
+				change.value = tokens[i+1]
+			}
+			return change, change.name != ""
+		case "description", "mtu", "speed":
+			change.operation = tokens[i]
+			if i+1 < len(tokens) {
+				change.value = tokens[i+1]
+			}
+			return change, change.name != ""
+		case "disable":
+			change.operation = "disable"
+			return change, change.name != ""
+		}
+	}
+	if len(tokens) > 3 {
+		change.operation = strings.Join(tokens[3:], " ")
+	}
+	return change, change.name != ""
 }
 
 func parsePolicyImpactChange(sign byte, line string) (changeImpactPolicyChange, bool) {
