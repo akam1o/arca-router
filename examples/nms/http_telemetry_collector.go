@@ -601,6 +601,9 @@ func validateNMSStatusSections(object map[string]json.RawMessage) error {
 	if err := validateNMSStatusStringArrayFieldOptional(ha, "issues", "ha.issues"); err != nil {
 		return err
 	}
+	if err := validateNMSStatusStringArrayCount(ha, "ha", "issues", "issue_count"); err != nil {
+		return err
+	}
 
 	classOfService, err := validateNMSStatusObjectField(object, "class_of_service")
 	if err != nil {
@@ -643,10 +646,17 @@ func validateNMSStatusSections(object map[string]json.RawMessage) error {
 	if err := validateNMSStatusRFC3339FieldOptional(vrrp, "last_check", "frr.vrrp.last_check"); err != nil {
 		return err
 	}
-	if err := validateNMSStatusObjectArrayFieldOptional(vrrp, "groups", "frr.vrrp.groups", validateNMSStatusVRRPGroup); err != nil {
+	vrrpGroups, err := nmsStatusObjectArrayFieldOptional(vrrp, "groups", "frr.vrrp.groups", validateNMSStatusVRRPGroup)
+	if err != nil {
 		return err
 	}
 	if err := validateNMSStatusStringArrayFieldOptional(vrrp, "issues", "frr.vrrp.issues"); err != nil {
+		return err
+	}
+	if err := validateNMSStatusVRRPAggregates(vrrp, vrrpGroups); err != nil {
+		return err
+	}
+	if err := validateNMSStatusStringArrayCount(vrrp, "frr.vrrp", "issues", "issue_count"); err != nil {
 		return err
 	}
 	bfd, err := validateNMSStatusObjectFieldPath(frr, "bfd", "frr.bfd")
@@ -659,10 +669,17 @@ func validateNMSStatusSections(object map[string]json.RawMessage) error {
 	if err := validateNMSStatusRFC3339FieldOptional(bfd, "last_check", "frr.bfd.last_check"); err != nil {
 		return err
 	}
-	if err := validateNMSStatusObjectArrayFieldOptional(bfd, "peers", "frr.bfd.peers", validateNMSStatusBFDPeer); err != nil {
+	bfdPeers, err := nmsStatusObjectArrayFieldOptional(bfd, "peers", "frr.bfd.peers", validateNMSStatusBFDPeer)
+	if err != nil {
 		return err
 	}
 	if err := validateNMSStatusStringArrayFieldOptional(bfd, "issues", "frr.bfd.issues"); err != nil {
+		return err
+	}
+	if err := validateNMSStatusBFDAggregates(bfd, bfdPeers); err != nil {
+		return err
+	}
+	if err := validateNMSStatusStringArrayCount(bfd, "frr.bfd", "issues", "issue_count"); err != nil {
 		return err
 	}
 
@@ -681,6 +698,9 @@ func validateNMSStatusSections(object map[string]json.RawMessage) error {
 		return err
 	}
 	if err := validateNMSStatusStringArrayFieldOptional(lcp, "inconsistencies", "vpp.lcp.inconsistencies"); err != nil {
+		return err
+	}
+	if err := validateNMSStatusStringArrayCount(lcp, "vpp.lcp", "inconsistencies", "inconsistency_count"); err != nil {
 		return err
 	}
 
@@ -772,18 +792,23 @@ func validateNMSStatusBoolFields(object map[string]json.RawMessage, parent strin
 }
 
 func validateNMSStatusBoolFieldPath(object map[string]json.RawMessage, field, path string) error {
+	_, err := nmsStatusBoolFieldValuePath(object, field, path)
+	return err
+}
+
+func nmsStatusBoolFieldValuePath(object map[string]json.RawMessage, field, path string) (bool, error) {
 	raw, ok := object[field]
 	if !ok {
-		return fmt.Errorf("nms status data %s is missing", path)
+		return false, fmt.Errorf("nms status data %s is missing", path)
 	}
 	var value *bool
 	if err := json.Unmarshal(raw, &value); err != nil || value == nil {
 		if err != nil {
-			return fmt.Errorf("nms status data %s must be a boolean: %w", path, err)
+			return false, fmt.Errorf("nms status data %s must be a boolean: %w", path, err)
 		}
-		return fmt.Errorf("nms status data %s must be a boolean", path)
+		return false, fmt.Errorf("nms status data %s must be a boolean", path)
 	}
-	return nil
+	return *value, nil
 }
 
 func validateNMSStatusIntFields(object map[string]json.RawMessage, parent string, fields ...string) error {
@@ -796,21 +821,26 @@ func validateNMSStatusIntFields(object map[string]json.RawMessage, parent string
 }
 
 func validateNMSStatusIntFieldPath(object map[string]json.RawMessage, field, path string) error {
+	_, err := nmsStatusIntFieldValuePath(object, field, path)
+	return err
+}
+
+func nmsStatusIntFieldValuePath(object map[string]json.RawMessage, field, path string) (int64, error) {
 	raw, ok := object[field]
 	if !ok {
-		return fmt.Errorf("nms status data %s is missing", path)
+		return 0, fmt.Errorf("nms status data %s is missing", path)
 	}
 	var value *int64
 	if err := json.Unmarshal(raw, &value); err != nil || value == nil {
 		if err != nil {
-			return fmt.Errorf("nms status data %s must be an integer: %w", path, err)
+			return 0, fmt.Errorf("nms status data %s must be an integer: %w", path, err)
 		}
-		return fmt.Errorf("nms status data %s must be an integer", path)
+		return 0, fmt.Errorf("nms status data %s must be an integer", path)
 	}
 	if *value < 0 {
-		return fmt.Errorf("nms status data %s must be non-negative", path)
+		return 0, fmt.Errorf("nms status data %s must be non-negative", path)
 	}
-	return nil
+	return *value, nil
 }
 
 func validateNMSStatusObjectField(object map[string]json.RawMessage, field string) (map[string]json.RawMessage, error) {
@@ -833,50 +863,62 @@ func validateNMSStatusObjectFieldPath(object map[string]json.RawMessage, field, 
 }
 
 func validateNMSStatusStringArrayFieldOptional(object map[string]json.RawMessage, field, path string) error {
+	_, err := nmsStatusStringArrayFieldLengthOptional(object, field, path)
+	return err
+}
+
+func nmsStatusStringArrayFieldLengthOptional(object map[string]json.RawMessage, field, path string) (int, error) {
 	raw, ok := object[field]
 	if !ok {
-		return nil
+		return 0, nil
 	}
 	var values []*string
 	if err := json.Unmarshal(raw, &values); err != nil {
-		return fmt.Errorf("nms status data %s must be a string array: %w", path, err)
+		return 0, fmt.Errorf("nms status data %s must be a string array: %w", path, err)
 	}
 	if values == nil {
-		return fmt.Errorf("nms status data %s must be a string array", path)
+		return 0, fmt.Errorf("nms status data %s must be a string array", path)
 	}
 	for i, value := range values {
 		if value == nil {
-			return fmt.Errorf("nms status data %s[%d] must be a string", path, i)
+			return 0, fmt.Errorf("nms status data %s[%d] must be a string", path, i)
 		}
 	}
-	return nil
+	return len(values), nil
 }
 
 func validateNMSStatusObjectArrayFieldOptional(object map[string]json.RawMessage, field, path string, validate func(int, map[string]json.RawMessage) error) error {
+	_, err := nmsStatusObjectArrayFieldOptional(object, field, path, validate)
+	return err
+}
+
+func nmsStatusObjectArrayFieldOptional(object map[string]json.RawMessage, field, path string, validate func(int, map[string]json.RawMessage) error) ([]map[string]json.RawMessage, error) {
 	raw, ok := object[field]
 	if !ok {
-		return nil
+		return nil, nil
 	}
 	var values []json.RawMessage
 	if err := json.Unmarshal(raw, &values); err != nil {
-		return fmt.Errorf("nms status data %s must be a JSON object array: %w", path, err)
+		return nil, fmt.Errorf("nms status data %s must be a JSON object array: %w", path, err)
 	}
 	if values == nil {
-		return fmt.Errorf("nms status data %s must be a JSON object array", path)
+		return nil, fmt.Errorf("nms status data %s must be a JSON object array", path)
 	}
+	objects := make([]map[string]json.RawMessage, 0, len(values))
 	for i, rawValue := range values {
 		var value map[string]json.RawMessage
 		if err := json.Unmarshal(rawValue, &value); err != nil {
-			return fmt.Errorf("nms status data %s[%d] must be a JSON object: %w", path, i, err)
+			return nil, fmt.Errorf("nms status data %s[%d] must be a JSON object: %w", path, i, err)
 		}
 		if len(value) == 0 {
-			return fmt.Errorf("nms status data %s[%d] object is empty", path, i)
+			return nil, fmt.Errorf("nms status data %s[%d] object is empty", path, i)
 		}
 		if err := validate(i, value); err != nil {
-			return err
+			return nil, err
 		}
+		objects = append(objects, value)
 	}
-	return nil
+	return objects, nil
 }
 
 func validateNMSStatusVRRPGroup(index int, group map[string]json.RawMessage) error {
@@ -953,6 +995,128 @@ func validateNMSStatusRFC3339FieldOptional(object map[string]json.RawMessage, fi
 	}
 	if _, err := time.Parse(time.RFC3339, *value); err != nil {
 		return fmt.Errorf("nms status data %s = %q, want RFC3339: %w", path, *value, err)
+	}
+	return nil
+}
+
+func validateNMSStatusStringArrayCount(object map[string]json.RawMessage, parent, arrayField, countField string) error {
+	arrayPath := nmsStatusDataPath(parent, arrayField)
+	countPath := nmsStatusDataPath(parent, countField)
+	length, err := nmsStatusStringArrayFieldLengthOptional(object, arrayField, arrayPath)
+	if err != nil {
+		return err
+	}
+	count, err := nmsStatusIntFieldValuePath(object, countField, countPath)
+	if err != nil {
+		return err
+	}
+	if count != int64(length) {
+		return fmt.Errorf("nms status data %s = %d, want len(%s) %d", countPath, count, arrayPath, length)
+	}
+	return nil
+}
+
+func validateNMSStatusVRRPAggregates(vrrp map[string]json.RawMessage, groups []map[string]json.RawMessage) error {
+	if groups == nil {
+		return nil
+	}
+	configuredGroups, err := nmsStatusIntFieldValuePath(vrrp, "configured_groups", "frr.vrrp.configured_groups")
+	if err != nil {
+		return err
+	}
+	if configuredGroups != int64(len(groups)) {
+		return fmt.Errorf("nms status data frr.vrrp.configured_groups = %d, want len(frr.vrrp.groups) %d", configuredGroups, len(groups))
+	}
+	var observedGroups, activeGroups int64
+	for i, group := range groups {
+		path := fmt.Sprintf("frr.vrrp.groups[%d]", i)
+		observed, err := nmsStatusBoolFieldValuePath(group, "observed", nmsStatusDataPath(path, "observed"))
+		if err != nil {
+			return err
+		}
+		active, err := nmsStatusBoolFieldValuePath(group, "active", nmsStatusDataPath(path, "active"))
+		if err != nil {
+			return err
+		}
+		if observed {
+			observedGroups++
+		}
+		if active {
+			activeGroups++
+		}
+	}
+	if err := validateNMSStatusAggregateCount(vrrp, "observed_groups", "frr.vrrp.observed_groups", observedGroups); err != nil {
+		return err
+	}
+	return validateNMSStatusAggregateCount(vrrp, "active_groups", "frr.vrrp.active_groups", activeGroups)
+}
+
+func validateNMSStatusBFDAggregates(bfd map[string]json.RawMessage, peers []map[string]json.RawMessage) error {
+	if peers == nil {
+		return nil
+	}
+	configuredPeers, err := nmsStatusIntFieldValuePath(bfd, "configured_peers", "frr.bfd.configured_peers")
+	if err != nil {
+		return err
+	}
+	if configuredPeers > int64(len(peers)) {
+		return fmt.Errorf("nms status data frr.bfd.configured_peers = %d, want no more than len(frr.bfd.peers) %d", configuredPeers, len(peers))
+	}
+	var observedPeers, upPeers, downPeers, sessionDownEvents, rxFailPackets int64
+	for i, peer := range peers {
+		path := fmt.Sprintf("frr.bfd.peers[%d]", i)
+		observed, err := nmsStatusBoolFieldValuePath(peer, "observed", nmsStatusDataPath(path, "observed"))
+		if err != nil {
+			return err
+		}
+		if !observed {
+			continue
+		}
+		observedPeers++
+		up, err := nmsStatusBoolFieldValuePath(peer, "up", nmsStatusDataPath(path, "up"))
+		if err != nil {
+			return err
+		}
+		if up {
+			upPeers++
+		} else {
+			downPeers++
+		}
+		sessionDown, err := nmsStatusIntFieldValuePath(peer, "session_down_events", nmsStatusDataPath(path, "session_down_events"))
+		if err != nil {
+			return err
+		}
+		rxFail, err := nmsStatusIntFieldValuePath(peer, "rx_fail_packets", nmsStatusDataPath(path, "rx_fail_packets"))
+		if err != nil {
+			return err
+		}
+		sessionDownEvents += sessionDown
+		rxFailPackets += rxFail
+	}
+	for _, aggregate := range []struct {
+		field string
+		want  int64
+	}{
+		{field: "observed_peers", want: observedPeers},
+		{field: "up_peers", want: upPeers},
+		{field: "down_peers", want: downPeers},
+		{field: "session_down_events", want: sessionDownEvents},
+		{field: "rx_fail_packets", want: rxFailPackets},
+	} {
+		if err := validateNMSStatusAggregateCount(bfd, aggregate.field, nmsStatusDataPath("frr.bfd", aggregate.field), aggregate.want); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func validateNMSStatusAggregateCount(object map[string]json.RawMessage, field, path string, want int64) error {
+	got, err := nmsStatusIntFieldValuePath(object, field, path)
+	if err != nil {
+		return err
+	}
+	if got != want {
+		return fmt.Errorf("nms status data %s = %d, want %d", path, got, want)
 	}
 	return nil
 }

@@ -338,6 +338,30 @@ func TestDecodeStatusResponseRejectsInvalidEnvelope(t *testing.T) {
 		t.Fatalf("decodeStatusResponse() error = %v, want vpp.lcp.inconsistencies mismatch", err)
 	}
 	data = validStatusData()
+	data["ha"].(map[string]any)["issue_count"] = 2
+	err = decodeStatusResponse(statusEnvelope(data))
+	if err == nil || !strings.Contains(err.Error(), "ha.issue_count") {
+		t.Fatalf("decodeStatusResponse() error = %v, want ha.issue_count mismatch", err)
+	}
+	data = validStatusData()
+	data["frr"].(map[string]any)["vrrp"].(map[string]any)["observed_groups"] = 0
+	err = decodeStatusResponse(statusEnvelope(data))
+	if err == nil || !strings.Contains(err.Error(), "frr.vrrp.observed_groups") {
+		t.Fatalf("decodeStatusResponse() error = %v, want frr.vrrp.observed_groups mismatch", err)
+	}
+	data = validStatusData()
+	data["frr"].(map[string]any)["bfd"].(map[string]any)["up_peers"] = 0
+	err = decodeStatusResponse(statusEnvelope(data))
+	if err == nil || !strings.Contains(err.Error(), "frr.bfd.up_peers") {
+		t.Fatalf("decodeStatusResponse() error = %v, want frr.bfd.up_peers mismatch", err)
+	}
+	data = validStatusData()
+	data["vpp"].(map[string]any)["lcp"].(map[string]any)["inconsistency_count"] = 2
+	err = decodeStatusResponse(statusEnvelope(data))
+	if err == nil || !strings.Contains(err.Error(), "vpp.lcp.inconsistency_count") {
+		t.Fatalf("decodeStatusResponse() error = %v, want vpp.lcp.inconsistency_count mismatch", err)
+	}
+	data = validStatusData()
 	data["config_sync"].(map[string]any)["last_check"] = "bad"
 	err = decodeStatusResponse(statusEnvelope(data))
 	if err == nil || !strings.Contains(err.Error(), "config_sync.last_check") {
