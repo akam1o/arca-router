@@ -541,8 +541,26 @@ func TestFilterValidate(t *testing.T) {
 			wantErr: false,
 		},
 		{
-			name:    "xpath filter rejected",
+			name:    "xpath filter",
 			filter:  &Filter{Type: "xpath", Select: "/interfaces"},
+			rpcName: "get-config",
+			wantErr: false,
+		},
+		{
+			name:    "xpath filter requires select",
+			filter:  &Filter{Type: "xpath"},
+			rpcName: "get-config",
+			wantErr: true,
+		},
+		{
+			name:    "xpath filter rejects relative select",
+			filter:  &Filter{Type: "xpath", Select: "interfaces"},
+			rpcName: "get-config",
+			wantErr: true,
+		},
+		{
+			name:    "xpath filter rejects subtree content",
+			filter:  &Filter{Type: "xpath", Select: "/interfaces", Content: []byte("<interfaces/>")},
 			rpcName: "get-config",
 			wantErr: true,
 		},

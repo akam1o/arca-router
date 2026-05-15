@@ -66,13 +66,43 @@ func TestParseXPathFilter(t *testing.T) {
 			wantErr: true,
 		},
 		{
+			name:    "invalid: empty segment",
+			path:    "/interfaces//interface",
+			wantErr: true,
+		},
+		{
+			name:    "invalid: function segment",
+			path:    "/interfaces/count()",
+			wantErr: true,
+		},
+		{
+			name:    "invalid: namespace prefix not supported",
+			path:    "/if:interfaces",
+			wantErr: true,
+		},
+		{
 			name:    "invalid: unclosed predicate",
 			path:    "/interfaces/interface[name='value'",
 			wantErr: true,
 		},
 		{
+			name:    "invalid: predicate function not supported",
+			path:    "/interfaces/interface[contains(name,'ge-0/0/0')]",
+			wantErr: true,
+		},
+		{
 			name:    "invalid: predicate without quotes",
 			path:    "/interfaces/interface[name=value]",
+			wantErr: true,
+		},
+		{
+			name:    "invalid: predicate key with axis",
+			path:    "/interfaces/interface[@name='ge-0/0/0']",
+			wantErr: true,
+		},
+		{
+			name:    "invalid: predicate trailing text",
+			path:    "/interfaces/interface[name='ge-0/0/0']junk",
 			wantErr: true,
 		},
 		{
@@ -195,6 +225,60 @@ func TestXPathFilter_MatchesElement(t *testing.T) {
 	}
 }
 
+func TestXPathFilterMatchesSection(t *testing.T) {
+	tests := []struct {
+		name        string
+		filterPath  string
+		elementPath []string
+		want        bool
+	}{
+		{
+			name:        "exact top-level match",
+			filterPath:  "/interfaces",
+			elementPath: []string{"interfaces"},
+			want:        true,
+		},
+		{
+			name:        "child selection includes parent section",
+			filterPath:  "/interfaces/interface[name='ge-0/0/0']",
+			elementPath: []string{"interfaces"},
+			want:        true,
+		},
+		{
+			name:        "parent selection includes child section",
+			filterPath:  "/state",
+			elementPath: []string{"state", "routes"},
+			want:        true,
+		},
+		{
+			name:        "different branch does not match",
+			filterPath:  "/state/routes",
+			elementPath: []string{"state", "protocols", "bgp"},
+			want:        false,
+		},
+		{
+			name:        "different top-level does not match",
+			filterPath:  "/protocols/bgp",
+			elementPath: []string{"interfaces"},
+			want:        false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			filter, err := ParseXPathFilter(tt.filterPath)
+			if err != nil {
+				t.Fatalf("ParseXPathFilter() error = %v", err)
+			}
+
+			got := filter.MatchesSection(tt.elementPath)
+			if got != tt.want {
+				t.Errorf("XPathFilter.MatchesSection() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
 func TestFilterMatches(t *testing.T) {
 	tests := []struct {
 		name    string
@@ -238,6 +322,24 @@ func TestFilterMatches(t *testing.T) {
 			want:    false,
 		},
 		{
+			name:    "xpath filter top-level match",
+			filter:  &Filter{Type: "xpath", Select: "/interfaces"},
+			element: "interfaces",
+			want:    true,
+		},
+		{
+			name:    "xpath filter child selection includes top-level element",
+			filter:  &Filter{Type: "xpath", Select: "/interfaces/interface[name='ge-0/0/0']"},
+			element: "interfaces",
+			want:    true,
+		},
+		{
+			name:    "xpath filter no match",
+			filter:  &Filter{Type: "xpath", Select: "/protocols/bgp"},
+			element: "interfaces",
+			want:    false,
+		},
+		{
 			name:    "text filter does not match all",
 			filter:  &Filter{Content: []byte("junk")},
 			element: "interfaces",
@@ -258,6 +360,28 @@ func TestFilterMatches(t *testing.T) {
 				t.Errorf("filterMatches() = %v, want %v", got, tt.want)
 			}
 		})
+	}
+}
+
+func TestFilterMatchesEnhancedXPathPath(t *testing.T) {
+	filter := &Filter{Type: "xpath", Select: "/state/routes/route[prefix='192.0.2.0/24']"}
+
+	if !filterMatchesEnhanced(filter, []string{"state", "routes"}) {
+		t.Fatal("filterMatchesEnhanced() = false, want true for selected state routes branch")
+	}
+	if filterMatchesEnhanced(filter, []string{"state", "protocols", "bgp"}) {
+		t.Fatal("filterMatchesEnhanced() = true, want false for sibling protocol state branch")
+	}
+}
+
+func TestIncludeOperationalSectionXPath(t *testing.T) {
+	filter := &Filter{Type: "xpath", Select: "/state/routes/route[prefix='192.0.2.0/24']"}
+
+	if !includeOperationalSection(filter, "state", "routes") {
+		t.Fatal("includeOperationalSection() = false, want true for selected state routes branch")
+	}
+	if includeOperationalSection(filter, "state", "protocols", "bgp") {
+		t.Fatal("includeOperationalSection() = true, want false for sibling protocol state branch")
 	}
 }
 

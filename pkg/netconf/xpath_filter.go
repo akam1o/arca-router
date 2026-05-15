@@ -43,6 +43,9 @@ func ParseXPathFilter(path string) (*XPathFilter, error) {
 
 	// Remove leading /
 	path = strings.TrimPrefix(path, "/")
+	if strings.Contains(path, "//") {
+		return nil, fmt.Errorf("empty XPath segment in: /%s", path)
+	}
 
 	filter := &XPathFilter{
 		Segments:   make([]string, 0),
@@ -91,13 +94,16 @@ func ParseXPathFilter(path string) (*XPathFilter, error) {
 		}
 
 		if seg == "" {
-			continue
+			return nil, fmt.Errorf("empty XPath segment in: /%s", path)
 		}
 
 		// Check for predicate: interface[name='value']
 		if idx := strings.Index(seg, "["); idx != -1 {
 			// Extract element name
 			elemName := seg[:idx]
+			if err := validateXPathName(elemName); err != nil {
+				return nil, fmt.Errorf("invalid XPath segment %q: %w", elemName, err)
+			}
 			segmentIndex := len(filter.Segments)
 			filter.Segments = append(filter.Segments, elemName)
 
@@ -126,11 +132,17 @@ func ParseXPathFilter(path string) (*XPathFilter, error) {
 			if predicateCount > 1 {
 				return nil, fmt.Errorf("multiple predicates not supported in Phase 3 (found %d in %s)", predicateCount, seg)
 			}
+			if remaining != "" {
+				return nil, fmt.Errorf("invalid predicate suffix in: %s", seg)
+			}
 
 			if len(predicateMap) > 0 {
 				filter.Predicates[segmentIndex] = predicateMap
 			}
 		} else {
+			if err := validateXPathName(seg); err != nil {
+				return nil, fmt.Errorf("invalid XPath segment %q: %w", seg, err)
+			}
 			filter.Segments = append(filter.Segments, seg)
 		}
 	}
@@ -149,6 +161,9 @@ func parsePredicate(pred string, predicates map[string]string) error {
 
 	key := strings.TrimSpace(pred[:eqIdx])
 	valueRaw := strings.TrimSpace(pred[eqIdx+1:])
+	if err := validateXPathName(key); err != nil {
+		return fmt.Errorf("invalid predicate key %q: %w", key, err)
+	}
 
 	// Remove quotes
 	if len(valueRaw) < 2 {
@@ -163,6 +178,29 @@ func parsePredicate(pred string, predicates map[string]string) error {
 	value := valueRaw[1 : len(valueRaw)-1]
 	predicates[key] = value
 	return nil
+}
+
+func validateXPathName(name string) error {
+	if name == "" {
+		return fmt.Errorf("name must not be empty")
+	}
+	if !isXPathNameStart(name[0]) {
+		return fmt.Errorf("name must start with a letter or underscore")
+	}
+	for i := 1; i < len(name); i++ {
+		if !isXPathNameChar(name[i]) {
+			return fmt.Errorf("name contains unsupported character %q", name[i])
+		}
+	}
+	return nil
+}
+
+func isXPathNameStart(ch byte) bool {
+	return (ch >= 'A' && ch <= 'Z') || (ch >= 'a' && ch <= 'z') || ch == '_'
+}
+
+func isXPathNameChar(ch byte) bool {
+	return isXPathNameStart(ch) || (ch >= '0' && ch <= '9') || ch == '-' || ch == '.'
 }
 
 // MatchesElement checks if the filter matches a given element path
@@ -185,6 +223,29 @@ func (f *XPathFilter) MatchesElement(elementPath []string) bool {
 		}
 	}
 
+	return true
+}
+
+// MatchesSection checks whether the XPath points at the given element path, one
+// of its ancestors, or one of its descendants. Section-level pruning uses this
+// to include parent containers for child XPath selections.
+func (f *XPathFilter) MatchesSection(elementPath []string) bool {
+	if f == nil || len(f.Segments) == 0 {
+		return true
+	}
+	if len(elementPath) == 0 {
+		return false
+	}
+
+	limit := len(f.Segments)
+	if len(elementPath) < limit {
+		limit = len(elementPath)
+	}
+	for i := 0; i < limit; i++ {
+		if f.Segments[i] != elementPath[i] {
+			return false
+		}
+	}
 	return true
 }
 
@@ -311,8 +372,16 @@ func extractSubtree(xmlData []byte, elementName string) []byte {
 // filterMatches checks if a top-level element matches the filter
 // Enhanced version with XPath-like support (Phase 3)
 func filterMatchesEnhanced(filter *Filter, elementPath []string) bool {
-	if filter == nil || len(filter.Content) == 0 {
+	if filter == nil {
 		return true
+	}
+
+	if filter.Type == "xpath" {
+		xpathFilter, err := ParseXPathFilter(strings.TrimSpace(filter.Select))
+		if err != nil {
+			return false
+		}
+		return xpathFilter.MatchesSection(elementPath)
 	}
 
 	content := bytes.TrimSpace(filter.Content)

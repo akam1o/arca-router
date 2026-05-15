@@ -163,11 +163,6 @@ func ErrInvalidTarget(rpcName, target string) *RPCError {
 
 // ErrUnsupportedFilterType returns error for unsupported filter type
 func ErrUnsupportedFilterType(rpcName, filterType string) *RPCError {
-	if filterType == "xpath" {
-		return NewRPCError(ErrorTypeProtocol, ErrorTagOperationNotSupported, "XPath filters are not supported").
-			WithPath(fmt.Sprintf("/rpc/%s/filter", rpcName)).
-			WithBadAttribute("type")
-	}
 	return NewRPCError(ErrorTypeProtocol, ErrorTagInvalidValue, fmt.Sprintf("unsupported filter type: %s", filterType)).
 		WithPath(fmt.Sprintf("/rpc/%s/filter", rpcName)).
 		WithBadAttribute("type")

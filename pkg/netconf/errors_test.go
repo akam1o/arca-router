@@ -259,16 +259,9 @@ func TestRPCErrorXMLSerialization(t *testing.T) {
 }
 
 func TestErrUnsupportedFilterType(t *testing.T) {
-	// Test xpath rejection
-	err := ErrUnsupportedFilterType("get", "xpath")
-	if err.ErrorTag != ErrorTagOperationNotSupported {
-		t.Errorf("Expected operation-not-supported for xpath, got %s", err.ErrorTag)
-	}
-
-	// Test other unsupported types
-	err2 := ErrUnsupportedFilterType("get", "invalid")
-	if err2.ErrorTag != ErrorTagInvalidValue {
-		t.Errorf("Expected invalid-value for other types, got %s", err2.ErrorTag)
+	err := ErrUnsupportedFilterType("get", "invalid")
+	if err.ErrorTag != ErrorTagInvalidValue {
+		t.Errorf("Expected invalid-value for unsupported type, got %s", err.ErrorTag)
 	}
 }
 

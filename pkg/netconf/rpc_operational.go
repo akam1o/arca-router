@@ -185,7 +185,12 @@ func buildOperationalData(cfg *config.Config, filter *Filter, now time.Time, int
 			return nil, err
 		}
 	}
-	if includeOperationalSection(filter, "routing", "routing-state", "routing-protocols", "routes") && hasRoutingState(cfg) {
+	if includeOperationalSectionPaths(filter,
+		[]string{"routing"},
+		[]string{"routing", "routing-state"},
+		[]string{"routing", "routing-state", "routes"},
+		[]string{"routing", "routing-state", "routing-protocols"},
+	) && hasRoutingState(cfg) {
 		if err := writeRoutingStateXML(&buf, cfg); err != nil {
 			return nil, err
 		}
@@ -328,12 +333,29 @@ func hasBFDOperationalState(status *BFDOperationalState) bool {
 }
 
 func includeOperationalSection(filter *Filter, names ...string) bool {
-	if filter == nil || len(bytes.TrimSpace(filter.Content)) == 0 {
+	return includeOperationalSectionPaths(filter, names)
+}
+
+func includeOperationalSectionPaths(filter *Filter, paths ...[]string) bool {
+	if filter == nil {
 		return true
 	}
-	for _, name := range names {
-		if filterMatches(filter, name) {
-			return true
+	if filter.Type == "xpath" {
+		for _, path := range paths {
+			if filterMatchesEnhanced(filter, path) {
+				return true
+			}
+		}
+		return false
+	}
+	if len(bytes.TrimSpace(filter.Content)) == 0 {
+		return true
+	}
+	for _, path := range paths {
+		for _, name := range path {
+			if filterMatches(filter, name) {
+				return true
+			}
 		}
 	}
 	return false

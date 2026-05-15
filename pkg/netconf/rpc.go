@@ -735,7 +735,7 @@ func selectDatastore(container string, running, candidate, startup bool) (string
 // Filter represents optional <filter> element in get-config/get
 type Filter struct {
 	Type           string     `xml:"type,attr,omitempty"`
-	Select         string     `xml:"select,attr,omitempty"` // For xpath (not supported)
+	Select         string     `xml:"select,attr,omitempty"` // For xpath filters
 	Attrs          []xml.Attr `xml:",any,attr"`
 	InheritedAttrs []xml.Attr `xml:"-"`
 	Content        []byte     `xml:",innerxml"`
@@ -763,13 +763,11 @@ func (f *Filter) Validate(rpcName string) error {
 		f.Type = "subtree"
 	}
 
-	// Reject xpath type
-	if f.Type == "xpath" {
-		return ErrUnsupportedFilterType(rpcName, "xpath")
-	}
-
-	// Only subtree is supported
-	if f.Type != "subtree" {
+	switch f.Type {
+	case "xpath":
+		return f.validateXPathFilter(rpcName)
+	case "subtree":
+	default:
 		return ErrUnsupportedFilterType(rpcName, f.Type)
 	}
 
@@ -784,6 +782,21 @@ func (f *Filter) Validate(rpcName string) error {
 		}
 	}
 
+	return nil
+}
+
+func (f *Filter) validateXPathFilter(rpcName string) error {
+	selectExpr := strings.TrimSpace(f.Select)
+	if selectExpr == "" {
+		return ErrInvalidFilter(rpcName, "xpath filter requires select attribute")
+	}
+	if len(bytes.TrimSpace(f.Content)) > 0 {
+		return ErrInvalidFilter(rpcName, "xpath filter must not contain subtree content")
+	}
+	if _, err := ParseXPathFilter(selectExpr); err != nil {
+		return ErrInvalidFilter(rpcName, fmt.Sprintf("invalid xpath filter: %v", err))
+	}
+	f.Select = selectExpr
 	return nil
 }
 
