@@ -2,6 +2,7 @@
 
 ## v0.8.x - Overlay and Streaming Telemetry (current)
 
+- **EVPN CLI status**: `arca show evpn` now renders the EVPN/VXLAN overlay telemetry snapshot as a human-readable VNI summary
 - **EVPN SNMP counters**: the read-only SNMPv2c subtree now exposes EVPN/VXLAN overlay configured, total VNI, L2 VNI, L3 VNI, and multicast VNI counters
 - **EVPN Grafana panels**: the packaged Grafana dashboard now includes EVPN/VXLAN overlay configured, total VNI, L2 VNI, L3 VNI, and multicast VNI panels backed by the Prometheus overlay metrics
 - **EVPN observability summary**: `/metrics`, `/api/status`, and `/api/nms/v1/status` now expose EVPN/VXLAN configured, total VNI, L2 VNI, L3 VNI, and multicast VNI counts for overlay intent monitoring

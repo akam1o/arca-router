@@ -109,6 +109,7 @@ Show subcommands:
   bfd status                  Show BFD operational state
   bfd [brief|counters]        Show raw BFD status
   bfd peer <ip> [counters]    Show BFD peer details
+  evpn                        Show EVPN/VXLAN overlay intent
   telemetry [path <path>]... [interval <duration>] [count <events>]
                               Show telemetry events as JSON lines
   route [inet|inet6]                 Show routing table
@@ -372,6 +373,13 @@ func oneShotShow(ctx context.Context, client showClient, args []string, f *cliFl
 			return ExitOperationError
 		}
 		printClassOfService(info)
+		return ExitSuccess
+
+	case "evpn":
+		if err := showEVPN(ctx, client); err != nil {
+			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+			return ExitOperationError
+		}
 		return ExitSuccess
 
 	case "telemetry":
@@ -906,6 +914,12 @@ func (sh *interactiveShell) cmdShow(ctx context.Context, args []string) error {
 		printClassOfService(info)
 		return nil
 
+	case "evpn":
+		if sh.mode == modeConfiguration {
+			return fmt.Errorf("'show evpn' not available in configuration mode")
+		}
+		return showEVPN(ctx, sh.client)
+
 	case "telemetry":
 		if sh.mode == modeConfiguration {
 			return fmt.Errorf("'show telemetry' not available in configuration mode")
@@ -1137,6 +1151,7 @@ func (sh *interactiveShell) showHelp() {
 		fmt.Println("  show bfd status               Show BFD operational state")
 		fmt.Println("  show bfd [brief|counters]     Show raw BFD status")
 		fmt.Println("  show bfd peer <ip> [counters] Show BFD peer details")
+		fmt.Println("  show evpn                     Show EVPN/VXLAN overlay intent")
 		fmt.Println("  show telemetry [path <path>]... [interval <duration>] [count <events>]")
 		fmt.Println("                                Show telemetry events as JSON lines")
 		fmt.Println("  show lcp                      Show VPP LCP reconciliation status")
@@ -1550,6 +1565,156 @@ func printClassOfService(info *grpcclient.ClassOfServiceInfo) {
 				formatCoSValue(iface.EnforcementStatus),
 			)
 		}
+	}
+}
+
+type evpnTelemetrySnapshot struct {
+	VNIs []evpnTelemetryVNI `json:"vnis"`
+}
+
+type evpnTelemetryVNI struct {
+	VNI                int      `json:"vni"`
+	Type               string   `json:"type,omitempty"`
+	BridgeDomain       string   `json:"bridge_domain,omitempty"`
+	VLANID             int      `json:"vlan_id,omitempty"`
+	RoutingInstance    string   `json:"routing_instance,omitempty"`
+	RouteDistinguisher string   `json:"route_distinguisher,omitempty"`
+	VRFTarget          string   `json:"vrf_target,omitempty"`
+	VRFTargetImport    []string `json:"vrf_target_import,omitempty"`
+	VRFTargetExport    []string `json:"vrf_target_export,omitempty"`
+	SourceInterface    string   `json:"source_interface,omitempty"`
+	SourceAddress      string   `json:"source_address,omitempty"`
+	MulticastGroup     string   `json:"multicast_group,omitempty"`
+}
+
+type evpnTelemetryCounts struct {
+	total     int
+	l2        int
+	l3        int
+	multicast int
+}
+
+func showEVPN(ctx context.Context, client showClient) error {
+	snapshot, err := fetchEVPNTelemetrySnapshot(ctx, client)
+	if err != nil {
+		return err
+	}
+	printEVPN(snapshot)
+	return nil
+}
+
+func fetchEVPNTelemetrySnapshot(ctx context.Context, client showClient) (*evpnTelemetrySnapshot, error) {
+	stream, err := client.SubscribeTelemetry(ctx, []string{"/overlays/evpn"}, 0, true)
+	if err != nil {
+		return nil, err
+	}
+	event, err := stream.Recv()
+	if err == io.EOF {
+		return nil, fmt.Errorf("EVPN telemetry snapshot was empty")
+	}
+	if err != nil {
+		return nil, err
+	}
+	if event == nil {
+		return nil, fmt.Errorf("EVPN telemetry snapshot was nil")
+	}
+	var snapshot evpnTelemetrySnapshot
+	if err := json.Unmarshal([]byte(event.JSONPayload), &snapshot); err != nil {
+		return nil, fmt.Errorf("decode EVPN telemetry snapshot: %w", err)
+	}
+	return &snapshot, nil
+}
+
+func printEVPN(snapshot *evpnTelemetrySnapshot) {
+	if snapshot == nil || len(snapshot.VNIs) == 0 {
+		fmt.Println("No EVPN/VXLAN VNI configuration found")
+		return
+	}
+	counts := countEVPNVNIs(snapshot.VNIs)
+	fmt.Printf("%-18s %s\n", "Configured", yesNo(counts.total > 0))
+	fmt.Printf("%-18s %d\n", "VNIs", counts.total)
+	fmt.Printf("%-18s %d\n", "L2 VNIs", counts.l2)
+	fmt.Printf("%-18s %d\n", "L3 VNIs", counts.l3)
+	fmt.Printf("%-18s %d\n", "Multicast VNIs", counts.multicast)
+
+	fmt.Println()
+	fmt.Println("VNIs")
+	fmt.Printf("%-8s %-6s %-20s %-20s %-8s %-18s %-28s %-24s %s\n",
+		"VNI", "Type", "Bridge domain", "Routing instance", "VLAN", "RD", "Route targets", "Source", "Multicast")
+	fmt.Println(strings.Repeat("-", 169))
+	for _, vni := range snapshot.VNIs {
+		fmt.Printf("%-8d %-6s %-20s %-20s %-8s %-18s %-28s %-24s %s\n",
+			vni.VNI,
+			formatEVPNValue(vni.Type),
+			formatEVPNValue(vni.BridgeDomain),
+			formatEVPNValue(vni.RoutingInstance),
+			formatEVPNVLAN(vni.VLANID),
+			formatEVPNValue(vni.RouteDistinguisher),
+			formatEVPNRouteTargets(vni),
+			formatEVPNSource(vni),
+			formatEVPNValue(vni.MulticastGroup),
+		)
+	}
+}
+
+func countEVPNVNIs(vnis []evpnTelemetryVNI) evpnTelemetryCounts {
+	var counts evpnTelemetryCounts
+	for _, vni := range vnis {
+		counts.total++
+		switch strings.ToLower(vni.Type) {
+		case "l2":
+			counts.l2++
+		case "l3":
+			counts.l3++
+		}
+		if vni.MulticastGroup != "" {
+			counts.multicast++
+		}
+	}
+	return counts
+}
+
+func formatEVPNValue(value string) string {
+	if value == "" {
+		return "-"
+	}
+	return value
+}
+
+func formatEVPNVLAN(vlanID int) string {
+	if vlanID == 0 {
+		return "-"
+	}
+	return strconv.Itoa(vlanID)
+}
+
+func formatEVPNRouteTargets(vni evpnTelemetryVNI) string {
+	var parts []string
+	if vni.VRFTarget != "" {
+		parts = append(parts, vni.VRFTarget)
+	}
+	if len(vni.VRFTargetImport) > 0 {
+		parts = append(parts, "import:"+strings.Join(vni.VRFTargetImport, ","))
+	}
+	if len(vni.VRFTargetExport) > 0 {
+		parts = append(parts, "export:"+strings.Join(vni.VRFTargetExport, ","))
+	}
+	if len(parts) == 0 {
+		return "-"
+	}
+	return strings.Join(parts, " ")
+}
+
+func formatEVPNSource(vni evpnTelemetryVNI) string {
+	switch {
+	case vni.SourceInterface != "" && vni.SourceAddress != "":
+		return vni.SourceInterface + "@" + vni.SourceAddress
+	case vni.SourceInterface != "":
+		return vni.SourceInterface
+	case vni.SourceAddress != "":
+		return vni.SourceAddress
+	default:
+		return "-"
 	}
 }
 
@@ -2047,6 +2212,13 @@ func createCompleter() *readline.PrefixCompleter {
 			readline.PcItem("lcp"),
 			readline.PcItem("ha"),
 			readline.PcItem("class-of-service"),
+			readline.PcItem("evpn"),
+			readline.PcItem("telemetry",
+				readline.PcItem("path"),
+				readline.PcItem("interval"),
+				readline.PcItem("count"),
+				readline.PcItem("once"),
+			),
 			readline.PcItem("route",
 				readline.PcItem("protocol"),
 			),

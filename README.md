@@ -244,6 +244,7 @@ arca show vrrp
 arca show bfd status
 arca show bfd
 arca show bfd counters
+arca show evpn
 arca show lcp
 arca show ha
 arca show class-of-service

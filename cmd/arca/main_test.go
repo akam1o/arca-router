@@ -236,6 +236,21 @@ func (s *fakeTelemetryStream) Recv() (*grpcclient.TelemetryEvent, error) {
 	return event, nil
 }
 
+func evpnTelemetryTestEvent() *grpcclient.TelemetryEvent {
+	return &grpcclient.TelemetryEvent{
+		Sequence:      1,
+		Timestamp:     time.Unix(100, 0).UTC(),
+		Path:          "/overlays/evpn",
+		EventType:     "snapshot",
+		Encoding:      "json",
+		SchemaVersion: "arca.telemetry.v1",
+		JSONPayload: `{"vnis":[` +
+			`{"vni":10010,"type":"l2","bridge_domain":"BD-10","vlan_id":10,"route_distinguisher":"65000:10010","vrf_target":"target:65000:10010","source_interface":"ge-0/0/0","source_address":"192.0.2.1","multicast_group":"239.0.0.10"},` +
+			`{"vni":20010,"type":"l3","routing_instance":"BLUE","vrf_target_import":["target:65000:20010"],"vrf_target_export":["target:65000:20011"]}` +
+			`]}`,
+	}
+}
+
 func TestCmdConfigureRequiresSession(t *testing.T) {
 	ctx := context.Background()
 	client := &fakeInteractiveClient{}
@@ -604,6 +619,31 @@ func TestCmdShowClassOfServiceReturnsOutput(t *testing.T) {
 	}
 }
 
+func TestCmdShowEVPNUsesTelemetrySnapshot(t *testing.T) {
+	ctx := context.Background()
+	client := &fakeInteractiveClient{telemetryEvents: []*grpcclient.TelemetryEvent{evpnTelemetryTestEvent()}}
+	sh := &interactiveShell{
+		client:    client,
+		hostname:  "router",
+		mode:      modeOperational,
+		sessionID: "session-1",
+	}
+
+	err := sh.cmdShow(ctx, []string{"evpn"})
+	if err != nil {
+		t.Fatalf("cmdShow(evpn) error = %v", err)
+	}
+	if client.telemetryCalls != 1 {
+		t.Fatalf("telemetry calls = %d, want 1", client.telemetryCalls)
+	}
+	if len(client.telemetryPaths) != 1 || client.telemetryPaths[0] != "/overlays/evpn" {
+		t.Fatalf("telemetry paths = %#v, want /overlays/evpn", client.telemetryPaths)
+	}
+	if !client.telemetryOnce || client.telemetryInterval != 0 {
+		t.Fatalf("telemetry once/interval = %v/%v, want true/0", client.telemetryOnce, client.telemetryInterval)
+	}
+}
+
 func TestCmdShowRoutingInstancesReturnsOutput(t *testing.T) {
 	ctx := context.Background()
 	client := &fakeInteractiveClient{routingInstances: []grpcclient.RoutingInstanceInfo{
@@ -838,6 +878,20 @@ func TestOneShotShowClassOfServiceReturnsSuccess(t *testing.T) {
 	}
 }
 
+func TestOneShotShowEVPNReturnsSuccess(t *testing.T) {
+	client := &fakeInteractiveClient{telemetryEvents: []*grpcclient.TelemetryEvent{evpnTelemetryTestEvent()}}
+	code := oneShotShow(context.Background(), client, []string{"evpn"}, &cliFlags{})
+	if code != ExitSuccess {
+		t.Fatalf("oneShotShow(evpn) = %d, want %d", code, ExitSuccess)
+	}
+	if client.telemetryCalls != 1 {
+		t.Fatalf("telemetry calls = %d, want 1", client.telemetryCalls)
+	}
+	if len(client.telemetryPaths) != 1 || client.telemetryPaths[0] != "/overlays/evpn" {
+		t.Fatalf("telemetry paths = %#v, want /overlays/evpn", client.telemetryPaths)
+	}
+}
+
 func TestOneShotShowRoutingInstancesReturnsSuccess(t *testing.T) {
 	client := &fakeInteractiveClient{routingInstances: []grpcclient.RoutingInstanceInfo{{Name: "BLUE", IPv4TableID: 100, IPv6TableID: 100}}}
 	code := oneShotShow(context.Background(), client, []string{"routing-instances"}, &cliFlags{})
@@ -898,6 +952,30 @@ func TestOneShotShowTelemetryReturnsSuccess(t *testing.T) {
 	}
 	if !client.telemetryOnce {
 		t.Fatal("telemetry once = false, want true")
+	}
+}
+
+func TestShowEVPNRejectsInvalidPayload(t *testing.T) {
+	client := &fakeInteractiveClient{telemetryEvents: []*grpcclient.TelemetryEvent{
+		{
+			Path:        "/overlays/evpn",
+			JSONPayload: `{"vnis":`,
+		},
+	}}
+	err := showEVPN(context.Background(), client)
+	if err == nil || !strings.Contains(err.Error(), "decode EVPN telemetry snapshot") {
+		t.Fatalf("showEVPN() error = %v, want decode failure", err)
+	}
+}
+
+func TestCountEVPNVNIs(t *testing.T) {
+	counts := countEVPNVNIs([]evpnTelemetryVNI{
+		{VNI: 10010, Type: "l2", MulticastGroup: "239.0.0.10"},
+		{VNI: 20010, Type: "l3"},
+		{VNI: 30010, Type: "l2"},
+	})
+	if counts.total != 3 || counts.l2 != 2 || counts.l3 != 1 || counts.multicast != 1 {
+		t.Fatalf("countEVPNVNIs() = %#v, want total 3 l2 2 l3 1 multicast 1", counts)
 	}
 }
 
