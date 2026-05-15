@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"log/slog"
 	"net"
@@ -342,6 +343,78 @@ func TestSubscribeTelemetrySelectedSnapshots(t *testing.T) {
 	}
 }
 
+func TestSubscribeTelemetryRouteScaleSnapshot(t *testing.T) {
+	srv := NewServer(engine.NewEngine(nil, testLogger()), &fakeStore{}, testLogger())
+	const routeCount = 128
+
+	var commands []string
+	oldVtysh := runOperationalVtyshCommand
+	runOperationalVtyshCommand = func(ctx context.Context, command string) (string, error) {
+		commands = append(commands, command)
+		switch command {
+		case "show ip route json":
+			return scaledFRRRouteJSON(routeCount), nil
+		case "show ipv6 route json":
+			return `{}`, nil
+		default:
+			t.Fatalf("unexpected vtysh command %q", command)
+			return "", nil
+		}
+	}
+	t.Cleanup(func() { runOperationalVtyshCommand = oldVtysh })
+
+	var events []TelemetryEvent
+	err := srv.SubscribeTelemetry(context.Background(), []string{"/routes"}, 0, true, func(event TelemetryEvent) error {
+		events = append(events, event)
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("SubscribeTelemetry(/routes) error = %v", err)
+	}
+	if len(commands) != 2 || commands[0] != "show ip route json" || commands[1] != "show ipv6 route json" {
+		t.Fatalf("vtysh commands = %#v, want IPv4 and IPv6 route JSON", commands)
+	}
+	if len(events) != 1 || events[0].Sequence != 1 || events[0].Path != "/routes" || events[0].EventType != telemetryEventTypeSnapshot {
+		t.Fatalf("events = %#v, want one route snapshot", events)
+	}
+	if events[0].PayloadBytes != len(events[0].JSONPayload) {
+		t.Fatalf("payload bytes = %d, want %d", events[0].PayloadBytes, len(events[0].JSONPayload))
+	}
+
+	var payload struct {
+		Routes []RouteInfo `json:"routes"`
+	}
+	if err := json.Unmarshal([]byte(events[0].JSONPayload), &payload); err != nil {
+		t.Fatalf("route telemetry payload is invalid JSON: %v", err)
+	}
+	if len(payload.Routes) != routeCount {
+		t.Fatalf("route telemetry payload has %d routes, want %d", len(payload.Routes), routeCount)
+	}
+	got, ok := routeInfoByPrefix(payload.Routes, "10.0.127.0/24")
+	if !ok {
+		t.Fatalf("route telemetry payload missing highest generated prefix")
+	}
+	if got.NextHop != "192.0.2.128" || got.Protocol != "bgp" || got.Metric != 127 || got.Interface != "ge0-0-127" || !got.Active {
+		t.Fatalf("route telemetry payload route = %#v, want generated BGP route attributes", got)
+	}
+}
+
+func TestNormalizeTelemetryPathsDeduplicatesLargeSelection(t *testing.T) {
+	var raw []string
+	for i := 0; i < 64; i++ {
+		raw = append(raw, "system", "/routes", "evpn", "running", "/routes", "/overlays/evpn")
+	}
+
+	paths, err := normalizeTelemetryPaths(raw)
+	if err != nil {
+		t.Fatalf("normalizeTelemetryPaths() error = %v", err)
+	}
+	want := []string{"/system", "/config/running", "/routes", "/overlays/evpn"}
+	if strings.Join(paths, "\n") != strings.Join(want, "\n") {
+		t.Fatalf("normalizeTelemetryPaths() = %#v, want %#v", paths, want)
+	}
+}
+
 func TestSubscribeTelemetryEVPNOverlaySnapshot(t *testing.T) {
 	eng := engine.NewEngine(nil, testLogger())
 	eng.InitializeRunning(&model.RouterConfig{
@@ -511,6 +584,38 @@ func TestTelemetryPathCatalog(t *testing.T) {
 	if len(filtered.Paths) != 0 {
 		t.Fatalf("NewFilteredTelemetryCatalog(unsupported encoding) paths = %#v, want none", filtered.Paths)
 	}
+}
+
+func scaledFRRRouteJSON(count int) string {
+	var b strings.Builder
+	b.WriteString("{")
+	for i := 0; i < count; i++ {
+		if i > 0 {
+			b.WriteString(",")
+		}
+		fmt.Fprintf(&b, `
+	%q: [
+		{
+			"protocol": "bgp",
+			"metric": %d,
+			"selected": true,
+			"nexthops": [
+				{"ip": %q, "interfaceName": %q, "active": true}
+			]
+		}
+	]`, fmt.Sprintf("10.0.%d.0/24", i), i, fmt.Sprintf("192.0.2.%d", i+1), fmt.Sprintf("ge0-0-%d", i))
+	}
+	b.WriteString("\n}")
+	return b.String()
+}
+
+func routeInfoByPrefix(routes []RouteInfo, prefix string) (RouteInfo, bool) {
+	for _, route := range routes {
+		if route.Prefix == prefix {
+			return route, true
+		}
+	}
+	return RouteInfo{}, false
 }
 
 func TestOperationalStateEndpointsReadVPPAndFRR(t *testing.T) {

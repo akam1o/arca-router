@@ -85,7 +85,8 @@ Focus: add data-center overlay support and richer external observability.
   - Stable operational API shape for external systems
   - Integration examples for collectors and dashboards
 - **Scale validation**
-  - Route scale, session count, and telemetry cardinality testing
+  - Route scale and telemetry cardinality regression coverage
+  - Session count testing
   - Performance guardrails for high-churn environments
 
 ## v0.9.x - NETCONF/YANG and Operational Safety
