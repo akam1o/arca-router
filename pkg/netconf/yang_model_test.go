@@ -191,13 +191,40 @@ func TestYANGValidator_ValidateConfig(t *testing.T) {
 		t.Fatalf("NewYANGValidator() error = %v", err)
 	}
 
-	// Test basic validation (Phase 3: minimal implementation)
-	xmlData := []byte(`<config><system><host-name>test</host-name></system></config>`)
+	tests := []struct {
+		name    string
+		xmlData []byte
+		wantErr bool
+	}{
+		{
+			name:    "valid system config",
+			xmlData: []byte(`<config><system><host-name>test</host-name></system></config>`),
+			wantErr: false,
+		},
+		{
+			name:    "unknown element rejected",
+			xmlData: []byte(`<config><unknown/></config>`),
+			wantErr: true,
+		},
+		{
+			name:    "semantic hostname validation rejected",
+			xmlData: []byte(`<config><system><host-name>bad_name</host-name></system></config>`),
+			wantErr: true,
+		},
+		{
+			name:    "semantic interface validation rejected",
+			xmlData: []byte(`<config><interfaces><interface><name>bad0</name></interface></interfaces></config>`),
+			wantErr: true,
+		},
+	}
 
-	err = v.ValidateConfig(xmlData)
-	// Phase 3: This is a stub implementation, should not error
-	if err != nil {
-		t.Errorf("ValidateConfig() error = %v, want nil", err)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := v.ValidateConfig(tt.xmlData)
+			if (err != nil) != tt.wantErr {
+				t.Errorf("ValidateConfig() error = %v, wantErr %v", err, tt.wantErr)
+			}
+		})
 	}
 }
 

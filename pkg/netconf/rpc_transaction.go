@@ -32,6 +32,16 @@ func (s *Server) handleCommit(ctx context.Context, sess *Session, rpc *RPC) *RPC
 		return NewErrorReply(rpc.MessageID, ErrOperationFailed("no candidate configuration to commit"))
 	}
 
+	cfg, err := TextToConfig(candidate.ConfigText)
+	if err != nil {
+		log.Printf("[NETCONF] Failed to parse candidate config before commit: %v", err)
+		return NewErrorReply(rpc.MessageID, ErrValidationFailed(fmt.Sprintf("config parsing failed: %v", err)))
+	}
+	if rpcErr := validateConfigSemantics("commit", cfg); rpcErr != nil {
+		log.Printf("[NETCONF] Commit validation failed for session %s: %v", sess.ID, rpcErr)
+		return NewErrorReply(rpc.MessageID, rpcErr)
+	}
+
 	// Perform commit
 	commitReq := &datastore.CommitRequest{
 		SessionID: sess.ID,
@@ -134,13 +144,9 @@ func (s *Server) handleValidate(ctx context.Context, sess *Session, rpc *RPC) *R
 		return NewErrorReply(rpc.MessageID, ErrValidationFailed(fmt.Sprintf("config parsing failed: %v", err)))
 	}
 
-	// Perform basic validation
-	if err := ValidateConfig(cfg); err != nil {
-		log.Printf("[NETCONF] Validation failed for session %s: %v", sess.ID, err)
-		if rpcErr, ok := err.(*RPCError); ok {
-			return NewErrorReply(rpc.MessageID, rpcErr)
-		}
-		return NewErrorReply(rpc.MessageID, ErrValidationFailed(fmt.Sprintf("validation error: %v", err)))
+	if rpcErr := validateConfigSemantics("validate", cfg); rpcErr != nil {
+		log.Printf("[NETCONF] Validation failed for session %s: %v", sess.ID, rpcErr)
+		return NewErrorReply(rpc.MessageID, rpcErr)
 	}
 
 	log.Printf("[NETCONF] Validation successful for session %s", sess.ID)

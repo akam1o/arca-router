@@ -85,9 +85,8 @@ func NewYANGValidator() (*YANGValidator, error) {
 	}, nil
 }
 
-// ValidateConfig performs basic YANG validation on the configuration
-// Phase 3: Structural validation only (allowlist approach)
-// Phase 4: Full YANG semantic validation with constraints
+// ValidateConfig validates configuration XML against the implemented NETCONF
+// schema subset and the internal semantic config rules.
 func (v *YANGValidator) ValidateConfig(xmlData []byte) error {
 	if v == nil {
 		return fmt.Errorf("YANG validator not initialized")
@@ -96,16 +95,13 @@ func (v *YANGValidator) ValidateConfig(xmlData []byte) error {
 	v.mu.RLock()
 	defer v.mu.RUnlock()
 
-	// Phase 3 implementation: Basic structural validation
-	// We validate:
-	// 1. XML is well-formed (already done by xml.Unmarshal in xml_convert.go)
-	// 2. Top-level elements match the currently implemented YANG schema roots
-	// 3. Size and depth limits (already enforced in xml_convert.go)
-
-	// For Phase 3, we accept the parse validation done during NewYANGValidator
-	// Full validation against data instances requires libyang or more advanced processing
-	// which is deferred to Phase 4
-
+	cfg, err := XMLToConfig(xmlData, DefaultOpMerge)
+	if err != nil {
+		return err
+	}
+	if rpcErr := validateConfigSemantics("validate", cfg); rpcErr != nil {
+		return rpcErr
+	}
 	return nil
 }
 

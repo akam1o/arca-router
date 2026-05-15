@@ -298,6 +298,11 @@ func (s *Server) handleEditConfig(ctx context.Context, sess *Session, rpc *RPC) 
 		return NewErrorReply(rpc.MessageID, ErrOperationFailed(fmt.Sprintf("config merge failed: %v", err)))
 	}
 
+	if rpcErr := validateConfigSemantics("edit-config", mergedCfg); rpcErr != nil {
+		log.Printf("[NETCONF] Config validation error: %v", rpcErr)
+		return NewErrorReply(rpc.MessageID, rpcErr)
+	}
+
 	// Convert merged config back to text
 	mergedTextCfg, err := ConfigToText(mergedCfg)
 	if err != nil {

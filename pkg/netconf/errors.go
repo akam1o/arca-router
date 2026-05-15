@@ -290,8 +290,13 @@ func ErrLockTimeout(target string) *RPCError {
 
 // ErrValidationFailed returns error for validation failure
 func ErrValidationFailed(message string) *RPCError {
+	return ErrConfigValidationFailed("validate", message)
+}
+
+// ErrConfigValidationFailed returns error for config validation failure.
+func ErrConfigValidationFailed(rpcName, message string) *RPCError {
 	return NewRPCError(ErrorTypeApplication, ErrorTagInvalidValue, message).
-		WithPath("/rpc/validate/source").
+		WithPath(configValidationErrorPath(rpcName)).
 		WithAppTag("validation-failed")
 }
 
