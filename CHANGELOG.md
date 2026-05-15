@@ -2,6 +2,7 @@
 
 ## v0.8.x - Overlay and Streaming Telemetry (current)
 
+- **NMS collector status text validation**: the example HTTP collector now rejects empty operational status strings and empty diagnostic list entries before printing status responses
 - **NMS collector status counter validation**: the example HTTP collector now validates EVPN VNI counter relationships and NETCONF handshake counters in operational status responses
 - **NMS collector status state validation**: the example HTTP collector now validates CoS enforcement status values and FRR VRRP/BFD state consistency in operational status responses
 - **NMS collector status metadata validation**: the example HTTP collector now validates optional operational status revision, commit, and last-error metadata before printing status responses

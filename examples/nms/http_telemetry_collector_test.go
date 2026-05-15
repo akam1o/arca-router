@@ -283,6 +283,12 @@ func TestDecodeStatusResponseRejectsInvalidEnvelope(t *testing.T) {
 		t.Fatalf("decodeStatusResponse() error = %v, want config_version mismatch", err)
 	}
 	data = validStatusData()
+	data["running_hostname"] = " "
+	err = decodeStatusResponse(statusEnvelope(data))
+	if err == nil || !strings.Contains(err.Error(), "running_hostname") {
+		t.Fatalf("decodeStatusResponse() error = %v, want running_hostname mismatch", err)
+	}
+	data = validStatusData()
 	data["uptime_seconds"] = -1
 	err = decodeStatusResponse(statusEnvelope(data))
 	if err == nil || !strings.Contains(err.Error(), "uptime_seconds") {
@@ -311,6 +317,12 @@ func TestDecodeStatusResponseRejectsInvalidEnvelope(t *testing.T) {
 	err = decodeStatusResponse(statusEnvelope(data))
 	if err == nil || !strings.Contains(err.Error(), "config_sync.running_commit_id") {
 		t.Fatalf("decodeStatusResponse() error = %v, want config_sync.running_commit_id mismatch", err)
+	}
+	data = validStatusData()
+	data["config_sync"].(map[string]any)["last_error"] = ""
+	err = decodeStatusResponse(statusEnvelope(data))
+	if err == nil || !strings.Contains(err.Error(), "config_sync.last_error") {
+		t.Fatalf("decodeStatusResponse() error = %v, want config_sync.last_error mismatch", err)
 	}
 	data = validStatusData()
 	data["overlay"].(map[string]any)["evpn"] = []string{}
@@ -360,6 +372,12 @@ func TestDecodeStatusResponseRejectsInvalidEnvelope(t *testing.T) {
 	err = decodeStatusResponse(statusEnvelope(data))
 	if err == nil || !strings.Contains(err.Error(), "ha.issues[1]") {
 		t.Fatalf("decodeStatusResponse() error = %v, want ha.issues mismatch", err)
+	}
+	data = validStatusData()
+	data["ha"].(map[string]any)["issues"] = []string{""}
+	err = decodeStatusResponse(statusEnvelope(data))
+	if err == nil || !strings.Contains(err.Error(), "ha.issues[0]") {
+		t.Fatalf("decodeStatusResponse() error = %v, want ha.issues empty mismatch", err)
 	}
 	data = validStatusData()
 	data["frr"].(map[string]any)["vrrp"].(map[string]any)["groups"] = []any{map[string]any{"interface": "ge-0/0/0", "id": 10, "observed": true, "active": true}}
