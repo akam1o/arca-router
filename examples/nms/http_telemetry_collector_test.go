@@ -149,7 +149,40 @@ func TestDecodeDiscoveryResponseRejectsInvalidSchemaEnvelope(t *testing.T) {
 }
 
 func TestDecodeStatusResponseRejectsInvalidEnvelope(t *testing.T) {
-	validStatus := []byte(`{"schema_version":"arca.nms.operational.v1","generated_at":"2026-05-15T12:34:56Z","resource":"/api/nms/v1/status","data":{"running_hostname":"edge01"}}`)
+	validStatusData := func() map[string]any {
+		return map[string]any{
+			"version":          "0.8.0",
+			"commit":           "abc123",
+			"build_date":       "2026-05-15T12:00:00Z",
+			"uptime_seconds":   120.5,
+			"config_version":   uint64(77),
+			"running_hostname": "edge01",
+			"datastore":        map[string]any{"backend": "memory"},
+			"config_sync":      map[string]any{"enabled": false, "healthy": false},
+			"cluster":          map[string]any{"enabled": false, "node_count": 0, "etcd_sync_configured": false, "sync_aligned": false},
+			"overlay":          map[string]any{"evpn": map[string]any{"configured": false, "vnis": 0}},
+			"ha":               map[string]any{"configured": false, "converged": false, "vrrp_groups": 0, "issue_count": 0},
+			"class_of_service": map[string]any{"configured": false, "enforcement_status": "not-configured", "capabilities": map[string]any{"metadata_binding_supported": false}},
+			"frr":              map[string]any{"vrrp": map[string]any{"configured_groups": 0}, "bfd": map[string]any{"configured_peers": 0}},
+			"vpp":              map[string]any{"lcp": map[string]any{"pair_count": 0}},
+			"netconf":          map[string]any{"listening": false, "active_sessions": 0},
+		}
+	}
+	statusEnvelope := func(data any) []byte {
+		t.Helper()
+		body, err := json.Marshal(map[string]any{
+			"schema_version": "arca.nms.operational.v1",
+			"generated_at":   "2026-05-15T12:34:56Z",
+			"resource":       "/api/nms/v1/status",
+			"data":           data,
+		})
+		if err != nil {
+			t.Fatalf("json.Marshal(status envelope) error = %v", err)
+		}
+		return body
+	}
+
+	validStatus := statusEnvelope(validStatusData())
 	if err := decodeStatusResponse(validStatus); err != nil {
 		t.Fatalf("decodeStatusResponse(valid) error = %v", err)
 	}
@@ -181,6 +214,24 @@ func TestDecodeStatusResponseRejectsInvalidEnvelope(t *testing.T) {
 	err = decodeStatusResponse([]byte(`{"schema_version":"arca.nms.operational.v1","generated_at":"2026-05-15T12:34:56Z","resource":"/api/nms/v1/status","data":{}}`))
 	if err == nil || !strings.Contains(err.Error(), "data object") {
 		t.Fatalf("decodeStatusResponse() error = %v, want empty data object mismatch", err)
+	}
+	data := validStatusData()
+	delete(data, "config_version")
+	err = decodeStatusResponse(statusEnvelope(data))
+	if err == nil || !strings.Contains(err.Error(), "config_version") {
+		t.Fatalf("decodeStatusResponse() error = %v, want config_version mismatch", err)
+	}
+	data = validStatusData()
+	data["uptime_seconds"] = -1
+	err = decodeStatusResponse(statusEnvelope(data))
+	if err == nil || !strings.Contains(err.Error(), "uptime_seconds") {
+		t.Fatalf("decodeStatusResponse() error = %v, want uptime_seconds mismatch", err)
+	}
+	data = validStatusData()
+	data["datastore"] = []string{}
+	err = decodeStatusResponse(statusEnvelope(data))
+	if err == nil || !strings.Contains(err.Error(), "datastore") {
+		t.Fatalf("decodeStatusResponse() error = %v, want datastore mismatch", err)
 	}
 }
 
