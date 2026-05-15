@@ -2,6 +2,7 @@
 
 ## v0.8.x - Overlay and Streaming Telemetry (current)
 
+- **NMS collector snapshot guardrail cap validation**: the example HTTP collector now rejects snapshot guardrails that exceed the advertised NMS caps before using snapshot responses
 - **NMS collector snapshot guardrail validation**: the example HTTP collector now rejects negative snapshot `max_payload_bytes` and `max_events` guardrails before using snapshot responses
 - **NMS collector snapshot event timing bounds**: the example HTTP collector now rejects telemetry snapshot event timestamps that are later than the snapshot envelope `generated_at`
 - **NMS collector path alias validation**: the example HTTP collector now validates telemetry path aliases against the supported NMS path mappings before using discovery responses
