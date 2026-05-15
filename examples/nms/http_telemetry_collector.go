@@ -180,16 +180,16 @@ func parseCollectorConfig(args []string) (collectorConfig, error) {
 	fs.StringVar(&cfg.baseURL, "base-url", cfg.baseURL, "Base Web API URL")
 	fs.StringVar(&cfg.username, "user", "", "HTTP Basic username")
 	fs.StringVar(&cfg.password, "password", "", "HTTP Basic password")
-	fs.StringVar(&cfg.mode, "mode", cfg.mode, "Endpoint mode: snapshot, status, or catalog")
+	fs.StringVar(&cfg.mode, "mode", cfg.mode, "Endpoint mode: snapshot, status, catalog, or schemas")
 	fs.StringVar(&cfg.otlpEndpoint, "otlp-endpoint", "", "OTLP/HTTP logs endpoint URL for snapshot export, for example http://127.0.0.1:4318/v1/logs")
 	fs.StringVar(&cfg.otlpServiceName, "otlp-service-name", cfg.otlpServiceName, "OpenTelemetry service.name resource attribute")
 	fs.Var(&cfg.paths, "path", "Telemetry path for snapshot mode; repeat for multiple paths")
 	fs.BoolVar(&cfg.discoverPaths, "discover-paths", false, "Use telemetry catalog paths as the snapshot path set")
-	fs.Var(&cfg.includedPath, "include-path", "Telemetry path or alias to request from catalog discovery; repeat for multiple values")
-	fs.BoolVar(&cfg.includedDefault, "include-default", false, "Request only default telemetry paths from catalog discovery")
-	fs.Var(&cfg.includedCard, "include-cardinality", "Telemetry cardinality to request from catalog discovery; repeat for multiple values")
-	fs.Var(&cfg.includedSchema, "include-payload-schema", "Telemetry payload schema ID to request from catalog discovery; repeat for multiple values")
-	fs.Var(&cfg.includedEncoding, "include-encoding", "Telemetry payload encoding to request from catalog discovery; repeat for multiple values")
+	fs.Var(&cfg.includedPath, "include-path", "Telemetry path or alias to request from catalog or schema discovery; repeat for multiple values")
+	fs.BoolVar(&cfg.includedDefault, "include-default", false, "Request only default telemetry paths from catalog or schema discovery")
+	fs.Var(&cfg.includedCard, "include-cardinality", "Telemetry cardinality to request from catalog or schema discovery; repeat for multiple values")
+	fs.Var(&cfg.includedSchema, "include-payload-schema", "Telemetry payload schema ID to request from catalog or schema discovery; repeat for multiple values")
+	fs.Var(&cfg.includedEncoding, "include-encoding", "Telemetry payload encoding to request from catalog or schema discovery; repeat for multiple values")
 	fs.Var(&cfg.excludedPath, "exclude-path", "Telemetry path or alias to exclude from snapshot mode; repeat for multiple values")
 	fs.Var(&cfg.excludedCard, "exclude-cardinality", "Telemetry cardinality to exclude from snapshot mode; repeat for multiple values")
 	fs.Var(&cfg.excludedSchema, "exclude-payload-schema", "Telemetry payload schema ID to exclude from snapshot mode; repeat for multiple values")
@@ -202,7 +202,7 @@ func parseCollectorConfig(args []string) (collectorConfig, error) {
 	}
 	cfg.mode = strings.ToLower(strings.TrimSpace(cfg.mode))
 	switch cfg.mode {
-	case "snapshot", "status", "catalog":
+	case "snapshot", "status", "catalog", "schemas":
 	default:
 		return cfg, fmt.Errorf("unsupported mode %q", cfg.mode)
 	}
@@ -547,6 +547,8 @@ func collectorEndpointURL(cfg collectorConfig) (string, error) {
 		endpoint = "/api/nms/v1/status"
 	case "catalog":
 		endpoint = "/api/nms/v1/telemetry/paths"
+	case "schemas":
+		endpoint = "/api/nms/v1/telemetry/schemas"
 	case "snapshot":
 		endpoint = "/api/nms/v1/telemetry/snapshot"
 	default:
@@ -557,7 +559,7 @@ func collectorEndpointURL(cfg collectorConfig) (string, error) {
 		return "", err
 	}
 	switch cfg.mode {
-	case "catalog":
+	case "catalog", "schemas":
 		query := u.Query()
 		if cfg.includedDefault {
 			query.Set("default", "true")

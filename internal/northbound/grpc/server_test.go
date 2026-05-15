@@ -586,6 +586,61 @@ func TestTelemetryPathCatalog(t *testing.T) {
 	}
 }
 
+func TestTelemetryPayloadSchemaCatalog(t *testing.T) {
+	catalog := TelemetryPayloadSchemaCatalog()
+	if len(catalog) != len(telemetryPathOrder) {
+		t.Fatalf("TelemetryPayloadSchemaCatalog() length = %d, want %d", len(catalog), len(telemetryPathOrder))
+	}
+	byPath := map[string]TelemetryPayloadSchemaInfo{}
+	for i, info := range catalog {
+		if info.Path != telemetryPathOrder[i] {
+			t.Fatalf("catalog[%d].Path = %q, want %q", i, info.Path, telemetryPathOrder[i])
+		}
+		if info.PayloadSchema == "" || info.Description == "" || info.Cardinality == "" {
+			t.Fatalf("catalog[%d] = %#v, want schema, description, and cardinality", i, info)
+		}
+		if len(info.Fields) == 0 {
+			t.Fatalf("catalog[%d].Fields is empty for %s", i, info.Path)
+		}
+		byPath[info.Path] = info
+	}
+	if byPath["/routes"].Fields[0].Name != "routes" || byPath["/routes"].Fields[0].Type != "[]RouteInfo" {
+		t.Fatalf("/routes fields = %#v, want routes []RouteInfo", byPath["/routes"].Fields)
+	}
+	if byPath["/overlays/evpn"].Fields[0].Name != "vnis" || byPath["/overlays/evpn"].Fields[0].Type != "[]EVPNVNI" {
+		t.Fatalf("/overlays/evpn fields = %#v, want vnis []EVPNVNI", byPath["/overlays/evpn"].Fields)
+	}
+	if byPath["/class-of-service"].Fields[0].Name != "class_of_service" {
+		t.Fatalf("/class-of-service fields = %#v, want class_of_service", byPath["/class-of-service"].Fields)
+	}
+
+	filtered := NewFilteredTelemetryPayloadSchemaCatalog(TelemetryCatalogFilter{
+		Paths:          []string{"evpn"},
+		PayloadSchemas: []string{"ARCA.TELEMETRY.OVERLAYS.EVPN.V1"},
+		Encodings:      []string{" json "},
+	})
+	if len(filtered) != 1 || filtered[0].Path != "/overlays/evpn" {
+		t.Fatalf("NewFilteredTelemetryPayloadSchemaCatalog() = %#v, want only /overlays/evpn", filtered)
+	}
+	filtered = NewFilteredTelemetryPayloadSchemaCatalog(TelemetryCatalogFilter{
+		DefaultOnly: true,
+	})
+	if len(filtered) != len(defaultTelemetryPaths) || filtered[0].Path != "/system" || filtered[1].Path != "/config/running" {
+		t.Fatalf("NewFilteredTelemetryPayloadSchemaCatalog(default only) = %#v, want default schemas", filtered)
+	}
+	filtered = NewFilteredTelemetryPayloadSchemaCatalog(TelemetryCatalogFilter{
+		Encodings: []string{"protobuf"},
+	})
+	if len(filtered) != 0 {
+		t.Fatalf("NewFilteredTelemetryPayloadSchemaCatalog(unsupported encoding) = %#v, want none", filtered)
+	}
+
+	catalog[0].Fields[0].Name = "mutated"
+	if again := TelemetryPayloadSchemaCatalog(); again[0].Fields[0].Name == "mutated" {
+		t.Fatal("TelemetryPayloadSchemaCatalog() returned shared field slices, want defensive copies")
+	}
+}
+
 func scaledFRRRouteJSON(count int) string {
 	var b strings.Builder
 	b.WriteString("{")

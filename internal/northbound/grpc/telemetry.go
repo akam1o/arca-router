@@ -81,6 +81,51 @@ var (
 		"/lcp":                     "arca.telemetry.lcp.v1",
 		"/ha":                      "arca.telemetry.ha.v1",
 	}
+	telemetryPathPayloadFields = map[string][]TelemetryPayloadFieldInfo{
+		"/system": {
+			{Name: "hostname", Type: "string", Description: "daemon hostname"},
+			{Name: "version", Type: "string", Description: "daemon software version"},
+			{Name: "uptime_secs", Type: "uint64", Description: "daemon uptime in seconds"},
+		},
+		"/config/running": {
+			{Name: "version", Type: "uint64", Description: "running configuration version"},
+			{Name: "config_text", Type: "string", Description: "running configuration in set-command text format"},
+			{Name: "line_count", Type: "int", Description: "number of running configuration lines"},
+		},
+		"/interfaces": {
+			{Name: "interfaces", Type: "[]InterfaceInfo", Description: "managed interface operational state entries"},
+		},
+		"/routes": {
+			{Name: "routes", Type: "[]RouteInfo", Description: "routing table entries"},
+		},
+		"/routing/bgp/neighbors": {
+			{Name: "neighbors", Type: "[]BGPNeighborInfo", Description: "BGP neighbor operational state entries"},
+		},
+		"/routing/ospf/neighbors": {
+			{Name: "neighbors", Type: "[]OSPFNeighborInfo", Description: "OSPFv2 neighbor operational state entries"},
+		},
+		"/routing/ospf3/neighbors": {
+			{Name: "neighbors", Type: "[]OSPFNeighborInfo", Description: "OSPFv3 neighbor operational state entries"},
+		},
+		"/routing-instances": {
+			{Name: "instances", Type: "[]RoutingInstanceInfo", Description: "routing instance operational summaries"},
+		},
+		"/overlays/evpn": {
+			{Name: "vnis", Type: "[]EVPNVNI", Description: "EVPN/VXLAN VNI intent entries"},
+		},
+		"/class-of-service": {
+			{Name: "class_of_service", Type: "ClassOfServiceInfo", Description: "class-of-service intent and enforcement status"},
+		},
+		"/bfd": {
+			{Name: "status", Type: "BFDStatusInfo", Description: "BFD peer operational status"},
+		},
+		"/lcp": {
+			{Name: "reconciliation", Type: "LCPReconciliationInfo", Description: "VPP LCP reconciliation status"},
+		},
+		"/ha": {
+			{Name: "status", Type: "HAStatusInfo", Description: "control-plane HA convergence status"},
+		},
+	}
 	telemetryPathAliases = map[string][]string{
 		"/config/running":          {"/running", "/config"},
 		"/routing/bgp/neighbors":   {"/bgp", "/bgp/neighbors"},
@@ -100,6 +145,24 @@ type TelemetryPathInfo struct {
 	PayloadSchema string
 	Aliases       []string
 	Default       bool
+}
+
+// TelemetryPayloadFieldInfo describes a stable top-level field in a telemetry payload.
+type TelemetryPayloadFieldInfo struct {
+	Name        string
+	Type        string
+	Description string
+}
+
+// TelemetryPayloadSchemaInfo describes the stable payload shape advertised for a telemetry path.
+type TelemetryPayloadSchemaInfo struct {
+	Path          string
+	Description   string
+	Cardinality   string
+	PayloadSchema string
+	Aliases       []string
+	Default       bool
+	Fields        []TelemetryPayloadFieldInfo
 }
 
 // TelemetryCatalog describes the structured telemetry stream inputs.
@@ -168,6 +231,19 @@ func NewFilteredTelemetryCatalog(filter TelemetryCatalogFilter) TelemetryCatalog
 	return catalog
 }
 
+// NewFilteredTelemetryPayloadSchemaCatalog returns the supported telemetry payload schemas with filters applied.
+func NewFilteredTelemetryPayloadSchemaCatalog(filter TelemetryCatalogFilter) []TelemetryPayloadSchemaInfo {
+	if !telemetryCatalogEncodingMatches(telemetryEncodingJSON, filter.Encodings) {
+		return nil
+	}
+	pathCatalog := filterTelemetryPathCatalog(TelemetryPathCatalog(), filter)
+	catalog := make([]TelemetryPayloadSchemaInfo, 0, len(pathCatalog))
+	for _, info := range pathCatalog {
+		catalog = append(catalog, newTelemetryPayloadSchemaInfo(info))
+	}
+	return catalog
+}
+
 // TelemetryPathCatalog returns the supported structured telemetry paths in canonical emission order.
 func TelemetryPathCatalog() []TelemetryPathInfo {
 	defaults := buildTelemetryPathSet(defaultTelemetryPaths)
@@ -184,6 +260,28 @@ func TelemetryPathCatalog() []TelemetryPathInfo {
 		})
 	}
 	return catalog
+}
+
+// TelemetryPayloadSchemaCatalog returns the supported telemetry payload schemas in canonical emission order.
+func TelemetryPayloadSchemaCatalog() []TelemetryPayloadSchemaInfo {
+	pathCatalog := TelemetryPathCatalog()
+	catalog := make([]TelemetryPayloadSchemaInfo, 0, len(pathCatalog))
+	for _, info := range pathCatalog {
+		catalog = append(catalog, newTelemetryPayloadSchemaInfo(info))
+	}
+	return catalog
+}
+
+func newTelemetryPayloadSchemaInfo(info TelemetryPathInfo) TelemetryPayloadSchemaInfo {
+	return TelemetryPayloadSchemaInfo{
+		Path:          info.Path,
+		Description:   info.Description,
+		Cardinality:   info.Cardinality,
+		PayloadSchema: info.PayloadSchema,
+		Aliases:       append([]string(nil), info.Aliases...),
+		Default:       info.Default,
+		Fields:        append([]TelemetryPayloadFieldInfo(nil), telemetryPathPayloadFields[info.Path]...),
+	}
 }
 
 func filterTelemetryPathCatalog(catalog []TelemetryPathInfo, filter TelemetryCatalogFilter) []TelemetryPathInfo {

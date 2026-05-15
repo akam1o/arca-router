@@ -4,11 +4,14 @@ This directory contains minimal HTTP-only collector examples for the schema-vers
 
 ## HTTP Telemetry Collector
 
-`http_telemetry_collector.go` uses only the Go standard library. It can query the operational status envelope, telemetry path catalog, or one-shot telemetry snapshot endpoint.
+`http_telemetry_collector.go` uses only the Go standard library. It can query the operational status envelope, telemetry path catalog, telemetry payload schema registry, or one-shot telemetry snapshot endpoint.
 
 ```bash
 # Discover supported telemetry paths, sample interval hints, cardinality hints, and payload schema IDs.
 go run ./examples/nms -mode catalog -base-url http://127.0.0.1:8080 -user monitor -password ReadOnly789
+
+# Discover stable top-level payload fields for selected telemetry schemas.
+go run ./examples/nms -mode schemas -base-url http://127.0.0.1:8080 -user monitor -password ReadOnly789 -include-path /evpn
 
 # Read the stable operational status envelope.
 go run ./examples/nms -mode status -base-url http://127.0.0.1:8080 -user monitor -password ReadOnly789
