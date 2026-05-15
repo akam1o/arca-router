@@ -138,7 +138,7 @@ func TestDecodeStatusResponseRejectsInvalidEnvelope(t *testing.T) {
 
 func TestDecodeTelemetrySnapshotResponseIntervalHints(t *testing.T) {
 	var snapshot telemetrySnapshotResponse
-	body := []byte(`{"schema_version":"arca.nms.telemetry-snapshot.v1","resource":"/api/nms/v1/telemetry/snapshot","event_schema_version":"arca.telemetry.v1","encoding":"json","default_paths":["/system","/config/running"],"default_sample_interval_ms":30000,"min_sample_interval_ms":1000,"max_sample_interval_ms":3600000,"event_count":2,"events":[` +
+	body := []byte(`{"schema_version":"arca.nms.telemetry-snapshot.v1","resource":"/api/nms/v1/telemetry/snapshot","event_schema_version":"arca.telemetry.v1","encoding":"json","default_paths":["/system","/config/running"],"default_sample_interval_ms":30000,"min_sample_interval_ms":1000,"max_sample_interval_ms":3600000,"paths":["/system","/config/running"],"event_count":2,"payload_bytes":44,"max_payload_bytes":8388608,"max_events":64,"timeout_ms":5000,"events":[` +
 		`{"path":"/system","event_type":"snapshot","encoding":"json","schema_version":"arca.telemetry.v1","payload_bytes":21,"payload":{"hostname":"edge01"}},` +
 		`{"path":"/config/running","event_type":"error","encoding":"json","schema_version":"arca.telemetry.v1","payload_bytes":23,"payload":{"error":"unavailable"}}` +
 		`]}`)
@@ -207,6 +207,26 @@ func TestDecodeSnapshotResponseRejectsInvalidEnvelope(t *testing.T) {
 	_, err = decodeSnapshotResponse([]byte(`{"schema_version":"arca.nms.telemetry-snapshot.v1","resource":"/api/nms/v1/telemetry/snapshot","event_schema_version":"arca.telemetry.v1","encoding":"json","event_count":1,"events":[{"path":"/system","event_type":"snapshot","encoding":"json","schema_version":"arca.telemetry.v1","payload_bytes":1,"payload":{}}]}`))
 	if err == nil || !strings.Contains(err.Error(), "payload_bytes") {
 		t.Fatalf("decodeSnapshotResponse() error = %v, want event payload_bytes mismatch", err)
+	}
+	_, err = decodeSnapshotResponse([]byte(`{"schema_version":"arca.nms.telemetry-snapshot.v1","resource":"/api/nms/v1/telemetry/snapshot","event_schema_version":"arca.telemetry.v1","encoding":"json","paths":["/wrong"],"event_count":1,"payload_bytes":2,"events":[{"path":"/system","event_type":"snapshot","encoding":"json","schema_version":"arca.telemetry.v1","payload_bytes":2,"payload":{}}]}`))
+	if err == nil || !strings.Contains(err.Error(), "paths[0]") {
+		t.Fatalf("decodeSnapshotResponse() error = %v, want emitted path mismatch", err)
+	}
+	_, err = decodeSnapshotResponse([]byte(`{"schema_version":"arca.nms.telemetry-snapshot.v1","resource":"/api/nms/v1/telemetry/snapshot","event_schema_version":"arca.telemetry.v1","encoding":"json","paths":["/system"],"event_count":1,"payload_bytes":3,"events":[{"path":"/system","event_type":"snapshot","encoding":"json","schema_version":"arca.telemetry.v1","payload_bytes":2,"payload":{}}]}`))
+	if err == nil || !strings.Contains(err.Error(), "payload_bytes") {
+		t.Fatalf("decodeSnapshotResponse() error = %v, want aggregate payload_bytes mismatch", err)
+	}
+	_, err = decodeSnapshotResponse([]byte(`{"schema_version":"arca.nms.telemetry-snapshot.v1","resource":"/api/nms/v1/telemetry/snapshot","event_schema_version":"arca.telemetry.v1","encoding":"json","paths":["/system"],"event_count":1,"payload_bytes":2,"max_payload_bytes":1,"events":[{"path":"/system","event_type":"snapshot","encoding":"json","schema_version":"arca.telemetry.v1","payload_bytes":2,"payload":{}}]}`))
+	if err == nil || !strings.Contains(err.Error(), "max_payload_bytes") {
+		t.Fatalf("decodeSnapshotResponse() error = %v, want max_payload_bytes mismatch", err)
+	}
+	_, err = decodeSnapshotResponse([]byte(`{"schema_version":"arca.nms.telemetry-snapshot.v1","resource":"/api/nms/v1/telemetry/snapshot","event_schema_version":"arca.telemetry.v1","encoding":"json","paths":["/system","/interfaces"],"event_count":2,"payload_bytes":4,"max_events":1,"events":[{"path":"/system","event_type":"snapshot","encoding":"json","schema_version":"arca.telemetry.v1","payload_bytes":2,"payload":{}},{"path":"/interfaces","event_type":"snapshot","encoding":"json","schema_version":"arca.telemetry.v1","payload_bytes":2,"payload":{}}]}`))
+	if err == nil || !strings.Contains(err.Error(), "max_events") {
+		t.Fatalf("decodeSnapshotResponse() error = %v, want max_events mismatch", err)
+	}
+	_, err = decodeSnapshotResponse([]byte(`{"schema_version":"arca.nms.telemetry-snapshot.v1","resource":"/api/nms/v1/telemetry/snapshot","event_schema_version":"arca.telemetry.v1","encoding":"json","paths":[],"event_count":0,"payload_bytes":0,"timeout_ms":-1,"events":[]}`))
+	if err == nil || !strings.Contains(err.Error(), "timeout_ms") {
+		t.Fatalf("decodeSnapshotResponse() error = %v, want timeout_ms mismatch", err)
 	}
 }
 
@@ -566,7 +586,7 @@ func TestFetchNMSExportsSnapshotToOTLP(t *testing.T) {
 		switch r.URL.Path {
 		case "/api/nms/v1/telemetry/snapshot":
 			snapshotQuery = r.URL.Query()
-			_, _ = w.Write([]byte(`{"schema_version":"arca.nms.telemetry-snapshot.v1","resource":"/api/nms/v1/telemetry/snapshot","event_schema_version":"arca.telemetry.v1","encoding":"json","event_count":1,"events":[{` +
+			_, _ = w.Write([]byte(`{"schema_version":"arca.nms.telemetry-snapshot.v1","resource":"/api/nms/v1/telemetry/snapshot","event_schema_version":"arca.telemetry.v1","encoding":"json","paths":["/system"],"event_count":1,"payload_bytes":21,"max_payload_bytes":8388608,"max_events":64,"timeout_ms":5000,"events":[{` +
 				`"sequence":7,` +
 				`"timestamp":"2026-05-15T12:34:56.000000789Z",` +
 				`"path":"/system",` +

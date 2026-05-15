@@ -147,7 +147,12 @@ type telemetrySnapshotResponse struct {
 	DefaultSampleIntervalMs uint32                   `json:"default_sample_interval_ms"`
 	MinSampleIntervalMs     uint32                   `json:"min_sample_interval_ms"`
 	MaxSampleIntervalMs     uint32                   `json:"max_sample_interval_ms"`
+	Paths                   []string                 `json:"paths"`
 	EventCount              int                      `json:"event_count"`
+	PayloadBytes            int                      `json:"payload_bytes"`
+	MaxPayloadBytes         int                      `json:"max_payload_bytes"`
+	MaxEvents               int                      `json:"max_events"`
+	TimeoutMs               int64                    `json:"timeout_ms"`
 	Events                  []telemetrySnapshotEvent `json:"events"`
 }
 
@@ -415,6 +420,9 @@ func decodeSnapshotResponse(body []byte) (telemetrySnapshotResponse, error) {
 	if err := validateTelemetrySnapshotEvents(snapshot.Events); err != nil {
 		return snapshot, err
 	}
+	if err := validateTelemetrySnapshotAggregates(snapshot); err != nil {
+		return snapshot, err
+	}
 	return snapshot, nil
 }
 
@@ -459,6 +467,32 @@ func validateTelemetrySnapshotEvents(events []telemetrySnapshotEvent) error {
 		if event.PayloadBytes != len(event.Payload) {
 			return fmt.Errorf("%s payload_bytes = %d, want len(payload) %d", kind, event.PayloadBytes, len(event.Payload))
 		}
+	}
+	return nil
+}
+
+func validateTelemetrySnapshotAggregates(snapshot telemetrySnapshotResponse) error {
+	if len(snapshot.Paths) != len(snapshot.Events) {
+		return fmt.Errorf("telemetry snapshot paths length = %d, want event count %d", len(snapshot.Paths), len(snapshot.Events))
+	}
+	payloadBytes := 0
+	for i, event := range snapshot.Events {
+		payloadBytes += event.PayloadBytes
+		if snapshot.Paths[i] != event.Path {
+			return fmt.Errorf("telemetry snapshot paths[%d] = %q, want event path %q", i, snapshot.Paths[i], event.Path)
+		}
+	}
+	if snapshot.PayloadBytes != payloadBytes {
+		return fmt.Errorf("telemetry snapshot payload_bytes = %d, want event payload_bytes total %d", snapshot.PayloadBytes, payloadBytes)
+	}
+	if snapshot.MaxPayloadBytes > 0 && snapshot.PayloadBytes > snapshot.MaxPayloadBytes {
+		return fmt.Errorf("telemetry snapshot payload_bytes = %d exceeds max_payload_bytes %d", snapshot.PayloadBytes, snapshot.MaxPayloadBytes)
+	}
+	if snapshot.MaxEvents > 0 && snapshot.EventCount > snapshot.MaxEvents {
+		return fmt.Errorf("telemetry snapshot event_count = %d exceeds max_events %d", snapshot.EventCount, snapshot.MaxEvents)
+	}
+	if snapshot.TimeoutMs < 0 {
+		return fmt.Errorf("telemetry snapshot timeout_ms = %d, want non-negative value", snapshot.TimeoutMs)
 	}
 	return nil
 }
