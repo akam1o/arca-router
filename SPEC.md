@@ -1108,7 +1108,7 @@ The packaged systemd unit grants `CAP_NET_BIND_SERVICE`, so the standard UDP por
 arca-routerd --snmp-listen=:161 --snmp-community=<read-only-community>
 ```
 
-SNMP is intended for monitoring only and should not be exposed on untrusted networks. The custom arca-router OID subtree exposes daemon, config, NETCONF, class-of-service intent, FRR VRRP operational, HA convergence, and VPP LCP reconciliation counters.
+SNMP is intended for monitoring only and should not be exposed on untrusted networks. The custom arca-router OID subtree exposes daemon, config, NETCONF, EVPN/VXLAN overlay intent, class-of-service intent, FRR VRRP operational, HA convergence, and VPP LCP reconciliation counters.
 
 ---
 
