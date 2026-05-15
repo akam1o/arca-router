@@ -1996,16 +1996,6 @@ func isTelemetryCatalogCommand(args []string) bool {
 	return ok && err == nil
 }
 
-func isLocalTelemetryCatalogCommand(args []string) bool {
-	opts, ok, err := telemetryCatalogOptions(args)
-	return ok && err == nil && !opts.live
-}
-
-func isLiveTelemetryCatalogCommand(args []string) bool {
-	opts, ok, err := telemetryCatalogOptions(args)
-	return ok && err == nil && opts.live
-}
-
 func telemetryCatalogOptions(args []string) (telemetryCatalogCLIOptions, bool, error) {
 	var opts telemetryCatalogCLIOptions
 	if len(args) == 0 || (args[0] != "paths" && args[0] != "catalog") {

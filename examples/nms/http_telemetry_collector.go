@@ -1021,11 +1021,6 @@ func nmsStatusStringArrayFieldLengthOptional(object map[string]json.RawMessage, 
 	return len(values), nil
 }
 
-func validateNMSStatusObjectArrayFieldOptional(object map[string]json.RawMessage, field, path string, validate func(int, map[string]json.RawMessage) error) error {
-	_, err := nmsStatusObjectArrayFieldOptional(object, field, path, validate)
-	return err
-}
-
 func nmsStatusObjectArrayFieldOptional(object map[string]json.RawMessage, field, path string, validate func(int, map[string]json.RawMessage) error) ([]map[string]json.RawMessage, error) {
 	raw, ok := object[field]
 	if !ok {
@@ -1456,11 +1451,6 @@ func validateNMSStatusStringFieldOptional(object map[string]json.RawMessage, fie
 		return fmt.Errorf("nms status data %s must be non-empty", path)
 	}
 	return nil
-}
-
-func validateNMSStatusRFC3339FieldOptional(object map[string]json.RawMessage, field, path string) error {
-	_, _, err := nmsStatusRFC3339FieldTimeOptional(object, field, path)
-	return err
 }
 
 func validateNMSStatusRFC3339FieldAtOrBeforeOptional(object map[string]json.RawMessage, field, path string, latest time.Time) error {
@@ -1993,7 +1983,7 @@ func fetchEndpoint(ctx context.Context, client *http.Client, cfg collectorConfig
 	if err != nil {
 		return nil, err
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	body, err := io.ReadAll(io.LimitReader(resp.Body, int64(cfg.maxPayloadBytes)+(1<<20)))
 	if err != nil {
@@ -2024,7 +2014,7 @@ func exportSnapshotToOTLP(ctx context.Context, client *http.Client, cfg collecto
 	if err != nil {
 		return err
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	respBody, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
 	if err != nil {
