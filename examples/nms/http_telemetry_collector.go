@@ -1676,8 +1676,12 @@ func validateTelemetryPayloadSchemas(schemas []telemetryPayloadSchema) error {
 				return fmt.Errorf("%s name = %q duplicates %s", fieldKind, field.Name, first)
 			}
 			seenFields[fieldName] = fmt.Sprintf("%s name", fieldKind)
-			if strings.TrimSpace(field.Type) == "" {
+			fieldType := strings.TrimSpace(field.Type)
+			if fieldType == "" {
 				return fmt.Errorf("%s type is empty", fieldKind)
+			}
+			if err := validateTelemetryPayloadFieldType(fieldKind, fieldType); err != nil {
+				return err
 			}
 			if strings.TrimSpace(field.Description) == "" {
 				return fmt.Errorf("%s description is empty", fieldKind)
@@ -1685,6 +1689,27 @@ func validateTelemetryPayloadSchemas(schemas []telemetryPayloadSchema) error {
 		}
 	}
 	return nil
+}
+
+func validateTelemetryPayloadFieldType(kind, fieldType string) error {
+	switch fieldType {
+	case "string",
+		"uint64",
+		"int",
+		"[]InterfaceInfo",
+		"[]RouteInfo",
+		"[]BGPNeighborInfo",
+		"[]OSPFNeighborInfo",
+		"[]RoutingInstanceInfo",
+		"[]EVPNVNI",
+		"ClassOfServiceInfo",
+		"BFDStatusInfo",
+		"LCPReconciliationInfo",
+		"HAStatusInfo":
+		return nil
+	default:
+		return fmt.Errorf("%s type = %q, want supported telemetry payload field type", kind, fieldType)
+	}
 }
 
 func validateTelemetryPathMetadata(kind, path, cardinality, payloadSchema string, aliases []string) error {

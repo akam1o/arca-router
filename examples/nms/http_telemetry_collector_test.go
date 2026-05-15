@@ -166,6 +166,10 @@ func TestDecodeDiscoveryResponseRejectsInvalidSchemaEnvelope(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "description") {
 		t.Fatalf("decodeDiscoveryResponse() error = %v, want schema field description mismatch", err)
 	}
+	err = decodeDiscoveryResponse(collectorConfig{mode: "schemas"}, []byte(`{"schema_version":"arca.nms.telemetry-schemas.v1","resource":"/api/nms/v1/telemetry/schemas","event_schema_version":"arca.telemetry.v1","encoding":"json","default_paths":["/system"],"default_sample_interval_ms":30000,"min_sample_interval_ms":1000,"max_sample_interval_ms":3600000,"schema_count":1,"schemas":[{"path":"/system","cardinality":"single","payload_schema":"arca.telemetry.system.v1","fields":[{"name":"hostname","type":"HostName","description":"daemon hostname"}]}]}`))
+	if err == nil || !strings.Contains(err.Error(), "type") {
+		t.Fatalf("decodeDiscoveryResponse() error = %v, want schema field type mismatch", err)
+	}
 	err = decodeDiscoveryResponse(collectorConfig{mode: "schemas"}, []byte(`{"schema_version":"arca.nms.telemetry-schemas.v1","resource":"/api/nms/v1/telemetry/schemas","event_schema_version":"arca.telemetry.v1","encoding":"json","default_paths":["/system"],"default_sample_interval_ms":30000,"min_sample_interval_ms":1000,"max_sample_interval_ms":3600000,"schema_count":1,"schemas":[{"path":"/system","cardinality":"single","payload_schema":"arca.telemetry.system.v1","fields":[{"name":"hostname","type":"string","description":"daemon hostname"},{"name":"hostname","type":"string","description":"duplicate daemon hostname"}]}]}`))
 	if err == nil || !strings.Contains(err.Error(), "duplicates") {
 		t.Fatalf("decodeDiscoveryResponse() error = %v, want duplicate schema field mismatch", err)
