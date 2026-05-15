@@ -34,6 +34,8 @@ const (
 	ExitUsageError     = 2
 
 	defaultSocket = "/run/arca-router/routerd.sock"
+
+	maxChangeImpactRouteDetails = 5
 )
 
 var errTelemetryUsage = errors.New("telemetry usage error")
@@ -1158,6 +1160,7 @@ type changeImpactPreview struct {
 	addedLines         int
 	removedLines       int
 	staticRoutes       changeImpactLineCount
+	staticRouteChanges []changeImpactRouteChange
 	policyOptions      changeImpactLineCount
 	bgp                changeImpactLineCount
 	ospf               changeImpactLineCount
@@ -1173,6 +1176,13 @@ type changeImpactLineCount struct {
 	removed int
 }
 
+type changeImpactRouteChange struct {
+	sign            byte
+	prefix          string
+	nextHop         string
+	routingInstance string
+}
+
 func formatChangeImpactPreview(diffText string, hasChanges bool) []string {
 	if !hasChanges || strings.TrimSpace(diffText) == "" {
 		return []string{"change impact preview: no candidate changes"}
@@ -1184,6 +1194,7 @@ func formatChangeImpactPreview(diffText string, hasChanges bool) []string {
 		fmt.Sprintf("  changed lines: +%d -%d", preview.addedLines, preview.removedLines),
 	}
 	lines = appendChangeImpactLine(lines, "static routes", preview.staticRoutes)
+	lines = appendStaticRouteImpactLines(lines, preview.staticRouteChanges)
 	lines = appendChangeImpactLine(lines, "policy-options", preview.policyOptions)
 	lines = appendChangeImpactLine(lines, "bgp", preview.bgp)
 	lines = appendChangeImpactLine(lines, "ospf", preview.ospf)
@@ -1221,6 +1232,24 @@ func formatChangeImpactPreview(diffText string, hasChanges bool) []string {
 	return lines
 }
 
+func appendStaticRouteImpactLines(lines []string, changes []changeImpactRouteChange) []string {
+	if len(changes) == 0 {
+		return lines
+	}
+	lines = append(lines, "  route diff:")
+	limit := len(changes)
+	if limit > maxChangeImpactRouteDetails {
+		limit = maxChangeImpactRouteDetails
+	}
+	for _, change := range changes[:limit] {
+		lines = append(lines, "    "+change.summary())
+	}
+	if remaining := len(changes) - limit; remaining > 0 {
+		lines = append(lines, fmt.Sprintf("    ... %d more static route changes", remaining))
+	}
+	return lines
+}
+
 func appendChangeImpactLine(lines []string, label string, count changeImpactLineCount) []string {
 	if !count.hasChanges() {
 		return lines
@@ -1238,6 +1267,21 @@ func (c *changeImpactLineCount) add(sign byte) {
 	} else {
 		c.removed++
 	}
+}
+
+func (c changeImpactRouteChange) summary() string {
+	action := "add"
+	if c.sign == '-' {
+		action = "remove"
+	}
+	target := c.prefix
+	if c.routingInstance != "" {
+		target = fmt.Sprintf("routing-instance %s %s", c.routingInstance, target)
+	}
+	if c.nextHop == "" {
+		return fmt.Sprintf("%s %s", action, target)
+	}
+	return fmt.Sprintf("%s %s via %s", action, target, c.nextHop)
 }
 
 func analyzeChangeImpact(diffText string) changeImpactPreview {
@@ -1262,6 +1306,9 @@ func analyzeChangeImpact(diffText string) changeImpactPreview {
 		}
 		if isStaticRouteConfigLine(configLine) {
 			preview.staticRoutes.add(sign)
+			if change, ok := parseStaticRouteImpactChange(sign, configLine); ok {
+				preview.staticRouteChanges = append(preview.staticRouteChanges, change)
+			}
 			if isDefaultRouteConfigLine(configLine) {
 				preview.defaultRouteChange = true
 			}
@@ -1299,6 +1346,33 @@ func isStaticRouteConfigLine(line string) bool {
 func isDefaultRouteConfigLine(line string) bool {
 	return strings.Contains(line, " static route 0.0.0.0/0 ") ||
 		strings.Contains(line, " static route ::/0 ")
+}
+
+func parseStaticRouteImpactChange(sign byte, line string) (changeImpactRouteChange, bool) {
+	tokens := tokenize(line)
+	if len(tokens) == 0 || tokens[0] != "set" {
+		return changeImpactRouteChange{}, false
+	}
+
+	change := changeImpactRouteChange{sign: sign}
+	if len(tokens) > 2 && tokens[1] == "routing-instances" {
+		change.routingInstance = tokens[2]
+	}
+
+	for i := 1; i+3 < len(tokens); i++ {
+		if tokens[i] != "static" || tokens[i+1] != "route" {
+			continue
+		}
+		change.prefix = tokens[i+2]
+		for j := i + 3; j+1 < len(tokens); j++ {
+			if tokens[j] == "next-hop" {
+				change.nextHop = tokens[j+1]
+				break
+			}
+		}
+		return change, change.prefix != ""
+	}
+	return changeImpactRouteChange{}, false
 }
 
 func (sh *interactiveShell) cmdEdit(args []string) error {

@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"strings"
 	"testing"
@@ -549,6 +550,9 @@ func TestFormatChangeImpactPreviewSummarizesRouteAndPolicyDiff(t *testing.T) {
 		"change impact preview:",
 		"changed lines: +2 -1",
 		"static routes: +1 -1",
+		"route diff:",
+		"add 0.0.0.0/0 via 198.51.100.2",
+		"remove 203.0.113.0/24 via 198.51.100.3",
 		"policy-options: +1 -0",
 		"warning: default route changes can affect all unmatched traffic",
 		"warning: static route removals can withdraw forwarding entries",
@@ -557,6 +561,40 @@ func TestFormatChangeImpactPreviewSummarizesRouteAndPolicyDiff(t *testing.T) {
 		if !strings.Contains(got, want) {
 			t.Fatalf("formatChangeImpactPreview() = %q, want substring %q", got, want)
 		}
+	}
+}
+
+func TestFormatChangeImpactPreviewSummarizesRoutingInstanceRouteDiff(t *testing.T) {
+	lines := formatChangeImpactPreview("- set routing-instances BLUE routing-options static route 0.0.0.0/0 next-hop 10.1.1.1", true)
+	got := strings.Join(lines, "\n")
+	for _, want := range []string{
+		"static routes: +0 -1",
+		"routing-instances: +0 -1",
+		"remove routing-instance BLUE 0.0.0.0/0 via 10.1.1.1",
+		"warning: default route changes can affect all unmatched traffic",
+		"warning: routing-instance changes can move interfaces or VRF routing state",
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("formatChangeImpactPreview() = %q, want substring %q", got, want)
+		}
+	}
+}
+
+func TestFormatChangeImpactPreviewLimitsRouteDiffDetails(t *testing.T) {
+	var diff []string
+	for i := 0; i < maxChangeImpactRouteDetails+2; i++ {
+		diff = append(diff, fmt.Sprintf("+ set routing-options static route 198.51.%d.0/24 next-hop 192.0.2.%d", i, i+1))
+	}
+	lines := formatChangeImpactPreview(strings.Join(diff, "\n"), true)
+	got := strings.Join(lines, "\n")
+	if !strings.Contains(got, "static routes: +7 -0") {
+		t.Fatalf("formatChangeImpactPreview() = %q, want static route count", got)
+	}
+	if !strings.Contains(got, "... 2 more static route changes") {
+		t.Fatalf("formatChangeImpactPreview() = %q, want capped route details", got)
+	}
+	if strings.Contains(got, "198.51.6.0/24") {
+		t.Fatalf("formatChangeImpactPreview() = %q, want details capped before final route", got)
 	}
 }
 
