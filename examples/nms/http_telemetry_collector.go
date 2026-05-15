@@ -97,6 +97,7 @@ type telemetrySnapshotResponse struct {
 	DefaultSampleIntervalMs uint32                   `json:"default_sample_interval_ms"`
 	MinSampleIntervalMs     uint32                   `json:"min_sample_interval_ms"`
 	MaxSampleIntervalMs     uint32                   `json:"max_sample_interval_ms"`
+	EventCount              int                      `json:"event_count"`
 	Events                  []telemetrySnapshotEvent `json:"events"`
 }
 

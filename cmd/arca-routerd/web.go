@@ -125,6 +125,7 @@ type nmsTelemetrySnapshotResponse struct {
 	MinSampleIntervalMs     uint32                      `json:"min_sample_interval_ms"`
 	MaxSampleIntervalMs     uint32                      `json:"max_sample_interval_ms"`
 	Paths                   []string                    `json:"paths"`
+	EventCount              int                         `json:"event_count"`
 	PayloadBytes            int                         `json:"payload_bytes"`
 	MaxPayloadBytes         int                         `json:"max_payload_bytes"`
 	MaxEvents               int                         `json:"max_events"`
@@ -1774,6 +1775,7 @@ func newNMSTelemetrySnapshotResponse(now time.Time, events []nbgrpc.TelemetryEve
 		MinSampleIntervalMs:     catalog.MinSampleIntervalMs,
 		MaxSampleIntervalMs:     catalog.MaxSampleIntervalMs,
 		Paths:                   paths,
+		EventCount:              len(responseEvents),
 		PayloadBytes:            payloadBytes,
 		MaxPayloadBytes:         opts.maxPayloadBytes,
 		MaxEvents:               opts.maxEvents,

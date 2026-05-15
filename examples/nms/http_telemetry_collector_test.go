@@ -47,7 +47,7 @@ func TestDecodeTelemetryCatalogResponseIntervalHints(t *testing.T) {
 
 func TestDecodeTelemetrySnapshotResponseIntervalHints(t *testing.T) {
 	var snapshot telemetrySnapshotResponse
-	body := []byte(`{"default_paths":["/system","/config/running"],"default_sample_interval_ms":30000,"min_sample_interval_ms":1000,"max_sample_interval_ms":3600000,"events":[]}`)
+	body := []byte(`{"default_paths":["/system","/config/running"],"default_sample_interval_ms":30000,"min_sample_interval_ms":1000,"max_sample_interval_ms":3600000,"event_count":2,"events":[]}`)
 	if err := json.Unmarshal(body, &snapshot); err != nil {
 		t.Fatalf("json.Unmarshal() error = %v", err)
 	}
@@ -60,6 +60,9 @@ func TestDecodeTelemetrySnapshotResponseIntervalHints(t *testing.T) {
 			snapshot.MinSampleIntervalMs,
 			snapshot.MaxSampleIntervalMs,
 		)
+	}
+	if snapshot.EventCount != 2 {
+		t.Fatalf("snapshot event count = %d, want 2", snapshot.EventCount)
 	}
 }
 

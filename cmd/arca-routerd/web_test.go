@@ -579,6 +579,9 @@ func TestNMSTelemetrySnapshotEndpoint(t *testing.T) {
 	if len(resp.Paths) != 2 || resp.Paths[0] != "/system" || resp.Paths[1] != "/interfaces" {
 		t.Fatalf("Paths = %#v, want emitted paths", resp.Paths)
 	}
+	if resp.EventCount != 2 {
+		t.Fatalf("EventCount = %d, want 2", resp.EventCount)
+	}
 	wantPayloadBytes := len(`{"hostname":"edge01"}`) + len(`{"interfaces":[]}`)
 	if resp.PayloadBytes != wantPayloadBytes || resp.MaxPayloadBytes != defaultNMSTelemetrySnapshotMaxPayloadBytes {
 		t.Fatalf("payload budget = %d/%d, want %d/%d", resp.PayloadBytes, resp.MaxPayloadBytes, wantPayloadBytes, defaultNMSTelemetrySnapshotMaxPayloadBytes)
