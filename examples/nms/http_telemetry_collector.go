@@ -1665,11 +1665,17 @@ func validateTelemetryPayloadSchemas(schemas []telemetryPayloadSchema) error {
 		if len(schema.Fields) == 0 {
 			return fmt.Errorf("%s fields is empty", kind)
 		}
+		seenFields := map[string]string{}
 		for j, field := range schema.Fields {
 			fieldKind := fmt.Sprintf("%s fields[%d]", kind, j)
-			if strings.TrimSpace(field.Name) == "" {
+			fieldName := strings.TrimSpace(field.Name)
+			if fieldName == "" {
 				return fmt.Errorf("%s name is empty", fieldKind)
 			}
+			if first, ok := seenFields[fieldName]; ok {
+				return fmt.Errorf("%s name = %q duplicates %s", fieldKind, field.Name, first)
+			}
+			seenFields[fieldName] = fmt.Sprintf("%s name", fieldKind)
 			if strings.TrimSpace(field.Type) == "" {
 				return fmt.Errorf("%s type is empty", fieldKind)
 			}

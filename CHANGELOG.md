@@ -2,6 +2,7 @@
 
 ## v0.8.x - Overlay and Streaming Telemetry (current)
 
+- **NMS collector schema field uniqueness validation**: the example HTTP collector now rejects duplicate telemetry payload field names before using schema registry responses
 - **NMS collector snapshot path uniqueness validation**: the example HTTP collector now rejects duplicate emitted telemetry snapshot paths before using snapshot responses
 - **NMS collector snapshot guardrail cap validation**: the example HTTP collector now rejects snapshot guardrails that exceed the advertised NMS caps before using snapshot responses
 - **NMS collector snapshot guardrail validation**: the example HTTP collector now rejects negative snapshot `max_payload_bytes` and `max_events` guardrails before using snapshot responses
