@@ -211,7 +211,8 @@ func runLocalOneShotCommand(args []string) (bool, int) {
 		if opts.live {
 			return false, ExitSuccess
 		}
-		printTelemetryPathCatalog(filterTelemetryPathCatalog(grpcclient.TelemetryPathCatalog(), opts))
+		catalog := grpcclient.NewTelemetryCatalog()
+		printTelemetryCatalog(catalog, filterTelemetryPathCatalog(catalog.Paths, opts))
 		return true, ExitSuccess
 	}
 	return false, ExitSuccess
@@ -1912,7 +1913,7 @@ func showTelemetry(ctx context.Context, client showClient, args []string) error 
 			catalogOpts.payloadSchemas = nil
 			catalogOpts.encodings = nil
 		}
-		printTelemetryPathCatalog(filterTelemetryPathCatalog(catalog.Paths, catalogOpts))
+		printTelemetryCatalog(catalog, filterTelemetryPathCatalog(catalog.Paths, catalogOpts))
 		return nil
 	}
 	opts, err := telemetryOptions(args)
@@ -2098,6 +2099,23 @@ func normalizedCatalogFilterSet(values []string) map[string]struct{} {
 
 func normalizedCatalogFilterValue(value string) string {
 	return strings.ToLower(strings.TrimSpace(value))
+}
+
+func printTelemetryCatalog(catalog grpcclient.TelemetryCatalog, paths []grpcclient.TelemetryPathInfo) {
+	if hint := formatTelemetryCatalogIntervalHints(catalog); hint != "" {
+		fmt.Println(hint)
+	}
+	printTelemetryPathCatalog(paths)
+}
+
+func formatTelemetryCatalogIntervalHints(catalog grpcclient.TelemetryCatalog) string {
+	if catalog.DefaultSampleIntervalMs == 0 && catalog.MinSampleIntervalMs == 0 && catalog.MaxSampleIntervalMs == 0 {
+		return ""
+	}
+	return fmt.Sprintf("Sample interval: default=%dms min=%dms max=%dms",
+		catalog.DefaultSampleIntervalMs,
+		catalog.MinSampleIntervalMs,
+		catalog.MaxSampleIntervalMs)
 }
 
 func printTelemetryPathCatalog(catalog []grpcclient.TelemetryPathInfo) {

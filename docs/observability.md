@@ -137,7 +137,7 @@ arca show telemetry path /overlays/evpn
 arca show evpn
 ```
 
-`arca show telemetry paths` prints the same local path catalog used by the stream implementation, including cardinality hints, payload schema IDs, default membership, and descriptions, without requiring a daemon connection. It accepts `default`, `path <path-or-alias>`, `cardinality <hint>`, `payload-schema <id>`, and `encoding <encoding>` filters. `arca show telemetry paths live` queries `TelemetryService.GetTelemetryCatalog` from the connected daemon and pushes those filters into that RPC.
+`arca show telemetry paths` prints the same local path catalog used by the stream implementation, including sample interval hints, cardinality hints, payload schema IDs, default membership, and descriptions, without requiring a daemon connection. It accepts `default`, `path <path-or-alias>`, `cardinality <hint>`, `payload-schema <id>`, and `encoding <encoding>` filters. `arca show telemetry paths live` queries `TelemetryService.GetTelemetryCatalog` from the connected daemon and pushes those filters into that RPC.
 
 ## Web UI
 

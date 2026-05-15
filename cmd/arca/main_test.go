@@ -1154,6 +1154,20 @@ func TestFilterTelemetryPathCatalog(t *testing.T) {
 	}
 }
 
+func TestFormatTelemetryCatalogIntervalHints(t *testing.T) {
+	catalog := grpcclient.TelemetryCatalog{
+		DefaultSampleIntervalMs: 30000,
+		MinSampleIntervalMs:     1000,
+		MaxSampleIntervalMs:     3600000,
+	}
+	if got, want := formatTelemetryCatalogIntervalHints(catalog), "Sample interval: default=30000ms min=1000ms max=3600000ms"; got != want {
+		t.Fatalf("formatTelemetryCatalogIntervalHints() = %q, want %q", got, want)
+	}
+	if got := formatTelemetryCatalogIntervalHints(grpcclient.TelemetryCatalog{}); got != "" {
+		t.Fatalf("formatTelemetryCatalogIntervalHints(empty) = %q, want empty", got)
+	}
+}
+
 func TestTelemetryPayloadBytes(t *testing.T) {
 	event := &grpcclient.TelemetryEvent{
 		JSONPayload:  `{"hostname":"router1"}`,
