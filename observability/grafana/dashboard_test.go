@@ -142,6 +142,24 @@ func TestDashboardIncludesVPPLCPPanels(t *testing.T) {
 	}
 }
 
+func TestDashboardIncludesQoSCapabilityPanels(t *testing.T) {
+	dash := loadDashboard(t)
+	want := map[string]string{
+		"arca_router_class_of_service_metadata_binding_supported":                     "CoS Metadata Binding",
+		"arca_router_class_of_service_queue_scheduler_supported":                      "CoS Scheduler Support",
+		"arca_router_class_of_service_policer_supported":                              "CoS Policer Support",
+		"arca_router_class_of_service_counters_supported":                             "CoS Counter Support",
+		"arca_router_class_of_service_capability_error":                               "CoS Capability Errors",
+		"arca_router_class_of_service_capability_last_check_timestamp_seconds * 1000": "CoS Capability Last Check",
+	}
+	expressions := panelExpressions(dash.Panels)
+	for expr, title := range want {
+		if got := expressions[expr]; got != title {
+			t.Fatalf("expression %q is on panel %q, want %q", expr, got, title)
+		}
+	}
+}
+
 func loadDashboard(t *testing.T) dashboard {
 	t.Helper()
 	data, err := os.ReadFile("arca-routerd-dashboard.json")
