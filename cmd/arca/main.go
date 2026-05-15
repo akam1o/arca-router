@@ -1041,6 +1041,9 @@ func (sh *interactiveShell) cmdCommit(ctx context.Context, args []string) error 
 			return fmt.Errorf("configuration check failed: %w", err)
 		}
 		fmt.Println("configuration check succeeds")
+		if err := sh.printChangeImpactPreview(ctx); err != nil {
+			return fmt.Errorf("change impact preview failed: %w", err)
+		}
 		return nil
 	}
 
@@ -1124,6 +1127,106 @@ func (sh *interactiveShell) cmdCompare(ctx context.Context) error {
 	return nil
 }
 
+func (sh *interactiveShell) printChangeImpactPreview(ctx context.Context) error {
+	diffText, hasChanges, err := sh.client.Diff(ctx, sh.sessionID)
+	if err != nil {
+		return err
+	}
+	for _, line := range formatChangeImpactPreview(diffText, hasChanges) {
+		fmt.Println(line)
+	}
+	return nil
+}
+
+type changeImpactPreview struct {
+	addedLines          int
+	removedLines        int
+	addedStaticRoutes   int
+	removedStaticRoutes int
+	addedPolicyLines    int
+	removedPolicyLines  int
+	defaultRouteChange  bool
+}
+
+func formatChangeImpactPreview(diffText string, hasChanges bool) []string {
+	if !hasChanges || strings.TrimSpace(diffText) == "" {
+		return []string{"change impact preview: no candidate changes"}
+	}
+
+	preview := analyzeChangeImpact(diffText)
+	lines := []string{
+		"change impact preview:",
+		fmt.Sprintf("  changed lines: +%d -%d", preview.addedLines, preview.removedLines),
+	}
+	if preview.addedStaticRoutes > 0 || preview.removedStaticRoutes > 0 {
+		lines = append(lines, fmt.Sprintf("  static routes: +%d -%d", preview.addedStaticRoutes, preview.removedStaticRoutes))
+	}
+	if preview.addedPolicyLines > 0 || preview.removedPolicyLines > 0 {
+		lines = append(lines, fmt.Sprintf("  policy-options: +%d -%d", preview.addedPolicyLines, preview.removedPolicyLines))
+	}
+	if preview.defaultRouteChange {
+		lines = append(lines, "  warning: default route changes can affect all unmatched traffic")
+	}
+	if preview.removedStaticRoutes > 0 {
+		lines = append(lines, "  warning: static route removals can withdraw forwarding entries")
+	}
+	if preview.addedPolicyLines > 0 || preview.removedPolicyLines > 0 {
+		lines = append(lines, "  warning: policy-options changes can regenerate FRR route-maps")
+	}
+	return lines
+}
+
+func analyzeChangeImpact(diffText string) changeImpactPreview {
+	var preview changeImpactPreview
+	for _, rawLine := range strings.Split(diffText, "\n") {
+		line := strings.TrimSpace(rawLine)
+		if len(line) < 3 {
+			continue
+		}
+		sign := line[0]
+		if sign != '+' && sign != '-' {
+			continue
+		}
+		configLine := strings.TrimSpace(line[1:])
+		if configLine == "" {
+			continue
+		}
+		if sign == '+' {
+			preview.addedLines++
+		} else {
+			preview.removedLines++
+		}
+		if isStaticRouteConfigLine(configLine) {
+			if sign == '+' {
+				preview.addedStaticRoutes++
+			} else {
+				preview.removedStaticRoutes++
+			}
+			if isDefaultRouteConfigLine(configLine) {
+				preview.defaultRouteChange = true
+			}
+		}
+		if strings.HasPrefix(configLine, "set policy-options ") {
+			if sign == '+' {
+				preview.addedPolicyLines++
+			} else {
+				preview.removedPolicyLines++
+			}
+		}
+	}
+	return preview
+}
+
+func isStaticRouteConfigLine(line string) bool {
+	return strings.HasPrefix(line, "set routing-options static route ") ||
+		(strings.HasPrefix(line, "set routing-instances ") && strings.Contains(line, " routing-options static route "))
+}
+
+func isDefaultRouteConfigLine(line string) bool {
+	return strings.Contains(line, " static route 0.0.0.0/0 ") ||
+		strings.Contains(line, " static route ::/0 ")
+}
+
 func (sh *interactiveShell) cmdEdit(args []string) error {
 	if sh.mode != modeConfiguration {
 		return fmt.Errorf("'edit' command only available in configuration mode")
@@ -1197,7 +1300,7 @@ func (sh *interactiveShell) showHelp() {
 		fmt.Println("  show                      Show candidate configuration")
 		fmt.Println("  show | compare            Show differences from running config")
 		fmt.Println("  commit                    Commit candidate configuration")
-		fmt.Println("  commit check              Validate without committing")
+		fmt.Println("  commit check              Validate and preview impact without committing")
 		fmt.Println("  commit and-quit           Commit and exit configuration mode")
 		fmt.Println("  commit comment <msg>      Commit with custom message")
 		fmt.Println("  rollback <N>              Roll back N commits")

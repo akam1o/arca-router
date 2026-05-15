@@ -1,6 +1,10 @@
 # Changelog
 
-## v0.8.x - Overlay and Streaming Telemetry (current)
+## v0.9.x - NETCONF/YANG and Operational Safety (current)
+
+- **CLI change impact preview**: `commit check` now validates the candidate and prints a pre-commit impact summary for changed lines, static routes, policy-options updates, and disruptive routing warnings
+
+## v0.8.x - Overlay and Streaming Telemetry (complete)
 
 - **NMS collector QoS capability validation**: the example HTTP collector now validates class-of-service capability diagnostics and last-check relationships before using status responses
 - **NMS collector schema field type validation**: the example HTTP collector now rejects unsupported telemetry payload field type hints before using schema registry responses

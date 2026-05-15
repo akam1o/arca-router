@@ -13,7 +13,7 @@ arca-router is a software router with Junos-compatible configuration syntax, pow
 
 ## Status
 
-arca-router has completed the v0.8.x overlay and streaming telemetry implementation. This README
+arca-router is currently in the v0.9.x NETCONF/YANG and operational safety phase after completing the v0.8.x overlay and streaming telemetry implementation. This README
 describes the current unified daemon path; detailed release history is kept in
 [`CHANGELOG.md`](CHANGELOG.md), and future scope is tracked in
 [`ROADMAP.md`](ROADMAP.md).

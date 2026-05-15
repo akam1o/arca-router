@@ -40,11 +40,15 @@ type fakeInteractiveClient struct {
 	cosInfo          *grpcclient.ClassOfServiceInfo
 	telemetryCatalog grpcclient.TelemetryCatalog
 	telemetryEvents  []*grpcclient.TelemetryEvent
+	diffText         string
+	diffHasChanges   bool
+	diffErr          error
 
 	acquireLockCalls              int
 	discardCalls                  int
 	releaseLockCalls              int
 	commitCalls                   int
+	diffCalls                     int
 	routeCalls                    int
 	bfdStatusCalls                int
 	routingCalls                  int
@@ -101,7 +105,8 @@ func (f *fakeInteractiveClient) Rollback(ctx context.Context, sessionID, commitI
 }
 
 func (f *fakeInteractiveClient) Diff(ctx context.Context, sessionID string) (string, bool, error) {
-	return "", false, nil
+	f.diffCalls++
+	return f.diffText, f.diffHasChanges, f.diffErr
 }
 
 func (f *fakeInteractiveClient) ListHistory(ctx context.Context, limit, offset int) ([]grpcclient.CommitInfo, error) {
@@ -457,6 +462,57 @@ func TestCommitCheckRejectsComment(t *testing.T) {
 	}
 	if client.validateCalls != 0 || client.commitCalls != 0 {
 		t.Fatalf("validate/commit calls = %d/%d, want 0/0", client.validateCalls, client.commitCalls)
+	}
+}
+
+func TestCommitCheckBuildsChangeImpactPreview(t *testing.T) {
+	ctx := context.Background()
+	client := &fakeInteractiveClient{
+		diffText:       "+ set routing-options static route 0.0.0.0/0 next-hop 198.51.100.2",
+		diffHasChanges: true,
+	}
+	sh := &interactiveShell{
+		client:    client,
+		hostname:  "router",
+		mode:      modeConfiguration,
+		sessionID: "session-1",
+		hasLock:   true,
+	}
+
+	if err := sh.cmdCommit(ctx, []string{"check"}); err != nil {
+		t.Fatalf("cmdCommit(check) error = %v", err)
+	}
+	if client.validateCalls != 1 || client.diffCalls != 1 || client.commitCalls != 0 {
+		t.Fatalf("validate/diff/commit calls = %d/%d/%d, want 1/1/0", client.validateCalls, client.diffCalls, client.commitCalls)
+	}
+}
+
+func TestFormatChangeImpactPreviewSummarizesRouteAndPolicyDiff(t *testing.T) {
+	lines := formatChangeImpactPreview(strings.Join([]string{
+		"+ set routing-options static route 0.0.0.0/0 next-hop 198.51.100.2",
+		"- set routing-options static route 203.0.113.0/24 next-hop 198.51.100.3",
+		"+ set policy-options policy-statement EXPORT term ALLOW then accept",
+	}, "\n"), true)
+	got := strings.Join(lines, "\n")
+	for _, want := range []string{
+		"change impact preview:",
+		"changed lines: +2 -1",
+		"static routes: +1 -1",
+		"policy-options: +1 -0",
+		"warning: default route changes can affect all unmatched traffic",
+		"warning: static route removals can withdraw forwarding entries",
+		"warning: policy-options changes can regenerate FRR route-maps",
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("formatChangeImpactPreview() = %q, want substring %q", got, want)
+		}
+	}
+}
+
+func TestFormatChangeImpactPreviewNoChanges(t *testing.T) {
+	lines := formatChangeImpactPreview("", false)
+	if got, want := strings.Join(lines, "\n"), "change impact preview: no candidate changes"; got != want {
+		t.Fatalf("formatChangeImpactPreview(no changes) = %q, want %q", got, want)
 	}
 }
 
