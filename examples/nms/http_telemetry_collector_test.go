@@ -118,6 +118,14 @@ func TestDecodeDiscoveryResponseRejectsInvalidSchemaEnvelope(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "default_paths") {
 		t.Fatalf("decodeDiscoveryResponse() error = %v, want default_paths mismatch", err)
 	}
+	err = decodeDiscoveryResponse(collectorConfig{mode: "catalog"}, []byte(`{"schema_version":"arca.nms.telemetry-catalog.v1","resource":"/api/nms/v1/telemetry/paths","event_schema_version":"arca.telemetry.v1","encoding":"json","default_paths":["system"],"default_sample_interval_ms":30000,"min_sample_interval_ms":1000,"max_sample_interval_ms":3600000,"path_count":0,"paths":[]}`))
+	if err == nil || !strings.Contains(err.Error(), "default_paths[0]") {
+		t.Fatalf("decodeDiscoveryResponse() error = %v, want default_paths absolute path mismatch", err)
+	}
+	err = decodeDiscoveryResponse(collectorConfig{mode: "schemas"}, []byte(`{"schema_version":"arca.nms.telemetry-schemas.v1","resource":"/api/nms/v1/telemetry/schemas","event_schema_version":"arca.telemetry.v1","encoding":"json","default_paths":["/system","/system/"],"default_sample_interval_ms":30000,"min_sample_interval_ms":1000,"max_sample_interval_ms":3600000,"schema_count":0,"schemas":[]}`))
+	if err == nil || !strings.Contains(err.Error(), "duplicates") {
+		t.Fatalf("decodeDiscoveryResponse() error = %v, want default_paths duplicate mismatch", err)
+	}
 	err = decodeDiscoveryResponse(collectorConfig{mode: "schemas"}, []byte(`{"schema_version":"arca.nms.telemetry-schemas.v1","resource":"/api/nms/v1/telemetry/schemas","event_schema_version":"arca.telemetry.v1","encoding":"json","default_paths":["/system"],"default_sample_interval_ms":500,"min_sample_interval_ms":1000,"max_sample_interval_ms":3600000,"schema_count":0,"schemas":[]}`))
 	if err == nil || !strings.Contains(err.Error(), "sample interval") {
 		t.Fatalf("decodeDiscoveryResponse() error = %v, want sample interval mismatch", err)
@@ -728,6 +736,10 @@ func TestDecodeSnapshotResponseRejectsInvalidEnvelope(t *testing.T) {
 	_, err = decodeSnapshotResponse([]byte(`{"schema_version":"arca.nms.telemetry-snapshot.v1","resource":"/api/nms/v1/telemetry/snapshot","event_schema_version":"arca.telemetry.v1","encoding":"json","default_sample_interval_ms":30000,"min_sample_interval_ms":1000,"max_sample_interval_ms":3600000,"paths":[],"event_count":0,"payload_bytes":0,"events":[]}`))
 	if err == nil || !strings.Contains(err.Error(), "default_paths") {
 		t.Fatalf("decodeSnapshotResponse() error = %v, want snapshot default_paths mismatch", err)
+	}
+	_, err = decodeSnapshotResponse([]byte(`{"schema_version":"arca.nms.telemetry-snapshot.v1","resource":"/api/nms/v1/telemetry/snapshot","event_schema_version":"arca.telemetry.v1","encoding":"json","default_paths":["system"],"default_sample_interval_ms":30000,"min_sample_interval_ms":1000,"max_sample_interval_ms":3600000,"paths":[],"event_count":0,"payload_bytes":0,"events":[]}`))
+	if err == nil || !strings.Contains(err.Error(), "default_paths[0]") {
+		t.Fatalf("decodeSnapshotResponse() error = %v, want snapshot default_paths absolute path mismatch", err)
 	}
 	_, err = decodeSnapshotResponse([]byte(`{"schema_version":"arca.nms.telemetry-snapshot.v1","resource":"/api/nms/v1/telemetry/snapshot","event_schema_version":"arca.telemetry.v1","encoding":"json","default_paths":["/system"],"default_sample_interval_ms":30000,"min_sample_interval_ms":1000,"max_sample_interval_ms":1000,"paths":[],"event_count":0,"payload_bytes":0,"events":[]}`))
 	if err == nil || !strings.Contains(err.Error(), "sample interval") {

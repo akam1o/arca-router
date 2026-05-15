@@ -2,6 +2,7 @@
 
 ## v0.8.x - Overlay and Streaming Telemetry (current)
 
+- **NMS collector default path validation**: the example HTTP collector now validates default telemetry path hints as unique absolute paths before using discovery and snapshot responses
 - **NMS collector status build metadata validation**: the example HTTP collector now validates operational status build timestamps before printing status responses
 - **NMS collector status datastore validation**: the example HTTP collector now validates operational status datastore backend values and etcd endpoint consistency before printing status responses
 - **NMS collector status sync validation**: the example HTTP collector now validates config-sync health/timestamp ordering and cluster etcd-sync endpoint consistency before printing operational status responses
