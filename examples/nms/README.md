@@ -23,6 +23,16 @@ go run ./examples/nms \
   -path /overlays/evpn \
   -timeout 5s \
   -max-payload-bytes 8388608
+
+# Discover all paths from the catalog, but skip high-cardinality route snapshots.
+go run ./examples/nms \
+  -base-url http://127.0.0.1:8080 \
+  -user monitor \
+  -password ReadOnly789 \
+  -discover-paths \
+  -exclude-cardinality per-route \
+  -timeout 5s \
+  -max-payload-bytes 8388608
 ```
 
 The example prints the returned JSON envelope with indentation so it can be piped into downstream tooling or inspected during collector integration tests.

@@ -29,6 +29,8 @@ type collectorConfig struct {
 	password        string
 	mode            string
 	paths           repeatedPathFlag
+	discoverPaths   bool
+	excludedCard    repeatedStringFlag
 	timeout         time.Duration
 	maxPayloadBytes int
 }
@@ -46,6 +48,30 @@ func (p *repeatedPathFlag) Set(value string) error {
 	}
 	*p = append(*p, value)
 	return nil
+}
+
+type repeatedStringFlag []string
+
+func (f *repeatedStringFlag) String() string {
+	return strings.Join(*f, ",")
+}
+
+func (f *repeatedStringFlag) Set(value string) error {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return fmt.Errorf("value must not be empty")
+	}
+	*f = append(*f, value)
+	return nil
+}
+
+type telemetryCatalogResponse struct {
+	Paths []telemetryCatalogPath `json:"paths"`
+}
+
+type telemetryCatalogPath struct {
+	Path        string `json:"path"`
+	Cardinality string `json:"cardinality"`
 }
 
 func main() {
@@ -81,6 +107,8 @@ func parseCollectorConfig(args []string) (collectorConfig, error) {
 	fs.StringVar(&cfg.password, "password", "", "HTTP Basic password")
 	fs.StringVar(&cfg.mode, "mode", cfg.mode, "Endpoint mode: snapshot, status, or catalog")
 	fs.Var(&cfg.paths, "path", "Telemetry path for snapshot mode; repeat for multiple paths")
+	fs.BoolVar(&cfg.discoverPaths, "discover-paths", false, "Use telemetry catalog paths as the snapshot path set")
+	fs.Var(&cfg.excludedCard, "exclude-cardinality", "Telemetry cardinality to exclude from snapshot mode; repeat for multiple values")
 	fs.DurationVar(&cfg.timeout, "timeout", cfg.timeout, "Snapshot timeout")
 	fs.IntVar(&cfg.maxPayloadBytes, "max-payload-bytes", cfg.maxPayloadBytes, "Snapshot payload byte budget")
 	if err := fs.Parse(args); err != nil {
@@ -99,7 +127,7 @@ func parseCollectorConfig(args []string) (collectorConfig, error) {
 		if cfg.maxPayloadBytes <= 0 {
 			return cfg, fmt.Errorf("max-payload-bytes must be positive")
 		}
-		if len(cfg.paths) == 0 {
+		if len(cfg.paths) == 0 && !cfg.discoverPaths {
 			cfg.paths = append(repeatedPathFlag(nil), defaultSnapshotPaths...)
 		}
 	}
@@ -114,10 +142,21 @@ func requestTimeout(cfg collectorConfig) time.Duration {
 }
 
 func fetchNMS(ctx context.Context, client *http.Client, cfg collectorConfig) ([]byte, error) {
+	var err error
+	if cfg.mode == "snapshot" && (cfg.discoverPaths || len(cfg.excludedCard) > 0) {
+		cfg.paths, err = resolveSnapshotPaths(ctx, client, cfg)
+		if err != nil {
+			return nil, err
+		}
+	}
 	endpoint, err := collectorEndpointURL(cfg)
 	if err != nil {
 		return nil, err
 	}
+	return fetchEndpoint(ctx, client, cfg, endpoint)
+}
+
+func fetchEndpoint(ctx context.Context, client *http.Client, cfg collectorConfig, endpoint string) ([]byte, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
 	if err != nil {
 		return nil, err
@@ -139,6 +178,67 @@ func fetchNMS(ctx context.Context, client *http.Client, cfg collectorConfig) ([]
 		return nil, fmt.Errorf("GET %s returned %s: %s", endpoint, resp.Status, strings.TrimSpace(string(body)))
 	}
 	return body, nil
+}
+
+func resolveSnapshotPaths(ctx context.Context, client *http.Client, cfg collectorConfig) (repeatedPathFlag, error) {
+	catalogURL, err := collectorEndpointURL(collectorConfig{
+		baseURL:  cfg.baseURL,
+		username: cfg.username,
+		password: cfg.password,
+		mode:     "catalog",
+	})
+	if err != nil {
+		return nil, err
+	}
+	body, err := fetchEndpoint(ctx, client, cfg, catalogURL)
+	if err != nil {
+		return nil, err
+	}
+	var catalog telemetryCatalogResponse
+	if err := json.Unmarshal(body, &catalog); err != nil {
+		return nil, fmt.Errorf("decode telemetry catalog: %w", err)
+	}
+	paths := cfg.paths
+	if cfg.discoverPaths {
+		paths = pathsFromCatalog(catalog)
+	}
+	filtered := filterSnapshotPathsByCardinality(paths, catalog, cfg.excludedCard)
+	if len(filtered) == 0 {
+		return nil, fmt.Errorf("snapshot path set is empty after applying cardinality filters")
+	}
+	return filtered, nil
+}
+
+func pathsFromCatalog(catalog telemetryCatalogResponse) repeatedPathFlag {
+	paths := make(repeatedPathFlag, 0, len(catalog.Paths))
+	for _, path := range catalog.Paths {
+		if path.Path != "" {
+			paths = append(paths, path.Path)
+		}
+	}
+	return paths
+}
+
+func filterSnapshotPathsByCardinality(paths repeatedPathFlag, catalog telemetryCatalogResponse, excluded repeatedStringFlag) repeatedPathFlag {
+	if len(excluded) == 0 {
+		return paths
+	}
+	excludedSet := make(map[string]struct{}, len(excluded))
+	for _, value := range excluded {
+		excludedSet[strings.ToLower(strings.TrimSpace(value))] = struct{}{}
+	}
+	cardinalityByPath := make(map[string]string, len(catalog.Paths))
+	for _, path := range catalog.Paths {
+		cardinalityByPath[path.Path] = strings.ToLower(strings.TrimSpace(path.Cardinality))
+	}
+	filtered := make(repeatedPathFlag, 0, len(paths))
+	for _, path := range paths {
+		if _, skip := excludedSet[cardinalityByPath[path]]; skip {
+			continue
+		}
+		filtered = append(filtered, path)
+	}
+	return filtered
 }
 
 func collectorEndpointURL(cfg collectorConfig) (string, error) {
