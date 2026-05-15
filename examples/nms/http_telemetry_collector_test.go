@@ -233,7 +233,7 @@ func TestDecodeStatusResponseRejectsInvalidEnvelope(t *testing.T) {
 		t.Helper()
 		body, err := json.Marshal(map[string]any{
 			"schema_version": "arca.nms.operational.v1",
-			"generated_at":   "2026-05-15T12:34:56Z",
+			"generated_at":   "2026-05-15T12:36:56Z",
 			"resource":       "/api/nms/v1/status",
 			"data":           data,
 		})
@@ -489,6 +489,12 @@ func TestDecodeStatusResponseRejectsInvalidEnvelope(t *testing.T) {
 	err = decodeStatusResponse(statusEnvelope(data))
 	if err == nil || !strings.Contains(err.Error(), "config_sync.last_check") {
 		t.Fatalf("decodeStatusResponse() error = %v, want config_sync.last_check mismatch", err)
+	}
+	data = validStatusData()
+	data["config_sync"].(map[string]any)["last_apply"] = "2026-05-15T12:37:56Z"
+	err = decodeStatusResponse(statusEnvelope(data))
+	if err == nil || !strings.Contains(err.Error(), "config_sync.last_apply") {
+		t.Fatalf("decodeStatusResponse() error = %v, want config_sync.last_apply timing mismatch", err)
 	}
 	data = validStatusData()
 	data["class_of_service"].(map[string]any)["capabilities"].(map[string]any)["last_check"] = "bad"

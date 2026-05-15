@@ -2,6 +2,7 @@
 
 ## v0.8.x - Overlay and Streaming Telemetry (current)
 
+- **NMS collector status timing validation**: the example HTTP collector now rejects operational status section timestamps that are later than the status envelope `generated_at`
 - **NMS collector status relationship validation**: the example HTTP collector now validates HA and CoS boolean, state, and counter relationships before printing operational status responses
 - **NMS collector status text validation**: the example HTTP collector now rejects empty operational status strings and empty diagnostic list entries before printing status responses
 - **NMS collector status counter validation**: the example HTTP collector now validates EVPN VNI counter relationships and NETCONF handshake counters in operational status responses

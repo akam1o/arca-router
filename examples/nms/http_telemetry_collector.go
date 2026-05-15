@@ -440,10 +440,11 @@ func decodeStatusResponse(body []byte) error {
 	if err := validateNMSEnvelope("nms status", status.SchemaVersion, status.Resource, nmsOperationalStatusV1, "/api/nms/v1/status"); err != nil {
 		return err
 	}
-	if err := validateNMSGeneratedAt("nms status", status.GeneratedAt); err != nil {
+	generatedAt, err := parseNMSGeneratedAt("nms status", status.GeneratedAt)
+	if err != nil {
 		return err
 	}
-	if err := validateNMSStatusData(status.Data); err != nil {
+	if err := validateNMSStatusData(status.Data, generatedAt); err != nil {
 		return err
 	}
 	return nil
@@ -495,16 +496,22 @@ func validateNMSEnvelope(kind, schemaVersion, resource, wantSchemaVersion, wantR
 }
 
 func validateNMSGeneratedAt(kind, generatedAt string) error {
-	if strings.TrimSpace(generatedAt) == "" {
-		return fmt.Errorf("%s generated_at is empty", kind)
-	}
-	if _, err := time.Parse(time.RFC3339, generatedAt); err != nil {
-		return fmt.Errorf("%s generated_at = %q, want RFC3339: %w", kind, generatedAt, err)
-	}
-	return nil
+	_, err := parseNMSGeneratedAt(kind, generatedAt)
+	return err
 }
 
-func validateNMSStatusData(data json.RawMessage) error {
+func parseNMSGeneratedAt(kind, generatedAt string) (time.Time, error) {
+	if strings.TrimSpace(generatedAt) == "" {
+		return time.Time{}, fmt.Errorf("%s generated_at is empty", kind)
+	}
+	parsed, err := time.Parse(time.RFC3339, generatedAt)
+	if err != nil {
+		return time.Time{}, fmt.Errorf("%s generated_at = %q, want RFC3339: %w", kind, generatedAt, err)
+	}
+	return parsed, nil
+}
+
+func validateNMSStatusData(data json.RawMessage, generatedAt time.Time) error {
 	if len(data) == 0 {
 		return fmt.Errorf("nms status data is empty")
 	}
@@ -515,13 +522,13 @@ func validateNMSStatusData(data json.RawMessage) error {
 	if len(object) == 0 {
 		return fmt.Errorf("nms status data object is empty")
 	}
-	if err := validateNMSStatusDataFields(object); err != nil {
+	if err := validateNMSStatusDataFields(object, generatedAt); err != nil {
 		return err
 	}
 	return nil
 }
 
-func validateNMSStatusDataFields(object map[string]json.RawMessage) error {
+func validateNMSStatusDataFields(object map[string]json.RawMessage, generatedAt time.Time) error {
 	for _, field := range []string{"version", "commit", "build_date", "running_hostname"} {
 		if err := validateNMSStatusStringField(object, field); err != nil {
 			return err
@@ -533,10 +540,10 @@ func validateNMSStatusDataFields(object map[string]json.RawMessage) error {
 	if err := validateNMSStatusUintField(object, "config_version"); err != nil {
 		return err
 	}
-	return validateNMSStatusSections(object)
+	return validateNMSStatusSections(object, generatedAt)
 }
 
-func validateNMSStatusSections(object map[string]json.RawMessage) error {
+func validateNMSStatusSections(object map[string]json.RawMessage, generatedAt time.Time) error {
 	datastore, err := validateNMSStatusObjectField(object, "datastore")
 	if err != nil {
 		return err
@@ -566,7 +573,7 @@ func validateNMSStatusSections(object map[string]json.RawMessage) error {
 		}
 	}
 	for _, field := range []string{"last_check", "last_apply"} {
-		if err := validateNMSStatusRFC3339FieldOptional(configSync, field, nmsStatusDataPath("config_sync", field)); err != nil {
+		if err := validateNMSStatusRFC3339FieldAtOrBeforeOptional(configSync, field, nmsStatusDataPath("config_sync", field), generatedAt); err != nil {
 			return err
 		}
 	}
@@ -653,7 +660,7 @@ func validateNMSStatusSections(object map[string]json.RawMessage) error {
 	if err := validateNMSStatusStringArrayFieldOptional(capabilities, "diagnostics", "class_of_service.capabilities.diagnostics"); err != nil {
 		return err
 	}
-	if err := validateNMSStatusRFC3339FieldOptional(capabilities, "last_check", "class_of_service.capabilities.last_check"); err != nil {
+	if err := validateNMSStatusRFC3339FieldAtOrBeforeOptional(capabilities, "last_check", "class_of_service.capabilities.last_check", generatedAt); err != nil {
 		return err
 	}
 	if err := validateNMSStatusStringFieldOptional(capabilities, "last_error", "class_of_service.capabilities.last_error"); err != nil {
@@ -671,7 +678,7 @@ func validateNMSStatusSections(object map[string]json.RawMessage) error {
 	if err := validateNMSStatusIntFields(vrrp, "frr.vrrp", "configured_groups", "observed_groups", "active_groups", "issue_count"); err != nil {
 		return err
 	}
-	if err := validateNMSStatusRFC3339FieldOptional(vrrp, "last_check", "frr.vrrp.last_check"); err != nil {
+	if err := validateNMSStatusRFC3339FieldAtOrBeforeOptional(vrrp, "last_check", "frr.vrrp.last_check", generatedAt); err != nil {
 		return err
 	}
 	if err := validateNMSStatusStringFieldOptional(vrrp, "last_error", "frr.vrrp.last_error"); err != nil {
@@ -697,7 +704,7 @@ func validateNMSStatusSections(object map[string]json.RawMessage) error {
 	if err := validateNMSStatusIntFields(bfd, "frr.bfd", "configured_peers", "observed_peers", "up_peers", "down_peers", "session_down_events", "rx_fail_packets", "issue_count"); err != nil {
 		return err
 	}
-	if err := validateNMSStatusRFC3339FieldOptional(bfd, "last_check", "frr.bfd.last_check"); err != nil {
+	if err := validateNMSStatusRFC3339FieldAtOrBeforeOptional(bfd, "last_check", "frr.bfd.last_check", generatedAt); err != nil {
 		return err
 	}
 	if err := validateNMSStatusStringFieldOptional(bfd, "last_error", "frr.bfd.last_error"); err != nil {
@@ -728,7 +735,7 @@ func validateNMSStatusSections(object map[string]json.RawMessage) error {
 	if err := validateNMSStatusIntFields(lcp, "vpp.lcp", "pair_count", "inconsistency_count"); err != nil {
 		return err
 	}
-	if err := validateNMSStatusRFC3339FieldOptional(lcp, "last_reconcile", "vpp.lcp.last_reconcile"); err != nil {
+	if err := validateNMSStatusRFC3339FieldAtOrBeforeOptional(lcp, "last_reconcile", "vpp.lcp.last_reconcile", generatedAt); err != nil {
 		return err
 	}
 	if err := validateNMSStatusStringFieldOptional(lcp, "last_error", "vpp.lcp.last_error"); err != nil {
@@ -1270,24 +1277,41 @@ func validateNMSStatusStringFieldOptional(object map[string]json.RawMessage, fie
 }
 
 func validateNMSStatusRFC3339FieldOptional(object map[string]json.RawMessage, field, path string) error {
+	_, _, err := nmsStatusRFC3339FieldTimeOptional(object, field, path)
+	return err
+}
+
+func validateNMSStatusRFC3339FieldAtOrBeforeOptional(object map[string]json.RawMessage, field, path string, latest time.Time) error {
+	value, ok, err := nmsStatusRFC3339FieldTimeOptional(object, field, path)
+	if err != nil || !ok {
+		return err
+	}
+	if value.After(latest) {
+		return fmt.Errorf("nms status data %s = %q, want no later than nms status generated_at %q", path, value.Format(time.RFC3339), latest.Format(time.RFC3339))
+	}
+	return nil
+}
+
+func nmsStatusRFC3339FieldTimeOptional(object map[string]json.RawMessage, field, path string) (time.Time, bool, error) {
 	raw, ok := object[field]
 	if !ok {
-		return nil
+		return time.Time{}, false, nil
 	}
 	var value *string
 	if err := json.Unmarshal(raw, &value); err != nil || value == nil {
 		if err != nil {
-			return fmt.Errorf("nms status data %s must be an RFC3339 string: %w", path, err)
+			return time.Time{}, false, fmt.Errorf("nms status data %s must be an RFC3339 string: %w", path, err)
 		}
-		return fmt.Errorf("nms status data %s must be an RFC3339 string", path)
+		return time.Time{}, false, fmt.Errorf("nms status data %s must be an RFC3339 string", path)
 	}
 	if strings.TrimSpace(*value) == "" {
-		return fmt.Errorf("nms status data %s must be an RFC3339 string", path)
+		return time.Time{}, false, fmt.Errorf("nms status data %s must be an RFC3339 string", path)
 	}
-	if _, err := time.Parse(time.RFC3339, *value); err != nil {
-		return fmt.Errorf("nms status data %s = %q, want RFC3339: %w", path, *value, err)
+	parsed, err := time.Parse(time.RFC3339, *value)
+	if err != nil {
+		return time.Time{}, false, fmt.Errorf("nms status data %s = %q, want RFC3339: %w", path, *value, err)
 	}
-	return nil
+	return parsed, true, nil
 }
 
 func validateNMSStatusStringArrayCount(object map[string]json.RawMessage, parent, arrayField, countField string) error {
