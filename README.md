@@ -248,6 +248,7 @@ arca show evpn
 arca show lcp
 arca show ha
 arca show class-of-service
+arca show telemetry paths
 arca show telemetry path /system path /interfaces path /overlays/evpn
 
 # Query the schema-versioned NMS status API when the Web API is enabled

@@ -2,6 +2,7 @@
 
 ## v0.8.x - Overlay and Streaming Telemetry (current)
 
+- **Telemetry CLI path catalog**: `arca show telemetry paths` now prints the supported telemetry paths, cardinality hints, default membership, and descriptions without requiring a daemon connection for local collector discovery
 - **Telemetry payload byte counts**: structured gRPC telemetry events and `arca show telemetry` output now include `payload_bytes` so local collectors can budget high-cardinality paths before forwarding events
 - **NMS snapshot payload sizing**: telemetry snapshot responses now include per-event `payload_bytes` so collectors can identify which paths consume the configured payload budget
 - **NMS collector cardinality filters**: the example HTTP collector can discover telemetry paths from the catalog and exclude selected cardinalities, such as `per-route`, before requesting bounded snapshots

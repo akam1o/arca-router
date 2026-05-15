@@ -110,6 +110,7 @@ Show subcommands:
   bfd [brief|counters]        Show raw BFD status
   bfd peer <ip> [counters]    Show BFD peer details
   evpn                        Show EVPN/VXLAN overlay intent
+  telemetry paths             Show supported telemetry path catalog
   telemetry [path <path>]... [interval <duration>] [count <events>]
                               Show telemetry events as JSON lines
   route [inet|inet6]                 Show routing table
@@ -164,6 +165,9 @@ func parseRollbackNumber(raw string) (int, error) {
 // --- One-shot command ---
 
 func runOneShotCommand(ctx context.Context, f *cliFlags, args []string) int {
+	if handled, code := runLocalOneShotCommand(args); handled {
+		return code
+	}
 	client, err := grpcclient.Dial(f.grpcSocket)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
@@ -191,6 +195,14 @@ func runOneShotCommand(ctx context.Context, f *cliFlags, args []string) int {
 		showUsage()
 		return ExitUsageError
 	}
+}
+
+func runLocalOneShotCommand(args []string) (bool, int) {
+	if len(args) >= 3 && args[0] == "show" && args[1] == "telemetry" && isTelemetryCatalogCommand(args[2:]) {
+		printTelemetryPathCatalog(grpcclient.TelemetryPathCatalog())
+		return true, ExitSuccess
+	}
+	return false, ExitSuccess
 }
 
 func oneShotShow(ctx context.Context, client showClient, args []string, f *cliFlags) int {
@@ -1860,6 +1872,10 @@ type telemetryOutputEvent struct {
 }
 
 func showTelemetry(ctx context.Context, client showClient, args []string) error {
+	if isTelemetryCatalogCommand(args) {
+		printTelemetryPathCatalog(grpcclient.TelemetryPathCatalog())
+		return nil
+	}
 	opts, err := telemetryOptions(args)
 	if err != nil {
 		return err
@@ -1888,6 +1904,34 @@ func showTelemetry(ctx context.Context, client showClient, args []string) error 
 			return nil
 		}
 	}
+}
+
+func isTelemetryCatalogCommand(args []string) bool {
+	return len(args) == 1 && (args[0] == "paths" || args[0] == "catalog")
+}
+
+func printTelemetryPathCatalog(catalog []grpcclient.TelemetryPathInfo) {
+	if len(catalog) == 0 {
+		fmt.Println("No telemetry paths found")
+		return
+	}
+	fmt.Printf("%-28s %-18s %-8s %s\n", "Path", "Cardinality", "Default", "Description")
+	fmt.Println(strings.Repeat("-", 96))
+	for _, info := range catalog {
+		fmt.Printf("%-28s %-18s %-8s %s\n",
+			formatTelemetryCatalogValue(info.Path),
+			formatTelemetryCatalogValue(info.Cardinality),
+			yesNo(info.Default),
+			formatTelemetryCatalogValue(info.Description),
+		)
+	}
+}
+
+func formatTelemetryCatalogValue(value string) string {
+	if value == "" {
+		return "-"
+	}
+	return value
 }
 
 func telemetryOptions(args []string) (telemetryCLIOptions, error) {

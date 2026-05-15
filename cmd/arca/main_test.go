@@ -955,6 +955,36 @@ func TestOneShotShowTelemetryReturnsSuccess(t *testing.T) {
 	}
 }
 
+func TestOneShotShowTelemetryPathsDoesNotSubscribe(t *testing.T) {
+	client := &fakeInteractiveClient{}
+	code := oneShotShow(context.Background(), client, []string{"telemetry", "paths"}, &cliFlags{})
+	if code != ExitSuccess {
+		t.Fatalf("oneShotShow(telemetry paths) = %d, want %d", code, ExitSuccess)
+	}
+	if client.telemetryCalls != 0 {
+		t.Fatalf("telemetry calls = %d, want local catalog output without subscription", client.telemetryCalls)
+	}
+}
+
+func TestRunLocalOneShotTelemetryPaths(t *testing.T) {
+	handled, code := runLocalOneShotCommand([]string{"show", "telemetry", "paths"})
+	if !handled || code != ExitSuccess {
+		t.Fatalf("runLocalOneShotCommand(show telemetry paths) = handled %v code %d, want local success", handled, code)
+	}
+	if handled, _ := runLocalOneShotCommand([]string{"show", "telemetry", "path", "/system"}); handled {
+		t.Fatal("runLocalOneShotCommand(show telemetry path /system) handled streaming command locally")
+	}
+}
+
+func TestTelemetryCatalogCommand(t *testing.T) {
+	if !isTelemetryCatalogCommand([]string{"paths"}) || !isTelemetryCatalogCommand([]string{"catalog"}) {
+		t.Fatal("isTelemetryCatalogCommand() did not recognize paths/catalog")
+	}
+	if isTelemetryCatalogCommand([]string{"path", "/system"}) || isTelemetryCatalogCommand(nil) {
+		t.Fatal("isTelemetryCatalogCommand() recognized non-catalog telemetry arguments")
+	}
+}
+
 func TestTelemetryPayloadBytes(t *testing.T) {
 	event := &grpcclient.TelemetryEvent{
 		JSONPayload:  `{"hostname":"router1"}`,
