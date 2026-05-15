@@ -170,6 +170,18 @@ func TestDecodeStatusResponseRejectsInvalidEnvelope(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "generated_at") {
 		t.Fatalf("decodeStatusResponse() error = %v, want generated_at mismatch", err)
 	}
+	err = decodeStatusResponse([]byte(`{"schema_version":"arca.nms.operational.v1","generated_at":"2026-05-15T12:34:56Z","resource":"/api/nms/v1/status"}`))
+	if err == nil || !strings.Contains(err.Error(), "data") {
+		t.Fatalf("decodeStatusResponse() error = %v, want missing data mismatch", err)
+	}
+	err = decodeStatusResponse([]byte(`{"schema_version":"arca.nms.operational.v1","generated_at":"2026-05-15T12:34:56Z","resource":"/api/nms/v1/status","data":[]}`))
+	if err == nil || !strings.Contains(err.Error(), "JSON object") {
+		t.Fatalf("decodeStatusResponse() error = %v, want data object mismatch", err)
+	}
+	err = decodeStatusResponse([]byte(`{"schema_version":"arca.nms.operational.v1","generated_at":"2026-05-15T12:34:56Z","resource":"/api/nms/v1/status","data":{}}`))
+	if err == nil || !strings.Contains(err.Error(), "data object") {
+		t.Fatalf("decodeStatusResponse() error = %v, want empty data object mismatch", err)
+	}
 }
 
 func TestDecodeTelemetrySnapshotResponseIntervalHints(t *testing.T) {

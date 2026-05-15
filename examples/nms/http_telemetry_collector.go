@@ -441,6 +441,9 @@ func decodeStatusResponse(body []byte) error {
 	if err := validateNMSGeneratedAt("nms status", status.GeneratedAt); err != nil {
 		return err
 	}
+	if err := validateNMSStatusData(status.Data); err != nil {
+		return err
+	}
 	return nil
 }
 
@@ -495,6 +498,20 @@ func validateNMSGeneratedAt(kind, generatedAt string) error {
 	}
 	if _, err := time.Parse(time.RFC3339, generatedAt); err != nil {
 		return fmt.Errorf("%s generated_at = %q, want RFC3339: %w", kind, generatedAt, err)
+	}
+	return nil
+}
+
+func validateNMSStatusData(data json.RawMessage) error {
+	if len(data) == 0 {
+		return fmt.Errorf("nms status data is empty")
+	}
+	var object map[string]json.RawMessage
+	if err := json.Unmarshal(data, &object); err != nil {
+		return fmt.Errorf("nms status data must be a JSON object: %w", err)
+	}
+	if len(object) == 0 {
+		return fmt.Errorf("nms status data object is empty")
 	}
 	return nil
 }
