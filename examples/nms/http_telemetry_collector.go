@@ -105,10 +105,12 @@ type telemetryCatalogResponse struct {
 }
 
 type telemetryCatalogPath struct {
+	Description   string   `json:"description"`
 	Path          string   `json:"path"`
 	Cardinality   string   `json:"cardinality"`
 	PayloadSchema string   `json:"payload_schema"`
 	Aliases       []string `json:"aliases"`
+	Default       bool     `json:"default"`
 }
 
 type telemetrySchemasResponse struct {
@@ -125,10 +127,12 @@ type telemetrySchemasResponse struct {
 }
 
 type telemetryPayloadSchema struct {
+	Description   string                  `json:"description"`
 	Path          string                  `json:"path"`
 	Cardinality   string                  `json:"cardinality"`
 	PayloadSchema string                  `json:"payload_schema"`
 	Aliases       []string                `json:"aliases"`
+	Default       bool                    `json:"default"`
 	Fields        []telemetryPayloadField `json:"fields"`
 }
 
@@ -381,6 +385,9 @@ func decodeCatalogResponse(body []byte) (telemetryCatalogResponse, error) {
 	); err != nil {
 		return catalog, err
 	}
+	if err := validateTelemetryCatalogPaths(catalog.Paths); err != nil {
+		return catalog, err
+	}
 	return catalog, nil
 }
 
@@ -405,6 +412,9 @@ func decodeSchemasResponse(body []byte) (telemetrySchemasResponse, error) {
 		schemas.MinSampleIntervalMs,
 		schemas.MaxSampleIntervalMs,
 	); err != nil {
+		return schemas, err
+	}
+	if err := validateTelemetryPayloadSchemas(schemas.Schemas); err != nil {
 		return schemas, err
 	}
 	return schemas, nil
@@ -493,6 +503,100 @@ func validateNMSTelemetryHints(kind string, defaultPaths []string, defaultSample
 			maxSampleIntervalMs,
 		)
 	}
+	return nil
+}
+
+func validateTelemetryCatalogPaths(paths []telemetryCatalogPath) error {
+	seen := map[string]string{}
+	for i, path := range paths {
+		kind := fmt.Sprintf("telemetry catalog paths[%d]", i)
+		if err := validateTelemetryPathMetadata(kind, path.Path, path.Cardinality, path.PayloadSchema, path.Aliases); err != nil {
+			return err
+		}
+		if err := rememberTelemetryDiscoveryPath(seen, kind, "path", path.Path); err != nil {
+			return err
+		}
+		for j, alias := range path.Aliases {
+			if err := rememberTelemetryDiscoveryPath(seen, kind, fmt.Sprintf("aliases[%d]", j), alias); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+func validateTelemetryPayloadSchemas(schemas []telemetryPayloadSchema) error {
+	seen := map[string]string{}
+	for i, schema := range schemas {
+		kind := fmt.Sprintf("telemetry schemas[%d]", i)
+		if err := validateTelemetryPathMetadata(kind, schema.Path, schema.Cardinality, schema.PayloadSchema, schema.Aliases); err != nil {
+			return err
+		}
+		if err := rememberTelemetryDiscoveryPath(seen, kind, "path", schema.Path); err != nil {
+			return err
+		}
+		for j, alias := range schema.Aliases {
+			if err := rememberTelemetryDiscoveryPath(seen, kind, fmt.Sprintf("aliases[%d]", j), alias); err != nil {
+				return err
+			}
+		}
+		if len(schema.Fields) == 0 {
+			return fmt.Errorf("%s fields is empty", kind)
+		}
+		for j, field := range schema.Fields {
+			fieldKind := fmt.Sprintf("%s fields[%d]", kind, j)
+			if strings.TrimSpace(field.Name) == "" {
+				return fmt.Errorf("%s name is empty", fieldKind)
+			}
+			if strings.TrimSpace(field.Type) == "" {
+				return fmt.Errorf("%s type is empty", fieldKind)
+			}
+			if strings.TrimSpace(field.Description) == "" {
+				return fmt.Errorf("%s description is empty", fieldKind)
+			}
+		}
+	}
+	return nil
+}
+
+func validateTelemetryPathMetadata(kind, path, cardinality, payloadSchema string, aliases []string) error {
+	if err := validateTelemetryPathValue(kind, "path", path); err != nil {
+		return err
+	}
+	if strings.TrimSpace(cardinality) == "" {
+		return fmt.Errorf("%s cardinality is empty", kind)
+	}
+	if strings.TrimSpace(payloadSchema) == "" {
+		return fmt.Errorf("%s payload_schema is empty", kind)
+	}
+	for i, alias := range aliases {
+		if err := validateTelemetryPathValue(kind, fmt.Sprintf("aliases[%d]", i), alias); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func validateTelemetryPathValue(kind, field, value string) error {
+	path := strings.TrimSpace(value)
+	if path == "" {
+		return fmt.Errorf("%s %s is empty", kind, field)
+	}
+	if !strings.HasPrefix(path, "/") {
+		return fmt.Errorf("%s %s = %q, want absolute telemetry path", kind, field, value)
+	}
+	if strings.Trim(path, "/") == "" {
+		return fmt.Errorf("%s %s = %q, want non-root telemetry path", kind, field, value)
+	}
+	return nil
+}
+
+func rememberTelemetryDiscoveryPath(seen map[string]string, kind, field, value string) error {
+	normalized := normalizeCatalogPath(value)
+	if first, ok := seen[normalized]; ok {
+		return fmt.Errorf("%s %s = %q duplicates %s", kind, field, value, first)
+	}
+	seen[normalized] = fmt.Sprintf("%s %s", kind, field)
 	return nil
 }
 

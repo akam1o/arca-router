@@ -2,6 +2,7 @@
 
 ## v0.8.x - Overlay and Streaming Telemetry (current)
 
+- **NMS collector discovery entry validation**: the example HTTP collector now validates telemetry catalog path metadata, schema registry entries, and payload field declarations before using discovery responses
 - **NMS collector telemetry hint validation**: the example HTTP collector now validates telemetry default path lists and sample interval hints in catalog, schema registry, and snapshot envelopes
 - **NMS collector snapshot aggregate validation**: the example HTTP collector now validates telemetry snapshot emitted paths, total payload bytes, and advertised guardrails against decoded events
 - **NMS collector snapshot event validation**: the example HTTP collector now validates per-event schema, encoding, type, path, and payload byte lengths in telemetry snapshot responses before printing or exporting events
