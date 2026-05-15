@@ -1575,9 +1575,13 @@ func validateNMSTelemetryHints(kind string, defaultPaths []string, defaultSample
 	if len(defaultPaths) == 0 {
 		return fmt.Errorf("%s default_paths is empty", kind)
 	}
+	seenPaths := map[string]string{}
 	for i, path := range defaultPaths {
-		if strings.TrimSpace(path) == "" {
-			return fmt.Errorf("%s default_paths[%d] is empty", kind, i)
+		if err := validateTelemetryPathValue(kind, fmt.Sprintf("default_paths[%d]", i), path); err != nil {
+			return err
+		}
+		if err := rememberTelemetryDiscoveryPath(seenPaths, kind, fmt.Sprintf("default_paths[%d]", i), path); err != nil {
+			return err
 		}
 	}
 	if defaultSampleIntervalMs == 0 || minSampleIntervalMs == 0 || maxSampleIntervalMs == 0 {
