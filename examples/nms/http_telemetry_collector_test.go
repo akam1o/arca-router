@@ -157,11 +157,11 @@ func TestDecodeStatusResponseRejectsInvalidEnvelope(t *testing.T) {
 			"uptime_seconds":   120.5,
 			"config_version":   uint64(77),
 			"running_hostname": "edge01",
-			"datastore":        map[string]any{"backend": "memory"},
+			"datastore":        map[string]any{"backend": "memory", "etcd_endpoints": []string{"http://127.0.0.1:2379"}},
 			"config_sync":      map[string]any{"enabled": false, "healthy": false},
-			"cluster":          map[string]any{"enabled": false, "node_count": 0, "etcd_sync_configured": false, "sync_aligned": false},
+			"cluster":          map[string]any{"enabled": false, "node_count": 0, "etcd_sync_configured": false, "etcd_endpoints": []string{"http://127.0.0.1:2379"}, "sync_aligned": false},
 			"overlay":          map[string]any{"evpn": map[string]any{"configured": false, "vnis": 0, "l2_vnis": 0, "l3_vnis": 0, "multicast_vnis": 0}},
-			"ha":               map[string]any{"configured": false, "converged": false, "vrrp_groups": 0, "issue_count": 0},
+			"ha":               map[string]any{"configured": false, "converged": false, "vrrp_groups": 0, "issue_count": 1, "issues": []string{"cluster disabled"}},
 			"class_of_service": map[string]any{
 				"configured":               false,
 				"enforcement_status":       "not-configured",
@@ -174,13 +174,43 @@ func TestDecodeStatusResponseRejectsInvalidEnvelope(t *testing.T) {
 					"queue_scheduler_supported":  false,
 					"policer_supported":          false,
 					"counters_supported":         false,
+					"diagnostics":                []string{"scheduler unsupported"},
 				},
 			},
 			"frr": map[string]any{
-				"vrrp": map[string]any{"configured_groups": 0, "observed_groups": 0, "active_groups": 0, "issue_count": 0},
-				"bfd":  map[string]any{"configured_peers": 0, "observed_peers": 0, "up_peers": 0, "down_peers": 0, "session_down_events": 0, "rx_fail_packets": 0, "issue_count": 0},
+				"vrrp": map[string]any{
+					"configured_groups": 1,
+					"observed_groups":   1,
+					"active_groups":     1,
+					"groups":            []any{map[string]any{"interface": "ge-0/0/0", "id": 10, "virtual_address": "192.0.2.1", "state": "Master", "observed": true, "active": true}},
+					"issue_count":       1,
+					"issues":            []string{"backup not observed"},
+				},
+				"bfd": map[string]any{
+					"configured_peers":    1,
+					"observed_peers":      1,
+					"up_peers":            1,
+					"down_peers":          0,
+					"session_down_events": 0,
+					"rx_fail_packets":     0,
+					"peers": []any{map[string]any{
+						"peer":                "192.0.2.2",
+						"local_address":       "192.0.2.1",
+						"interface":           "ge-0/0/0",
+						"vrf":                 "default",
+						"status":              "up",
+						"diagnostic":          "ok",
+						"remote_diagnostic":   "ok",
+						"observed":            true,
+						"up":                  true,
+						"session_down_events": 0,
+						"rx_fail_packets":     0,
+					}},
+					"issue_count": 1,
+					"issues":      []string{"remote diagnostic degraded"},
+				},
 			},
-			"vpp":     map[string]any{"lcp": map[string]any{"pair_count": 0, "inconsistency_count": 0}},
+			"vpp":     map[string]any{"lcp": map[string]any{"pair_count": 0, "inconsistency_count": 1, "inconsistencies": []string{"missing pair"}}},
 			"netconf": map[string]any{"listening": false, "active_sessions": 0, "active_connections": 0, "total_connections": uint64(0), "successful_auth": uint64(0), "failed_auth": uint64(0)},
 		}
 	}
@@ -272,6 +302,37 @@ func TestDecodeStatusResponseRejectsInvalidEnvelope(t *testing.T) {
 	err = decodeStatusResponse(statusEnvelope(data))
 	if err == nil || !strings.Contains(err.Error(), "netconf.total_connections") {
 		t.Fatalf("decodeStatusResponse() error = %v, want netconf.total_connections mismatch", err)
+	}
+	data = validStatusData()
+	data["ha"].(map[string]any)["issues"] = []any{"cluster disabled", nil}
+	err = decodeStatusResponse(statusEnvelope(data))
+	if err == nil || !strings.Contains(err.Error(), "ha.issues[1]") {
+		t.Fatalf("decodeStatusResponse() error = %v, want ha.issues mismatch", err)
+	}
+	data = validStatusData()
+	data["frr"].(map[string]any)["vrrp"].(map[string]any)["groups"] = []any{map[string]any{"interface": "ge-0/0/0", "id": 10, "observed": true, "active": true}}
+	err = decodeStatusResponse(statusEnvelope(data))
+	if err == nil || !strings.Contains(err.Error(), "frr.vrrp.groups[0].state") {
+		t.Fatalf("decodeStatusResponse() error = %v, want frr.vrrp.groups state mismatch", err)
+	}
+	data = validStatusData()
+	data["frr"].(map[string]any)["bfd"].(map[string]any)["peers"] = []any{map[string]any{
+		"peer":                "192.0.2.2",
+		"status":              "up",
+		"observed":            true,
+		"up":                  true,
+		"session_down_events": 0,
+		"rx_fail_packets":     -1,
+	}}
+	err = decodeStatusResponse(statusEnvelope(data))
+	if err == nil || !strings.Contains(err.Error(), "frr.bfd.peers[0].rx_fail_packets") {
+		t.Fatalf("decodeStatusResponse() error = %v, want frr.bfd.peers rx_fail_packets mismatch", err)
+	}
+	data = validStatusData()
+	data["vpp"].(map[string]any)["lcp"].(map[string]any)["inconsistencies"] = "missing pair"
+	err = decodeStatusResponse(statusEnvelope(data))
+	if err == nil || !strings.Contains(err.Error(), "vpp.lcp.inconsistencies") {
+		t.Fatalf("decodeStatusResponse() error = %v, want vpp.lcp.inconsistencies mismatch", err)
 	}
 }
 
