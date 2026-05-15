@@ -577,6 +577,9 @@ func validateNMSStatusSections(object map[string]json.RawMessage, generatedAt ti
 			return err
 		}
 	}
+	if err := validateNMSStatusConfigSyncConsistency(configSync); err != nil {
+		return err
+	}
 
 	cluster, err := validateNMSStatusObjectField(object, "cluster")
 	if err != nil {
@@ -589,6 +592,9 @@ func validateNMSStatusSections(object map[string]json.RawMessage, generatedAt ti
 		return err
 	}
 	if err := validateNMSStatusStringArrayFieldOptional(cluster, "etcd_endpoints", "cluster.etcd_endpoints"); err != nil {
+		return err
+	}
+	if err := validateNMSStatusClusterSyncConsistency(cluster); err != nil {
 		return err
 	}
 
@@ -1066,6 +1072,68 @@ func validateNMSStatusCoSEnforcementStatus(status string) error {
 	default:
 		return fmt.Errorf("nms status data class_of_service.enforcement_status = %q, want %s or %s", status, nmsStatusCoSDisabled, nmsStatusCoSIntentOnly)
 	}
+}
+
+func validateNMSStatusConfigSyncConsistency(configSync map[string]json.RawMessage) error {
+	enabled, err := nmsStatusBoolFieldValuePath(configSync, "enabled", "config_sync.enabled")
+	if err != nil {
+		return err
+	}
+	healthy, err := nmsStatusBoolFieldValuePath(configSync, "healthy", "config_sync.healthy")
+	if err != nil {
+		return err
+	}
+	lastCheck, hasLastCheck, err := nmsStatusRFC3339FieldTimeOptional(configSync, "last_check", "config_sync.last_check")
+	if err != nil {
+		return err
+	}
+	lastApply, hasLastApply, err := nmsStatusRFC3339FieldTimeOptional(configSync, "last_apply", "config_sync.last_apply")
+	if err != nil {
+		return err
+	}
+	if healthy && !enabled {
+		return fmt.Errorf("nms status data config_sync.healthy must be false when config_sync.enabled is false")
+	}
+	if healthy && !hasLastCheck {
+		return fmt.Errorf("nms status data config_sync.last_check is required when config_sync.healthy is true")
+	}
+	if healthy {
+		if _, ok := configSync["last_error"]; ok {
+			return fmt.Errorf("nms status data config_sync.last_error must be omitted when config_sync.healthy is true")
+		}
+	}
+	if hasLastApply && !hasLastCheck {
+		return fmt.Errorf("nms status data config_sync.last_check is required when config_sync.last_apply is present")
+	}
+	if hasLastApply && lastApply.After(lastCheck) {
+		return fmt.Errorf("nms status data config_sync.last_apply = %q, want no later than config_sync.last_check %q", lastApply.Format(time.RFC3339), lastCheck.Format(time.RFC3339))
+	}
+	return nil
+}
+
+func validateNMSStatusClusterSyncConsistency(cluster map[string]json.RawMessage) error {
+	enabled, err := nmsStatusBoolFieldValuePath(cluster, "enabled", "cluster.enabled")
+	if err != nil {
+		return err
+	}
+	etcdSync, err := nmsStatusBoolFieldValuePath(cluster, "etcd_sync_configured", "cluster.etcd_sync_configured")
+	if err != nil {
+		return err
+	}
+	endpoints, err := nmsStatusStringArrayFieldLengthOptional(cluster, "etcd_endpoints", "cluster.etcd_endpoints")
+	if err != nil {
+		return err
+	}
+	if etcdSync && !enabled {
+		return fmt.Errorf("nms status data cluster.etcd_sync_configured must be false when cluster.enabled is false")
+	}
+	if etcdSync && endpoints == 0 {
+		return fmt.Errorf("nms status data cluster.etcd_endpoints must be non-empty when cluster.etcd_sync_configured is true")
+	}
+	if !etcdSync && endpoints > 0 {
+		return fmt.Errorf("nms status data cluster.etcd_sync_configured must be true when cluster.etcd_endpoints has %d entries", endpoints)
+	}
+	return nil
 }
 
 func validateNMSStatusHAConsistency(ha map[string]json.RawMessage) error {

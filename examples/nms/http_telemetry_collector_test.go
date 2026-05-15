@@ -166,9 +166,9 @@ func TestDecodeStatusResponseRejectsInvalidEnvelope(t *testing.T) {
 				"running_commit_id": "commit-11",
 				"last_error":        "sync delayed",
 				"last_check":        "2026-05-15T12:34:56Z",
-				"last_apply":        "2026-05-15T12:35:56Z",
+				"last_apply":        "2026-05-15T12:34:56Z",
 			},
-			"cluster": map[string]any{"enabled": false, "node_count": 0, "etcd_sync_configured": false, "etcd_endpoints": []string{"http://127.0.0.1:2379"}, "sync_aligned": false},
+			"cluster": map[string]any{"enabled": false, "node_count": 0, "etcd_sync_configured": false, "etcd_endpoints": []string{}, "sync_aligned": false},
 			"overlay": map[string]any{"evpn": map[string]any{"configured": false, "vnis": 0, "l2_vnis": 0, "l3_vnis": 0, "multicast_vnis": 0}},
 			"ha":      map[string]any{"configured": false, "converged": false, "vrrp_groups": 0, "issue_count": 1, "issues": []string{"cluster disabled"}},
 			"class_of_service": map[string]any{
@@ -305,6 +305,19 @@ func TestDecodeStatusResponseRejectsInvalidEnvelope(t *testing.T) {
 	err = decodeStatusResponse(statusEnvelope(data))
 	if err == nil || !strings.Contains(err.Error(), "config_sync.enabled") {
 		t.Fatalf("decodeStatusResponse() error = %v, want config_sync.enabled mismatch", err)
+	}
+	data = validStatusData()
+	data["config_sync"].(map[string]any)["healthy"] = true
+	err = decodeStatusResponse(statusEnvelope(data))
+	if err == nil || !strings.Contains(err.Error(), "config_sync.healthy") {
+		t.Fatalf("decodeStatusResponse() error = %v, want config_sync.healthy relationship mismatch", err)
+	}
+	data = validStatusData()
+	data["config_sync"].(map[string]any)["enabled"] = true
+	data["config_sync"].(map[string]any)["healthy"] = true
+	err = decodeStatusResponse(statusEnvelope(data))
+	if err == nil || !strings.Contains(err.Error(), "config_sync.last_error") {
+		t.Fatalf("decodeStatusResponse() error = %v, want config_sync.last_error health mismatch", err)
 	}
 	data = validStatusData()
 	data["config_sync"].(map[string]any)["etcd_revision"] = -1
@@ -495,6 +508,37 @@ func TestDecodeStatusResponseRejectsInvalidEnvelope(t *testing.T) {
 	err = decodeStatusResponse(statusEnvelope(data))
 	if err == nil || !strings.Contains(err.Error(), "config_sync.last_apply") {
 		t.Fatalf("decodeStatusResponse() error = %v, want config_sync.last_apply timing mismatch", err)
+	}
+	data = validStatusData()
+	data["config_sync"].(map[string]any)["last_apply"] = "2026-05-15T12:35:56Z"
+	err = decodeStatusResponse(statusEnvelope(data))
+	if err == nil || !strings.Contains(err.Error(), "config_sync.last_apply") {
+		t.Fatalf("decodeStatusResponse() error = %v, want config_sync.last_apply order mismatch", err)
+	}
+	data = validStatusData()
+	delete(data["config_sync"].(map[string]any), "last_check")
+	err = decodeStatusResponse(statusEnvelope(data))
+	if err == nil || !strings.Contains(err.Error(), "config_sync.last_check") {
+		t.Fatalf("decodeStatusResponse() error = %v, want config_sync.last_check relationship mismatch", err)
+	}
+	data = validStatusData()
+	data["cluster"].(map[string]any)["etcd_endpoints"] = []string{"http://127.0.0.1:2379"}
+	err = decodeStatusResponse(statusEnvelope(data))
+	if err == nil || !strings.Contains(err.Error(), "cluster.etcd_sync_configured") {
+		t.Fatalf("decodeStatusResponse() error = %v, want cluster.etcd_sync_configured relationship mismatch", err)
+	}
+	data = validStatusData()
+	data["cluster"].(map[string]any)["etcd_sync_configured"] = true
+	err = decodeStatusResponse(statusEnvelope(data))
+	if err == nil || !strings.Contains(err.Error(), "cluster.etcd_sync_configured") {
+		t.Fatalf("decodeStatusResponse() error = %v, want cluster.etcd_sync_configured enabled mismatch", err)
+	}
+	data = validStatusData()
+	data["cluster"].(map[string]any)["enabled"] = true
+	data["cluster"].(map[string]any)["etcd_sync_configured"] = true
+	err = decodeStatusResponse(statusEnvelope(data))
+	if err == nil || !strings.Contains(err.Error(), "cluster.etcd_endpoints") {
+		t.Fatalf("decodeStatusResponse() error = %v, want cluster.etcd_endpoints relationship mismatch", err)
 	}
 	data = validStatusData()
 	data["class_of_service"].(map[string]any)["capabilities"].(map[string]any)["last_check"] = "bad"
