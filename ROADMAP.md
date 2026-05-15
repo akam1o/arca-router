@@ -86,7 +86,7 @@ Focus: add data-center overlay support and richer external observability.
   - Integration examples for collectors and dashboards
 - **Scale validation**
   - Route scale and telemetry cardinality regression coverage
-  - Session count testing
+  - NETCONF session count regression coverage
   - Performance guardrails for high-churn environments
 
 ## v0.9.x - NETCONF/YANG and Operational Safety

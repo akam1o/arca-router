@@ -2,6 +2,7 @@
 
 ## v0.8.x - Overlay and Streaming Telemetry (current)
 
+- **NETCONF session scale validation**: NETCONF session counting now has regression coverage for hundreds of active sessions, numeric session lookup, CloseAll cleanup, and lock release accounting
 - **Telemetry scale validation**: gRPC route telemetry snapshots now have regression coverage for larger route sets, payload byte accounting, and high-cardinality path de-duplication
 - **EVPN remote VTEP dataplane**: EVPN VNI intent now accepts `remote-vtep` unicast endpoints and VPP southbound creates unicast VXLAN tunnels for L2/L3 VNIs while keeping multicast groups mutually exclusive
 - **VPP VXLAN L3 dataplane plumbing**: VPP southbound validation and apply now support multicast VXLAN for L3 EVPN VNIs by creating L3 VXLAN tunnel interfaces, binding them to the routing-instance table, and deleting tunnels before stale routing-instance tables
