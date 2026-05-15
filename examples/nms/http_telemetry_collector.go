@@ -93,7 +93,10 @@ type telemetryCatalogPath struct {
 }
 
 type telemetrySnapshotResponse struct {
-	Events []telemetrySnapshotEvent `json:"events"`
+	DefaultSampleIntervalMs uint32                   `json:"default_sample_interval_ms"`
+	MinSampleIntervalMs     uint32                   `json:"min_sample_interval_ms"`
+	MaxSampleIntervalMs     uint32                   `json:"max_sample_interval_ms"`
+	Events                  []telemetrySnapshotEvent `json:"events"`
 }
 
 type telemetrySnapshotEvent struct {
