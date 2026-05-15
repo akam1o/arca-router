@@ -51,6 +51,21 @@ var (
 		"/lcp":                     "VPP LCP reconciliation status",
 		"/ha":                      "control-plane HA convergence status",
 	}
+	telemetryPathCardinality = map[string]string{
+		"/system":                  "single",
+		"/config/running":          "single",
+		"/interfaces":              "per-interface",
+		"/routes":                  "per-route",
+		"/routing/bgp/neighbors":   "per-neighbor",
+		"/routing/ospf/neighbors":  "per-neighbor",
+		"/routing/ospf3/neighbors": "per-neighbor",
+		"/routing-instances":       "per-instance",
+		"/overlays/evpn":           "per-vni",
+		"/class-of-service":        "per-intent-object",
+		"/bfd":                     "per-peer",
+		"/lcp":                     "single",
+		"/ha":                      "single",
+	}
 	telemetryPathSet = buildTelemetryPathSet(telemetryPathOrder)
 )
 
@@ -58,6 +73,7 @@ var (
 type TelemetryPathInfo struct {
 	Path        string
 	Description string
+	Cardinality string
 	Default     bool
 }
 
@@ -91,6 +107,7 @@ func TelemetryPathCatalog() []TelemetryPathInfo {
 		catalog = append(catalog, TelemetryPathInfo{
 			Path:        path,
 			Description: telemetryPathDescriptions[path],
+			Cardinality: telemetryPathCardinality[path],
 			Default:     isDefault,
 		})
 	}
