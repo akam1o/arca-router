@@ -378,6 +378,11 @@ func TestNMSTelemetrySnapshotEndpoint(t *testing.T) {
 	if len(resp.Events) != 2 || resp.Events[0].Path != "/system" || string(resp.Events[0].Payload) != `{"hostname":"edge01"}` {
 		t.Fatalf("Events = %#v, want system payload event", resp.Events)
 	}
+	if resp.Events[0].PayloadBytes != len(`{"hostname":"edge01"}`) ||
+		resp.Events[1].PayloadBytes != len(`{"interfaces":[]}`) {
+		t.Fatalf("event payload bytes = %d/%d, want per-event payload lengths",
+			resp.Events[0].PayloadBytes, resp.Events[1].PayloadBytes)
+	}
 }
 
 func TestNMSTelemetrySnapshotEndpointRejectsOversizedPayload(t *testing.T) {

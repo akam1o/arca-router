@@ -115,6 +115,7 @@ type nmsTelemetrySnapshotEvent struct {
 	EventType     string          `json:"event_type"`
 	Encoding      string          `json:"encoding"`
 	SchemaVersion string          `json:"schema_version"`
+	PayloadBytes  int             `json:"payload_bytes"`
 	Payload       json.RawMessage `json:"payload"`
 }
 
@@ -1552,6 +1553,7 @@ func newNMSTelemetrySnapshotEvent(event nbgrpc.TelemetryEvent) nmsTelemetrySnaps
 		EventType:     event.EventType,
 		Encoding:      event.Encoding,
 		SchemaVersion: event.SchemaVersion,
+		PayloadBytes:  len(event.JSONPayload),
 		Payload:       telemetrySnapshotPayload(event.JSONPayload),
 	}
 	if !event.Timestamp.IsZero() {
