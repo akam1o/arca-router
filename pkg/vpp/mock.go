@@ -11,17 +11,21 @@ import (
 
 // MockClient is a mock implementation of the VPP Client interface for testing
 type MockClient struct {
-	mu             sync.RWMutex
-	connected      bool
-	interfaces     map[uint32]*Interface
-	lcpInterfaces  map[uint32]*LCPInterface
-	mplsInterfaces map[uint32]bool
-	ipTables       map[ipTableKey]IPTable
-	interfaceTable map[interfaceTableKey]uint32
-	qosProfiles    map[uint32]QoSProfile
-	counters       map[uint32]InterfaceCounters
-	queuePlacement map[uint32]InterfaceQueuePlacements
-	nextIfIdx      uint32
+	mu              sync.RWMutex
+	connected       bool
+	interfaces      map[uint32]*Interface
+	lcpInterfaces   map[uint32]*LCPInterface
+	mplsInterfaces  map[uint32]bool
+	ipTables        map[ipTableKey]IPTable
+	interfaceTable  map[interfaceTableKey]uint32
+	qosProfiles     map[uint32]QoSProfile
+	bridgeDomains   map[uint32]BridgeDomain
+	vxlanTunnels    map[vxlanTunnelKey]*Interface
+	l2Bridge        map[uint32]uint32
+	counters        map[uint32]InterfaceCounters
+	queuePlacement  map[uint32]InterfaceQueuePlacements
+	qosCapabilities QoSCapabilities
+	nextIfIdx       uint32
 
 	// Hooks for testing error scenarios
 	ConnectError                error
@@ -35,8 +39,14 @@ type MockClient struct {
 	DeleteIPTableError          error
 	SetInterfaceTableError      error
 	GetInterfaceTableError      error
+	GetQoSCapabilitiesError     error
 	SetQoSProfileError          error
 	ClearQoSProfileError        error
+	AddBridgeDomainError        error
+	DeleteBridgeDomainError     error
+	CreateVXLANError            error
+	DeleteVXLANError            error
+	SetInterfaceL2BridgeError   error
 	ListInterfaceCountersError  error
 	ListInterfaceQueuesError    error
 	GetInterfaceError           error
@@ -56,9 +66,15 @@ func NewMockClient() *MockClient {
 		ipTables:       make(map[ipTableKey]IPTable),
 		interfaceTable: make(map[interfaceTableKey]uint32),
 		qosProfiles:    make(map[uint32]QoSProfile),
+		bridgeDomains:  make(map[uint32]BridgeDomain),
+		vxlanTunnels:   make(map[vxlanTunnelKey]*Interface),
+		l2Bridge:       make(map[uint32]uint32),
 		counters:       make(map[uint32]InterfaceCounters),
 		queuePlacement: make(map[uint32]InterfaceQueuePlacements),
-		nextIfIdx:      1, // Start from 1 (0 is reserved for local0)
+		qosCapabilities: QoSCapabilities{
+			MetadataBinding: true,
+		},
+		nextIfIdx: 1, // Start from 1 (0 is reserved for local0)
 	}
 }
 
@@ -70,6 +86,15 @@ type ipTableKey struct {
 type interfaceTableKey struct {
 	ifIndex uint32
 	isIPv6  bool
+}
+
+type vxlanTunnelKey struct {
+	vni                uint32
+	source             string
+	destination        string
+	multicastIfIndex   uint32
+	encapsulationTable uint32
+	l3                 bool
 }
 
 // deepCopyInterface creates a deep copy of an Interface
@@ -639,6 +664,27 @@ func (m *MockClient) InterfaceTableID(ifIndex uint32, isIPv6 bool) uint32 {
 	return m.interfaceTable[interfaceTableKey{ifIndex: ifIndex, isIPv6: isIPv6}]
 }
 
+// GetQoSCapabilities reports mock class-of-service dataplane capabilities.
+func (m *MockClient) GetQoSCapabilities(ctx context.Context) (QoSCapabilities, error) {
+	if err := ctx.Err(); err != nil {
+		return QoSCapabilities{}, err
+	}
+	if m.GetQoSCapabilitiesError != nil {
+		return QoSCapabilities{}, m.GetQoSCapabilitiesError
+	}
+
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	return cloneQoSCapabilities(m.qosCapabilities), nil
+}
+
+// SetQoSCapabilities sets mock class-of-service dataplane capabilities.
+func (m *MockClient) SetQoSCapabilities(capabilities QoSCapabilities) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.qosCapabilities = cloneQoSCapabilities(capabilities)
+}
+
 // SetQoSProfile binds output QoS policy intent to a mock interface.
 func (m *MockClient) SetQoSProfile(ctx context.Context, ifIndex uint32, profile QoSProfile) error {
 	if err := ctx.Err(); err != nil {
@@ -720,6 +766,266 @@ func (m *MockClient) QoSProfile(ifIndex uint32) (QoSProfile, bool) {
 func cloneQoSProfile(profile QoSProfile) QoSProfile {
 	profile.Queues = append([]QoSQueue(nil), profile.Queues...)
 	return profile
+}
+
+func cloneQoSCapabilities(capabilities QoSCapabilities) QoSCapabilities {
+	capabilities.Diagnostics = append([]string(nil), capabilities.Diagnostics...)
+	return capabilities
+}
+
+// AddBridgeDomain creates a mock bridge domain.
+func (m *MockClient) AddBridgeDomain(ctx context.Context, bridge BridgeDomain) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if m.AddBridgeDomainError != nil {
+		return m.AddBridgeDomainError
+	}
+
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	if !m.connected {
+		return errors.New(
+			errors.ErrCodeVPPConnection,
+			"Not connected to VPP",
+			"VPP connection not established",
+			"Connect to VPP before adding bridge domains",
+		)
+	}
+	if bridge.ID == 0 {
+		return errors.New(
+			errors.ErrCodeVPPOperation,
+			"Bridge domain ID 0 is reserved",
+			"Bridge domain ID must be non-zero",
+			"Use a non-zero bridge domain ID",
+		)
+	}
+	m.bridgeDomains[bridge.ID] = bridge
+	return nil
+}
+
+// DeleteBridgeDomain deletes a mock bridge domain.
+func (m *MockClient) DeleteBridgeDomain(ctx context.Context, bridgeID uint32) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if m.DeleteBridgeDomainError != nil {
+		return m.DeleteBridgeDomainError
+	}
+
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	if !m.connected {
+		return errors.New(
+			errors.ErrCodeVPPConnection,
+			"Not connected to VPP",
+			"VPP connection not established",
+			"Connect to VPP before deleting bridge domains",
+		)
+	}
+	delete(m.bridgeDomains, bridgeID)
+	for ifIndex, bdID := range m.l2Bridge {
+		if bdID == bridgeID {
+			delete(m.l2Bridge, ifIndex)
+		}
+	}
+	return nil
+}
+
+// CreateVXLAN creates a mock VXLAN tunnel interface.
+func (m *MockClient) CreateVXLAN(ctx context.Context, req VXLANRequest) (*Interface, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	if m.CreateVXLANError != nil {
+		return nil, m.CreateVXLANError
+	}
+
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	if !m.connected {
+		return nil, errors.New(
+			errors.ErrCodeVPPConnection,
+			"Not connected to VPP",
+			"VPP connection not established",
+			"Connect to VPP before creating VXLAN tunnels",
+		)
+	}
+	if err := validateMockVXLANRequest(req); err != nil {
+		return nil, err
+	}
+	key := vxlanKey(req)
+	if _, exists := m.vxlanTunnels[key]; exists {
+		return nil, errors.New(
+			errors.ErrCodeVPPOperation,
+			fmt.Sprintf("VXLAN tunnel VNI %d already exists", req.VNI),
+			"VXLAN tunnel already configured",
+			"Remove the existing VXLAN tunnel before adding it again",
+		)
+	}
+	if req.DestinationAddress.IsMulticast() {
+		if _, ok := m.interfaces[req.MulticastInterfaceIndex]; !ok {
+			return nil, errors.New(
+				errors.ErrCodeVPPOperation,
+				fmt.Sprintf("Multicast interface with index %d not found", req.MulticastInterfaceIndex),
+				"VXLAN multicast interface does not exist",
+				"Create the source interface before creating the VXLAN tunnel",
+			)
+		}
+	}
+	iface := &Interface{
+		SwIfIndex: m.nextIfIdx,
+		Name:      fmt.Sprintf("vxlan_tunnel%d", req.VNI),
+		MAC:       net.HardwareAddr{0x02, 0x00, byte(req.VNI >> 16), byte(req.VNI >> 8), byte(req.VNI), byte(m.nextIfIdx)},
+		Addresses: []*net.IPNet{},
+	}
+	m.interfaces[m.nextIfIdx] = deepCopyInterface(iface)
+	m.vxlanTunnels[key] = deepCopyInterface(iface)
+	m.nextIfIdx++
+	return deepCopyInterface(iface), nil
+}
+
+// DeleteVXLAN deletes a mock VXLAN tunnel interface.
+func (m *MockClient) DeleteVXLAN(ctx context.Context, req VXLANRequest) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if m.DeleteVXLANError != nil {
+		return m.DeleteVXLANError
+	}
+
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	if !m.connected {
+		return errors.New(
+			errors.ErrCodeVPPConnection,
+			"Not connected to VPP",
+			"VPP connection not established",
+			"Connect to VPP before deleting VXLAN tunnels",
+		)
+	}
+	key := vxlanKey(req)
+	iface, ok := m.vxlanTunnels[key]
+	if !ok {
+		return nil
+	}
+	delete(m.vxlanTunnels, key)
+	delete(m.l2Bridge, iface.SwIfIndex)
+	delete(m.interfaceTable, interfaceTableKey{ifIndex: iface.SwIfIndex, isIPv6: false})
+	delete(m.interfaceTable, interfaceTableKey{ifIndex: iface.SwIfIndex, isIPv6: true})
+	delete(m.interfaces, iface.SwIfIndex)
+	return nil
+}
+
+// SetInterfaceL2Bridge attaches or detaches an interface to a mock bridge domain.
+func (m *MockClient) SetInterfaceL2Bridge(ctx context.Context, ifIndex uint32, bridgeID uint32, enable bool) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if m.SetInterfaceL2BridgeError != nil {
+		return m.SetInterfaceL2BridgeError
+	}
+
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	if !m.connected {
+		return errors.New(
+			errors.ErrCodeVPPConnection,
+			"Not connected to VPP",
+			"VPP connection not established",
+			"Connect to VPP before setting L2 bridge membership",
+		)
+	}
+	if _, ok := m.interfaces[ifIndex]; !ok {
+		return errors.New(
+			errors.ErrCodeVPPOperation,
+			fmt.Sprintf("Interface with index %d not found", ifIndex),
+			"Interface does not exist",
+			"Create the interface before setting L2 bridge membership",
+		)
+	}
+	if !enable {
+		delete(m.l2Bridge, ifIndex)
+		return nil
+	}
+	if _, ok := m.bridgeDomains[bridgeID]; !ok {
+		return errors.New(
+			errors.ErrCodeVPPOperation,
+			fmt.Sprintf("Bridge domain %d not found", bridgeID),
+			"Bridge domain does not exist",
+			"Create the bridge domain before adding member interfaces",
+		)
+	}
+	m.l2Bridge[ifIndex] = bridgeID
+	return nil
+}
+
+// BridgeDomainExists reports whether a mock bridge domain exists.
+func (m *MockClient) BridgeDomainExists(bridgeID uint32) bool {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	_, ok := m.bridgeDomains[bridgeID]
+	return ok
+}
+
+// VXLANExists reports whether a mock VXLAN tunnel exists.
+func (m *MockClient) VXLANExists(req VXLANRequest) bool {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	_, ok := m.vxlanTunnels[vxlanKey(req)]
+	return ok
+}
+
+// L2BridgeDomain returns the bridge domain attached to an interface.
+func (m *MockClient) L2BridgeDomain(ifIndex uint32) (uint32, bool) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	bdID, ok := m.l2Bridge[ifIndex]
+	return bdID, ok
+}
+
+func validateMockVXLANRequest(req VXLANRequest) error {
+	if req.VNI == 0 || req.VNI > 16777215 {
+		return errors.New(
+			errors.ErrCodeVPPOperation,
+			fmt.Sprintf("Invalid VXLAN VNI %d", req.VNI),
+			"VXLAN VNI must be between 1 and 16777215",
+			"Use a valid VXLAN VNI",
+		)
+	}
+	if req.SourceAddress == nil || req.DestinationAddress == nil {
+		return errors.New(
+			errors.ErrCodeVPPOperation,
+			"VXLAN source and destination addresses are required",
+			"VXLAN tunnels require source and destination addresses",
+			"Set source-address and multicast-group for EVPN VNI",
+		)
+	}
+	if (req.SourceAddress.To4() == nil) != (req.DestinationAddress.To4() == nil) {
+		return errors.New(
+			errors.ErrCodeVPPOperation,
+			"VXLAN source and destination address families differ",
+			"VXLAN tunnel endpoints must use the same address family",
+			"Use source and multicast addresses from the same address family",
+		)
+	}
+	return nil
+}
+
+func vxlanKey(req VXLANRequest) vxlanTunnelKey {
+	return vxlanTunnelKey{
+		vni:                req.VNI,
+		source:             req.SourceAddress.String(),
+		destination:        req.DestinationAddress.String(),
+		multicastIfIndex:   req.MulticastInterfaceIndex,
+		encapsulationTable: req.EncapsulationTable,
+		l3:                 req.L3,
+	}
 }
 
 // ListInterfaceCounters returns mock packet and byte counters by interface index.
@@ -872,8 +1178,12 @@ func (m *MockClient) Reset() {
 	m.ipTables = make(map[ipTableKey]IPTable)
 	m.interfaceTable = make(map[interfaceTableKey]uint32)
 	m.qosProfiles = make(map[uint32]QoSProfile)
+	m.bridgeDomains = make(map[uint32]BridgeDomain)
+	m.vxlanTunnels = make(map[vxlanTunnelKey]*Interface)
+	m.l2Bridge = make(map[uint32]uint32)
 	m.counters = make(map[uint32]InterfaceCounters)
 	m.queuePlacement = make(map[uint32]InterfaceQueuePlacements)
+	m.qosCapabilities = QoSCapabilities{MetadataBinding: true}
 	m.nextIfIdx = 1
 
 	m.ConnectError = nil
@@ -887,8 +1197,14 @@ func (m *MockClient) Reset() {
 	m.DeleteIPTableError = nil
 	m.SetInterfaceTableError = nil
 	m.GetInterfaceTableError = nil
+	m.GetQoSCapabilitiesError = nil
 	m.SetQoSProfileError = nil
 	m.ClearQoSProfileError = nil
+	m.AddBridgeDomainError = nil
+	m.DeleteBridgeDomainError = nil
+	m.CreateVXLANError = nil
+	m.DeleteVXLANError = nil
+	m.SetInterfaceL2BridgeError = nil
 	m.ListInterfaceCountersError = nil
 	m.ListInterfaceQueuesError = nil
 	m.GetInterfaceError = nil

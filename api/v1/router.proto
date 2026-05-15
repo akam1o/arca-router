@@ -102,6 +102,15 @@ service StateService {
   rpc GetSystemInfo(GetSystemInfoRequest) returns (GetSystemInfoResponse);
 }
 
+// TelemetryService provides structured streaming telemetry snapshots.
+service TelemetryService {
+  // GetTelemetryCatalog returns supported telemetry paths and metadata.
+  rpc GetTelemetryCatalog(GetTelemetryCatalogRequest) returns (GetTelemetryCatalogResponse);
+
+  // SubscribeTelemetry streams selected operational/config state paths.
+  rpc SubscribeTelemetry(SubscribeTelemetryRequest) returns (stream TelemetryEvent);
+}
+
 // --- Config messages ---
 
 message GetRunningRequest {}
@@ -452,6 +461,7 @@ message GetClassOfServiceResponse {
   repeated ClassOfServiceTrafficControlProfile traffic_control_profiles = 2;
   repeated ClassOfServiceInterface interfaces = 3;
   string enforcement_status = 4;
+  ClassOfServiceCapabilities capabilities = 5;
 }
 
 message ClassOfServiceForwardingClass {
@@ -478,4 +488,76 @@ message GetSystemInfoResponse {
   string hostname = 1;
   string version = 2;
   uint64 uptime_secs = 3;
+}
+
+// --- Telemetry messages ---
+
+message GetTelemetryCatalogRequest {
+  // Optional cardinality filters, such as "single" or "per-route".
+  repeated string cardinality = 1;
+
+  // Optional payload schema filters, such as "arca.telemetry.routes.v1".
+  repeated string payload_schema = 2;
+
+  // Optional canonical path or alias filters, such as "/routes" or "/evpn".
+  repeated string path = 3;
+
+  // When true, return only paths that are part of the default subscription set.
+  bool default_only = 4;
+
+  // Optional payload encoding filters, such as "json".
+  repeated string encoding = 5;
+}
+
+message GetTelemetryCatalogResponse {
+  string event_schema_version = 1;
+  string encoding = 2;
+  repeated string default_paths = 3;
+  repeated TelemetryPath paths = 4;
+  uint32 default_sample_interval_ms = 5;
+  uint32 min_sample_interval_ms = 6;
+  uint32 max_sample_interval_ms = 7;
+}
+
+message TelemetryPath {
+  string path = 1;
+  string description = 2;
+  string cardinality = 3;
+  bool default = 4;
+  repeated string aliases = 5;
+  string payload_schema = 6;
+}
+
+message SubscribeTelemetryRequest {
+  // Optional paths. Empty selects the safe default paths.
+  repeated string paths = 1;
+
+  // Sample interval for repeated snapshots. Zero uses the daemon default.
+  uint32 sample_interval_ms = 2;
+
+  // Send one snapshot batch and close the stream.
+  bool once = 3;
+}
+
+message TelemetryEvent {
+  uint64 sequence = 1;
+  string timestamp = 2;
+  string path = 3;
+  string event_type = 4;
+  string encoding = 5;
+  string json_payload = 6;
+  string schema_version = 7;
+  uint64 payload_bytes = 8;
+  string payload_schema = 9;
+  string cardinality = 10;
+}
+
+message ClassOfServiceCapabilities {
+  bool metadata_binding_supported = 1;
+  bool queue_scheduler_supported = 2;
+  bool policer_supported = 3;
+  bool counters_supported = 4;
+  string last_check = 5;
+  string last_error = 6;
+  repeated string diagnostics = 7;
 }

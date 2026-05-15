@@ -19,6 +19,7 @@ import (
 	"github.com/akam1o/arca-router/internal/engine"
 	"github.com/akam1o/arca-router/internal/model"
 	sbfrr "github.com/akam1o/arca-router/internal/southbound/frr"
+	sbvpp "github.com/akam1o/arca-router/internal/southbound/vpp"
 	"github.com/akam1o/arca-router/internal/store"
 	"github.com/akam1o/arca-router/pkg/cli"
 	pkgconfig "github.com/akam1o/arca-router/pkg/config"
@@ -40,6 +41,7 @@ type Server struct {
 	lcpSource      lcpReconciliationSource
 	haSource       haStatusSource
 	bfdSource      bfdOperationalSource
+	qosSource      qosCapabilitySource
 	routeReader    pkgfrr.RouteStatusReader
 	bgpReader      pkgfrr.BGPSummaryStatusReader
 	ospfReader     pkgfrr.OSPFNeighborStatusReader
@@ -73,6 +75,10 @@ type bfdOperationalSource interface {
 	BFDOperationalStatus() sbfrr.BFDOperationalStatus
 }
 
+type qosCapabilitySource interface {
+	QoSCapabilityStatus() sbvpp.QoSCapabilityStatus
+}
+
 // NewServer creates a new gRPC server.
 func NewServer(eng *engine.Engine, st store.ConfigStore, log *slog.Logger) *Server {
 	return &Server{
@@ -92,6 +98,7 @@ func (s *Server) Serve(lis net.Listener) error {
 	apiv1.RegisterConfigServiceServer(s.server, &configServiceAdapter{server: s})
 	apiv1.RegisterSessionServiceServer(s.server, &sessionServiceAdapter{server: s})
 	apiv1.RegisterStateServiceServer(s.server, &stateServiceAdapter{server: s})
+	apiv1.RegisterTelemetryServiceServer(s.server, &telemetryServiceAdapter{server: s})
 	s.log.Info("gRPC server starting", slog.String("address", lis.Addr().String()))
 	return s.server.Serve(lis)
 }
@@ -121,6 +128,11 @@ func (s *Server) SetHAStatusSource(source haStatusSource) {
 // SetBFDOperationalSource installs an FRR BFD operational state source.
 func (s *Server) SetBFDOperationalSource(source bfdOperationalSource) {
 	s.bfdSource = source
+}
+
+// SetQoSCapabilitySource installs a VPP QoS capability source.
+func (s *Server) SetQoSCapabilitySource(source qosCapabilitySource) {
+	s.qosSource = source
 }
 
 func newOperationalRouteStatusReader() pkgfrr.RouteStatusReader {
@@ -953,6 +965,7 @@ func (s *Server) GetRoutingInstances(ctx context.Context) ([]RoutingInstanceInfo
 // GetClassOfService returns running class-of-service intent.
 func (s *Server) GetClassOfService(ctx context.Context) (*ClassOfServiceInfo, error) {
 	info := &ClassOfServiceInfo{EnforcementStatus: classOfServiceEnforcementNotConfigured}
+	s.applyClassOfServiceCapabilities(info)
 	if s.engine == nil {
 		return info, nil
 	}
@@ -1003,10 +1016,32 @@ func (s *Server) GetClassOfService(ctx context.Context) (*ClassOfServiceInfo, er
 	return info, nil
 }
 
+func (s *Server) applyClassOfServiceCapabilities(info *ClassOfServiceInfo) {
+	if info == nil || s.qosSource == nil {
+		return
+	}
+	status := s.qosSource.QoSCapabilityStatus()
+	info.Capabilities = &ClassOfServiceCapabilitiesInfo{
+		MetadataBindingSupported: status.Capabilities.MetadataBinding,
+		QueueSchedulerSupported:  status.Capabilities.QueueScheduler,
+		PolicerSupported:         status.Capabilities.Policer,
+		CountersSupported:        status.Capabilities.OperationalCounters,
+		LastCheck:                status.LastCheck,
+		LastError:                status.LastError,
+		Diagnostics:              append([]string(nil), status.Capabilities.Diagnostics...),
+	}
+	if status.LastError != "" {
+		info.Capabilities.Diagnostics = append(info.Capabilities.Diagnostics, "capability detection failed: "+status.LastError)
+	}
+}
+
 // GetSystemInfo returns basic system information.
 func (s *Server) GetSystemInfo(ctx context.Context) (*SystemInfo, error) {
-	cfg := s.engine.Running()
 	info := &SystemInfo{Version: "unknown"}
+	if s.engine == nil {
+		return info, nil
+	}
+	cfg := s.engine.Running()
 	if cfg.System != nil {
 		info.Hostname = cfg.System.HostName
 	}

@@ -250,6 +250,42 @@ func TestMockClient_ListInterfaceQueuePlacements(t *testing.T) {
 	}
 }
 
+func TestMockClient_GetQoSCapabilities(t *testing.T) {
+	client := NewMockClient()
+	ctx := context.Background()
+
+	caps, err := client.GetQoSCapabilities(ctx)
+	if err != nil {
+		t.Fatalf("GetQoSCapabilities() error = %v", err)
+	}
+	if !caps.MetadataBinding || caps.QueueScheduler || caps.Policer || caps.OperationalCounters {
+		t.Fatalf("default QoS capabilities = %#v, want metadata binding only", caps)
+	}
+
+	client.SetQoSCapabilities(QoSCapabilities{
+		MetadataBinding:     true,
+		QueueScheduler:      true,
+		Policer:             true,
+		OperationalCounters: true,
+		Diagnostics:         []string{"test diagnostic"},
+	})
+	caps, err = client.GetQoSCapabilities(ctx)
+	if err != nil {
+		t.Fatalf("GetQoSCapabilities() after SetQoSCapabilities error = %v", err)
+	}
+	if !caps.QueueScheduler || !caps.Policer || !caps.OperationalCounters || len(caps.Diagnostics) != 1 {
+		t.Fatalf("QoS capabilities = %#v, want scheduler, policer, counters, diagnostic", caps)
+	}
+	caps.Diagnostics[0] = "mutated"
+	caps, err = client.GetQoSCapabilities(ctx)
+	if err != nil {
+		t.Fatalf("GetQoSCapabilities() after mutation error = %v", err)
+	}
+	if caps.Diagnostics[0] != "test diagnostic" {
+		t.Fatalf("QoS capabilities leaked diagnostics slice: %#v", caps.Diagnostics)
+	}
+}
+
 func TestMockClient_GetInterfaceTable(t *testing.T) {
 	client := NewMockClient()
 	ctx := context.Background()

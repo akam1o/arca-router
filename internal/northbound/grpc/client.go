@@ -18,10 +18,11 @@ import (
 // It provides high-level methods for config management, session control,
 // and operational state queries.
 type Client struct {
-	conn    *googlegrpc.ClientConn
-	config  apiv1.ConfigServiceClient
-	session apiv1.SessionServiceClient
-	state   apiv1.StateServiceClient
+	conn      *googlegrpc.ClientConn
+	config    apiv1.ConfigServiceClient
+	session   apiv1.SessionServiceClient
+	state     apiv1.StateServiceClient
+	telemetry apiv1.TelemetryServiceClient
 }
 
 // Dial connects to the arca-routerd gRPC server via Unix socket.
@@ -52,10 +53,11 @@ func Dial(socketPath string) (*Client, error) {
 	}
 
 	return &Client{
-		conn:    conn,
-		config:  apiv1.NewConfigServiceClient(conn),
-		session: apiv1.NewSessionServiceClient(conn),
-		state:   apiv1.NewStateServiceClient(conn),
+		conn:      conn,
+		config:    apiv1.NewConfigServiceClient(conn),
+		session:   apiv1.NewSessionServiceClient(conn),
+		state:     apiv1.NewStateServiceClient(conn),
+		telemetry: apiv1.NewTelemetryServiceClient(conn),
 	}, nil
 }
 
@@ -476,6 +478,22 @@ func (c *Client) GetClassOfService(ctx context.Context) (*ClassOfServiceInfo, er
 	info := &ClassOfServiceInfo{
 		EnforcementStatus: resp.GetEnforcementStatus(),
 	}
+	if capabilities := resp.GetCapabilities(); capabilities != nil {
+		info.Capabilities = &ClassOfServiceCapabilitiesInfo{
+			MetadataBindingSupported: capabilities.GetMetadataBindingSupported(),
+			QueueSchedulerSupported:  capabilities.GetQueueSchedulerSupported(),
+			PolicerSupported:         capabilities.GetPolicerSupported(),
+			CountersSupported:        capabilities.GetCountersSupported(),
+			LastError:                capabilities.GetLastError(),
+			Diagnostics:              append([]string(nil), capabilities.GetDiagnostics()...),
+		}
+		if rawLastCheck := capabilities.GetLastCheck(); rawLastCheck != "" {
+			parsed, err := time.Parse(time.RFC3339Nano, rawLastCheck)
+			if err == nil {
+				info.Capabilities.LastCheck = parsed
+			}
+		}
+	}
 	for _, fc := range resp.GetForwardingClasses() {
 		info.ForwardingClasses = append(info.ForwardingClasses, ClassOfServiceForwardingClassInfo{
 			Name:  fc.GetName(),
@@ -515,11 +533,131 @@ func (c *Client) GetSystemInfo(ctx context.Context) (*SystemInfo, error) {
 	}, nil
 }
 
+// TelemetryReceiver receives structured telemetry events.
+type TelemetryReceiver interface {
+	Recv() (*TelemetryEvent, error)
+}
+
+// GetTelemetryCatalog returns the daemon's supported telemetry path catalog.
+func (c *Client) GetTelemetryCatalog(ctx context.Context) (TelemetryCatalog, error) {
+	return c.GetFilteredTelemetryCatalog(ctx, nil, nil)
+}
+
+// GetFilteredTelemetryCatalog returns the daemon's supported telemetry path catalog after server-side filters.
+func (c *Client) GetFilteredTelemetryCatalog(ctx context.Context, cardinalities []string, payloadSchemas []string) (TelemetryCatalog, error) {
+	return c.GetPathFilteredTelemetryCatalog(ctx, nil, cardinalities, payloadSchemas)
+}
+
+// GetPathFilteredTelemetryCatalog returns the daemon's supported telemetry path catalog after server-side path and metadata filters.
+func (c *Client) GetPathFilteredTelemetryCatalog(ctx context.Context, paths []string, cardinalities []string, payloadSchemas []string) (TelemetryCatalog, error) {
+	return c.GetTelemetryCatalogWithFilter(ctx, TelemetryCatalogFilter{
+		Paths:          paths,
+		Cardinalities:  cardinalities,
+		PayloadSchemas: payloadSchemas,
+	})
+}
+
+// GetTelemetryCatalogWithFilter returns the daemon's supported telemetry path catalog after server-side filters.
+func (c *Client) GetTelemetryCatalogWithFilter(ctx context.Context, filter TelemetryCatalogFilter) (TelemetryCatalog, error) {
+	ctx, cancel := contextWithDefaultTimeout(ctx)
+	defer cancel()
+	resp, err := c.telemetry.GetTelemetryCatalog(ctx, &apiv1.GetTelemetryCatalogRequest{
+		Path:          append([]string(nil), filter.Paths...),
+		Cardinality:   append([]string(nil), filter.Cardinalities...),
+		PayloadSchema: append([]string(nil), filter.PayloadSchemas...),
+		Encoding:      append([]string(nil), filter.Encodings...),
+		DefaultOnly:   filter.DefaultOnly,
+	})
+	if err != nil {
+		return TelemetryCatalog{}, err
+	}
+	catalog := TelemetryCatalog{
+		EventSchemaVersion:      resp.GetEventSchemaVersion(),
+		Encoding:                resp.GetEncoding(),
+		DefaultPaths:            append([]string(nil), resp.GetDefaultPaths()...),
+		DefaultSampleIntervalMs: resp.GetDefaultSampleIntervalMs(),
+		MinSampleIntervalMs:     resp.GetMinSampleIntervalMs(),
+		MaxSampleIntervalMs:     resp.GetMaxSampleIntervalMs(),
+		Paths:                   make([]TelemetryPathInfo, 0, len(resp.GetPaths())),
+	}
+	for _, path := range resp.GetPaths() {
+		catalog.Paths = append(catalog.Paths, TelemetryPathInfo{
+			Path:          path.GetPath(),
+			Description:   path.GetDescription(),
+			Cardinality:   path.GetCardinality(),
+			PayloadSchema: path.GetPayloadSchema(),
+			Aliases:       append([]string(nil), path.GetAliases()...),
+			Default:       path.GetDefault(),
+		})
+	}
+	return catalog, nil
+}
+
+// SubscribeTelemetry starts a structured telemetry stream.
+func (c *Client) SubscribeTelemetry(ctx context.Context, paths []string, sampleInterval time.Duration, once bool) (TelemetryReceiver, error) {
+	stream, err := c.telemetry.SubscribeTelemetry(ctx, &apiv1.SubscribeTelemetryRequest{
+		Paths:            append([]string(nil), paths...),
+		SampleIntervalMs: durationMillisUint32(sampleInterval),
+		Once:             once,
+	})
+	if err != nil {
+		return nil, err
+	}
+	return &TelemetryStream{stream: stream}, nil
+}
+
+// TelemetryStream receives structured telemetry events.
+type TelemetryStream struct {
+	stream apiv1.TelemetryService_SubscribeTelemetryClient
+}
+
+// Recv reads the next telemetry event from the stream.
+func (s *TelemetryStream) Recv() (*TelemetryEvent, error) {
+	resp, err := s.stream.Recv()
+	if err != nil {
+		return nil, err
+	}
+	event := &TelemetryEvent{
+		Sequence:      resp.GetSequence(),
+		Path:          resp.GetPath(),
+		Cardinality:   resp.GetCardinality(),
+		PayloadSchema: resp.GetPayloadSchema(),
+		EventType:     resp.GetEventType(),
+		Encoding:      resp.GetEncoding(),
+		JSONPayload:   resp.GetJsonPayload(),
+		SchemaVersion: resp.GetSchemaVersion(),
+		PayloadBytes:  int(resp.GetPayloadBytes()),
+	}
+	if event.PayloadBytes == 0 && event.JSONPayload != "" {
+		event.PayloadBytes = len(event.JSONPayload)
+	}
+	if rawTimestamp := resp.GetTimestamp(); rawTimestamp != "" {
+		if parsed, err := time.Parse(time.RFC3339Nano, rawTimestamp); err == nil {
+			event.Timestamp = parsed
+		}
+	}
+	return event, nil
+}
+
 func contextWithDefaultTimeout(ctx context.Context) (context.Context, context.CancelFunc) {
 	if _, ok := ctx.Deadline(); ok {
 		return ctx, func() {}
 	}
 	return context.WithTimeout(ctx, 10*time.Second)
+}
+
+func durationMillisUint32(duration time.Duration) uint32 {
+	if duration <= 0 {
+		return 0
+	}
+	ms := duration / time.Millisecond
+	if ms < 1 {
+		return 1
+	}
+	if ms > time.Duration(^uint32(0)) {
+		return ^uint32(0)
+	}
+	return uint32(ms)
 }
 
 func commitInfosFromProto(entries []*apiv1.CommitEntry) []CommitInfo {
@@ -760,6 +898,18 @@ type ClassOfServiceInfo struct {
 	TrafficControlProfiles []ClassOfServiceTrafficControlProfileInfo
 	Interfaces             []ClassOfServiceInterfaceInfo
 	EnforcementStatus      string
+	Capabilities           *ClassOfServiceCapabilitiesInfo
+}
+
+// ClassOfServiceCapabilitiesInfo represents detected VPP QoS dataplane support.
+type ClassOfServiceCapabilitiesInfo struct {
+	MetadataBindingSupported bool
+	QueueSchedulerSupported  bool
+	PolicerSupported         bool
+	CountersSupported        bool
+	LastCheck                time.Time
+	LastError                string
+	Diagnostics              []string
 }
 
 // ClassOfServiceForwardingClassInfo maps a forwarding class to a queue.

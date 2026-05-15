@@ -1,6 +1,119 @@
 # Changelog
 
-## v0.7.x - Core Router Parity (current)
+## v0.8.x - Overlay and Streaming Telemetry (current)
+
+- **NMS collector QoS capability validation**: the example HTTP collector now validates class-of-service capability diagnostics and last-check relationships before using status responses
+- **NMS collector schema field type validation**: the example HTTP collector now rejects unsupported telemetry payload field type hints before using schema registry responses
+- **NMS telemetry filter normalization**: `/api/nms/v1/telemetry/paths`, `/schemas`, and `/snapshot` now ignore empty metadata filter values and accept comma-separated filter lists
+- **NMS collector schema field uniqueness validation**: the example HTTP collector now rejects duplicate telemetry payload field names before using schema registry responses
+- **NMS collector snapshot path uniqueness validation**: the example HTTP collector now rejects duplicate emitted telemetry snapshot paths before using snapshot responses
+- **NMS collector snapshot guardrail cap validation**: the example HTTP collector now rejects snapshot guardrails that exceed the advertised NMS caps before using snapshot responses
+- **NMS collector snapshot guardrail validation**: the example HTTP collector now rejects negative snapshot `max_payload_bytes` and `max_events` guardrails before using snapshot responses
+- **NMS collector snapshot event timing bounds**: the example HTTP collector now rejects telemetry snapshot event timestamps that are later than the snapshot envelope `generated_at`
+- **NMS collector path alias validation**: the example HTTP collector now validates telemetry path aliases against the supported NMS path mappings before using discovery responses
+- **NMS collector path metadata mapping validation**: the example HTTP collector now validates telemetry path, cardinality, and payload schema mappings before using discovery and snapshot responses
+- **NMS collector payload schema hint validation**: the example HTTP collector now validates telemetry payload schema hints against the supported NMS schema IDs before using discovery and snapshot responses
+- **NMS collector cardinality hint validation**: the example HTTP collector now validates telemetry cardinality hints against the supported NMS values before using discovery and snapshot responses
+- **NMS collector default path validation**: the example HTTP collector now validates default telemetry path hints as unique absolute paths before using discovery and snapshot responses
+- **NMS collector status build metadata validation**: the example HTTP collector now validates operational status build timestamps before printing status responses
+- **NMS collector status datastore validation**: the example HTTP collector now validates operational status datastore backend values and etcd endpoint consistency before printing status responses
+- **NMS collector status sync validation**: the example HTTP collector now validates config-sync health/timestamp ordering and cluster etcd-sync endpoint consistency before printing operational status responses
+- **NMS collector status timing validation**: the example HTTP collector now rejects operational status section timestamps that are later than the status envelope `generated_at`
+- **NMS collector status relationship validation**: the example HTTP collector now validates HA and CoS boolean, state, and counter relationships before printing operational status responses
+- **NMS collector status text validation**: the example HTTP collector now rejects empty operational status strings and empty diagnostic list entries before printing status responses
+- **NMS collector status counter validation**: the example HTTP collector now validates EVPN VNI counter relationships and NETCONF handshake counters in operational status responses
+- **NMS collector status state validation**: the example HTTP collector now validates CoS enforcement status values and FRR VRRP/BFD state consistency in operational status responses
+- **NMS collector status metadata validation**: the example HTTP collector now validates optional operational status revision, commit, and last-error metadata before printing status responses
+- **NMS collector status aggregate validation**: the example HTTP collector now validates operational status issue counts, FRR VRRP/BFD counters, and VPP LCP inconsistency counts against decoded status arrays
+- **NMS collector status timestamp validation**: the example HTTP collector now validates optional RFC3339 operational status section timestamps before printing status responses
+- **NMS collector status array validation**: the example HTTP collector now validates optional operational status arrays, including issue lists, VPP LCP inconsistencies, FRR VRRP groups, and FRR BFD peers
+- **NMS collector status section validation**: the example HTTP collector now validates required nested operational status section fields for datastore, cluster, overlay, HA, CoS, FRR, VPP, and NETCONF status data
+- **NMS collector status field validation**: the example HTTP collector now validates required top-level operational status fields and section objects inside status `data`
+- **NMS collector status data validation**: the example HTTP collector now validates that operational status envelopes include a non-empty JSON `data` object before printing status responses
+- **NMS collector generated timestamp validation**: the example HTTP collector now validates RFC3339 `generated_at` timestamps across status, telemetry catalog, schema registry, and snapshot envelopes
+- **NMS collector snapshot event timing validation**: the example HTTP collector now validates positive, increasing `sequence` values and RFC3339Nano `timestamp` values in telemetry snapshot events
+- **NMS collector snapshot event metadata validation**: the example HTTP collector now validates per-event `cardinality` and `payload_schema` metadata in telemetry snapshot responses before printing or exporting events
+- **NMS collector discovery entry validation**: the example HTTP collector now validates telemetry catalog path metadata, schema registry entries, and payload field declarations before using discovery responses
+- **NMS collector telemetry hint validation**: the example HTTP collector now validates telemetry default path lists and sample interval hints in catalog, schema registry, and snapshot envelopes
+- **NMS collector snapshot aggregate validation**: the example HTTP collector now validates telemetry snapshot emitted paths, total payload bytes, and advertised guardrails against decoded events
+- **NMS collector snapshot event validation**: the example HTTP collector now validates per-event schema, encoding, type, path, and payload byte lengths in telemetry snapshot responses before printing or exporting events
+- **NMS collector telemetry metadata validation**: the example HTTP collector now validates telemetry `event_schema_version` and `encoding` values in discovery and snapshot envelopes
+- **NMS collector result count validation**: the example HTTP collector now validates telemetry catalog `path_count`, schema registry `schema_count`, and snapshot `event_count` values against decoded result arrays
+- **NMS collector status validation**: the example HTTP collector now validates operational status `schema_version` and `resource` values before printing status responses
+- **NMS collector snapshot validation**: the example HTTP collector now validates telemetry snapshot `schema_version` and `resource` values before printing or exporting snapshot events
+- **NMS collector discovery validation**: the example HTTP collector now validates telemetry discovery `schema_version` and `resource` values before using catalog or schema responses
+- **NMS collector schema default hints**: the example HTTP collector now decodes default paths, sample interval hints, and result counts from telemetry schema discovery responses
+- **NMS telemetry schema default hints**: `/api/nms/v1/telemetry/schemas` now echoes default telemetry paths and sample interval hints so schema-only discovery responses remain self-contained
+- **NMS telemetry result counts**: `/api/nms/v1/telemetry/paths` and `/api/nms/v1/telemetry/schemas` now report filtered result counts so collectors can distinguish empty filters from missing arrays
+- **NMS snapshot event counts**: `/api/nms/v1/telemetry/snapshot` now reports `event_count` alongside `max_events` so HTTP-only collectors can distinguish emitted event fan-out from the configured guardrail
+- **NMS snapshot default paths**: `/api/nms/v1/telemetry/snapshot` now echoes the default telemetry path set so HTTP-only collectors can discover default polling inputs from the snapshot envelope
+- **NMS snapshot interval hints**: `/api/nms/v1/telemetry/snapshot` now echoes default, minimum, and maximum sample interval hints so HTTP-only collectors can poll filtered snapshots without a separate catalog lookup
+- **NMS collector snapshot filters**: the example HTTP collector now pushes include path, default, cardinality, payload schema, and encoding filters directly to `/api/nms/v1/telemetry/snapshot` when catalog exclusion or discovery is not needed
+- **NMS snapshot metadata filters**: `/api/nms/v1/telemetry/snapshot` now accepts default, cardinality, payload schema, and encoding filters so HTTP-only collectors can select snapshot paths without a separate catalog request
+- **Telemetry event cardinality hints**: gRPC, CLI, NMS snapshot, and OTLP-exported telemetry events now carry `cardinality` so collectors can distinguish single-object snapshots from higher-cardinality payloads without a catalog lookup
+- **Telemetry event payload schemas**: gRPC, CLI, NMS snapshot, and OTLP-exported telemetry events now carry `payload_schema` so collectors can route and validate events without a separate catalog lookup
+- **QoS capability gRPC telemetry**: `GetClassOfService`, `arca show class-of-service`, and the `/class-of-service` telemetry payload now include VPP QoS capability support, diagnostics, errors, and last-check time
+- **QoS capability SNMP OIDs**: the read-only SNMP subtree now exposes VPP QoS metadata binding, scheduler, policer, counter, capability error, and last-check gauges
+- **QoS capability Grafana panels**: the packaged Grafana dashboard now shows metadata binding, scheduler, policer, counter, capability error, and last-check gauges from the VPP QoS capability metrics
+- **VPP LCP Grafana panels**: the packaged Grafana dashboard now includes VPP LCP pair, inconsistency, reconcile error, and last-check panels backed by the Prometheus LCP metrics
+- **NMS telemetry schema registry**: `/api/nms/v1/telemetry/schemas` and the example HTTP collector expose per-path payload schema IDs and stable top-level JSON fields so collectors can validate and route snapshot payloads before polling or subscribing
+- **NMS OTLP snapshot exporter**: the example HTTP collector can forward bounded telemetry snapshot events to an OpenTelemetry OTLP/HTTP logs endpoint as JSON log records
+- **NMS snapshot event guardrail**: `/api/nms/v1/telemetry/snapshot` and the example HTTP collector now support `max_events` to bound one-shot telemetry event fan-out alongside timeout and payload byte budgets
+- **NETCONF session scale validation**: NETCONF session counting now has regression coverage for hundreds of active sessions, numeric session lookup, CloseAll cleanup, and lock release accounting
+- **Telemetry scale validation**: gRPC route telemetry snapshots now have regression coverage for larger route sets, payload byte accounting, and high-cardinality path de-duplication
+- **EVPN remote VTEP dataplane**: EVPN VNI intent now accepts `remote-vtep` unicast endpoints and VPP southbound creates unicast VXLAN tunnels for L2/L3 VNIs while keeping multicast groups mutually exclusive
+- **VPP VXLAN L3 dataplane plumbing**: VPP southbound validation and apply now support multicast VXLAN for L3 EVPN VNIs by creating L3 VXLAN tunnel interfaces, binding them to the routing-instance table, and deleting tunnels before stale routing-instance tables
+- **NMS collector catalog interval hints**: the example HTTP collector decodes default, minimum, and maximum sample interval hints from telemetry catalog discovery responses
+- **Telemetry CLI catalog interval hints**: `arca show telemetry paths` and `arca show telemetry paths live` print default, minimum, and maximum sample intervals when the catalog advertises them
+- **NMS telemetry catalog interval hints**: `/api/nms/v1/telemetry/paths` advertises default, minimum, and maximum sample intervals in milliseconds for HTTP collector discovery
+- **gRPC telemetry catalog interval hints**: `TelemetryService.GetTelemetryCatalog` advertises default, minimum, and maximum sample intervals in milliseconds for stream collectors
+- **NMS collector encoding exclude filters**: the example HTTP collector can skip catalog-discovered snapshot paths when the advertised payload encoding matches `-exclude-encoding`
+- **NMS collector alias exclude filters**: the example HTTP collector applies path, cardinality, and payload schema exclusions to snapshot paths selected by catalog aliases
+- **NMS collector path exclude filters**: the example HTTP collector can skip selected telemetry paths or aliases after catalog discovery before requesting bounded snapshots
+- **NMS collector catalog encoding filters**: the example HTTP collector can pass `-include-encoding` filters to telemetry catalog discovery before deriving snapshot paths
+- **NMS telemetry catalog encoding filters**: `/api/nms/v1/telemetry/paths` accepts repeated `encoding` query parameters for HTTP collector discovery
+- **Telemetry CLI catalog encoding filters**: `arca show telemetry paths` and `arca show telemetry paths live` can filter the catalog by payload encoding before showing collector inputs
+- **gRPC telemetry catalog encoding filters**: `TelemetryService.GetTelemetryCatalog` accepts repeated payload encoding filters so collectors can explicitly discover JSON-compatible telemetry paths
+- **NMS collector catalog default filters**: the example HTTP collector can pass `-include-default` to catalog discovery before deriving snapshot paths
+- **NMS telemetry catalog default filters**: `/api/nms/v1/telemetry/paths` accepts `default=true` to return only default subscription paths
+- **Telemetry CLI catalog default filters**: `arca show telemetry paths` and `arca show telemetry paths live` can show only the default subscription paths
+- **gRPC telemetry catalog default filters**: `TelemetryService.GetTelemetryCatalog` can return only the default subscription paths alongside path, cardinality, and payload schema filters
+- **NMS collector catalog path filters**: the example HTTP collector can pass `-include-path` filters to the telemetry catalog endpoint before deriving snapshot paths
+- **NMS telemetry catalog path filters**: `/api/nms/v1/telemetry/paths` accepts repeated `path` query parameters that match canonical telemetry paths or advertised aliases such as `/evpn`
+- **Telemetry CLI catalog path filters**: `arca show telemetry paths` and `arca show telemetry paths live` can filter the catalog by canonical path or advertised alias before showing collector inputs
+- **gRPC telemetry catalog path filters**: `TelemetryService.GetTelemetryCatalog` accepts repeated path filters, including advertised aliases such as `/evpn`, alongside cardinality and payload schema filters
+- **NMS collector catalog filters**: the example HTTP collector can pass include cardinality and payload schema filters to the telemetry catalog endpoint before deriving snapshot paths
+- **Telemetry CLI live filter pushdown**: `arca show telemetry paths live` now sends cardinality and payload schema filters to `TelemetryService.GetTelemetryCatalog` instead of always fetching the full daemon catalog first
+- **gRPC telemetry catalog filters**: `TelemetryService.GetTelemetryCatalog` accepts repeated cardinality and payload schema filters so gRPC collectors can discover only the path classes they plan to subscribe to
+- **NMS telemetry catalog filters**: `/api/nms/v1/telemetry/paths` can filter the advertised catalog with repeated `cardinality` and `payload_schema` query parameters for HTTP collector discovery
+- **Telemetry CLI catalog filters**: `arca show telemetry paths` and `arca show telemetry paths live` can filter the catalog by cardinality hint or payload schema ID before operators subscribe to high-churn paths
+- **NMS collector payload schema filters**: the example HTTP collector can discover telemetry paths from the catalog and exclude selected payload schema IDs, such as `arca.telemetry.routes.v1`, before requesting bounded snapshots
+- **Telemetry payload schema hints**: gRPC, NMS, and CLI telemetry catalogs now advertise stable per-path payload schema IDs so collectors can route and validate path-specific JSON payloads before subscribing
+- **Telemetry path alias hints**: gRPC, NMS, and CLI telemetry catalogs now advertise accepted path aliases such as `/evpn`, `/running`, and `/cos` alongside canonical paths
+- **Telemetry CLI live catalog**: `arca show telemetry paths live` now queries `TelemetryService.GetTelemetryCatalog` so operators can compare the connected daemon's telemetry catalog with the local CLI catalog
+- **gRPC telemetry catalog**: `TelemetryService.GetTelemetryCatalog` now exposes supported telemetry paths, default paths, cardinality hints, event schema version, and encoding to gRPC collectors
+- **Telemetry CLI path catalog**: `arca show telemetry paths` now prints the supported telemetry paths, cardinality hints, default membership, and descriptions without requiring a daemon connection for local collector discovery
+- **Telemetry payload byte counts**: structured gRPC telemetry events and `arca show telemetry` output now include `payload_bytes` so local collectors can budget high-cardinality paths before forwarding events
+- **NMS snapshot payload sizing**: telemetry snapshot responses now include per-event `payload_bytes` so collectors can identify which paths consume the configured payload budget
+- **NMS collector cardinality filters**: the example HTTP collector can discover telemetry paths from the catalog and exclude selected cardinalities, such as `per-route`, before requesting bounded snapshots
+- **Telemetry cardinality hints**: the NMS telemetry catalog now advertises per-path cardinality hints so collectors can distinguish single-object snapshots from per-route, per-interface, per-peer, and per-VNI payloads before subscribing
+- **NMS collector example**: `examples/nms` now includes a standard-library HTTP collector for the schema-versioned status, telemetry catalog, and bounded telemetry snapshot APIs
+- **EVPN CLI status**: `arca show evpn` now renders the EVPN/VXLAN overlay telemetry snapshot as a human-readable VNI summary
+- **EVPN SNMP counters**: the read-only SNMPv2c subtree now exposes EVPN/VXLAN overlay configured, total VNI, L2 VNI, L3 VNI, and multicast VNI counters
+- **EVPN Grafana panels**: the packaged Grafana dashboard now includes EVPN/VXLAN overlay configured, total VNI, L2 VNI, L3 VNI, and multicast VNI panels backed by the Prometheus overlay metrics
+- **EVPN observability summary**: `/metrics`, `/api/status`, and `/api/nms/v1/status` now expose EVPN/VXLAN configured, total VNI, L2 VNI, L3 VNI, and multicast VNI counts for overlay intent monitoring
+- **EVPN telemetry path**: structured telemetry and NMS snapshots now expose `/overlays/evpn` with sorted EVPN/VXLAN VNI intent, including L2 bridge-domain metadata, route targets, multicast source settings, and L3 routing-instance bindings
+- **NMS telemetry snapshot API**: `/api/nms/v1/telemetry/snapshot` exposes one-shot structured telemetry snapshots over the Web API for HTTP-only collectors, with repeated `path` query parameters, timeout and payload byte budget guardrails, and the same telemetry event payloads used by the gRPC stream
+- **VPP QoS capability diagnostics**: VPP southbound initialization now records class-of-service dataplane capability detection, including metadata binding, scheduler, policer, and operational counter support, and exposes the result through metrics and the Web/NMS status API
+- **NMS telemetry catalog API**: `/api/nms/v1/telemetry/paths` exposes the supported structured telemetry paths, default path set, event schema version, and payload encoding for collector discovery
+- **NMS operational status API**: the Web API now exposes `/api/nms/v1/status`, a schema-versioned JSON envelope for external NMS and collectors that need a stable read-only operational status shape
+- **Telemetry CLI snapshots**: `arca show telemetry` now consumes the structured gRPC telemetry stream and prints selected telemetry events as JSON lines for local debugging and collector validation
+- **Structured gRPC telemetry stream**: the internal gRPC API now exposes `TelemetryService.SubscribeTelemetry` for selected config, daemon, interface, routing, BFD, LCP, HA, routing-instance, and class-of-service paths with JSON payload events, interval sampling, one-shot snapshots, and gRPC flow-control backpressure
+- **VPP VXLAN L2 dataplane plumbing**: VPP southbound validation and apply now support multicast VXLAN for L2 EVPN VNIs by creating bridge domains, creating VXLAN tunnel interfaces, bringing them up, and attaching them to L2 bridge domains with rollback coverage
+- **FRR EVPN control-plane generation**: FRR file-backend generation now renders global BGP `l2vpn evpn` with `advertise-all-vni`, explicit L2 VNI route-targets, L3 VNI VRF bindings, and per-VRF EVPN route-targets while transactional mgmtd support is pending
+- **EVPN/VXLAN VNI intent model**: CLI parser/serializer, validation, internal model conversion/clone/diff, NETCONF XML/YANG, and commit-time southbound safety gates cover L2/L3 `protocols evpn vni` configuration with explicit rejection for unsupported VPP dataplane modes
+
+## v0.7.x - Core Router Parity (previous)
 
 - **BFD peer/profile configuration**: parser, serializer, validation, internal model, diff, NETCONF XML/YANG, FRR file backend generation, and transactional `frr-bfdd` operations cover `protocols bfd profile` and `protocols bfd peer`
 - **BFD protocol bindings**: BGP neighbors and OSPF/OSPFv3 interfaces can enable BFD directly, including reusable `protocols bfd profile` references

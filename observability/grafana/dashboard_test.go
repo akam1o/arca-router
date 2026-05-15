@@ -109,6 +109,57 @@ func TestDashboardIncludesClassOfServicePanels(t *testing.T) {
 	}
 }
 
+func TestDashboardIncludesEVPNPanels(t *testing.T) {
+	dash := loadDashboard(t)
+	want := map[string]string{
+		"arca_router_overlay_evpn_configured":     "EVPN Overlay",
+		"arca_router_overlay_evpn_vnis":           "EVPN VNIs",
+		"arca_router_overlay_evpn_l2_vnis":        "EVPN L2 VNIs",
+		"arca_router_overlay_evpn_l3_vnis":        "EVPN L3 VNIs",
+		"arca_router_overlay_evpn_multicast_vnis": "EVPN Multicast VNIs",
+	}
+	expressions := panelExpressions(dash.Panels)
+	for expr, title := range want {
+		if got := expressions[expr]; got != title {
+			t.Fatalf("expression %q is on panel %q, want %q", expr, got, title)
+		}
+	}
+}
+
+func TestDashboardIncludesVPPLCPPanels(t *testing.T) {
+	dash := loadDashboard(t)
+	want := map[string]string{
+		"arca_router_vpp_lcp_pairs":                                   "VPP LCP Pairs",
+		"arca_router_vpp_lcp_inconsistencies":                         "VPP LCP Inconsistencies",
+		"arca_router_vpp_lcp_reconcile_error":                         "VPP LCP Errors",
+		"arca_router_vpp_lcp_last_reconcile_timestamp_seconds * 1000": "VPP LCP Last Check",
+	}
+	expressions := panelExpressions(dash.Panels)
+	for expr, title := range want {
+		if got := expressions[expr]; got != title {
+			t.Fatalf("expression %q is on panel %q, want %q", expr, got, title)
+		}
+	}
+}
+
+func TestDashboardIncludesQoSCapabilityPanels(t *testing.T) {
+	dash := loadDashboard(t)
+	want := map[string]string{
+		"arca_router_class_of_service_metadata_binding_supported":                     "CoS Metadata Binding",
+		"arca_router_class_of_service_queue_scheduler_supported":                      "CoS Scheduler Support",
+		"arca_router_class_of_service_policer_supported":                              "CoS Policer Support",
+		"arca_router_class_of_service_counters_supported":                             "CoS Counter Support",
+		"arca_router_class_of_service_capability_error":                               "CoS Capability Errors",
+		"arca_router_class_of_service_capability_last_check_timestamp_seconds * 1000": "CoS Capability Last Check",
+	}
+	expressions := panelExpressions(dash.Panels)
+	for expr, title := range want {
+		if got := expressions[expr]; got != title {
+			t.Fatalf("expression %q is on panel %q, want %q", expr, got, title)
+		}
+	}
+}
+
 func loadDashboard(t *testing.T) dashboard {
 	t.Helper()
 	data, err := os.ReadFile("arca-routerd-dashboard.json")

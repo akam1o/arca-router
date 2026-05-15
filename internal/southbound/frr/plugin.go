@@ -273,6 +273,8 @@ func requiresFRRFileBackend(cfg *pkgfrr.Config) bool {
 		return false
 	}
 	return cfg.OSPF3 != nil ||
+		frrBGPHasEVPN(cfg.BGP) ||
+		frrVRFsHaveEVPN(cfg.VRFs) ||
 		frrBGPHasBFDProfiles(cfg.BGP) ||
 		frrOSPFHasBFDProfiles(cfg.OSPF) ||
 		frrBFDRequiresFileBackend(cfg.BFD) ||
@@ -286,6 +288,19 @@ func frrBGPHasBFDProfiles(cfg *pkgfrr.BGPConfig) bool {
 	}
 	for _, neighbor := range cfg.Neighbors {
 		if neighbor.BFDProfile != "" {
+			return true
+		}
+	}
+	return false
+}
+
+func frrBGPHasEVPN(cfg *pkgfrr.BGPConfig) bool {
+	return cfg != nil && cfg.EVPN != nil
+}
+
+func frrVRFsHaveEVPN(vrfs []pkgfrr.VRFConfig) bool {
+	for _, vrf := range vrfs {
+		if vrf.VNI != 0 || vrf.EVPN != nil {
 			return true
 		}
 	}
@@ -365,6 +380,11 @@ func (p *FRRPlugin) buildFullConfig(diff *engine.ConfigDiff) *model.RouterConfig
 	} else if diff.OldBGP != nil && !diff.BGPChanged {
 		cfg.Protocols.BGP = diff.OldBGP
 	}
+	if diff.NewEVPN != nil {
+		cfg.Protocols.EVPN = diff.NewEVPN
+	} else if diff.OldEVPN != nil && !diff.EVPNChanged {
+		cfg.Protocols.EVPN = diff.OldEVPN
+	}
 	if diff.NewOSPF != nil {
 		cfg.Protocols.OSPF = diff.NewOSPF
 	} else if diff.OldOSPF != nil && !diff.OSPFChanged {
@@ -416,6 +436,7 @@ func hasFRRRelevantChanges(diff *engine.ConfigDiff) bool {
 	}
 	return diff.BFDChanged ||
 		diff.BGPChanged ||
+		diff.EVPNChanged ||
 		diff.OSPFChanged ||
 		diff.OSPF3Changed ||
 		diff.StaticRoutesChanged ||

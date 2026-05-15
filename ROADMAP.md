@@ -31,7 +31,7 @@ Focus: expand the hardened unified daemon into higher-level router features.
   - Bound QoS profile visibility in interface operational state
   - VPP RX/TX queue placement telemetry for managed interfaces
   - Class-of-service intent status through CLI, Web UI, Prometheus, SNMP, and Grafana
-  - Scheduler and policer enforcement deferred to v0.8 until supported VPP binapi coverage is available
+  - Scheduler and policer enforcement deferred to v0.8 capability detection and fallback until supported VPP binapi coverage is available
 - **Observability services**
   - Config-driven NETCONF listen port from `security netconf ssh port`
   - Live managed VPP interface status and counters in NETCONF `<get>`
@@ -63,29 +63,32 @@ Focus: close common router feature gaps before adding more advanced overlays.
   - CLI, gRPC, and NETCONF configuration paths
   - Operational state and failure counters
 
-## v0.8.x - Overlay and Streaming Telemetry
+## v0.8.x - Overlay and Streaming Telemetry (implementation complete)
 
-Focus: add data-center overlay support and richer external observability.
+Focus: deliver data-center overlay support and richer external observability.
 
 - **EVPN / VXLAN**
-  - L2/L3 VNI configuration model
-  - FRR EVPN control-plane integration
-  - VPP VXLAN dataplane plumbing
+  - L2/L3 VNI configuration model with CLI, validation, diff, and NETCONF/YANG coverage
+  - FRR EVPN control-plane generation through the FRR file backend
+  - VPP VXLAN L2/L3 multicast and unicast remote-VTEP dataplane plumbing
 - **Streaming telemetry**
-  - gNMI, OpenTelemetry, or structured event stream support
-  - Subscription management and backpressure handling
-  - Stable event schemas for config, daemon, and routing state changes
+  - Structured gRPC telemetry event stream with JSON payload schemas for selected config, daemon, and routing state paths
+  - Subscription path filtering, sample intervals, one-shot snapshots, and gRPC flow-control backpressure
+  - OpenTelemetry OTLP/HTTP snapshot exporter example
+  - Expanded stable event schemas for additional dataplane and protocol state changes
 - **QoS dataplane enforcement**
-  - VPP scheduler and policer capability detection
-  - Queue scheduler and policer apply support
-  - Operational QoS counters
-  - Version-specific fallback and diagnostics
+  - VPP scheduler, policer, and counter capability detection
+  - Interface metadata binding for output QoS policy intent when scheduler/policer services are unavailable
+  - Operational QoS counter visibility through interface telemetry where VPP stats expose them
+  - Version-specific fallback and diagnostics for the VPP 24.10 binapi surface
 - **NMS integration**
   - Stable operational API shape for external systems
+  - Telemetry payload schema registry for collector validation and routing
   - Integration examples for collectors and dashboards
 - **Scale validation**
-  - Route scale, session count, and telemetry cardinality testing
-  - Performance guardrails for high-churn environments
+  - Route scale and telemetry cardinality regression coverage
+  - NETCONF session count regression coverage
+  - NMS telemetry snapshot timeout, payload byte, and event count guardrails
 
 ## v0.9.x - NETCONF/YANG and Operational Safety
 

@@ -279,6 +279,7 @@ func writeProtocols(b *strings.Builder, pc *ProtocolConfig) {
 	}
 	writeBFD(b, pc.BFD)
 	writeBGP(b, pc.BGP)
+	writeEVPN(b, pc.EVPN)
 	writeOSPF(b, "ospf", pc.OSPF)
 	writeOSPF(b, "ospf3", pc.OSPF3)
 	writeMPLS(b, pc.MPLS)
@@ -350,6 +351,61 @@ func writeBFD(b *strings.Builder, bfd *BFDConfig) {
 			writeLine(b, "%s shutdown", base)
 		}
 	}
+}
+
+func writeEVPN(b *strings.Builder, evpn *EVPNConfig) {
+	if evpn == nil {
+		return
+	}
+	for _, vni := range sortedInts(evpn.VNIs) {
+		entry := evpn.VNIs[vni]
+		if entry == nil {
+			continue
+		}
+		base := fmt.Sprintf("set protocols evpn vni %d", vni)
+		if entry.Type != "" {
+			writeLine(b, "%s type %s", base, entry.Type)
+		}
+		if entry.BridgeDomain != "" {
+			writeLine(b, "%s bridge-domain %s", base, EscapeValue(entry.BridgeDomain))
+		}
+		if entry.VLANID != 0 {
+			writeLine(b, "%s vlan-id %d", base, entry.VLANID)
+		}
+		if entry.RoutingInstance != "" {
+			writeLine(b, "%s routing-instance %s", base, EscapeValue(entry.RoutingInstance))
+		}
+		if entry.RouteDistinguisher != "" {
+			writeLine(b, "%s route-distinguisher %s", base, entry.RouteDistinguisher)
+		}
+		if entry.VRFTarget != "" {
+			writeLine(b, "%s vrf-target %s", base, entry.VRFTarget)
+		}
+		for _, target := range sortedStrings(entry.VRFTargetImport) {
+			writeLine(b, "%s vrf-target import %s", base, target)
+		}
+		for _, target := range sortedStrings(entry.VRFTargetExport) {
+			writeLine(b, "%s vrf-target export %s", base, target)
+		}
+		if entry.SourceInterface != "" {
+			writeLine(b, "%s source-interface %s", base, entry.SourceInterface)
+		}
+		if entry.SourceAddress != "" {
+			writeLine(b, "%s source-address %s", base, entry.SourceAddress)
+		}
+		if entry.MulticastGroup != "" {
+			writeLine(b, "%s multicast-group %s", base, entry.MulticastGroup)
+		}
+		if entry.RemoteVTEP != "" {
+			writeLine(b, "%s remote-vtep %s", base, entry.RemoteVTEP)
+		}
+	}
+}
+
+func sortedStrings(values []string) []string {
+	sorted := append([]string(nil), values...)
+	sort.Strings(sorted)
+	return sorted
 }
 
 func writeMPLS(b *strings.Builder, mpls *MPLSConfig) {

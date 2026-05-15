@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"errors"
+	"io"
 	"strings"
 	"testing"
 	"time"
@@ -37,20 +38,33 @@ type fakeInteractiveClient struct {
 	lcpInfo          *grpcclient.LCPReconciliationInfo
 	haInfo           *grpcclient.HAStatusInfo
 	cosInfo          *grpcclient.ClassOfServiceInfo
+	telemetryCatalog grpcclient.TelemetryCatalog
+	telemetryEvents  []*grpcclient.TelemetryEvent
 
-	acquireLockCalls  int
-	discardCalls      int
-	releaseLockCalls  int
-	commitCalls       int
-	routeCalls        int
-	bfdStatusCalls    int
-	routingCalls      int
-	bgpNeighborCalls  int
-	ospfNeighborCalls int
-	listHistoryCalls  int
-	rollbackCalls     int
-	validateCalls     int
-	editTexts         []string
+	acquireLockCalls              int
+	discardCalls                  int
+	releaseLockCalls              int
+	commitCalls                   int
+	routeCalls                    int
+	bfdStatusCalls                int
+	routingCalls                  int
+	bgpNeighborCalls              int
+	ospfNeighborCalls             int
+	listHistoryCalls              int
+	rollbackCalls                 int
+	telemetryCatalogCalls         int
+	filteredTelemetryCatalogCalls int
+	telemetryCalls                int
+	validateCalls                 int
+	editTexts                     []string
+	telemetryCatalogPaths         []string
+	telemetryCatalogCardinalities []string
+	telemetryCatalogSchemas       []string
+	telemetryCatalogEncodings     []string
+	telemetryCatalogDefaultOnly   bool
+	telemetryPaths                []string
+	telemetryInterval             time.Duration
+	telemetryOnce                 bool
 }
 
 func (f *fakeInteractiveClient) GetRunning(ctx context.Context) (string, uint64, error) {
@@ -207,6 +221,87 @@ func (f *fakeInteractiveClient) GetClassOfService(ctx context.Context) (*grpccli
 		return f.cosInfo, nil
 	}
 	return &grpcclient.ClassOfServiceInfo{}, nil
+}
+
+func (f *fakeInteractiveClient) GetTelemetryCatalog(ctx context.Context) (grpcclient.TelemetryCatalog, error) {
+	f.telemetryCatalogCalls++
+	if len(f.telemetryCatalog.Paths) > 0 || len(f.telemetryCatalog.DefaultPaths) > 0 ||
+		f.telemetryCatalog.EventSchemaVersion != "" || f.telemetryCatalog.Encoding != "" {
+		return f.telemetryCatalog, nil
+	}
+	return grpcclient.NewTelemetryCatalog(), nil
+}
+
+func (f *fakeInteractiveClient) GetFilteredTelemetryCatalog(ctx context.Context, cardinalities []string, payloadSchemas []string) (grpcclient.TelemetryCatalog, error) {
+	return f.GetPathFilteredTelemetryCatalog(ctx, nil, cardinalities, payloadSchemas)
+}
+
+func (f *fakeInteractiveClient) GetPathFilteredTelemetryCatalog(ctx context.Context, paths []string, cardinalities []string, payloadSchemas []string) (grpcclient.TelemetryCatalog, error) {
+	return f.GetTelemetryCatalogWithFilter(ctx, grpcclient.TelemetryCatalogFilter{
+		Paths:          paths,
+		Cardinalities:  cardinalities,
+		PayloadSchemas: payloadSchemas,
+	})
+}
+
+func (f *fakeInteractiveClient) GetTelemetryCatalogWithFilter(ctx context.Context, filter grpcclient.TelemetryCatalogFilter) (grpcclient.TelemetryCatalog, error) {
+	f.filteredTelemetryCatalogCalls++
+	f.telemetryCatalogPaths = append([]string(nil), filter.Paths...)
+	f.telemetryCatalogCardinalities = append([]string(nil), filter.Cardinalities...)
+	f.telemetryCatalogSchemas = append([]string(nil), filter.PayloadSchemas...)
+	f.telemetryCatalogEncodings = append([]string(nil), filter.Encodings...)
+	f.telemetryCatalogDefaultOnly = filter.DefaultOnly
+	if len(f.telemetryCatalog.Paths) > 0 || len(f.telemetryCatalog.DefaultPaths) > 0 ||
+		f.telemetryCatalog.EventSchemaVersion != "" || f.telemetryCatalog.Encoding != "" {
+		catalog := f.telemetryCatalog
+		catalog.Paths = filterTelemetryPathCatalog(catalog.Paths, telemetryCatalogCLIOptions{
+			defaultOnly:    filter.DefaultOnly,
+			paths:          filter.Paths,
+			cardinalities:  filter.Cardinalities,
+			payloadSchemas: filter.PayloadSchemas,
+			encodings:      filter.Encodings,
+		})
+		return catalog, nil
+	}
+	return grpcclient.NewFilteredTelemetryCatalog(filter), nil
+}
+
+func (f *fakeInteractiveClient) SubscribeTelemetry(ctx context.Context, paths []string, sampleInterval time.Duration, once bool) (grpcclient.TelemetryReceiver, error) {
+	f.telemetryCalls++
+	f.telemetryPaths = append([]string(nil), paths...)
+	f.telemetryInterval = sampleInterval
+	f.telemetryOnce = once
+	return &fakeTelemetryStream{events: append([]*grpcclient.TelemetryEvent(nil), f.telemetryEvents...)}, nil
+}
+
+type fakeTelemetryStream struct {
+	events []*grpcclient.TelemetryEvent
+}
+
+func (s *fakeTelemetryStream) Recv() (*grpcclient.TelemetryEvent, error) {
+	if len(s.events) == 0 {
+		return nil, io.EOF
+	}
+	event := s.events[0]
+	s.events = s.events[1:]
+	return event, nil
+}
+
+func evpnTelemetryTestEvent() *grpcclient.TelemetryEvent {
+	return &grpcclient.TelemetryEvent{
+		Sequence:      1,
+		Timestamp:     time.Unix(100, 0).UTC(),
+		Path:          "/overlays/evpn",
+		Cardinality:   "per-vni",
+		PayloadSchema: "arca.telemetry.overlays.evpn.v1",
+		EventType:     "snapshot",
+		Encoding:      "json",
+		SchemaVersion: "arca.telemetry.v1",
+		JSONPayload: `{"vnis":[` +
+			`{"vni":10010,"type":"l2","bridge_domain":"BD-10","vlan_id":10,"route_distinguisher":"65000:10010","vrf_target":"target:65000:10010","source_interface":"ge-0/0/0","source_address":"192.0.2.1","multicast_group":"239.0.0.10"},` +
+			`{"vni":20010,"type":"l3","routing_instance":"BLUE","vrf_target_import":["target:65000:20010"],"vrf_target_export":["target:65000:20011"]}` +
+			`]}`,
+	}
 }
 
 func TestCmdConfigureRequiresSession(t *testing.T) {
@@ -577,6 +672,31 @@ func TestCmdShowClassOfServiceReturnsOutput(t *testing.T) {
 	}
 }
 
+func TestCmdShowEVPNUsesTelemetrySnapshot(t *testing.T) {
+	ctx := context.Background()
+	client := &fakeInteractiveClient{telemetryEvents: []*grpcclient.TelemetryEvent{evpnTelemetryTestEvent()}}
+	sh := &interactiveShell{
+		client:    client,
+		hostname:  "router",
+		mode:      modeOperational,
+		sessionID: "session-1",
+	}
+
+	err := sh.cmdShow(ctx, []string{"evpn"})
+	if err != nil {
+		t.Fatalf("cmdShow(evpn) error = %v", err)
+	}
+	if client.telemetryCalls != 1 {
+		t.Fatalf("telemetry calls = %d, want 1", client.telemetryCalls)
+	}
+	if len(client.telemetryPaths) != 1 || client.telemetryPaths[0] != "/overlays/evpn" {
+		t.Fatalf("telemetry paths = %#v, want /overlays/evpn", client.telemetryPaths)
+	}
+	if !client.telemetryOnce || client.telemetryInterval != 0 {
+		t.Fatalf("telemetry once/interval = %v/%v, want true/0", client.telemetryOnce, client.telemetryInterval)
+	}
+}
+
 func TestCmdShowRoutingInstancesReturnsOutput(t *testing.T) {
 	ctx := context.Background()
 	client := &fakeInteractiveClient{routingInstances: []grpcclient.RoutingInstanceInfo{
@@ -811,6 +931,20 @@ func TestOneShotShowClassOfServiceReturnsSuccess(t *testing.T) {
 	}
 }
 
+func TestOneShotShowEVPNReturnsSuccess(t *testing.T) {
+	client := &fakeInteractiveClient{telemetryEvents: []*grpcclient.TelemetryEvent{evpnTelemetryTestEvent()}}
+	code := oneShotShow(context.Background(), client, []string{"evpn"}, &cliFlags{})
+	if code != ExitSuccess {
+		t.Fatalf("oneShotShow(evpn) = %d, want %d", code, ExitSuccess)
+	}
+	if client.telemetryCalls != 1 {
+		t.Fatalf("telemetry calls = %d, want 1", client.telemetryCalls)
+	}
+	if len(client.telemetryPaths) != 1 || client.telemetryPaths[0] != "/overlays/evpn" {
+		t.Fatalf("telemetry paths = %#v, want /overlays/evpn", client.telemetryPaths)
+	}
+}
+
 func TestOneShotShowRoutingInstancesReturnsSuccess(t *testing.T) {
 	client := &fakeInteractiveClient{routingInstances: []grpcclient.RoutingInstanceInfo{{Name: "BLUE", IPv4TableID: 100, IPv6TableID: 100}}}
 	code := oneShotShow(context.Background(), client, []string{"routing-instances"}, &cliFlags{})
@@ -844,6 +978,270 @@ func TestOneShotShowRoutesReturnsSuccess(t *testing.T) {
 	}
 	if client.routeStateProto != "connected" {
 		t.Fatalf("route protocol filter = %q, want connected", client.routeStateProto)
+	}
+}
+
+func TestOneShotShowTelemetryReturnsSuccess(t *testing.T) {
+	client := &fakeInteractiveClient{telemetryEvents: []*grpcclient.TelemetryEvent{
+		{
+			Sequence:      1,
+			Timestamp:     time.Unix(100, 0).UTC(),
+			Path:          "/system",
+			Cardinality:   "single",
+			PayloadSchema: "arca.telemetry.system.v1",
+			EventType:     "snapshot",
+			Encoding:      "json",
+			SchemaVersion: "arca.telemetry.v1",
+			JSONPayload:   `{"hostname":"router1"}`,
+		},
+	}}
+	code := oneShotShow(context.Background(), client, []string{"telemetry", "path", "/system"}, &cliFlags{})
+	if code != ExitSuccess {
+		t.Fatalf("oneShotShow(telemetry) = %d, want %d", code, ExitSuccess)
+	}
+	if client.telemetryCalls != 1 {
+		t.Fatalf("telemetry calls = %d, want 1", client.telemetryCalls)
+	}
+	if len(client.telemetryPaths) != 1 || client.telemetryPaths[0] != "/system" {
+		t.Fatalf("telemetry paths = %#v, want /system", client.telemetryPaths)
+	}
+	if !client.telemetryOnce {
+		t.Fatal("telemetry once = false, want true")
+	}
+}
+
+func TestOneShotShowTelemetryPathsDoesNotSubscribe(t *testing.T) {
+	client := &fakeInteractiveClient{}
+	code := oneShotShow(context.Background(), client, []string{"telemetry", "paths"}, &cliFlags{})
+	if code != ExitSuccess {
+		t.Fatalf("oneShotShow(telemetry paths) = %d, want %d", code, ExitSuccess)
+	}
+	if client.telemetryCalls != 0 {
+		t.Fatalf("telemetry calls = %d, want local catalog output without subscription", client.telemetryCalls)
+	}
+	if client.telemetryCatalogCalls != 0 {
+		t.Fatalf("telemetry catalog calls = %d, want local catalog output without RPC", client.telemetryCatalogCalls)
+	}
+}
+
+func TestOneShotShowTelemetryPathsLiveUsesCatalogRPC(t *testing.T) {
+	client := &fakeInteractiveClient{telemetryCatalog: grpcclient.TelemetryCatalog{
+		EventSchemaVersion: "arca.telemetry.v1",
+		Encoding:           "json",
+		DefaultPaths:       []string{"/system"},
+		Paths: []grpcclient.TelemetryPathInfo{
+			{Path: "/system", Description: "system", Cardinality: "single", PayloadSchema: "arca.telemetry.system.v1", Default: true},
+			{Path: "/config/running", Description: "config", Cardinality: "single", PayloadSchema: "arca.telemetry.config.running.v1", Default: true},
+			{Path: "/routes", Description: "routes", Cardinality: "per-route", PayloadSchema: "arca.telemetry.routes.v1"},
+		},
+	}}
+	code := oneShotShow(context.Background(), client, []string{"telemetry", "paths", "live", "default", "path", "/system", "payload-schema", "arca.telemetry.system.v1", "encoding", "json"}, &cliFlags{})
+	if code != ExitSuccess {
+		t.Fatalf("oneShotShow(telemetry paths live default path payload-schema encoding) = %d, want %d", code, ExitSuccess)
+	}
+	if client.filteredTelemetryCatalogCalls != 1 {
+		t.Fatalf("filtered telemetry catalog calls = %d, want 1 live catalog RPC", client.filteredTelemetryCatalogCalls)
+	}
+	if client.telemetryCatalogCalls != 0 {
+		t.Fatalf("telemetry catalog calls = %d, want filtered catalog RPC", client.telemetryCatalogCalls)
+	}
+	if len(client.telemetryCatalogPaths) != 1 || client.telemetryCatalogPaths[0] != "/system" {
+		t.Fatalf("telemetry catalog paths = %#v, want system path filter", client.telemetryCatalogPaths)
+	}
+	if !client.telemetryCatalogDefaultOnly {
+		t.Fatal("telemetry catalog default-only = false, want true")
+	}
+	if len(client.telemetryCatalogSchemas) != 1 || client.telemetryCatalogSchemas[0] != "arca.telemetry.system.v1" {
+		t.Fatalf("telemetry catalog schemas = %#v, want system payload schema filter", client.telemetryCatalogSchemas)
+	}
+	if len(client.telemetryCatalogEncodings) != 1 || client.telemetryCatalogEncodings[0] != "json" {
+		t.Fatalf("telemetry catalog encodings = %#v, want json encoding filter", client.telemetryCatalogEncodings)
+	}
+	if client.telemetryCalls != 0 {
+		t.Fatalf("telemetry calls = %d, want catalog lookup without subscription", client.telemetryCalls)
+	}
+}
+
+func TestRunLocalOneShotTelemetryPaths(t *testing.T) {
+	handled, code := runLocalOneShotCommand([]string{"show", "telemetry", "paths"})
+	if !handled || code != ExitSuccess {
+		t.Fatalf("runLocalOneShotCommand(show telemetry paths) = handled %v code %d, want local success", handled, code)
+	}
+	if handled, _ := runLocalOneShotCommand([]string{"show", "telemetry", "paths", "live"}); handled {
+		t.Fatal("runLocalOneShotCommand(show telemetry paths live) handled live catalog command locally")
+	}
+	if handled, code := runLocalOneShotCommand([]string{"show", "telemetry", "paths", "cardinality", "per-route"}); !handled || code != ExitSuccess {
+		t.Fatalf("runLocalOneShotCommand(show telemetry paths cardinality) = handled %v code %d, want local success", handled, code)
+	}
+	if handled, code := runLocalOneShotCommand([]string{"show", "telemetry", "paths", "path", "/evpn"}); !handled || code != ExitSuccess {
+		t.Fatalf("runLocalOneShotCommand(show telemetry paths path /evpn) = handled %v code %d, want local success", handled, code)
+	}
+	if handled, code := runLocalOneShotCommand([]string{"show", "telemetry", "paths", "default"}); !handled || code != ExitSuccess {
+		t.Fatalf("runLocalOneShotCommand(show telemetry paths default) = handled %v code %d, want local success", handled, code)
+	}
+	if handled, code := runLocalOneShotCommand([]string{"show", "telemetry", "paths", "encoding", "json"}); !handled || code != ExitSuccess {
+		t.Fatalf("runLocalOneShotCommand(show telemetry paths encoding json) = handled %v code %d, want local success", handled, code)
+	}
+	if handled, _ := runLocalOneShotCommand([]string{"show", "telemetry", "paths", "live", "cardinality", "single"}); handled {
+		t.Fatal("runLocalOneShotCommand(show telemetry paths live cardinality) handled live catalog command locally")
+	}
+	if handled, _ := runLocalOneShotCommand([]string{"show", "telemetry", "path", "/system"}); handled {
+		t.Fatal("runLocalOneShotCommand(show telemetry path /system) handled streaming command locally")
+	}
+}
+
+func TestTelemetryCatalogCommand(t *testing.T) {
+	if !isTelemetryCatalogCommand([]string{"paths"}) || !isTelemetryCatalogCommand([]string{"catalog"}) {
+		t.Fatal("isTelemetryCatalogCommand() did not recognize paths/catalog")
+	}
+	if !isTelemetryCatalogCommand([]string{"paths", "live"}) || !isTelemetryCatalogCommand([]string{"catalog", "live"}) {
+		t.Fatal("isTelemetryCatalogCommand() did not recognize live paths/catalog")
+	}
+	if !isTelemetryCatalogCommand([]string{"paths", "cardinality", "per-route"}) ||
+		!isTelemetryCatalogCommand([]string{"paths", "default"}) ||
+		!isTelemetryCatalogCommand([]string{"paths", "default-only"}) ||
+		!isTelemetryCatalogCommand([]string{"paths", "path", "/evpn"}) ||
+		!isTelemetryCatalogCommand([]string{"paths", "encoding", "json"}) ||
+		!isTelemetryCatalogCommand([]string{"catalog", "live", "path", "evpn", "payload-schema", "arca.telemetry.routes.v1", "encoding", "json"}) {
+		t.Fatal("isTelemetryCatalogCommand() did not recognize filtered catalog commands")
+	}
+	if isTelemetryCatalogCommand([]string{"path", "/system"}) || isTelemetryCatalogCommand(nil) {
+		t.Fatal("isTelemetryCatalogCommand() recognized non-catalog telemetry arguments")
+	}
+	if isTelemetryCatalogCommand([]string{"paths", "cardinality"}) ||
+		isTelemetryCatalogCommand([]string{"paths", "path"}) ||
+		isTelemetryCatalogCommand([]string{"paths", "encoding"}) ||
+		isTelemetryCatalogCommand([]string{"paths", "unknown"}) {
+		t.Fatal("isTelemetryCatalogCommand() recognized invalid catalog arguments")
+	}
+}
+
+func TestFilterTelemetryPathCatalog(t *testing.T) {
+	catalog := []grpcclient.TelemetryPathInfo{
+		{Path: "/system", Cardinality: "single", PayloadSchema: "arca.telemetry.system.v1", Default: true},
+		{Path: "/config/running", Cardinality: "single", PayloadSchema: "arca.telemetry.config.running.v1", Default: true},
+		{Path: "/routes", Cardinality: "per-route", PayloadSchema: "arca.telemetry.routes.v1"},
+		{Path: "/overlays/evpn", Cardinality: "per-vni", PayloadSchema: "arca.telemetry.overlays.evpn.v1", Aliases: []string{"/evpn"}},
+		{Path: "/bfd", Cardinality: "per-peer", PayloadSchema: "arca.telemetry.bfd.v1"},
+	}
+	got := filterTelemetryPathCatalog(catalog, telemetryCatalogCLIOptions{
+		cardinalities:  []string{"per-route", "per-peer"},
+		payloadSchemas: []string{"ARCA.TELEMETRY.ROUTES.V1"},
+	})
+	if len(got) != 1 || got[0].Path != "/routes" {
+		t.Fatalf("filterTelemetryPathCatalog() = %#v, want only /routes", got)
+	}
+
+	got = filterTelemetryPathCatalog(catalog, telemetryCatalogCLIOptions{payloadSchemas: []string{"arca.telemetry.system.v1"}})
+	if len(got) != 1 || got[0].Path != "/system" {
+		t.Fatalf("filterTelemetryPathCatalog(payload schema) = %#v, want only /system", got)
+	}
+
+	got = filterTelemetryPathCatalog(catalog, telemetryCatalogCLIOptions{paths: []string{"evpn"}})
+	if len(got) != 1 || got[0].Path != "/overlays/evpn" {
+		t.Fatalf("filterTelemetryPathCatalog(path alias) = %#v, want only /overlays/evpn", got)
+	}
+
+	got = filterTelemetryPathCatalog(catalog, telemetryCatalogCLIOptions{defaultOnly: true})
+	if len(got) != 2 || got[0].Path != "/system" || got[1].Path != "/config/running" {
+		t.Fatalf("filterTelemetryPathCatalog(default only) = %#v, want default paths", got)
+	}
+
+	got = filterTelemetryPathCatalog(catalog, telemetryCatalogCLIOptions{encodings: []string{" JSON "}})
+	if len(got) != len(catalog) {
+		t.Fatalf("filterTelemetryPathCatalog(encoding) = %#v, want full catalog", got)
+	}
+
+	got = filterTelemetryPathCatalog(catalog, telemetryCatalogCLIOptions{encodings: []string{"protobuf"}})
+	if len(got) != 0 {
+		t.Fatalf("filterTelemetryPathCatalog(unsupported encoding) = %#v, want none", got)
+	}
+}
+
+func TestFormatTelemetryCatalogIntervalHints(t *testing.T) {
+	catalog := grpcclient.TelemetryCatalog{
+		DefaultSampleIntervalMs: 30000,
+		MinSampleIntervalMs:     1000,
+		MaxSampleIntervalMs:     3600000,
+	}
+	if got, want := formatTelemetryCatalogIntervalHints(catalog), "Sample interval: default=30000ms min=1000ms max=3600000ms"; got != want {
+		t.Fatalf("formatTelemetryCatalogIntervalHints() = %q, want %q", got, want)
+	}
+	if got := formatTelemetryCatalogIntervalHints(grpcclient.TelemetryCatalog{}); got != "" {
+		t.Fatalf("formatTelemetryCatalogIntervalHints(empty) = %q, want empty", got)
+	}
+}
+
+func TestTelemetryPayloadBytes(t *testing.T) {
+	event := &grpcclient.TelemetryEvent{
+		JSONPayload:  `{"hostname":"router1"}`,
+		PayloadBytes: 99,
+	}
+	if got := telemetryPayloadBytes(event); got != 99 {
+		t.Fatalf("telemetryPayloadBytes() = %d, want explicit payload bytes", got)
+	}
+	event.PayloadBytes = 0
+	if got, want := telemetryPayloadBytes(event), len(event.JSONPayload); got != want {
+		t.Fatalf("telemetryPayloadBytes() = %d, want fallback payload length %d", got, want)
+	}
+}
+
+func TestShowEVPNRejectsInvalidPayload(t *testing.T) {
+	client := &fakeInteractiveClient{telemetryEvents: []*grpcclient.TelemetryEvent{
+		{
+			Path:        "/overlays/evpn",
+			JSONPayload: `{"vnis":`,
+		},
+	}}
+	err := showEVPN(context.Background(), client)
+	if err == nil || !strings.Contains(err.Error(), "decode EVPN telemetry snapshot") {
+		t.Fatalf("showEVPN() error = %v, want decode failure", err)
+	}
+}
+
+func TestCountEVPNVNIs(t *testing.T) {
+	counts := countEVPNVNIs([]evpnTelemetryVNI{
+		{VNI: 10010, Type: "l2", MulticastGroup: "239.0.0.10"},
+		{VNI: 20010, Type: "l3"},
+		{VNI: 30010, Type: "l2"},
+	})
+	if counts.total != 3 || counts.l2 != 2 || counts.l3 != 1 || counts.multicast != 1 {
+		t.Fatalf("countEVPNVNIs() = %#v, want total 3 l2 2 l3 1 multicast 1", counts)
+	}
+}
+
+func TestFormatEVPNEndpoint(t *testing.T) {
+	if got := formatEVPNEndpoint(evpnTelemetryVNI{MulticastGroup: "239.0.0.10"}); got != "multicast:239.0.0.10" {
+		t.Fatalf("formatEVPNEndpoint(multicast) = %q", got)
+	}
+	if got := formatEVPNEndpoint(evpnTelemetryVNI{RemoteVTEP: "198.51.100.10"}); got != "remote:198.51.100.10" {
+		t.Fatalf("formatEVPNEndpoint(remote) = %q", got)
+	}
+	if got := formatEVPNEndpoint(evpnTelemetryVNI{}); got != "-" {
+		t.Fatalf("formatEVPNEndpoint(empty) = %q", got)
+	}
+}
+
+func TestTelemetryOptions(t *testing.T) {
+	opts, err := telemetryOptions([]string{"path", "/system", "path", "/routes", "interval", "5s", "count", "3"})
+	if err != nil {
+		t.Fatalf("telemetryOptions() error = %v", err)
+	}
+	if len(opts.paths) != 2 || opts.paths[0] != "/system" || opts.paths[1] != "/routes" {
+		t.Fatalf("paths = %#v, want /system and /routes", opts.paths)
+	}
+	if opts.interval != 5*time.Second {
+		t.Fatalf("interval = %v, want 5s", opts.interval)
+	}
+	if opts.once || opts.count != 3 {
+		t.Fatalf("once/count = %v/%d, want false/3", opts.once, opts.count)
+	}
+
+	if _, err := telemetryOptions([]string{"interval"}); !isTelemetryUsageError(err) {
+		t.Fatalf("telemetryOptions(interval) error = %v, want usage error", err)
+	}
+	if _, err := telemetryOptions([]string{"count", "0"}); !isTelemetryUsageError(err) {
+		t.Fatalf("telemetryOptions(count 0) error = %v, want usage error", err)
 	}
 }
 

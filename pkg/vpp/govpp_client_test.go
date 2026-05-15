@@ -196,6 +196,23 @@ func TestConvertInterfaceCounters(t *testing.T) {
 	}
 }
 
+func TestGovppClientGetQoSCapabilities(t *testing.T) {
+	client := &govppClient{}
+	caps, err := client.GetQoSCapabilities(context.Background())
+	if err != nil {
+		t.Fatalf("GetQoSCapabilities() error = %v", err)
+	}
+	if !caps.MetadataBinding {
+		t.Fatal("MetadataBinding = false, want true")
+	}
+	if caps.QueueScheduler || caps.Policer || caps.OperationalCounters {
+		t.Fatalf("QoS capabilities = %#v, want scheduler, policer, and counters unsupported", caps)
+	}
+	if len(caps.Diagnostics) == 0 {
+		t.Fatal("Diagnostics is empty, want bundled binapi limitation diagnostic")
+	}
+}
+
 func TestRxModeName(t *testing.T) {
 	tests := []struct {
 		mode interface_types.RxMode
@@ -393,6 +410,21 @@ func TestGovppClient_CreateInterface_NilRequest(t *testing.T) {
 	_, err := client.CreateInterface(ctx, nil)
 	if err == nil {
 		t.Error("CreateInterface(nil) expected error, got nil")
+	}
+}
+
+func TestVXLANMulticastInterfaceIndex(t *testing.T) {
+	multicast := VXLANRequest{
+		DestinationAddress:      net.ParseIP("239.0.0.10").To4(),
+		MulticastInterfaceIndex: 7,
+	}
+	if got := vxlanMulticastInterfaceIndex(multicast); got != 7 {
+		t.Fatalf("vxlanMulticastInterfaceIndex(multicast) = %d, want 7", got)
+	}
+
+	unicast := VXLANRequest{DestinationAddress: net.ParseIP("198.51.100.10").To4()}
+	if got := vxlanMulticastInterfaceIndex(unicast); got != ^uint32(0) {
+		t.Fatalf("vxlanMulticastInterfaceIndex(unicast) = %d, want %d", got, ^uint32(0))
 	}
 }
 

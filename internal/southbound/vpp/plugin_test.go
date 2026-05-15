@@ -6,6 +6,7 @@ import (
 	"io"
 	"log/slog"
 	"net"
+	"strings"
 	"testing"
 
 	"github.com/akam1o/arca-router/internal/engine"
@@ -16,6 +17,35 @@ import (
 
 func testLogger() *slog.Logger {
 	return slog.New(slog.NewTextHandler(io.Discard, nil))
+}
+
+func TestInitRecordsQoSCapabilities(t *testing.T) {
+	ctx := context.Background()
+	client := pkgvpp.NewMockClient()
+	client.SetQoSCapabilities(pkgvpp.QoSCapabilities{
+		MetadataBinding:     true,
+		QueueScheduler:      false,
+		Policer:             false,
+		OperationalCounters: false,
+		Diagnostics:         []string{"scheduler api unavailable"},
+	})
+	plugin := NewVPPPlugin(client, &device.HardwareConfig{}, testLogger())
+	if err := plugin.Init(ctx); err != nil {
+		t.Fatalf("Init() error = %v", err)
+	}
+	t.Cleanup(func() { _ = plugin.Close() })
+
+	status := plugin.QoSCapabilityStatus()
+	if status.LastCheck.IsZero() {
+		t.Fatal("QoSCapabilityStatus().LastCheck is zero")
+	}
+	if !status.Capabilities.MetadataBinding || status.Capabilities.QueueScheduler || status.Capabilities.Policer ||
+		status.Capabilities.OperationalCounters {
+		t.Fatalf("QoSCapabilityStatus().Capabilities = %#v, want metadata-only support", status.Capabilities)
+	}
+	if len(status.Capabilities.Diagnostics) != 1 || status.Capabilities.Diagnostics[0] != "scheduler api unavailable" {
+		t.Fatalf("QoSCapabilityStatus().Diagnostics = %#v", status.Capabilities.Diagnostics)
+	}
 }
 
 func TestApplyChangesPreservesInterfaceAddressHostIP(t *testing.T) {
@@ -317,6 +347,163 @@ func TestValidateChangesAllowsMPLSConfig(t *testing.T) {
 	}
 }
 
+func TestValidateChangesAllowsEVPNL2VXLAN(t *testing.T) {
+	plugin := NewVPPPlugin(pkgvpp.NewMockClient(), &device.HardwareConfig{
+		Interfaces: []device.PhysicalInterface{
+			{Name: "ge-0/0/0", PCI: "0000:03:00.0", Driver: "avf"},
+		},
+	}, testLogger())
+	newCfg := model.NewRouterConfig()
+	newCfg.Interfaces["ge-0/0/0"] = &model.InterfaceConfig{Units: map[int]*model.Unit{
+		0: {Family: map[string]*model.AddressFamily{
+			"inet": {Addresses: []string{"192.0.2.1/24"}},
+		}},
+	}}
+	newCfg.Protocols = &model.ProtocolsConfig{
+		EVPN: &model.EVPNConfig{VNIs: map[int]*model.EVPNVNI{
+			10010: {
+				VNI:             10010,
+				Type:            "l2",
+				BridgeDomain:    "BD-10",
+				SourceInterface: "ge-0/0/0",
+				MulticastGroup:  "239.0.0.10",
+			},
+		}},
+	}
+	diff := engine.ComputeDiff(model.NewRouterConfig(), newCfg)
+
+	if err := plugin.ValidateChanges(context.Background(), diff); err != nil {
+		t.Fatalf("ValidateChanges() error = %v, want nil", err)
+	}
+}
+
+func TestValidateChangesAllowsEVPNL3VXLAN(t *testing.T) {
+	plugin := NewVPPPlugin(pkgvpp.NewMockClient(), &device.HardwareConfig{
+		Interfaces: []device.PhysicalInterface{
+			{Name: "ge-0/0/0", PCI: "0000:03:00.0", Driver: "avf"},
+		},
+	}, testLogger())
+	newCfg := model.NewRouterConfig()
+	newCfg.Interfaces["ge-0/0/0"] = &model.InterfaceConfig{Units: map[int]*model.Unit{
+		0: {Family: map[string]*model.AddressFamily{
+			"inet": {Addresses: []string{"192.0.2.1/24"}},
+		}},
+	}}
+	newCfg.RoutingInstances = map[string]*model.RoutingInstance{
+		"BLUE": {InstanceType: "vrf", RouteDistinguisher: "65000:200"},
+	}
+	newCfg.Protocols = &model.ProtocolsConfig{
+		EVPN: &model.EVPNConfig{VNIs: map[int]*model.EVPNVNI{
+			20010: {
+				VNI:             20010,
+				Type:            "l3",
+				RoutingInstance: "BLUE",
+				SourceInterface: "ge-0/0/0",
+				MulticastGroup:  "239.0.0.20",
+			},
+		}},
+	}
+	diff := engine.ComputeDiff(model.NewRouterConfig(), newCfg)
+
+	if err := plugin.ValidateChanges(context.Background(), diff); err != nil {
+		t.Fatalf("ValidateChanges() error = %v, want nil", err)
+	}
+}
+
+func TestValidateChangesAllowsEVPNRemoteVTEP(t *testing.T) {
+	plugin := NewVPPPlugin(pkgvpp.NewMockClient(), &device.HardwareConfig{
+		Interfaces: []device.PhysicalInterface{
+			{Name: "ge-0/0/0", PCI: "0000:03:00.0", Driver: "avf"},
+		},
+	}, testLogger())
+	newCfg := model.NewRouterConfig()
+	newCfg.Interfaces["ge-0/0/0"] = &model.InterfaceConfig{Units: map[int]*model.Unit{
+		0: {Family: map[string]*model.AddressFamily{
+			"inet": {Addresses: []string{"192.0.2.1/24"}},
+		}},
+	}}
+	newCfg.Protocols = &model.ProtocolsConfig{
+		EVPN: &model.EVPNConfig{VNIs: map[int]*model.EVPNVNI{
+			10010: {
+				VNI:             10010,
+				Type:            "l2",
+				BridgeDomain:    "BD-10",
+				SourceInterface: "ge-0/0/0",
+				RemoteVTEP:      "198.51.100.10",
+			},
+		}},
+	}
+	diff := engine.ComputeDiff(model.NewRouterConfig(), newCfg)
+
+	if err := plugin.ValidateChanges(context.Background(), diff); err != nil {
+		t.Fatalf("ValidateChanges() error = %v, want nil", err)
+	}
+}
+
+func TestValidateChangesRejectsInvalidEVPNDataplane(t *testing.T) {
+	tests := []struct {
+		name string
+		vni  *model.EVPNVNI
+		want string
+	}{
+		{
+			name: "missing multicast",
+			vni:  &model.EVPNVNI{VNI: 10010, Type: "l2", BridgeDomain: "BD-10", SourceInterface: "ge-0/0/0"},
+			want: "multicast-group or remote-vtep is required",
+		},
+		{
+			name: "unknown l3 routing instance",
+			vni:  &model.EVPNVNI{VNI: 20010, Type: "l3", RoutingInstance: "RED", SourceInterface: "ge-0/0/0", MulticastGroup: "239.0.0.20"},
+			want: "routing-instance RED is not configured for VPP VXLAN L3 dataplane",
+		},
+		{
+			name: "multicast and remote vtep",
+			vni:  &model.EVPNVNI{VNI: 10010, Type: "l2", BridgeDomain: "BD-10", SourceInterface: "ge-0/0/0", MulticastGroup: "239.0.0.10", RemoteVTEP: "198.51.100.10"},
+			want: "multicast-group and remote-vtep are mutually exclusive",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			plugin := NewVPPPlugin(pkgvpp.NewMockClient(), &device.HardwareConfig{
+				Interfaces: []device.PhysicalInterface{
+					{Name: "ge-0/0/0", PCI: "0000:03:00.0", Driver: "avf"},
+				},
+			}, testLogger())
+			newCfg := model.NewRouterConfig()
+			newCfg.Interfaces["ge-0/0/0"] = &model.InterfaceConfig{Units: map[int]*model.Unit{
+				0: {Family: map[string]*model.AddressFamily{
+					"inet": {Addresses: []string{"192.0.2.1/24"}},
+				}},
+			}}
+			newCfg.RoutingInstances = map[string]*model.RoutingInstance{"BLUE": {InstanceType: "vrf"}}
+			newCfg.Protocols = &model.ProtocolsConfig{
+				EVPN: &model.EVPNConfig{VNIs: map[int]*model.EVPNVNI{tt.vni.VNI: tt.vni}},
+			}
+			diff := engine.ComputeDiff(model.NewRouterConfig(), newCfg)
+
+			err := plugin.ValidateChanges(context.Background(), diff)
+			if err == nil || !strings.Contains(err.Error(), tt.want) {
+				t.Fatalf("ValidateChanges() error = %v, want %q", err, tt.want)
+			}
+		})
+	}
+}
+
+func TestValidateChangesAllowsRemovingEVPNIntent(t *testing.T) {
+	plugin := NewVPPPlugin(pkgvpp.NewMockClient(), &device.HardwareConfig{}, testLogger())
+	oldCfg := model.NewRouterConfig()
+	oldCfg.Protocols = &model.ProtocolsConfig{
+		EVPN: &model.EVPNConfig{VNIs: map[int]*model.EVPNVNI{
+			10010: {VNI: 10010, Type: "l2", BridgeDomain: "BD-10"},
+		}},
+	}
+	diff := engine.ComputeDiff(oldCfg, model.NewRouterConfig())
+
+	if err := plugin.ValidateChanges(context.Background(), diff); err != nil {
+		t.Fatalf("ValidateChanges() error = %v, want nil for EVPN removal", err)
+	}
+}
+
 func TestValidateChangesAllowsRoutingInstances(t *testing.T) {
 	plugin := NewVPPPlugin(pkgvpp.NewMockClient(), &device.HardwareConfig{}, testLogger())
 	newCfg := model.NewRouterConfig()
@@ -450,6 +637,238 @@ func TestApplyChangesMapsRoutingInstanceTables(t *testing.T) {
 	}
 	if got := state["ge-0/0/0"]; got == nil || got.IPv4TableID != 0 || got.IPv6TableID != 0 {
 		t.Fatalf("CollectState() table IDs after removal = %#v, want default table 0", got)
+	}
+}
+
+func TestApplyChangesConfiguresEVPNL2VXLAN(t *testing.T) {
+	ctx := context.Background()
+	client := pkgvpp.NewMockClient()
+	plugin := NewVPPPlugin(client, &device.HardwareConfig{
+		Interfaces: []device.PhysicalInterface{
+			{Name: "ge-0/0/0", PCI: "0000:03:00.0", Driver: "avf"},
+		},
+	}, testLogger())
+	if err := plugin.Init(ctx); err != nil {
+		t.Fatalf("Init() error = %v", err)
+	}
+	t.Cleanup(func() { _ = plugin.Close() })
+
+	newCfg := model.NewRouterConfig()
+	newCfg.Interfaces["ge-0/0/0"] = &model.InterfaceConfig{Units: map[int]*model.Unit{
+		0: {Family: map[string]*model.AddressFamily{
+			"inet": {Addresses: []string{"192.0.2.1/24"}},
+		}},
+	}}
+	newCfg.Protocols = &model.ProtocolsConfig{
+		EVPN: &model.EVPNConfig{VNIs: map[int]*model.EVPNVNI{
+			10010: {
+				VNI:             10010,
+				Type:            "l2",
+				BridgeDomain:    "BD-10",
+				SourceInterface: "ge-0/0/0",
+				MulticastGroup:  "239.0.0.10",
+			},
+		}},
+	}
+
+	diff := engine.ComputeDiff(model.NewRouterConfig(), newCfg)
+	if err := plugin.ValidateChanges(ctx, diff); err != nil {
+		t.Fatalf("ValidateChanges() error = %v", err)
+	}
+	if err := plugin.ApplyChanges(ctx, diff); err != nil {
+		t.Fatalf("ApplyChanges() error = %v", err)
+	}
+	sourceIndex, ok := plugin.GetInterfaceIndex("ge-0/0/0")
+	if !ok {
+		t.Fatal("ApplyChanges() did not add source interface index")
+	}
+	vxlanIndex, ok := plugin.vxlanIfIndex[10010]
+	if !ok {
+		t.Fatal("ApplyChanges() did not add VXLAN interface index")
+	}
+	vxlanReq := pkgvpp.VXLANRequest{
+		VNI:                     10010,
+		SourceAddress:           net.ParseIP("192.0.2.1").To4(),
+		DestinationAddress:      net.ParseIP("239.0.0.10").To4(),
+		MulticastInterfaceIndex: sourceIndex,
+	}
+	if !client.BridgeDomainExists(10010) {
+		t.Fatal("ApplyChanges() did not create bridge domain 10010")
+	}
+	if !client.VXLANExists(vxlanReq) {
+		t.Fatalf("ApplyChanges() did not create VXLAN tunnel %#v", vxlanReq)
+	}
+	if bdID, ok := client.L2BridgeDomain(vxlanIndex); !ok || bdID != 10010 {
+		t.Fatalf("L2BridgeDomain(%d) = %d, %t; want 10010, true", vxlanIndex, bdID, ok)
+	}
+	vxlanIface, err := client.GetInterface(ctx, vxlanIndex)
+	if err != nil {
+		t.Fatalf("GetInterface(VXLAN) error = %v", err)
+	}
+	if !vxlanIface.AdminUp {
+		t.Fatal("VXLAN interface is not admin up")
+	}
+
+	withoutEVPN := newCfg.Clone()
+	withoutEVPN.Protocols.EVPN = nil
+	if err := plugin.ApplyChanges(ctx, engine.ComputeDiff(newCfg, withoutEVPN)); err != nil {
+		t.Fatalf("ApplyChanges() remove EVPN error = %v", err)
+	}
+	if _, ok := plugin.vxlanIfIndex[10010]; ok {
+		t.Fatal("ApplyChanges() left VXLAN interface index after removing EVPN")
+	}
+	if client.BridgeDomainExists(10010) {
+		t.Fatal("ApplyChanges() left bridge domain after removing EVPN")
+	}
+	if client.VXLANExists(vxlanReq) {
+		t.Fatal("ApplyChanges() left VXLAN tunnel after removing EVPN")
+	}
+}
+
+func TestApplyChangesConfiguresEVPNL2RemoteVTEP(t *testing.T) {
+	ctx := context.Background()
+	client := pkgvpp.NewMockClient()
+	plugin := NewVPPPlugin(client, &device.HardwareConfig{
+		Interfaces: []device.PhysicalInterface{
+			{Name: "ge-0/0/0", PCI: "0000:03:00.0", Driver: "avf"},
+		},
+	}, testLogger())
+	if err := plugin.Init(ctx); err != nil {
+		t.Fatalf("Init() error = %v", err)
+	}
+	t.Cleanup(func() { _ = plugin.Close() })
+
+	newCfg := model.NewRouterConfig()
+	newCfg.Interfaces["ge-0/0/0"] = &model.InterfaceConfig{Units: map[int]*model.Unit{
+		0: {Family: map[string]*model.AddressFamily{
+			"inet": {Addresses: []string{"192.0.2.1/24"}},
+		}},
+	}}
+	newCfg.Protocols = &model.ProtocolsConfig{
+		EVPN: &model.EVPNConfig{VNIs: map[int]*model.EVPNVNI{
+			10010: {
+				VNI:             10010,
+				Type:            "l2",
+				BridgeDomain:    "BD-10",
+				SourceInterface: "ge-0/0/0",
+				RemoteVTEP:      "198.51.100.10",
+			},
+		}},
+	}
+
+	diff := engine.ComputeDiff(model.NewRouterConfig(), newCfg)
+	if err := plugin.ValidateChanges(ctx, diff); err != nil {
+		t.Fatalf("ValidateChanges() error = %v", err)
+	}
+	if err := plugin.ApplyChanges(ctx, diff); err != nil {
+		t.Fatalf("ApplyChanges() error = %v", err)
+	}
+	vxlanIndex, ok := plugin.vxlanIfIndex[10010]
+	if !ok {
+		t.Fatal("ApplyChanges() did not add remote VTEP VXLAN interface index")
+	}
+	vxlanReq := pkgvpp.VXLANRequest{
+		VNI:                10010,
+		SourceAddress:      net.ParseIP("192.0.2.1").To4(),
+		DestinationAddress: net.ParseIP("198.51.100.10").To4(),
+	}
+	if !client.VXLANExists(vxlanReq) {
+		t.Fatalf("ApplyChanges() did not create remote VTEP VXLAN tunnel %#v", vxlanReq)
+	}
+	if bdID, ok := client.L2BridgeDomain(vxlanIndex); !ok || bdID != 10010 {
+		t.Fatalf("L2BridgeDomain(%d) = %d, %t; want 10010, true", vxlanIndex, bdID, ok)
+	}
+}
+
+func TestApplyChangesConfiguresEVPNL3VXLAN(t *testing.T) {
+	ctx := context.Background()
+	client := pkgvpp.NewMockClient()
+	plugin := NewVPPPlugin(client, &device.HardwareConfig{
+		Interfaces: []device.PhysicalInterface{
+			{Name: "ge-0/0/0", PCI: "0000:03:00.0", Driver: "avf"},
+		},
+	}, testLogger())
+	if err := plugin.Init(ctx); err != nil {
+		t.Fatalf("Init() error = %v", err)
+	}
+	t.Cleanup(func() { _ = plugin.Close() })
+
+	newCfg := model.NewRouterConfig()
+	newCfg.Interfaces["ge-0/0/0"] = &model.InterfaceConfig{Units: map[int]*model.Unit{
+		0: {Family: map[string]*model.AddressFamily{
+			"inet": {Addresses: []string{"192.0.2.1/24"}},
+		}},
+	}}
+	newCfg.RoutingInstances = map[string]*model.RoutingInstance{
+		"BLUE": {InstanceType: "vrf", RouteDistinguisher: "65000:200"},
+	}
+	newCfg.Protocols = &model.ProtocolsConfig{
+		EVPN: &model.EVPNConfig{VNIs: map[int]*model.EVPNVNI{
+			20010: {
+				VNI:             20010,
+				Type:            "l3",
+				RoutingInstance: "BLUE",
+				SourceInterface: "ge-0/0/0",
+				MulticastGroup:  "239.0.0.20",
+			},
+		}},
+	}
+
+	diff := engine.ComputeDiff(model.NewRouterConfig(), newCfg)
+	if err := plugin.ValidateChanges(ctx, diff); err != nil {
+		t.Fatalf("ValidateChanges() error = %v", err)
+	}
+	if err := plugin.ApplyChanges(ctx, diff); err != nil {
+		t.Fatalf("ApplyChanges() error = %v", err)
+	}
+	sourceIndex, ok := plugin.GetInterfaceIndex("ge-0/0/0")
+	if !ok {
+		t.Fatal("ApplyChanges() did not add source interface index")
+	}
+	vxlanIndex, ok := plugin.vxlanIfIndex[20010]
+	if !ok {
+		t.Fatal("ApplyChanges() did not add VXLAN interface index")
+	}
+	vxlanReq := pkgvpp.VXLANRequest{
+		VNI:                     20010,
+		SourceAddress:           net.ParseIP("192.0.2.1").To4(),
+		DestinationAddress:      net.ParseIP("239.0.0.20").To4(),
+		MulticastInterfaceIndex: sourceIndex,
+		EncapsulationTable:      200,
+		L3:                      true,
+	}
+	if !client.IPTableExists(200, false) || !client.IPTableExists(200, true) {
+		t.Fatal("ApplyChanges() did not create routing-instance table pair 200")
+	}
+	if !client.VXLANExists(vxlanReq) {
+		t.Fatalf("ApplyChanges() did not create L3 VXLAN tunnel %#v", vxlanReq)
+	}
+	if client.BridgeDomainExists(20010) {
+		t.Fatal("ApplyChanges() created a bridge domain for L3 VXLAN")
+	}
+	if _, ok := client.L2BridgeDomain(vxlanIndex); ok {
+		t.Fatal("ApplyChanges() attached L3 VXLAN to an L2 bridge domain")
+	}
+	if got := client.InterfaceTableID(vxlanIndex, false); got != 200 {
+		t.Fatalf("L3 VXLAN IPv4 table = %d, want 200", got)
+	}
+	if got := client.InterfaceTableID(vxlanIndex, true); got != 200 {
+		t.Fatalf("L3 VXLAN IPv6 table = %d, want 200", got)
+	}
+
+	withoutOverlay := model.NewRouterConfig()
+	withoutOverlay.Interfaces["ge-0/0/0"] = newCfg.Interfaces["ge-0/0/0"].Clone()
+	if err := plugin.ApplyChanges(ctx, engine.ComputeDiff(newCfg, withoutOverlay)); err != nil {
+		t.Fatalf("ApplyChanges() remove L3 EVPN error = %v", err)
+	}
+	if _, ok := plugin.vxlanIfIndex[20010]; ok {
+		t.Fatal("ApplyChanges() left L3 VXLAN interface index after removing EVPN")
+	}
+	if client.VXLANExists(vxlanReq) {
+		t.Fatal("ApplyChanges() left L3 VXLAN tunnel after removing EVPN")
+	}
+	if client.IPTableExists(200, false) || client.IPTableExists(200, true) {
+		t.Fatal("ApplyChanges() left routing-instance table pair after removing routing-instance")
 	}
 }
 

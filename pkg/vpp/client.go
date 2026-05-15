@@ -62,11 +62,29 @@ type Client interface {
 	// GetInterfaceTable returns the IPv4 or IPv6 FIB table bound to an interface.
 	GetInterfaceTable(ctx context.Context, ifIndex uint32, isIPv6 bool) (uint32, error)
 
+	// GetQoSCapabilities reports VPP class-of-service dataplane capabilities.
+	GetQoSCapabilities(ctx context.Context) (QoSCapabilities, error)
+
 	// SetQoSProfile binds output QoS policy intent to an interface.
 	SetQoSProfile(ctx context.Context, ifIndex uint32, profile QoSProfile) error
 
 	// ClearQoSProfile removes output QoS policy intent from an interface.
 	ClearQoSProfile(ctx context.Context, ifIndex uint32) error
+
+	// AddBridgeDomain creates a VPP L2 bridge domain.
+	AddBridgeDomain(ctx context.Context, bridge BridgeDomain) error
+
+	// DeleteBridgeDomain deletes a VPP L2 bridge domain.
+	DeleteBridgeDomain(ctx context.Context, bridgeID uint32) error
+
+	// CreateVXLAN creates a VXLAN tunnel interface.
+	CreateVXLAN(ctx context.Context, req VXLANRequest) (*Interface, error)
+
+	// DeleteVXLAN deletes a VXLAN tunnel interface.
+	DeleteVXLAN(ctx context.Context, req VXLANRequest) error
+
+	// SetInterfaceL2Bridge attaches or detaches an interface to a bridge domain.
+	SetInterfaceL2Bridge(ctx context.Context, ifIndex uint32, bridgeID uint32, enable bool) error
 
 	// ListInterfaceCounters returns packet and byte counters by VPP interface index.
 	ListInterfaceCounters(ctx context.Context) (map[uint32]InterfaceCounters, error)
@@ -175,6 +193,35 @@ type QoSProfile struct {
 type QoSQueue struct {
 	ForwardingClass string
 	Queue           uint8
+}
+
+// QoSCapabilities describes class-of-service dataplane support exposed by VPP.
+type QoSCapabilities struct {
+	MetadataBinding     bool
+	QueueScheduler      bool
+	Policer             bool
+	OperationalCounters bool
+	Diagnostics         []string
+}
+
+// BridgeDomain represents a VPP bridge-domain.
+type BridgeDomain struct {
+	ID      uint32
+	Tag     string
+	Flood   bool
+	UUFlood bool
+	Forward bool
+	Learn   bool
+}
+
+// VXLANRequest represents the parameters for one VXLAN tunnel.
+type VXLANRequest struct {
+	VNI                     uint32
+	SourceAddress           net.IP
+	DestinationAddress      net.IP
+	MulticastInterfaceIndex uint32
+	EncapsulationTable      uint32
+	L3                      bool
 }
 
 // InterfaceQueuePlacements holds VPP RX/TX queue placement for an interface.

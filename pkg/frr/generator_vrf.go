@@ -22,42 +22,56 @@ func GenerateVRFConfig(vrfs []VRFConfig) (string, error) {
 		if vrf.Name == "" {
 			return "", NewInvalidConfigError("VRF name is required")
 		}
+		if vrf.VNI < 0 || vrf.VNI > 16777215 {
+			return "", NewInvalidConfigError(fmt.Sprintf("VRF %s: VNI must be between 1 and 16777215", vrf.Name))
+		}
 		fmt.Fprintf(&b, "vrf %s\n", vrf.Name)
+		if vrf.VNI > 0 {
+			fmt.Fprintf(&b, " vni %d\n", vrf.VNI)
+		}
 		b.WriteString(" exit-vrf\n")
 		b.WriteString("!\n")
 
-		if !vrfHasVPNConfig(vrf) {
+		if !vrfHasBGPConfig(vrf) {
 			continue
 		}
 		if vrf.ASN == 0 {
-			return "", NewInvalidConfigError(fmt.Sprintf("VRF %s: BGP ASN is required for VPN import/export", vrf.Name))
+			return "", NewInvalidConfigError(fmt.Sprintf("VRF %s: BGP ASN is required for VPN/EVPN import/export", vrf.Name))
 		}
 
-		for _, family := range []string{"ipv4", "ipv6"} {
-			fmt.Fprintf(&b, "router bgp %d vrf %s\n", vrf.ASN, vrf.Name)
-			b.WriteString(" !\n")
-			fmt.Fprintf(&b, " address-family %s unicast\n", family)
-			if len(vrf.ExportTargets) > 0 {
-				if vrf.RouteDistinguisher == "" {
-					return "", NewInvalidConfigError(fmt.Sprintf("VRF %s: route-distinguisher is required for VPN export", vrf.Name))
+		if vrfHasVPNConfig(vrf) {
+			for _, family := range []string{"ipv4", "ipv6"} {
+				fmt.Fprintf(&b, "router bgp %d vrf %s\n", vrf.ASN, vrf.Name)
+				b.WriteString(" !\n")
+				fmt.Fprintf(&b, " address-family %s unicast\n", family)
+				if len(vrf.ExportTargets) > 0 {
+					if vrf.RouteDistinguisher == "" {
+						return "", NewInvalidConfigError(fmt.Sprintf("VRF %s: route-distinguisher is required for VPN export", vrf.Name))
+					}
+					fmt.Fprintf(&b, "  rd vpn export %s\n", vrf.RouteDistinguisher)
+					b.WriteString("  export vpn\n")
+					b.WriteString("  label vpn export auto\n")
+					fmt.Fprintf(&b, "  rt vpn export %s\n", strings.Join(vrf.ExportTargets, " "))
 				}
-				fmt.Fprintf(&b, "  rd vpn export %s\n", vrf.RouteDistinguisher)
-				b.WriteString("  export vpn\n")
-				b.WriteString("  label vpn export auto\n")
-				fmt.Fprintf(&b, "  rt vpn export %s\n", strings.Join(vrf.ExportTargets, " "))
+				if len(vrf.ImportTargets) > 0 {
+					b.WriteString("  import vpn\n")
+					fmt.Fprintf(&b, "  rt vpn import %s\n", strings.Join(vrf.ImportTargets, " "))
+				}
+				if vrf.ImportRouteMap != "" {
+					fmt.Fprintf(&b, "  route-map vpn import %s\n", vrf.ImportRouteMap)
+				}
+				if vrf.ExportRouteMap != "" {
+					fmt.Fprintf(&b, "  route-map vpn export %s\n", vrf.ExportRouteMap)
+				}
+				b.WriteString(" exit-address-family\n")
+				b.WriteString("!\n")
 			}
-			if len(vrf.ImportTargets) > 0 {
-				b.WriteString("  import vpn\n")
-				fmt.Fprintf(&b, "  rt vpn import %s\n", strings.Join(vrf.ImportTargets, " "))
+		}
+
+		if vrf.EVPN != nil {
+			if err := writeVRFEVPNConfig(&b, vrf); err != nil {
+				return "", err
 			}
-			if vrf.ImportRouteMap != "" {
-				fmt.Fprintf(&b, "  route-map vpn import %s\n", vrf.ImportRouteMap)
-			}
-			if vrf.ExportRouteMap != "" {
-				fmt.Fprintf(&b, "  route-map vpn export %s\n", vrf.ExportRouteMap)
-			}
-			b.WriteString(" exit-address-family\n")
-			b.WriteString("!\n")
 		}
 	}
 	return b.String(), nil
@@ -217,4 +231,35 @@ func vrfNeedsBGP(importTargets, exportTargets []string, importRouteMap, exportRo
 
 func vrfHasVPNConfig(vrf VRFConfig) bool {
 	return vrfNeedsBGP(vrf.ImportTargets, vrf.ExportTargets, vrf.ImportRouteMap, vrf.ExportRouteMap)
+}
+
+func vrfHasBGPConfig(vrf VRFConfig) bool {
+	return vrfHasVPNConfig(vrf) || vrf.EVPN != nil
+}
+
+func writeVRFEVPNConfig(b *strings.Builder, vrf VRFConfig) error {
+	for _, target := range append(append([]string{}, vrf.EVPN.ImportTargets...), vrf.EVPN.ExportTargets...) {
+		if !evpnTargetPattern.MatchString(target) {
+			return NewInvalidConfigError(fmt.Sprintf("VRF %s: invalid EVPN route-target %s", vrf.Name, target))
+		}
+	}
+
+	fmt.Fprintf(b, "router bgp %d vrf %s\n", vrf.ASN, vrf.Name)
+	b.WriteString(" !\n")
+	b.WriteString(" address-family l2vpn evpn\n")
+	if vrf.EVPN.AdvertiseIPv4Unicast {
+		b.WriteString("  advertise ipv4 unicast\n")
+	}
+	if vrf.EVPN.AdvertiseIPv6Unicast {
+		b.WriteString("  advertise ipv6 unicast\n")
+	}
+	if len(vrf.EVPN.ImportTargets) > 0 {
+		fmt.Fprintf(b, "  route-target import %s\n", strings.Join(vrf.EVPN.ImportTargets, " "))
+	}
+	if len(vrf.EVPN.ExportTargets) > 0 {
+		fmt.Fprintf(b, "  route-target export %s\n", strings.Join(vrf.EVPN.ExportTargets, " "))
+	}
+	b.WriteString(" exit-address-family\n")
+	b.WriteString("!\n")
+	return nil
 }

@@ -418,6 +418,19 @@ func (a *stateServiceAdapter) GetClassOfService(ctx context.Context, _ *apiv1.Ge
 	resp := &apiv1.GetClassOfServiceResponse{
 		EnforcementStatus: info.EnforcementStatus,
 	}
+	if capabilities := info.Capabilities; capabilities != nil {
+		resp.Capabilities = &apiv1.ClassOfServiceCapabilities{
+			MetadataBindingSupported: capabilities.MetadataBindingSupported,
+			QueueSchedulerSupported:  capabilities.QueueSchedulerSupported,
+			PolicerSupported:         capabilities.PolicerSupported,
+			CountersSupported:        capabilities.CountersSupported,
+			LastError:                capabilities.LastError,
+			Diagnostics:              append([]string(nil), capabilities.Diagnostics...),
+		}
+		if !capabilities.LastCheck.IsZero() {
+			resp.Capabilities.LastCheck = capabilities.LastCheck.UTC().Format(time.RFC3339Nano)
+		}
+	}
 	for _, fc := range info.ForwardingClasses {
 		queue := uint32(0)
 		if fc.Queue > 0 {
@@ -456,4 +469,71 @@ func (a *stateServiceAdapter) GetSystemInfo(ctx context.Context, _ *apiv1.GetSys
 		Version:    info.Version,
 		UptimeSecs: info.UptimeSecs,
 	}, nil
+}
+
+type telemetryServiceAdapter struct {
+	apiv1.UnimplementedTelemetryServiceServer
+	server *Server
+}
+
+func (a *telemetryServiceAdapter) GetTelemetryCatalog(_ context.Context, req *apiv1.GetTelemetryCatalogRequest) (*apiv1.GetTelemetryCatalogResponse, error) {
+	var filter TelemetryCatalogFilter
+	if req != nil {
+		filter = TelemetryCatalogFilter{
+			Paths:          append([]string(nil), req.GetPath()...),
+			Cardinalities:  append([]string(nil), req.GetCardinality()...),
+			PayloadSchemas: append([]string(nil), req.GetPayloadSchema()...),
+			Encodings:      append([]string(nil), req.GetEncoding()...),
+			DefaultOnly:    req.GetDefaultOnly(),
+		}
+	}
+	return telemetryCatalogToProto(NewFilteredTelemetryCatalog(filter)), nil
+}
+
+func (a *telemetryServiceAdapter) SubscribeTelemetry(req *apiv1.SubscribeTelemetryRequest, stream apiv1.TelemetryService_SubscribeTelemetryServer) error {
+	interval := time.Duration(req.GetSampleIntervalMs()) * time.Millisecond
+	return a.server.SubscribeTelemetry(stream.Context(), req.GetPaths(), interval, req.GetOnce(), func(event TelemetryEvent) error {
+		return stream.Send(telemetryEventToProto(event))
+	})
+}
+
+func telemetryCatalogToProto(catalog TelemetryCatalog) *apiv1.GetTelemetryCatalogResponse {
+	resp := &apiv1.GetTelemetryCatalogResponse{
+		EventSchemaVersion:      catalog.EventSchemaVersion,
+		Encoding:                catalog.Encoding,
+		DefaultPaths:            append([]string(nil), catalog.DefaultPaths...),
+		DefaultSampleIntervalMs: catalog.DefaultSampleIntervalMs,
+		MinSampleIntervalMs:     catalog.MinSampleIntervalMs,
+		MaxSampleIntervalMs:     catalog.MaxSampleIntervalMs,
+		Paths:                   make([]*apiv1.TelemetryPath, 0, len(catalog.Paths)),
+	}
+	for _, info := range catalog.Paths {
+		resp.Paths = append(resp.Paths, &apiv1.TelemetryPath{
+			Path:          info.Path,
+			Description:   info.Description,
+			Cardinality:   info.Cardinality,
+			PayloadSchema: info.PayloadSchema,
+			Aliases:       append([]string(nil), info.Aliases...),
+			Default:       info.Default,
+		})
+	}
+	return resp
+}
+
+func telemetryEventToProto(event TelemetryEvent) *apiv1.TelemetryEvent {
+	resp := &apiv1.TelemetryEvent{
+		Sequence:      event.Sequence,
+		Path:          event.Path,
+		Cardinality:   event.Cardinality,
+		PayloadSchema: event.PayloadSchema,
+		EventType:     event.EventType,
+		Encoding:      event.Encoding,
+		JsonPayload:   event.JSONPayload,
+		SchemaVersion: event.SchemaVersion,
+		PayloadBytes:  uint64(event.PayloadBytes),
+	}
+	if !event.Timestamp.IsZero() {
+		resp.Timestamp = event.Timestamp.UTC().Format(time.RFC3339Nano)
+	}
+	return resp
 }

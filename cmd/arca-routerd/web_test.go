@@ -18,6 +18,7 @@ import (
 	sbvpp "github.com/akam1o/arca-router/internal/southbound/vpp"
 	pkgconfig "github.com/akam1o/arca-router/pkg/config"
 	"github.com/akam1o/arca-router/pkg/datastore"
+	pkgvpp "github.com/akam1o/arca-router/pkg/vpp"
 )
 
 func TestEffectiveWebListenUsesFlagOverride(t *testing.T) {
@@ -89,6 +90,20 @@ func TestWebStatusEndpoint(t *testing.T) {
 		VRRP: &model.VRRPConfig{Groups: map[string]*model.VRRPGroup{
 			"10": {Interface: "ge-0/0/0", VirtualAddress: "192.0.2.1", Priority: 110, Preempt: true},
 		}},
+		EVPN: &model.EVPNConfig{VNIs: map[int]*model.EVPNVNI{
+			10010: {
+				VNI:             10010,
+				Type:            "l2",
+				BridgeDomain:    "BD-10",
+				SourceInterface: "ge-0/0/0",
+				MulticastGroup:  "239.0.0.10",
+			},
+			20010: {
+				VNI:             20010,
+				Type:            "l3",
+				RoutingInstance: "BLUE",
+			},
+		}},
 	}
 	cfg.ClassOfService = &model.ClassOfServiceConfig{
 		ForwardingClasses: map[string]*model.ForwardingClass{
@@ -148,6 +163,15 @@ func TestWebStatusEndpoint(t *testing.T) {
 			LastRun:         time.Unix(1700000000, 0),
 			PairCount:       2,
 			Inconsistencies: []string{"Interface 7 exists in VPP but not in cache"},
+		}, qos: sbvpp.QoSCapabilityStatus{
+			LastCheck: time.Unix(1700000500, 0),
+			Capabilities: pkgvpp.QoSCapabilities{
+				MetadataBinding:     true,
+				QueueScheduler:      false,
+				Policer:             false,
+				OperationalCounters: false,
+				Diagnostics:         []string{"scheduler api unavailable"},
+			},
 		}},
 	}.handleWebStatus(rec, req)
 
@@ -177,6 +201,11 @@ func TestWebStatusEndpoint(t *testing.T) {
 	if !status.Cluster.Enabled || status.Cluster.NodeCount != 1 || !status.Cluster.EtcdSyncConfigured || !status.Cluster.SyncAligned {
 		t.Fatalf("Cluster status = %#v, want enabled aligned etcd sync", status.Cluster)
 	}
+	if !status.Overlay.EVPN.Configured || status.Overlay.EVPN.VNIs != 2 ||
+		status.Overlay.EVPN.L2VNIs != 1 || status.Overlay.EVPN.L3VNIs != 1 ||
+		status.Overlay.EVPN.MulticastVNIs != 1 {
+		t.Fatalf("Overlay EVPN status = %#v, want configured L2/L3 multicast VNI counts", status.Overlay.EVPN)
+	}
 	if !status.HA.Configured || status.HA.Converged || status.HA.VRRPGroups != 1 || status.HA.IssueCount != 2 {
 		t.Fatalf("HA status = %#v, want configured with cluster and VPP LCP issues", status.HA)
 	}
@@ -205,6 +234,635 @@ func TestWebStatusEndpoint(t *testing.T) {
 		status.ClassOfService.InterfaceBindings != 1 ||
 		!status.ClassOfService.IntentOnly {
 		t.Fatalf("ClassOfService status = %#v, want configured intent-only status", status.ClassOfService)
+	}
+	if !status.ClassOfService.Capabilities.MetadataBindingSupported ||
+		status.ClassOfService.Capabilities.QueueSchedulerSupported ||
+		status.ClassOfService.Capabilities.PolicerSupported ||
+		status.ClassOfService.Capabilities.CountersSupported ||
+		len(status.ClassOfService.Capabilities.Diagnostics) != 1 ||
+		status.ClassOfService.Capabilities.LastCheck == "" {
+		t.Fatalf("ClassOfService capabilities = %#v, want metadata binding with unsupported scheduler/policer", status.ClassOfService.Capabilities)
+	}
+}
+
+func TestNMSStatusEndpoint(t *testing.T) {
+	eng := engine.NewEngine(nil, slog.Default())
+	cfg := model.NewRouterConfig()
+	cfg.System = &model.SystemConfig{HostName: "edge-nms"}
+	eng.InitializeRunning(cfg, 77)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/nms/v1/status", nil)
+	rec := httptest.NewRecorder()
+	metricsSource{
+		startedAt: time.Now().Add(-2 * time.Minute),
+		engine:    eng,
+	}.handleNMSStatus(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d", rec.Code, http.StatusOK)
+	}
+	var resp nmsStatusResponse
+	if err := json.NewDecoder(rec.Result().Body).Decode(&resp); err != nil {
+		t.Fatalf("Decode() error = %v", err)
+	}
+	if resp.SchemaVersion != nmsOperationalStatusSchemaVersion {
+		t.Fatalf("SchemaVersion = %q, want %q", resp.SchemaVersion, nmsOperationalStatusSchemaVersion)
+	}
+	if resp.Resource != "/api/nms/v1/status" {
+		t.Fatalf("Resource = %q, want /api/nms/v1/status", resp.Resource)
+	}
+	if _, err := time.Parse(time.RFC3339, resp.GeneratedAt); err != nil {
+		t.Fatalf("GeneratedAt = %q, want RFC3339 timestamp: %v", resp.GeneratedAt, err)
+	}
+	if resp.Data.ConfigVersion != 77 || resp.Data.RunningHostname != "edge-nms" {
+		t.Fatalf("Data = %#v, want config version 77 for edge-nms", resp.Data)
+	}
+}
+
+func TestNMSTelemetryCatalogEndpoint(t *testing.T) {
+	req := httptest.NewRequest(http.MethodGet, "/api/nms/v1/telemetry/paths", nil)
+	rec := httptest.NewRecorder()
+	metricsSource{}.handleNMSTelemetryCatalog(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d", rec.Code, http.StatusOK)
+	}
+	var resp nmsTelemetryCatalogResponse
+	if err := json.NewDecoder(rec.Result().Body).Decode(&resp); err != nil {
+		t.Fatalf("Decode() error = %v", err)
+	}
+	if resp.SchemaVersion != nmsTelemetryCatalogSchemaVersion {
+		t.Fatalf("SchemaVersion = %q, want %q", resp.SchemaVersion, nmsTelemetryCatalogSchemaVersion)
+	}
+	if resp.Resource != "/api/nms/v1/telemetry/paths" {
+		t.Fatalf("Resource = %q, want /api/nms/v1/telemetry/paths", resp.Resource)
+	}
+	if resp.EventSchemaVersion != nbgrpc.TelemetryEventSchemaVersion() || resp.Encoding != nbgrpc.TelemetryEncoding() {
+		t.Fatalf("event schema/encoding = %q/%q, want %q/%q",
+			resp.EventSchemaVersion, resp.Encoding, nbgrpc.TelemetryEventSchemaVersion(), nbgrpc.TelemetryEncoding())
+	}
+	if len(resp.DefaultPaths) != 2 || resp.DefaultPaths[0] != "/system" || resp.DefaultPaths[1] != "/config/running" {
+		t.Fatalf("DefaultPaths = %#v, want system and config/running", resp.DefaultPaths)
+	}
+	catalog := nbgrpc.NewTelemetryCatalog()
+	if resp.DefaultSampleIntervalMs != catalog.DefaultSampleIntervalMs ||
+		resp.MinSampleIntervalMs != catalog.MinSampleIntervalMs ||
+		resp.MaxSampleIntervalMs != catalog.MaxSampleIntervalMs {
+		t.Fatalf("sample intervals = %d/%d/%d, want %d/%d/%d",
+			resp.DefaultSampleIntervalMs, resp.MinSampleIntervalMs, resp.MaxSampleIntervalMs,
+			catalog.DefaultSampleIntervalMs, catalog.MinSampleIntervalMs, catalog.MaxSampleIntervalMs)
+	}
+	if len(resp.Paths) == 0 {
+		t.Fatal("Paths is empty, want telemetry path catalog")
+	}
+	if resp.PathCount != len(resp.Paths) {
+		t.Fatalf("PathCount = %d, want %d", resp.PathCount, len(resp.Paths))
+	}
+	if resp.Paths[0].Path != "/system" || !resp.Paths[0].Default || resp.Paths[0].Description == "" ||
+		resp.Paths[0].Cardinality != "single" || resp.Paths[0].PayloadSchema != "arca.telemetry.system.v1" {
+		t.Fatalf("Paths[0] = %#v, want default system path with description, single cardinality, and payload schema", resp.Paths[0])
+	}
+	var routesPath, evpnPath nmsTelemetryPath
+	for _, path := range resp.Paths {
+		switch path.Path {
+		case "/routes":
+			routesPath = path
+		case "/overlays/evpn":
+			evpnPath = path
+		}
+	}
+	if routesPath.Cardinality != "per-route" {
+		t.Fatalf("/routes cardinality = %q, want per-route", routesPath.Cardinality)
+	}
+	if routesPath.PayloadSchema != "arca.telemetry.routes.v1" {
+		t.Fatalf("/routes payload schema = %q, want arca.telemetry.routes.v1", routesPath.PayloadSchema)
+	}
+	if len(evpnPath.Aliases) != 2 || evpnPath.Aliases[0] != "/evpn" || evpnPath.Aliases[1] != "/overlay/evpn" {
+		t.Fatalf("/overlays/evpn aliases = %#v, want EVPN aliases", evpnPath.Aliases)
+	}
+}
+
+func TestNMSTelemetryCatalogEndpointFilters(t *testing.T) {
+	req := httptest.NewRequest(http.MethodGet, "/api/nms/v1/telemetry/paths?cardinality=per-route&payload_schema=arca.telemetry.routes.v1&encoding=JSON", nil)
+	rec := httptest.NewRecorder()
+	metricsSource{}.handleNMSTelemetryCatalog(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d", rec.Code, http.StatusOK)
+	}
+	var resp nmsTelemetryCatalogResponse
+	if err := json.NewDecoder(rec.Result().Body).Decode(&resp); err != nil {
+		t.Fatalf("Decode() error = %v", err)
+	}
+	if len(resp.Paths) != 1 || resp.Paths[0].Path != "/routes" {
+		t.Fatalf("filtered paths = %#v, want only /routes", resp.Paths)
+	}
+	if resp.PathCount != 1 {
+		t.Fatalf("PathCount = %d, want 1", resp.PathCount)
+	}
+	if resp.Paths[0].Cardinality != "per-route" || resp.Paths[0].PayloadSchema != "arca.telemetry.routes.v1" {
+		t.Fatalf("filtered path = %#v, want route cardinality and schema", resp.Paths[0])
+	}
+}
+
+func TestNMSTelemetryCatalogEndpointIgnoresEmptyFilters(t *testing.T) {
+	req := httptest.NewRequest(http.MethodGet, "/api/nms/v1/telemetry/paths?path=&cardinality=&payload_schema=&payload-schema=&encoding=", nil)
+	rec := httptest.NewRecorder()
+	metricsSource{}.handleNMSTelemetryCatalog(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d", rec.Code, http.StatusOK)
+	}
+	var resp nmsTelemetryCatalogResponse
+	if err := json.NewDecoder(rec.Result().Body).Decode(&resp); err != nil {
+		t.Fatalf("Decode() error = %v", err)
+	}
+	catalog := nbgrpc.NewTelemetryCatalog()
+	if resp.PathCount != len(catalog.Paths) {
+		t.Fatalf("PathCount = %d, want full catalog count %d", resp.PathCount, len(catalog.Paths))
+	}
+}
+
+func TestNMSTelemetryCatalogEndpointSplitsCommaSeparatedFilters(t *testing.T) {
+	req := httptest.NewRequest(http.MethodGet, "/api/nms/v1/telemetry/paths?path=system,evpn&payload_schema=arca.telemetry.system.v1,arca.telemetry.overlays.evpn.v1&encoding=json,", nil)
+	rec := httptest.NewRecorder()
+	metricsSource{}.handleNMSTelemetryCatalog(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d", rec.Code, http.StatusOK)
+	}
+	var resp nmsTelemetryCatalogResponse
+	if err := json.NewDecoder(rec.Result().Body).Decode(&resp); err != nil {
+		t.Fatalf("Decode() error = %v", err)
+	}
+	if len(resp.Paths) != 2 || resp.Paths[0].Path != "/system" || resp.Paths[1].Path != "/overlays/evpn" {
+		t.Fatalf("filtered paths = %#v, want system and EVPN from comma-separated filters", resp.Paths)
+	}
+}
+
+func TestNMSTelemetryCatalogEndpointFiltersUnsupportedEncoding(t *testing.T) {
+	req := httptest.NewRequest(http.MethodGet, "/api/nms/v1/telemetry/paths?encoding=protobuf", nil)
+	rec := httptest.NewRecorder()
+	metricsSource{}.handleNMSTelemetryCatalog(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d", rec.Code, http.StatusOK)
+	}
+	var resp nmsTelemetryCatalogResponse
+	if err := json.NewDecoder(rec.Result().Body).Decode(&resp); err != nil {
+		t.Fatalf("Decode() error = %v", err)
+	}
+	if resp.Encoding != nbgrpc.TelemetryEncoding() {
+		t.Fatalf("Encoding = %q, want %q", resp.Encoding, nbgrpc.TelemetryEncoding())
+	}
+	if len(resp.Paths) != 0 {
+		t.Fatalf("filtered paths = %#v, want none for unsupported encoding", resp.Paths)
+	}
+	if resp.PathCount != 0 {
+		t.Fatalf("PathCount = %d, want 0", resp.PathCount)
+	}
+}
+
+func TestNMSTelemetryCatalogEndpointAcceptsPayloadSchemaAlias(t *testing.T) {
+	req := httptest.NewRequest(http.MethodGet, "/api/nms/v1/telemetry/paths?payload-schema=ARCA.TELEMETRY.SYSTEM.V1", nil)
+	rec := httptest.NewRecorder()
+	metricsSource{}.handleNMSTelemetryCatalog(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d", rec.Code, http.StatusOK)
+	}
+	var resp nmsTelemetryCatalogResponse
+	if err := json.NewDecoder(rec.Result().Body).Decode(&resp); err != nil {
+		t.Fatalf("Decode() error = %v", err)
+	}
+	if len(resp.Paths) != 1 || resp.Paths[0].Path != "/system" {
+		t.Fatalf("filtered paths = %#v, want only /system", resp.Paths)
+	}
+}
+
+func TestNMSTelemetryCatalogEndpointAcceptsPathAliasFilter(t *testing.T) {
+	req := httptest.NewRequest(http.MethodGet, "/api/nms/v1/telemetry/paths?path=evpn", nil)
+	rec := httptest.NewRecorder()
+	metricsSource{}.handleNMSTelemetryCatalog(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d", rec.Code, http.StatusOK)
+	}
+	var resp nmsTelemetryCatalogResponse
+	if err := json.NewDecoder(rec.Result().Body).Decode(&resp); err != nil {
+		t.Fatalf("Decode() error = %v", err)
+	}
+	if len(resp.Paths) != 1 || resp.Paths[0].Path != "/overlays/evpn" {
+		t.Fatalf("filtered paths = %#v, want only /overlays/evpn", resp.Paths)
+	}
+}
+
+func TestNMSTelemetryCatalogEndpointAcceptsDefaultFilter(t *testing.T) {
+	req := httptest.NewRequest(http.MethodGet, "/api/nms/v1/telemetry/paths?default=true", nil)
+	rec := httptest.NewRecorder()
+	metricsSource{}.handleNMSTelemetryCatalog(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d", rec.Code, http.StatusOK)
+	}
+	var resp nmsTelemetryCatalogResponse
+	if err := json.NewDecoder(rec.Result().Body).Decode(&resp); err != nil {
+		t.Fatalf("Decode() error = %v", err)
+	}
+	if len(resp.Paths) != len(resp.DefaultPaths) {
+		t.Fatalf("filtered paths = %#v, want default path count %d", resp.Paths, len(resp.DefaultPaths))
+	}
+	for _, path := range resp.Paths {
+		if !path.Default {
+			t.Fatalf("filtered path = %#v, want only default paths", path)
+		}
+	}
+}
+
+func TestNMSTelemetrySchemasEndpoint(t *testing.T) {
+	req := httptest.NewRequest(http.MethodGet, "/api/nms/v1/telemetry/schemas", nil)
+	rec := httptest.NewRecorder()
+	metricsSource{}.handleNMSTelemetrySchemas(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d", rec.Code, http.StatusOK)
+	}
+	var resp nmsTelemetrySchemasResponse
+	if err := json.NewDecoder(rec.Result().Body).Decode(&resp); err != nil {
+		t.Fatalf("Decode() error = %v", err)
+	}
+	if resp.SchemaVersion != nmsTelemetrySchemasSchemaVersion {
+		t.Fatalf("SchemaVersion = %q, want %q", resp.SchemaVersion, nmsTelemetrySchemasSchemaVersion)
+	}
+	if resp.Resource != "/api/nms/v1/telemetry/schemas" {
+		t.Fatalf("Resource = %q, want /api/nms/v1/telemetry/schemas", resp.Resource)
+	}
+	if resp.EventSchemaVersion != nbgrpc.TelemetryEventSchemaVersion() || resp.Encoding != nbgrpc.TelemetryEncoding() {
+		t.Fatalf("event schema/encoding = %q/%q, want %q/%q",
+			resp.EventSchemaVersion, resp.Encoding, nbgrpc.TelemetryEventSchemaVersion(), nbgrpc.TelemetryEncoding())
+	}
+	catalog := nbgrpc.NewTelemetryCatalog()
+	if strings.Join(resp.DefaultPaths, ",") != strings.Join(catalog.DefaultPaths, ",") {
+		t.Fatalf("DefaultPaths = %#v, want %#v", resp.DefaultPaths, catalog.DefaultPaths)
+	}
+	if resp.DefaultSampleIntervalMs != catalog.DefaultSampleIntervalMs ||
+		resp.MinSampleIntervalMs != catalog.MinSampleIntervalMs ||
+		resp.MaxSampleIntervalMs != catalog.MaxSampleIntervalMs {
+		t.Fatalf("sample intervals = %d/%d/%d, want %d/%d/%d",
+			resp.DefaultSampleIntervalMs, resp.MinSampleIntervalMs, resp.MaxSampleIntervalMs,
+			catalog.DefaultSampleIntervalMs, catalog.MinSampleIntervalMs, catalog.MaxSampleIntervalMs)
+	}
+	if len(resp.Schemas) == 0 {
+		t.Fatal("Schemas is empty, want telemetry payload schemas")
+	}
+	if resp.SchemaCount != len(resp.Schemas) {
+		t.Fatalf("SchemaCount = %d, want %d", resp.SchemaCount, len(resp.Schemas))
+	}
+	byPath := map[string]nmsTelemetryPayloadSchema{}
+	for _, schema := range resp.Schemas {
+		byPath[schema.Path] = schema
+	}
+	routes := byPath["/routes"]
+	if routes.PayloadSchema != "arca.telemetry.routes.v1" || routes.Cardinality != "per-route" ||
+		len(routes.Fields) != 1 || routes.Fields[0].Name != "routes" || routes.Fields[0].Type != "[]RouteInfo" {
+		t.Fatalf("/routes schema = %#v, want route payload field metadata", routes)
+	}
+	evpn := byPath["/overlays/evpn"]
+	if evpn.PayloadSchema != "arca.telemetry.overlays.evpn.v1" ||
+		len(evpn.Fields) != 1 || evpn.Fields[0].Name != "vnis" || evpn.Fields[0].Type != "[]EVPNVNI" {
+		t.Fatalf("/overlays/evpn schema = %#v, want EVPN VNI field metadata", evpn)
+	}
+	if cos := byPath["/class-of-service"]; len(cos.Fields) != 1 || cos.Fields[0].Name != "class_of_service" {
+		t.Fatalf("/class-of-service schema = %#v, want class_of_service field metadata", cos)
+	}
+}
+
+func TestNMSTelemetrySchemasEndpointFilters(t *testing.T) {
+	req := httptest.NewRequest(http.MethodGet, "/api/nms/v1/telemetry/schemas?path=evpn&payload_schema=arca.telemetry.overlays.evpn.v1&encoding=json", nil)
+	rec := httptest.NewRecorder()
+	metricsSource{}.handleNMSTelemetrySchemas(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d", rec.Code, http.StatusOK)
+	}
+	var resp nmsTelemetrySchemasResponse
+	if err := json.NewDecoder(rec.Result().Body).Decode(&resp); err != nil {
+		t.Fatalf("Decode() error = %v", err)
+	}
+	if len(resp.Schemas) != 1 || resp.Schemas[0].Path != "/overlays/evpn" {
+		t.Fatalf("filtered schemas = %#v, want only /overlays/evpn", resp.Schemas)
+	}
+	if resp.SchemaCount != 1 {
+		t.Fatalf("SchemaCount = %d, want 1", resp.SchemaCount)
+	}
+	if len(resp.DefaultPaths) != 2 || resp.DefaultPaths[0] != "/system" || resp.DefaultPaths[1] != "/config/running" {
+		t.Fatalf("DefaultPaths = %#v, want system/config defaults", resp.DefaultPaths)
+	}
+	if len(resp.Schemas[0].Fields) != 1 || resp.Schemas[0].Fields[0].Name != "vnis" {
+		t.Fatalf("filtered schema fields = %#v, want EVPN VNI field", resp.Schemas[0].Fields)
+	}
+}
+
+func TestNMSTelemetrySchemasEndpointFiltersUnsupportedEncoding(t *testing.T) {
+	req := httptest.NewRequest(http.MethodGet, "/api/nms/v1/telemetry/schemas?encoding=protobuf", nil)
+	rec := httptest.NewRecorder()
+	metricsSource{}.handleNMSTelemetrySchemas(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d", rec.Code, http.StatusOK)
+	}
+	var resp nmsTelemetrySchemasResponse
+	if err := json.NewDecoder(rec.Result().Body).Decode(&resp); err != nil {
+		t.Fatalf("Decode() error = %v", err)
+	}
+	if resp.Encoding != nbgrpc.TelemetryEncoding() {
+		t.Fatalf("Encoding = %q, want %q", resp.Encoding, nbgrpc.TelemetryEncoding())
+	}
+	if len(resp.Schemas) != 0 {
+		t.Fatalf("filtered schemas = %#v, want none for unsupported encoding", resp.Schemas)
+	}
+	if resp.SchemaCount != 0 {
+		t.Fatalf("SchemaCount = %d, want 0", resp.SchemaCount)
+	}
+	if len(resp.DefaultPaths) != 2 {
+		t.Fatalf("DefaultPaths = %#v, want unfiltered defaults with unsupported encoding", resp.DefaultPaths)
+	}
+}
+
+func TestNMSTelemetrySnapshotEndpoint(t *testing.T) {
+	telemetry := &webTelemetryTestAPI{events: []nbgrpc.TelemetryEvent{
+		{
+			Sequence:      1,
+			Timestamp:     time.Unix(1700000600, 123).UTC(),
+			Path:          "/system",
+			Cardinality:   "single",
+			PayloadSchema: "arca.telemetry.system.v1",
+			EventType:     "snapshot",
+			Encoding:      nbgrpc.TelemetryEncoding(),
+			SchemaVersion: nbgrpc.TelemetryEventSchemaVersion(),
+			JSONPayload:   `{"hostname":"edge01"}`,
+		},
+		{
+			Sequence:      2,
+			Timestamp:     time.Unix(1700000601, 0).UTC(),
+			Path:          "/interfaces",
+			Cardinality:   "per-interface",
+			PayloadSchema: "arca.telemetry.interfaces.v1",
+			EventType:     "snapshot",
+			Encoding:      nbgrpc.TelemetryEncoding(),
+			SchemaVersion: nbgrpc.TelemetryEventSchemaVersion(),
+			JSONPayload:   `{"interfaces":[]}`,
+		},
+	}}
+
+	req := httptest.NewRequest(http.MethodGet, "/api/nms/v1/telemetry/snapshot?path=/system&path=/interfaces", nil)
+	rec := httptest.NewRecorder()
+	metricsSource{telemetryAPI: telemetry}.handleNMSTelemetrySnapshot(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d: %s", rec.Code, http.StatusOK, rec.Body.String())
+	}
+	if !telemetry.once || len(telemetry.paths) != 2 || telemetry.paths[0] != "/system" || telemetry.paths[1] != "/interfaces" {
+		t.Fatalf("telemetry subscription = once %v paths %#v, want one-shot system/interfaces", telemetry.once, telemetry.paths)
+	}
+	var resp nmsTelemetrySnapshotResponse
+	if err := json.NewDecoder(rec.Result().Body).Decode(&resp); err != nil {
+		t.Fatalf("Decode() error = %v", err)
+	}
+	if resp.SchemaVersion != nmsTelemetrySnapshotSchemaVersion || resp.Resource != "/api/nms/v1/telemetry/snapshot" {
+		t.Fatalf("snapshot envelope = %#v", resp)
+	}
+	if resp.EventSchemaVersion != nbgrpc.TelemetryEventSchemaVersion() || resp.Encoding != nbgrpc.TelemetryEncoding() {
+		t.Fatalf("snapshot schema/encoding = %q/%q", resp.EventSchemaVersion, resp.Encoding)
+	}
+	catalog := nbgrpc.NewTelemetryCatalog()
+	if strings.Join(resp.DefaultPaths, ",") != strings.Join(catalog.DefaultPaths, ",") {
+		t.Fatalf("DefaultPaths = %#v, want %#v", resp.DefaultPaths, catalog.DefaultPaths)
+	}
+	if resp.DefaultSampleIntervalMs != catalog.DefaultSampleIntervalMs ||
+		resp.MinSampleIntervalMs != catalog.MinSampleIntervalMs ||
+		resp.MaxSampleIntervalMs != catalog.MaxSampleIntervalMs {
+		t.Fatalf("sample intervals = %d/%d/%d, want %d/%d/%d",
+			resp.DefaultSampleIntervalMs, resp.MinSampleIntervalMs, resp.MaxSampleIntervalMs,
+			catalog.DefaultSampleIntervalMs, catalog.MinSampleIntervalMs, catalog.MaxSampleIntervalMs)
+	}
+	if len(resp.Paths) != 2 || resp.Paths[0] != "/system" || resp.Paths[1] != "/interfaces" {
+		t.Fatalf("Paths = %#v, want emitted paths", resp.Paths)
+	}
+	if resp.EventCount != 2 {
+		t.Fatalf("EventCount = %d, want 2", resp.EventCount)
+	}
+	wantPayloadBytes := len(`{"hostname":"edge01"}`) + len(`{"interfaces":[]}`)
+	if resp.PayloadBytes != wantPayloadBytes || resp.MaxPayloadBytes != defaultNMSTelemetrySnapshotMaxPayloadBytes {
+		t.Fatalf("payload budget = %d/%d, want %d/%d", resp.PayloadBytes, resp.MaxPayloadBytes, wantPayloadBytes, defaultNMSTelemetrySnapshotMaxPayloadBytes)
+	}
+	if resp.MaxEvents != defaultNMSTelemetrySnapshotMaxEvents {
+		t.Fatalf("MaxEvents = %d, want %d", resp.MaxEvents, defaultNMSTelemetrySnapshotMaxEvents)
+	}
+	if resp.TimeoutMs != defaultNMSTelemetrySnapshotTimeout.Milliseconds() {
+		t.Fatalf("TimeoutMs = %d, want %d", resp.TimeoutMs, defaultNMSTelemetrySnapshotTimeout.Milliseconds())
+	}
+	if len(resp.Events) != 2 || resp.Events[0].Path != "/system" || string(resp.Events[0].Payload) != `{"hostname":"edge01"}` {
+		t.Fatalf("Events = %#v, want system payload event", resp.Events)
+	}
+	if resp.Events[0].Cardinality != "single" || resp.Events[1].Cardinality != "per-interface" {
+		t.Fatalf("event cardinalities = %q/%q, want system/interfaces hints",
+			resp.Events[0].Cardinality, resp.Events[1].Cardinality)
+	}
+	if resp.Events[0].PayloadSchema != "arca.telemetry.system.v1" ||
+		resp.Events[1].PayloadSchema != "arca.telemetry.interfaces.v1" {
+		t.Fatalf("event payload schemas = %q/%q, want system/interfaces schema IDs",
+			resp.Events[0].PayloadSchema, resp.Events[1].PayloadSchema)
+	}
+	if resp.Events[0].PayloadBytes != len(`{"hostname":"edge01"}`) ||
+		resp.Events[1].PayloadBytes != len(`{"interfaces":[]}`) {
+		t.Fatalf("event payload bytes = %d/%d, want per-event payload lengths",
+			resp.Events[0].PayloadBytes, resp.Events[1].PayloadBytes)
+	}
+}
+
+func TestNMSTelemetrySnapshotEndpointFiltersCatalogMetadata(t *testing.T) {
+	telemetry := &webTelemetryTestAPI{events: []nbgrpc.TelemetryEvent{
+		{
+			Sequence:      1,
+			Path:          "/routes",
+			Cardinality:   "per-route",
+			PayloadSchema: "arca.telemetry.routes.v1",
+			EventType:     "snapshot",
+			Encoding:      nbgrpc.TelemetryEncoding(),
+			SchemaVersion: nbgrpc.TelemetryEventSchemaVersion(),
+			JSONPayload:   `{"routes":[]}`,
+		},
+	}}
+
+	req := httptest.NewRequest(http.MethodGet, "/api/nms/v1/telemetry/snapshot?cardinality=per-route&payload_schema=arca.telemetry.routes.v1&encoding=json", nil)
+	rec := httptest.NewRecorder()
+	metricsSource{telemetryAPI: telemetry}.handleNMSTelemetrySnapshot(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d: %s", rec.Code, http.StatusOK, rec.Body.String())
+	}
+	if !telemetry.once || len(telemetry.paths) != 1 || telemetry.paths[0] != "/routes" {
+		t.Fatalf("telemetry subscription = once %v paths %#v, want one-shot /routes", telemetry.once, telemetry.paths)
+	}
+	var resp nmsTelemetrySnapshotResponse
+	if err := json.NewDecoder(rec.Result().Body).Decode(&resp); err != nil {
+		t.Fatalf("Decode() error = %v", err)
+	}
+	if len(resp.Paths) != 1 || resp.Paths[0] != "/routes" ||
+		resp.Events[0].Cardinality != "per-route" || resp.Events[0].PayloadSchema != "arca.telemetry.routes.v1" {
+		t.Fatalf("snapshot response = %#v, want filtered route event metadata", resp)
+	}
+}
+
+func TestNMSTelemetrySnapshotEndpointFiltersCatalogPathAlias(t *testing.T) {
+	telemetry := &webTelemetryTestAPI{events: []nbgrpc.TelemetryEvent{
+		{
+			Sequence:      1,
+			Path:          "/overlays/evpn",
+			Cardinality:   "per-vni",
+			PayloadSchema: "arca.telemetry.overlays.evpn.v1",
+			EventType:     "snapshot",
+			Encoding:      nbgrpc.TelemetryEncoding(),
+			SchemaVersion: nbgrpc.TelemetryEventSchemaVersion(),
+			JSONPayload:   `{"vnis":[]}`,
+		},
+	}}
+
+	req := httptest.NewRequest(http.MethodGet, "/api/nms/v1/telemetry/snapshot?path=evpn&cardinality=per-vni", nil)
+	rec := httptest.NewRecorder()
+	metricsSource{telemetryAPI: telemetry}.handleNMSTelemetrySnapshot(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d: %s", rec.Code, http.StatusOK, rec.Body.String())
+	}
+	if !telemetry.once || len(telemetry.paths) != 1 || telemetry.paths[0] != "/overlays/evpn" {
+		t.Fatalf("telemetry subscription = once %v paths %#v, want canonical EVPN path", telemetry.once, telemetry.paths)
+	}
+}
+
+func TestNMSTelemetrySnapshotOptionsFiltersDefaultCatalogPaths(t *testing.T) {
+	req := httptest.NewRequest(http.MethodGet, "/api/nms/v1/telemetry/snapshot?default=true&cardinality=single", nil)
+	opts, err := nmsTelemetrySnapshotOptionsFromRequest(req)
+	if err != nil {
+		t.Fatalf("nmsTelemetrySnapshotOptionsFromRequest() error = %v", err)
+	}
+	if len(opts.paths) != 2 || opts.paths[0] != "/system" || opts.paths[1] != "/config/running" {
+		t.Fatalf("paths = %#v, want default single-cardinality snapshot paths", opts.paths)
+	}
+}
+
+func TestNMSTelemetrySnapshotOptionsNormalizesCatalogFilters(t *testing.T) {
+	req := httptest.NewRequest(http.MethodGet, "/api/nms/v1/telemetry/snapshot?path=system,evpn&payload_schema=arca.telemetry.system.v1,arca.telemetry.overlays.evpn.v1&encoding=json,", nil)
+	opts, err := nmsTelemetrySnapshotOptionsFromRequest(req)
+	if err != nil {
+		t.Fatalf("nmsTelemetrySnapshotOptionsFromRequest() error = %v", err)
+	}
+	if len(opts.paths) != 2 || opts.paths[0] != "/system" || opts.paths[1] != "/overlays/evpn" {
+		t.Fatalf("paths = %#v, want normalized system and EVPN snapshot paths", opts.paths)
+	}
+}
+
+func TestNMSTelemetrySnapshotEndpointRejectsEmptyCatalogFilter(t *testing.T) {
+	telemetry := &webTelemetryTestAPI{}
+	req := httptest.NewRequest(http.MethodGet, "/api/nms/v1/telemetry/snapshot?encoding=protobuf", nil)
+	rec := httptest.NewRecorder()
+	metricsSource{telemetryAPI: telemetry}.handleNMSTelemetrySnapshot(rec, req)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want %d: %s", rec.Code, http.StatusBadRequest, rec.Body.String())
+	}
+	if telemetry.once || len(telemetry.paths) != 0 {
+		t.Fatalf("telemetry subscription = once %v paths %#v, want no subscription", telemetry.once, telemetry.paths)
+	}
+}
+
+func TestNMSTelemetrySnapshotEndpointRejectsOversizedPayload(t *testing.T) {
+	telemetry := &webTelemetryTestAPI{events: []nbgrpc.TelemetryEvent{
+		{
+			Sequence:      1,
+			Path:          "/routes",
+			EventType:     "snapshot",
+			Encoding:      nbgrpc.TelemetryEncoding(),
+			SchemaVersion: nbgrpc.TelemetryEventSchemaVersion(),
+			JSONPayload:   `{"routes":[1,2,3]}`,
+		},
+	}}
+
+	req := httptest.NewRequest(http.MethodGet, "/api/nms/v1/telemetry/snapshot?path=/routes&max_payload_bytes=4", nil)
+	rec := httptest.NewRecorder()
+	metricsSource{telemetryAPI: telemetry}.handleNMSTelemetrySnapshot(rec, req)
+
+	if rec.Code != http.StatusRequestEntityTooLarge {
+		t.Fatalf("status = %d, want %d: %s", rec.Code, http.StatusRequestEntityTooLarge, rec.Body.String())
+	}
+}
+
+func TestNMSTelemetrySnapshotEndpointRejectsTooManyEvents(t *testing.T) {
+	telemetry := &webTelemetryTestAPI{events: []nbgrpc.TelemetryEvent{
+		{
+			Sequence:      1,
+			Path:          "/system",
+			EventType:     "snapshot",
+			Encoding:      nbgrpc.TelemetryEncoding(),
+			SchemaVersion: nbgrpc.TelemetryEventSchemaVersion(),
+			JSONPayload:   `{"hostname":"edge01"}`,
+		},
+		{
+			Sequence:      2,
+			Path:          "/interfaces",
+			EventType:     "snapshot",
+			Encoding:      nbgrpc.TelemetryEncoding(),
+			SchemaVersion: nbgrpc.TelemetryEventSchemaVersion(),
+			JSONPayload:   `{"interfaces":[]}`,
+		},
+		{
+			Sequence:      3,
+			Path:          "/routes",
+			EventType:     "snapshot",
+			Encoding:      nbgrpc.TelemetryEncoding(),
+			SchemaVersion: nbgrpc.TelemetryEventSchemaVersion(),
+			JSONPayload:   `{"routes":[]}`,
+		},
+	}}
+
+	req := httptest.NewRequest(http.MethodGet, "/api/nms/v1/telemetry/snapshot?path=/system&path=/interfaces&path=/routes&max_events=1", nil)
+	rec := httptest.NewRecorder()
+	metricsSource{telemetryAPI: telemetry}.handleNMSTelemetrySnapshot(rec, req)
+
+	if rec.Code != http.StatusRequestEntityTooLarge {
+		t.Fatalf("status = %d, want %d: %s", rec.Code, http.StatusRequestEntityTooLarge, rec.Body.String())
+	}
+	if telemetry.sent != 2 {
+		t.Fatalf("sent events = %d, want stop on second event", telemetry.sent)
+	}
+}
+
+func TestNMSTelemetrySnapshotEndpointRejectsInvalidTimeout(t *testing.T) {
+	req := httptest.NewRequest(http.MethodGet, "/api/nms/v1/telemetry/snapshot?timeout=1h", nil)
+	rec := httptest.NewRecorder()
+	metricsSource{telemetryAPI: &webTelemetryTestAPI{}}.handleNMSTelemetrySnapshot(rec, req)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want %d: %s", rec.Code, http.StatusBadRequest, rec.Body.String())
+	}
+}
+
+func TestNMSTelemetrySnapshotEndpointRejectsInvalidMaxEvents(t *testing.T) {
+	tests := []string{
+		"/api/nms/v1/telemetry/snapshot?max_events=0",
+		"/api/nms/v1/telemetry/snapshot?max_events=2048",
+	}
+	for _, target := range tests {
+		t.Run(target, func(t *testing.T) {
+			req := httptest.NewRequest(http.MethodGet, target, nil)
+			rec := httptest.NewRecorder()
+			metricsSource{telemetryAPI: &webTelemetryTestAPI{}}.handleNMSTelemetrySnapshot(rec, req)
+
+			if rec.Code != http.StatusBadRequest {
+				t.Fatalf("status = %d, want %d: %s", rec.Code, http.StatusBadRequest, rec.Body.String())
+			}
+		})
 	}
 }
 
@@ -414,6 +1072,10 @@ func TestWebIndexEndpoint(t *testing.T) {
 		"Configuration editor",
 		"set system host-name edge01",
 		"/api/status",
+		"/api/nms/v1/status",
+		"/api/nms/v1/telemetry/paths",
+		"/api/nms/v1/telemetry/schemas",
+		"/api/nms/v1/telemetry/snapshot",
 		"/api/config",
 		"/api/config/history",
 		"refreshHistory",
@@ -493,4 +1155,27 @@ func (a webHistoryTestAPI) ListHistory(ctx context.Context, limit, offset int) (
 		history = history[:limit]
 	}
 	return history, nil
+}
+
+type webTelemetryTestAPI struct {
+	events []nbgrpc.TelemetryEvent
+	paths  []string
+	once   bool
+	sent   int
+	err    error
+}
+
+func (a *webTelemetryTestAPI) SubscribeTelemetry(ctx context.Context, rawPaths []string, interval time.Duration, once bool, send func(nbgrpc.TelemetryEvent) error) error {
+	a.paths = append([]string(nil), rawPaths...)
+	a.once = once
+	if a.err != nil {
+		return a.err
+	}
+	for _, event := range a.events {
+		a.sent++
+		if err := send(event); err != nil {
+			return err
+		}
+	}
+	return nil
 }

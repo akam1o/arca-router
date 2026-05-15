@@ -6,8 +6,11 @@ package main
 import (
 	"bufio"
 	"context"
+	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
+	"io"
 	"os"
 	"os/signal"
 	"strconv"
@@ -32,6 +35,8 @@ const (
 
 	defaultSocket = "/run/arca-router/routerd.sock"
 )
+
+var errTelemetryUsage = errors.New("telemetry usage error")
 
 type cliFlags struct {
 	grpcSocket  string
@@ -104,6 +109,11 @@ Show subcommands:
   bfd status                  Show BFD operational state
   bfd [brief|counters]        Show raw BFD status
   bfd peer <ip> [counters]    Show BFD peer details
+  evpn                        Show EVPN/VXLAN overlay intent
+  telemetry paths [live] [default] [path <path>] [cardinality <hint>] [payload-schema <id>] [encoding <encoding>]
+                              Show supported telemetry path catalog
+  telemetry [path <path>]... [interval <duration>] [count <events>]
+                              Show telemetry events as JSON lines
   route [inet|inet6]                 Show routing table
   route [inet|inet6] protocol <proto> Show routes by protocol
 
@@ -156,6 +166,9 @@ func parseRollbackNumber(raw string) (int, error) {
 // --- One-shot command ---
 
 func runOneShotCommand(ctx context.Context, f *cliFlags, args []string) int {
+	if handled, code := runLocalOneShotCommand(args); handled {
+		return code
+	}
 	client, err := grpcclient.Dial(f.grpcSocket)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
@@ -183,6 +196,26 @@ func runOneShotCommand(ctx context.Context, f *cliFlags, args []string) int {
 		showUsage()
 		return ExitUsageError
 	}
+}
+
+func runLocalOneShotCommand(args []string) (bool, int) {
+	if len(args) >= 3 && args[0] == "show" && args[1] == "telemetry" {
+		opts, ok, err := telemetryCatalogOptions(args[2:])
+		if !ok {
+			return false, ExitSuccess
+		}
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+			return true, ExitUsageError
+		}
+		if opts.live {
+			return false, ExitSuccess
+		}
+		catalog := grpcclient.NewTelemetryCatalog()
+		printTelemetryCatalog(catalog, filterTelemetryPathCatalog(catalog.Paths, opts))
+		return true, ExitSuccess
+	}
+	return false, ExitSuccess
 }
 
 func oneShotShow(ctx context.Context, client showClient, args []string, f *cliFlags) int {
@@ -367,6 +400,23 @@ func oneShotShow(ctx context.Context, client showClient, args []string, f *cliFl
 		printClassOfService(info)
 		return ExitSuccess
 
+	case "evpn":
+		if err := showEVPN(ctx, client); err != nil {
+			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+			return ExitOperationError
+		}
+		return ExitSuccess
+
+	case "telemetry":
+		if err := showTelemetry(ctx, client, args[1:]); err != nil {
+			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+			if isTelemetryUsageError(err) {
+				return ExitUsageError
+			}
+			return ExitOperationError
+		}
+		return ExitSuccess
+
 	case "route":
 		protoFilter, addressFamily, err := routeTextOptions(args[1:])
 		if err != nil {
@@ -431,6 +481,11 @@ type showClient interface {
 	GetLCPReconciliation(context.Context) (*grpcclient.LCPReconciliationInfo, error)
 	GetHAStatus(context.Context) (*grpcclient.HAStatusInfo, error)
 	GetClassOfService(context.Context) (*grpcclient.ClassOfServiceInfo, error)
+	GetTelemetryCatalog(context.Context) (grpcclient.TelemetryCatalog, error)
+	GetFilteredTelemetryCatalog(context.Context, []string, []string) (grpcclient.TelemetryCatalog, error)
+	GetPathFilteredTelemetryCatalog(context.Context, []string, []string, []string) (grpcclient.TelemetryCatalog, error)
+	GetTelemetryCatalogWithFilter(context.Context, grpcclient.TelemetryCatalogFilter) (grpcclient.TelemetryCatalog, error)
+	SubscribeTelemetry(context.Context, []string, time.Duration, bool) (grpcclient.TelemetryReceiver, error)
 }
 
 type cliMode int
@@ -888,6 +943,18 @@ func (sh *interactiveShell) cmdShow(ctx context.Context, args []string) error {
 		printClassOfService(info)
 		return nil
 
+	case "evpn":
+		if sh.mode == modeConfiguration {
+			return fmt.Errorf("'show evpn' not available in configuration mode")
+		}
+		return showEVPN(ctx, sh.client)
+
+	case "telemetry":
+		if sh.mode == modeConfiguration {
+			return fmt.Errorf("'show telemetry' not available in configuration mode")
+		}
+		return showTelemetry(ctx, sh.client, args[1:])
+
 	case "route":
 		if sh.mode == modeConfiguration {
 			return fmt.Errorf("'show route' not available in configuration mode")
@@ -1113,6 +1180,9 @@ func (sh *interactiveShell) showHelp() {
 		fmt.Println("  show bfd status               Show BFD operational state")
 		fmt.Println("  show bfd [brief|counters]     Show raw BFD status")
 		fmt.Println("  show bfd peer <ip> [counters] Show BFD peer details")
+		fmt.Println("  show evpn                     Show EVPN/VXLAN overlay intent")
+		fmt.Println("  show telemetry [path <path>]... [interval <duration>] [count <events>]")
+		fmt.Println("                                Show telemetry events as JSON lines")
 		fmt.Println("  show lcp                      Show VPP LCP reconciliation status")
 		fmt.Println("  show ha                       Show HA convergence status")
 		fmt.Println("  show class-of-service         Show class-of-service intent")
@@ -1481,11 +1551,15 @@ func printBFDStatus(info *grpcclient.BFDStatusInfo) {
 }
 
 func printClassOfService(info *grpcclient.ClassOfServiceInfo) {
-	if info == nil || (len(info.ForwardingClasses) == 0 && len(info.TrafficControlProfiles) == 0 && len(info.Interfaces) == 0) {
+	if info == nil || (len(info.ForwardingClasses) == 0 && len(info.TrafficControlProfiles) == 0 && len(info.Interfaces) == 0 && info.Capabilities == nil) {
 		fmt.Println("No class-of-service configuration found")
 		return
 	}
-	fmt.Printf("%-18s %s\n", "Enforcement", formatCoSValue(info.EnforcementStatus))
+	if len(info.ForwardingClasses) == 0 && len(info.TrafficControlProfiles) == 0 && len(info.Interfaces) == 0 {
+		fmt.Println("No class-of-service configuration found")
+	} else {
+		fmt.Printf("%-18s %s\n", "Enforcement", formatCoSValue(info.EnforcementStatus))
+	}
 
 	if len(info.ForwardingClasses) > 0 {
 		fmt.Println()
@@ -1524,6 +1598,186 @@ func printClassOfService(info *grpcclient.ClassOfServiceInfo) {
 				formatCoSValue(iface.EnforcementStatus),
 			)
 		}
+	}
+
+	if info.Capabilities != nil {
+		fmt.Println()
+		fmt.Println("VPP QoS capabilities")
+		fmt.Printf("%-24s %s\n", "Metadata binding", yesNo(info.Capabilities.MetadataBindingSupported))
+		fmt.Printf("%-24s %s\n", "Queue scheduler", yesNo(info.Capabilities.QueueSchedulerSupported))
+		fmt.Printf("%-24s %s\n", "Policer", yesNo(info.Capabilities.PolicerSupported))
+		fmt.Printf("%-24s %s\n", "Counters", yesNo(info.Capabilities.CountersSupported))
+		fmt.Printf("%-24s %s\n", "Last check", formatOptionalTime(info.Capabilities.LastCheck))
+		fmt.Printf("%-24s %s\n", "Last error", formatCoSValue(info.Capabilities.LastError))
+		if len(info.Capabilities.Diagnostics) > 0 {
+			fmt.Println()
+			fmt.Println("VPP QoS diagnostics")
+			for _, diagnostic := range info.Capabilities.Diagnostics {
+				fmt.Printf("  - %s\n", diagnostic)
+			}
+		}
+	}
+}
+
+type evpnTelemetrySnapshot struct {
+	VNIs []evpnTelemetryVNI `json:"vnis"`
+}
+
+type evpnTelemetryVNI struct {
+	VNI                int      `json:"vni"`
+	Type               string   `json:"type,omitempty"`
+	BridgeDomain       string   `json:"bridge_domain,omitempty"`
+	VLANID             int      `json:"vlan_id,omitempty"`
+	RoutingInstance    string   `json:"routing_instance,omitempty"`
+	RouteDistinguisher string   `json:"route_distinguisher,omitempty"`
+	VRFTarget          string   `json:"vrf_target,omitempty"`
+	VRFTargetImport    []string `json:"vrf_target_import,omitempty"`
+	VRFTargetExport    []string `json:"vrf_target_export,omitempty"`
+	SourceInterface    string   `json:"source_interface,omitempty"`
+	SourceAddress      string   `json:"source_address,omitempty"`
+	MulticastGroup     string   `json:"multicast_group,omitempty"`
+	RemoteVTEP         string   `json:"remote_vtep,omitempty"`
+}
+
+type evpnTelemetryCounts struct {
+	total     int
+	l2        int
+	l3        int
+	multicast int
+}
+
+func showEVPN(ctx context.Context, client showClient) error {
+	snapshot, err := fetchEVPNTelemetrySnapshot(ctx, client)
+	if err != nil {
+		return err
+	}
+	printEVPN(snapshot)
+	return nil
+}
+
+func fetchEVPNTelemetrySnapshot(ctx context.Context, client showClient) (*evpnTelemetrySnapshot, error) {
+	stream, err := client.SubscribeTelemetry(ctx, []string{"/overlays/evpn"}, 0, true)
+	if err != nil {
+		return nil, err
+	}
+	event, err := stream.Recv()
+	if err == io.EOF {
+		return nil, fmt.Errorf("EVPN telemetry snapshot was empty")
+	}
+	if err != nil {
+		return nil, err
+	}
+	if event == nil {
+		return nil, fmt.Errorf("EVPN telemetry snapshot was nil")
+	}
+	var snapshot evpnTelemetrySnapshot
+	if err := json.Unmarshal([]byte(event.JSONPayload), &snapshot); err != nil {
+		return nil, fmt.Errorf("decode EVPN telemetry snapshot: %w", err)
+	}
+	return &snapshot, nil
+}
+
+func printEVPN(snapshot *evpnTelemetrySnapshot) {
+	if snapshot == nil || len(snapshot.VNIs) == 0 {
+		fmt.Println("No EVPN/VXLAN VNI configuration found")
+		return
+	}
+	counts := countEVPNVNIs(snapshot.VNIs)
+	fmt.Printf("%-18s %s\n", "Configured", yesNo(counts.total > 0))
+	fmt.Printf("%-18s %d\n", "VNIs", counts.total)
+	fmt.Printf("%-18s %d\n", "L2 VNIs", counts.l2)
+	fmt.Printf("%-18s %d\n", "L3 VNIs", counts.l3)
+	fmt.Printf("%-18s %d\n", "Multicast VNIs", counts.multicast)
+
+	fmt.Println()
+	fmt.Println("VNIs")
+	fmt.Printf("%-8s %-6s %-20s %-20s %-8s %-18s %-28s %-24s %s\n",
+		"VNI", "Type", "Bridge domain", "Routing instance", "VLAN", "RD", "Route targets", "Source", "Endpoint")
+	fmt.Println(strings.Repeat("-", 169))
+	for _, vni := range snapshot.VNIs {
+		fmt.Printf("%-8d %-6s %-20s %-20s %-8s %-18s %-28s %-24s %s\n",
+			vni.VNI,
+			formatEVPNValue(vni.Type),
+			formatEVPNValue(vni.BridgeDomain),
+			formatEVPNValue(vni.RoutingInstance),
+			formatEVPNVLAN(vni.VLANID),
+			formatEVPNValue(vni.RouteDistinguisher),
+			formatEVPNRouteTargets(vni),
+			formatEVPNSource(vni),
+			formatEVPNEndpoint(vni),
+		)
+	}
+}
+
+func countEVPNVNIs(vnis []evpnTelemetryVNI) evpnTelemetryCounts {
+	var counts evpnTelemetryCounts
+	for _, vni := range vnis {
+		counts.total++
+		switch strings.ToLower(vni.Type) {
+		case "l2":
+			counts.l2++
+		case "l3":
+			counts.l3++
+		}
+		if vni.MulticastGroup != "" {
+			counts.multicast++
+		}
+	}
+	return counts
+}
+
+func formatEVPNValue(value string) string {
+	if value == "" {
+		return "-"
+	}
+	return value
+}
+
+func formatEVPNVLAN(vlanID int) string {
+	if vlanID == 0 {
+		return "-"
+	}
+	return strconv.Itoa(vlanID)
+}
+
+func formatEVPNRouteTargets(vni evpnTelemetryVNI) string {
+	var parts []string
+	if vni.VRFTarget != "" {
+		parts = append(parts, vni.VRFTarget)
+	}
+	if len(vni.VRFTargetImport) > 0 {
+		parts = append(parts, "import:"+strings.Join(vni.VRFTargetImport, ","))
+	}
+	if len(vni.VRFTargetExport) > 0 {
+		parts = append(parts, "export:"+strings.Join(vni.VRFTargetExport, ","))
+	}
+	if len(parts) == 0 {
+		return "-"
+	}
+	return strings.Join(parts, " ")
+}
+
+func formatEVPNSource(vni evpnTelemetryVNI) string {
+	switch {
+	case vni.SourceInterface != "" && vni.SourceAddress != "":
+		return vni.SourceInterface + "@" + vni.SourceAddress
+	case vni.SourceInterface != "":
+		return vni.SourceInterface
+	case vni.SourceAddress != "":
+		return vni.SourceAddress
+	default:
+		return "-"
+	}
+}
+
+func formatEVPNEndpoint(vni evpnTelemetryVNI) string {
+	switch {
+	case vni.MulticastGroup != "":
+		return "multicast:" + vni.MulticastGroup
+	case vni.RemoteVTEP != "":
+		return "remote:" + vni.RemoteVTEP
+	default:
+		return "-"
 	}
 }
 
@@ -1648,6 +1902,373 @@ func printCommandOutput(output string) {
 	if output != "" && !strings.HasSuffix(output, "\n") {
 		fmt.Println()
 	}
+}
+
+type telemetryCLIOptions struct {
+	paths    []string
+	interval time.Duration
+	once     bool
+	count    int
+}
+
+type telemetryOutputEvent struct {
+	Sequence      uint64          `json:"sequence"`
+	Timestamp     string          `json:"timestamp,omitempty"`
+	Path          string          `json:"path"`
+	Cardinality   string          `json:"cardinality,omitempty"`
+	PayloadSchema string          `json:"payload_schema,omitempty"`
+	EventType     string          `json:"event_type"`
+	Encoding      string          `json:"encoding"`
+	SchemaVersion string          `json:"schema_version"`
+	PayloadBytes  int             `json:"payload_bytes"`
+	Payload       json.RawMessage `json:"payload"`
+}
+
+func showTelemetry(ctx context.Context, client showClient, args []string) error {
+	catalogOpts, isCatalog, err := telemetryCatalogOptions(args)
+	if isCatalog {
+		if err != nil {
+			return err
+		}
+		catalog := grpcclient.NewTelemetryCatalog()
+		if catalogOpts.live {
+			liveCatalog, err := client.GetTelemetryCatalogWithFilter(ctx, grpcclient.TelemetryCatalogFilter{
+				Paths:          catalogOpts.paths,
+				Cardinalities:  catalogOpts.cardinalities,
+				PayloadSchemas: catalogOpts.payloadSchemas,
+				Encodings:      catalogOpts.encodings,
+				DefaultOnly:    catalogOpts.defaultOnly,
+			})
+			if err != nil {
+				return err
+			}
+			catalog = liveCatalog
+			catalogOpts.defaultOnly = false
+			catalogOpts.paths = nil
+			catalogOpts.cardinalities = nil
+			catalogOpts.payloadSchemas = nil
+			catalogOpts.encodings = nil
+		}
+		printTelemetryCatalog(catalog, filterTelemetryPathCatalog(catalog.Paths, catalogOpts))
+		return nil
+	}
+	opts, err := telemetryOptions(args)
+	if err != nil {
+		return err
+	}
+	streamCtx, cancel := context.WithCancel(ctx)
+	defer cancel()
+
+	stream, err := client.SubscribeTelemetry(streamCtx, opts.paths, opts.interval, opts.once)
+	if err != nil {
+		return err
+	}
+	events := 0
+	for {
+		event, err := stream.Recv()
+		if err == io.EOF {
+			return nil
+		}
+		if err != nil {
+			return err
+		}
+		if err := printTelemetryEvent(event); err != nil {
+			return err
+		}
+		events++
+		if opts.count > 0 && events >= opts.count {
+			return nil
+		}
+	}
+}
+
+type telemetryCatalogCLIOptions struct {
+	live           bool
+	defaultOnly    bool
+	paths          []string
+	cardinalities  []string
+	payloadSchemas []string
+	encodings      []string
+}
+
+func isTelemetryCatalogCommand(args []string) bool {
+	_, ok, err := telemetryCatalogOptions(args)
+	return ok && err == nil
+}
+
+func telemetryCatalogOptions(args []string) (telemetryCatalogCLIOptions, bool, error) {
+	var opts telemetryCatalogCLIOptions
+	if len(args) == 0 || (args[0] != "paths" && args[0] != "catalog") {
+		return opts, false, nil
+	}
+	args = args[1:]
+	for len(args) > 0 {
+		switch args[0] {
+		case "live":
+			if opts.live {
+				return opts, true, telemetryUsageError("'show telemetry paths live' specified more than once")
+			}
+			opts.live = true
+			args = args[1:]
+		case "default", "default-only":
+			opts.defaultOnly = true
+			args = args[1:]
+		case "cardinality":
+			if len(args) < 2 {
+				return opts, true, telemetryUsageError("'show telemetry paths cardinality' requires a cardinality hint")
+			}
+			opts.cardinalities = append(opts.cardinalities, args[1])
+			args = args[2:]
+		case "path":
+			if len(args) < 2 {
+				return opts, true, telemetryUsageError("'show telemetry paths path' requires a telemetry path or alias")
+			}
+			opts.paths = append(opts.paths, args[1])
+			args = args[2:]
+		case "payload-schema", "schema":
+			if len(args) < 2 {
+				return opts, true, telemetryUsageError("'show telemetry paths payload-schema' requires a schema ID")
+			}
+			opts.payloadSchemas = append(opts.payloadSchemas, args[1])
+			args = args[2:]
+		case "encoding":
+			if len(args) < 2 {
+				return opts, true, telemetryUsageError("'show telemetry paths encoding' requires a payload encoding")
+			}
+			opts.encodings = append(opts.encodings, args[1])
+			args = args[2:]
+		default:
+			return opts, true, telemetryUsageError("unknown telemetry catalog option: %s", args[0])
+		}
+	}
+	return opts, true, nil
+}
+
+func filterTelemetryPathCatalog(catalog []grpcclient.TelemetryPathInfo, opts telemetryCatalogCLIOptions) []grpcclient.TelemetryPathInfo {
+	paths := normalizedCatalogPathFilterSet(opts.paths)
+	cardinalities := normalizedCatalogFilterSet(opts.cardinalities)
+	payloadSchemas := normalizedCatalogFilterSet(opts.payloadSchemas)
+	encodings := normalizedCatalogFilterSet(opts.encodings)
+	if len(encodings) > 0 {
+		if _, ok := encodings[normalizedCatalogFilterValue(grpcclient.TelemetryEncoding())]; !ok {
+			return nil
+		}
+	}
+	if !opts.defaultOnly && len(paths) == 0 && len(cardinalities) == 0 && len(payloadSchemas) == 0 && len(encodings) == 0 {
+		return catalog
+	}
+
+	filtered := make([]grpcclient.TelemetryPathInfo, 0, len(catalog))
+	for _, info := range catalog {
+		if opts.defaultOnly && !info.Default {
+			continue
+		}
+		if len(paths) > 0 && !telemetryCatalogInfoMatchesPath(info, paths) {
+			continue
+		}
+		if len(cardinalities) > 0 {
+			if _, ok := cardinalities[normalizedCatalogFilterValue(info.Cardinality)]; !ok {
+				continue
+			}
+		}
+		if len(payloadSchemas) > 0 {
+			if _, ok := payloadSchemas[normalizedCatalogFilterValue(info.PayloadSchema)]; !ok {
+				continue
+			}
+		}
+		filtered = append(filtered, info)
+	}
+	return filtered
+}
+
+func normalizedCatalogPathFilterSet(values []string) map[string]struct{} {
+	set := make(map[string]struct{}, len(values))
+	for _, value := range values {
+		normalized := normalizedCatalogPathFilterValue(value)
+		if normalized != "" {
+			set[normalized] = struct{}{}
+		}
+	}
+	return set
+}
+
+func telemetryCatalogInfoMatchesPath(info grpcclient.TelemetryPathInfo, paths map[string]struct{}) bool {
+	if _, ok := paths[normalizedCatalogPathFilterValue(info.Path)]; ok {
+		return true
+	}
+	for _, alias := range info.Aliases {
+		if _, ok := paths[normalizedCatalogPathFilterValue(alias)]; ok {
+			return true
+		}
+	}
+	return false
+}
+
+func normalizedCatalogPathFilterValue(value string) string {
+	path := strings.ToLower(strings.TrimSpace(value))
+	if path == "" {
+		return ""
+	}
+	return "/" + strings.Trim(path, "/")
+}
+
+func normalizedCatalogFilterSet(values []string) map[string]struct{} {
+	set := make(map[string]struct{}, len(values))
+	for _, value := range values {
+		normalized := normalizedCatalogFilterValue(value)
+		if normalized != "" {
+			set[normalized] = struct{}{}
+		}
+	}
+	return set
+}
+
+func normalizedCatalogFilterValue(value string) string {
+	return strings.ToLower(strings.TrimSpace(value))
+}
+
+func printTelemetryCatalog(catalog grpcclient.TelemetryCatalog, paths []grpcclient.TelemetryPathInfo) {
+	if hint := formatTelemetryCatalogIntervalHints(catalog); hint != "" {
+		fmt.Println(hint)
+	}
+	printTelemetryPathCatalog(paths)
+}
+
+func formatTelemetryCatalogIntervalHints(catalog grpcclient.TelemetryCatalog) string {
+	if catalog.DefaultSampleIntervalMs == 0 && catalog.MinSampleIntervalMs == 0 && catalog.MaxSampleIntervalMs == 0 {
+		return ""
+	}
+	return fmt.Sprintf("Sample interval: default=%dms min=%dms max=%dms",
+		catalog.DefaultSampleIntervalMs,
+		catalog.MinSampleIntervalMs,
+		catalog.MaxSampleIntervalMs)
+}
+
+func printTelemetryPathCatalog(catalog []grpcclient.TelemetryPathInfo) {
+	if len(catalog) == 0 {
+		fmt.Println("No telemetry paths found")
+		return
+	}
+	fmt.Printf("%-28s %-18s %-8s %-28s %-42s %s\n", "Path", "Cardinality", "Default", "Aliases", "Payload schema", "Description")
+	fmt.Println(strings.Repeat("-", 168))
+	for _, info := range catalog {
+		fmt.Printf("%-28s %-18s %-8s %-28s %-42s %s\n",
+			formatTelemetryCatalogValue(info.Path),
+			formatTelemetryCatalogValue(info.Cardinality),
+			yesNo(info.Default),
+			formatTelemetryCatalogList(info.Aliases),
+			formatTelemetryCatalogValue(info.PayloadSchema),
+			formatTelemetryCatalogValue(info.Description),
+		)
+	}
+}
+
+func formatTelemetryCatalogValue(value string) string {
+	if value == "" {
+		return "-"
+	}
+	return value
+}
+
+func formatTelemetryCatalogList(values []string) string {
+	if len(values) == 0 {
+		return "-"
+	}
+	return strings.Join(values, ",")
+}
+
+func telemetryOptions(args []string) (telemetryCLIOptions, error) {
+	opts := telemetryCLIOptions{once: true}
+	for len(args) > 0 {
+		switch args[0] {
+		case "path":
+			if len(args) < 2 {
+				return opts, telemetryUsageError("'show telemetry path' requires a path")
+			}
+			opts.paths = append(opts.paths, args[1])
+			args = args[2:]
+		case "interval":
+			if len(args) < 2 {
+				return opts, telemetryUsageError("'show telemetry interval' requires a duration such as 5s")
+			}
+			interval, err := time.ParseDuration(args[1])
+			if err != nil || interval <= 0 {
+				return opts, telemetryUsageError("invalid telemetry interval %q", args[1])
+			}
+			opts.interval = interval
+			args = args[2:]
+		case "count":
+			if len(args) < 2 {
+				return opts, telemetryUsageError("'show telemetry count' requires a positive event count")
+			}
+			count, err := strconv.Atoi(args[1])
+			if err != nil || count <= 0 {
+				return opts, telemetryUsageError("invalid telemetry event count %q", args[1])
+			}
+			opts.count = count
+			opts.once = false
+			args = args[2:]
+		case "once":
+			opts.once = true
+			opts.count = 0
+			args = args[1:]
+		default:
+			opts.paths = append(opts.paths, args[0])
+			args = args[1:]
+		}
+	}
+	return opts, nil
+}
+
+func telemetryUsageError(format string, args ...interface{}) error {
+	return fmt.Errorf("%w: %s", errTelemetryUsage, fmt.Sprintf(format, args...))
+}
+
+func isTelemetryUsageError(err error) bool {
+	return errors.Is(err, errTelemetryUsage)
+}
+
+func printTelemetryEvent(event *grpcclient.TelemetryEvent) error {
+	if event == nil {
+		return nil
+	}
+	payload := json.RawMessage(event.JSONPayload)
+	if len(payload) == 0 {
+		payload = json.RawMessage("null")
+	} else if !json.Valid(payload) {
+		encoded, err := json.Marshal(event.JSONPayload)
+		if err != nil {
+			return err
+		}
+		payload = json.RawMessage(encoded)
+	}
+
+	timestamp := ""
+	if !event.Timestamp.IsZero() {
+		timestamp = event.Timestamp.UTC().Format(time.RFC3339Nano)
+	}
+	output := telemetryOutputEvent{
+		Sequence:      event.Sequence,
+		Timestamp:     timestamp,
+		Path:          event.Path,
+		Cardinality:   event.Cardinality,
+		PayloadSchema: event.PayloadSchema,
+		EventType:     event.EventType,
+		Encoding:      event.Encoding,
+		SchemaVersion: event.SchemaVersion,
+		PayloadBytes:  telemetryPayloadBytes(event),
+		Payload:       payload,
+	}
+	encoder := json.NewEncoder(os.Stdout)
+	encoder.SetEscapeHTML(false)
+	return encoder.Encode(output)
+}
+
+func telemetryPayloadBytes(event *grpcclient.TelemetryEvent) int {
+	if event.PayloadBytes > 0 {
+		return event.PayloadBytes
+	}
+	return len(event.JSONPayload)
 }
 
 func routeTextOptions(args []string) (protocol, addressFamily string, err error) {
@@ -1889,6 +2510,13 @@ func createCompleter() *readline.PrefixCompleter {
 			readline.PcItem("lcp"),
 			readline.PcItem("ha"),
 			readline.PcItem("class-of-service"),
+			readline.PcItem("evpn"),
+			readline.PcItem("telemetry",
+				readline.PcItem("path"),
+				readline.PcItem("interval"),
+				readline.PcItem("count"),
+				readline.PcItem("once"),
+			),
 			readline.PcItem("route",
 				readline.PcItem("protocol"),
 			),

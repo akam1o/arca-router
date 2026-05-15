@@ -29,6 +29,9 @@ type VPPPlugin struct {
 	// ifaceIndex maps Junos interface name → VPP sw_if_index
 	ifaceIndex map[string]uint32
 
+	// vxlanIfIndex maps EVPN VNI → VPP VXLAN tunnel sw_if_index
+	vxlanIfIndex map[int]uint32
+
 	// appliedAddrs tracks addresses applied per interface for rollback
 	appliedAddrs map[uint32][]*net.IPNet
 
@@ -36,6 +39,7 @@ type VPPPlugin struct {
 	removedInterfaces map[string]uint32
 
 	lcpReconciliation LCPReconciliationStatus
+	qosCapabilities   QoSCapabilityStatus
 }
 
 // LCPReconciliationStatus is the latest VPP LCP cache reconciliation result.
@@ -46,6 +50,13 @@ type LCPReconciliationStatus struct {
 	LastError       string
 }
 
+// QoSCapabilityStatus is the latest VPP class-of-service capability result.
+type QoSCapabilityStatus struct {
+	LastCheck    time.Time
+	Capabilities pkgvpp.QoSCapabilities
+	LastError    string
+}
+
 // NewVPPPlugin creates a new VPP plugin.
 func NewVPPPlugin(client pkgvpp.Client, hwConfig *device.HardwareConfig, log *slog.Logger) *VPPPlugin {
 	return &VPPPlugin{
@@ -54,6 +65,7 @@ func NewVPPPlugin(client pkgvpp.Client, hwConfig *device.HardwareConfig, log *sl
 		hwConfig:          hwConfig,
 		log:               log.With("plugin", "vpp"),
 		ifaceIndex:        make(map[string]uint32),
+		vxlanIfIndex:      make(map[int]uint32),
 		appliedAddrs:      make(map[uint32][]*net.IPNet),
 		removedInterfaces: make(map[string]uint32),
 	}
@@ -70,6 +82,7 @@ func (p *VPPPlugin) Init(ctx context.Context) error {
 	if err := p.lcpManager.Sync(ctx); err != nil {
 		p.log.Warn("LCP state sync failed, continuing", slog.Any("error", err))
 	}
+	p.updateQoSCapabilities(ctx)
 
 	// Build interface index from existing VPP interfaces
 	existing, err := p.client.ListInterfaces(ctx)
@@ -107,6 +120,9 @@ func (p *VPPPlugin) HealthCheck(ctx context.Context) error {
 func (p *VPPPlugin) ValidateChanges(ctx context.Context, diff *engine.ConfigDiff) error {
 	if diff == nil {
 		return nil
+	}
+	if err := validateEVPNChanges(diff); err != nil {
+		return err
 	}
 	// Validate added interfaces exist in hardware config
 	for name := range diff.InterfacesAdded {
@@ -158,7 +174,7 @@ func (p *VPPPlugin) ApplyChanges(ctx context.Context, diff *engine.ConfigDiff) e
 	tableAddressHandled := make(map[string]bool)
 	if diff.RoutingInstancesChanged {
 		var err error
-		tableAddressHandled, err = p.applyRoutingInstanceChanges(ctx, diff, &rollbackOps)
+		tableAddressHandled, err = p.applyRoutingInstanceChanges(ctx, diff, &rollbackOps, false)
 		if err != nil {
 			p.executeRollback(ctx, rollbackOps)
 			return fmt.Errorf("update routing instance tables: %w", err)
@@ -207,7 +223,22 @@ func (p *VPPPlugin) ApplyChanges(ctx context.Context, diff *engine.ConfigDiff) e
 		}
 	}
 
-	// 5. Remove interfaces (remove addresses, LCP, then disable)
+	// 5. Apply EVPN/VXLAN overlay state before interfaces are removed.
+	if diff.EVPNChanged {
+		if err := p.applyEVPNChanges(ctx, diff, &rollbackOps); err != nil {
+			p.executeRollback(ctx, rollbackOps)
+			return fmt.Errorf("update EVPN/VXLAN dataplane: %w", err)
+		}
+	}
+
+	if diff.RoutingInstancesChanged {
+		if err := p.deleteStaleRoutingInstanceTables(ctx, diff, &rollbackOps); err != nil {
+			p.executeRollback(ctx, rollbackOps)
+			return fmt.Errorf("delete routing instance tables: %w", err)
+		}
+	}
+
+	// 6. Remove interfaces (remove addresses, LCP, then disable)
 	for _, name := range diff.InterfacesRemoved {
 		if err := p.removeInterface(ctx, name, &rollbackOps); err != nil {
 			p.executeRollback(ctx, rollbackOps)
@@ -251,6 +282,12 @@ func (p *VPPPlugin) RollbackChanges(ctx context.Context, diff *engine.ConfigDiff
 		}
 	}
 
+	if diff.EVPNChanged {
+		if err := p.applyEVPNChanges(ctx, reverseEVPNDiff(diff), nil); err != nil && rollbackErr == nil {
+			rollbackErr = fmt.Errorf("restore EVPN/VXLAN dataplane: %w", err)
+		}
+	}
+
 	// Reverse of ApplyChanges: remove added addresses, re-add removed addresses.
 	for name, ifaceCfg := range diff.InterfacesAdded {
 		swIfIndex, ok := p.ifaceIndex[name]
@@ -271,7 +308,7 @@ func (p *VPPPlugin) RollbackChanges(ctx context.Context, diff *engine.ConfigDiff
 			NewConfig:           diff.OldConfig,
 			OldRoutingInstances: diff.NewRoutingInstances,
 			NewRoutingInstances: diff.OldRoutingInstances,
-		}, nil)
+		}, nil, true)
 		if err != nil && rollbackErr == nil {
 			rollbackErr = fmt.Errorf("restore routing instance tables: %w", err)
 		}
@@ -413,6 +450,13 @@ func (p *VPPPlugin) LCPReconciliationStatus() LCPReconciliationStatus {
 	p.mu.RLock()
 	defer p.mu.RUnlock()
 	return cloneLCPReconciliationStatus(p.lcpReconciliation)
+}
+
+// QoSCapabilityStatus returns a copy of the latest class-of-service capability result.
+func (p *VPPPlugin) QoSCapabilityStatus() QoSCapabilityStatus {
+	p.mu.RLock()
+	defer p.mu.RUnlock()
+	return cloneQoSCapabilityStatus(p.qosCapabilities)
 }
 
 // --- Internal helpers ---
@@ -768,7 +812,7 @@ type routingInstancePlan struct {
 	interfaces []string
 }
 
-func (p *VPPPlugin) applyRoutingInstanceChanges(ctx context.Context, diff *engine.ConfigDiff, rollback *[]func(context.Context) error) (map[string]bool, error) {
+func (p *VPPPlugin) applyRoutingInstanceChanges(ctx context.Context, diff *engine.ConfigDiff, rollback *[]func(context.Context) error, deleteStaleTables bool) (map[string]bool, error) {
 	oldPlans, err := routingInstancePlanMap(diff.OldRoutingInstances)
 	if err != nil {
 		return nil, err
@@ -819,9 +863,27 @@ func (p *VPPPlugin) applyRoutingInstanceChanges(ctx context.Context, diff *engin
 		handledAddresses[binding.name] = true
 	}
 
+	if deleteStaleTables {
+		if err := p.deleteStaleRoutingInstanceTables(ctx, diff, rollback); err != nil {
+			return nil, err
+		}
+	}
+
+	return handledAddresses, nil
+}
+
+func (p *VPPPlugin) deleteStaleRoutingInstanceTables(ctx context.Context, diff *engine.ConfigDiff, rollback *[]func(context.Context) error) error {
+	oldPlans, err := routingInstancePlanMap(diff.OldRoutingInstances)
+	if err != nil {
+		return err
+	}
+	newPlans, err := routingInstancePlanMap(diff.NewRoutingInstances)
+	if err != nil {
+		return err
+	}
 	for _, plan := range routingTablesToDelete(oldPlans, newPlans) {
 		if err := p.deleteIPTablePair(ctx, plan); err != nil {
-			return nil, fmt.Errorf("delete routing-instance %s table %d: %w", plan.name, plan.tableID, err)
+			return fmt.Errorf("delete routing-instance %s table %d: %w", plan.name, plan.tableID, err)
 		}
 		if rollback != nil {
 			planCopy := plan
@@ -830,8 +892,7 @@ func (p *VPPPlugin) applyRoutingInstanceChanges(ctx context.Context, diff *engin
 			})
 		}
 	}
-
-	return handledAddresses, nil
+	return nil
 }
 
 func routingInstancePlanMap(instances map[string]*model.RoutingInstance) (map[string]routingInstancePlan, error) {
@@ -1195,6 +1256,22 @@ func (p *VPPPlugin) updateLCPReconciliationLocked(ctx context.Context) {
 	p.logLCPReconciliation(status)
 }
 
+func (p *VPPPlugin) updateQoSCapabilities(ctx context.Context) {
+	status := QoSCapabilityStatus{LastCheck: time.Now()}
+	capabilities, err := p.client.GetQoSCapabilities(ctx)
+	if err != nil {
+		status.LastError = err.Error()
+		p.log.Warn("VPP QoS capability detection failed", slog.String("error", status.LastError))
+	} else {
+		status.Capabilities = capabilities
+		status.Capabilities.Diagnostics = append([]string(nil), capabilities.Diagnostics...)
+	}
+
+	p.mu.Lock()
+	p.qosCapabilities = status
+	p.mu.Unlock()
+}
+
 func (p *VPPPlugin) checkLCPReconciliation(ctx context.Context) LCPReconciliationStatus {
 	status := LCPReconciliationStatus{
 		LastRun:   time.Now(),
@@ -1225,6 +1302,11 @@ func (p *VPPPlugin) logLCPReconciliation(status LCPReconciliationStatus) {
 
 func cloneLCPReconciliationStatus(status LCPReconciliationStatus) LCPReconciliationStatus {
 	status.Inconsistencies = append([]string(nil), status.Inconsistencies...)
+	return status
+}
+
+func cloneQoSCapabilityStatus(status QoSCapabilityStatus) QoSCapabilityStatus {
+	status.Capabilities.Diagnostics = append([]string(nil), status.Capabilities.Diagnostics...)
 	return status
 }
 

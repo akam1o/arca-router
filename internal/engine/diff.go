@@ -26,6 +26,9 @@ type ConfigDiff struct {
 	BGPChanged   bool
 	OldBGP       *model.BGPConfig
 	NewBGP       *model.BGPConfig
+	EVPNChanged  bool
+	OldEVPN      *model.EVPNConfig
+	NewEVPN      *model.EVPNConfig
 	OSPFChanged  bool
 	OldOSPF      *model.OSPFConfig
 	NewOSPF      *model.OSPFConfig
@@ -98,6 +101,7 @@ func (d *ConfigDiff) HasChanges() bool {
 		len(d.InterfacesChanged) > 0 ||
 		d.BFDChanged ||
 		d.BGPChanged ||
+		d.EVPNChanged ||
 		d.OSPFChanged ||
 		d.OSPF3Changed ||
 		d.MPLSChanged ||
@@ -245,6 +249,14 @@ func computeProtocolDiff(old, new *model.RouterConfig, diff *ConfigDiff) {
 		diff.NewBGP = newBGP
 	}
 
+	oldEVPN := getEVPN(old)
+	newEVPN := getEVPN(new)
+	if !reflect.DeepEqual(oldEVPN, newEVPN) {
+		diff.EVPNChanged = true
+		diff.OldEVPN = oldEVPN
+		diff.NewEVPN = newEVPN
+	}
+
 	oldOSPF := getOSPF(old)
 	newOSPF := getOSPF(new)
 	if !ospfEqual(oldOSPF, newOSPF) {
@@ -350,6 +362,13 @@ func getBGP(c *model.RouterConfig) *model.BGPConfig {
 		return nil
 	}
 	return c.Protocols.BGP
+}
+
+func getEVPN(c *model.RouterConfig) *model.EVPNConfig {
+	if c.Protocols == nil {
+		return nil
+	}
+	return c.Protocols.EVPN
 }
 
 func getOSPF(c *model.RouterConfig) *model.OSPFConfig {

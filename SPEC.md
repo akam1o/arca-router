@@ -49,18 +49,19 @@ Only the current command names are part of this specification: `arca-routerd` an
    - [Prefix Lists](#prefix-lists)
    - [Policy Statements](#policy-statements)
 7. [Advanced v0.6 Configuration](#advanced-v06-configuration)
-8. [Security](#security)
+8. [Overlay v0.8 Configuration](#overlay-v08-configuration)
+9. [Security](#security)
    - [NETCONF Server](#netconf-server)
    - [User Management](#user-management)
    - [Rate Limiting](#rate-limiting)
-9. [Configuration Workflow](#configuration-workflow)
-10. [Examples](#examples)
-11. [Runtime Options and Observability](#runtime-options-and-observability)
-12. [Operational Commands](#operational-commands)
-13. [Configuration Validation](#configuration-validation)
-14. [Troubleshooting](#troubleshooting)
-15. [References](#references)
-16. [Version History](#version-history)
+10. [Configuration Workflow](#configuration-workflow)
+11. [Examples](#examples)
+12. [Runtime Options and Observability](#runtime-options-and-observability)
+13. [Operational Commands](#operational-commands)
+14. [Configuration Validation](#configuration-validation)
+15. [Troubleshooting](#troubleshooting)
+16. [References](#references)
+17. [Version History](#version-history)
 
 ---
 
@@ -583,7 +584,34 @@ set class-of-service interfaces ge-0/0/0 output-traffic-control-profile WAN
 
 Forwarding class queues must be between `0` and `7`. Interface bindings must reference an existing traffic-control profile and a configured interface.
 
-`arca show class-of-service` exposes the running forwarding classes, traffic-control profiles, interface bindings, and current enforcement status. VPP scheduler and policer enforcement remains `intent-only` until the supported VPP binapi surface is available.
+`arca show class-of-service` exposes the running forwarding classes, traffic-control profiles, interface bindings, and current enforcement status. VPP scheduler and policer enforcement remains `intent-only` until the supported VPP binapi surface is available. The VPP southbound detects class-of-service dataplane capabilities during initialization and records whether metadata binding, queue scheduler enforcement, policer enforcement, and operational QoS counters are supported; the current bundled VPP 24.10 binapi path supports metadata binding and reports scheduler, policer, and QoS counters as unsupported diagnostics.
+
+---
+
+<a id="overlay-v08-configuration"></a>
+## Overlay v0.8 Configuration
+
+The v0.8 management-plane model includes EVPN/VXLAN VNI intent. Parser, serializer, validation, clone, conversion, diff, NETCONF XML/YANG coverage, and the `/overlays/evpn` structured telemetry path are implemented for L2 and L3 VNIs. FRR EVPN control-plane generation is implemented through the FRR file backend: arca-router renders global BGP `l2vpn evpn` with `advertise-all-vni`, explicit L2 VNI route-targets, L3 VNI VRF bindings, and per-VRF EVPN route-targets. VPP VXLAN dataplane apply supports L2 and L3 VNIs with multicast VXLAN or unicast remote VTEPs. For L2 VNIs, the VPP southbound creates a bridge domain using the VNI as the bridge ID, creates the VXLAN tunnel, brings the tunnel interface up, and attaches it to the bridge domain. For L3 VNIs, it creates an L3 VXLAN tunnel, binds the tunnel interface to the routing-instance IPv4/IPv6 table, and deletes stale routing-instance tables only after dependent tunnels are removed.
+
+```
+set protocols evpn vni 10010 type l2
+set protocols evpn vni 10010 bridge-domain BD-10
+set protocols evpn vni 10010 vlan-id 10
+set protocols evpn vni 10010 route-distinguisher 65000:10010
+set protocols evpn vni 10010 vrf-target target:65000:10010
+set protocols evpn vni 10010 vrf-target import target:65000:10011
+set protocols evpn vni 10010 vrf-target export target:65000:10012
+set protocols evpn vni 10010 source-interface ge-0/0/0
+set protocols evpn vni 10010 source-address 192.0.2.1
+set protocols evpn vni 10010 multicast-group 239.0.0.10
+
+set protocols evpn vni 20010 type l3
+set protocols evpn vni 20010 routing-instance BLUE
+set protocols evpn vni 20010 source-interface ge-0/0/0
+set protocols evpn vni 20010 remote-vtep 198.51.100.20
+```
+
+VNI values must be between `1` and `16777215`. `type l2` requires `bridge-domain` and may include `vlan-id`; `type l3` requires `routing-instance` and must reference a configured routing instance. Route distinguishers use `<asn>:<number>`, route targets use `target:<asn>:<number>`, source interfaces must reference configured interfaces, multicast groups must be valid multicast IPv4 or IPv6 addresses, and remote VTEPs must be valid unicast IPv4 or IPv6 addresses. `multicast-group` and `remote-vtep` are mutually exclusive. For current VPP dataplane apply, L2 and L3 VNIs require `source-interface` plus either `multicast-group` or `remote-vtep`; `source-address` may be omitted when it can be derived from a configured source-interface address in the same address family as the VXLAN destination. L3 VNIs use the referenced routing-instance table for VXLAN encapsulation and tunnel interface table binding. FRR EVPN generation currently maps route-target intent; FRR derives EVPN route distinguishers from local EVPN state.
 
 ---
 
@@ -608,11 +636,11 @@ set security netconf ssh port 830
 
 **Note**: The NETCONF server is built into `arca-routerd`. When `--netconf-listen` is omitted, the daemon listens on the configured `security netconf ssh port`; if that is also unset, it uses `:830`. `--netconf-listen` remains the explicit runtime override and can include a listen address.
 
-NETCONF XML get-config/edit-config supports the v0.6 management-plane model for `system services`, `chassis cluster`, `protocols mpls`, `protocols vrrp`, `routing-instances`, `class-of-service`, and non-sensitive `security netconf` / `security rate-limit` settings. Security user secrets are intentionally not emitted in NETCONF XML replies.
+NETCONF XML get-config/edit-config supports the v0.6 management-plane model for `system services`, `chassis cluster`, `protocols mpls`, `protocols vrrp`, `routing-instances`, `class-of-service`, the v0.8 `protocols evpn` VNI intent model, and non-sensitive `security netconf` / `security rate-limit` settings. Security user secrets are intentionally not emitted in NETCONF XML replies.
 
 NETCONF `<get>` returns config-derived system/routing state and, when arca-routerd can collect VPP state, live managed interface admin/oper status, physical address, bound `qos-profile`, VPP table bindings (`ipv4-table-id`, `ipv6-table-id`), counters (`rx-packets`, `tx-packets`, `rx-bytes`, `tx-bytes`, `rx-errors`, `tx-errors`, `drops`), and VPP RX/TX queue placement. If live collection fails, interface output falls back to configured addresses with unknown operational status.
 
-The internal gRPC interface state API and `arca show interfaces` use the same managed VPP interface state source, so interface filters use configured names such as `ge-0/0/0` and expose the same bound QoS profile, VPP table binding, packet counters, and queue placement summary for local operators.
+The internal gRPC interface state API and `arca show interfaces` use the same managed VPP interface state source, so interface filters use configured names such as `ge-0/0/0` and expose the same bound QoS profile, VPP table binding, packet counters, and queue placement summary for local operators. The internal gRPC class-of-service API, `arca show class-of-service`, and the `/class-of-service` telemetry path expose the same VPP QoS capability diagnostics used by the Web/NMS status API.
 
 The internal gRPC route state API reads FRR JSON route output for both IPv4 and IPv6 tables and returns structured route entries with prefix, next-hop, protocol, metric, interface, and active-path status. Prefix filters must be valid CIDR prefixes; protocol filters accept the FRR protocol names used by the route table, with `ospf3` normalized to `ospf6`.
 
@@ -997,7 +1025,7 @@ Endpoints:
 - `GET /metrics`
 - `GET /healthz`
 
-The metrics endpoint exports daemon uptime, running config version, NETCONF counters, config sync gauges for etcd health and running revision, cluster sync gauges for enabled state, node count, etcd sync configuration, datastore alignment, FRR VRRP operational gauges, HA convergence gauges, class-of-service intent gauges, and VPP LCP reconciliation gauges for pair count, inconsistency count, check failures, and latest check timestamp.
+The metrics endpoint exports daemon uptime, running config version, NETCONF counters, config sync gauges for etcd health and running revision, cluster sync gauges for enabled state, node count, etcd sync configuration, datastore alignment, EVPN/VXLAN overlay intent gauges for configured state and VNI counts, FRR VRRP operational gauges, HA convergence gauges, class-of-service intent and VPP QoS capability gauges, and VPP LCP reconciliation gauges for pair count, inconsistency count, check failures, and latest check timestamp.
 
 The packaged Grafana dashboard is installed at:
 
@@ -1005,7 +1033,25 @@ The packaged Grafana dashboard is installed at:
 /usr/share/arca-router/grafana/arca-routerd-dashboard.json
 ```
 
-It includes daemon, NETCONF, config sync, HA, FRR VRRP, class-of-service intent, and VPP LCP panels backed by the Prometheus metrics endpoint.
+It includes daemon, NETCONF, config sync, HA, FRR VRRP, EVPN/VXLAN overlay intent, class-of-service intent and VPP QoS capability, and VPP LCP panels backed by the Prometheus metrics endpoint.
+
+### gRPC Telemetry Stream
+
+The internal Unix socket gRPC API includes `TelemetryService.GetTelemetryCatalog` for stream discovery and `TelemetryService.SubscribeTelemetry` for structured streaming telemetry. The catalog returns the event schema version, payload encoding, default paths, default/min/max sample interval hints in milliseconds, supported paths, descriptions, cardinality hints, per-path payload schema IDs, accepted path aliases, and default membership. `GetTelemetryCatalog` accepts repeated path, cardinality, payload schema, and payload encoding filters, plus a default-only filter, so collectors can discover only the paths or path classes they plan to subscribe to; path filters match canonical paths or advertised aliases such as `/evpn`. Events use the `arca.telemetry.v1` envelope with `sequence`, `timestamp`, `path`, `cardinality`, `payload_schema`, `event_type`, `encoding`, `json_payload`, and `payload_bytes`; payloads are JSON. Subscriptions can select paths, set a sample interval, or request a one-shot snapshot. Empty path selection defaults to `/system` and `/config/running`.
+
+Supported paths are `/system`, `/config/running`, `/interfaces`, `/routes`, `/routing/bgp/neighbors`, `/routing/ospf/neighbors`, `/routing/ospf3/neighbors`, `/routing-instances`, `/overlays/evpn`, `/class-of-service`, `/bfd`, `/lcp`, and `/ha`. The server writes events synchronously to the gRPC stream, so gRPC flow control provides the backpressure boundary and the daemon does not keep unbounded per-subscriber event buffers.
+
+Local operators can inspect the same stream with `arca show telemetry path /system path /interfaces`; the CLI prints one JSON envelope per line. `interval <duration>` and `count <events>` request a sampled stream for a bounded number of events, for example `arca show telemetry path /routes interval 5s count 3`. `arca show telemetry paths` prints the local telemetry path catalog with default/min/max sample interval hints, cardinality hints, payload schema IDs, default membership, and descriptions before operators subscribe to high-cardinality paths, and does not require a daemon connection. It accepts `default`, `path <path-or-alias>`, `cardinality <hint>`, `payload-schema <id>`, and `encoding <encoding>` catalog filters, for example `arca show telemetry paths default` or `arca show telemetry paths encoding json`. `arca show telemetry paths live` queries `TelemetryService.GetTelemetryCatalog` to show the connected daemon's advertised catalog and pushes the same filters into the RPC, for example `arca show telemetry paths live cardinality per-route`.
+
+For external NMS polling, the Web API exposes `GET /api/nms/v1/status`. The response is a stable JSON envelope with `schema_version` set to `arca.nms.operational.v1`, `generated_at`, `resource`, and `data`. The `data` object contains the same read-only operational status as `/api/status`, including build metadata, config version, datastore state, config sync, HA, CoS, FRR, VPP LCP, and NETCONF counters.
+
+The Web API also exposes `GET /api/nms/v1/telemetry/paths` for collector discovery. The response is a stable JSON envelope with `schema_version` set to `arca.nms.telemetry-catalog.v1`, `generated_at`, `event_schema_version`, `encoding`, `default_paths`, default/min/max sample interval hints in milliseconds, filtered `path_count`, and the ordered telemetry `paths` catalog with descriptions, cardinality hints, payload schema IDs, accepted aliases, and default membership. Repeated `path`, `cardinality`, `payload_schema`, and `encoding` query parameters filter the returned catalog; `default=true` returns only default subscription paths. `path` values match canonical paths or advertised aliases. For example, `?path=/evpn` returns the EVPN path and `?cardinality=per-route&payload_schema=arca.telemetry.routes.v1&encoding=json` returns JSON route snapshots.
+
+Collectors that need stable payload field metadata can call `GET /api/nms/v1/telemetry/schemas`. The response is a stable JSON envelope with `schema_version` set to `arca.nms.telemetry-schemas.v1`, `generated_at`, `event_schema_version`, `encoding`, `default_paths`, default/min/max sample interval hints in milliseconds, filtered `schema_count`, and ordered `schemas` entries for each telemetry path. Each schema entry repeats the path description, cardinality hint, payload schema ID, accepted aliases, default membership, and the stable top-level JSON `fields` with field name, type hint, and description. The endpoint accepts the same repeated `path`, `cardinality`, `payload_schema`, `encoding`, and `default=true` filters as `/api/nms/v1/telemetry/paths`.
+
+HTTP-only collectors can request one-shot telemetry through `GET /api/nms/v1/telemetry/snapshot`. The endpoint accepts repeated `path` query parameters, such as `?path=/system&path=/interfaces`; when no metadata filter is provided, omitting `path` uses the same default path set as the gRPC telemetry stream. It also accepts `default=true`, repeated `cardinality`, repeated `payload_schema`, and repeated `encoding` query parameters to apply catalog metadata filters directly to the snapshot path set, for example `?cardinality=per-route&payload_schema=arca.telemetry.routes.v1`. It also accepts `timeout` as a Go duration string, defaulting to `5s` with a maximum of `30s`, `max_payload_bytes`, defaulting to `8388608` with a maximum of `67108864`, and `max_events`, defaulting to `64` with a maximum of `1024`, so large paths such as `/routes` and unexpected event fan-out stay bounded. The response is a stable JSON envelope with `schema_version` set to `arca.nms.telemetry-snapshot.v1`, `generated_at`, `event_schema_version`, `encoding`, default paths, default/min/max sample interval hints in milliseconds, emitted `paths`, `event_count`, total `payload_bytes`, `max_payload_bytes`, `max_events`, `timeout_ms`, and `events` carrying the same structured telemetry event fields, per-event `cardinality`, `payload_schema`, and `payload_bytes`, and JSON payloads as the gRPC stream.
+
+`examples/nms` includes a standard-library HTTP collector example for the status, telemetry catalog, telemetry payload schema registry, and bounded telemetry snapshot endpoints. The example decodes catalog, schema, and snapshot default paths plus sample interval hints, validates NMS status envelope metadata, the status `data` object, required status data fields, sections, nested section fields, optional status arrays, non-empty status text, optional RFC3339 status section timestamps and generated_at timing bounds, optional status diagnostic metadata, status datastore consistency, status state and boolean consistency, status sync consistency, status counter relationships, and status aggregate counts, telemetry discovery, snapshot envelope metadata, RFC3339 `generated_at` timestamps, catalog path metadata, schema registry entries, payload field declarations, and per-event snapshot sequence, timestamp, path, cardinality, payload schema, encoding, and payload byte metadata, checks telemetry result counts, default path lists and sample interval hints, emitted paths, payload byte totals, and advertised guardrails against decoded data, can request default-only paths, selected paths or aliases, cardinalities, payload schema IDs, or payload encodings from the telemetry catalog and schema registry, and pushes the same include filters directly to the snapshot endpoint when catalog exclusion or discovery is not needed. It can also exclude selected paths or aliases, cardinalities such as `per-route`, payload schema IDs such as `arca.telemetry.routes.v1`, or payload encodings before requesting a snapshot. Exclude filters use the catalog aliases, so a snapshot path selected as `evpn` can still be filtered with `/overlays/evpn` metadata. When `-otlp-endpoint` is set in snapshot mode, the collector also exports snapshot events as OTLP/HTTP JSON log records to an OpenTelemetry logs endpoint such as `/v1/logs`, using `service.name` from `-otlp-service-name` and `arca.telemetry.cardinality` plus `arca.telemetry.payload_schema` from each event.
 
 ### Web UI
 
@@ -1029,10 +1075,18 @@ Endpoints:
 - `GET /api/config`
 - `GET /api/config/history`
 - `GET /api/status`
+- `GET /api/nms/v1/status`
+- `GET /api/nms/v1/telemetry/paths`
+- `GET /api/nms/v1/telemetry/schemas`
+- `GET /api/nms/v1/telemetry/snapshot`
 - `POST /api/config/validate`
 - `POST /api/config/commit`
 
-`/api/status` includes build metadata, uptime, running config version, datastore backend, cluster sync state, class-of-service intent state, FRR VRRP operational state with per-group state details, HA convergence state, VPP LCP reconciliation state, and NETCONF counters.
+`/api/status` includes build metadata, uptime, running config version, datastore backend, cluster sync state, EVPN/VXLAN overlay intent counts, class-of-service intent state with VPP QoS capability diagnostics, FRR VRRP operational state with per-group state details, HA convergence state, VPP LCP reconciliation state, and NETCONF counters.
+`/api/nms/v1/status` wraps the same read-only status in the `arca.nms.operational.v1` schema envelope for external NMS collectors.
+`/api/nms/v1/telemetry/paths` wraps the structured telemetry path catalog in the `arca.nms.telemetry-catalog.v1` schema envelope for collector discovery.
+`/api/nms/v1/telemetry/schemas` wraps the structured telemetry payload schema registry in the `arca.nms.telemetry-schemas.v1` schema envelope for collector validation and routing.
+`/api/nms/v1/telemetry/snapshot` wraps one-shot structured telemetry events in the `arca.nms.telemetry-snapshot.v1` schema envelope for HTTP-only collectors and enforces configurable timeout, payload byte, and event count guardrails.
 `/api/config` returns the running configuration as set-command text with the running config version. The dashboard renders the same running configuration in the browser editor.
 `/api/config/history` returns recent configuration commits and backs the dashboard commit history panel.
 
@@ -1062,7 +1116,7 @@ The packaged systemd unit grants `CAP_NET_BIND_SERVICE`, so the standard UDP por
 arca-routerd --snmp-listen=:161 --snmp-community=<read-only-community>
 ```
 
-SNMP is intended for monitoring only and should not be exposed on untrusted networks. The custom arca-router OID subtree exposes daemon, config, NETCONF, class-of-service intent, FRR VRRP operational, HA convergence, and VPP LCP reconciliation counters.
+SNMP is intended for monitoring only and should not be exposed on untrusted networks. The custom arca-router OID subtree exposes daemon, config, NETCONF, EVPN/VXLAN overlay intent, class-of-service intent and VPP QoS capability, FRR VRRP operational, HA convergence, and VPP LCP reconciliation counters.
 
 ---
 
@@ -1095,6 +1149,9 @@ arca show ospf neighbor
 # VRRP status
 arca show vrrp
 
+# EVPN/VXLAN overlay intent
+arca show evpn
+
 # VPP LCP reconciliation status
 arca show lcp
 
@@ -1108,7 +1165,7 @@ arca show class-of-service
 arca show configuration
 ```
 
-`show interfaces` prints live managed VPP admin/oper status, bound QoS profile, packet counters, and RX/TX queue placement when available. Name filters use configured interface names such as `ge-0/0/0`. `show routes` prints structured IPv4/IPv6 route state from the internal gRPC state API and supports optional `prefix <cidr>` and `protocol <proto>` filters; `show route` retains raw FRR route output. `show bgp neighbors` prints structured BGP neighbor state from the internal gRPC state API, while `show bgp summary` and `show bgp neighbor <ip>` retain raw FRR output. `show ospf neighbor` and `show ospf3 neighbor` print structured OSPF neighbor state from the same gRPC state API. `show vrrp` prints FRR `show vrrp` output through arca-routerd for local HA inspection. `show lcp` prints the cached VPP LCP reconciliation state used by HA convergence checks. `show ha` prints the same HA convergence summary used by Web UI, Prometheus, and SNMP, including FRR VRRP, configured FRR BFD peer health, and VPP LCP reconciliation status. `show class-of-service` prints running CoS intent and reports `intent-only` for scheduler/policer enforcement while VPP enforcement support is staged separately.
+`show interfaces` prints live managed VPP admin/oper status, bound QoS profile, packet counters, and RX/TX queue placement when available. Name filters use configured interface names such as `ge-0/0/0`. `show routes` prints structured IPv4/IPv6 route state from the internal gRPC state API and supports optional `prefix <cidr>` and `protocol <proto>` filters; `show route` retains raw FRR route output. `show bgp neighbors` prints structured BGP neighbor state from the internal gRPC state API, while `show bgp summary` and `show bgp neighbor <ip>` retain raw FRR output. `show ospf neighbor` and `show ospf3 neighbor` print structured OSPF neighbor state from the same gRPC state API. `show vrrp` prints FRR `show vrrp` output through arca-routerd for local HA inspection. `show evpn` renders the `/overlays/evpn` telemetry snapshot as a VNI summary for local overlay inspection. `show lcp` prints the cached VPP LCP reconciliation state used by HA convergence checks. `show ha` prints the same HA convergence summary used by Web UI, Prometheus, and SNMP, including FRR VRRP, configured FRR BFD peer health, and VPP LCP reconciliation status. `show class-of-service` prints running CoS intent, reports `intent-only` for scheduler/policer enforcement while VPP enforcement support is staged separately, and includes VPP QoS capability diagnostics.
 
 Interactive mode also supports `show history [N]` in configuration mode for commit history.
 

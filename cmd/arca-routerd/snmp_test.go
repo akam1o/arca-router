@@ -14,6 +14,7 @@ import (
 	sbfrr "github.com/akam1o/arca-router/internal/southbound/frr"
 	sbvpp "github.com/akam1o/arca-router/internal/southbound/vpp"
 	"github.com/akam1o/arca-router/pkg/datastore"
+	pkgvpp "github.com/akam1o/arca-router/pkg/vpp"
 )
 
 func TestEffectiveSNMPListenUsesFlagOverride(t *testing.T) {
@@ -113,6 +114,20 @@ func TestSNMPEndpointExportsRouterMetrics(t *testing.T) {
 		VRRP: &model.VRRPConfig{Groups: map[string]*model.VRRPGroup{
 			"10": {Interface: "ge-0/0/0", VirtualAddress: "192.0.2.1", Priority: 110, Preempt: true},
 		}},
+		EVPN: &model.EVPNConfig{VNIs: map[int]*model.EVPNVNI{
+			10010: {
+				VNI:             10010,
+				Type:            "l2",
+				BridgeDomain:    "BD-10",
+				SourceInterface: "ge-0/0/0",
+				MulticastGroup:  "239.0.0.10",
+			},
+			20010: {
+				VNI:             20010,
+				Type:            "l3",
+				RoutingInstance: "BLUE",
+			},
+		}},
 	}
 	cfg.ClassOfService = &model.ClassOfServiceConfig{
 		ForwardingClasses: map[string]*model.ForwardingClass{
@@ -163,6 +178,14 @@ func TestSNMPEndpointExportsRouterMetrics(t *testing.T) {
 		vpp: fakeVPPReconciliationSource{status: sbvpp.LCPReconciliationStatus{
 			LastRun:   time.Unix(1700000000, 0),
 			PairCount: 2,
+		}, qos: sbvpp.QoSCapabilityStatus{
+			LastCheck: time.Unix(1700000500, 0),
+			Capabilities: pkgvpp.QoSCapabilities{
+				MetadataBinding:     true,
+				QueueScheduler:      true,
+				Policer:             false,
+				OperationalCounters: true,
+			},
 		}},
 	}, "test-community")
 	if err := server.ListenUDP("udp4", "127.0.0.1:0"); err != nil {
@@ -242,12 +265,23 @@ func TestSNMPEndpointExportsRouterMetrics(t *testing.T) {
 		snmpOIDFRRBFDIssues,
 		snmpOIDFRRBFDError,
 		snmpOIDFRRBFDLastRun,
+		snmpOIDEVPNConfigured,
+		snmpOIDEVPNVNIs,
+		snmpOIDEVPNL2VNIs,
+		snmpOIDEVPNL3VNIs,
+		snmpOIDEVPNMulticastVNIs,
+		snmpOIDCoSMetadata,
+		snmpOIDCoSScheduler,
+		snmpOIDCoSPolicer,
+		snmpOIDCoSCounters,
+		snmpOIDCoSCapabilityErr,
+		snmpOIDCoSCapabilityLast,
 	})
 	if err != nil {
 		t.Fatalf("SNMP Get() error = %v", err)
 	}
-	if len(packet.Variables) != 31 {
-		t.Fatalf("SNMP variables = %d, want 31", len(packet.Variables))
+	if len(packet.Variables) != 42 {
+		t.Fatalf("SNMP variables = %d, want 42", len(packet.Variables))
 	}
 	if got := snmpUintValue(t, packet.Variables[0].Value); got != 42 {
 		t.Fatalf("%s = %d, want 42", snmpOIDConfigVersion, got)
@@ -341,6 +375,39 @@ func TestSNMPEndpointExportsRouterMetrics(t *testing.T) {
 	}
 	if got := snmpUintValue(t, packet.Variables[30].Value); got != 1700000400 {
 		t.Fatalf("%s = %d, want 1700000400", snmpOIDFRRBFDLastRun, got)
+	}
+	if got := snmpUintValue(t, packet.Variables[31].Value); got != 1 {
+		t.Fatalf("%s = %d, want 1", snmpOIDEVPNConfigured, got)
+	}
+	if got := snmpUintValue(t, packet.Variables[32].Value); got != 2 {
+		t.Fatalf("%s = %d, want 2", snmpOIDEVPNVNIs, got)
+	}
+	if got := snmpUintValue(t, packet.Variables[33].Value); got != 1 {
+		t.Fatalf("%s = %d, want 1", snmpOIDEVPNL2VNIs, got)
+	}
+	if got := snmpUintValue(t, packet.Variables[34].Value); got != 1 {
+		t.Fatalf("%s = %d, want 1", snmpOIDEVPNL3VNIs, got)
+	}
+	if got := snmpUintValue(t, packet.Variables[35].Value); got != 1 {
+		t.Fatalf("%s = %d, want 1", snmpOIDEVPNMulticastVNIs, got)
+	}
+	if got := snmpUintValue(t, packet.Variables[36].Value); got != 1 {
+		t.Fatalf("%s = %d, want 1", snmpOIDCoSMetadata, got)
+	}
+	if got := snmpUintValue(t, packet.Variables[37].Value); got != 1 {
+		t.Fatalf("%s = %d, want 1", snmpOIDCoSScheduler, got)
+	}
+	if got := snmpUintValue(t, packet.Variables[38].Value); got != 0 {
+		t.Fatalf("%s = %d, want 0", snmpOIDCoSPolicer, got)
+	}
+	if got := snmpUintValue(t, packet.Variables[39].Value); got != 1 {
+		t.Fatalf("%s = %d, want 1", snmpOIDCoSCounters, got)
+	}
+	if got := snmpUintValue(t, packet.Variables[40].Value); got != 0 {
+		t.Fatalf("%s = %d, want 0", snmpOIDCoSCapabilityErr, got)
+	}
+	if got := snmpUintValue(t, packet.Variables[41].Value); got != 1700000500 {
+		t.Fatalf("%s = %d, want 1700000500", snmpOIDCoSCapabilityLast, got)
 	}
 }
 

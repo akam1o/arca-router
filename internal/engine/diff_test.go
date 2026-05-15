@@ -134,6 +134,23 @@ func TestComputeDiffDetectsBFDChanges(t *testing.T) {
 	}
 }
 
+func TestComputeDiffDetectsEVPNChanges(t *testing.T) {
+	newCfg := model.NewRouterConfig()
+	newCfg.Protocols = &model.ProtocolsConfig{
+		EVPN: &model.EVPNConfig{VNIs: map[int]*model.EVPNVNI{
+			10010: {VNI: 10010, Type: "l2", BridgeDomain: "BD-10"},
+		}},
+	}
+
+	diff := ComputeDiff(model.NewRouterConfig(), newCfg)
+	if !diff.EVPNChanged || diff.NewEVPN == nil {
+		t.Fatalf("EVPN change not detected: %#v", diff)
+	}
+	if !diff.HasChanges() {
+		t.Fatal("HasChanges() = false, want true")
+	}
+}
+
 func TestComputeDiffDetectsBGPBFDBindingChanges(t *testing.T) {
 	oldCfg := model.NewRouterConfig()
 	oldCfg.Protocols = &model.ProtocolsConfig{

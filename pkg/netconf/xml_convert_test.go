@@ -493,6 +493,68 @@ func TestApplyConfigEditMergesV06AdvancedConfig(t *testing.T) {
 	}
 }
 
+func TestV08EVPNConfigXMLRoundTrip(t *testing.T) {
+	cfg := &config.Config{
+		Protocols: &config.ProtocolConfig{
+			EVPN: &config.EVPNConfig{VNIs: map[int]*config.EVPNVNI{
+				10010: {
+					VNI:                10010,
+					Type:               "l2",
+					BridgeDomain:       "BD-10",
+					VLANID:             10,
+					RouteDistinguisher: "65000:10010",
+					VRFTarget:          "target:65000:10010",
+					VRFTargetImport:    []string{"target:65000:10011"},
+					VRFTargetExport:    []string{"target:65000:10012"},
+					SourceInterface:    "ge-0/0/0",
+					SourceAddress:      "192.0.2.1",
+					MulticastGroup:     "239.0.0.10",
+				},
+				20010: {
+					VNI:             20010,
+					Type:            "l3",
+					RoutingInstance: "BLUE",
+					RemoteVTEP:      "198.51.100.20",
+				},
+			}},
+		},
+	}
+
+	xmlData, err := ConfigToXML(cfg, nil)
+	if err != nil {
+		t.Fatalf("ConfigToXML() error = %v", err)
+	}
+	xmlStr := string(xmlData)
+	for _, want := range []string{
+		"<evpn>",
+		"<id>10010</id>",
+		"<bridge-domain>BD-10</bridge-domain>",
+		"<routing-instance>BLUE</routing-instance>",
+		"<remote-vtep>198.51.100.20</remote-vtep>",
+	} {
+		if !strings.Contains(xmlStr, want) {
+			t.Fatalf("ConfigToXML() missing %q:\n%s", want, xmlStr)
+		}
+	}
+
+	parsed, err := XMLToConfig([]byte("<config>"+xmlStr+"</config>"), DefaultOpMerge)
+	if err != nil {
+		t.Fatalf("XMLToConfig() error = %v\nXML:\n%s", err, xmlStr)
+	}
+	setCommands := config.ToSetCommands(parsed)
+	for _, want := range []string{
+		"set protocols evpn vni 10010 type l2",
+		"set protocols evpn vni 10010 bridge-domain BD-10",
+		"set protocols evpn vni 10010 vrf-target import target:65000:10011",
+		"set protocols evpn vni 20010 routing-instance BLUE",
+		"set protocols evpn vni 20010 remote-vtep 198.51.100.20",
+	} {
+		if !strings.Contains(setCommands, want) {
+			t.Fatalf("ToSetCommands() missing %q:\n%s", want, setCommands)
+		}
+	}
+}
+
 func assertXMLOrder(t *testing.T, xmlStr, first, second string) {
 	t.Helper()
 	firstIndex := strings.Index(xmlStr, first)

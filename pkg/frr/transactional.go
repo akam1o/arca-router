@@ -142,6 +142,9 @@ func BuildMgmtOperations(cfg *Config) ([]MgmtOperation, error) {
 	if err := validateTransactionalBGP(cfg); err != nil {
 		return nil, err
 	}
+	if err := validateTransactionalEVPN(cfg); err != nil {
+		return nil, err
+	}
 	if err := validateTransactionalStaticRoutes(cfg); err != nil {
 		return nil, err
 	}
@@ -209,6 +212,21 @@ func validateTransactionalBGP(cfg *Config) error {
 		return nil
 	}
 	return validateBGPConfig(cfg.BGP)
+}
+
+func validateTransactionalEVPN(cfg *Config) error {
+	if cfg == nil {
+		return nil
+	}
+	if cfg.BGP != nil && cfg.BGP.EVPN != nil {
+		return NewInvalidConfigError("EVPN/VXLAN is not supported by the transactional FRR backend until BGP EVPN management operations are implemented")
+	}
+	for _, vrf := range cfg.VRFs {
+		if vrf.VNI != 0 || vrf.EVPN != nil {
+			return NewInvalidConfigError("EVPN/VXLAN is not supported by the transactional FRR backend until VRF EVPN management operations are implemented")
+		}
+	}
+	return nil
 }
 
 func validateTransactionalStaticRoutes(cfg *Config) error {

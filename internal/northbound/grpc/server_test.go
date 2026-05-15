@@ -2,7 +2,9 @@ package grpc
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"log/slog"
 	"net"
@@ -14,6 +16,7 @@ import (
 	"github.com/akam1o/arca-router/internal/engine"
 	"github.com/akam1o/arca-router/internal/model"
 	sbfrr "github.com/akam1o/arca-router/internal/southbound/frr"
+	sbvpp "github.com/akam1o/arca-router/internal/southbound/vpp"
 	"github.com/akam1o/arca-router/internal/store"
 	pkgconfig "github.com/akam1o/arca-router/pkg/config"
 	pkgvpp "github.com/akam1o/arca-router/pkg/vpp"
@@ -73,6 +76,14 @@ type fakeBFDOperationalSource struct {
 }
 
 func (f fakeBFDOperationalSource) BFDOperationalStatus() sbfrr.BFDOperationalStatus {
+	return f.status
+}
+
+type fakeQoSCapabilitySource struct {
+	status sbvpp.QoSCapabilityStatus
+}
+
+func (f fakeQoSCapabilitySource) QoSCapabilityStatus() sbvpp.QoSCapabilityStatus {
 	return f.status
 }
 
@@ -156,6 +167,16 @@ func TestClientServerConfigFlow(t *testing.T) {
 	}
 
 	srv := NewServer(eng, &fakeStore{commitID: "commit-1"}, testLogger())
+	srv.SetQoSCapabilitySource(fakeQoSCapabilitySource{status: sbvpp.QoSCapabilityStatus{
+		LastCheck: time.Unix(1700000500, 0),
+		Capabilities: pkgvpp.QoSCapabilities{
+			MetadataBinding:     true,
+			QueueScheduler:      true,
+			Policer:             false,
+			OperationalCounters: true,
+			Diagnostics:         []string{"scheduler api available"},
+		},
+	}})
 	errCh := make(chan error, 1)
 	go func() {
 		errCh <- srv.Serve(lis)
@@ -212,6 +233,16 @@ func TestClientServerConfigFlow(t *testing.T) {
 	if commitID != "commit-1" || version != 2 {
 		t.Fatalf("Commit() = (%q, %d), want commit-1 version 2", commitID, version)
 	}
+	cosInfo, err := client.GetClassOfService(ctx)
+	if err != nil {
+		t.Fatalf("GetClassOfService() error = %v", err)
+	}
+	if cosInfo.Capabilities == nil || !cosInfo.Capabilities.MetadataBindingSupported ||
+		!cosInfo.Capabilities.QueueSchedulerSupported || !cosInfo.Capabilities.CountersSupported ||
+		cosInfo.Capabilities.PolicerSupported || cosInfo.Capabilities.LastCheck.Unix() != 1700000500 ||
+		len(cosInfo.Capabilities.Diagnostics) != 1 {
+		t.Fatalf("GetClassOfService() capabilities = %#v, want VPP QoS capability diagnostics", cosInfo.Capabilities)
+	}
 	diffText, hasChanges, err := client.Diff(ctx, sessionID)
 	if err != nil {
 		t.Fatalf("Diff() error = %v", err)
@@ -219,6 +250,514 @@ func TestClientServerConfigFlow(t *testing.T) {
 	if hasChanges {
 		t.Fatalf("Diff() has changes after commit: %q", diffText)
 	}
+
+	catalog, err := client.GetTelemetryCatalog(ctx)
+	if err != nil {
+		t.Fatalf("GetTelemetryCatalog() error = %v", err)
+	}
+	if catalog.EventSchemaVersion != telemetrySchemaVersion || catalog.Encoding != telemetryEncodingJSON {
+		t.Fatalf("telemetry catalog schema/encoding = %q/%q, want %q/%q",
+			catalog.EventSchemaVersion, catalog.Encoding, telemetrySchemaVersion, telemetryEncodingJSON)
+	}
+	if len(catalog.DefaultPaths) != len(defaultTelemetryPaths) || catalog.DefaultPaths[0] != "/system" || catalog.DefaultPaths[1] != "/config/running" {
+		t.Fatalf("telemetry catalog default paths = %#v, want system/config defaults", catalog.DefaultPaths)
+	}
+	if catalog.DefaultSampleIntervalMs != telemetrySampleIntervalMillis(defaultTelemetrySampleInterval) ||
+		catalog.MinSampleIntervalMs != telemetrySampleIntervalMillis(minTelemetrySampleInterval) ||
+		catalog.MaxSampleIntervalMs != telemetrySampleIntervalMillis(maxTelemetrySampleInterval) {
+		t.Fatalf("telemetry catalog intervals = %d/%d/%d, want %d/%d/%d",
+			catalog.DefaultSampleIntervalMs, catalog.MinSampleIntervalMs, catalog.MaxSampleIntervalMs,
+			telemetrySampleIntervalMillis(defaultTelemetrySampleInterval),
+			telemetrySampleIntervalMillis(minTelemetrySampleInterval),
+			telemetrySampleIntervalMillis(maxTelemetrySampleInterval))
+	}
+	if len(catalog.Paths) != len(telemetryPathOrder) || catalog.Paths[0].Path != "/system" {
+		t.Fatalf("telemetry catalog paths = %#v, want canonical path catalog", catalog.Paths)
+	}
+	if catalog.Paths[0].PayloadSchema != "arca.telemetry.system.v1" ||
+		catalog.Paths[1].PayloadSchema != "arca.telemetry.config.running.v1" {
+		t.Fatalf("telemetry catalog payload schemas = %q/%q, want system/config schema hints",
+			catalog.Paths[0].PayloadSchema, catalog.Paths[1].PayloadSchema)
+	}
+	if len(catalog.Paths[1].Aliases) != 2 || catalog.Paths[1].Aliases[0] != "/running" {
+		t.Fatalf("telemetry catalog aliases for config/running = %#v, want running aliases", catalog.Paths[1].Aliases)
+	}
+	filteredCatalog, err := client.GetFilteredTelemetryCatalog(ctx, []string{"per-route"}, []string{"arca.telemetry.routes.v1"})
+	if err != nil {
+		t.Fatalf("GetFilteredTelemetryCatalog() error = %v", err)
+	}
+	if len(filteredCatalog.Paths) != 1 || filteredCatalog.Paths[0].Path != "/routes" {
+		t.Fatalf("filtered telemetry catalog paths = %#v, want only /routes", filteredCatalog.Paths)
+	}
+	if len(filteredCatalog.DefaultPaths) != len(defaultTelemetryPaths) {
+		t.Fatalf("filtered telemetry catalog default paths = %#v, want unfiltered defaults", filteredCatalog.DefaultPaths)
+	}
+	filteredCatalog, err = client.GetTelemetryCatalogWithFilter(ctx, TelemetryCatalogFilter{
+		Paths:     []string{"/routes"},
+		Encodings: []string{"JSON"},
+	})
+	if err != nil {
+		t.Fatalf("GetTelemetryCatalogWithFilter(encoding) error = %v", err)
+	}
+	if len(filteredCatalog.Paths) != 1 || filteredCatalog.Paths[0].Path != "/routes" {
+		t.Fatalf("encoding-filtered telemetry catalog paths = %#v, want only /routes", filteredCatalog.Paths)
+	}
+	filteredCatalog, err = client.GetTelemetryCatalogWithFilter(ctx, TelemetryCatalogFilter{
+		Encodings: []string{"protobuf"},
+	})
+	if err != nil {
+		t.Fatalf("GetTelemetryCatalogWithFilter(unsupported encoding) error = %v", err)
+	}
+	if len(filteredCatalog.Paths) != 0 {
+		t.Fatalf("unsupported encoding telemetry catalog paths = %#v, want none", filteredCatalog.Paths)
+	}
+
+	stream, err := client.SubscribeTelemetry(ctx, []string{"/config/running"}, time.Second, true)
+	if err != nil {
+		t.Fatalf("SubscribeTelemetry() error = %v", err)
+	}
+	event, err := stream.Recv()
+	if err != nil {
+		t.Fatalf("TelemetryStream.Recv() error = %v", err)
+	}
+	if event.Path != "/config/running" || event.EventType != telemetryEventTypeSnapshot ||
+		event.Encoding != telemetryEncodingJSON || event.SchemaVersion != telemetrySchemaVersion ||
+		event.Cardinality != "single" || event.PayloadSchema != "arca.telemetry.config.running.v1" {
+		t.Fatalf("telemetry event = %#v, want config/running JSON snapshot", event)
+	}
+	var payload map[string]any
+	if err := json.Unmarshal([]byte(event.JSONPayload), &payload); err != nil {
+		t.Fatalf("telemetry JSON payload is invalid: %v", err)
+	}
+	if payload["version"] != float64(2) || !strings.Contains(event.JSONPayload, "router2") {
+		t.Fatalf("telemetry payload = %s, want running config version 2", event.JSONPayload)
+	}
+	if event.PayloadBytes != len(event.JSONPayload) {
+		t.Fatalf("telemetry payload bytes = %d, want %d", event.PayloadBytes, len(event.JSONPayload))
+	}
+	if _, err := stream.Recv(); err != io.EOF {
+		t.Fatalf("TelemetryStream.Recv() after once = %v, want EOF", err)
+	}
+}
+
+func TestSubscribeTelemetrySelectedSnapshots(t *testing.T) {
+	eng := engine.NewEngine(nil, testLogger())
+	eng.InitializeRunning(&model.RouterConfig{
+		System:     &model.SystemConfig{HostName: "router1"},
+		Interfaces: map[string]*model.InterfaceConfig{},
+	}, 7)
+	srv := NewServer(eng, &fakeStore{}, testLogger())
+
+	var events []TelemetryEvent
+	err := srv.SubscribeTelemetry(context.Background(), []string{"system", "running", "system"}, time.Millisecond, true, func(event TelemetryEvent) error {
+		events = append(events, event)
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("SubscribeTelemetry() error = %v", err)
+	}
+	if len(events) != 2 {
+		t.Fatalf("SubscribeTelemetry() emitted %d events, want 2", len(events))
+	}
+	if events[0].Sequence != 1 || events[0].Path != "/system" || events[0].Cardinality != "single" ||
+		events[0].PayloadSchema != "arca.telemetry.system.v1" || events[0].EventType != telemetryEventTypeSnapshot {
+		t.Fatalf("events[0] = %#v, want system snapshot sequence 1", events[0])
+	}
+	if events[1].Sequence != 2 || events[1].Path != "/config/running" ||
+		events[1].Cardinality != "single" || events[1].PayloadSchema != "arca.telemetry.config.running.v1" ||
+		events[1].EventType != telemetryEventTypeSnapshot {
+		t.Fatalf("events[1] = %#v, want config snapshot sequence 2", events[1])
+	}
+	if !strings.Contains(events[0].JSONPayload, "router1") || !strings.Contains(events[1].JSONPayload, "router1") {
+		t.Fatalf("telemetry payloads = %#v, want hostname/config content", events)
+	}
+	if events[0].PayloadBytes != len(events[0].JSONPayload) || events[1].PayloadBytes != len(events[1].JSONPayload) {
+		t.Fatalf("payload bytes = %d/%d, want JSON payload lengths", events[0].PayloadBytes, events[1].PayloadBytes)
+	}
+}
+
+func TestSubscribeTelemetryRouteScaleSnapshot(t *testing.T) {
+	srv := NewServer(engine.NewEngine(nil, testLogger()), &fakeStore{}, testLogger())
+	const routeCount = 128
+
+	var commands []string
+	oldVtysh := runOperationalVtyshCommand
+	runOperationalVtyshCommand = func(ctx context.Context, command string) (string, error) {
+		commands = append(commands, command)
+		switch command {
+		case "show ip route json":
+			return scaledFRRRouteJSON(routeCount), nil
+		case "show ipv6 route json":
+			return `{}`, nil
+		default:
+			t.Fatalf("unexpected vtysh command %q", command)
+			return "", nil
+		}
+	}
+	t.Cleanup(func() { runOperationalVtyshCommand = oldVtysh })
+
+	var events []TelemetryEvent
+	err := srv.SubscribeTelemetry(context.Background(), []string{"/routes"}, 0, true, func(event TelemetryEvent) error {
+		events = append(events, event)
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("SubscribeTelemetry(/routes) error = %v", err)
+	}
+	if len(commands) != 2 || commands[0] != "show ip route json" || commands[1] != "show ipv6 route json" {
+		t.Fatalf("vtysh commands = %#v, want IPv4 and IPv6 route JSON", commands)
+	}
+	if len(events) != 1 || events[0].Sequence != 1 || events[0].Path != "/routes" ||
+		events[0].Cardinality != "per-route" || events[0].PayloadSchema != "arca.telemetry.routes.v1" ||
+		events[0].EventType != telemetryEventTypeSnapshot {
+		t.Fatalf("events = %#v, want one route snapshot", events)
+	}
+	if events[0].PayloadBytes != len(events[0].JSONPayload) {
+		t.Fatalf("payload bytes = %d, want %d", events[0].PayloadBytes, len(events[0].JSONPayload))
+	}
+
+	var payload struct {
+		Routes []RouteInfo `json:"routes"`
+	}
+	if err := json.Unmarshal([]byte(events[0].JSONPayload), &payload); err != nil {
+		t.Fatalf("route telemetry payload is invalid JSON: %v", err)
+	}
+	if len(payload.Routes) != routeCount {
+		t.Fatalf("route telemetry payload has %d routes, want %d", len(payload.Routes), routeCount)
+	}
+	got, ok := routeInfoByPrefix(payload.Routes, "10.0.127.0/24")
+	if !ok {
+		t.Fatalf("route telemetry payload missing highest generated prefix")
+	}
+	if got.NextHop != "192.0.2.128" || got.Protocol != "bgp" || got.Metric != 127 || got.Interface != "ge0-0-127" || !got.Active {
+		t.Fatalf("route telemetry payload route = %#v, want generated BGP route attributes", got)
+	}
+}
+
+func TestNormalizeTelemetryPathsDeduplicatesLargeSelection(t *testing.T) {
+	var raw []string
+	for i := 0; i < 64; i++ {
+		raw = append(raw, "system", "/routes", "evpn", "running", "/routes", "/overlays/evpn")
+	}
+
+	paths, err := normalizeTelemetryPaths(raw)
+	if err != nil {
+		t.Fatalf("normalizeTelemetryPaths() error = %v", err)
+	}
+	want := []string{"/system", "/config/running", "/routes", "/overlays/evpn"}
+	if strings.Join(paths, "\n") != strings.Join(want, "\n") {
+		t.Fatalf("normalizeTelemetryPaths() = %#v, want %#v", paths, want)
+	}
+}
+
+func TestSubscribeTelemetryEVPNOverlaySnapshot(t *testing.T) {
+	eng := engine.NewEngine(nil, testLogger())
+	eng.InitializeRunning(&model.RouterConfig{
+		Protocols: &model.ProtocolsConfig{EVPN: &model.EVPNConfig{VNIs: map[int]*model.EVPNVNI{
+			20010: {
+				VNI:             20010,
+				Type:            "l3",
+				RoutingInstance: "BLUE",
+				VRFTargetImport: []string{"target:65000:20010"},
+				RemoteVTEP:      "198.51.100.20",
+			},
+			10010: {
+				VNI:                10010,
+				Type:               "l2",
+				BridgeDomain:       "BD-10",
+				VLANID:             10,
+				RouteDistinguisher: "65000:10010",
+				VRFTarget:          "target:65000:10010",
+				VRFTargetExport:    []string{"target:65000:10011"},
+				SourceInterface:    "ge-0/0/0",
+				SourceAddress:      "192.0.2.1",
+				MulticastGroup:     "239.0.0.10",
+			},
+		}}},
+	}, 8)
+	srv := NewServer(eng, &fakeStore{}, testLogger())
+
+	var events []TelemetryEvent
+	err := srv.SubscribeTelemetry(context.Background(), []string{"evpn"}, 0, true, func(event TelemetryEvent) error {
+		events = append(events, event)
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("SubscribeTelemetry(evpn) error = %v", err)
+	}
+	if len(events) != 1 || events[0].Path != "/overlays/evpn" ||
+		events[0].Cardinality != "per-vni" || events[0].PayloadSchema != "arca.telemetry.overlays.evpn.v1" ||
+		events[0].EventType != telemetryEventTypeSnapshot {
+		t.Fatalf("events = %#v, want one EVPN overlay snapshot", events)
+	}
+	var payload telemetryEVPNPayload
+	if err := json.Unmarshal([]byte(events[0].JSONPayload), &payload); err != nil {
+		t.Fatalf("EVPN telemetry payload is invalid JSON: %v", err)
+	}
+	if len(payload.VNIs) != 2 || payload.VNIs[0].VNI != 10010 || payload.VNIs[1].VNI != 20010 {
+		t.Fatalf("EVPN VNIs = %#v, want sorted 10010 and 20010", payload.VNIs)
+	}
+	if payload.VNIs[0].BridgeDomain != "BD-10" || payload.VNIs[0].MulticastGroup != "239.0.0.10" {
+		t.Fatalf("L2 EVPN VNI payload = %#v, want bridge-domain and multicast group", payload.VNIs[0])
+	}
+	if payload.VNIs[1].RoutingInstance != "BLUE" || payload.VNIs[1].RemoteVTEP != "198.51.100.20" || len(payload.VNIs[1].VRFTargetImport) != 1 {
+		t.Fatalf("L3 EVPN VNI payload = %#v, want routing-instance, remote VTEP, and import target", payload.VNIs[1])
+	}
+}
+
+func TestSubscribeTelemetryClassOfServiceIncludesQoSCapabilities(t *testing.T) {
+	eng := engine.NewEngine(nil, testLogger())
+	eng.InitializeRunning(&model.RouterConfig{
+		ClassOfService: &model.ClassOfServiceConfig{
+			TrafficControlProfiles: map[string]*model.TrafficControlProfile{
+				"WAN": {ShapingRate: 1000000000},
+			},
+		},
+	}, 3)
+	srv := NewServer(eng, &fakeStore{}, testLogger())
+	srv.SetQoSCapabilitySource(fakeQoSCapabilitySource{status: sbvpp.QoSCapabilityStatus{
+		LastCheck: time.Unix(1700000500, 0),
+		Capabilities: pkgvpp.QoSCapabilities{
+			MetadataBinding:     true,
+			QueueScheduler:      true,
+			Policer:             false,
+			OperationalCounters: true,
+			Diagnostics:         []string{"scheduler api available"},
+		},
+	}})
+
+	var events []TelemetryEvent
+	err := srv.SubscribeTelemetry(context.Background(), []string{"/class-of-service"}, 0, true, func(event TelemetryEvent) error {
+		events = append(events, event)
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("SubscribeTelemetry(class-of-service) error = %v", err)
+	}
+	if len(events) != 1 || events[0].Path != "/class-of-service" ||
+		events[0].Cardinality != "per-intent-object" || events[0].PayloadSchema != "arca.telemetry.class_of_service.v1" {
+		t.Fatalf("events = %#v, want one class-of-service snapshot", events)
+	}
+	var payload struct {
+		ClassOfService *ClassOfServiceInfo `json:"class_of_service"`
+	}
+	if err := json.Unmarshal([]byte(events[0].JSONPayload), &payload); err != nil {
+		t.Fatalf("class-of-service telemetry payload is invalid JSON: %v", err)
+	}
+	if payload.ClassOfService == nil || payload.ClassOfService.Capabilities == nil {
+		t.Fatalf("class-of-service payload = %#v, want QoS capability diagnostics", payload)
+	}
+	capabilities := payload.ClassOfService.Capabilities
+	if !capabilities.MetadataBindingSupported || !capabilities.QueueSchedulerSupported || capabilities.PolicerSupported ||
+		!capabilities.CountersSupported || capabilities.LastCheck.Unix() != 1700000500 ||
+		len(capabilities.Diagnostics) != 1 {
+		t.Fatalf("capabilities = %#v, want VPP QoS capability snapshot", capabilities)
+	}
+}
+
+func TestSubscribeTelemetryRejectsUnsupportedPath(t *testing.T) {
+	srv := NewServer(engine.NewEngine(nil, testLogger()), &fakeStore{}, testLogger())
+	err := srv.SubscribeTelemetry(context.Background(), []string{"/unsupported"}, 0, true, func(event TelemetryEvent) error {
+		t.Fatalf("unexpected telemetry event: %#v", event)
+		return nil
+	})
+	if err == nil || !strings.Contains(err.Error(), "unsupported telemetry path") {
+		t.Fatalf("SubscribeTelemetry() error = %v, want unsupported path", err)
+	}
+}
+
+func TestTelemetryPathCatalog(t *testing.T) {
+	catalog := TelemetryPathCatalog()
+	if len(catalog) != len(telemetryPathOrder) {
+		t.Fatalf("TelemetryPathCatalog() length = %d, want %d", len(catalog), len(telemetryPathOrder))
+	}
+	defaults := map[string]bool{}
+	for i, info := range catalog {
+		if info.Path != telemetryPathOrder[i] {
+			t.Fatalf("catalog[%d].Path = %q, want %q", i, info.Path, telemetryPathOrder[i])
+		}
+		if info.Description == "" {
+			t.Fatalf("catalog[%d].Description is empty for %s", i, info.Path)
+		}
+		if info.Cardinality == "" {
+			t.Fatalf("catalog[%d].Cardinality is empty for %s", i, info.Path)
+		}
+		if info.PayloadSchema == "" {
+			t.Fatalf("catalog[%d].PayloadSchema is empty for %s", i, info.Path)
+		}
+		for _, alias := range info.Aliases {
+			if got := normalizeTelemetryPath(alias); got != info.Path {
+				t.Fatalf("alias %q normalizes to %q, want %q", alias, got, info.Path)
+			}
+		}
+		if info.Default {
+			defaults[info.Path] = true
+		}
+	}
+	cardinality := map[string]string{}
+	payloadSchemas := map[string]string{}
+	aliases := map[string][]string{}
+	for _, info := range catalog {
+		cardinality[info.Path] = info.Cardinality
+		payloadSchemas[info.Path] = info.PayloadSchema
+		aliases[info.Path] = info.Aliases
+	}
+	if cardinality["/routes"] != "per-route" || cardinality["/overlays/evpn"] != "per-vni" ||
+		cardinality["/interfaces"] != "per-interface" {
+		t.Fatalf("cardinality hints = %#v, want route/evpn/interface hints", cardinality)
+	}
+	if payloadSchemas["/routes"] != "arca.telemetry.routes.v1" ||
+		payloadSchemas["/overlays/evpn"] != "arca.telemetry.overlays.evpn.v1" ||
+		payloadSchemas["/class-of-service"] != "arca.telemetry.class_of_service.v1" {
+		t.Fatalf("payload schema hints = %#v, want stable route/evpn/CoS schema hints", payloadSchemas)
+	}
+	if len(aliases["/overlays/evpn"]) != 2 || aliases["/overlays/evpn"][0] != "/evpn" ||
+		len(aliases["/class-of-service"]) != 1 || aliases["/class-of-service"][0] != "/cos" {
+		t.Fatalf("aliases = %#v, want EVPN and CoS path aliases", aliases)
+	}
+	for _, path := range defaultTelemetryPaths {
+		if !defaults[path] {
+			t.Fatalf("default path %s is not marked default in catalog %#v", path, catalog)
+		}
+	}
+	if TelemetryEventSchemaVersion() != telemetrySchemaVersion {
+		t.Fatalf("TelemetryEventSchemaVersion() = %q, want %q", TelemetryEventSchemaVersion(), telemetrySchemaVersion)
+	}
+	if TelemetryEncoding() != telemetryEncodingJSON {
+		t.Fatalf("TelemetryEncoding() = %q, want %q", TelemetryEncoding(), telemetryEncodingJSON)
+	}
+	envelope := NewTelemetryCatalog()
+	if envelope.EventSchemaVersion != telemetrySchemaVersion || envelope.Encoding != telemetryEncodingJSON {
+		t.Fatalf("NewTelemetryCatalog() schema/encoding = %q/%q, want %q/%q",
+			envelope.EventSchemaVersion, envelope.Encoding, telemetrySchemaVersion, telemetryEncodingJSON)
+	}
+	if len(envelope.DefaultPaths) != len(defaultTelemetryPaths) || len(envelope.Paths) != len(telemetryPathOrder) {
+		t.Fatalf("NewTelemetryCatalog() = %#v, want default paths and path catalog", envelope)
+	}
+	if envelope.DefaultSampleIntervalMs != telemetrySampleIntervalMillis(defaultTelemetrySampleInterval) ||
+		envelope.MinSampleIntervalMs != telemetrySampleIntervalMillis(minTelemetrySampleInterval) ||
+		envelope.MaxSampleIntervalMs != telemetrySampleIntervalMillis(maxTelemetrySampleInterval) {
+		t.Fatalf("NewTelemetryCatalog() intervals = %d/%d/%d, want sample interval hints",
+			envelope.DefaultSampleIntervalMs, envelope.MinSampleIntervalMs, envelope.MaxSampleIntervalMs)
+	}
+	filtered := NewFilteredTelemetryCatalog(TelemetryCatalogFilter{
+		Cardinalities:  []string{"PER-ROUTE", "per-peer"},
+		PayloadSchemas: []string{"arca.telemetry.routes.v1"},
+	})
+	if len(filtered.Paths) != 1 || filtered.Paths[0].Path != "/routes" {
+		t.Fatalf("NewFilteredTelemetryCatalog() paths = %#v, want only /routes", filtered.Paths)
+	}
+	filtered = NewFilteredTelemetryCatalog(TelemetryCatalogFilter{
+		Paths: []string{"/evpn"},
+	})
+	if len(filtered.Paths) != 1 || filtered.Paths[0].Path != "/overlays/evpn" {
+		t.Fatalf("NewFilteredTelemetryCatalog(path alias) paths = %#v, want only /overlays/evpn", filtered.Paths)
+	}
+	filtered = NewFilteredTelemetryCatalog(TelemetryCatalogFilter{
+		DefaultOnly: true,
+	})
+	if len(filtered.Paths) != len(defaultTelemetryPaths) || filtered.Paths[0].Path != "/system" || filtered.Paths[1].Path != "/config/running" {
+		t.Fatalf("NewFilteredTelemetryCatalog(default only) paths = %#v, want default paths", filtered.Paths)
+	}
+	filtered = NewFilteredTelemetryCatalog(TelemetryCatalogFilter{
+		Encodings: []string{" JSON "},
+	})
+	if len(filtered.Paths) != len(telemetryPathOrder) {
+		t.Fatalf("NewFilteredTelemetryCatalog(encoding) paths = %#v, want full path catalog", filtered.Paths)
+	}
+	filtered = NewFilteredTelemetryCatalog(TelemetryCatalogFilter{
+		Encodings: []string{"protobuf"},
+	})
+	if len(filtered.Paths) != 0 {
+		t.Fatalf("NewFilteredTelemetryCatalog(unsupported encoding) paths = %#v, want none", filtered.Paths)
+	}
+}
+
+func TestTelemetryPayloadSchemaCatalog(t *testing.T) {
+	catalog := TelemetryPayloadSchemaCatalog()
+	if len(catalog) != len(telemetryPathOrder) {
+		t.Fatalf("TelemetryPayloadSchemaCatalog() length = %d, want %d", len(catalog), len(telemetryPathOrder))
+	}
+	byPath := map[string]TelemetryPayloadSchemaInfo{}
+	for i, info := range catalog {
+		if info.Path != telemetryPathOrder[i] {
+			t.Fatalf("catalog[%d].Path = %q, want %q", i, info.Path, telemetryPathOrder[i])
+		}
+		if info.PayloadSchema == "" || info.Description == "" || info.Cardinality == "" {
+			t.Fatalf("catalog[%d] = %#v, want schema, description, and cardinality", i, info)
+		}
+		if len(info.Fields) == 0 {
+			t.Fatalf("catalog[%d].Fields is empty for %s", i, info.Path)
+		}
+		byPath[info.Path] = info
+	}
+	if byPath["/routes"].Fields[0].Name != "routes" || byPath["/routes"].Fields[0].Type != "[]RouteInfo" {
+		t.Fatalf("/routes fields = %#v, want routes []RouteInfo", byPath["/routes"].Fields)
+	}
+	if byPath["/overlays/evpn"].Fields[0].Name != "vnis" || byPath["/overlays/evpn"].Fields[0].Type != "[]EVPNVNI" {
+		t.Fatalf("/overlays/evpn fields = %#v, want vnis []EVPNVNI", byPath["/overlays/evpn"].Fields)
+	}
+	if byPath["/class-of-service"].Fields[0].Name != "class_of_service" {
+		t.Fatalf("/class-of-service fields = %#v, want class_of_service", byPath["/class-of-service"].Fields)
+	}
+
+	filtered := NewFilteredTelemetryPayloadSchemaCatalog(TelemetryCatalogFilter{
+		Paths:          []string{"evpn"},
+		PayloadSchemas: []string{"ARCA.TELEMETRY.OVERLAYS.EVPN.V1"},
+		Encodings:      []string{" json "},
+	})
+	if len(filtered) != 1 || filtered[0].Path != "/overlays/evpn" {
+		t.Fatalf("NewFilteredTelemetryPayloadSchemaCatalog() = %#v, want only /overlays/evpn", filtered)
+	}
+	filtered = NewFilteredTelemetryPayloadSchemaCatalog(TelemetryCatalogFilter{
+		DefaultOnly: true,
+	})
+	if len(filtered) != len(defaultTelemetryPaths) || filtered[0].Path != "/system" || filtered[1].Path != "/config/running" {
+		t.Fatalf("NewFilteredTelemetryPayloadSchemaCatalog(default only) = %#v, want default schemas", filtered)
+	}
+	filtered = NewFilteredTelemetryPayloadSchemaCatalog(TelemetryCatalogFilter{
+		Encodings: []string{"protobuf"},
+	})
+	if len(filtered) != 0 {
+		t.Fatalf("NewFilteredTelemetryPayloadSchemaCatalog(unsupported encoding) = %#v, want none", filtered)
+	}
+
+	catalog[0].Fields[0].Name = "mutated"
+	if again := TelemetryPayloadSchemaCatalog(); again[0].Fields[0].Name == "mutated" {
+		t.Fatal("TelemetryPayloadSchemaCatalog() returned shared field slices, want defensive copies")
+	}
+}
+
+func scaledFRRRouteJSON(count int) string {
+	var b strings.Builder
+	b.WriteString("{")
+	for i := 0; i < count; i++ {
+		if i > 0 {
+			b.WriteString(",")
+		}
+		fmt.Fprintf(&b, `
+	%q: [
+		{
+			"protocol": "bgp",
+			"metric": %d,
+			"selected": true,
+			"nexthops": [
+				{"ip": %q, "interfaceName": %q, "active": true}
+			]
+		}
+	]`, fmt.Sprintf("10.0.%d.0/24", i), i, fmt.Sprintf("192.0.2.%d", i+1), fmt.Sprintf("ge0-0-%d", i))
+	}
+	b.WriteString("\n}")
+	return b.String()
+}
+
+func routeInfoByPrefix(routes []RouteInfo, prefix string) (RouteInfo, bool) {
+	for _, route := range routes {
+		if route.Prefix == prefix {
+			return route, true
+		}
+	}
+	return RouteInfo{}, false
 }
 
 func TestOperationalStateEndpointsReadVPPAndFRR(t *testing.T) {
@@ -765,6 +1304,16 @@ func TestGetClassOfServiceReturnsRunningConfig(t *testing.T) {
 		},
 	}, 1)
 	srv := NewServer(eng, &fakeStore{}, testLogger())
+	srv.SetQoSCapabilitySource(fakeQoSCapabilitySource{status: sbvpp.QoSCapabilityStatus{
+		LastCheck: time.Unix(1700000500, 0),
+		Capabilities: pkgvpp.QoSCapabilities{
+			MetadataBinding:     true,
+			QueueScheduler:      false,
+			Policer:             false,
+			OperationalCounters: false,
+			Diagnostics:         []string{"scheduler api unavailable"},
+		},
+	}})
 
 	info, err := srv.GetClassOfService(context.Background())
 	if err != nil {
@@ -786,6 +1335,11 @@ func TestGetClassOfServiceReturnsRunningConfig(t *testing.T) {
 		info.Interfaces[0].OutputTrafficControlProfile != "WAN" ||
 		info.Interfaces[0].EnforcementStatus != "intent-only" {
 		t.Fatalf("Interfaces = %#v, want interface binding", info.Interfaces)
+	}
+	if info.Capabilities == nil || !info.Capabilities.MetadataBindingSupported ||
+		info.Capabilities.QueueSchedulerSupported || info.Capabilities.LastCheck.Unix() != 1700000500 ||
+		len(info.Capabilities.Diagnostics) != 1 {
+		t.Fatalf("Capabilities = %#v, want metadata-only VPP QoS capability status", info.Capabilities)
 	}
 }
 

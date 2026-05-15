@@ -13,14 +13,20 @@ import (
 	sbfrr "github.com/akam1o/arca-router/internal/southbound/frr"
 	sbvpp "github.com/akam1o/arca-router/internal/southbound/vpp"
 	"github.com/akam1o/arca-router/pkg/datastore"
+	pkgvpp "github.com/akam1o/arca-router/pkg/vpp"
 )
 
 type fakeVPPReconciliationSource struct {
 	status sbvpp.LCPReconciliationStatus
+	qos    sbvpp.QoSCapabilityStatus
 }
 
 func (s fakeVPPReconciliationSource) LCPReconciliationStatus() sbvpp.LCPReconciliationStatus {
 	return s.status
+}
+
+func (s fakeVPPReconciliationSource) QoSCapabilityStatus() sbvpp.QoSCapabilityStatus {
+	return s.qos
 }
 
 type fakeConfigSyncRuntimeSource struct {
@@ -113,6 +119,20 @@ func TestMetricsEndpointExportsRouterMetrics(t *testing.T) {
 		VRRP: &model.VRRPConfig{Groups: map[string]*model.VRRPGroup{
 			"10": {Interface: "ge-0/0/0", VirtualAddress: "192.0.2.1", Priority: 110, Preempt: true},
 		}},
+		EVPN: &model.EVPNConfig{VNIs: map[int]*model.EVPNVNI{
+			10010: {
+				VNI:             10010,
+				Type:            "l2",
+				BridgeDomain:    "BD-10",
+				SourceInterface: "ge-0/0/0",
+				MulticastGroup:  "239.0.0.10",
+			},
+			20010: {
+				VNI:             20010,
+				Type:            "l3",
+				RoutingInstance: "BLUE",
+			},
+		}},
 	}
 	cfg.ClassOfService = &model.ClassOfServiceConfig{
 		ForwardingClasses: map[string]*model.ForwardingClass{
@@ -166,6 +186,15 @@ func TestMetricsEndpointExportsRouterMetrics(t *testing.T) {
 			LastRun:         time.Unix(1700000000, 0),
 			PairCount:       2,
 			Inconsistencies: []string{"Interface 7 exists in VPP but not in cache"},
+		}, qos: sbvpp.QoSCapabilityStatus{
+			LastCheck: time.Unix(1700000500, 0),
+			Capabilities: pkgvpp.QoSCapabilities{
+				MetadataBinding:     true,
+				QueueScheduler:      false,
+				Policer:             false,
+				OperationalCounters: false,
+				Diagnostics:         []string{"scheduler api unavailable"},
+			},
 		}},
 	}.handleMetrics(rec, req)
 
@@ -188,6 +217,11 @@ func TestMetricsEndpointExportsRouterMetrics(t *testing.T) {
 		"arca_router_cluster_nodes 2",
 		"arca_router_cluster_sync_etcd_configured 1",
 		"arca_router_cluster_sync_aligned 1",
+		"arca_router_overlay_evpn_configured 1",
+		"arca_router_overlay_evpn_vnis 2",
+		"arca_router_overlay_evpn_l2_vnis 1",
+		"arca_router_overlay_evpn_l3_vnis 1",
+		"arca_router_overlay_evpn_multicast_vnis 1",
 		"arca_router_ha_configured 1",
 		"arca_router_ha_converged 0",
 		"arca_router_ha_vrrp_groups 1",
@@ -216,6 +250,12 @@ func TestMetricsEndpointExportsRouterMetrics(t *testing.T) {
 		"arca_router_class_of_service_traffic_control_profiles 1",
 		"arca_router_class_of_service_interface_bindings 1",
 		"arca_router_class_of_service_intent_only 1",
+		"arca_router_class_of_service_metadata_binding_supported 1",
+		"arca_router_class_of_service_queue_scheduler_supported 0",
+		"arca_router_class_of_service_policer_supported 0",
+		"arca_router_class_of_service_counters_supported 0",
+		"arca_router_class_of_service_capability_error 0",
+		"arca_router_class_of_service_capability_last_check_timestamp_seconds 1700000500",
 		"arca_router_netconf_listening 0",
 	} {
 		if !strings.Contains(text, want) {

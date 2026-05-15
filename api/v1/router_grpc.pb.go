@@ -1385,3 +1385,155 @@ var StateService_ServiceDesc = grpc.ServiceDesc{
 	Streams:  []grpc.StreamDesc{},
 	Metadata: "api/v1/router.proto",
 }
+
+const (
+	TelemetryService_GetTelemetryCatalog_FullMethodName = "/arca.router.v1.TelemetryService/GetTelemetryCatalog"
+	TelemetryService_SubscribeTelemetry_FullMethodName  = "/arca.router.v1.TelemetryService/SubscribeTelemetry"
+)
+
+// TelemetryServiceClient is the client API for TelemetryService service.
+//
+// For semantics around ctx use and closing/ending streaming RPCs, please refer to https://pkg.go.dev/google.golang.org/grpc/?tab=doc#ClientConn.NewStream.
+//
+// TelemetryService provides structured streaming telemetry snapshots.
+type TelemetryServiceClient interface {
+	// GetTelemetryCatalog returns supported telemetry paths and metadata.
+	GetTelemetryCatalog(ctx context.Context, in *GetTelemetryCatalogRequest, opts ...grpc.CallOption) (*GetTelemetryCatalogResponse, error)
+	// SubscribeTelemetry streams selected operational/config state paths.
+	SubscribeTelemetry(ctx context.Context, in *SubscribeTelemetryRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[TelemetryEvent], error)
+}
+
+type telemetryServiceClient struct {
+	cc grpc.ClientConnInterface
+}
+
+func NewTelemetryServiceClient(cc grpc.ClientConnInterface) TelemetryServiceClient {
+	return &telemetryServiceClient{cc}
+}
+
+func (c *telemetryServiceClient) GetTelemetryCatalog(ctx context.Context, in *GetTelemetryCatalogRequest, opts ...grpc.CallOption) (*GetTelemetryCatalogResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(GetTelemetryCatalogResponse)
+	err := c.cc.Invoke(ctx, TelemetryService_GetTelemetryCatalog_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *telemetryServiceClient) SubscribeTelemetry(ctx context.Context, in *SubscribeTelemetryRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[TelemetryEvent], error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	stream, err := c.cc.NewStream(ctx, &TelemetryService_ServiceDesc.Streams[0], TelemetryService_SubscribeTelemetry_FullMethodName, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	x := &grpc.GenericClientStream[SubscribeTelemetryRequest, TelemetryEvent]{ClientStream: stream}
+	if err := x.ClientStream.SendMsg(in); err != nil {
+		return nil, err
+	}
+	if err := x.ClientStream.CloseSend(); err != nil {
+		return nil, err
+	}
+	return x, nil
+}
+
+// This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
+type TelemetryService_SubscribeTelemetryClient = grpc.ServerStreamingClient[TelemetryEvent]
+
+// TelemetryServiceServer is the server API for TelemetryService service.
+// All implementations must embed UnimplementedTelemetryServiceServer
+// for forward compatibility.
+//
+// TelemetryService provides structured streaming telemetry snapshots.
+type TelemetryServiceServer interface {
+	// GetTelemetryCatalog returns supported telemetry paths and metadata.
+	GetTelemetryCatalog(context.Context, *GetTelemetryCatalogRequest) (*GetTelemetryCatalogResponse, error)
+	// SubscribeTelemetry streams selected operational/config state paths.
+	SubscribeTelemetry(*SubscribeTelemetryRequest, grpc.ServerStreamingServer[TelemetryEvent]) error
+	mustEmbedUnimplementedTelemetryServiceServer()
+}
+
+// UnimplementedTelemetryServiceServer must be embedded to have
+// forward compatible implementations.
+//
+// NOTE: this should be embedded by value instead of pointer to avoid a nil
+// pointer dereference when methods are called.
+type UnimplementedTelemetryServiceServer struct{}
+
+func (UnimplementedTelemetryServiceServer) GetTelemetryCatalog(context.Context, *GetTelemetryCatalogRequest) (*GetTelemetryCatalogResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method GetTelemetryCatalog not implemented")
+}
+func (UnimplementedTelemetryServiceServer) SubscribeTelemetry(*SubscribeTelemetryRequest, grpc.ServerStreamingServer[TelemetryEvent]) error {
+	return status.Errorf(codes.Unimplemented, "method SubscribeTelemetry not implemented")
+}
+func (UnimplementedTelemetryServiceServer) mustEmbedUnimplementedTelemetryServiceServer() {}
+func (UnimplementedTelemetryServiceServer) testEmbeddedByValue()                          {}
+
+// UnsafeTelemetryServiceServer may be embedded to opt out of forward compatibility for this service.
+// Use of this interface is not recommended, as added methods to TelemetryServiceServer will
+// result in compilation errors.
+type UnsafeTelemetryServiceServer interface {
+	mustEmbedUnimplementedTelemetryServiceServer()
+}
+
+func RegisterTelemetryServiceServer(s grpc.ServiceRegistrar, srv TelemetryServiceServer) {
+	// If the following call pancis, it indicates UnimplementedTelemetryServiceServer was
+	// embedded by pointer and is nil.  This will cause panics if an
+	// unimplemented method is ever invoked, so we test this at initialization
+	// time to prevent it from happening at runtime later due to I/O.
+	if t, ok := srv.(interface{ testEmbeddedByValue() }); ok {
+		t.testEmbeddedByValue()
+	}
+	s.RegisterService(&TelemetryService_ServiceDesc, srv)
+}
+
+func _TelemetryService_GetTelemetryCatalog_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(GetTelemetryCatalogRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(TelemetryServiceServer).GetTelemetryCatalog(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: TelemetryService_GetTelemetryCatalog_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(TelemetryServiceServer).GetTelemetryCatalog(ctx, req.(*GetTelemetryCatalogRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _TelemetryService_SubscribeTelemetry_Handler(srv interface{}, stream grpc.ServerStream) error {
+	m := new(SubscribeTelemetryRequest)
+	if err := stream.RecvMsg(m); err != nil {
+		return err
+	}
+	return srv.(TelemetryServiceServer).SubscribeTelemetry(m, &grpc.GenericServerStream[SubscribeTelemetryRequest, TelemetryEvent]{ServerStream: stream})
+}
+
+// This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
+type TelemetryService_SubscribeTelemetryServer = grpc.ServerStreamingServer[TelemetryEvent]
+
+// TelemetryService_ServiceDesc is the grpc.ServiceDesc for TelemetryService service.
+// It's only intended for direct use with grpc.RegisterService,
+// and not to be introspected or modified (even as a copy)
+var TelemetryService_ServiceDesc = grpc.ServiceDesc{
+	ServiceName: "arca.router.v1.TelemetryService",
+	HandlerType: (*TelemetryServiceServer)(nil),
+	Methods: []grpc.MethodDesc{
+		{
+			MethodName: "GetTelemetryCatalog",
+			Handler:    _TelemetryService_GetTelemetryCatalog_Handler,
+		},
+	},
+	Streams: []grpc.StreamDesc{
+		{
+			StreamName:    "SubscribeTelemetry",
+			Handler:       _TelemetryService_SubscribeTelemetry_Handler,
+			ServerStreams: true,
+		},
+	},
+	Metadata: "api/v1/router.proto",
+}

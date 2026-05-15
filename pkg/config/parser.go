@@ -786,6 +786,8 @@ func (p *Parser) parseProtocols(config *Config) error {
 		return p.parseBFD(config.Protocols)
 	case "bgp":
 		return p.parseBGP(config.Protocols)
+	case "evpn":
+		return p.parseEVPN(config.Protocols)
 	case "ospf":
 		return p.parseOSPF(config.Protocols)
 	case "ospf3":
@@ -796,6 +798,131 @@ func (p *Parser) parseProtocols(config *Config) error {
 		return p.parseVRRP(config.Protocols)
 	default:
 		return p.error(fmt.Sprintf("unsupported protocol: %s", protocol))
+	}
+}
+
+func (p *Parser) parseEVPN(pc *ProtocolConfig) error {
+	if pc.EVPN == nil {
+		pc.EVPN = &EVPNConfig{VNIs: make(map[int]*EVPNVNI)}
+	}
+	if p.current.Type != TokenWord || p.current.Value != "vni" {
+		return p.error("expected 'vni' after protocols evpn")
+	}
+	p.nextToken()
+	if p.current.Type != TokenNumber {
+		return p.error("expected EVPN VNI")
+	}
+	vni, err := strconv.Atoi(p.current.Value)
+	if err != nil {
+		return p.error(fmt.Sprintf("invalid EVPN VNI: %s", p.current.Value))
+	}
+	p.nextToken()
+	if pc.EVPN.VNIs == nil {
+		pc.EVPN.VNIs = make(map[int]*EVPNVNI)
+	}
+	if pc.EVPN.VNIs[vni] == nil {
+		pc.EVPN.VNIs[vni] = &EVPNVNI{VNI: vni}
+	}
+	evpnVNI := pc.EVPN.VNIs[vni]
+
+	if p.current.Type != TokenWord {
+		return p.error("expected EVPN VNI parameter")
+	}
+	param := p.current.Value
+	p.nextToken()
+
+	switch param {
+	case "type":
+		if p.current.Type != TokenWord {
+			return p.error("expected EVPN VNI type")
+		}
+		evpnVNI.Type = p.current.Value
+		p.nextToken()
+		return nil
+	case "bridge-domain":
+		if p.current.Type != TokenWord && p.current.Type != TokenString {
+			return p.error("expected EVPN bridge-domain")
+		}
+		evpnVNI.BridgeDomain = p.current.Value
+		p.nextToken()
+		return nil
+	case "vlan-id":
+		if p.current.Type != TokenNumber {
+			return p.error("expected EVPN VLAN ID")
+		}
+		vlanID, err := strconv.Atoi(p.current.Value)
+		if err != nil {
+			return p.error(fmt.Sprintf("invalid EVPN VLAN ID: %s", p.current.Value))
+		}
+		evpnVNI.VLANID = vlanID
+		p.nextToken()
+		return nil
+	case "routing-instance":
+		if p.current.Type != TokenWord && p.current.Type != TokenString {
+			return p.error("expected EVPN routing-instance")
+		}
+		evpnVNI.RoutingInstance = p.current.Value
+		p.nextToken()
+		return nil
+	case "route-distinguisher":
+		if p.current.Type != TokenWord {
+			return p.error("expected EVPN route distinguisher")
+		}
+		evpnVNI.RouteDistinguisher = p.current.Value
+		p.nextToken()
+		return nil
+	case "vrf-target":
+		if p.current.Type != TokenWord {
+			return p.error("expected EVPN vrf-target")
+		}
+		if p.current.Value == "import" || p.current.Value == "export" {
+			direction := p.current.Value
+			p.nextToken()
+			if p.current.Type != TokenWord {
+				return p.error(fmt.Sprintf("expected EVPN vrf-target %s value", direction))
+			}
+			switch direction {
+			case "import":
+				evpnVNI.VRFTargetImport = appendUniqueString(evpnVNI.VRFTargetImport, p.current.Value)
+			case "export":
+				evpnVNI.VRFTargetExport = appendUniqueString(evpnVNI.VRFTargetExport, p.current.Value)
+			}
+			p.nextToken()
+			return nil
+		}
+		evpnVNI.VRFTarget = p.current.Value
+		p.nextToken()
+		return nil
+	case "source-interface":
+		if p.current.Type != TokenWord {
+			return p.error("expected EVPN source interface")
+		}
+		evpnVNI.SourceInterface = p.current.Value
+		p.nextToken()
+		return nil
+	case "source-address":
+		if p.current.Type != TokenWord {
+			return p.error("expected EVPN source address")
+		}
+		evpnVNI.SourceAddress = p.current.Value
+		p.nextToken()
+		return nil
+	case "multicast-group":
+		if p.current.Type != TokenWord {
+			return p.error("expected EVPN multicast group")
+		}
+		evpnVNI.MulticastGroup = p.current.Value
+		p.nextToken()
+		return nil
+	case "remote-vtep":
+		if p.current.Type != TokenWord {
+			return p.error("expected EVPN remote VTEP")
+		}
+		evpnVNI.RemoteVTEP = p.current.Value
+		p.nextToken()
+		return nil
+	default:
+		return p.error(fmt.Sprintf("unsupported EVPN VNI parameter: %s", param))
 	}
 }
 

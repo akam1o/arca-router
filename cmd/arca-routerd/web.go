@@ -9,6 +9,7 @@ import (
 	"log/slog"
 	"net"
 	"net/http"
+	"net/url"
 	"strconv"
 	"strings"
 	"time"
@@ -30,6 +31,25 @@ const webDummyPasswordHash = "$argon2id$v=19$m=65536,t=3,p=4$AAAAAAAAAAAAAAAAAAA
 
 const webConfigEditBodyLimit = 1 << 20
 
+const nmsOperationalStatusSchemaVersion = "arca.nms.operational.v1"
+const nmsTelemetryCatalogSchemaVersion = "arca.nms.telemetry-catalog.v1"
+const nmsTelemetrySchemasSchemaVersion = "arca.nms.telemetry-schemas.v1"
+const nmsTelemetrySnapshotSchemaVersion = "arca.nms.telemetry-snapshot.v1"
+
+const (
+	defaultNMSTelemetrySnapshotTimeout         = 5 * time.Second
+	maxNMSTelemetrySnapshotTimeout             = 30 * time.Second
+	defaultNMSTelemetrySnapshotMaxPayloadBytes = 8 << 20
+	maxNMSTelemetrySnapshotMaxPayloadBytes     = 64 << 20
+	defaultNMSTelemetrySnapshotMaxEvents       = 64
+	maxNMSTelemetrySnapshotMaxEvents           = 1024
+)
+
+var (
+	errNMSTelemetrySnapshotTooLarge      = errors.New("nms telemetry snapshot payload budget exceeded")
+	errNMSTelemetrySnapshotTooManyEvents = errors.New("nms telemetry snapshot event budget exceeded")
+)
+
 type webConfigAPI interface {
 	GetRunning(ctx context.Context) (string, uint64, error)
 	CreateSession(ctx context.Context, user string) (string, error)
@@ -43,6 +63,10 @@ type webConfigAPI interface {
 	ListHistory(ctx context.Context, limit, offset int) ([]nbgrpc.CommitInfo, error)
 }
 
+type webTelemetryAPI interface {
+	SubscribeTelemetry(ctx context.Context, rawPaths []string, interval time.Duration, once bool, send func(nbgrpc.TelemetryEvent) error) error
+}
+
 type webStatus struct {
 	Version         string          `json:"version"`
 	Commit          string          `json:"commit"`
@@ -53,11 +77,119 @@ type webStatus struct {
 	Datastore       webDatastore    `json:"datastore"`
 	ConfigSync      webConfigSync   `json:"config_sync"`
 	Cluster         webCluster      `json:"cluster"`
+	Overlay         webOverlayStats `json:"overlay"`
 	HA              webHAStats      `json:"ha"`
 	ClassOfService  webCoSStats     `json:"class_of_service"`
 	FRR             webFRRStats     `json:"frr"`
 	VPP             webVPPStats     `json:"vpp"`
 	NETCONF         webNETCONFStats `json:"netconf"`
+}
+
+type nmsStatusResponse struct {
+	SchemaVersion string    `json:"schema_version"`
+	GeneratedAt   string    `json:"generated_at"`
+	Resource      string    `json:"resource"`
+	Data          webStatus `json:"data"`
+}
+
+type nmsTelemetryCatalogResponse struct {
+	SchemaVersion           string             `json:"schema_version"`
+	GeneratedAt             string             `json:"generated_at"`
+	Resource                string             `json:"resource"`
+	EventSchemaVersion      string             `json:"event_schema_version"`
+	Encoding                string             `json:"encoding"`
+	DefaultPaths            []string           `json:"default_paths"`
+	DefaultSampleIntervalMs uint32             `json:"default_sample_interval_ms"`
+	MinSampleIntervalMs     uint32             `json:"min_sample_interval_ms"`
+	MaxSampleIntervalMs     uint32             `json:"max_sample_interval_ms"`
+	PathCount               int                `json:"path_count"`
+	Paths                   []nmsTelemetryPath `json:"paths"`
+}
+
+type nmsTelemetrySchemasResponse struct {
+	SchemaVersion           string                      `json:"schema_version"`
+	GeneratedAt             string                      `json:"generated_at"`
+	Resource                string                      `json:"resource"`
+	EventSchemaVersion      string                      `json:"event_schema_version"`
+	Encoding                string                      `json:"encoding"`
+	DefaultPaths            []string                    `json:"default_paths"`
+	DefaultSampleIntervalMs uint32                      `json:"default_sample_interval_ms"`
+	MinSampleIntervalMs     uint32                      `json:"min_sample_interval_ms"`
+	MaxSampleIntervalMs     uint32                      `json:"max_sample_interval_ms"`
+	SchemaCount             int                         `json:"schema_count"`
+	Schemas                 []nmsTelemetryPayloadSchema `json:"schemas"`
+}
+
+type nmsTelemetrySnapshotResponse struct {
+	SchemaVersion           string                      `json:"schema_version"`
+	GeneratedAt             string                      `json:"generated_at"`
+	Resource                string                      `json:"resource"`
+	EventSchemaVersion      string                      `json:"event_schema_version"`
+	Encoding                string                      `json:"encoding"`
+	DefaultPaths            []string                    `json:"default_paths"`
+	DefaultSampleIntervalMs uint32                      `json:"default_sample_interval_ms"`
+	MinSampleIntervalMs     uint32                      `json:"min_sample_interval_ms"`
+	MaxSampleIntervalMs     uint32                      `json:"max_sample_interval_ms"`
+	Paths                   []string                    `json:"paths"`
+	EventCount              int                         `json:"event_count"`
+	PayloadBytes            int                         `json:"payload_bytes"`
+	MaxPayloadBytes         int                         `json:"max_payload_bytes"`
+	MaxEvents               int                         `json:"max_events"`
+	TimeoutMs               int64                       `json:"timeout_ms"`
+	Events                  []nmsTelemetrySnapshotEvent `json:"events"`
+}
+
+type nmsTelemetrySnapshotEvent struct {
+	Sequence      uint64          `json:"sequence"`
+	Timestamp     string          `json:"timestamp,omitempty"`
+	Path          string          `json:"path"`
+	Cardinality   string          `json:"cardinality,omitempty"`
+	PayloadSchema string          `json:"payload_schema,omitempty"`
+	EventType     string          `json:"event_type"`
+	Encoding      string          `json:"encoding"`
+	SchemaVersion string          `json:"schema_version"`
+	PayloadBytes  int             `json:"payload_bytes"`
+	Payload       json.RawMessage `json:"payload"`
+}
+
+type nmsTelemetryPath struct {
+	Path          string   `json:"path"`
+	Description   string   `json:"description"`
+	Cardinality   string   `json:"cardinality"`
+	PayloadSchema string   `json:"payload_schema"`
+	Aliases       []string `json:"aliases,omitempty"`
+	Default       bool     `json:"default"`
+}
+
+type nmsTelemetryPayloadSchema struct {
+	Path          string                     `json:"path"`
+	Description   string                     `json:"description"`
+	Cardinality   string                     `json:"cardinality"`
+	PayloadSchema string                     `json:"payload_schema"`
+	Aliases       []string                   `json:"aliases,omitempty"`
+	Default       bool                       `json:"default"`
+	Fields        []nmsTelemetryPayloadField `json:"fields"`
+}
+
+type nmsTelemetryPayloadField struct {
+	Name        string `json:"name"`
+	Type        string `json:"type"`
+	Description string `json:"description"`
+}
+
+type nmsTelemetryCatalogFilters struct {
+	paths          []string
+	cardinalities  []string
+	payloadSchemas []string
+	encodings      []string
+	defaultOnly    bool
+}
+
+type nmsTelemetrySnapshotOptions struct {
+	paths           []string
+	timeout         time.Duration
+	maxPayloadBytes int
+	maxEvents       int
 }
 
 type webDatastore struct {
@@ -84,6 +216,18 @@ type webCluster struct {
 	SyncAligned        bool     `json:"sync_aligned"`
 }
 
+type webOverlayStats struct {
+	EVPN webEVPNStats `json:"evpn"`
+}
+
+type webEVPNStats struct {
+	Configured    bool `json:"configured"`
+	VNIs          int  `json:"vnis"`
+	L2VNIs        int  `json:"l2_vnis"`
+	L3VNIs        int  `json:"l3_vnis"`
+	MulticastVNIs int  `json:"multicast_vnis"`
+}
+
 type webHAStats struct {
 	Configured bool     `json:"configured"`
 	Converged  bool     `json:"converged"`
@@ -93,12 +237,23 @@ type webHAStats struct {
 }
 
 type webCoSStats struct {
-	Configured             bool   `json:"configured"`
-	EnforcementStatus      string `json:"enforcement_status"`
-	ForwardingClasses      int    `json:"forwarding_classes"`
-	TrafficControlProfiles int    `json:"traffic_control_profiles"`
-	InterfaceBindings      int    `json:"interface_bindings"`
-	IntentOnly             bool   `json:"intent_only"`
+	Configured             bool               `json:"configured"`
+	EnforcementStatus      string             `json:"enforcement_status"`
+	ForwardingClasses      int                `json:"forwarding_classes"`
+	TrafficControlProfiles int                `json:"traffic_control_profiles"`
+	InterfaceBindings      int                `json:"interface_bindings"`
+	IntentOnly             bool               `json:"intent_only"`
+	Capabilities           webCoSCapabilities `json:"capabilities"`
+}
+
+type webCoSCapabilities struct {
+	LastCheck                string   `json:"last_check,omitempty"`
+	MetadataBindingSupported bool     `json:"metadata_binding_supported"`
+	QueueSchedulerSupported  bool     `json:"queue_scheduler_supported"`
+	PolicerSupported         bool     `json:"policer_supported"`
+	CountersSupported        bool     `json:"counters_supported"`
+	Diagnostics              []string `json:"diagnostics,omitempty"`
+	LastError                string   `json:"last_error,omitempty"`
 }
 
 type webFRRStats struct {
@@ -219,49 +374,53 @@ type webAuthUser struct {
 }
 
 type webIndexData struct {
-	Status                  webStatus
-	Uptime                  string
-	NETCONFState            string
-	NETCONFStateClass       string
-	NETCONFConnections      string
-	ClusterState            string
-	ClusterStateClass       string
-	ClusterSyncState        string
-	ClusterSyncAlignment    string
-	ClusterNodeCount        string
-	ConfigSyncState         string
-	ConfigSyncStateClass    string
-	ConfigSyncRevision      string
-	ConfigSyncLastApply     string
-	HAState                 string
-	HAStateClass            string
-	HAVRPGroups             string
-	HAIssues                string
-	ClassOfServiceState     string
-	ClassOfServiceClass     string
-	ClassOfServiceProfiles  string
-	ClassOfServiceBindings  string
-	ClassOfServiceClasses   string
-	FRRVRRPState            string
-	FRRVRRPStateClass       string
-	FRRVRRPActiveGroups     string
-	FRRVRRPGroups           []webVRRPGroupView
-	FRRBFDState             string
-	FRRBFDStateClass        string
-	FRRBFDUpPeers           string
-	FRRBFDSessionDownEvents string
-	FRRBFDRxFailPackets     string
-	FRRBFDPeers             []webBFDPeerView
-	VPPLCPState             string
-	VPPLCPStateClass        string
-	VPPLCPPairs             string
-	VPPLCPInconsistencies   string
-	VPPLCPLastReconcile     string
-	DatastoreBackend        string
-	GeneratedAt             string
-	ConfigVersionString     string
-	RunningConfig           string
-	History                 []webCommitEntry
+	Status                   webStatus
+	Uptime                   string
+	NETCONFState             string
+	NETCONFStateClass        string
+	NETCONFConnections       string
+	ClusterState             string
+	ClusterStateClass        string
+	ClusterSyncState         string
+	ClusterSyncAlignment     string
+	ClusterNodeCount         string
+	ConfigSyncState          string
+	ConfigSyncStateClass     string
+	ConfigSyncRevision       string
+	ConfigSyncLastApply      string
+	HAState                  string
+	HAStateClass             string
+	HAVRPGroups              string
+	HAIssues                 string
+	ClassOfServiceState      string
+	ClassOfServiceClass      string
+	ClassOfServiceProfiles   string
+	ClassOfServiceBindings   string
+	ClassOfServiceClasses    string
+	ClassOfServiceScheduler  string
+	ClassOfServicePolicer    string
+	ClassOfServiceCounters   string
+	ClassOfServiceDiagnostic string
+	FRRVRRPState             string
+	FRRVRRPStateClass        string
+	FRRVRRPActiveGroups      string
+	FRRVRRPGroups            []webVRRPGroupView
+	FRRBFDState              string
+	FRRBFDStateClass         string
+	FRRBFDUpPeers            string
+	FRRBFDSessionDownEvents  string
+	FRRBFDRxFailPackets      string
+	FRRBFDPeers              []webBFDPeerView
+	VPPLCPState              string
+	VPPLCPStateClass         string
+	VPPLCPPairs              string
+	VPPLCPInconsistencies    string
+	VPPLCPLastReconcile      string
+	DatastoreBackend         string
+	GeneratedAt              string
+	ConfigVersionString      string
+	RunningConfig            string
+	History                  []webCommitEntry
 }
 
 type webVRRPGroupView struct {
@@ -550,6 +709,10 @@ var webIndexTemplate = template.Must(template.New("web-index").Parse(`<!doctype 
           <div class="row"><span>Traffic-control profiles</span><strong>{{.ClassOfServiceProfiles}}</strong></div>
           <div class="row"><span>Forwarding classes</span><strong>{{.ClassOfServiceClasses}}</strong></div>
           <div class="row"><span>Interface bindings</span><strong>{{.ClassOfServiceBindings}}</strong></div>
+          <div class="row"><span>Queue scheduler</span><strong>{{.ClassOfServiceScheduler}}</strong></div>
+          <div class="row"><span>Policer</span><strong>{{.ClassOfServicePolicer}}</strong></div>
+          <div class="row"><span>QoS counters</span><strong>{{.ClassOfServiceCounters}}</strong></div>
+          <div class="row"><span>Diagnostic</span><strong>{{.ClassOfServiceDiagnostic}}</strong></div>
         </div>
       </article>
       <article class="panel span-2">
@@ -598,7 +761,7 @@ var webIndexTemplate = template.Must(template.New("web-index").Parse(`<!doctype 
 
     <footer>
       <span>Generated {{.GeneratedAt}}</span>
-      <span>/api/status | /api/config | /api/config/history | /api/config/validate | /api/config/commit</span>
+      <span>/api/status | /api/nms/v1/status | /api/nms/v1/telemetry/paths | /api/nms/v1/telemetry/schemas | /api/nms/v1/telemetry/snapshot | /api/config | /api/config/history | /api/config/validate | /api/config/commit</span>
     </footer>
   </main>
   <script>
@@ -798,6 +961,10 @@ func newWebMux(source metricsSource) *http.ServeMux {
 	mux.HandleFunc("/api/config/commit", source.handleWebConfigCommit)
 	mux.HandleFunc("/api/config/history", source.handleWebConfigHistory)
 	mux.HandleFunc("/api/status", source.handleWebStatus)
+	mux.HandleFunc("/api/nms/v1/status", source.handleNMSStatus)
+	mux.HandleFunc("/api/nms/v1/telemetry/paths", source.handleNMSTelemetryCatalog)
+	mux.HandleFunc("/api/nms/v1/telemetry/schemas", source.handleNMSTelemetrySchemas)
+	mux.HandleFunc("/api/nms/v1/telemetry/snapshot", source.handleNMSTelemetrySnapshot)
 	mux.HandleFunc("/api/config/validate", source.handleWebConfigValidate)
 	return mux
 }
@@ -814,6 +981,77 @@ func (s metricsSource) handleWebStatus(w http.ResponseWriter, r *http.Request) {
 	if err := json.NewEncoder(w).Encode(newWebStatus(s.snapshot(time.Now()))); err != nil {
 		http.Error(w, "encode status: "+err.Error(), http.StatusInternalServerError)
 	}
+}
+
+func (s metricsSource) handleNMSStatus(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	if !s.authorizeWebRead(w, r) {
+		return
+	}
+	now := time.Now()
+	writeWebJSON(w, http.StatusOK, newNMSStatusResponse(now, s.snapshot(now)))
+}
+
+func (s metricsSource) handleNMSTelemetryCatalog(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	if !s.authorizeWebRead(w, r) {
+		return
+	}
+	writeWebJSON(w, http.StatusOK, newNMSTelemetryCatalogResponse(time.Now(), nmsTelemetryCatalogFiltersFromRequest(r)))
+}
+
+func (s metricsSource) handleNMSTelemetrySchemas(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	if !s.authorizeWebRead(w, r) {
+		return
+	}
+	writeWebJSON(w, http.StatusOK, newNMSTelemetrySchemasResponse(time.Now(), nmsTelemetryCatalogFiltersFromRequest(r)))
+}
+
+func (s metricsSource) handleNMSTelemetrySnapshot(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	if !s.authorizeWebRead(w, r) {
+		return
+	}
+	if s.telemetryAPI == nil {
+		writeWebJSONError(w, http.StatusServiceUnavailable, "telemetry API is not available")
+		return
+	}
+	opts, err := nmsTelemetrySnapshotOptionsFromRequest(r)
+	if err != nil {
+		writeWebJSONError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	now := time.Now()
+	ctx, cancel := context.WithTimeout(r.Context(), opts.timeout)
+	defer cancel()
+	events, payloadBytes, err := s.collectNMSTelemetrySnapshot(ctx, opts)
+	if err != nil {
+		status := http.StatusInternalServerError
+		switch {
+		case strings.Contains(err.Error(), "unsupported telemetry path"):
+			status = http.StatusBadRequest
+		case errors.Is(err, errNMSTelemetrySnapshotTooLarge), errors.Is(err, errNMSTelemetrySnapshotTooManyEvents):
+			status = http.StatusRequestEntityTooLarge
+		case errors.Is(err, context.DeadlineExceeded), errors.Is(err, context.Canceled):
+			status = http.StatusGatewayTimeout
+		}
+		writeWebJSONError(w, status, err.Error())
+		return
+	}
+	writeWebJSON(w, http.StatusOK, newNMSTelemetrySnapshotResponse(now, events, opts, payloadBytes))
 }
 
 func (s metricsSource) handleWebConfig(w http.ResponseWriter, r *http.Request) {
@@ -1244,6 +1482,375 @@ func formatWebOptionalDisplayTime(value string) string {
 	return value
 }
 
+func webSupportedStatus(supported bool) string {
+	if supported {
+		return "Supported"
+	}
+	return "Unsupported"
+}
+
+func webCoSDiagnosticText(capabilities webCoSCapabilities) string {
+	if capabilities.LastError != "" {
+		return "Detection failed"
+	}
+	if capabilities.MetadataBindingSupported && !capabilities.QueueSchedulerSupported &&
+		!capabilities.PolicerSupported && !capabilities.CountersSupported {
+		return "Metadata only"
+	}
+	if len(capabilities.Diagnostics) == 0 {
+		return "None"
+	}
+	return fmt.Sprintf("%d diagnostics", len(capabilities.Diagnostics))
+}
+
+func newNMSStatusResponse(now time.Time, metrics routerMetrics) nmsStatusResponse {
+	return nmsStatusResponse{
+		SchemaVersion: nmsOperationalStatusSchemaVersion,
+		GeneratedAt:   formatWebOptionalTime(now),
+		Resource:      "/api/nms/v1/status",
+		Data:          newWebStatus(metrics),
+	}
+}
+
+func newNMSTelemetryCatalogResponse(now time.Time, filters nmsTelemetryCatalogFilters) nmsTelemetryCatalogResponse {
+	catalog := nbgrpc.NewTelemetryCatalog()
+	paths := make([]nmsTelemetryPath, 0, len(catalog.Paths))
+	if nmsTelemetryCatalogFilterMatches(catalog.Encoding, filters.encodings) {
+		for _, info := range catalog.Paths {
+			if !nmsTelemetryPathMatchesCatalogFilters(info, filters) {
+				continue
+			}
+			paths = append(paths, nmsTelemetryPath{
+				Path:          info.Path,
+				Description:   info.Description,
+				Cardinality:   info.Cardinality,
+				PayloadSchema: info.PayloadSchema,
+				Aliases:       append([]string(nil), info.Aliases...),
+				Default:       info.Default,
+			})
+		}
+	}
+	return nmsTelemetryCatalogResponse{
+		SchemaVersion:           nmsTelemetryCatalogSchemaVersion,
+		GeneratedAt:             formatWebOptionalTime(now),
+		Resource:                "/api/nms/v1/telemetry/paths",
+		EventSchemaVersion:      catalog.EventSchemaVersion,
+		Encoding:                catalog.Encoding,
+		DefaultPaths:            catalog.DefaultPaths,
+		DefaultSampleIntervalMs: catalog.DefaultSampleIntervalMs,
+		MinSampleIntervalMs:     catalog.MinSampleIntervalMs,
+		MaxSampleIntervalMs:     catalog.MaxSampleIntervalMs,
+		PathCount:               len(paths),
+		Paths:                   paths,
+	}
+}
+
+func newNMSTelemetrySchemasResponse(now time.Time, filters nmsTelemetryCatalogFilters) nmsTelemetrySchemasResponse {
+	baseCatalog := nbgrpc.NewTelemetryCatalog()
+	schemaCatalog := nbgrpc.NewFilteredTelemetryPayloadSchemaCatalog(nbgrpc.TelemetryCatalogFilter{
+		Paths:          filters.paths,
+		Cardinalities:  filters.cardinalities,
+		PayloadSchemas: filters.payloadSchemas,
+		Encodings:      filters.encodings,
+		DefaultOnly:    filters.defaultOnly,
+	})
+	schemas := make([]nmsTelemetryPayloadSchema, 0, len(schemaCatalog))
+	for _, info := range schemaCatalog {
+		fields := make([]nmsTelemetryPayloadField, 0, len(info.Fields))
+		for _, field := range info.Fields {
+			fields = append(fields, nmsTelemetryPayloadField{
+				Name:        field.Name,
+				Type:        field.Type,
+				Description: field.Description,
+			})
+		}
+		schemas = append(schemas, nmsTelemetryPayloadSchema{
+			Path:          info.Path,
+			Description:   info.Description,
+			Cardinality:   info.Cardinality,
+			PayloadSchema: info.PayloadSchema,
+			Aliases:       append([]string(nil), info.Aliases...),
+			Default:       info.Default,
+			Fields:        fields,
+		})
+	}
+	return nmsTelemetrySchemasResponse{
+		SchemaVersion:           nmsTelemetrySchemasSchemaVersion,
+		GeneratedAt:             formatWebOptionalTime(now),
+		Resource:                "/api/nms/v1/telemetry/schemas",
+		EventSchemaVersion:      baseCatalog.EventSchemaVersion,
+		Encoding:                baseCatalog.Encoding,
+		DefaultPaths:            append([]string(nil), baseCatalog.DefaultPaths...),
+		DefaultSampleIntervalMs: baseCatalog.DefaultSampleIntervalMs,
+		MinSampleIntervalMs:     baseCatalog.MinSampleIntervalMs,
+		MaxSampleIntervalMs:     baseCatalog.MaxSampleIntervalMs,
+		SchemaCount:             len(schemas),
+		Schemas:                 schemas,
+	}
+}
+
+func nmsTelemetryCatalogFiltersFromRequest(r *http.Request) nmsTelemetryCatalogFilters {
+	query := r.URL.Query()
+	return nmsTelemetryCatalogFilters{
+		paths:          nmsTelemetryCatalogFilterValues(query, "path"),
+		cardinalities:  nmsTelemetryCatalogFilterValues(query, "cardinality"),
+		payloadSchemas: nmsTelemetryCatalogFilterValues(query, "payload_schema", "payload-schema"),
+		encodings:      nmsTelemetryCatalogFilterValues(query, "encoding"),
+		defaultOnly:    nmsTelemetryCatalogDefaultOnlyFromQuery(query),
+	}
+}
+
+func nmsTelemetryCatalogFilterValues(query url.Values, keys ...string) []string {
+	var values []string
+	for _, key := range keys {
+		for _, raw := range query[key] {
+			for _, part := range strings.Split(raw, ",") {
+				value := strings.TrimSpace(part)
+				if value != "" {
+					values = append(values, value)
+				}
+			}
+		}
+	}
+	return values
+}
+
+func nmsTelemetryPathMatchesCatalogFilters(info nbgrpc.TelemetryPathInfo, filters nmsTelemetryCatalogFilters) bool {
+	if filters.defaultOnly && !info.Default {
+		return false
+	}
+	if len(filters.paths) > 0 && !nmsTelemetryCatalogPathMatches(info, filters.paths) {
+		return false
+	}
+	if len(filters.cardinalities) > 0 && !nmsTelemetryCatalogFilterMatches(info.Cardinality, filters.cardinalities) {
+		return false
+	}
+	if len(filters.payloadSchemas) > 0 && !nmsTelemetryCatalogFilterMatches(info.PayloadSchema, filters.payloadSchemas) {
+		return false
+	}
+	return true
+}
+
+func nmsTelemetryCatalogDefaultOnlyFromQuery(query url.Values) bool {
+	for _, value := range append(append([]string(nil), query["default"]...), query["default_only"]...) {
+		switch strings.ToLower(strings.TrimSpace(value)) {
+		case "", "1", "true", "yes":
+			return true
+		}
+	}
+	return false
+}
+
+func nmsTelemetryCatalogPathMatches(info nbgrpc.TelemetryPathInfo, filters []string) bool {
+	if nmsTelemetryCatalogFilterMatchesPathValue(info.Path, filters) {
+		return true
+	}
+	for _, alias := range info.Aliases {
+		if nmsTelemetryCatalogFilterMatchesPathValue(alias, filters) {
+			return true
+		}
+	}
+	return false
+}
+
+func nmsTelemetryCatalogFilterMatchesPathValue(value string, filters []string) bool {
+	value = normalizeNMSTelemetryCatalogPathFilter(value)
+	for _, filter := range filters {
+		if value == normalizeNMSTelemetryCatalogPathFilter(filter) {
+			return true
+		}
+	}
+	return false
+}
+
+func normalizeNMSTelemetryCatalogPathFilter(value string) string {
+	path := strings.ToLower(strings.TrimSpace(value))
+	if path == "" {
+		return ""
+	}
+	return "/" + strings.Trim(path, "/")
+}
+
+func nmsTelemetryCatalogFilterMatches(value string, filters []string) bool {
+	if len(filters) == 0 {
+		return true
+	}
+	value = strings.ToLower(strings.TrimSpace(value))
+	for _, filter := range filters {
+		if value == strings.ToLower(strings.TrimSpace(filter)) {
+			return true
+		}
+	}
+	return false
+}
+
+func (s metricsSource) collectNMSTelemetrySnapshot(ctx context.Context, opts nmsTelemetrySnapshotOptions) ([]nbgrpc.TelemetryEvent, int, error) {
+	var events []nbgrpc.TelemetryEvent
+	payloadBytes := 0
+	err := s.telemetryAPI.SubscribeTelemetry(ctx, opts.paths, 0, true, func(event nbgrpc.TelemetryEvent) error {
+		if len(events)+1 > opts.maxEvents {
+			return fmt.Errorf("%w: %d events exceeds max_events %d", errNMSTelemetrySnapshotTooManyEvents, len(events)+1, opts.maxEvents)
+		}
+		payloadBytes += telemetryEventPayloadBytes(event)
+		if payloadBytes > opts.maxPayloadBytes {
+			return fmt.Errorf("%w: %d bytes exceeds max_payload_bytes %d", errNMSTelemetrySnapshotTooLarge, payloadBytes, opts.maxPayloadBytes)
+		}
+		events = append(events, event)
+		return nil
+	})
+	if err != nil {
+		return nil, payloadBytes, err
+	}
+	return events, payloadBytes, nil
+}
+
+func nmsTelemetrySnapshotOptionsFromRequest(r *http.Request) (nmsTelemetrySnapshotOptions, error) {
+	opts := nmsTelemetrySnapshotOptions{
+		paths:           nmsTelemetrySnapshotPaths(r),
+		timeout:         defaultNMSTelemetrySnapshotTimeout,
+		maxPayloadBytes: defaultNMSTelemetrySnapshotMaxPayloadBytes,
+		maxEvents:       defaultNMSTelemetrySnapshotMaxEvents,
+	}
+	filters := nmsTelemetryCatalogFiltersFromRequest(r)
+	filters.paths = opts.paths
+	if nmsTelemetrySnapshotHasCatalogFilters(filters) {
+		opts.paths = nmsTelemetrySnapshotPathsFromCatalogFilters(filters)
+		if len(opts.paths) == 0 {
+			return opts, fmt.Errorf("telemetry snapshot path set is empty after catalog filters")
+		}
+	}
+	if raw := strings.TrimSpace(r.URL.Query().Get("timeout")); raw != "" {
+		timeout, err := time.ParseDuration(raw)
+		if err != nil || timeout <= 0 {
+			return opts, fmt.Errorf("invalid telemetry snapshot timeout %q", raw)
+		}
+		if timeout > maxNMSTelemetrySnapshotTimeout {
+			return opts, fmt.Errorf("telemetry snapshot timeout %s exceeds max %s", timeout, maxNMSTelemetrySnapshotTimeout)
+		}
+		opts.timeout = timeout
+	}
+	if raw := strings.TrimSpace(r.URL.Query().Get("max_payload_bytes")); raw != "" {
+		maxPayloadBytes, err := strconv.Atoi(raw)
+		if err != nil || maxPayloadBytes <= 0 {
+			return opts, fmt.Errorf("invalid telemetry snapshot max_payload_bytes %q", raw)
+		}
+		if maxPayloadBytes > maxNMSTelemetrySnapshotMaxPayloadBytes {
+			return opts, fmt.Errorf("telemetry snapshot max_payload_bytes %d exceeds max %d", maxPayloadBytes, maxNMSTelemetrySnapshotMaxPayloadBytes)
+		}
+		opts.maxPayloadBytes = maxPayloadBytes
+	}
+	if raw := strings.TrimSpace(r.URL.Query().Get("max_events")); raw != "" {
+		maxEvents, err := strconv.Atoi(raw)
+		if err != nil || maxEvents <= 0 {
+			return opts, fmt.Errorf("invalid telemetry snapshot max_events %q", raw)
+		}
+		if maxEvents > maxNMSTelemetrySnapshotMaxEvents {
+			return opts, fmt.Errorf("telemetry snapshot max_events %d exceeds max %d", maxEvents, maxNMSTelemetrySnapshotMaxEvents)
+		}
+		opts.maxEvents = maxEvents
+	}
+	return opts, nil
+}
+
+func nmsTelemetrySnapshotHasCatalogFilters(filters nmsTelemetryCatalogFilters) bool {
+	return filters.defaultOnly || len(filters.cardinalities) > 0 || len(filters.payloadSchemas) > 0 || len(filters.encodings) > 0
+}
+
+func nmsTelemetrySnapshotPathsFromCatalogFilters(filters nmsTelemetryCatalogFilters) []string {
+	catalog := nbgrpc.NewFilteredTelemetryCatalog(nbgrpc.TelemetryCatalogFilter{
+		Paths:          filters.paths,
+		Cardinalities:  filters.cardinalities,
+		PayloadSchemas: filters.payloadSchemas,
+		Encodings:      filters.encodings,
+		DefaultOnly:    filters.defaultOnly,
+	})
+	paths := make([]string, 0, len(catalog.Paths))
+	for _, info := range catalog.Paths {
+		paths = append(paths, info.Path)
+	}
+	return paths
+}
+
+func nmsTelemetrySnapshotPaths(r *http.Request) []string {
+	rawPaths := r.URL.Query()["path"]
+	paths := make([]string, 0, len(rawPaths))
+	for _, rawPath := range rawPaths {
+		for _, part := range strings.Split(rawPath, ",") {
+			if path := strings.TrimSpace(part); path != "" {
+				paths = append(paths, path)
+			}
+		}
+	}
+	return paths
+}
+
+func newNMSTelemetrySnapshotResponse(now time.Time, events []nbgrpc.TelemetryEvent, opts nmsTelemetrySnapshotOptions, payloadBytes int) nmsTelemetrySnapshotResponse {
+	catalog := nbgrpc.NewTelemetryCatalog()
+	responseEvents := make([]nmsTelemetrySnapshotEvent, 0, len(events))
+	paths := make([]string, 0, len(events))
+	for _, event := range events {
+		responseEvents = append(responseEvents, newNMSTelemetrySnapshotEvent(event))
+		paths = append(paths, event.Path)
+	}
+	return nmsTelemetrySnapshotResponse{
+		SchemaVersion:           nmsTelemetrySnapshotSchemaVersion,
+		GeneratedAt:             formatWebOptionalTime(now),
+		Resource:                "/api/nms/v1/telemetry/snapshot",
+		EventSchemaVersion:      catalog.EventSchemaVersion,
+		Encoding:                catalog.Encoding,
+		DefaultPaths:            append([]string(nil), catalog.DefaultPaths...),
+		DefaultSampleIntervalMs: catalog.DefaultSampleIntervalMs,
+		MinSampleIntervalMs:     catalog.MinSampleIntervalMs,
+		MaxSampleIntervalMs:     catalog.MaxSampleIntervalMs,
+		Paths:                   paths,
+		EventCount:              len(responseEvents),
+		PayloadBytes:            payloadBytes,
+		MaxPayloadBytes:         opts.maxPayloadBytes,
+		MaxEvents:               opts.maxEvents,
+		TimeoutMs:               opts.timeout.Milliseconds(),
+		Events:                  responseEvents,
+	}
+}
+
+func newNMSTelemetrySnapshotEvent(event nbgrpc.TelemetryEvent) nmsTelemetrySnapshotEvent {
+	output := nmsTelemetrySnapshotEvent{
+		Sequence:      event.Sequence,
+		Path:          event.Path,
+		Cardinality:   event.Cardinality,
+		PayloadSchema: event.PayloadSchema,
+		EventType:     event.EventType,
+		Encoding:      event.Encoding,
+		SchemaVersion: event.SchemaVersion,
+		PayloadBytes:  telemetryEventPayloadBytes(event),
+		Payload:       telemetrySnapshotPayload(event.JSONPayload),
+	}
+	if !event.Timestamp.IsZero() {
+		output.Timestamp = event.Timestamp.UTC().Format(time.RFC3339Nano)
+	}
+	return output
+}
+
+func telemetryEventPayloadBytes(event nbgrpc.TelemetryEvent) int {
+	if event.PayloadBytes > 0 {
+		return event.PayloadBytes
+	}
+	return len(event.JSONPayload)
+}
+
+func telemetrySnapshotPayload(payload string) json.RawMessage {
+	if payload == "" {
+		return json.RawMessage("null")
+	}
+	if json.Valid([]byte(payload)) {
+		return json.RawMessage(payload)
+	}
+	encoded, err := json.Marshal(payload)
+	if err != nil {
+		return json.RawMessage("null")
+	}
+	return json.RawMessage(encoded)
+}
+
 func newWebStatus(metrics routerMetrics) webStatus {
 	return webStatus{
 		Version:         Version,
@@ -1273,6 +1880,15 @@ func newWebStatus(metrics routerMetrics) webStatus {
 			EtcdEndpoints:      metrics.ClusterEtcdEndpoints,
 			SyncAligned:        metrics.ClusterSyncAligned,
 		},
+		Overlay: webOverlayStats{
+			EVPN: webEVPNStats{
+				Configured:    metrics.OverlayEVPNConfigured,
+				VNIs:          metrics.OverlayEVPNVNIs,
+				L2VNIs:        metrics.OverlayEVPNL2VNIs,
+				L3VNIs:        metrics.OverlayEVPNL3VNIs,
+				MulticastVNIs: metrics.OverlayEVPNMulticastVNIs,
+			},
+		},
 		HA: webHAStats{
 			Configured: metrics.HAConfigured,
 			Converged:  metrics.HAConverged,
@@ -1287,6 +1903,15 @@ func newWebStatus(metrics routerMetrics) webStatus {
 			TrafficControlProfiles: metrics.ClassOfServiceProfiles,
 			InterfaceBindings:      metrics.ClassOfServiceBindings,
 			IntentOnly:             metrics.ClassOfServiceIntentOnly,
+			Capabilities: webCoSCapabilities{
+				LastCheck:                formatWebOptionalTime(metrics.ClassOfServiceCapabilityLastCheck),
+				MetadataBindingSupported: metrics.ClassOfServiceMetadataBindingSupported,
+				QueueSchedulerSupported:  metrics.ClassOfServiceQueueSchedulerSupported,
+				PolicerSupported:         metrics.ClassOfServicePolicerSupported,
+				CountersSupported:        metrics.ClassOfServiceCountersSupported,
+				Diagnostics:              append([]string(nil), metrics.ClassOfServiceCapabilityDiagnostics...),
+				LastError:                metrics.ClassOfServiceCapabilityError,
+			},
 		},
 		FRR: webFRRStats{
 			VRRP: webVRRPStats{
@@ -1468,49 +2093,53 @@ func newWebIndexData(status webStatus, now time.Time, runningConfig string, hist
 	}
 
 	return webIndexData{
-		Status:                  status,
-		Uptime:                  formatWebUptime(status.UptimeSeconds),
-		NETCONFState:            state,
-		NETCONFStateClass:       stateClass,
-		NETCONFConnections:      strconv.FormatUint(status.NETCONF.TotalConnections, 10),
-		ClusterState:            clusterState,
-		ClusterStateClass:       clusterStateClass,
-		ClusterSyncState:        clusterSyncState,
-		ClusterSyncAlignment:    clusterSyncAlignment,
-		ClusterNodeCount:        strconv.Itoa(status.Cluster.NodeCount),
-		ConfigSyncState:         configSyncState,
-		ConfigSyncStateClass:    configSyncStateClass,
-		ConfigSyncRevision:      configSyncRevision,
-		ConfigSyncLastApply:     formatWebOptionalDisplayTime(status.ConfigSync.LastApply),
-		HAState:                 haState,
-		HAStateClass:            haStateClass,
-		HAVRPGroups:             strconv.Itoa(status.HA.VRRPGroups),
-		HAIssues:                strconv.Itoa(status.HA.IssueCount),
-		ClassOfServiceState:     cosState,
-		ClassOfServiceClass:     cosStateClass,
-		ClassOfServiceProfiles:  strconv.Itoa(status.ClassOfService.TrafficControlProfiles),
-		ClassOfServiceBindings:  strconv.Itoa(status.ClassOfService.InterfaceBindings),
-		ClassOfServiceClasses:   strconv.Itoa(status.ClassOfService.ForwardingClasses),
-		FRRVRRPState:            frrVRRPState,
-		FRRVRRPStateClass:       frrVRRPStateClass,
-		FRRVRRPActiveGroups:     fmt.Sprintf("%d/%d", status.FRR.VRRP.ActiveGroups, status.FRR.VRRP.ConfiguredGroups),
-		FRRVRRPGroups:           webVRRPGroupViews(status.FRR.VRRP.Groups),
-		FRRBFDState:             frrBFDState,
-		FRRBFDStateClass:        frrBFDStateClass,
-		FRRBFDUpPeers:           webBFDPeerRatio(status.FRR.BFD),
-		FRRBFDSessionDownEvents: strconv.Itoa(status.FRR.BFD.SessionDownEvents),
-		FRRBFDRxFailPackets:     strconv.Itoa(status.FRR.BFD.RxFailPackets),
-		FRRBFDPeers:             webBFDPeerViews(status.FRR.BFD.Peers),
-		VPPLCPState:             vppLCPState,
-		VPPLCPStateClass:        vppLCPStateClass,
-		VPPLCPPairs:             strconv.Itoa(status.VPP.LCP.PairCount),
-		VPPLCPInconsistencies:   strconv.Itoa(status.VPP.LCP.InconsistencyCount),
-		VPPLCPLastReconcile:     formatWebOptionalDisplayTime(status.VPP.LCP.LastReconcile),
-		DatastoreBackend:        status.Datastore.Backend,
-		GeneratedAt:             now.UTC().Format(time.RFC3339),
-		ConfigVersionString:     strconv.FormatUint(status.ConfigVersion, 10),
-		RunningConfig:           runningConfig,
-		History:                 history,
+		Status:                   status,
+		Uptime:                   formatWebUptime(status.UptimeSeconds),
+		NETCONFState:             state,
+		NETCONFStateClass:        stateClass,
+		NETCONFConnections:       strconv.FormatUint(status.NETCONF.TotalConnections, 10),
+		ClusterState:             clusterState,
+		ClusterStateClass:        clusterStateClass,
+		ClusterSyncState:         clusterSyncState,
+		ClusterSyncAlignment:     clusterSyncAlignment,
+		ClusterNodeCount:         strconv.Itoa(status.Cluster.NodeCount),
+		ConfigSyncState:          configSyncState,
+		ConfigSyncStateClass:     configSyncStateClass,
+		ConfigSyncRevision:       configSyncRevision,
+		ConfigSyncLastApply:      formatWebOptionalDisplayTime(status.ConfigSync.LastApply),
+		HAState:                  haState,
+		HAStateClass:             haStateClass,
+		HAVRPGroups:              strconv.Itoa(status.HA.VRRPGroups),
+		HAIssues:                 strconv.Itoa(status.HA.IssueCount),
+		ClassOfServiceState:      cosState,
+		ClassOfServiceClass:      cosStateClass,
+		ClassOfServiceProfiles:   strconv.Itoa(status.ClassOfService.TrafficControlProfiles),
+		ClassOfServiceBindings:   strconv.Itoa(status.ClassOfService.InterfaceBindings),
+		ClassOfServiceClasses:    strconv.Itoa(status.ClassOfService.ForwardingClasses),
+		ClassOfServiceScheduler:  webSupportedStatus(status.ClassOfService.Capabilities.QueueSchedulerSupported),
+		ClassOfServicePolicer:    webSupportedStatus(status.ClassOfService.Capabilities.PolicerSupported),
+		ClassOfServiceCounters:   webSupportedStatus(status.ClassOfService.Capabilities.CountersSupported),
+		ClassOfServiceDiagnostic: webCoSDiagnosticText(status.ClassOfService.Capabilities),
+		FRRVRRPState:             frrVRRPState,
+		FRRVRRPStateClass:        frrVRRPStateClass,
+		FRRVRRPActiveGroups:      fmt.Sprintf("%d/%d", status.FRR.VRRP.ActiveGroups, status.FRR.VRRP.ConfiguredGroups),
+		FRRVRRPGroups:            webVRRPGroupViews(status.FRR.VRRP.Groups),
+		FRRBFDState:              frrBFDState,
+		FRRBFDStateClass:         frrBFDStateClass,
+		FRRBFDUpPeers:            webBFDPeerRatio(status.FRR.BFD),
+		FRRBFDSessionDownEvents:  strconv.Itoa(status.FRR.BFD.SessionDownEvents),
+		FRRBFDRxFailPackets:      strconv.Itoa(status.FRR.BFD.RxFailPackets),
+		FRRBFDPeers:              webBFDPeerViews(status.FRR.BFD.Peers),
+		VPPLCPState:              vppLCPState,
+		VPPLCPStateClass:         vppLCPStateClass,
+		VPPLCPPairs:              strconv.Itoa(status.VPP.LCP.PairCount),
+		VPPLCPInconsistencies:    strconv.Itoa(status.VPP.LCP.InconsistencyCount),
+		VPPLCPLastReconcile:      formatWebOptionalDisplayTime(status.VPP.LCP.LastReconcile),
+		DatastoreBackend:         status.Datastore.Backend,
+		GeneratedAt:              now.UTC().Format(time.RFC3339),
+		ConfigVersionString:      strconv.FormatUint(status.ConfigVersion, 10),
+		RunningConfig:            runningConfig,
+		History:                  history,
 	}
 }
 
