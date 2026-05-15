@@ -41,12 +41,11 @@ go run ./examples/nms \
   -otlp-endpoint http://127.0.0.1:4318/v1/logs \
   -otlp-service-name arca-router-nms-collector
 
-# Discover only selected default paths and path classes using server-side catalog filters.
+# Request selected path classes using server-side snapshot metadata filters.
 go run ./examples/nms \
   -base-url http://127.0.0.1:8080 \
   -user monitor \
   -password ReadOnly789 \
-  -include-default \
   -include-path /evpn \
   -include-cardinality per-vni \
   -include-payload-schema arca.telemetry.overlays.evpn.v1 \

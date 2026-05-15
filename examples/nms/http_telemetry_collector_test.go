@@ -129,7 +129,7 @@ func TestParseCollectorConfigOTLPExporter(t *testing.T) {
 	}
 }
 
-func TestParseCollectorConfigIncludeFiltersUseCatalogPaths(t *testing.T) {
+func TestParseCollectorConfigIncludeFiltersUseSnapshotMetadataFilters(t *testing.T) {
 	cfg, err := parseCollectorConfig([]string{
 		"-include-encoding", "json",
 	})
@@ -137,7 +137,7 @@ func TestParseCollectorConfigIncludeFiltersUseCatalogPaths(t *testing.T) {
 		t.Fatalf("parseCollectorConfig() error = %v", err)
 	}
 	if len(cfg.paths) != 0 {
-		t.Fatalf("paths = %#v, want catalog-discovered paths for include encoding filter", cfg.paths)
+		t.Fatalf("paths = %#v, want server-selected paths for include encoding filter", cfg.paths)
 	}
 }
 
@@ -183,6 +183,48 @@ func TestCollectorEndpointURLForSnapshot(t *testing.T) {
 		if !strings.Contains(got, want) {
 			t.Fatalf("snapshot URL = %q, missing %s", got, want)
 		}
+	}
+}
+
+func TestCollectorEndpointURLForSnapshotMetadataFilters(t *testing.T) {
+	cfg, err := parseCollectorConfig([]string{
+		"-base-url", "http://router.example:8080/arca",
+		"-include-default",
+		"-include-cardinality", "single",
+		"-include-payload-schema", "arca.telemetry.system.v1",
+		"-include-encoding", "json",
+		"-timeout", "3s",
+		"-max-events", "2",
+	})
+	if err != nil {
+		t.Fatalf("parseCollectorConfig() error = %v", err)
+	}
+	got, err := collectorEndpointURL(cfg)
+	if err != nil {
+		t.Fatalf("collectorEndpointURL() error = %v", err)
+	}
+	parsed, err := url.Parse(got)
+	if err != nil {
+		t.Fatalf("snapshot URL is invalid: %v", err)
+	}
+	if parsed.Scheme != "http" || parsed.Host != "router.example:8080" || parsed.Path != "/arca/api/nms/v1/telemetry/snapshot" {
+		t.Fatalf("snapshot URL = %q, want endpoint under /arca", got)
+	}
+	query := parsed.Query()
+	if query.Get("default") != "true" {
+		t.Fatalf("default query = %#v, want true", query["default"])
+	}
+	if query.Get("cardinality") != "single" {
+		t.Fatalf("cardinality query = %#v, want single", query["cardinality"])
+	}
+	if query.Get("payload_schema") != "arca.telemetry.system.v1" {
+		t.Fatalf("payload_schema query = %#v, want system schema", query["payload_schema"])
+	}
+	if query.Get("encoding") != "json" {
+		t.Fatalf("encoding query = %#v, want json", query["encoding"])
+	}
+	if query.Get("timeout") != "3s" || query.Get("max_events") != "2" {
+		t.Fatalf("snapshot guardrail query = %#v, want timeout and max_events", query)
 	}
 }
 
@@ -274,16 +316,14 @@ func TestFetchNMSDiscoversAndFiltersSnapshotPaths(t *testing.T) {
 	}
 }
 
-func TestFetchNMSUsesCatalogFiltersForSnapshotPaths(t *testing.T) {
-	var catalogQuery url.Values
+func TestFetchNMSUsesSnapshotMetadataFilters(t *testing.T) {
 	var snapshotQuery url.Values
+	catalogCalled := false
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case "/api/nms/v1/telemetry/paths":
-			catalogQuery = r.URL.Query()
-			_, _ = w.Write([]byte(`{"paths":[` +
-				`{"path":"/overlays/evpn","cardinality":"per-vni","payload_schema":"arca.telemetry.overlays.evpn.v1"}` +
-				`]}`))
+			catalogCalled = true
+			http.Error(w, "unexpected catalog request", http.StatusInternalServerError)
 		case "/api/nms/v1/telemetry/snapshot":
 			snapshotQuery = r.URL.Query()
 			_, _ = w.Write([]byte(`{"schema_version":"arca.nms.telemetry-snapshot.v1","events":[]}`))
@@ -295,11 +335,10 @@ func TestFetchNMSUsesCatalogFiltersForSnapshotPaths(t *testing.T) {
 
 	cfg, err := parseCollectorConfig([]string{
 		"-base-url", server.URL,
-		"-include-default",
-		"-include-path", "evpn",
-		"-include-cardinality", "per-vni",
-		"-include-payload-schema", "arca.telemetry.overlays.evpn.v1",
+		"-include-cardinality", "per-route",
+		"-include-payload-schema", "arca.telemetry.routes.v1",
 		"-include-encoding", "json",
+		"-max-events", "1",
 	})
 	if err != nil {
 		t.Fatalf("parseCollectorConfig() error = %v", err)
@@ -311,25 +350,23 @@ func TestFetchNMSUsesCatalogFiltersForSnapshotPaths(t *testing.T) {
 	if !json.Valid(body) {
 		t.Fatalf("fetchNMS() body is invalid JSON: %s", string(body))
 	}
-	if catalogQuery.Get("path") != "evpn" {
-		t.Fatalf("catalog path query = %#v, want evpn", catalogQuery["path"])
+	if catalogCalled {
+		t.Fatal("catalog endpoint was called, want direct snapshot metadata filters")
 	}
-	if catalogQuery.Get("default") != "true" {
-		t.Fatalf("catalog default query = %#v, want true", catalogQuery["default"])
+	if snapshotQuery.Get("cardinality") != "per-route" {
+		t.Fatalf("snapshot cardinality query = %#v, want per-route", snapshotQuery["cardinality"])
 	}
-	if catalogQuery.Get("cardinality") != "per-vni" {
-		t.Fatalf("catalog cardinality query = %#v, want per-vni", catalogQuery["cardinality"])
+	if snapshotQuery.Get("payload_schema") != "arca.telemetry.routes.v1" {
+		t.Fatalf("snapshot payload_schema query = %#v, want route schema", snapshotQuery["payload_schema"])
 	}
-	if catalogQuery.Get("payload_schema") != "arca.telemetry.overlays.evpn.v1" {
-		t.Fatalf("catalog payload_schema query = %#v, want EVPN schema", catalogQuery["payload_schema"])
+	if snapshotQuery.Get("encoding") != "json" {
+		t.Fatalf("snapshot encoding query = %#v, want json", snapshotQuery["encoding"])
 	}
-	if catalogQuery.Get("encoding") != "json" {
-		t.Fatalf("catalog encoding query = %#v, want json", catalogQuery["encoding"])
+	if snapshotQuery.Get("max_events") != "1" {
+		t.Fatalf("snapshot max_events query = %#v, want 1", snapshotQuery["max_events"])
 	}
-	gotPaths := snapshotQuery["path"]
-	wantPaths := []string{"/overlays/evpn"}
-	if strings.Join(gotPaths, ",") != strings.Join(wantPaths, ",") {
-		t.Fatalf("snapshot paths = %#v, want %#v", gotPaths, wantPaths)
+	if gotPaths := snapshotQuery["path"]; len(gotPaths) != 0 {
+		t.Fatalf("snapshot paths = %#v, want server-selected paths", gotPaths)
 	}
 }
 
