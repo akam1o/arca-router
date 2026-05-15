@@ -34,6 +34,7 @@ func TestParseCollectorConfigCatalogFilters(t *testing.T) {
 		"-include-path", "evpn",
 		"-include-cardinality", "single",
 		"-include-payload-schema", "arca.telemetry.system.v1",
+		"-include-encoding", "json",
 		"-exclude-cardinality", "per-route",
 		"-exclude-cardinality", "per-peer",
 		"-exclude-payload-schema", "arca.telemetry.bfd.v1",
@@ -59,6 +60,9 @@ func TestParseCollectorConfigCatalogFilters(t *testing.T) {
 	if len(cfg.includedSchema) != 1 || cfg.includedSchema[0] != "arca.telemetry.system.v1" {
 		t.Fatalf("included schemas = %#v, want system payload schema", cfg.includedSchema)
 	}
+	if len(cfg.includedEncoding) != 1 || cfg.includedEncoding[0] != "json" {
+		t.Fatalf("included encodings = %#v, want json", cfg.includedEncoding)
+	}
 	if len(cfg.excludedCard) != 2 || cfg.excludedCard[0] != "per-route" || cfg.excludedCard[1] != "per-peer" {
 		t.Fatalf("excluded cardinalities = %#v, want per-route and per-peer", cfg.excludedCard)
 	}
@@ -69,13 +73,13 @@ func TestParseCollectorConfigCatalogFilters(t *testing.T) {
 
 func TestParseCollectorConfigIncludeFiltersUseCatalogPaths(t *testing.T) {
 	cfg, err := parseCollectorConfig([]string{
-		"-include-default",
+		"-include-encoding", "json",
 	})
 	if err != nil {
 		t.Fatalf("parseCollectorConfig() error = %v", err)
 	}
 	if len(cfg.paths) != 0 {
-		t.Fatalf("paths = %#v, want catalog-discovered paths for include filter", cfg.paths)
+		t.Fatalf("paths = %#v, want catalog-discovered paths for include encoding filter", cfg.paths)
 	}
 }
 
@@ -130,6 +134,7 @@ func TestCollectorEndpointURLForCatalogFilters(t *testing.T) {
 		"-include-cardinality", "per-route",
 		"-include-cardinality", "per-vni",
 		"-include-payload-schema", "arca.telemetry.routes.v1",
+		"-include-encoding", "json",
 	})
 	if err != nil {
 		t.Fatalf("parseCollectorConfig() error = %v", err)
@@ -157,6 +162,9 @@ func TestCollectorEndpointURLForCatalogFilters(t *testing.T) {
 	}
 	if query.Get("payload_schema") != "arca.telemetry.routes.v1" {
 		t.Fatalf("payload_schema query = %#v, want routes schema", query["payload_schema"])
+	}
+	if query.Get("encoding") != "json" {
+		t.Fatalf("encoding query = %#v, want json", query["encoding"])
 	}
 }
 
@@ -229,6 +237,7 @@ func TestFetchNMSUsesCatalogFiltersForSnapshotPaths(t *testing.T) {
 		"-include-path", "evpn",
 		"-include-cardinality", "per-vni",
 		"-include-payload-schema", "arca.telemetry.overlays.evpn.v1",
+		"-include-encoding", "json",
 	})
 	if err != nil {
 		t.Fatalf("parseCollectorConfig() error = %v", err)
@@ -251,6 +260,9 @@ func TestFetchNMSUsesCatalogFiltersForSnapshotPaths(t *testing.T) {
 	}
 	if catalogQuery.Get("payload_schema") != "arca.telemetry.overlays.evpn.v1" {
 		t.Fatalf("catalog payload_schema query = %#v, want EVPN schema", catalogQuery["payload_schema"])
+	}
+	if catalogQuery.Get("encoding") != "json" {
+		t.Fatalf("catalog encoding query = %#v, want json", catalogQuery["encoding"])
 	}
 	gotPaths := snapshotQuery["path"]
 	wantPaths := []string{"/overlays/evpn"}

@@ -24,20 +24,21 @@ const (
 var defaultSnapshotPaths = []string{"/system", "/interfaces", "/overlays/evpn"}
 
 type collectorConfig struct {
-	baseURL         string
-	username        string
-	password        string
-	mode            string
-	paths           repeatedPathFlag
-	discoverPaths   bool
-	includedPath    repeatedPathFlag
-	includedDefault bool
-	includedCard    repeatedStringFlag
-	includedSchema  repeatedStringFlag
-	excludedCard    repeatedStringFlag
-	excludedSchema  repeatedStringFlag
-	timeout         time.Duration
-	maxPayloadBytes int
+	baseURL          string
+	username         string
+	password         string
+	mode             string
+	paths            repeatedPathFlag
+	discoverPaths    bool
+	includedPath     repeatedPathFlag
+	includedDefault  bool
+	includedCard     repeatedStringFlag
+	includedSchema   repeatedStringFlag
+	includedEncoding repeatedStringFlag
+	excludedCard     repeatedStringFlag
+	excludedSchema   repeatedStringFlag
+	timeout          time.Duration
+	maxPayloadBytes  int
 }
 
 type repeatedPathFlag []string
@@ -118,6 +119,7 @@ func parseCollectorConfig(args []string) (collectorConfig, error) {
 	fs.BoolVar(&cfg.includedDefault, "include-default", false, "Request only default telemetry paths from catalog discovery")
 	fs.Var(&cfg.includedCard, "include-cardinality", "Telemetry cardinality to request from catalog discovery; repeat for multiple values")
 	fs.Var(&cfg.includedSchema, "include-payload-schema", "Telemetry payload schema ID to request from catalog discovery; repeat for multiple values")
+	fs.Var(&cfg.includedEncoding, "include-encoding", "Telemetry payload encoding to request from catalog discovery; repeat for multiple values")
 	fs.Var(&cfg.excludedCard, "exclude-cardinality", "Telemetry cardinality to exclude from snapshot mode; repeat for multiple values")
 	fs.Var(&cfg.excludedSchema, "exclude-payload-schema", "Telemetry payload schema ID to exclude from snapshot mode; repeat for multiple values")
 	fs.DurationVar(&cfg.timeout, "timeout", cfg.timeout, "Snapshot timeout")
@@ -146,7 +148,7 @@ func parseCollectorConfig(args []string) (collectorConfig, error) {
 }
 
 func usesCatalogDiscovery(cfg collectorConfig) bool {
-	return cfg.discoverPaths || cfg.includedDefault || len(cfg.includedPath) > 0 || len(cfg.includedCard) > 0 || len(cfg.includedSchema) > 0
+	return cfg.discoverPaths || cfg.includedDefault || len(cfg.includedPath) > 0 || len(cfg.includedCard) > 0 || len(cfg.includedSchema) > 0 || len(cfg.includedEncoding) > 0
 }
 
 func needsCatalogResolution(cfg collectorConfig) bool {
@@ -201,14 +203,15 @@ func fetchEndpoint(ctx context.Context, client *http.Client, cfg collectorConfig
 
 func resolveSnapshotPaths(ctx context.Context, client *http.Client, cfg collectorConfig) (repeatedPathFlag, error) {
 	catalogURL, err := collectorEndpointURL(collectorConfig{
-		baseURL:         cfg.baseURL,
-		username:        cfg.username,
-		password:        cfg.password,
-		mode:            "catalog",
-		includedPath:    append(repeatedPathFlag(nil), cfg.includedPath...),
-		includedDefault: cfg.includedDefault,
-		includedCard:    append(repeatedStringFlag(nil), cfg.includedCard...),
-		includedSchema:  append(repeatedStringFlag(nil), cfg.includedSchema...),
+		baseURL:          cfg.baseURL,
+		username:         cfg.username,
+		password:         cfg.password,
+		mode:             "catalog",
+		includedPath:     append(repeatedPathFlag(nil), cfg.includedPath...),
+		includedDefault:  cfg.includedDefault,
+		includedCard:     append(repeatedStringFlag(nil), cfg.includedCard...),
+		includedSchema:   append(repeatedStringFlag(nil), cfg.includedSchema...),
+		includedEncoding: append(repeatedStringFlag(nil), cfg.includedEncoding...),
 	})
 	if err != nil {
 		return nil, err
@@ -317,6 +320,9 @@ func collectorEndpointURL(cfg collectorConfig) (string, error) {
 		}
 		for _, value := range cfg.includedSchema {
 			query.Add("payload_schema", value)
+		}
+		for _, value := range cfg.includedEncoding {
+			query.Add("encoding", value)
 		}
 		u.RawQuery = query.Encode()
 	case "snapshot":

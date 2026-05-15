@@ -33,6 +33,7 @@ go run ./examples/nms \
   -include-path /evpn \
   -include-cardinality per-vni \
   -include-payload-schema arca.telemetry.overlays.evpn.v1 \
+  -include-encoding json \
   -timeout 5s \
   -max-payload-bytes 8388608
 
