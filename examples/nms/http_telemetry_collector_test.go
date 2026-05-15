@@ -150,6 +150,10 @@ func TestDecodeDiscoveryResponseRejectsInvalidSchemaEnvelope(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "payload_schema") {
 		t.Fatalf("decodeDiscoveryResponse() error = %v, want schema path payload_schema mismatch", err)
 	}
+	err = decodeDiscoveryResponse(collectorConfig{mode: "catalog"}, []byte(`{"schema_version":"arca.nms.telemetry-catalog.v1","resource":"/api/nms/v1/telemetry/paths","event_schema_version":"arca.telemetry.v1","encoding":"json","default_paths":["/system"],"default_sample_interval_ms":30000,"min_sample_interval_ms":1000,"max_sample_interval_ms":3600000,"path_count":1,"paths":[{"path":"/overlays/evpn","cardinality":"per-vni","payload_schema":"arca.telemetry.overlays.evpn.v1","aliases":["/routes"]}]}`))
+	if err == nil || !strings.Contains(err.Error(), "aliases[0]") {
+		t.Fatalf("decodeDiscoveryResponse() error = %v, want catalog alias mapping mismatch", err)
+	}
 	err = decodeDiscoveryResponse(collectorConfig{mode: "catalog"}, []byte(`{"schema_version":"arca.nms.telemetry-catalog.v1","resource":"/api/nms/v1/telemetry/paths","event_schema_version":"arca.telemetry.v1","encoding":"json","default_paths":["/system"],"default_sample_interval_ms":30000,"min_sample_interval_ms":1000,"max_sample_interval_ms":3600000,"path_count":1,"paths":[{"path":"/system","cardinality":"single","payload_schema":"arca.telemetry.system.v1","aliases":["/system"]}]}`))
 	if err == nil || !strings.Contains(err.Error(), "duplicates") {
 		t.Fatalf("decodeDiscoveryResponse() error = %v, want catalog duplicate path mismatch", err)
