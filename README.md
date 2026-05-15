@@ -260,6 +260,7 @@ curl -u monitor:ReadOnly789 http://127.0.0.1:8080/api/nms/v1/telemetry/paths
 curl -u monitor:ReadOnly789 'http://127.0.0.1:8080/api/nms/v1/telemetry/paths?cardinality=per-route&payload_schema=arca.telemetry.routes.v1'
 curl -u monitor:ReadOnly789 'http://127.0.0.1:8080/api/nms/v1/telemetry/schemas?path=/evpn'
 curl -u monitor:ReadOnly789 'http://127.0.0.1:8080/api/nms/v1/telemetry/snapshot?path=/system&path=/interfaces&path=/overlays/evpn&timeout=5s&max_payload_bytes=8388608&max_events=64'
+curl -u monitor:ReadOnly789 'http://127.0.0.1:8080/api/nms/v1/telemetry/snapshot?cardinality=per-route&payload_schema=arca.telemetry.routes.v1&max_events=1'
 
 # Check VPP/FRR directly (optional)
 sudo vppctl show interface

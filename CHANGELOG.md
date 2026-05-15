@@ -2,6 +2,7 @@
 
 ## v0.8.x - Overlay and Streaming Telemetry (current)
 
+- **NMS snapshot metadata filters**: `/api/nms/v1/telemetry/snapshot` now accepts default, cardinality, payload schema, and encoding filters so HTTP-only collectors can select snapshot paths without a separate catalog request
 - **Telemetry event cardinality hints**: gRPC, CLI, NMS snapshot, and OTLP-exported telemetry events now carry `cardinality` so collectors can distinguish single-object snapshots from higher-cardinality payloads without a catalog lookup
 - **Telemetry event payload schemas**: gRPC, CLI, NMS snapshot, and OTLP-exported telemetry events now carry `payload_schema` so collectors can route and validate events without a separate catalog lookup
 - **QoS capability gRPC telemetry**: `GetClassOfService`, `arca show class-of-service`, and the `/class-of-service` telemetry payload now include VPP QoS capability support, diagnostics, errors, and last-check time

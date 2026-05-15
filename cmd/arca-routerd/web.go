@@ -1678,6 +1678,14 @@ func nmsTelemetrySnapshotOptionsFromRequest(r *http.Request) (nmsTelemetrySnapsh
 		maxPayloadBytes: defaultNMSTelemetrySnapshotMaxPayloadBytes,
 		maxEvents:       defaultNMSTelemetrySnapshotMaxEvents,
 	}
+	filters := nmsTelemetryCatalogFiltersFromRequest(r)
+	filters.paths = opts.paths
+	if nmsTelemetrySnapshotHasCatalogFilters(filters) {
+		opts.paths = nmsTelemetrySnapshotPathsFromCatalogFilters(filters)
+		if len(opts.paths) == 0 {
+			return opts, fmt.Errorf("telemetry snapshot path set is empty after catalog filters")
+		}
+	}
 	if raw := strings.TrimSpace(r.URL.Query().Get("timeout")); raw != "" {
 		timeout, err := time.ParseDuration(raw)
 		if err != nil || timeout <= 0 {
@@ -1709,6 +1717,25 @@ func nmsTelemetrySnapshotOptionsFromRequest(r *http.Request) (nmsTelemetrySnapsh
 		opts.maxEvents = maxEvents
 	}
 	return opts, nil
+}
+
+func nmsTelemetrySnapshotHasCatalogFilters(filters nmsTelemetryCatalogFilters) bool {
+	return filters.defaultOnly || len(filters.cardinalities) > 0 || len(filters.payloadSchemas) > 0 || len(filters.encodings) > 0
+}
+
+func nmsTelemetrySnapshotPathsFromCatalogFilters(filters nmsTelemetryCatalogFilters) []string {
+	catalog := nbgrpc.NewFilteredTelemetryCatalog(nbgrpc.TelemetryCatalogFilter{
+		Paths:          filters.paths,
+		Cardinalities:  filters.cardinalities,
+		PayloadSchemas: filters.payloadSchemas,
+		Encodings:      filters.encodings,
+		DefaultOnly:    filters.defaultOnly,
+	})
+	paths := make([]string, 0, len(catalog.Paths))
+	for _, info := range catalog.Paths {
+		paths = append(paths, info.Path)
+	}
+	return paths
 }
 
 func nmsTelemetrySnapshotPaths(r *http.Request) []string {
