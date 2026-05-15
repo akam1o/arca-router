@@ -481,6 +481,7 @@ type showClient interface {
 	GetHAStatus(context.Context) (*grpcclient.HAStatusInfo, error)
 	GetClassOfService(context.Context) (*grpcclient.ClassOfServiceInfo, error)
 	GetTelemetryCatalog(context.Context) (grpcclient.TelemetryCatalog, error)
+	GetFilteredTelemetryCatalog(context.Context, []string, []string) (grpcclient.TelemetryCatalog, error)
 	SubscribeTelemetry(context.Context, []string, time.Duration, bool) (grpcclient.TelemetryReceiver, error)
 }
 
@@ -1892,11 +1893,13 @@ func showTelemetry(ctx context.Context, client showClient, args []string) error 
 		}
 		catalog := grpcclient.NewTelemetryCatalog()
 		if catalogOpts.live {
-			liveCatalog, err := client.GetTelemetryCatalog(ctx)
+			liveCatalog, err := client.GetFilteredTelemetryCatalog(ctx, catalogOpts.cardinalities, catalogOpts.payloadSchemas)
 			if err != nil {
 				return err
 			}
 			catalog = liveCatalog
+			catalogOpts.cardinalities = nil
+			catalogOpts.payloadSchemas = nil
 		}
 		printTelemetryPathCatalog(filterTelemetryPathCatalog(catalog.Paths, catalogOpts))
 		return nil

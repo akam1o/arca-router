@@ -41,24 +41,27 @@ type fakeInteractiveClient struct {
 	telemetryCatalog grpcclient.TelemetryCatalog
 	telemetryEvents  []*grpcclient.TelemetryEvent
 
-	acquireLockCalls      int
-	discardCalls          int
-	releaseLockCalls      int
-	commitCalls           int
-	routeCalls            int
-	bfdStatusCalls        int
-	routingCalls          int
-	bgpNeighborCalls      int
-	ospfNeighborCalls     int
-	listHistoryCalls      int
-	rollbackCalls         int
-	telemetryCatalogCalls int
-	telemetryCalls        int
-	validateCalls         int
-	editTexts             []string
-	telemetryPaths        []string
-	telemetryInterval     time.Duration
-	telemetryOnce         bool
+	acquireLockCalls              int
+	discardCalls                  int
+	releaseLockCalls              int
+	commitCalls                   int
+	routeCalls                    int
+	bfdStatusCalls                int
+	routingCalls                  int
+	bgpNeighborCalls              int
+	ospfNeighborCalls             int
+	listHistoryCalls              int
+	rollbackCalls                 int
+	telemetryCatalogCalls         int
+	filteredTelemetryCatalogCalls int
+	telemetryCalls                int
+	validateCalls                 int
+	editTexts                     []string
+	telemetryCatalogCardinalities []string
+	telemetryCatalogSchemas       []string
+	telemetryPaths                []string
+	telemetryInterval             time.Duration
+	telemetryOnce                 bool
 }
 
 func (f *fakeInteractiveClient) GetRunning(ctx context.Context) (string, uint64, error) {
@@ -224,6 +227,25 @@ func (f *fakeInteractiveClient) GetTelemetryCatalog(ctx context.Context) (grpccl
 		return f.telemetryCatalog, nil
 	}
 	return grpcclient.NewTelemetryCatalog(), nil
+}
+
+func (f *fakeInteractiveClient) GetFilteredTelemetryCatalog(ctx context.Context, cardinalities []string, payloadSchemas []string) (grpcclient.TelemetryCatalog, error) {
+	f.filteredTelemetryCatalogCalls++
+	f.telemetryCatalogCardinalities = append([]string(nil), cardinalities...)
+	f.telemetryCatalogSchemas = append([]string(nil), payloadSchemas...)
+	if len(f.telemetryCatalog.Paths) > 0 || len(f.telemetryCatalog.DefaultPaths) > 0 ||
+		f.telemetryCatalog.EventSchemaVersion != "" || f.telemetryCatalog.Encoding != "" {
+		catalog := f.telemetryCatalog
+		catalog.Paths = filterTelemetryPathCatalog(catalog.Paths, telemetryCatalogCLIOptions{
+			cardinalities:  cardinalities,
+			payloadSchemas: payloadSchemas,
+		})
+		return catalog, nil
+	}
+	return grpcclient.NewFilteredTelemetryCatalog(grpcclient.TelemetryCatalogFilter{
+		Cardinalities:  cardinalities,
+		PayloadSchemas: payloadSchemas,
+	}), nil
 }
 
 func (f *fakeInteractiveClient) SubscribeTelemetry(ctx context.Context, paths []string, sampleInterval time.Duration, once bool) (grpcclient.TelemetryReceiver, error) {
@@ -994,8 +1016,14 @@ func TestOneShotShowTelemetryPathsLiveUsesCatalogRPC(t *testing.T) {
 	if code != ExitSuccess {
 		t.Fatalf("oneShotShow(telemetry paths live payload-schema) = %d, want %d", code, ExitSuccess)
 	}
-	if client.telemetryCatalogCalls != 1 {
-		t.Fatalf("telemetry catalog calls = %d, want 1 live catalog RPC", client.telemetryCatalogCalls)
+	if client.filteredTelemetryCatalogCalls != 1 {
+		t.Fatalf("filtered telemetry catalog calls = %d, want 1 live catalog RPC", client.filteredTelemetryCatalogCalls)
+	}
+	if client.telemetryCatalogCalls != 0 {
+		t.Fatalf("telemetry catalog calls = %d, want filtered catalog RPC", client.telemetryCatalogCalls)
+	}
+	if len(client.telemetryCatalogSchemas) != 1 || client.telemetryCatalogSchemas[0] != "arca.telemetry.system.v1" {
+		t.Fatalf("telemetry catalog schemas = %#v, want system payload schema filter", client.telemetryCatalogSchemas)
 	}
 	if client.telemetryCalls != 0 {
 		t.Fatalf("telemetry calls = %d, want catalog lookup without subscription", client.telemetryCalls)
