@@ -102,6 +102,7 @@ type nmsTelemetryCatalogResponse struct {
 	DefaultSampleIntervalMs uint32             `json:"default_sample_interval_ms"`
 	MinSampleIntervalMs     uint32             `json:"min_sample_interval_ms"`
 	MaxSampleIntervalMs     uint32             `json:"max_sample_interval_ms"`
+	PathCount               int                `json:"path_count"`
 	Paths                   []nmsTelemetryPath `json:"paths"`
 }
 
@@ -111,6 +112,7 @@ type nmsTelemetrySchemasResponse struct {
 	Resource           string                      `json:"resource"`
 	EventSchemaVersion string                      `json:"event_schema_version"`
 	Encoding           string                      `json:"encoding"`
+	SchemaCount        int                         `json:"schema_count"`
 	Schemas            []nmsTelemetryPayloadSchema `json:"schemas"`
 }
 
@@ -1534,6 +1536,7 @@ func newNMSTelemetryCatalogResponse(now time.Time, filters nmsTelemetryCatalogFi
 		DefaultSampleIntervalMs: catalog.DefaultSampleIntervalMs,
 		MinSampleIntervalMs:     catalog.MinSampleIntervalMs,
 		MaxSampleIntervalMs:     catalog.MaxSampleIntervalMs,
+		PathCount:               len(paths),
 		Paths:                   paths,
 	}
 }
@@ -1572,6 +1575,7 @@ func newNMSTelemetrySchemasResponse(now time.Time, filters nmsTelemetryCatalogFi
 		Resource:           "/api/nms/v1/telemetry/schemas",
 		EventSchemaVersion: nbgrpc.TelemetryEventSchemaVersion(),
 		Encoding:           nbgrpc.TelemetryEncoding(),
+		SchemaCount:        len(schemas),
 		Schemas:            schemas,
 	}
 }

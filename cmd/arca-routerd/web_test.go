@@ -315,6 +315,9 @@ func TestNMSTelemetryCatalogEndpoint(t *testing.T) {
 	if len(resp.Paths) == 0 {
 		t.Fatal("Paths is empty, want telemetry path catalog")
 	}
+	if resp.PathCount != len(resp.Paths) {
+		t.Fatalf("PathCount = %d, want %d", resp.PathCount, len(resp.Paths))
+	}
 	if resp.Paths[0].Path != "/system" || !resp.Paths[0].Default || resp.Paths[0].Description == "" ||
 		resp.Paths[0].Cardinality != "single" || resp.Paths[0].PayloadSchema != "arca.telemetry.system.v1" {
 		t.Fatalf("Paths[0] = %#v, want default system path with description, single cardinality, and payload schema", resp.Paths[0])
@@ -354,6 +357,9 @@ func TestNMSTelemetryCatalogEndpointFilters(t *testing.T) {
 	if len(resp.Paths) != 1 || resp.Paths[0].Path != "/routes" {
 		t.Fatalf("filtered paths = %#v, want only /routes", resp.Paths)
 	}
+	if resp.PathCount != 1 {
+		t.Fatalf("PathCount = %d, want 1", resp.PathCount)
+	}
 	if resp.Paths[0].Cardinality != "per-route" || resp.Paths[0].PayloadSchema != "arca.telemetry.routes.v1" {
 		t.Fatalf("filtered path = %#v, want route cardinality and schema", resp.Paths[0])
 	}
@@ -376,6 +382,9 @@ func TestNMSTelemetryCatalogEndpointFiltersUnsupportedEncoding(t *testing.T) {
 	}
 	if len(resp.Paths) != 0 {
 		t.Fatalf("filtered paths = %#v, want none for unsupported encoding", resp.Paths)
+	}
+	if resp.PathCount != 0 {
+		t.Fatalf("PathCount = %d, want 0", resp.PathCount)
 	}
 }
 
@@ -460,6 +469,9 @@ func TestNMSTelemetrySchemasEndpoint(t *testing.T) {
 	if len(resp.Schemas) == 0 {
 		t.Fatal("Schemas is empty, want telemetry payload schemas")
 	}
+	if resp.SchemaCount != len(resp.Schemas) {
+		t.Fatalf("SchemaCount = %d, want %d", resp.SchemaCount, len(resp.Schemas))
+	}
 	byPath := map[string]nmsTelemetryPayloadSchema{}
 	for _, schema := range resp.Schemas {
 		byPath[schema.Path] = schema
@@ -494,6 +506,9 @@ func TestNMSTelemetrySchemasEndpointFilters(t *testing.T) {
 	if len(resp.Schemas) != 1 || resp.Schemas[0].Path != "/overlays/evpn" {
 		t.Fatalf("filtered schemas = %#v, want only /overlays/evpn", resp.Schemas)
 	}
+	if resp.SchemaCount != 1 {
+		t.Fatalf("SchemaCount = %d, want 1", resp.SchemaCount)
+	}
 	if len(resp.Schemas[0].Fields) != 1 || resp.Schemas[0].Fields[0].Name != "vnis" {
 		t.Fatalf("filtered schema fields = %#v, want EVPN VNI field", resp.Schemas[0].Fields)
 	}
@@ -516,6 +531,9 @@ func TestNMSTelemetrySchemasEndpointFiltersUnsupportedEncoding(t *testing.T) {
 	}
 	if len(resp.Schemas) != 0 {
 		t.Fatalf("filtered schemas = %#v, want none for unsupported encoding", resp.Schemas)
+	}
+	if resp.SchemaCount != 0 {
+		t.Fatalf("SchemaCount = %d, want 0", resp.SchemaCount)
 	}
 }
 
