@@ -128,6 +128,11 @@ type nmsTelemetryPath struct {
 	Default       bool     `json:"default"`
 }
 
+type nmsTelemetryCatalogFilters struct {
+	cardinalities  []string
+	payloadSchemas []string
+}
+
 type nmsTelemetrySnapshotOptions struct {
 	paths           []string
 	timeout         time.Duration
@@ -944,7 +949,7 @@ func (s metricsSource) handleNMSTelemetryCatalog(w http.ResponseWriter, r *http.
 	if !s.authorizeWebRead(w, r) {
 		return
 	}
-	writeWebJSON(w, http.StatusOK, newNMSTelemetryCatalogResponse(time.Now()))
+	writeWebJSON(w, http.StatusOK, newNMSTelemetryCatalogResponse(time.Now(), nmsTelemetryCatalogFiltersFromRequest(r)))
 }
 
 func (s metricsSource) handleNMSTelemetrySnapshot(w http.ResponseWriter, r *http.Request) {
@@ -1442,10 +1447,13 @@ func newNMSStatusResponse(now time.Time, metrics routerMetrics) nmsStatusRespons
 	}
 }
 
-func newNMSTelemetryCatalogResponse(now time.Time) nmsTelemetryCatalogResponse {
+func newNMSTelemetryCatalogResponse(now time.Time, filters nmsTelemetryCatalogFilters) nmsTelemetryCatalogResponse {
 	catalog := nbgrpc.NewTelemetryCatalog()
 	paths := make([]nmsTelemetryPath, 0, len(catalog.Paths))
 	for _, info := range catalog.Paths {
+		if !nmsTelemetryPathMatchesCatalogFilters(info, filters) {
+			continue
+		}
 		paths = append(paths, nmsTelemetryPath{
 			Path:          info.Path,
 			Description:   info.Description,
@@ -1464,6 +1472,34 @@ func newNMSTelemetryCatalogResponse(now time.Time) nmsTelemetryCatalogResponse {
 		DefaultPaths:       catalog.DefaultPaths,
 		Paths:              paths,
 	}
+}
+
+func nmsTelemetryCatalogFiltersFromRequest(r *http.Request) nmsTelemetryCatalogFilters {
+	query := r.URL.Query()
+	return nmsTelemetryCatalogFilters{
+		cardinalities:  append([]string(nil), query["cardinality"]...),
+		payloadSchemas: append(append([]string(nil), query["payload_schema"]...), query["payload-schema"]...),
+	}
+}
+
+func nmsTelemetryPathMatchesCatalogFilters(info nbgrpc.TelemetryPathInfo, filters nmsTelemetryCatalogFilters) bool {
+	if len(filters.cardinalities) > 0 && !nmsTelemetryCatalogFilterMatches(info.Cardinality, filters.cardinalities) {
+		return false
+	}
+	if len(filters.payloadSchemas) > 0 && !nmsTelemetryCatalogFilterMatches(info.PayloadSchema, filters.payloadSchemas) {
+		return false
+	}
+	return true
+}
+
+func nmsTelemetryCatalogFilterMatches(value string, filters []string) bool {
+	value = strings.ToLower(strings.TrimSpace(value))
+	for _, filter := range filters {
+		if value == strings.ToLower(strings.TrimSpace(filter)) {
+			return true
+		}
+	}
+	return false
 }
 
 func (s metricsSource) collectNMSTelemetrySnapshot(ctx context.Context, opts nmsTelemetrySnapshotOptions) ([]nbgrpc.TelemetryEvent, int, error) {
