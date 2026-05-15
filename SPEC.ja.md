@@ -1217,6 +1217,9 @@ arca show ospf neighbor
 # VRRP operational state
 arca show vrrp
 
+# EVPN/VXLAN overlay intent
+arca show evpn
+
 # VPP LCP reconciliation state
 arca show lcp
 
@@ -1230,7 +1233,7 @@ arca show class-of-service
 arca show configuration
 ```
 
-`show interfaces` は live VPP admin/oper status、bound QoS profile、packet counter、RX/TX queue placement を取得できる場合に表示します。名前フィルターには `ge-0/0/0` のような設定上の interface 名を使用します。`show vrrp` は arca-routerd 経由で FRR `show vrrp` output を表示します。`show lcp` は HA convergence check で使う cached VPP LCP reconciliation state を表示します。`show ha` は Web UI、Prometheus、SNMP と同じ HA convergence summary を表示します。`show class-of-service` は running CoS intent を表示し、VPP enforcement support が段階的対応の間は scheduler/policer enforcement を `intent-only` として報告します。
+`show interfaces` は live VPP admin/oper status、bound QoS profile、packet counter、RX/TX queue placement を取得できる場合に表示します。名前フィルターには `ge-0/0/0` のような設定上の interface 名を使用します。`show vrrp` は arca-routerd 経由で FRR `show vrrp` output を表示します。`show evpn` は `/overlays/evpn` telemetry snapshot を VNI summary として表示し、local overlay inspection に利用できます。`show lcp` は HA convergence check で使う cached VPP LCP reconciliation state を表示します。`show ha` は Web UI、Prometheus、SNMP と同じ HA convergence summary を表示します。`show class-of-service` は running CoS intent を表示し、VPP enforcement support が段階的対応の間は scheduler/policer enforcement を `intent-only` として報告します。
 
 対話型の設定モードでは、`show history [N]` で commit history も表示できます。
 

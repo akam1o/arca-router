@@ -127,6 +127,7 @@ Local operators can inspect the same stream through the CLI. The command prints 
 arca show telemetry path /system path /interfaces
 arca show telemetry path /routes interval 5s count 3
 arca show telemetry path /overlays/evpn
+arca show evpn
 ```
 
 ## Web UI
