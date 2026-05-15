@@ -30,6 +30,7 @@ func TestParseCollectorConfigDefaults(t *testing.T) {
 func TestParseCollectorConfigCatalogFilters(t *testing.T) {
 	cfg, err := parseCollectorConfig([]string{
 		"-discover-paths",
+		"-include-default",
 		"-include-path", "evpn",
 		"-include-cardinality", "single",
 		"-include-payload-schema", "arca.telemetry.system.v1",
@@ -49,6 +50,9 @@ func TestParseCollectorConfigCatalogFilters(t *testing.T) {
 	if len(cfg.includedPath) != 1 || cfg.includedPath[0] != "evpn" {
 		t.Fatalf("included paths = %#v, want evpn", cfg.includedPath)
 	}
+	if !cfg.includedDefault {
+		t.Fatal("included default = false, want true")
+	}
 	if len(cfg.includedCard) != 1 || cfg.includedCard[0] != "single" {
 		t.Fatalf("included cardinalities = %#v, want single", cfg.includedCard)
 	}
@@ -65,7 +69,7 @@ func TestParseCollectorConfigCatalogFilters(t *testing.T) {
 
 func TestParseCollectorConfigIncludeFiltersUseCatalogPaths(t *testing.T) {
 	cfg, err := parseCollectorConfig([]string{
-		"-include-path", "evpn",
+		"-include-default",
 	})
 	if err != nil {
 		t.Fatalf("parseCollectorConfig() error = %v", err)
@@ -121,6 +125,7 @@ func TestCollectorEndpointURLForCatalogFilters(t *testing.T) {
 	cfg, err := parseCollectorConfig([]string{
 		"-mode", "catalog",
 		"-base-url", "http://router.example:8080/arca",
+		"-include-default",
 		"-include-path", "evpn",
 		"-include-cardinality", "per-route",
 		"-include-cardinality", "per-vni",
@@ -141,6 +146,9 @@ func TestCollectorEndpointURLForCatalogFilters(t *testing.T) {
 		t.Fatalf("catalog URL = %q, want endpoint under /arca", got)
 	}
 	query := parsed.Query()
+	if query.Get("default") != "true" {
+		t.Fatalf("default query = %#v, want true", query["default"])
+	}
 	if query.Get("path") != "evpn" {
 		t.Fatalf("path query = %#v, want evpn", query["path"])
 	}
@@ -217,6 +225,7 @@ func TestFetchNMSUsesCatalogFiltersForSnapshotPaths(t *testing.T) {
 
 	cfg, err := parseCollectorConfig([]string{
 		"-base-url", server.URL,
+		"-include-default",
 		"-include-path", "evpn",
 		"-include-cardinality", "per-vni",
 		"-include-payload-schema", "arca.telemetry.overlays.evpn.v1",
@@ -233,6 +242,9 @@ func TestFetchNMSUsesCatalogFiltersForSnapshotPaths(t *testing.T) {
 	}
 	if catalogQuery.Get("path") != "evpn" {
 		t.Fatalf("catalog path query = %#v, want evpn", catalogQuery["path"])
+	}
+	if catalogQuery.Get("default") != "true" {
+		t.Fatalf("catalog default query = %#v, want true", catalogQuery["default"])
 	}
 	if catalogQuery.Get("cardinality") != "per-vni" {
 		t.Fatalf("catalog cardinality query = %#v, want per-vni", catalogQuery["cardinality"])

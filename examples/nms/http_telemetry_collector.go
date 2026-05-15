@@ -31,6 +31,7 @@ type collectorConfig struct {
 	paths           repeatedPathFlag
 	discoverPaths   bool
 	includedPath    repeatedPathFlag
+	includedDefault bool
 	includedCard    repeatedStringFlag
 	includedSchema  repeatedStringFlag
 	excludedCard    repeatedStringFlag
@@ -114,6 +115,7 @@ func parseCollectorConfig(args []string) (collectorConfig, error) {
 	fs.Var(&cfg.paths, "path", "Telemetry path for snapshot mode; repeat for multiple paths")
 	fs.BoolVar(&cfg.discoverPaths, "discover-paths", false, "Use telemetry catalog paths as the snapshot path set")
 	fs.Var(&cfg.includedPath, "include-path", "Telemetry path or alias to request from catalog discovery; repeat for multiple values")
+	fs.BoolVar(&cfg.includedDefault, "include-default", false, "Request only default telemetry paths from catalog discovery")
 	fs.Var(&cfg.includedCard, "include-cardinality", "Telemetry cardinality to request from catalog discovery; repeat for multiple values")
 	fs.Var(&cfg.includedSchema, "include-payload-schema", "Telemetry payload schema ID to request from catalog discovery; repeat for multiple values")
 	fs.Var(&cfg.excludedCard, "exclude-cardinality", "Telemetry cardinality to exclude from snapshot mode; repeat for multiple values")
@@ -144,7 +146,7 @@ func parseCollectorConfig(args []string) (collectorConfig, error) {
 }
 
 func usesCatalogDiscovery(cfg collectorConfig) bool {
-	return cfg.discoverPaths || len(cfg.includedPath) > 0 || len(cfg.includedCard) > 0 || len(cfg.includedSchema) > 0
+	return cfg.discoverPaths || cfg.includedDefault || len(cfg.includedPath) > 0 || len(cfg.includedCard) > 0 || len(cfg.includedSchema) > 0
 }
 
 func needsCatalogResolution(cfg collectorConfig) bool {
@@ -199,13 +201,14 @@ func fetchEndpoint(ctx context.Context, client *http.Client, cfg collectorConfig
 
 func resolveSnapshotPaths(ctx context.Context, client *http.Client, cfg collectorConfig) (repeatedPathFlag, error) {
 	catalogURL, err := collectorEndpointURL(collectorConfig{
-		baseURL:        cfg.baseURL,
-		username:       cfg.username,
-		password:       cfg.password,
-		mode:           "catalog",
-		includedPath:   append(repeatedPathFlag(nil), cfg.includedPath...),
-		includedCard:   append(repeatedStringFlag(nil), cfg.includedCard...),
-		includedSchema: append(repeatedStringFlag(nil), cfg.includedSchema...),
+		baseURL:         cfg.baseURL,
+		username:        cfg.username,
+		password:        cfg.password,
+		mode:            "catalog",
+		includedPath:    append(repeatedPathFlag(nil), cfg.includedPath...),
+		includedDefault: cfg.includedDefault,
+		includedCard:    append(repeatedStringFlag(nil), cfg.includedCard...),
+		includedSchema:  append(repeatedStringFlag(nil), cfg.includedSchema...),
 	})
 	if err != nil {
 		return nil, err
@@ -303,6 +306,9 @@ func collectorEndpointURL(cfg collectorConfig) (string, error) {
 	switch cfg.mode {
 	case "catalog":
 		query := u.Query()
+		if cfg.includedDefault {
+			query.Set("default", "true")
+		}
 		for _, path := range cfg.includedPath {
 			query.Add("path", path)
 		}

@@ -24,11 +24,12 @@ go run ./examples/nms \
   -timeout 5s \
   -max-payload-bytes 8388608
 
-# Discover only selected paths and path classes using server-side catalog filters.
+# Discover only selected default paths and path classes using server-side catalog filters.
 go run ./examples/nms \
   -base-url http://127.0.0.1:8080 \
   -user monitor \
   -password ReadOnly789 \
+  -include-default \
   -include-path /evpn \
   -include-cardinality per-vni \
   -include-payload-schema arca.telemetry.overlays.evpn.v1 \
