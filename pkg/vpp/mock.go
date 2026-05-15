@@ -913,6 +913,8 @@ func (m *MockClient) DeleteVXLAN(ctx context.Context, req VXLANRequest) error {
 	}
 	delete(m.vxlanTunnels, key)
 	delete(m.l2Bridge, iface.SwIfIndex)
+	delete(m.interfaceTable, interfaceTableKey{ifIndex: iface.SwIfIndex, isIPv6: false})
+	delete(m.interfaceTable, interfaceTableKey{ifIndex: iface.SwIfIndex, isIPv6: true})
 	delete(m.interfaces, iface.SwIfIndex)
 	return nil
 }

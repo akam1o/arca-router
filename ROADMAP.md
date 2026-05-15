@@ -70,7 +70,7 @@ Focus: add data-center overlay support and richer external observability.
 - **EVPN / VXLAN**
   - L2/L3 VNI configuration model with CLI, validation, diff, and NETCONF/YANG coverage
   - FRR EVPN control-plane generation through the FRR file backend
-  - VPP VXLAN L2 multicast dataplane plumbing; L3 VNI and unicast remote-VTEP dataplane support remain pending
+  - VPP VXLAN L2/L3 multicast dataplane plumbing; unicast remote-VTEP dataplane support remains pending
 - **Streaming telemetry**
   - Structured gRPC telemetry event stream with JSON payload schemas for selected config, daemon, and routing state paths
   - Subscription path filtering, sample intervals, one-shot snapshots, and gRPC flow-control backpressure

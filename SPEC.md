@@ -591,7 +591,7 @@ Forwarding class queues must be between `0` and `7`. Interface bindings must ref
 <a id="overlay-v08-configuration"></a>
 ## Overlay v0.8 Configuration
 
-The v0.8 management-plane model includes EVPN/VXLAN VNI intent. Parser, serializer, validation, clone, conversion, diff, NETCONF XML/YANG coverage, and the `/overlays/evpn` structured telemetry path are implemented for L2 and L3 VNIs. FRR EVPN control-plane generation is implemented through the FRR file backend: arca-router renders global BGP `l2vpn evpn` with `advertise-all-vni`, explicit L2 VNI route-targets, L3 VNI VRF bindings, and per-VRF EVPN route-targets. VPP VXLAN dataplane apply supports L2 VNIs with multicast VXLAN: the VPP southbound creates a bridge domain using the VNI as the bridge ID, creates the multicast VXLAN tunnel, brings the tunnel interface up, and attaches it to the bridge domain. L3 VNI dataplane apply and unicast remote-VTEP dataplane are not implemented yet and are rejected by VPP validation.
+The v0.8 management-plane model includes EVPN/VXLAN VNI intent. Parser, serializer, validation, clone, conversion, diff, NETCONF XML/YANG coverage, and the `/overlays/evpn` structured telemetry path are implemented for L2 and L3 VNIs. FRR EVPN control-plane generation is implemented through the FRR file backend: arca-router renders global BGP `l2vpn evpn` with `advertise-all-vni`, explicit L2 VNI route-targets, L3 VNI VRF bindings, and per-VRF EVPN route-targets. VPP VXLAN dataplane apply supports L2 and L3 VNIs with multicast VXLAN. For L2 VNIs, the VPP southbound creates a bridge domain using the VNI as the bridge ID, creates the multicast VXLAN tunnel, brings the tunnel interface up, and attaches it to the bridge domain. For L3 VNIs, it creates an L3 VXLAN tunnel, binds the tunnel interface to the routing-instance IPv4/IPv6 table, and deletes stale routing-instance tables only after dependent tunnels are removed. Unicast remote-VTEP dataplane is not implemented yet and is rejected by VPP validation.
 
 ```
 set protocols evpn vni 10010 type l2
@@ -607,9 +607,11 @@ set protocols evpn vni 10010 multicast-group 239.0.0.10
 
 set protocols evpn vni 20010 type l3
 set protocols evpn vni 20010 routing-instance BLUE
+set protocols evpn vni 20010 source-interface ge-0/0/0
+set protocols evpn vni 20010 multicast-group 239.0.0.20
 ```
 
-VNI values must be between `1` and `16777215`. `type l2` requires `bridge-domain` and may include `vlan-id`; `type l3` requires `routing-instance` and must reference a configured routing instance. Route distinguishers use `<asn>:<number>`, route targets use `target:<asn>:<number>`, source interfaces must reference configured interfaces, and multicast groups must be valid multicast IPv4 or IPv6 addresses. For current VPP dataplane apply, L2 VNIs require `source-interface` and `multicast-group`; `source-address` may be omitted when it can be derived from a configured source-interface address in the same address family as the multicast group. FRR EVPN generation currently maps route-target intent; FRR derives EVPN route distinguishers from local EVPN state.
+VNI values must be between `1` and `16777215`. `type l2` requires `bridge-domain` and may include `vlan-id`; `type l3` requires `routing-instance` and must reference a configured routing instance. Route distinguishers use `<asn>:<number>`, route targets use `target:<asn>:<number>`, source interfaces must reference configured interfaces, and multicast groups must be valid multicast IPv4 or IPv6 addresses. For current VPP dataplane apply, L2 and L3 VNIs require `source-interface` and `multicast-group`; `source-address` may be omitted when it can be derived from a configured source-interface address in the same address family as the multicast group. L3 VNIs use the referenced routing-instance table for VXLAN encapsulation and tunnel interface table binding. FRR EVPN generation currently maps route-target intent; FRR derives EVPN route distinguishers from local EVPN state.
 
 ---
 

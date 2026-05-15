@@ -174,7 +174,7 @@ func (p *VPPPlugin) ApplyChanges(ctx context.Context, diff *engine.ConfigDiff) e
 	tableAddressHandled := make(map[string]bool)
 	if diff.RoutingInstancesChanged {
 		var err error
-		tableAddressHandled, err = p.applyRoutingInstanceChanges(ctx, diff, &rollbackOps)
+		tableAddressHandled, err = p.applyRoutingInstanceChanges(ctx, diff, &rollbackOps, false)
 		if err != nil {
 			p.executeRollback(ctx, rollbackOps)
 			return fmt.Errorf("update routing instance tables: %w", err)
@@ -228,6 +228,13 @@ func (p *VPPPlugin) ApplyChanges(ctx context.Context, diff *engine.ConfigDiff) e
 		if err := p.applyEVPNChanges(ctx, diff, &rollbackOps); err != nil {
 			p.executeRollback(ctx, rollbackOps)
 			return fmt.Errorf("update EVPN/VXLAN dataplane: %w", err)
+		}
+	}
+
+	if diff.RoutingInstancesChanged {
+		if err := p.deleteStaleRoutingInstanceTables(ctx, diff, &rollbackOps); err != nil {
+			p.executeRollback(ctx, rollbackOps)
+			return fmt.Errorf("delete routing instance tables: %w", err)
 		}
 	}
 
@@ -301,7 +308,7 @@ func (p *VPPPlugin) RollbackChanges(ctx context.Context, diff *engine.ConfigDiff
 			NewConfig:           diff.OldConfig,
 			OldRoutingInstances: diff.NewRoutingInstances,
 			NewRoutingInstances: diff.OldRoutingInstances,
-		}, nil)
+		}, nil, true)
 		if err != nil && rollbackErr == nil {
 			rollbackErr = fmt.Errorf("restore routing instance tables: %w", err)
 		}
@@ -805,7 +812,7 @@ type routingInstancePlan struct {
 	interfaces []string
 }
 
-func (p *VPPPlugin) applyRoutingInstanceChanges(ctx context.Context, diff *engine.ConfigDiff, rollback *[]func(context.Context) error) (map[string]bool, error) {
+func (p *VPPPlugin) applyRoutingInstanceChanges(ctx context.Context, diff *engine.ConfigDiff, rollback *[]func(context.Context) error, deleteStaleTables bool) (map[string]bool, error) {
 	oldPlans, err := routingInstancePlanMap(diff.OldRoutingInstances)
 	if err != nil {
 		return nil, err
@@ -856,9 +863,27 @@ func (p *VPPPlugin) applyRoutingInstanceChanges(ctx context.Context, diff *engin
 		handledAddresses[binding.name] = true
 	}
 
+	if deleteStaleTables {
+		if err := p.deleteStaleRoutingInstanceTables(ctx, diff, rollback); err != nil {
+			return nil, err
+		}
+	}
+
+	return handledAddresses, nil
+}
+
+func (p *VPPPlugin) deleteStaleRoutingInstanceTables(ctx context.Context, diff *engine.ConfigDiff, rollback *[]func(context.Context) error) error {
+	oldPlans, err := routingInstancePlanMap(diff.OldRoutingInstances)
+	if err != nil {
+		return err
+	}
+	newPlans, err := routingInstancePlanMap(diff.NewRoutingInstances)
+	if err != nil {
+		return err
+	}
 	for _, plan := range routingTablesToDelete(oldPlans, newPlans) {
 		if err := p.deleteIPTablePair(ctx, plan); err != nil {
-			return nil, fmt.Errorf("delete routing-instance %s table %d: %w", plan.name, plan.tableID, err)
+			return fmt.Errorf("delete routing-instance %s table %d: %w", plan.name, plan.tableID, err)
 		}
 		if rollback != nil {
 			planCopy := plan
@@ -867,8 +892,7 @@ func (p *VPPPlugin) applyRoutingInstanceChanges(ctx context.Context, diff *engin
 			})
 		}
 	}
-
-	return handledAddresses, nil
+	return nil
 }
 
 func routingInstancePlanMap(instances map[string]*model.RoutingInstance) (map[string]routingInstancePlan, error) {
