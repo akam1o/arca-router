@@ -509,6 +509,36 @@ func TestFormatChangeImpactPreviewSummarizesRouteAndPolicyDiff(t *testing.T) {
 	}
 }
 
+func TestFormatChangeImpactPreviewWarnsOnDisruptiveProtocolDiff(t *testing.T) {
+	lines := formatChangeImpactPreview(strings.Join([]string{
+		"- set protocols bgp group external neighbor 198.51.100.2 peer-as 65001",
+		"+ set protocols ospf area 0.0.0.0 interface ge-0/0/1 metric 50",
+		"- set protocols bfd peer 192.0.2.2 profile fast",
+		"+ set protocols evpn vni 10010 remote-vtep 198.51.100.20",
+		"- set routing-instances BLUE interface ge-0/0/0",
+		"+ set class-of-service interfaces ge-0/0/0 output-traffic-control-profile WAN",
+	}, "\n"), true)
+	got := strings.Join(lines, "\n")
+	for _, want := range []string{
+		"bgp: +0 -1",
+		"ospf: +1 -0",
+		"bfd: +0 -1",
+		"evpn: +1 -0",
+		"routing-instances: +0 -1",
+		"class-of-service: +1 -0",
+		"warning: BGP changes can reset sessions or change route advertisements",
+		"warning: OSPF changes can trigger adjacency updates or SPF recalculation",
+		"warning: BFD changes can affect fast failure detection",
+		"warning: EVPN changes can alter overlay VNI reachability",
+		"warning: routing-instance changes can move interfaces or VRF routing state",
+		"warning: class-of-service changes can alter traffic treatment",
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("formatChangeImpactPreview() = %q, want substring %q", got, want)
+		}
+	}
+}
+
 func TestFormatChangeImpactPreviewNoChanges(t *testing.T) {
 	lines := formatChangeImpactPreview("", false)
 	if got, want := strings.Join(lines, "\n"), "change impact preview: no candidate changes"; got != want {

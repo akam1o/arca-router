@@ -1139,13 +1139,22 @@ func (sh *interactiveShell) printChangeImpactPreview(ctx context.Context) error 
 }
 
 type changeImpactPreview struct {
-	addedLines          int
-	removedLines        int
-	addedStaticRoutes   int
-	removedStaticRoutes int
-	addedPolicyLines    int
-	removedPolicyLines  int
-	defaultRouteChange  bool
+	addedLines         int
+	removedLines       int
+	staticRoutes       changeImpactLineCount
+	policyOptions      changeImpactLineCount
+	bgp                changeImpactLineCount
+	ospf               changeImpactLineCount
+	bfd                changeImpactLineCount
+	evpn               changeImpactLineCount
+	routingInstances   changeImpactLineCount
+	classOfService     changeImpactLineCount
+	defaultRouteChange bool
+}
+
+type changeImpactLineCount struct {
+	added   int
+	removed int
 }
 
 func formatChangeImpactPreview(diffText string, hasChanges bool) []string {
@@ -1158,22 +1167,61 @@ func formatChangeImpactPreview(diffText string, hasChanges bool) []string {
 		"change impact preview:",
 		fmt.Sprintf("  changed lines: +%d -%d", preview.addedLines, preview.removedLines),
 	}
-	if preview.addedStaticRoutes > 0 || preview.removedStaticRoutes > 0 {
-		lines = append(lines, fmt.Sprintf("  static routes: +%d -%d", preview.addedStaticRoutes, preview.removedStaticRoutes))
-	}
-	if preview.addedPolicyLines > 0 || preview.removedPolicyLines > 0 {
-		lines = append(lines, fmt.Sprintf("  policy-options: +%d -%d", preview.addedPolicyLines, preview.removedPolicyLines))
-	}
+	lines = appendChangeImpactLine(lines, "static routes", preview.staticRoutes)
+	lines = appendChangeImpactLine(lines, "policy-options", preview.policyOptions)
+	lines = appendChangeImpactLine(lines, "bgp", preview.bgp)
+	lines = appendChangeImpactLine(lines, "ospf", preview.ospf)
+	lines = appendChangeImpactLine(lines, "bfd", preview.bfd)
+	lines = appendChangeImpactLine(lines, "evpn", preview.evpn)
+	lines = appendChangeImpactLine(lines, "routing-instances", preview.routingInstances)
+	lines = appendChangeImpactLine(lines, "class-of-service", preview.classOfService)
 	if preview.defaultRouteChange {
 		lines = append(lines, "  warning: default route changes can affect all unmatched traffic")
 	}
-	if preview.removedStaticRoutes > 0 {
+	if preview.staticRoutes.removed > 0 {
 		lines = append(lines, "  warning: static route removals can withdraw forwarding entries")
 	}
-	if preview.addedPolicyLines > 0 || preview.removedPolicyLines > 0 {
+	if preview.policyOptions.hasChanges() {
 		lines = append(lines, "  warning: policy-options changes can regenerate FRR route-maps")
 	}
+	if preview.bgp.hasChanges() {
+		lines = append(lines, "  warning: BGP changes can reset sessions or change route advertisements")
+	}
+	if preview.ospf.hasChanges() {
+		lines = append(lines, "  warning: OSPF changes can trigger adjacency updates or SPF recalculation")
+	}
+	if preview.bfd.hasChanges() {
+		lines = append(lines, "  warning: BFD changes can affect fast failure detection")
+	}
+	if preview.evpn.hasChanges() {
+		lines = append(lines, "  warning: EVPN changes can alter overlay VNI reachability")
+	}
+	if preview.routingInstances.hasChanges() {
+		lines = append(lines, "  warning: routing-instance changes can move interfaces or VRF routing state")
+	}
+	if preview.classOfService.hasChanges() {
+		lines = append(lines, "  warning: class-of-service changes can alter traffic treatment")
+	}
 	return lines
+}
+
+func appendChangeImpactLine(lines []string, label string, count changeImpactLineCount) []string {
+	if !count.hasChanges() {
+		return lines
+	}
+	return append(lines, fmt.Sprintf("  %s: +%d -%d", label, count.added, count.removed))
+}
+
+func (c changeImpactLineCount) hasChanges() bool {
+	return c.added > 0 || c.removed > 0
+}
+
+func (c *changeImpactLineCount) add(sign byte) {
+	if sign == '+' {
+		c.added++
+	} else {
+		c.removed++
+	}
 }
 
 func analyzeChangeImpact(diffText string) changeImpactPreview {
@@ -1197,21 +1245,31 @@ func analyzeChangeImpact(diffText string) changeImpactPreview {
 			preview.removedLines++
 		}
 		if isStaticRouteConfigLine(configLine) {
-			if sign == '+' {
-				preview.addedStaticRoutes++
-			} else {
-				preview.removedStaticRoutes++
-			}
+			preview.staticRoutes.add(sign)
 			if isDefaultRouteConfigLine(configLine) {
 				preview.defaultRouteChange = true
 			}
 		}
 		if strings.HasPrefix(configLine, "set policy-options ") {
-			if sign == '+' {
-				preview.addedPolicyLines++
-			} else {
-				preview.removedPolicyLines++
-			}
+			preview.policyOptions.add(sign)
+		}
+		if strings.HasPrefix(configLine, "set protocols bgp ") {
+			preview.bgp.add(sign)
+		}
+		if strings.HasPrefix(configLine, "set protocols ospf ") || strings.HasPrefix(configLine, "set protocols ospf3 ") {
+			preview.ospf.add(sign)
+		}
+		if strings.HasPrefix(configLine, "set protocols bfd ") {
+			preview.bfd.add(sign)
+		}
+		if strings.HasPrefix(configLine, "set protocols evpn ") {
+			preview.evpn.add(sign)
+		}
+		if strings.HasPrefix(configLine, "set routing-instances ") {
+			preview.routingInstances.add(sign)
+		}
+		if strings.HasPrefix(configLine, "set class-of-service ") {
+			preview.classOfService.add(sign)
 		}
 	}
 	return preview

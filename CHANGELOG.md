@@ -2,6 +2,7 @@
 
 ## v0.9.x - NETCONF/YANG and Operational Safety (current)
 
+- **CLI disruptive change warnings**: commit impact previews now flag BGP, OSPF, BFD, EVPN, routing-instance, and class-of-service changes before commit
 - **CLI change impact preview**: `commit check` now validates the candidate and prints a pre-commit impact summary for changed lines, static routes, policy-options updates, and disruptive routing warnings
 
 ## v0.8.x - Overlay and Streaming Telemetry (complete)
