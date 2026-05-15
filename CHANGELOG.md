@@ -2,6 +2,7 @@
 
 ## v0.8.x - Overlay and Streaming Telemetry (current)
 
+- **NMS collector snapshot filters**: the example HTTP collector now pushes include path, default, cardinality, payload schema, and encoding filters directly to `/api/nms/v1/telemetry/snapshot` when catalog exclusion or discovery is not needed
 - **NMS snapshot metadata filters**: `/api/nms/v1/telemetry/snapshot` now accepts default, cardinality, payload schema, and encoding filters so HTTP-only collectors can select snapshot paths without a separate catalog request
 - **Telemetry event cardinality hints**: gRPC, CLI, NMS snapshot, and OTLP-exported telemetry events now carry `cardinality` so collectors can distinguish single-object snapshots from higher-cardinality payloads without a catalog lookup
 - **Telemetry event payload schemas**: gRPC, CLI, NMS snapshot, and OTLP-exported telemetry events now carry `payload_schema` so collectors can route and validate events without a separate catalog lookup

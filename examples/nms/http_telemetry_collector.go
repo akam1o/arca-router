@@ -187,11 +187,11 @@ func parseCollectorConfig(args []string) (collectorConfig, error) {
 	fs.StringVar(&cfg.otlpServiceName, "otlp-service-name", cfg.otlpServiceName, "OpenTelemetry service.name resource attribute")
 	fs.Var(&cfg.paths, "path", "Telemetry path for snapshot mode; repeat for multiple paths")
 	fs.BoolVar(&cfg.discoverPaths, "discover-paths", false, "Use telemetry catalog paths as the snapshot path set")
-	fs.Var(&cfg.includedPath, "include-path", "Telemetry path or alias to request from catalog or schema discovery; repeat for multiple values")
-	fs.BoolVar(&cfg.includedDefault, "include-default", false, "Request only default telemetry paths from catalog or schema discovery")
-	fs.Var(&cfg.includedCard, "include-cardinality", "Telemetry cardinality to request from catalog or schema discovery; repeat for multiple values")
-	fs.Var(&cfg.includedSchema, "include-payload-schema", "Telemetry payload schema ID to request from catalog or schema discovery; repeat for multiple values")
-	fs.Var(&cfg.includedEncoding, "include-encoding", "Telemetry payload encoding to request from catalog or schema discovery; repeat for multiple values")
+	fs.Var(&cfg.includedPath, "include-path", "Telemetry path or alias to request from catalog, schema, or snapshot metadata filters; repeat for multiple values")
+	fs.BoolVar(&cfg.includedDefault, "include-default", false, "Request only default telemetry paths from catalog, schema, or snapshot metadata filters")
+	fs.Var(&cfg.includedCard, "include-cardinality", "Telemetry cardinality to request from catalog, schema, or snapshot metadata filters; repeat for multiple values")
+	fs.Var(&cfg.includedSchema, "include-payload-schema", "Telemetry payload schema ID to request from catalog, schema, or snapshot metadata filters; repeat for multiple values")
+	fs.Var(&cfg.includedEncoding, "include-encoding", "Telemetry payload encoding to request from catalog, schema, or snapshot metadata filters; repeat for multiple values")
 	fs.Var(&cfg.excludedPath, "exclude-path", "Telemetry path or alias to exclude from snapshot mode; repeat for multiple values")
 	fs.Var(&cfg.excludedCard, "exclude-cardinality", "Telemetry cardinality to exclude from snapshot mode; repeat for multiple values")
 	fs.Var(&cfg.excludedSchema, "exclude-payload-schema", "Telemetry payload schema ID to exclude from snapshot mode; repeat for multiple values")
@@ -237,7 +237,7 @@ func usesCatalogDiscovery(cfg collectorConfig) bool {
 }
 
 func needsCatalogResolution(cfg collectorConfig) bool {
-	return usesCatalogDiscovery(cfg) || len(cfg.excludedPath) > 0 || len(cfg.excludedCard) > 0 || len(cfg.excludedSchema) > 0 || len(cfg.excludedEncoding) > 0
+	return cfg.discoverPaths || len(cfg.excludedPath) > 0 || len(cfg.excludedCard) > 0 || len(cfg.excludedSchema) > 0 || len(cfg.excludedEncoding) > 0
 }
 
 func requestTimeout(cfg collectorConfig) time.Duration {
@@ -585,6 +585,21 @@ func collectorEndpointURL(cfg collectorConfig) (string, error) {
 		query := u.Query()
 		for _, path := range cfg.paths {
 			query.Add("path", path)
+		}
+		for _, path := range cfg.includedPath {
+			query.Add("path", path)
+		}
+		if cfg.includedDefault {
+			query.Set("default", "true")
+		}
+		for _, value := range cfg.includedCard {
+			query.Add("cardinality", value)
+		}
+		for _, value := range cfg.includedSchema {
+			query.Add("payload_schema", value)
+		}
+		for _, value := range cfg.includedEncoding {
+			query.Add("encoding", value)
 		}
 		query.Set("timeout", cfg.timeout.String())
 		query.Set("max_payload_bytes", strconv.Itoa(cfg.maxPayloadBytes))
