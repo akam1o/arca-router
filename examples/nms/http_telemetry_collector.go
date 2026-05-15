@@ -775,6 +775,9 @@ func nmsStatusStringFieldValuePath(object map[string]json.RawMessage, field, pat
 		}
 		return "", fmt.Errorf("nms status data %s must be a string", path)
 	}
+	if strings.TrimSpace(*value) == "" {
+		return "", fmt.Errorf("nms status data %s must be non-empty", path)
+	}
 	return *value, nil
 }
 
@@ -942,6 +945,9 @@ func nmsStatusStringArrayFieldLengthOptional(object map[string]json.RawMessage, 
 	for i, value := range values {
 		if value == nil {
 			return 0, fmt.Errorf("nms status data %s[%d] must be a string", path, i)
+		}
+		if strings.TrimSpace(*value) == "" {
+			return 0, fmt.Errorf("nms status data %s[%d] must be non-empty", path, i)
 		}
 	}
 	return len(values), nil
@@ -1174,6 +1180,9 @@ func validateNMSStatusStringFieldOptional(object map[string]json.RawMessage, fie
 			return fmt.Errorf("nms status data %s must be a string: %w", path, err)
 		}
 		return fmt.Errorf("nms status data %s must be a string", path)
+	}
+	if strings.TrimSpace(*value) == "" {
+		return fmt.Errorf("nms status data %s must be non-empty", path)
 	}
 	return nil
 }
