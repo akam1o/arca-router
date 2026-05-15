@@ -452,6 +452,12 @@ func TestTelemetryPathCatalog(t *testing.T) {
 	if len(filtered.Paths) != 1 || filtered.Paths[0].Path != "/routes" {
 		t.Fatalf("NewFilteredTelemetryCatalog() paths = %#v, want only /routes", filtered.Paths)
 	}
+	filtered = NewFilteredTelemetryCatalog(TelemetryCatalogFilter{
+		Paths: []string{"/evpn"},
+	})
+	if len(filtered.Paths) != 1 || filtered.Paths[0].Path != "/overlays/evpn" {
+		t.Fatalf("NewFilteredTelemetryCatalog(path alias) paths = %#v, want only /overlays/evpn", filtered.Paths)
+	}
 }
 
 func TestOperationalStateEndpointsReadVPPAndFRR(t *testing.T) {
