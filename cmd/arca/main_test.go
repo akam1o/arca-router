@@ -13,6 +13,7 @@ import (
 
 type fakeInteractiveClient struct {
 	acquireLockErr   error
+	commitErr        error
 	discardErr       error
 	releaseLockErr   error
 	history          []grpcclient.CommitInfo
@@ -86,6 +87,9 @@ func (f *fakeInteractiveClient) EditCandidate(ctx context.Context, sessionID, co
 
 func (f *fakeInteractiveClient) Commit(ctx context.Context, sessionID, user, message string) (string, uint64, error) {
 	f.commitCalls++
+	if f.commitErr != nil {
+		return "", 0, f.commitErr
+	}
 	return "commit-1234567890", 2, nil
 }
 
@@ -419,6 +423,53 @@ func TestCommitAndQuitKeepsConfigurationModeOnReleaseFailure(t *testing.T) {
 	}
 	if sh.mode != modeConfiguration || !sh.hasLock || len(sh.editPath) == 0 {
 		t.Fatal("configuration state changed after commit and-quit release failure")
+	}
+}
+
+func TestCommitFailureCollectsDiagnostics(t *testing.T) {
+	ctx := context.Background()
+	client := &fakeInteractiveClient{
+		commitErr:      errors.New("apply failed"),
+		diffText:       "- set protocols bgp group external neighbor 198.51.100.2 peer-as 65001",
+		diffHasChanges: true,
+	}
+	sh := &interactiveShell{
+		client:    client,
+		hostname:  "router",
+		mode:      modeConfiguration,
+		sessionID: "session-1",
+		hasLock:   true,
+	}
+
+	err := sh.cmdCommit(ctx, nil)
+	if err == nil || !strings.Contains(err.Error(), "commit failed: apply failed") {
+		t.Fatalf("cmdCommit() error = %v, want commit failure", err)
+	}
+	if client.commitCalls != 1 || client.diffCalls != 1 {
+		t.Fatalf("commit/diff calls = %d/%d, want 1/1", client.commitCalls, client.diffCalls)
+	}
+}
+
+func TestCommitFailureReportsDiagnosticCollectionError(t *testing.T) {
+	ctx := context.Background()
+	client := &fakeInteractiveClient{
+		commitErr: errors.New("apply failed"),
+		diffErr:   errors.New("diff unavailable"),
+	}
+	sh := &interactiveShell{
+		client:    client,
+		hostname:  "router",
+		mode:      modeConfiguration,
+		sessionID: "session-1",
+		hasLock:   true,
+	}
+
+	err := sh.cmdCommit(ctx, nil)
+	if err == nil || !strings.Contains(err.Error(), "diagnostics unavailable: diff unavailable") {
+		t.Fatalf("cmdCommit() error = %v, want diagnostics unavailable detail", err)
+	}
+	if client.commitCalls != 1 || client.diffCalls != 1 {
+		t.Fatalf("commit/diff calls = %d/%d, want 1/1", client.commitCalls, client.diffCalls)
 	}
 }
 

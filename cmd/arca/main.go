@@ -1051,6 +1051,9 @@ func (sh *interactiveShell) cmdCommit(ctx context.Context, args []string) error 
 
 	commitID, version, err := sh.client.Commit(ctx, sh.sessionID, user, message)
 	if err != nil {
+		if diagErr := sh.printCommitFailureDiagnostics(ctx); diagErr != nil {
+			return fmt.Errorf("commit failed: %w (diagnostics unavailable: %v)", err, diagErr)
+		}
 		return fmt.Errorf("commit failed: %w", err)
 	}
 	fmt.Printf("commit complete (id: %s, version: %d)\n", shortCommitID(commitID), version)
@@ -1135,6 +1138,19 @@ func (sh *interactiveShell) printChangeImpactPreview(ctx context.Context) error 
 	for _, line := range formatChangeImpactPreview(diffText, hasChanges) {
 		fmt.Println(line)
 	}
+	return nil
+}
+
+func (sh *interactiveShell) printCommitFailureDiagnostics(ctx context.Context) error {
+	diffText, hasChanges, err := sh.client.Diff(ctx, sh.sessionID)
+	if err != nil {
+		return err
+	}
+	fmt.Println("commit failure diagnostics:")
+	for _, line := range formatChangeImpactPreview(diffText, hasChanges) {
+		fmt.Printf("  %s\n", line)
+	}
+	fmt.Println("  next step: resolve the error and run 'commit check'")
 	return nil
 }
 
