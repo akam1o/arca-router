@@ -372,6 +372,15 @@ func decodeCatalogResponse(body []byte) (telemetryCatalogResponse, error) {
 	if err := validateNMSResultCount("telemetry catalog", "path_count", catalog.PathCount, "paths", len(catalog.Paths)); err != nil {
 		return catalog, err
 	}
+	if err := validateNMSTelemetryHints(
+		"telemetry catalog",
+		catalog.DefaultPaths,
+		catalog.DefaultSampleIntervalMs,
+		catalog.MinSampleIntervalMs,
+		catalog.MaxSampleIntervalMs,
+	); err != nil {
+		return catalog, err
+	}
 	return catalog, nil
 }
 
@@ -387,6 +396,15 @@ func decodeSchemasResponse(body []byte) (telemetrySchemasResponse, error) {
 		return schemas, err
 	}
 	if err := validateNMSResultCount("telemetry schemas", "schema_count", schemas.SchemaCount, "schemas", len(schemas.Schemas)); err != nil {
+		return schemas, err
+	}
+	if err := validateNMSTelemetryHints(
+		"telemetry schemas",
+		schemas.DefaultPaths,
+		schemas.DefaultSampleIntervalMs,
+		schemas.MinSampleIntervalMs,
+		schemas.MaxSampleIntervalMs,
+	); err != nil {
 		return schemas, err
 	}
 	return schemas, nil
@@ -423,6 +441,15 @@ func decodeSnapshotResponse(body []byte) (telemetrySnapshotResponse, error) {
 	if err := validateTelemetrySnapshotAggregates(snapshot); err != nil {
 		return snapshot, err
 	}
+	if err := validateNMSTelemetryHints(
+		"telemetry snapshot",
+		snapshot.DefaultPaths,
+		snapshot.DefaultSampleIntervalMs,
+		snapshot.MinSampleIntervalMs,
+		snapshot.MaxSampleIntervalMs,
+	); err != nil {
+		return snapshot, err
+	}
 	return snapshot, nil
 }
 
@@ -442,6 +469,29 @@ func validateNMSTelemetryMetadata(kind, eventSchemaVersion, encoding string) err
 	}
 	if encoding != telemetryEncodingJSON {
 		return fmt.Errorf("%s encoding = %q, want %q", kind, encoding, telemetryEncodingJSON)
+	}
+	return nil
+}
+
+func validateNMSTelemetryHints(kind string, defaultPaths []string, defaultSampleIntervalMs, minSampleIntervalMs, maxSampleIntervalMs uint32) error {
+	if len(defaultPaths) == 0 {
+		return fmt.Errorf("%s default_paths is empty", kind)
+	}
+	for i, path := range defaultPaths {
+		if strings.TrimSpace(path) == "" {
+			return fmt.Errorf("%s default_paths[%d] is empty", kind, i)
+		}
+	}
+	if defaultSampleIntervalMs == 0 || minSampleIntervalMs == 0 || maxSampleIntervalMs == 0 {
+		return fmt.Errorf("%s sample interval hints must be positive", kind)
+	}
+	if minSampleIntervalMs > defaultSampleIntervalMs || defaultSampleIntervalMs > maxSampleIntervalMs {
+		return fmt.Errorf("%s sample interval hints out of order: min %d default %d max %d",
+			kind,
+			minSampleIntervalMs,
+			defaultSampleIntervalMs,
+			maxSampleIntervalMs,
+		)
 	}
 	return nil
 }
