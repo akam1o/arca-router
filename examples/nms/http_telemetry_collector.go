@@ -1875,8 +1875,14 @@ func validateTelemetrySnapshotAggregates(snapshot telemetrySnapshotResponse) err
 	if snapshot.PayloadBytes != payloadBytes {
 		return fmt.Errorf("telemetry snapshot payload_bytes = %d, want event payload_bytes total %d", snapshot.PayloadBytes, payloadBytes)
 	}
+	if snapshot.MaxPayloadBytes < 0 {
+		return fmt.Errorf("telemetry snapshot max_payload_bytes = %d, want non-negative value", snapshot.MaxPayloadBytes)
+	}
 	if snapshot.MaxPayloadBytes > 0 && snapshot.PayloadBytes > snapshot.MaxPayloadBytes {
 		return fmt.Errorf("telemetry snapshot payload_bytes = %d exceeds max_payload_bytes %d", snapshot.PayloadBytes, snapshot.MaxPayloadBytes)
+	}
+	if snapshot.MaxEvents < 0 {
+		return fmt.Errorf("telemetry snapshot max_events = %d, want non-negative value", snapshot.MaxEvents)
 	}
 	if snapshot.MaxEvents > 0 && snapshot.EventCount > snapshot.MaxEvents {
 		return fmt.Errorf("telemetry snapshot event_count = %d exceeds max_events %d", snapshot.EventCount, snapshot.MaxEvents)
