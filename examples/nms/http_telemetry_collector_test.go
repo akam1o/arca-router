@@ -160,12 +160,28 @@ func TestDecodeStatusResponseRejectsInvalidEnvelope(t *testing.T) {
 			"datastore":        map[string]any{"backend": "memory"},
 			"config_sync":      map[string]any{"enabled": false, "healthy": false},
 			"cluster":          map[string]any{"enabled": false, "node_count": 0, "etcd_sync_configured": false, "sync_aligned": false},
-			"overlay":          map[string]any{"evpn": map[string]any{"configured": false, "vnis": 0}},
+			"overlay":          map[string]any{"evpn": map[string]any{"configured": false, "vnis": 0, "l2_vnis": 0, "l3_vnis": 0, "multicast_vnis": 0}},
 			"ha":               map[string]any{"configured": false, "converged": false, "vrrp_groups": 0, "issue_count": 0},
-			"class_of_service": map[string]any{"configured": false, "enforcement_status": "not-configured", "capabilities": map[string]any{"metadata_binding_supported": false}},
-			"frr":              map[string]any{"vrrp": map[string]any{"configured_groups": 0}, "bfd": map[string]any{"configured_peers": 0}},
-			"vpp":              map[string]any{"lcp": map[string]any{"pair_count": 0}},
-			"netconf":          map[string]any{"listening": false, "active_sessions": 0},
+			"class_of_service": map[string]any{
+				"configured":               false,
+				"enforcement_status":       "not-configured",
+				"forwarding_classes":       0,
+				"traffic_control_profiles": 0,
+				"interface_bindings":       0,
+				"intent_only":              false,
+				"capabilities": map[string]any{
+					"metadata_binding_supported": false,
+					"queue_scheduler_supported":  false,
+					"policer_supported":          false,
+					"counters_supported":         false,
+				},
+			},
+			"frr": map[string]any{
+				"vrrp": map[string]any{"configured_groups": 0, "observed_groups": 0, "active_groups": 0, "issue_count": 0},
+				"bfd":  map[string]any{"configured_peers": 0, "observed_peers": 0, "up_peers": 0, "down_peers": 0, "session_down_events": 0, "rx_fail_packets": 0, "issue_count": 0},
+			},
+			"vpp":     map[string]any{"lcp": map[string]any{"pair_count": 0, "inconsistency_count": 0}},
+			"netconf": map[string]any{"listening": false, "active_sessions": 0, "active_connections": 0, "total_connections": uint64(0), "successful_auth": uint64(0), "failed_auth": uint64(0)},
 		}
 	}
 	statusEnvelope := func(data any) []byte {
@@ -232,6 +248,30 @@ func TestDecodeStatusResponseRejectsInvalidEnvelope(t *testing.T) {
 	err = decodeStatusResponse(statusEnvelope(data))
 	if err == nil || !strings.Contains(err.Error(), "datastore") {
 		t.Fatalf("decodeStatusResponse() error = %v, want datastore mismatch", err)
+	}
+	data = validStatusData()
+	data["config_sync"].(map[string]any)["enabled"] = "false"
+	err = decodeStatusResponse(statusEnvelope(data))
+	if err == nil || !strings.Contains(err.Error(), "config_sync.enabled") {
+		t.Fatalf("decodeStatusResponse() error = %v, want config_sync.enabled mismatch", err)
+	}
+	data = validStatusData()
+	data["overlay"].(map[string]any)["evpn"] = []string{}
+	err = decodeStatusResponse(statusEnvelope(data))
+	if err == nil || !strings.Contains(err.Error(), "overlay.evpn") {
+		t.Fatalf("decodeStatusResponse() error = %v, want overlay.evpn mismatch", err)
+	}
+	data = validStatusData()
+	data["frr"].(map[string]any)["bfd"].(map[string]any)["rx_fail_packets"] = -1
+	err = decodeStatusResponse(statusEnvelope(data))
+	if err == nil || !strings.Contains(err.Error(), "frr.bfd.rx_fail_packets") {
+		t.Fatalf("decodeStatusResponse() error = %v, want frr.bfd.rx_fail_packets mismatch", err)
+	}
+	data = validStatusData()
+	data["netconf"].(map[string]any)["total_connections"] = -1
+	err = decodeStatusResponse(statusEnvelope(data))
+	if err == nil || !strings.Contains(err.Error(), "netconf.total_connections") {
+		t.Fatalf("decodeStatusResponse() error = %v, want netconf.total_connections mismatch", err)
 	}
 }
 

@@ -531,8 +531,127 @@ func validateNMSStatusDataFields(object map[string]json.RawMessage) error {
 	if err := validateNMSStatusUintField(object, "config_version"); err != nil {
 		return err
 	}
-	for _, section := range []string{"datastore", "config_sync", "cluster", "overlay", "ha", "class_of_service", "frr", "vpp", "netconf"} {
-		if err := validateNMSStatusObjectField(object, section); err != nil {
+	return validateNMSStatusSections(object)
+}
+
+func validateNMSStatusSections(object map[string]json.RawMessage) error {
+	datastore, err := validateNMSStatusObjectField(object, "datastore")
+	if err != nil {
+		return err
+	}
+	if err := validateNMSStatusStringFieldPath(datastore, "backend", "datastore.backend"); err != nil {
+		return err
+	}
+
+	configSync, err := validateNMSStatusObjectField(object, "config_sync")
+	if err != nil {
+		return err
+	}
+	if err := validateNMSStatusBoolFields(configSync, "config_sync", "enabled", "healthy"); err != nil {
+		return err
+	}
+
+	cluster, err := validateNMSStatusObjectField(object, "cluster")
+	if err != nil {
+		return err
+	}
+	if err := validateNMSStatusBoolFields(cluster, "cluster", "enabled", "etcd_sync_configured", "sync_aligned"); err != nil {
+		return err
+	}
+	if err := validateNMSStatusIntFields(cluster, "cluster", "node_count"); err != nil {
+		return err
+	}
+
+	overlay, err := validateNMSStatusObjectField(object, "overlay")
+	if err != nil {
+		return err
+	}
+	evpn, err := validateNMSStatusObjectFieldPath(overlay, "evpn", "overlay.evpn")
+	if err != nil {
+		return err
+	}
+	if err := validateNMSStatusBoolFields(evpn, "overlay.evpn", "configured"); err != nil {
+		return err
+	}
+	if err := validateNMSStatusIntFields(evpn, "overlay.evpn", "vnis", "l2_vnis", "l3_vnis", "multicast_vnis"); err != nil {
+		return err
+	}
+
+	ha, err := validateNMSStatusObjectField(object, "ha")
+	if err != nil {
+		return err
+	}
+	if err := validateNMSStatusBoolFields(ha, "ha", "configured", "converged"); err != nil {
+		return err
+	}
+	if err := validateNMSStatusIntFields(ha, "ha", "vrrp_groups", "issue_count"); err != nil {
+		return err
+	}
+
+	classOfService, err := validateNMSStatusObjectField(object, "class_of_service")
+	if err != nil {
+		return err
+	}
+	if err := validateNMSStatusBoolFields(classOfService, "class_of_service", "configured", "intent_only"); err != nil {
+		return err
+	}
+	if err := validateNMSStatusStringFieldPath(classOfService, "enforcement_status", "class_of_service.enforcement_status"); err != nil {
+		return err
+	}
+	if err := validateNMSStatusIntFields(classOfService, "class_of_service", "forwarding_classes", "traffic_control_profiles", "interface_bindings"); err != nil {
+		return err
+	}
+	capabilities, err := validateNMSStatusObjectFieldPath(classOfService, "capabilities", "class_of_service.capabilities")
+	if err != nil {
+		return err
+	}
+	if err := validateNMSStatusBoolFields(capabilities, "class_of_service.capabilities", "metadata_binding_supported", "queue_scheduler_supported", "policer_supported", "counters_supported"); err != nil {
+		return err
+	}
+
+	frr, err := validateNMSStatusObjectField(object, "frr")
+	if err != nil {
+		return err
+	}
+	vrrp, err := validateNMSStatusObjectFieldPath(frr, "vrrp", "frr.vrrp")
+	if err != nil {
+		return err
+	}
+	if err := validateNMSStatusIntFields(vrrp, "frr.vrrp", "configured_groups", "observed_groups", "active_groups", "issue_count"); err != nil {
+		return err
+	}
+	bfd, err := validateNMSStatusObjectFieldPath(frr, "bfd", "frr.bfd")
+	if err != nil {
+		return err
+	}
+	if err := validateNMSStatusIntFields(bfd, "frr.bfd", "configured_peers", "observed_peers", "up_peers", "down_peers", "session_down_events", "rx_fail_packets", "issue_count"); err != nil {
+		return err
+	}
+
+	vpp, err := validateNMSStatusObjectField(object, "vpp")
+	if err != nil {
+		return err
+	}
+	lcp, err := validateNMSStatusObjectFieldPath(vpp, "lcp", "vpp.lcp")
+	if err != nil {
+		return err
+	}
+	if err := validateNMSStatusIntFields(lcp, "vpp.lcp", "pair_count", "inconsistency_count"); err != nil {
+		return err
+	}
+
+	netconf, err := validateNMSStatusObjectField(object, "netconf")
+	if err != nil {
+		return err
+	}
+	if err := validateNMSStatusBoolFields(netconf, "netconf", "listening"); err != nil {
+		return err
+	}
+	if err := validateNMSStatusIntFields(netconf, "netconf", "active_sessions", "active_connections"); err != nil {
+		return err
+	}
+	for _, field := range []string{"total_connections", "successful_auth", "failed_auth"} {
+		if err := validateNMSStatusUintFieldPath(netconf, field, nmsStatusDataPath("netconf", field)); err != nil {
 			return err
 		}
 	}
@@ -540,66 +659,140 @@ func validateNMSStatusDataFields(object map[string]json.RawMessage) error {
 }
 
 func validateNMSStatusStringField(object map[string]json.RawMessage, field string) error {
+	return validateNMSStatusStringFieldPath(object, field, field)
+}
+
+func validateNMSStatusStringFieldPath(object map[string]json.RawMessage, field, path string) error {
 	raw, ok := object[field]
 	if !ok {
-		return fmt.Errorf("nms status data %s is missing", field)
+		return fmt.Errorf("nms status data %s is missing", path)
 	}
 	var value *string
 	if err := json.Unmarshal(raw, &value); err != nil || value == nil {
 		if err != nil {
-			return fmt.Errorf("nms status data %s must be a string: %w", field, err)
+			return fmt.Errorf("nms status data %s must be a string: %w", path, err)
 		}
-		return fmt.Errorf("nms status data %s must be a string", field)
+		return fmt.Errorf("nms status data %s must be a string", path)
 	}
 	return nil
 }
 
 func validateNMSStatusFloatField(object map[string]json.RawMessage, field string) error {
+	return validateNMSStatusFloatFieldPath(object, field, field)
+}
+
+func validateNMSStatusFloatFieldPath(object map[string]json.RawMessage, field, path string) error {
 	raw, ok := object[field]
 	if !ok {
-		return fmt.Errorf("nms status data %s is missing", field)
+		return fmt.Errorf("nms status data %s is missing", path)
 	}
 	var value *float64
 	if err := json.Unmarshal(raw, &value); err != nil || value == nil {
 		if err != nil {
-			return fmt.Errorf("nms status data %s must be a number: %w", field, err)
+			return fmt.Errorf("nms status data %s must be a number: %w", path, err)
 		}
-		return fmt.Errorf("nms status data %s must be a number", field)
+		return fmt.Errorf("nms status data %s must be a number", path)
 	}
 	if *value < 0 {
-		return fmt.Errorf("nms status data %s must be non-negative", field)
+		return fmt.Errorf("nms status data %s must be non-negative", path)
 	}
 	return nil
 }
 
 func validateNMSStatusUintField(object map[string]json.RawMessage, field string) error {
+	return validateNMSStatusUintFieldPath(object, field, field)
+}
+
+func validateNMSStatusUintFieldPath(object map[string]json.RawMessage, field, path string) error {
 	raw, ok := object[field]
 	if !ok {
-		return fmt.Errorf("nms status data %s is missing", field)
+		return fmt.Errorf("nms status data %s is missing", path)
 	}
 	var value *uint64
 	if err := json.Unmarshal(raw, &value); err != nil || value == nil {
 		if err != nil {
-			return fmt.Errorf("nms status data %s must be an unsigned integer: %w", field, err)
+			return fmt.Errorf("nms status data %s must be an unsigned integer: %w", path, err)
 		}
-		return fmt.Errorf("nms status data %s must be an unsigned integer", field)
+		return fmt.Errorf("nms status data %s must be an unsigned integer", path)
 	}
 	return nil
 }
 
-func validateNMSStatusObjectField(object map[string]json.RawMessage, field string) error {
+func validateNMSStatusBoolFields(object map[string]json.RawMessage, parent string, fields ...string) error {
+	for _, field := range fields {
+		if err := validateNMSStatusBoolFieldPath(object, field, nmsStatusDataPath(parent, field)); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func validateNMSStatusBoolFieldPath(object map[string]json.RawMessage, field, path string) error {
 	raw, ok := object[field]
 	if !ok {
-		return fmt.Errorf("nms status data %s is missing", field)
+		return fmt.Errorf("nms status data %s is missing", path)
+	}
+	var value *bool
+	if err := json.Unmarshal(raw, &value); err != nil || value == nil {
+		if err != nil {
+			return fmt.Errorf("nms status data %s must be a boolean: %w", path, err)
+		}
+		return fmt.Errorf("nms status data %s must be a boolean", path)
+	}
+	return nil
+}
+
+func validateNMSStatusIntFields(object map[string]json.RawMessage, parent string, fields ...string) error {
+	for _, field := range fields {
+		if err := validateNMSStatusIntFieldPath(object, field, nmsStatusDataPath(parent, field)); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func validateNMSStatusIntFieldPath(object map[string]json.RawMessage, field, path string) error {
+	raw, ok := object[field]
+	if !ok {
+		return fmt.Errorf("nms status data %s is missing", path)
+	}
+	var value *int64
+	if err := json.Unmarshal(raw, &value); err != nil || value == nil {
+		if err != nil {
+			return fmt.Errorf("nms status data %s must be an integer: %w", path, err)
+		}
+		return fmt.Errorf("nms status data %s must be an integer", path)
+	}
+	if *value < 0 {
+		return fmt.Errorf("nms status data %s must be non-negative", path)
+	}
+	return nil
+}
+
+func validateNMSStatusObjectField(object map[string]json.RawMessage, field string) (map[string]json.RawMessage, error) {
+	return validateNMSStatusObjectFieldPath(object, field, field)
+}
+
+func validateNMSStatusObjectFieldPath(object map[string]json.RawMessage, field, path string) (map[string]json.RawMessage, error) {
+	raw, ok := object[field]
+	if !ok {
+		return nil, fmt.Errorf("nms status data %s is missing", path)
 	}
 	var section map[string]json.RawMessage
 	if err := json.Unmarshal(raw, &section); err != nil {
-		return fmt.Errorf("nms status data %s must be a JSON object: %w", field, err)
+		return nil, fmt.Errorf("nms status data %s must be a JSON object: %w", path, err)
 	}
 	if len(section) == 0 {
-		return fmt.Errorf("nms status data %s object is empty", field)
+		return nil, fmt.Errorf("nms status data %s object is empty", path)
 	}
-	return nil
+	return section, nil
+}
+
+func nmsStatusDataPath(parent, field string) string {
+	if parent == "" {
+		return field
+	}
+	return parent + "." + field
 }
 
 func validateNMSTelemetryMetadata(kind, eventSchemaVersion, encoding string) error {
