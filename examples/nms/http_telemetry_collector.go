@@ -597,6 +597,9 @@ func validateNMSStatusSections(object map[string]json.RawMessage) error {
 	if err := validateNMSStatusIntFields(evpn, "overlay.evpn", "vnis", "l2_vnis", "l3_vnis", "multicast_vnis"); err != nil {
 		return err
 	}
+	if err := validateNMSStatusEVPNCounters(evpn); err != nil {
+		return err
+	}
 
 	ha, err := validateNMSStatusObjectField(object, "ha")
 	if err != nil {
@@ -745,6 +748,9 @@ func validateNMSStatusSections(object map[string]json.RawMessage) error {
 			return err
 		}
 	}
+	if err := validateNMSStatusNETCONFCounters(netconf); err != nil {
+		return err
+	}
 	return nil
 }
 
@@ -799,18 +805,23 @@ func validateNMSStatusUintField(object map[string]json.RawMessage, field string)
 }
 
 func validateNMSStatusUintFieldPath(object map[string]json.RawMessage, field, path string) error {
+	_, err := nmsStatusUintFieldValuePath(object, field, path)
+	return err
+}
+
+func nmsStatusUintFieldValuePath(object map[string]json.RawMessage, field, path string) (uint64, error) {
 	raw, ok := object[field]
 	if !ok {
-		return fmt.Errorf("nms status data %s is missing", path)
+		return 0, fmt.Errorf("nms status data %s is missing", path)
 	}
 	var value *uint64
 	if err := json.Unmarshal(raw, &value); err != nil || value == nil {
 		if err != nil {
-			return fmt.Errorf("nms status data %s must be an unsigned integer: %w", path, err)
+			return 0, fmt.Errorf("nms status data %s must be an unsigned integer: %w", path, err)
 		}
-		return fmt.Errorf("nms status data %s must be an unsigned integer", path)
+		return 0, fmt.Errorf("nms status data %s must be an unsigned integer", path)
 	}
-	return nil
+	return *value, nil
 }
 
 func validateNMSStatusBoolFields(object map[string]json.RawMessage, parent string, fields ...string) error {
@@ -1087,6 +1098,67 @@ func validateNMSStatusBFDPeerStatus(path, status string, observed, up bool) erro
 	}
 	if !up && normalized == "up" {
 		return fmt.Errorf("nms status data %s must be true when %s is %q", nmsStatusDataPath(path, "up"), statusPath, status)
+	}
+	return nil
+}
+
+func validateNMSStatusEVPNCounters(evpn map[string]json.RawMessage) error {
+	configured, err := nmsStatusBoolFieldValuePath(evpn, "configured", "overlay.evpn.configured")
+	if err != nil {
+		return err
+	}
+	vnis, err := nmsStatusIntFieldValuePath(evpn, "vnis", "overlay.evpn.vnis")
+	if err != nil {
+		return err
+	}
+	l2VNIs, err := nmsStatusIntFieldValuePath(evpn, "l2_vnis", "overlay.evpn.l2_vnis")
+	if err != nil {
+		return err
+	}
+	l3VNIs, err := nmsStatusIntFieldValuePath(evpn, "l3_vnis", "overlay.evpn.l3_vnis")
+	if err != nil {
+		return err
+	}
+	multicastVNIs, err := nmsStatusIntFieldValuePath(evpn, "multicast_vnis", "overlay.evpn.multicast_vnis")
+	if err != nil {
+		return err
+	}
+	if configured != (vnis > 0) {
+		return fmt.Errorf("nms status data overlay.evpn.configured = %t, want %t because overlay.evpn.vnis = %d", configured, vnis > 0, vnis)
+	}
+	for _, counter := range []struct {
+		field string
+		value int64
+	}{
+		{field: "l2_vnis", value: l2VNIs},
+		{field: "l3_vnis", value: l3VNIs},
+		{field: "multicast_vnis", value: multicastVNIs},
+	} {
+		if counter.value > vnis {
+			return fmt.Errorf("nms status data overlay.evpn.%s = %d, want no more than overlay.evpn.vnis %d", counter.field, counter.value, vnis)
+		}
+	}
+	if l2VNIs+l3VNIs > vnis {
+		return fmt.Errorf("nms status data overlay.evpn.vnis = %d, want at least l2_vnis+l3_vnis %d", vnis, l2VNIs+l3VNIs)
+	}
+	return nil
+}
+
+func validateNMSStatusNETCONFCounters(netconf map[string]json.RawMessage) error {
+	total, err := nmsStatusUintFieldValuePath(netconf, "total_connections", "netconf.total_connections")
+	if err != nil {
+		return err
+	}
+	success, err := nmsStatusUintFieldValuePath(netconf, "successful_auth", "netconf.successful_auth")
+	if err != nil {
+		return err
+	}
+	failed, err := nmsStatusUintFieldValuePath(netconf, "failed_auth", "netconf.failed_auth")
+	if err != nil {
+		return err
+	}
+	if success > total || failed > total || success > total-failed {
+		return fmt.Errorf("nms status data netconf.total_connections = %d, want at least netconf.successful_auth %d plus netconf.failed_auth %d", total, success, failed)
 	}
 	return nil
 }

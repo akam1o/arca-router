@@ -319,6 +319,22 @@ func TestDecodeStatusResponseRejectsInvalidEnvelope(t *testing.T) {
 		t.Fatalf("decodeStatusResponse() error = %v, want overlay.evpn mismatch", err)
 	}
 	data = validStatusData()
+	data["overlay"].(map[string]any)["evpn"].(map[string]any)["configured"] = true
+	err = decodeStatusResponse(statusEnvelope(data))
+	if err == nil || !strings.Contains(err.Error(), "overlay.evpn.configured") {
+		t.Fatalf("decodeStatusResponse() error = %v, want overlay.evpn.configured mismatch", err)
+	}
+	data = validStatusData()
+	evpn := data["overlay"].(map[string]any)["evpn"].(map[string]any)
+	evpn["configured"] = true
+	evpn["vnis"] = 1
+	evpn["l2_vnis"] = 1
+	evpn["l3_vnis"] = 1
+	err = decodeStatusResponse(statusEnvelope(data))
+	if err == nil || !strings.Contains(err.Error(), "overlay.evpn.vnis") {
+		t.Fatalf("decodeStatusResponse() error = %v, want overlay.evpn.vnis mismatch", err)
+	}
+	data = validStatusData()
 	data["frr"].(map[string]any)["bfd"].(map[string]any)["rx_fail_packets"] = -1
 	err = decodeStatusResponse(statusEnvelope(data))
 	if err == nil || !strings.Contains(err.Error(), "frr.bfd.rx_fail_packets") {
@@ -329,6 +345,15 @@ func TestDecodeStatusResponseRejectsInvalidEnvelope(t *testing.T) {
 	err = decodeStatusResponse(statusEnvelope(data))
 	if err == nil || !strings.Contains(err.Error(), "netconf.total_connections") {
 		t.Fatalf("decodeStatusResponse() error = %v, want netconf.total_connections mismatch", err)
+	}
+	data = validStatusData()
+	netconf := data["netconf"].(map[string]any)
+	netconf["total_connections"] = uint64(1)
+	netconf["successful_auth"] = uint64(1)
+	netconf["failed_auth"] = uint64(1)
+	err = decodeStatusResponse(statusEnvelope(data))
+	if err == nil || !strings.Contains(err.Error(), "netconf.total_connections") {
+		t.Fatalf("decodeStatusResponse() error = %v, want netconf.total_connections aggregate mismatch", err)
 	}
 	data = validStatusData()
 	data["ha"].(map[string]any)["issues"] = []any{"cluster disabled", nil}
