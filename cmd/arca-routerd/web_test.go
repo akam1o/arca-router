@@ -332,7 +332,7 @@ func TestNMSTelemetryCatalogEndpoint(t *testing.T) {
 }
 
 func TestNMSTelemetryCatalogEndpointFilters(t *testing.T) {
-	req := httptest.NewRequest(http.MethodGet, "/api/nms/v1/telemetry/paths?cardinality=per-route&payload_schema=arca.telemetry.routes.v1", nil)
+	req := httptest.NewRequest(http.MethodGet, "/api/nms/v1/telemetry/paths?cardinality=per-route&payload_schema=arca.telemetry.routes.v1&encoding=JSON", nil)
 	rec := httptest.NewRecorder()
 	metricsSource{}.handleNMSTelemetryCatalog(rec, req)
 
@@ -348,6 +348,26 @@ func TestNMSTelemetryCatalogEndpointFilters(t *testing.T) {
 	}
 	if resp.Paths[0].Cardinality != "per-route" || resp.Paths[0].PayloadSchema != "arca.telemetry.routes.v1" {
 		t.Fatalf("filtered path = %#v, want route cardinality and schema", resp.Paths[0])
+	}
+}
+
+func TestNMSTelemetryCatalogEndpointFiltersUnsupportedEncoding(t *testing.T) {
+	req := httptest.NewRequest(http.MethodGet, "/api/nms/v1/telemetry/paths?encoding=protobuf", nil)
+	rec := httptest.NewRecorder()
+	metricsSource{}.handleNMSTelemetryCatalog(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d", rec.Code, http.StatusOK)
+	}
+	var resp nmsTelemetryCatalogResponse
+	if err := json.NewDecoder(rec.Result().Body).Decode(&resp); err != nil {
+		t.Fatalf("Decode() error = %v", err)
+	}
+	if resp.Encoding != nbgrpc.TelemetryEncoding() {
+		t.Fatalf("Encoding = %q, want %q", resp.Encoding, nbgrpc.TelemetryEncoding())
+	}
+	if len(resp.Paths) != 0 {
+		t.Fatalf("filtered paths = %#v, want none for unsupported encoding", resp.Paths)
 	}
 }
 

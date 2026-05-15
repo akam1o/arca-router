@@ -133,6 +133,7 @@ type nmsTelemetryCatalogFilters struct {
 	paths          []string
 	cardinalities  []string
 	payloadSchemas []string
+	encodings      []string
 	defaultOnly    bool
 }
 
@@ -1453,18 +1454,20 @@ func newNMSStatusResponse(now time.Time, metrics routerMetrics) nmsStatusRespons
 func newNMSTelemetryCatalogResponse(now time.Time, filters nmsTelemetryCatalogFilters) nmsTelemetryCatalogResponse {
 	catalog := nbgrpc.NewTelemetryCatalog()
 	paths := make([]nmsTelemetryPath, 0, len(catalog.Paths))
-	for _, info := range catalog.Paths {
-		if !nmsTelemetryPathMatchesCatalogFilters(info, filters) {
-			continue
+	if nmsTelemetryCatalogFilterMatches(catalog.Encoding, filters.encodings) {
+		for _, info := range catalog.Paths {
+			if !nmsTelemetryPathMatchesCatalogFilters(info, filters) {
+				continue
+			}
+			paths = append(paths, nmsTelemetryPath{
+				Path:          info.Path,
+				Description:   info.Description,
+				Cardinality:   info.Cardinality,
+				PayloadSchema: info.PayloadSchema,
+				Aliases:       append([]string(nil), info.Aliases...),
+				Default:       info.Default,
+			})
 		}
-		paths = append(paths, nmsTelemetryPath{
-			Path:          info.Path,
-			Description:   info.Description,
-			Cardinality:   info.Cardinality,
-			PayloadSchema: info.PayloadSchema,
-			Aliases:       append([]string(nil), info.Aliases...),
-			Default:       info.Default,
-		})
 	}
 	return nmsTelemetryCatalogResponse{
 		SchemaVersion:      nmsTelemetryCatalogSchemaVersion,
@@ -1483,6 +1486,7 @@ func nmsTelemetryCatalogFiltersFromRequest(r *http.Request) nmsTelemetryCatalogF
 		paths:          append([]string(nil), query["path"]...),
 		cardinalities:  append([]string(nil), query["cardinality"]...),
 		payloadSchemas: append(append([]string(nil), query["payload_schema"]...), query["payload-schema"]...),
+		encodings:      append([]string(nil), query["encoding"]...),
 		defaultOnly:    nmsTelemetryCatalogDefaultOnlyFromQuery(query),
 	}
 }
@@ -1544,6 +1548,9 @@ func normalizeNMSTelemetryCatalogPathFilter(value string) string {
 }
 
 func nmsTelemetryCatalogFilterMatches(value string, filters []string) bool {
+	if len(filters) == 0 {
+		return true
+	}
 	value = strings.ToLower(strings.TrimSpace(value))
 	for _, filter := range filters {
 		if value == strings.ToLower(strings.TrimSpace(filter)) {
