@@ -261,17 +261,14 @@ func filterSnapshotPathsByPath(paths repeatedPathFlag, catalog telemetryCatalogR
 			excludedSet[normalized] = struct{}{}
 		}
 	}
-	catalogByPath := make(map[string]telemetryCatalogPath, len(catalog.Paths))
-	for _, path := range catalog.Paths {
-		catalogByPath[normalizeCatalogPath(path.Path)] = path
-	}
+	catalogByPath := telemetryCatalogPathLookup(catalog)
 	filtered := make(repeatedPathFlag, 0, len(paths))
 	for _, path := range paths {
 		normalized := normalizeCatalogPath(path)
 		if _, skip := excludedSet[normalized]; skip {
 			continue
 		}
-		if entry, ok := catalogByPath[normalized]; ok && telemetryCatalogPathHasExcludedAlias(entry, excludedSet) {
+		if entry, ok := catalogByPath[normalized]; ok && telemetryCatalogPathMatchesExcluded(entry, excludedSet) {
 			continue
 		}
 		filtered = append(filtered, path)
@@ -279,13 +276,29 @@ func filterSnapshotPathsByPath(paths repeatedPathFlag, catalog telemetryCatalogR
 	return filtered
 }
 
-func telemetryCatalogPathHasExcludedAlias(path telemetryCatalogPath, excluded map[string]struct{}) bool {
+func telemetryCatalogPathMatchesExcluded(path telemetryCatalogPath, excluded map[string]struct{}) bool {
+	if _, ok := excluded[normalizeCatalogPath(path.Path)]; ok {
+		return true
+	}
 	for _, alias := range path.Aliases {
 		if _, ok := excluded[normalizeCatalogPath(alias)]; ok {
 			return true
 		}
 	}
 	return false
+}
+
+func telemetryCatalogPathLookup(catalog telemetryCatalogResponse) map[string]telemetryCatalogPath {
+	lookup := make(map[string]telemetryCatalogPath, len(catalog.Paths))
+	for _, path := range catalog.Paths {
+		for _, value := range append([]string{path.Path}, path.Aliases...) {
+			normalized := normalizeCatalogPath(value)
+			if normalized != "" {
+				lookup[normalized] = path
+			}
+		}
+	}
+	return lookup
 }
 
 func filterSnapshotPathsByCardinality(paths repeatedPathFlag, catalog telemetryCatalogResponse, excluded repeatedStringFlag) repeatedPathFlag {
@@ -296,13 +309,11 @@ func filterSnapshotPathsByCardinality(paths repeatedPathFlag, catalog telemetryC
 	for _, value := range excluded {
 		excludedSet[strings.ToLower(strings.TrimSpace(value))] = struct{}{}
 	}
-	cardinalityByPath := make(map[string]string, len(catalog.Paths))
-	for _, path := range catalog.Paths {
-		cardinalityByPath[path.Path] = strings.ToLower(strings.TrimSpace(path.Cardinality))
-	}
+	catalogByPath := telemetryCatalogPathLookup(catalog)
 	filtered := make(repeatedPathFlag, 0, len(paths))
 	for _, path := range paths {
-		if _, skip := excludedSet[cardinalityByPath[path]]; skip {
+		entry := catalogByPath[normalizeCatalogPath(path)]
+		if _, skip := excludedSet[strings.ToLower(strings.TrimSpace(entry.Cardinality))]; skip {
 			continue
 		}
 		filtered = append(filtered, path)
@@ -318,13 +329,11 @@ func filterSnapshotPathsByPayloadSchema(paths repeatedPathFlag, catalog telemetr
 	for _, value := range excluded {
 		excludedSet[strings.ToLower(strings.TrimSpace(value))] = struct{}{}
 	}
-	schemaByPath := make(map[string]string, len(catalog.Paths))
-	for _, path := range catalog.Paths {
-		schemaByPath[path.Path] = strings.ToLower(strings.TrimSpace(path.PayloadSchema))
-	}
+	catalogByPath := telemetryCatalogPathLookup(catalog)
 	filtered := make(repeatedPathFlag, 0, len(paths))
 	for _, path := range paths {
-		if _, skip := excludedSet[schemaByPath[path]]; skip {
+		entry := catalogByPath[normalizeCatalogPath(path)]
+		if _, skip := excludedSet[strings.ToLower(strings.TrimSpace(entry.PayloadSchema))]; skip {
 			continue
 		}
 		filtered = append(filtered, path)

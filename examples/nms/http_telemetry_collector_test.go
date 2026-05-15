@@ -280,11 +280,11 @@ func TestFetchNMSUsesCatalogFiltersForSnapshotPaths(t *testing.T) {
 func TestFilterSnapshotPathsByCardinality(t *testing.T) {
 	catalog := telemetryCatalogResponse{Paths: []telemetryCatalogPath{
 		{Path: "/system", Cardinality: "single"},
-		{Path: "/routes", Cardinality: "per-route"},
-		{Path: "/bfd", Cardinality: "per-peer"},
+		{Path: "/routes", Cardinality: "per-route", Aliases: []string{"/route-table"}},
+		{Path: "/bfd", Cardinality: "per-peer", Aliases: []string{"/bfd-peer"}},
 	}}
 	got := filterSnapshotPathsByCardinality(
-		repeatedPathFlag{"/system", "/routes", "/bfd"},
+		repeatedPathFlag{"/system", "route-table", "/bfd-peer"},
 		catalog,
 		repeatedStringFlag{"per-route", "per-peer"},
 	)
@@ -300,9 +300,9 @@ func TestFilterSnapshotPathsByPath(t *testing.T) {
 		{Path: "/overlays/evpn", Aliases: []string{"/evpn"}},
 	}}
 	got := filterSnapshotPathsByPath(
-		repeatedPathFlag{"/system", "/routes", "/overlays/evpn"},
+		repeatedPathFlag{"/system", "route-table", "/evpn"},
 		catalog,
-		repeatedPathFlag{"route-table", "/evpn"},
+		repeatedPathFlag{"/routes", "/overlays/evpn"},
 	)
 	if len(got) != 1 || got[0] != "/system" {
 		t.Fatalf("filterSnapshotPathsByPath() = %#v, want only /system", got)
@@ -312,11 +312,11 @@ func TestFilterSnapshotPathsByPath(t *testing.T) {
 func TestFilterSnapshotPathsByPayloadSchema(t *testing.T) {
 	catalog := telemetryCatalogResponse{Paths: []telemetryCatalogPath{
 		{Path: "/system", PayloadSchema: "arca.telemetry.system.v1"},
-		{Path: "/routes", PayloadSchema: "arca.telemetry.routes.v1"},
-		{Path: "/bfd", PayloadSchema: "arca.telemetry.bfd.v1"},
+		{Path: "/routes", PayloadSchema: "arca.telemetry.routes.v1", Aliases: []string{"/route-table"}},
+		{Path: "/bfd", PayloadSchema: "arca.telemetry.bfd.v1", Aliases: []string{"/bfd-peer"}},
 	}}
 	got := filterSnapshotPathsByPayloadSchema(
-		repeatedPathFlag{"/system", "/routes", "/bfd"},
+		repeatedPathFlag{"/system", "route-table", "/bfd-peer"},
 		catalog,
 		repeatedStringFlag{"arca.telemetry.routes.v1", "ARCA.TELEMETRY.BFD.V1"},
 	)
