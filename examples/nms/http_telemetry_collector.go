@@ -20,6 +20,8 @@ const (
 	defaultSnapshotTimeout = 5 * time.Second
 	defaultMaxPayloadBytes = 8 << 20
 	defaultMaxEvents       = 64
+	nmsTelemetryCatalogV1  = "arca.nms.telemetry-catalog.v1"
+	nmsTelemetrySchemasV1  = "arca.nms.telemetry-schemas.v1"
 )
 
 var defaultSnapshotPaths = []string{"/system", "/interfaces", "/overlays/evpn"}
@@ -78,6 +80,9 @@ func (f *repeatedStringFlag) Set(value string) error {
 }
 
 type telemetryCatalogResponse struct {
+	SchemaVersion           string                 `json:"schema_version"`
+	Resource                string                 `json:"resource"`
+	EventSchemaVersion      string                 `json:"event_schema_version"`
 	Encoding                string                 `json:"encoding"`
 	DefaultPaths            []string               `json:"default_paths"`
 	DefaultSampleIntervalMs uint32                 `json:"default_sample_interval_ms"`
@@ -95,6 +100,9 @@ type telemetryCatalogPath struct {
 }
 
 type telemetrySchemasResponse struct {
+	SchemaVersion           string                   `json:"schema_version"`
+	Resource                string                   `json:"resource"`
+	EventSchemaVersion      string                   `json:"event_schema_version"`
 	Encoding                string                   `json:"encoding"`
 	DefaultPaths            []string                 `json:"default_paths"`
 	DefaultSampleIntervalMs uint32                   `json:"default_sample_interval_ms"`
@@ -312,11 +320,27 @@ func decodeDiscoveryResponse(cfg collectorConfig, body []byte) error {
 		if err := json.Unmarshal(body, &catalog); err != nil {
 			return fmt.Errorf("decode telemetry catalog response: %w", err)
 		}
+		if err := validateNMSDiscoveryEnvelope("telemetry catalog", catalog.SchemaVersion, catalog.Resource, nmsTelemetryCatalogV1, "/api/nms/v1/telemetry/paths"); err != nil {
+			return err
+		}
 	case "schemas":
 		var schemas telemetrySchemasResponse
 		if err := json.Unmarshal(body, &schemas); err != nil {
 			return fmt.Errorf("decode telemetry schemas response: %w", err)
 		}
+		if err := validateNMSDiscoveryEnvelope("telemetry schemas", schemas.SchemaVersion, schemas.Resource, nmsTelemetrySchemasV1, "/api/nms/v1/telemetry/schemas"); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func validateNMSDiscoveryEnvelope(kind, schemaVersion, resource, wantSchemaVersion, wantResource string) error {
+	if schemaVersion != wantSchemaVersion {
+		return fmt.Errorf("%s schema_version = %q, want %q", kind, schemaVersion, wantSchemaVersion)
+	}
+	if resource != wantResource {
+		return fmt.Errorf("%s resource = %q, want %q", kind, resource, wantResource)
 	}
 	return nil
 }

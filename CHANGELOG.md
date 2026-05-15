@@ -2,6 +2,7 @@
 
 ## v0.8.x - Overlay and Streaming Telemetry (current)
 
+- **NMS collector discovery validation**: the example HTTP collector now validates telemetry discovery `schema_version` and `resource` values before using catalog or schema responses
 - **NMS collector schema default hints**: the example HTTP collector now decodes default paths, sample interval hints, and result counts from telemetry schema discovery responses
 - **NMS telemetry schema default hints**: `/api/nms/v1/telemetry/schemas` now echoes default telemetry paths and sample interval hints so schema-only discovery responses remain self-contained
 - **NMS telemetry result counts**: `/api/nms/v1/telemetry/paths` and `/api/nms/v1/telemetry/schemas` now report filtered result counts so collectors can distinguish empty filters from missing arrays

@@ -77,9 +77,26 @@ func TestDecodeTelemetrySchemasResponseDefaultHints(t *testing.T) {
 }
 
 func TestDecodeDiscoveryResponseRejectsInvalidSchemaEnvelope(t *testing.T) {
+	validCatalog := []byte(`{"schema_version":"arca.nms.telemetry-catalog.v1","resource":"/api/nms/v1/telemetry/paths","encoding":"json","paths":[]}`)
+	if err := decodeDiscoveryResponse(collectorConfig{mode: "catalog"}, validCatalog); err != nil {
+		t.Fatalf("decodeDiscoveryResponse(valid catalog) error = %v", err)
+	}
+	validSchemas := []byte(`{"schema_version":"arca.nms.telemetry-schemas.v1","resource":"/api/nms/v1/telemetry/schemas","encoding":"json","schemas":[]}`)
+	if err := decodeDiscoveryResponse(collectorConfig{mode: "schemas"}, validSchemas); err != nil {
+		t.Fatalf("decodeDiscoveryResponse(valid schemas) error = %v", err)
+	}
+
 	err := decodeDiscoveryResponse(collectorConfig{mode: "schemas"}, []byte(`[{"path":"/system"}]`))
 	if err == nil || !strings.Contains(err.Error(), "decode telemetry schemas response") {
 		t.Fatalf("decodeDiscoveryResponse() error = %v, want telemetry schemas decode error", err)
+	}
+	err = decodeDiscoveryResponse(collectorConfig{mode: "catalog"}, []byte(`{"schema_version":"wrong","resource":"/api/nms/v1/telemetry/paths","paths":[]}`))
+	if err == nil || !strings.Contains(err.Error(), "schema_version") {
+		t.Fatalf("decodeDiscoveryResponse() error = %v, want schema_version mismatch", err)
+	}
+	err = decodeDiscoveryResponse(collectorConfig{mode: "schemas"}, []byte(`{"schema_version":"arca.nms.telemetry-schemas.v1","resource":"/wrong","schemas":[]}`))
+	if err == nil || !strings.Contains(err.Error(), "resource") {
+		t.Fatalf("decodeDiscoveryResponse() error = %v, want resource mismatch", err)
 	}
 }
 
