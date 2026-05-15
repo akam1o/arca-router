@@ -87,6 +87,28 @@ func TestConfigToXMLWritesBFD(t *testing.T) {
 	}
 }
 
+func TestConfigToXMLWithXPathFilter(t *testing.T) {
+	cfg := &config.Config{
+		System: &config.SystemConfig{HostName: "router1"},
+		Interfaces: map[string]*config.Interface{
+			"ge-0/0/0": {Description: "uplink"},
+		},
+	}
+	filter := &Filter{Type: "xpath", Select: "/interfaces/interface[name='ge-0/0/0']"}
+
+	xmlData, err := ConfigToXML(cfg, filter)
+	if err != nil {
+		t.Fatalf("ConfigToXML() error = %v", err)
+	}
+	xmlStr := string(xmlData)
+	if !strings.Contains(xmlStr, "<interfaces") {
+		t.Fatalf("ConfigToXML() missing interfaces for XPath filter:\n%s", xmlStr)
+	}
+	if strings.Contains(xmlStr, "<system") {
+		t.Fatalf("ConfigToXML() included unrelated system section:\n%s", xmlStr)
+	}
+}
+
 func TestXMLToConfigParsesBFD(t *testing.T) {
 	xmlData := []byte(`
 <config>

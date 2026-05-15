@@ -3181,7 +3181,13 @@ func ValidateXMLSecurity(data []byte) error {
 
 // ValidateFilterDepthAndSize validates filter depth and size per Phase 2 Step 3
 func ValidateFilterDepthAndSize(rpcName string, filter *Filter) error {
-	if filter == nil || len(filter.Content) == 0 {
+	if filter == nil {
+		return nil
+	}
+	if filter.Type == "xpath" {
+		return validateXPathFilterDepthAndSize(rpcName, filter.Select)
+	}
+	if len(filter.Content) == 0 {
 		return nil
 	}
 
@@ -3203,6 +3209,31 @@ func ValidateFilterDepthAndSize(rpcName string, filter *Filter) error {
 			WithAppTag("size-limit")
 	}
 
+	return nil
+}
+
+func validateXPathFilterDepthAndSize(rpcName, selectExpr string) error {
+	selectExpr = strings.TrimSpace(selectExpr)
+	if len(selectExpr) > MaxXMLSize {
+		return NewRPCError(ErrorTypeProtocol, ErrorTagInvalidValue,
+			fmt.Sprintf("xpath filter exceeds maximum size limit (%d bytes)", MaxXMLSize)).
+			WithPath(fmt.Sprintf("/rpc/%s/filter", rpcName)).
+			WithAppTag("size-limit")
+	}
+
+	xpathFilter, err := ParseXPathFilter(selectExpr)
+	if err != nil {
+		return ErrInvalidFilter(rpcName, fmt.Sprintf("invalid xpath filter: %v", err))
+	}
+	if xpathFilter == nil {
+		return nil
+	}
+	if len(xpathFilter.Segments) > MaxXMLDepth {
+		return NewRPCError(ErrorTypeProtocol, ErrorTagInvalidValue,
+			fmt.Sprintf("xpath filter exceeds maximum depth limit (%d)", MaxXMLDepth)).
+			WithPath(fmt.Sprintf("/rpc/%s/filter", rpcName)).
+			WithAppTag("depth-limit")
+	}
 	return nil
 }
 
