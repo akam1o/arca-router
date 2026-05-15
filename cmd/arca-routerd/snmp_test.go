@@ -14,6 +14,7 @@ import (
 	sbfrr "github.com/akam1o/arca-router/internal/southbound/frr"
 	sbvpp "github.com/akam1o/arca-router/internal/southbound/vpp"
 	"github.com/akam1o/arca-router/pkg/datastore"
+	pkgvpp "github.com/akam1o/arca-router/pkg/vpp"
 )
 
 func TestEffectiveSNMPListenUsesFlagOverride(t *testing.T) {
@@ -177,6 +178,14 @@ func TestSNMPEndpointExportsRouterMetrics(t *testing.T) {
 		vpp: fakeVPPReconciliationSource{status: sbvpp.LCPReconciliationStatus{
 			LastRun:   time.Unix(1700000000, 0),
 			PairCount: 2,
+		}, qos: sbvpp.QoSCapabilityStatus{
+			LastCheck: time.Unix(1700000500, 0),
+			Capabilities: pkgvpp.QoSCapabilities{
+				MetadataBinding:     true,
+				QueueScheduler:      true,
+				Policer:             false,
+				OperationalCounters: true,
+			},
 		}},
 	}, "test-community")
 	if err := server.ListenUDP("udp4", "127.0.0.1:0"); err != nil {
@@ -261,12 +270,18 @@ func TestSNMPEndpointExportsRouterMetrics(t *testing.T) {
 		snmpOIDEVPNL2VNIs,
 		snmpOIDEVPNL3VNIs,
 		snmpOIDEVPNMulticastVNIs,
+		snmpOIDCoSMetadata,
+		snmpOIDCoSScheduler,
+		snmpOIDCoSPolicer,
+		snmpOIDCoSCounters,
+		snmpOIDCoSCapabilityErr,
+		snmpOIDCoSCapabilityLast,
 	})
 	if err != nil {
 		t.Fatalf("SNMP Get() error = %v", err)
 	}
-	if len(packet.Variables) != 36 {
-		t.Fatalf("SNMP variables = %d, want 36", len(packet.Variables))
+	if len(packet.Variables) != 42 {
+		t.Fatalf("SNMP variables = %d, want 42", len(packet.Variables))
 	}
 	if got := snmpUintValue(t, packet.Variables[0].Value); got != 42 {
 		t.Fatalf("%s = %d, want 42", snmpOIDConfigVersion, got)
@@ -375,6 +390,24 @@ func TestSNMPEndpointExportsRouterMetrics(t *testing.T) {
 	}
 	if got := snmpUintValue(t, packet.Variables[35].Value); got != 1 {
 		t.Fatalf("%s = %d, want 1", snmpOIDEVPNMulticastVNIs, got)
+	}
+	if got := snmpUintValue(t, packet.Variables[36].Value); got != 1 {
+		t.Fatalf("%s = %d, want 1", snmpOIDCoSMetadata, got)
+	}
+	if got := snmpUintValue(t, packet.Variables[37].Value); got != 1 {
+		t.Fatalf("%s = %d, want 1", snmpOIDCoSScheduler, got)
+	}
+	if got := snmpUintValue(t, packet.Variables[38].Value); got != 0 {
+		t.Fatalf("%s = %d, want 0", snmpOIDCoSPolicer, got)
+	}
+	if got := snmpUintValue(t, packet.Variables[39].Value); got != 1 {
+		t.Fatalf("%s = %d, want 1", snmpOIDCoSCounters, got)
+	}
+	if got := snmpUintValue(t, packet.Variables[40].Value); got != 0 {
+		t.Fatalf("%s = %d, want 0", snmpOIDCoSCapabilityErr, got)
+	}
+	if got := snmpUintValue(t, packet.Variables[41].Value); got != 1700000500 {
+		t.Fatalf("%s = %d, want 1700000500", snmpOIDCoSCapabilityLast, got)
 	}
 }
 

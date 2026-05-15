@@ -286,6 +286,12 @@ arca-router custom OIDs currently use the provisional experimental base `1.3.6.1
 | `1.3.6.1.3.9950.1.41.0` | `arcaRouterOverlayEvpnL2Vnis` |
 | `1.3.6.1.3.9950.1.42.0` | `arcaRouterOverlayEvpnL3Vnis` |
 | `1.3.6.1.3.9950.1.43.0` | `arcaRouterOverlayEvpnMulticastVnis` |
+| `1.3.6.1.3.9950.1.44.0` | `arcaRouterClassOfServiceMetadataBindingSupported` |
+| `1.3.6.1.3.9950.1.45.0` | `arcaRouterClassOfServiceQueueSchedulerSupported` |
+| `1.3.6.1.3.9950.1.46.0` | `arcaRouterClassOfServicePolicerSupported` |
+| `1.3.6.1.3.9950.1.47.0` | `arcaRouterClassOfServiceCountersSupported` |
+| `1.3.6.1.3.9950.1.48.0` | `arcaRouterClassOfServiceCapabilityError` |
+| `1.3.6.1.3.9950.1.49.0` | `arcaRouterClassOfServiceCapabilityLastCheck` |
 
 Example:
 

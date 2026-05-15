@@ -67,6 +67,12 @@ const (
 	snmpOIDEVPNL2VNIs        = arcaSNMPBaseOID + ".41.0"
 	snmpOIDEVPNL3VNIs        = arcaSNMPBaseOID + ".42.0"
 	snmpOIDEVPNMulticastVNIs = arcaSNMPBaseOID + ".43.0"
+	snmpOIDCoSMetadata       = arcaSNMPBaseOID + ".44.0"
+	snmpOIDCoSScheduler      = arcaSNMPBaseOID + ".45.0"
+	snmpOIDCoSPolicer        = arcaSNMPBaseOID + ".46.0"
+	snmpOIDCoSCounters       = arcaSNMPBaseOID + ".47.0"
+	snmpOIDCoSCapabilityErr  = arcaSNMPBaseOID + ".48.0"
+	snmpOIDCoSCapabilityLast = arcaSNMPBaseOID + ".49.0"
 
 	defaultSNMPPort      = 161
 	defaultSNMPCommunity = "public"
@@ -544,6 +550,69 @@ func snmpOIDs(source metricsSource) []*snmpserver.PDUValueControlItem {
 				return snmpserver.Asn1Gauge32Wrap(uint(source.snapshot(time.Now()).OverlayEVPNMulticastVNIs)), nil
 			},
 			Document: "arcaRouterOverlayEvpnMulticastVnis",
+		},
+		{
+			OID:  snmpOIDCoSMetadata,
+			Type: gosnmp.Integer,
+			OnGet: func() (interface{}, error) {
+				if source.snapshot(time.Now()).ClassOfServiceMetadataBindingSupported {
+					return snmpserver.Asn1IntegerWrap(1), nil
+				}
+				return snmpserver.Asn1IntegerWrap(0), nil
+			},
+			Document: "arcaRouterClassOfServiceMetadataBindingSupported",
+		},
+		{
+			OID:  snmpOIDCoSScheduler,
+			Type: gosnmp.Integer,
+			OnGet: func() (interface{}, error) {
+				if source.snapshot(time.Now()).ClassOfServiceQueueSchedulerSupported {
+					return snmpserver.Asn1IntegerWrap(1), nil
+				}
+				return snmpserver.Asn1IntegerWrap(0), nil
+			},
+			Document: "arcaRouterClassOfServiceQueueSchedulerSupported",
+		},
+		{
+			OID:  snmpOIDCoSPolicer,
+			Type: gosnmp.Integer,
+			OnGet: func() (interface{}, error) {
+				if source.snapshot(time.Now()).ClassOfServicePolicerSupported {
+					return snmpserver.Asn1IntegerWrap(1), nil
+				}
+				return snmpserver.Asn1IntegerWrap(0), nil
+			},
+			Document: "arcaRouterClassOfServicePolicerSupported",
+		},
+		{
+			OID:  snmpOIDCoSCounters,
+			Type: gosnmp.Integer,
+			OnGet: func() (interface{}, error) {
+				if source.snapshot(time.Now()).ClassOfServiceCountersSupported {
+					return snmpserver.Asn1IntegerWrap(1), nil
+				}
+				return snmpserver.Asn1IntegerWrap(0), nil
+			},
+			Document: "arcaRouterClassOfServiceCountersSupported",
+		},
+		{
+			OID:  snmpOIDCoSCapabilityErr,
+			Type: gosnmp.Integer,
+			OnGet: func() (interface{}, error) {
+				if source.snapshot(time.Now()).ClassOfServiceCapabilityError != "" {
+					return snmpserver.Asn1IntegerWrap(1), nil
+				}
+				return snmpserver.Asn1IntegerWrap(0), nil
+			},
+			Document: "arcaRouterClassOfServiceCapabilityError",
+		},
+		{
+			OID:  snmpOIDCoSCapabilityLast,
+			Type: gosnmp.Gauge32,
+			OnGet: func() (interface{}, error) {
+				return snmpserver.Asn1Gauge32Wrap(uint(unixTimestampSeconds(source.snapshot(time.Now()).ClassOfServiceCapabilityLastCheck))), nil
+			},
+			Document: "arcaRouterClassOfServiceCapabilityLastCheck",
 		},
 	}
 }
