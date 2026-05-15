@@ -35,6 +35,7 @@ func TestParseCollectorConfigCatalogFilters(t *testing.T) {
 		"-include-cardinality", "single",
 		"-include-payload-schema", "arca.telemetry.system.v1",
 		"-include-encoding", "json",
+		"-exclude-path", "/routes",
 		"-exclude-cardinality", "per-route",
 		"-exclude-cardinality", "per-peer",
 		"-exclude-payload-schema", "arca.telemetry.bfd.v1",
@@ -63,6 +64,9 @@ func TestParseCollectorConfigCatalogFilters(t *testing.T) {
 	if len(cfg.includedEncoding) != 1 || cfg.includedEncoding[0] != "json" {
 		t.Fatalf("included encodings = %#v, want json", cfg.includedEncoding)
 	}
+	if len(cfg.excludedPath) != 1 || cfg.excludedPath[0] != "/routes" {
+		t.Fatalf("excluded paths = %#v, want /routes", cfg.excludedPath)
+	}
 	if len(cfg.excludedCard) != 2 || cfg.excludedCard[0] != "per-route" || cfg.excludedCard[1] != "per-peer" {
 		t.Fatalf("excluded cardinalities = %#v, want per-route and per-peer", cfg.excludedCard)
 	}
@@ -85,6 +89,7 @@ func TestParseCollectorConfigIncludeFiltersUseCatalogPaths(t *testing.T) {
 
 func TestParseCollectorConfigExcludeFiltersKeepDefaultPaths(t *testing.T) {
 	cfg, err := parseCollectorConfig([]string{
+		"-exclude-path", "/routes",
 		"-exclude-cardinality", "per-route",
 	})
 	if err != nil {
@@ -177,7 +182,7 @@ func TestFetchNMSDiscoversAndFiltersSnapshotPaths(t *testing.T) {
 				`{"path":"/system","cardinality":"single","payload_schema":"arca.telemetry.system.v1"},` +
 				`{"path":"/interfaces","cardinality":"per-interface","payload_schema":"arca.telemetry.interfaces.v1"},` +
 				`{"path":"/routes","cardinality":"per-route","payload_schema":"arca.telemetry.routes.v1"},` +
-				`{"path":"/overlays/evpn","cardinality":"per-vni","payload_schema":"arca.telemetry.overlays.evpn.v1"},` +
+				`{"path":"/overlays/evpn","cardinality":"per-vni","payload_schema":"arca.telemetry.overlays.evpn.v1","aliases":["/evpn"]},` +
 				`{"path":"/bfd","cardinality":"per-peer","payload_schema":"arca.telemetry.bfd.v1"}` +
 				`]}`))
 		case "/api/nms/v1/telemetry/snapshot":
@@ -192,6 +197,7 @@ func TestFetchNMSDiscoversAndFiltersSnapshotPaths(t *testing.T) {
 	cfg, err := parseCollectorConfig([]string{
 		"-base-url", server.URL,
 		"-discover-paths",
+		"-exclude-path", "evpn",
 		"-exclude-cardinality", "per-route",
 		"-exclude-payload-schema", "arca.telemetry.bfd.v1",
 	})
@@ -206,7 +212,7 @@ func TestFetchNMSDiscoversAndFiltersSnapshotPaths(t *testing.T) {
 		t.Fatalf("fetchNMS() body is invalid JSON: %s", string(body))
 	}
 	gotPaths := snapshotQuery["path"]
-	wantPaths := []string{"/system", "/interfaces", "/overlays/evpn"}
+	wantPaths := []string{"/system", "/interfaces"}
 	if strings.Join(gotPaths, ",") != strings.Join(wantPaths, ",") {
 		t.Fatalf("snapshot paths = %#v, want %#v", gotPaths, wantPaths)
 	}
@@ -284,6 +290,22 @@ func TestFilterSnapshotPathsByCardinality(t *testing.T) {
 	)
 	if len(got) != 1 || got[0] != "/system" {
 		t.Fatalf("filterSnapshotPathsByCardinality() = %#v, want only /system", got)
+	}
+}
+
+func TestFilterSnapshotPathsByPath(t *testing.T) {
+	catalog := telemetryCatalogResponse{Paths: []telemetryCatalogPath{
+		{Path: "/system"},
+		{Path: "/routes", Aliases: []string{"/route-table"}},
+		{Path: "/overlays/evpn", Aliases: []string{"/evpn"}},
+	}}
+	got := filterSnapshotPathsByPath(
+		repeatedPathFlag{"/system", "/routes", "/overlays/evpn"},
+		catalog,
+		repeatedPathFlag{"route-table", "/evpn"},
+	)
+	if len(got) != 1 || got[0] != "/system" {
+		t.Fatalf("filterSnapshotPathsByPath() = %#v, want only /system", got)
 	}
 }
 
