@@ -2,6 +2,7 @@
 
 ## v0.9.x - NETCONF/YANG and Operational Safety (current)
 
+- **CLI route impact summaries**: commit impact previews now list representative static route prefixes and next-hops, including routing-instance scoped routes, before commit
 - **CLI failed commit diagnostics**: failed `commit` operations now print the candidate impact summary and keep the original failure while reporting diagnostics collection errors separately
 - **CLI disruptive change warnings**: commit impact previews now flag BGP, OSPF, BFD, EVPN, routing-instance, and class-of-service changes before commit
 - **CLI change impact preview**: `commit check` now validates the candidate and prints a pre-commit impact summary for changed lines, static routes, policy-options updates, and disruptive routing warnings
