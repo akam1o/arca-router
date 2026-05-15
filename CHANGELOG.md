@@ -2,6 +2,7 @@
 
 ## v0.8.x - Overlay and Streaming Telemetry (current)
 
+- **Telemetry payload schema hints**: gRPC, NMS, and CLI telemetry catalogs now advertise stable per-path payload schema IDs so collectors can route and validate path-specific JSON payloads before subscribing
 - **Telemetry path alias hints**: gRPC, NMS, and CLI telemetry catalogs now advertise accepted path aliases such as `/evpn`, `/running`, and `/cos` alongside canonical paths
 - **Telemetry CLI live catalog**: `arca show telemetry paths live` now queries `TelemetryService.GetTelemetryCatalog` so operators can compare the connected daemon's telemetry catalog with the local CLI catalog
 - **gRPC telemetry catalog**: `TelemetryService.GetTelemetryCatalog` now exposes supported telemetry paths, default paths, cardinality hints, event schema version, and encoding to gRPC collectors

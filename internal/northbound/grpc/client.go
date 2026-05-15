@@ -538,11 +538,12 @@ func (c *Client) GetTelemetryCatalog(ctx context.Context) (TelemetryCatalog, err
 	}
 	for _, path := range resp.GetPaths() {
 		catalog.Paths = append(catalog.Paths, TelemetryPathInfo{
-			Path:        path.GetPath(),
-			Description: path.GetDescription(),
-			Cardinality: path.GetCardinality(),
-			Aliases:     append([]string(nil), path.GetAliases()...),
-			Default:     path.GetDefault(),
+			Path:          path.GetPath(),
+			Description:   path.GetDescription(),
+			Cardinality:   path.GetCardinality(),
+			PayloadSchema: path.GetPayloadSchema(),
+			Aliases:       append([]string(nil), path.GetAliases()...),
+			Default:       path.GetDefault(),
 		})
 	}
 	return catalog, nil

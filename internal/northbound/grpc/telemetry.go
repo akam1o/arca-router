@@ -66,6 +66,21 @@ var (
 		"/lcp":                     "single",
 		"/ha":                      "single",
 	}
+	telemetryPathPayloadSchemas = map[string]string{
+		"/system":                  "arca.telemetry.system.v1",
+		"/config/running":          "arca.telemetry.config.running.v1",
+		"/interfaces":              "arca.telemetry.interfaces.v1",
+		"/routes":                  "arca.telemetry.routes.v1",
+		"/routing/bgp/neighbors":   "arca.telemetry.routing.bgp.neighbors.v1",
+		"/routing/ospf/neighbors":  "arca.telemetry.routing.ospf.neighbors.v1",
+		"/routing/ospf3/neighbors": "arca.telemetry.routing.ospf3.neighbors.v1",
+		"/routing-instances":       "arca.telemetry.routing.instances.v1",
+		"/overlays/evpn":           "arca.telemetry.overlays.evpn.v1",
+		"/class-of-service":        "arca.telemetry.class_of_service.v1",
+		"/bfd":                     "arca.telemetry.bfd.v1",
+		"/lcp":                     "arca.telemetry.lcp.v1",
+		"/ha":                      "arca.telemetry.ha.v1",
+	}
 	telemetryPathAliases = map[string][]string{
 		"/config/running":          {"/running", "/config"},
 		"/routing/bgp/neighbors":   {"/bgp", "/bgp/neighbors"},
@@ -79,11 +94,12 @@ var (
 
 // TelemetryPathInfo describes a supported structured telemetry path.
 type TelemetryPathInfo struct {
-	Path        string
-	Description string
-	Cardinality string
-	Aliases     []string
-	Default     bool
+	Path          string
+	Description   string
+	Cardinality   string
+	PayloadSchema string
+	Aliases       []string
+	Default       bool
 }
 
 // TelemetryCatalog describes the structured telemetry stream inputs.
@@ -133,11 +149,12 @@ func TelemetryPathCatalog() []TelemetryPathInfo {
 	for _, path := range telemetryPathOrder {
 		_, isDefault := defaults[path]
 		catalog = append(catalog, TelemetryPathInfo{
-			Path:        path,
-			Description: telemetryPathDescriptions[path],
-			Cardinality: telemetryPathCardinality[path],
-			Aliases:     append([]string(nil), telemetryPathAliases[path]...),
-			Default:     isDefault,
+			Path:          path,
+			Description:   telemetryPathDescriptions[path],
+			Cardinality:   telemetryPathCardinality[path],
+			PayloadSchema: telemetryPathPayloadSchemas[path],
+			Aliases:       append([]string(nil), telemetryPathAliases[path]...),
+			Default:       isDefault,
 		})
 	}
 	return catalog

@@ -308,8 +308,8 @@ func TestNMSTelemetryCatalogEndpoint(t *testing.T) {
 		t.Fatal("Paths is empty, want telemetry path catalog")
 	}
 	if resp.Paths[0].Path != "/system" || !resp.Paths[0].Default || resp.Paths[0].Description == "" ||
-		resp.Paths[0].Cardinality != "single" {
-		t.Fatalf("Paths[0] = %#v, want default system path with description and single cardinality", resp.Paths[0])
+		resp.Paths[0].Cardinality != "single" || resp.Paths[0].PayloadSchema != "arca.telemetry.system.v1" {
+		t.Fatalf("Paths[0] = %#v, want default system path with description, single cardinality, and payload schema", resp.Paths[0])
 	}
 	var routesPath, evpnPath nmsTelemetryPath
 	for _, path := range resp.Paths {
@@ -322,6 +322,9 @@ func TestNMSTelemetryCatalogEndpoint(t *testing.T) {
 	}
 	if routesPath.Cardinality != "per-route" {
 		t.Fatalf("/routes cardinality = %q, want per-route", routesPath.Cardinality)
+	}
+	if routesPath.PayloadSchema != "arca.telemetry.routes.v1" {
+		t.Fatalf("/routes payload schema = %q, want arca.telemetry.routes.v1", routesPath.PayloadSchema)
 	}
 	if len(evpnPath.Aliases) != 2 || evpnPath.Aliases[0] != "/evpn" || evpnPath.Aliases[1] != "/overlay/evpn" {
 		t.Fatalf("/overlays/evpn aliases = %#v, want EVPN aliases", evpnPath.Aliases)

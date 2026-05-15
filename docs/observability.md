@@ -101,7 +101,7 @@ observability/grafana/arca-routerd-dashboard.json
 
 ## gRPC Telemetry Stream
 
-The internal Unix socket gRPC API exposes `TelemetryService.GetTelemetryCatalog` for stream discovery and `TelemetryService.SubscribeTelemetry` for local collectors and NMS sidecars. The catalog returns the event schema version, payload encoding, default paths, supported paths, descriptions, cardinality hints, accepted aliases, and default membership. Events use the `arca.telemetry.v1` schema envelope with `sequence`, `timestamp`, `path`, `event_type`, `encoding`, `json_payload`, and `payload_bytes` fields. Payloads are encoded as JSON.
+The internal Unix socket gRPC API exposes `TelemetryService.GetTelemetryCatalog` for stream discovery and `TelemetryService.SubscribeTelemetry` for local collectors and NMS sidecars. The catalog returns the event schema version, payload encoding, default paths, supported paths, descriptions, cardinality hints, per-path payload schema IDs, accepted aliases, and default membership. Events use the `arca.telemetry.v1` schema envelope with `sequence`, `timestamp`, `path`, `event_type`, `encoding`, `json_payload`, and `payload_bytes` fields. Payloads are encoded as JSON.
 
 Supported paths:
 
@@ -132,7 +132,7 @@ arca show telemetry path /overlays/evpn
 arca show evpn
 ```
 
-`arca show telemetry paths` prints the same local path catalog used by the stream implementation, including cardinality hints, default membership, and descriptions, without requiring a daemon connection. `arca show telemetry paths live` queries `TelemetryService.GetTelemetryCatalog` from the connected daemon.
+`arca show telemetry paths` prints the same local path catalog used by the stream implementation, including cardinality hints, payload schema IDs, default membership, and descriptions, without requiring a daemon connection. `arca show telemetry paths live` queries `TelemetryService.GetTelemetryCatalog` from the connected daemon.
 
 ## Web UI
 

@@ -506,6 +506,7 @@ message TelemetryPath {
   string cardinality = 3;
   bool default = 4;
   repeated string aliases = 5;
+  string payload_schema = 6;
 }
 
 message SubscribeTelemetryRequest {

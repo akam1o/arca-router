@@ -986,7 +986,7 @@ func TestOneShotShowTelemetryPathsLiveUsesCatalogRPC(t *testing.T) {
 		Encoding:           "json",
 		DefaultPaths:       []string{"/system"},
 		Paths: []grpcclient.TelemetryPathInfo{
-			{Path: "/system", Description: "system", Cardinality: "single", Default: true},
+			{Path: "/system", Description: "system", Cardinality: "single", PayloadSchema: "arca.telemetry.system.v1", Default: true},
 		},
 	}}
 	code := oneShotShow(context.Background(), client, []string{"telemetry", "paths", "live"}, &cliFlags{})

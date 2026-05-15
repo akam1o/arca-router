@@ -235,6 +235,11 @@ func TestClientServerConfigFlow(t *testing.T) {
 	if len(catalog.Paths) != len(telemetryPathOrder) || catalog.Paths[0].Path != "/system" {
 		t.Fatalf("telemetry catalog paths = %#v, want canonical path catalog", catalog.Paths)
 	}
+	if catalog.Paths[0].PayloadSchema != "arca.telemetry.system.v1" ||
+		catalog.Paths[1].PayloadSchema != "arca.telemetry.config.running.v1" {
+		t.Fatalf("telemetry catalog payload schemas = %q/%q, want system/config schema hints",
+			catalog.Paths[0].PayloadSchema, catalog.Paths[1].PayloadSchema)
+	}
 	if len(catalog.Paths[1].Aliases) != 2 || catalog.Paths[1].Aliases[0] != "/running" {
 		t.Fatalf("telemetry catalog aliases for config/running = %#v, want running aliases", catalog.Paths[1].Aliases)
 	}
@@ -378,6 +383,9 @@ func TestTelemetryPathCatalog(t *testing.T) {
 		if info.Cardinality == "" {
 			t.Fatalf("catalog[%d].Cardinality is empty for %s", i, info.Path)
 		}
+		if info.PayloadSchema == "" {
+			t.Fatalf("catalog[%d].PayloadSchema is empty for %s", i, info.Path)
+		}
 		for _, alias := range info.Aliases {
 			if got := normalizeTelemetryPath(alias); got != info.Path {
 				t.Fatalf("alias %q normalizes to %q, want %q", alias, got, info.Path)
@@ -388,14 +396,21 @@ func TestTelemetryPathCatalog(t *testing.T) {
 		}
 	}
 	cardinality := map[string]string{}
+	payloadSchemas := map[string]string{}
 	aliases := map[string][]string{}
 	for _, info := range catalog {
 		cardinality[info.Path] = info.Cardinality
+		payloadSchemas[info.Path] = info.PayloadSchema
 		aliases[info.Path] = info.Aliases
 	}
 	if cardinality["/routes"] != "per-route" || cardinality["/overlays/evpn"] != "per-vni" ||
 		cardinality["/interfaces"] != "per-interface" {
 		t.Fatalf("cardinality hints = %#v, want route/evpn/interface hints", cardinality)
+	}
+	if payloadSchemas["/routes"] != "arca.telemetry.routes.v1" ||
+		payloadSchemas["/overlays/evpn"] != "arca.telemetry.overlays.evpn.v1" ||
+		payloadSchemas["/class-of-service"] != "arca.telemetry.class_of_service.v1" {
+		t.Fatalf("payload schema hints = %#v, want stable route/evpn/CoS schema hints", payloadSchemas)
 	}
 	if len(aliases["/overlays/evpn"]) != 2 || aliases["/overlays/evpn"][0] != "/evpn" ||
 		len(aliases["/class-of-service"]) != 1 || aliases["/class-of-service"][0] != "/cos" {

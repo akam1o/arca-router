@@ -1932,14 +1932,15 @@ func printTelemetryPathCatalog(catalog []grpcclient.TelemetryPathInfo) {
 		fmt.Println("No telemetry paths found")
 		return
 	}
-	fmt.Printf("%-28s %-18s %-8s %-28s %s\n", "Path", "Cardinality", "Default", "Aliases", "Description")
-	fmt.Println(strings.Repeat("-", 125))
+	fmt.Printf("%-28s %-18s %-8s %-28s %-42s %s\n", "Path", "Cardinality", "Default", "Aliases", "Payload schema", "Description")
+	fmt.Println(strings.Repeat("-", 168))
 	for _, info := range catalog {
-		fmt.Printf("%-28s %-18s %-8s %-28s %s\n",
+		fmt.Printf("%-28s %-18s %-8s %-28s %-42s %s\n",
 			formatTelemetryCatalogValue(info.Path),
 			formatTelemetryCatalogValue(info.Cardinality),
 			yesNo(info.Default),
 			formatTelemetryCatalogList(info.Aliases),
+			formatTelemetryCatalogValue(info.PayloadSchema),
 			formatTelemetryCatalogValue(info.Description),
 		)
 	}

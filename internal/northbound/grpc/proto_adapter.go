@@ -483,11 +483,12 @@ func telemetryCatalogToProto(catalog TelemetryCatalog) *apiv1.GetTelemetryCatalo
 	}
 	for _, info := range catalog.Paths {
 		resp.Paths = append(resp.Paths, &apiv1.TelemetryPath{
-			Path:        info.Path,
-			Description: info.Description,
-			Cardinality: info.Cardinality,
-			Aliases:     append([]string(nil), info.Aliases...),
-			Default:     info.Default,
+			Path:          info.Path,
+			Description:   info.Description,
+			Cardinality:   info.Cardinality,
+			PayloadSchema: info.PayloadSchema,
+			Aliases:       append([]string(nil), info.Aliases...),
+			Default:       info.Default,
 		})
 	}
 	return resp
