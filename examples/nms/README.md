@@ -7,7 +7,7 @@ This directory contains minimal HTTP-only collector examples for the schema-vers
 `http_telemetry_collector.go` uses only the Go standard library. It can query the operational status envelope, telemetry path catalog, or one-shot telemetry snapshot endpoint.
 
 ```bash
-# Discover supported telemetry paths and cardinality hints.
+# Discover supported telemetry paths, cardinality hints, and payload schema IDs.
 go run ./examples/nms -mode catalog -base-url http://127.0.0.1:8080 -user monitor -password ReadOnly789
 
 # Read the stable operational status envelope.
@@ -31,6 +31,17 @@ go run ./examples/nms \
   -password ReadOnly789 \
   -discover-paths \
   -exclude-cardinality per-route \
+  -timeout 5s \
+  -max-payload-bytes 8388608
+
+# Discover all paths from the catalog, but skip selected payload schemas.
+go run ./examples/nms \
+  -base-url http://127.0.0.1:8080 \
+  -user monitor \
+  -password ReadOnly789 \
+  -discover-paths \
+  -exclude-payload-schema arca.telemetry.routes.v1 \
+  -exclude-payload-schema arca.telemetry.bfd.v1 \
   -timeout 5s \
   -max-payload-bytes 8388608
 ```

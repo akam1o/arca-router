@@ -32,6 +32,7 @@ func TestParseCollectorConfigCardinalityFilters(t *testing.T) {
 		"-discover-paths",
 		"-exclude-cardinality", "per-route",
 		"-exclude-cardinality", "per-peer",
+		"-exclude-payload-schema", "arca.telemetry.bfd.v1",
 	})
 	if err != nil {
 		t.Fatalf("parseCollectorConfig() error = %v", err)
@@ -44,6 +45,9 @@ func TestParseCollectorConfigCardinalityFilters(t *testing.T) {
 	}
 	if len(cfg.excludedCard) != 2 || cfg.excludedCard[0] != "per-route" || cfg.excludedCard[1] != "per-peer" {
 		t.Fatalf("excluded cardinalities = %#v, want per-route and per-peer", cfg.excludedCard)
+	}
+	if len(cfg.excludedSchema) != 1 || cfg.excludedSchema[0] != "arca.telemetry.bfd.v1" {
+		t.Fatalf("excluded schemas = %#v, want BFD payload schema", cfg.excludedSchema)
 	}
 }
 
@@ -83,10 +87,11 @@ func TestFetchNMSDiscoversAndFiltersSnapshotPaths(t *testing.T) {
 		switch r.URL.Path {
 		case "/api/nms/v1/telemetry/paths":
 			_, _ = w.Write([]byte(`{"paths":[` +
-				`{"path":"/system","cardinality":"single"},` +
-				`{"path":"/interfaces","cardinality":"per-interface"},` +
-				`{"path":"/routes","cardinality":"per-route"},` +
-				`{"path":"/overlays/evpn","cardinality":"per-vni"}` +
+				`{"path":"/system","cardinality":"single","payload_schema":"arca.telemetry.system.v1"},` +
+				`{"path":"/interfaces","cardinality":"per-interface","payload_schema":"arca.telemetry.interfaces.v1"},` +
+				`{"path":"/routes","cardinality":"per-route","payload_schema":"arca.telemetry.routes.v1"},` +
+				`{"path":"/overlays/evpn","cardinality":"per-vni","payload_schema":"arca.telemetry.overlays.evpn.v1"},` +
+				`{"path":"/bfd","cardinality":"per-peer","payload_schema":"arca.telemetry.bfd.v1"}` +
 				`]}`))
 		case "/api/nms/v1/telemetry/snapshot":
 			snapshotQuery = r.URL.Query()
@@ -101,6 +106,7 @@ func TestFetchNMSDiscoversAndFiltersSnapshotPaths(t *testing.T) {
 		"-base-url", server.URL,
 		"-discover-paths",
 		"-exclude-cardinality", "per-route",
+		"-exclude-payload-schema", "arca.telemetry.bfd.v1",
 	})
 	if err != nil {
 		t.Fatalf("parseCollectorConfig() error = %v", err)
@@ -135,9 +141,25 @@ func TestFilterSnapshotPathsByCardinality(t *testing.T) {
 	}
 }
 
+func TestFilterSnapshotPathsByPayloadSchema(t *testing.T) {
+	catalog := telemetryCatalogResponse{Paths: []telemetryCatalogPath{
+		{Path: "/system", PayloadSchema: "arca.telemetry.system.v1"},
+		{Path: "/routes", PayloadSchema: "arca.telemetry.routes.v1"},
+		{Path: "/bfd", PayloadSchema: "arca.telemetry.bfd.v1"},
+	}}
+	got := filterSnapshotPathsByPayloadSchema(
+		repeatedPathFlag{"/system", "/routes", "/bfd"},
+		catalog,
+		repeatedStringFlag{"arca.telemetry.routes.v1", "ARCA.TELEMETRY.BFD.V1"},
+	)
+	if len(got) != 1 || got[0] != "/system" {
+		t.Fatalf("filterSnapshotPathsByPayloadSchema() = %#v, want only /system", got)
+	}
+}
+
 func TestResolveSnapshotPathsRejectsEmptyFilteredSet(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		_, _ = w.Write([]byte(`{"paths":[{"path":"/routes","cardinality":"per-route"}]}`))
+		_, _ = w.Write([]byte(`{"paths":[{"path":"/routes","cardinality":"per-route","payload_schema":"arca.telemetry.routes.v1"}]}`))
 	}))
 	defer server.Close()
 
