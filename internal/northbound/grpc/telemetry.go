@@ -115,6 +115,7 @@ type TelemetryCatalogFilter struct {
 	Paths          []string
 	Cardinalities  []string
 	PayloadSchemas []string
+	Encodings      []string
 	DefaultOnly    bool
 }
 
@@ -153,6 +154,10 @@ func NewTelemetryCatalog() TelemetryCatalog {
 // NewFilteredTelemetryCatalog returns the supported telemetry catalog with path filters applied.
 func NewFilteredTelemetryCatalog(filter TelemetryCatalogFilter) TelemetryCatalog {
 	catalog := NewTelemetryCatalog()
+	if !telemetryCatalogEncodingMatches(catalog.Encoding, filter.Encodings) {
+		catalog.Paths = nil
+		return catalog
+	}
 	catalog.Paths = filterTelemetryPathCatalog(catalog.Paths, filter)
 	return catalog
 }
@@ -242,6 +247,15 @@ func normalizedTelemetryCatalogFilterSet(values []string) map[string]struct{} {
 
 func normalizedTelemetryCatalogFilterValue(value string) string {
 	return strings.ToLower(strings.TrimSpace(value))
+}
+
+func telemetryCatalogEncodingMatches(encoding string, filters []string) bool {
+	encodings := normalizedTelemetryCatalogFilterSet(filters)
+	if len(encodings) == 0 {
+		return true
+	}
+	_, ok := encodings[normalizedTelemetryCatalogFilterValue(encoding)]
+	return ok
 }
 
 type telemetryErrorPayload struct {

@@ -503,6 +503,9 @@ message GetTelemetryCatalogRequest {
 
   // When true, return only paths that are part of the default subscription set.
   bool default_only = 4;
+
+  // Optional payload encoding filters, such as "json".
+  repeated string encoding = 5;
 }
 
 message GetTelemetryCatalogResponse {

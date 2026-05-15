@@ -549,6 +549,7 @@ func (c *Client) GetTelemetryCatalogWithFilter(ctx context.Context, filter Telem
 		Path:          append([]string(nil), filter.Paths...),
 		Cardinality:   append([]string(nil), filter.Cardinalities...),
 		PayloadSchema: append([]string(nil), filter.PayloadSchemas...),
+		Encoding:      append([]string(nil), filter.Encodings...),
 		DefaultOnly:   filter.DefaultOnly,
 	})
 	if err != nil {

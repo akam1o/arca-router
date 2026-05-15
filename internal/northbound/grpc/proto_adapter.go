@@ -470,6 +470,7 @@ func (a *telemetryServiceAdapter) GetTelemetryCatalog(_ context.Context, req *ap
 			Paths:          append([]string(nil), req.GetPath()...),
 			Cardinalities:  append([]string(nil), req.GetCardinality()...),
 			PayloadSchemas: append([]string(nil), req.GetPayloadSchema()...),
+			Encodings:      append([]string(nil), req.GetEncoding()...),
 			DefaultOnly:    req.GetDefaultOnly(),
 		}
 	}

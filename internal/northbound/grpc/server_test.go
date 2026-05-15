@@ -253,6 +253,25 @@ func TestClientServerConfigFlow(t *testing.T) {
 	if len(filteredCatalog.DefaultPaths) != len(defaultTelemetryPaths) {
 		t.Fatalf("filtered telemetry catalog default paths = %#v, want unfiltered defaults", filteredCatalog.DefaultPaths)
 	}
+	filteredCatalog, err = client.GetTelemetryCatalogWithFilter(ctx, TelemetryCatalogFilter{
+		Paths:     []string{"/routes"},
+		Encodings: []string{"JSON"},
+	})
+	if err != nil {
+		t.Fatalf("GetTelemetryCatalogWithFilter(encoding) error = %v", err)
+	}
+	if len(filteredCatalog.Paths) != 1 || filteredCatalog.Paths[0].Path != "/routes" {
+		t.Fatalf("encoding-filtered telemetry catalog paths = %#v, want only /routes", filteredCatalog.Paths)
+	}
+	filteredCatalog, err = client.GetTelemetryCatalogWithFilter(ctx, TelemetryCatalogFilter{
+		Encodings: []string{"protobuf"},
+	})
+	if err != nil {
+		t.Fatalf("GetTelemetryCatalogWithFilter(unsupported encoding) error = %v", err)
+	}
+	if len(filteredCatalog.Paths) != 0 {
+		t.Fatalf("unsupported encoding telemetry catalog paths = %#v, want none", filteredCatalog.Paths)
+	}
 
 	stream, err := client.SubscribeTelemetry(ctx, []string{"/config/running"}, time.Second, true)
 	if err != nil {
@@ -463,6 +482,18 @@ func TestTelemetryPathCatalog(t *testing.T) {
 	})
 	if len(filtered.Paths) != len(defaultTelemetryPaths) || filtered.Paths[0].Path != "/system" || filtered.Paths[1].Path != "/config/running" {
 		t.Fatalf("NewFilteredTelemetryCatalog(default only) paths = %#v, want default paths", filtered.Paths)
+	}
+	filtered = NewFilteredTelemetryCatalog(TelemetryCatalogFilter{
+		Encodings: []string{" JSON "},
+	})
+	if len(filtered.Paths) != len(telemetryPathOrder) {
+		t.Fatalf("NewFilteredTelemetryCatalog(encoding) paths = %#v, want full path catalog", filtered.Paths)
+	}
+	filtered = NewFilteredTelemetryCatalog(TelemetryCatalogFilter{
+		Encodings: []string{"protobuf"},
+	})
+	if len(filtered.Paths) != 0 {
+		t.Fatalf("NewFilteredTelemetryCatalog(unsupported encoding) paths = %#v, want none", filtered.Paths)
 	}
 }
 
