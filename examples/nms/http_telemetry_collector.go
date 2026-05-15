@@ -622,7 +622,11 @@ func validateNMSStatusSections(object map[string]json.RawMessage) error {
 	if err := validateNMSStatusBoolFields(classOfService, "class_of_service", "configured", "intent_only"); err != nil {
 		return err
 	}
-	if err := validateNMSStatusStringFieldPath(classOfService, "enforcement_status", "class_of_service.enforcement_status"); err != nil {
+	enforcementStatus, err := nmsStatusStringFieldValuePath(classOfService, "enforcement_status", "class_of_service.enforcement_status")
+	if err != nil {
+		return err
+	}
+	if err := validateNMSStatusCoSEnforcementStatus(enforcementStatus); err != nil {
 		return err
 	}
 	if err := validateNMSStatusIntFields(classOfService, "class_of_service", "forwarding_classes", "traffic_control_profiles", "interface_bindings"); err != nil {
@@ -749,18 +753,23 @@ func validateNMSStatusStringField(object map[string]json.RawMessage, field strin
 }
 
 func validateNMSStatusStringFieldPath(object map[string]json.RawMessage, field, path string) error {
+	_, err := nmsStatusStringFieldValuePath(object, field, path)
+	return err
+}
+
+func nmsStatusStringFieldValuePath(object map[string]json.RawMessage, field, path string) (string, error) {
 	raw, ok := object[field]
 	if !ok {
-		return fmt.Errorf("nms status data %s is missing", path)
+		return "", fmt.Errorf("nms status data %s is missing", path)
 	}
 	var value *string
 	if err := json.Unmarshal(raw, &value); err != nil || value == nil {
 		if err != nil {
-			return fmt.Errorf("nms status data %s must be a string: %w", path, err)
+			return "", fmt.Errorf("nms status data %s must be a string: %w", path, err)
 		}
-		return fmt.Errorf("nms status data %s must be a string", path)
+		return "", fmt.Errorf("nms status data %s must be a string", path)
 	}
-	return nil
+	return *value, nil
 }
 
 func validateNMSStatusFloatField(object map[string]json.RawMessage, field string) error {
@@ -972,13 +981,19 @@ func validateNMSStatusVRRPGroup(index int, group map[string]json.RawMessage) err
 	if err := validateNMSStatusStringFieldOptional(group, "virtual_address", nmsStatusDataPath(path, "virtual_address")); err != nil {
 		return err
 	}
-	if err := validateNMSStatusStringFieldPath(group, "state", nmsStatusDataPath(path, "state")); err != nil {
+	state, err := nmsStatusStringFieldValuePath(group, "state", nmsStatusDataPath(path, "state"))
+	if err != nil {
 		return err
 	}
-	if err := validateNMSStatusBoolFields(group, path, "observed", "active"); err != nil {
+	observed, err := nmsStatusBoolFieldValuePath(group, "observed", nmsStatusDataPath(path, "observed"))
+	if err != nil {
 		return err
 	}
-	return nil
+	active, err := nmsStatusBoolFieldValuePath(group, "active", nmsStatusDataPath(path, "active"))
+	if err != nil {
+		return err
+	}
+	return validateNMSStatusVRRPGroupState(path, state, observed, active)
 }
 
 func validateNMSStatusBFDPeer(index int, peer map[string]json.RawMessage) error {
@@ -991,14 +1006,87 @@ func validateNMSStatusBFDPeer(index int, peer map[string]json.RawMessage) error 
 			return err
 		}
 	}
-	if err := validateNMSStatusStringFieldPath(peer, "status", nmsStatusDataPath(path, "status")); err != nil {
+	status, err := nmsStatusStringFieldValuePath(peer, "status", nmsStatusDataPath(path, "status"))
+	if err != nil {
 		return err
 	}
-	if err := validateNMSStatusBoolFields(peer, path, "observed", "up"); err != nil {
+	observed, err := nmsStatusBoolFieldValuePath(peer, "observed", nmsStatusDataPath(path, "observed"))
+	if err != nil {
+		return err
+	}
+	up, err := nmsStatusBoolFieldValuePath(peer, "up", nmsStatusDataPath(path, "up"))
+	if err != nil {
+		return err
+	}
+	if err := validateNMSStatusBFDPeerStatus(path, status, observed, up); err != nil {
 		return err
 	}
 	if err := validateNMSStatusIntFields(peer, path, "session_down_events", "rx_fail_packets"); err != nil {
 		return err
+	}
+	return nil
+}
+
+func validateNMSStatusCoSEnforcementStatus(status string) error {
+	switch strings.TrimSpace(status) {
+	case "not configured", "intent-only":
+		return nil
+	default:
+		return fmt.Errorf("nms status data class_of_service.enforcement_status = %q, want not configured or intent-only", status)
+	}
+}
+
+func validateNMSStatusVRRPGroupState(path, state string, observed, active bool) error {
+	normalized := strings.ToLower(strings.TrimSpace(state))
+	statePath := nmsStatusDataPath(path, "state")
+	if normalized == "" {
+		return fmt.Errorf("nms status data %s must be non-empty", statePath)
+	}
+	if !observed {
+		if active {
+			return fmt.Errorf("nms status data %s must be false when %s is false", nmsStatusDataPath(path, "active"), nmsStatusDataPath(path, "observed"))
+		}
+		if normalized != "missing" {
+			return fmt.Errorf("nms status data %s = %q, want missing when %s is false", statePath, state, nmsStatusDataPath(path, "observed"))
+		}
+		return nil
+	}
+	if normalized == "missing" {
+		return fmt.Errorf("nms status data %s = %q, want observed VRRP state", statePath, state)
+	}
+	activeState := normalized == "master" || normalized == "backup"
+	if active && !activeState {
+		return fmt.Errorf("nms status data %s = %q, want Master or Backup when %s is true", statePath, state, nmsStatusDataPath(path, "active"))
+	}
+	if !active && activeState {
+		return fmt.Errorf("nms status data %s must be true when %s is %q", nmsStatusDataPath(path, "active"), statePath, state)
+	}
+	return nil
+}
+
+func validateNMSStatusBFDPeerStatus(path, status string, observed, up bool) error {
+	normalized := strings.ToLower(strings.TrimSpace(status))
+	statusPath := nmsStatusDataPath(path, "status")
+	if normalized == "" {
+		return fmt.Errorf("nms status data %s must be non-empty", statusPath)
+	}
+	if !observed {
+		if up {
+			return fmt.Errorf("nms status data %s must be false when %s is false", nmsStatusDataPath(path, "up"), nmsStatusDataPath(path, "observed"))
+		}
+		if normalized != "missing" {
+			return fmt.Errorf("nms status data %s = %q, want missing when %s is false", statusPath, status, nmsStatusDataPath(path, "observed"))
+		}
+		return nil
+	}
+	if normalized == "missing" {
+		return fmt.Errorf("nms status data %s = %q, want observed BFD status", statusPath, status)
+	}
+	if up && normalized != "up" {
+		return fmt.Errorf("nms status data %s = %q, want up when %s is true", statusPath, status, nmsStatusDataPath(path, "up"))
+	}
+	if !up && normalized == "up" {
+		return fmt.Errorf("nms status data %s must be true when %s is %q", nmsStatusDataPath(path, "up"), statusPath, status)
 	}
 	return nil
 }

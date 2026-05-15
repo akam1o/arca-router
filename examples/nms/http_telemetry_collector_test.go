@@ -173,7 +173,7 @@ func TestDecodeStatusResponseRejectsInvalidEnvelope(t *testing.T) {
 			"ha":      map[string]any{"configured": false, "converged": false, "vrrp_groups": 0, "issue_count": 1, "issues": []string{"cluster disabled"}},
 			"class_of_service": map[string]any{
 				"configured":               false,
-				"enforcement_status":       "not-configured",
+				"enforcement_status":       "not configured",
 				"forwarding_classes":       0,
 				"traffic_control_profiles": 0,
 				"interface_bindings":       0,
@@ -360,6 +360,31 @@ func TestDecodeStatusResponseRejectsInvalidEnvelope(t *testing.T) {
 	err = decodeStatusResponse(statusEnvelope(data))
 	if err == nil || !strings.Contains(err.Error(), "vpp.lcp.inconsistencies") {
 		t.Fatalf("decodeStatusResponse() error = %v, want vpp.lcp.inconsistencies mismatch", err)
+	}
+	data = validStatusData()
+	data["class_of_service"].(map[string]any)["enforcement_status"] = "enforced"
+	err = decodeStatusResponse(statusEnvelope(data))
+	if err == nil || !strings.Contains(err.Error(), "class_of_service.enforcement_status") {
+		t.Fatalf("decodeStatusResponse() error = %v, want class_of_service.enforcement_status mismatch", err)
+	}
+	data = validStatusData()
+	data["frr"].(map[string]any)["vrrp"].(map[string]any)["groups"] = []any{map[string]any{"interface": "ge-0/0/0", "id": 10, "state": "Idle", "observed": true, "active": true}}
+	err = decodeStatusResponse(statusEnvelope(data))
+	if err == nil || !strings.Contains(err.Error(), "frr.vrrp.groups[0].state") {
+		t.Fatalf("decodeStatusResponse() error = %v, want frr.vrrp.groups state mismatch", err)
+	}
+	data = validStatusData()
+	data["frr"].(map[string]any)["bfd"].(map[string]any)["peers"] = []any{map[string]any{
+		"peer":                "192.0.2.2",
+		"status":              "down",
+		"observed":            true,
+		"up":                  true,
+		"session_down_events": 0,
+		"rx_fail_packets":     0,
+	}}
+	err = decodeStatusResponse(statusEnvelope(data))
+	if err == nil || !strings.Contains(err.Error(), "frr.bfd.peers[0].status") {
+		t.Fatalf("decodeStatusResponse() error = %v, want frr.bfd.peers status mismatch", err)
 	}
 	data = validStatusData()
 	data["ha"].(map[string]any)["issue_count"] = 2
