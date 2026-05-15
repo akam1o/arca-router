@@ -466,6 +466,17 @@ func TestNMSTelemetrySchemasEndpoint(t *testing.T) {
 		t.Fatalf("event schema/encoding = %q/%q, want %q/%q",
 			resp.EventSchemaVersion, resp.Encoding, nbgrpc.TelemetryEventSchemaVersion(), nbgrpc.TelemetryEncoding())
 	}
+	catalog := nbgrpc.NewTelemetryCatalog()
+	if strings.Join(resp.DefaultPaths, ",") != strings.Join(catalog.DefaultPaths, ",") {
+		t.Fatalf("DefaultPaths = %#v, want %#v", resp.DefaultPaths, catalog.DefaultPaths)
+	}
+	if resp.DefaultSampleIntervalMs != catalog.DefaultSampleIntervalMs ||
+		resp.MinSampleIntervalMs != catalog.MinSampleIntervalMs ||
+		resp.MaxSampleIntervalMs != catalog.MaxSampleIntervalMs {
+		t.Fatalf("sample intervals = %d/%d/%d, want %d/%d/%d",
+			resp.DefaultSampleIntervalMs, resp.MinSampleIntervalMs, resp.MaxSampleIntervalMs,
+			catalog.DefaultSampleIntervalMs, catalog.MinSampleIntervalMs, catalog.MaxSampleIntervalMs)
+	}
 	if len(resp.Schemas) == 0 {
 		t.Fatal("Schemas is empty, want telemetry payload schemas")
 	}
@@ -509,6 +520,9 @@ func TestNMSTelemetrySchemasEndpointFilters(t *testing.T) {
 	if resp.SchemaCount != 1 {
 		t.Fatalf("SchemaCount = %d, want 1", resp.SchemaCount)
 	}
+	if len(resp.DefaultPaths) != 2 || resp.DefaultPaths[0] != "/system" || resp.DefaultPaths[1] != "/config/running" {
+		t.Fatalf("DefaultPaths = %#v, want system/config defaults", resp.DefaultPaths)
+	}
 	if len(resp.Schemas[0].Fields) != 1 || resp.Schemas[0].Fields[0].Name != "vnis" {
 		t.Fatalf("filtered schema fields = %#v, want EVPN VNI field", resp.Schemas[0].Fields)
 	}
@@ -534,6 +548,9 @@ func TestNMSTelemetrySchemasEndpointFiltersUnsupportedEncoding(t *testing.T) {
 	}
 	if resp.SchemaCount != 0 {
 		t.Fatalf("SchemaCount = %d, want 0", resp.SchemaCount)
+	}
+	if len(resp.DefaultPaths) != 2 {
+		t.Fatalf("DefaultPaths = %#v, want unfiltered defaults with unsupported encoding", resp.DefaultPaths)
 	}
 }
 

@@ -80,4 +80,4 @@ go run ./examples/nms \
   -max-events 64
 ```
 
-The example prints the returned JSON envelope with indentation so it can be piped into downstream tooling or inspected during collector integration tests. Catalog and schema envelopes include filtered result counts, snapshot envelopes include `event_count`, `default_paths`, and sample interval hints, events include `cardinality` and `payload_schema`, and OTLP exports copy them to the `arca.telemetry.cardinality` and `arca.telemetry.payload_schema` log attributes for routing and validation.
+The example prints the returned JSON envelope with indentation so it can be piped into downstream tooling or inspected during collector integration tests. Catalog and schema envelopes include default path hints and filtered result counts, snapshot envelopes include `event_count`, `default_paths`, and sample interval hints, events include `cardinality` and `payload_schema`, and OTLP exports copy them to the `arca.telemetry.cardinality` and `arca.telemetry.payload_schema` log attributes for routing and validation.

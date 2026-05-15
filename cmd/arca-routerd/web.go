@@ -107,13 +107,17 @@ type nmsTelemetryCatalogResponse struct {
 }
 
 type nmsTelemetrySchemasResponse struct {
-	SchemaVersion      string                      `json:"schema_version"`
-	GeneratedAt        string                      `json:"generated_at"`
-	Resource           string                      `json:"resource"`
-	EventSchemaVersion string                      `json:"event_schema_version"`
-	Encoding           string                      `json:"encoding"`
-	SchemaCount        int                         `json:"schema_count"`
-	Schemas            []nmsTelemetryPayloadSchema `json:"schemas"`
+	SchemaVersion           string                      `json:"schema_version"`
+	GeneratedAt             string                      `json:"generated_at"`
+	Resource                string                      `json:"resource"`
+	EventSchemaVersion      string                      `json:"event_schema_version"`
+	Encoding                string                      `json:"encoding"`
+	DefaultPaths            []string                    `json:"default_paths"`
+	DefaultSampleIntervalMs uint32                      `json:"default_sample_interval_ms"`
+	MinSampleIntervalMs     uint32                      `json:"min_sample_interval_ms"`
+	MaxSampleIntervalMs     uint32                      `json:"max_sample_interval_ms"`
+	SchemaCount             int                         `json:"schema_count"`
+	Schemas                 []nmsTelemetryPayloadSchema `json:"schemas"`
 }
 
 type nmsTelemetrySnapshotResponse struct {
@@ -1542,15 +1546,16 @@ func newNMSTelemetryCatalogResponse(now time.Time, filters nmsTelemetryCatalogFi
 }
 
 func newNMSTelemetrySchemasResponse(now time.Time, filters nmsTelemetryCatalogFilters) nmsTelemetrySchemasResponse {
-	catalog := nbgrpc.NewFilteredTelemetryPayloadSchemaCatalog(nbgrpc.TelemetryCatalogFilter{
+	baseCatalog := nbgrpc.NewTelemetryCatalog()
+	schemaCatalog := nbgrpc.NewFilteredTelemetryPayloadSchemaCatalog(nbgrpc.TelemetryCatalogFilter{
 		Paths:          filters.paths,
 		Cardinalities:  filters.cardinalities,
 		PayloadSchemas: filters.payloadSchemas,
 		Encodings:      filters.encodings,
 		DefaultOnly:    filters.defaultOnly,
 	})
-	schemas := make([]nmsTelemetryPayloadSchema, 0, len(catalog))
-	for _, info := range catalog {
+	schemas := make([]nmsTelemetryPayloadSchema, 0, len(schemaCatalog))
+	for _, info := range schemaCatalog {
 		fields := make([]nmsTelemetryPayloadField, 0, len(info.Fields))
 		for _, field := range info.Fields {
 			fields = append(fields, nmsTelemetryPayloadField{
@@ -1570,13 +1575,17 @@ func newNMSTelemetrySchemasResponse(now time.Time, filters nmsTelemetryCatalogFi
 		})
 	}
 	return nmsTelemetrySchemasResponse{
-		SchemaVersion:      nmsTelemetrySchemasSchemaVersion,
-		GeneratedAt:        formatWebOptionalTime(now),
-		Resource:           "/api/nms/v1/telemetry/schemas",
-		EventSchemaVersion: nbgrpc.TelemetryEventSchemaVersion(),
-		Encoding:           nbgrpc.TelemetryEncoding(),
-		SchemaCount:        len(schemas),
-		Schemas:            schemas,
+		SchemaVersion:           nmsTelemetrySchemasSchemaVersion,
+		GeneratedAt:             formatWebOptionalTime(now),
+		Resource:                "/api/nms/v1/telemetry/schemas",
+		EventSchemaVersion:      baseCatalog.EventSchemaVersion,
+		Encoding:                baseCatalog.Encoding,
+		DefaultPaths:            append([]string(nil), baseCatalog.DefaultPaths...),
+		DefaultSampleIntervalMs: baseCatalog.DefaultSampleIntervalMs,
+		MinSampleIntervalMs:     baseCatalog.MinSampleIntervalMs,
+		MaxSampleIntervalMs:     baseCatalog.MaxSampleIntervalMs,
+		SchemaCount:             len(schemas),
+		Schemas:                 schemas,
 	}
 }
 
