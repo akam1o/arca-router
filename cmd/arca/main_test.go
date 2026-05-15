@@ -987,11 +987,12 @@ func TestOneShotShowTelemetryPathsLiveUsesCatalogRPC(t *testing.T) {
 		DefaultPaths:       []string{"/system"},
 		Paths: []grpcclient.TelemetryPathInfo{
 			{Path: "/system", Description: "system", Cardinality: "single", PayloadSchema: "arca.telemetry.system.v1", Default: true},
+			{Path: "/routes", Description: "routes", Cardinality: "per-route", PayloadSchema: "arca.telemetry.routes.v1"},
 		},
 	}}
-	code := oneShotShow(context.Background(), client, []string{"telemetry", "paths", "live"}, &cliFlags{})
+	code := oneShotShow(context.Background(), client, []string{"telemetry", "paths", "live", "payload-schema", "arca.telemetry.system.v1"}, &cliFlags{})
 	if code != ExitSuccess {
-		t.Fatalf("oneShotShow(telemetry paths live) = %d, want %d", code, ExitSuccess)
+		t.Fatalf("oneShotShow(telemetry paths live payload-schema) = %d, want %d", code, ExitSuccess)
 	}
 	if client.telemetryCatalogCalls != 1 {
 		t.Fatalf("telemetry catalog calls = %d, want 1 live catalog RPC", client.telemetryCatalogCalls)
@@ -1009,6 +1010,12 @@ func TestRunLocalOneShotTelemetryPaths(t *testing.T) {
 	if handled, _ := runLocalOneShotCommand([]string{"show", "telemetry", "paths", "live"}); handled {
 		t.Fatal("runLocalOneShotCommand(show telemetry paths live) handled live catalog command locally")
 	}
+	if handled, code := runLocalOneShotCommand([]string{"show", "telemetry", "paths", "cardinality", "per-route"}); !handled || code != ExitSuccess {
+		t.Fatalf("runLocalOneShotCommand(show telemetry paths cardinality) = handled %v code %d, want local success", handled, code)
+	}
+	if handled, _ := runLocalOneShotCommand([]string{"show", "telemetry", "paths", "live", "cardinality", "single"}); handled {
+		t.Fatal("runLocalOneShotCommand(show telemetry paths live cardinality) handled live catalog command locally")
+	}
 	if handled, _ := runLocalOneShotCommand([]string{"show", "telemetry", "path", "/system"}); handled {
 		t.Fatal("runLocalOneShotCommand(show telemetry path /system) handled streaming command locally")
 	}
@@ -1021,8 +1028,36 @@ func TestTelemetryCatalogCommand(t *testing.T) {
 	if !isTelemetryCatalogCommand([]string{"paths", "live"}) || !isTelemetryCatalogCommand([]string{"catalog", "live"}) {
 		t.Fatal("isTelemetryCatalogCommand() did not recognize live paths/catalog")
 	}
+	if !isTelemetryCatalogCommand([]string{"paths", "cardinality", "per-route"}) ||
+		!isTelemetryCatalogCommand([]string{"catalog", "live", "payload-schema", "arca.telemetry.routes.v1"}) {
+		t.Fatal("isTelemetryCatalogCommand() did not recognize filtered catalog commands")
+	}
 	if isTelemetryCatalogCommand([]string{"path", "/system"}) || isTelemetryCatalogCommand(nil) {
 		t.Fatal("isTelemetryCatalogCommand() recognized non-catalog telemetry arguments")
+	}
+	if isTelemetryCatalogCommand([]string{"paths", "cardinality"}) ||
+		isTelemetryCatalogCommand([]string{"paths", "unknown"}) {
+		t.Fatal("isTelemetryCatalogCommand() recognized invalid catalog arguments")
+	}
+}
+
+func TestFilterTelemetryPathCatalog(t *testing.T) {
+	catalog := []grpcclient.TelemetryPathInfo{
+		{Path: "/system", Cardinality: "single", PayloadSchema: "arca.telemetry.system.v1"},
+		{Path: "/routes", Cardinality: "per-route", PayloadSchema: "arca.telemetry.routes.v1"},
+		{Path: "/bfd", Cardinality: "per-peer", PayloadSchema: "arca.telemetry.bfd.v1"},
+	}
+	got := filterTelemetryPathCatalog(catalog, telemetryCatalogCLIOptions{
+		cardinalities:  []string{"per-route", "per-peer"},
+		payloadSchemas: []string{"ARCA.TELEMETRY.ROUTES.V1"},
+	})
+	if len(got) != 1 || got[0].Path != "/routes" {
+		t.Fatalf("filterTelemetryPathCatalog() = %#v, want only /routes", got)
+	}
+
+	got = filterTelemetryPathCatalog(catalog, telemetryCatalogCLIOptions{payloadSchemas: []string{"arca.telemetry.system.v1"}})
+	if len(got) != 1 || got[0].Path != "/system" {
+		t.Fatalf("filterTelemetryPathCatalog(payload schema) = %#v, want only /system", got)
 	}
 }
 

@@ -110,7 +110,8 @@ Show subcommands:
   bfd [brief|counters]        Show raw BFD status
   bfd peer <ip> [counters]    Show BFD peer details
   evpn                        Show EVPN/VXLAN overlay intent
-  telemetry paths [live]      Show supported telemetry path catalog
+  telemetry paths [live] [cardinality <hint>] [payload-schema <id>]
+                              Show supported telemetry path catalog
   telemetry [path <path>]... [interval <duration>] [count <events>]
                               Show telemetry events as JSON lines
   route [inet|inet6]                 Show routing table
@@ -198,8 +199,19 @@ func runOneShotCommand(ctx context.Context, f *cliFlags, args []string) int {
 }
 
 func runLocalOneShotCommand(args []string) (bool, int) {
-	if len(args) >= 3 && args[0] == "show" && args[1] == "telemetry" && isLocalTelemetryCatalogCommand(args[2:]) {
-		printTelemetryPathCatalog(grpcclient.TelemetryPathCatalog())
+	if len(args) >= 3 && args[0] == "show" && args[1] == "telemetry" {
+		opts, ok, err := telemetryCatalogOptions(args[2:])
+		if !ok {
+			return false, ExitSuccess
+		}
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+			return true, ExitUsageError
+		}
+		if opts.live {
+			return false, ExitSuccess
+		}
+		printTelemetryPathCatalog(filterTelemetryPathCatalog(grpcclient.TelemetryPathCatalog(), opts))
 		return true, ExitSuccess
 	}
 	return false, ExitSuccess
@@ -1873,16 +1885,20 @@ type telemetryOutputEvent struct {
 }
 
 func showTelemetry(ctx context.Context, client showClient, args []string) error {
-	if isTelemetryCatalogCommand(args) {
+	catalogOpts, isCatalog, err := telemetryCatalogOptions(args)
+	if isCatalog {
+		if err != nil {
+			return err
+		}
 		catalog := grpcclient.NewTelemetryCatalog()
-		if isLiveTelemetryCatalogCommand(args) {
+		if catalogOpts.live {
 			liveCatalog, err := client.GetTelemetryCatalog(ctx)
 			if err != nil {
 				return err
 			}
 			catalog = liveCatalog
 		}
-		printTelemetryPathCatalog(catalog.Paths)
+		printTelemetryPathCatalog(filterTelemetryPathCatalog(catalog.Paths, catalogOpts))
 		return nil
 	}
 	opts, err := telemetryOptions(args)
@@ -1915,16 +1931,97 @@ func showTelemetry(ctx context.Context, client showClient, args []string) error 
 	}
 }
 
+type telemetryCatalogCLIOptions struct {
+	live           bool
+	cardinalities  []string
+	payloadSchemas []string
+}
+
 func isTelemetryCatalogCommand(args []string) bool {
-	return isLocalTelemetryCatalogCommand(args) || isLiveTelemetryCatalogCommand(args)
+	_, ok, err := telemetryCatalogOptions(args)
+	return ok && err == nil
 }
 
 func isLocalTelemetryCatalogCommand(args []string) bool {
-	return len(args) == 1 && (args[0] == "paths" || args[0] == "catalog")
+	opts, ok, err := telemetryCatalogOptions(args)
+	return ok && err == nil && !opts.live
 }
 
 func isLiveTelemetryCatalogCommand(args []string) bool {
-	return len(args) == 2 && (args[0] == "paths" || args[0] == "catalog") && args[1] == "live"
+	opts, ok, err := telemetryCatalogOptions(args)
+	return ok && err == nil && opts.live
+}
+
+func telemetryCatalogOptions(args []string) (telemetryCatalogCLIOptions, bool, error) {
+	var opts telemetryCatalogCLIOptions
+	if len(args) == 0 || (args[0] != "paths" && args[0] != "catalog") {
+		return opts, false, nil
+	}
+	args = args[1:]
+	for len(args) > 0 {
+		switch args[0] {
+		case "live":
+			if opts.live {
+				return opts, true, telemetryUsageError("'show telemetry paths live' specified more than once")
+			}
+			opts.live = true
+			args = args[1:]
+		case "cardinality":
+			if len(args) < 2 {
+				return opts, true, telemetryUsageError("'show telemetry paths cardinality' requires a cardinality hint")
+			}
+			opts.cardinalities = append(opts.cardinalities, args[1])
+			args = args[2:]
+		case "payload-schema", "schema":
+			if len(args) < 2 {
+				return opts, true, telemetryUsageError("'show telemetry paths payload-schema' requires a schema ID")
+			}
+			opts.payloadSchemas = append(opts.payloadSchemas, args[1])
+			args = args[2:]
+		default:
+			return opts, true, telemetryUsageError("unknown telemetry catalog option: %s", args[0])
+		}
+	}
+	return opts, true, nil
+}
+
+func filterTelemetryPathCatalog(catalog []grpcclient.TelemetryPathInfo, opts telemetryCatalogCLIOptions) []grpcclient.TelemetryPathInfo {
+	cardinalities := normalizedCatalogFilterSet(opts.cardinalities)
+	payloadSchemas := normalizedCatalogFilterSet(opts.payloadSchemas)
+	if len(cardinalities) == 0 && len(payloadSchemas) == 0 {
+		return catalog
+	}
+
+	filtered := make([]grpcclient.TelemetryPathInfo, 0, len(catalog))
+	for _, info := range catalog {
+		if len(cardinalities) > 0 {
+			if _, ok := cardinalities[normalizedCatalogFilterValue(info.Cardinality)]; !ok {
+				continue
+			}
+		}
+		if len(payloadSchemas) > 0 {
+			if _, ok := payloadSchemas[normalizedCatalogFilterValue(info.PayloadSchema)]; !ok {
+				continue
+			}
+		}
+		filtered = append(filtered, info)
+	}
+	return filtered
+}
+
+func normalizedCatalogFilterSet(values []string) map[string]struct{} {
+	set := make(map[string]struct{}, len(values))
+	for _, value := range values {
+		normalized := normalizedCatalogFilterValue(value)
+		if normalized != "" {
+			set[normalized] = struct{}{}
+		}
+	}
+	return set
+}
+
+func normalizedCatalogFilterValue(value string) string {
+	return strings.ToLower(strings.TrimSpace(value))
 }
 
 func printTelemetryPathCatalog(catalog []grpcclient.TelemetryPathInfo) {

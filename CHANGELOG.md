@@ -2,6 +2,7 @@
 
 ## v0.8.x - Overlay and Streaming Telemetry (current)
 
+- **Telemetry CLI catalog filters**: `arca show telemetry paths` and `arca show telemetry paths live` can filter the catalog by cardinality hint or payload schema ID before operators subscribe to high-churn paths
 - **NMS collector payload schema filters**: the example HTTP collector can discover telemetry paths from the catalog and exclude selected payload schema IDs, such as `arca.telemetry.routes.v1`, before requesting bounded snapshots
 - **Telemetry payload schema hints**: gRPC, NMS, and CLI telemetry catalogs now advertise stable per-path payload schema IDs so collectors can route and validate path-specific JSON payloads before subscribing
 - **Telemetry path alias hints**: gRPC, NMS, and CLI telemetry catalogs now advertise accepted path aliases such as `/evpn`, `/running`, and `/cos` alongside canonical paths
