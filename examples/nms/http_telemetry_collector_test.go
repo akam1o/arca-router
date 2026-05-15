@@ -97,6 +97,38 @@ func TestParseCollectorConfigCatalogFilters(t *testing.T) {
 	}
 }
 
+func TestParseCollectorConfigOTLPExporter(t *testing.T) {
+	cfg, err := parseCollectorConfig([]string{
+		"-otlp-endpoint", "http://otel.example:4318/v1/logs",
+		"-otlp-service-name", "arca-edge01",
+	})
+	if err != nil {
+		t.Fatalf("parseCollectorConfig() error = %v", err)
+	}
+	if cfg.otlpEndpoint != "http://otel.example:4318/v1/logs" {
+		t.Fatalf("otlp endpoint = %q, want configured endpoint", cfg.otlpEndpoint)
+	}
+	if cfg.otlpServiceName != "arca-edge01" {
+		t.Fatalf("otlp service name = %q, want arca-edge01", cfg.otlpServiceName)
+	}
+
+	_, err = parseCollectorConfig([]string{
+		"-mode", "status",
+		"-otlp-endpoint", "http://otel.example:4318/v1/logs",
+	})
+	if err == nil || !strings.Contains(err.Error(), "otlp export requires snapshot mode") {
+		t.Fatalf("parseCollectorConfig(status otlp) error = %v, want snapshot-only error", err)
+	}
+
+	_, err = parseCollectorConfig([]string{
+		"-otlp-endpoint", "http://otel.example:4318/v1/logs",
+		"-otlp-service-name", " ",
+	})
+	if err == nil || !strings.Contains(err.Error(), "otlp-service-name must not be empty") {
+		t.Fatalf("parseCollectorConfig(empty otlp service) error = %v, want service-name error", err)
+	}
+}
+
 func TestParseCollectorConfigIncludeFiltersUseCatalogPaths(t *testing.T) {
 	cfg, err := parseCollectorConfig([]string{
 		"-include-encoding", "json",
@@ -301,6 +333,86 @@ func TestFetchNMSUsesCatalogFiltersForSnapshotPaths(t *testing.T) {
 	}
 }
 
+func TestFetchNMSExportsSnapshotToOTLP(t *testing.T) {
+	var snapshotQuery url.Values
+	var otlpContentType string
+	var otlpRequest otlpLogsRequest
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/nms/v1/telemetry/snapshot":
+			snapshotQuery = r.URL.Query()
+			_, _ = w.Write([]byte(`{"schema_version":"arca.nms.telemetry-snapshot.v1","events":[{` +
+				`"sequence":7,` +
+				`"timestamp":"2026-05-15T12:34:56.000000789Z",` +
+				`"path":"/system",` +
+				`"event_type":"snapshot",` +
+				`"encoding":"json",` +
+				`"schema_version":"arca.telemetry.v1",` +
+				`"payload_bytes":21,` +
+				`"payload":{"hostname":"edge01"}` +
+				`}]}`))
+		case "/v1/logs":
+			if r.Method != http.MethodPost {
+				t.Fatalf("OTLP method = %s, want POST", r.Method)
+			}
+			otlpContentType = r.Header.Get("Content-Type")
+			if err := json.NewDecoder(r.Body).Decode(&otlpRequest); err != nil {
+				t.Fatalf("decode OTLP request: %v", err)
+			}
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte(`{}`))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+
+	cfg, err := parseCollectorConfig([]string{
+		"-base-url", server.URL,
+		"-path", "/system",
+		"-otlp-endpoint", server.URL + "/v1/logs",
+		"-otlp-service-name", "arca-edge01",
+	})
+	if err != nil {
+		t.Fatalf("parseCollectorConfig() error = %v", err)
+	}
+	body, err := fetchNMS(t.Context(), server.Client(), cfg)
+	if err != nil {
+		t.Fatalf("fetchNMS() error = %v", err)
+	}
+	if !json.Valid(body) {
+		t.Fatalf("fetchNMS() body is invalid JSON: %s", string(body))
+	}
+	if snapshotQuery.Get("path") != "/system" {
+		t.Fatalf("snapshot path query = %#v, want /system", snapshotQuery["path"])
+	}
+	if otlpContentType != "application/json" {
+		t.Fatalf("OTLP Content-Type = %q, want application/json", otlpContentType)
+	}
+	if len(otlpRequest.ResourceLogs) != 1 || len(otlpRequest.ResourceLogs[0].ScopeLogs) != 1 {
+		t.Fatalf("OTLP request = %#v, want one resource/scope logs entry", otlpRequest)
+	}
+	if got := otlpAttributeValue(otlpRequest.ResourceLogs[0].Resource.Attributes, "service.name"); got != "arca-edge01" {
+		t.Fatalf("OTLP service.name = %q, want arca-edge01", got)
+	}
+	records := otlpRequest.ResourceLogs[0].ScopeLogs[0].LogRecords
+	if len(records) != 1 {
+		t.Fatalf("OTLP log records = %d, want 1", len(records))
+	}
+	if records[0].TimeUnixNano != "1778848496000000789" {
+		t.Fatalf("TimeUnixNano = %q, want parsed timestamp", records[0].TimeUnixNano)
+	}
+	if records[0].Body.StringValue != `{"hostname":"edge01"}` {
+		t.Fatalf("OTLP body = %q, want JSON payload string", records[0].Body.StringValue)
+	}
+	if got := otlpAttributeValue(records[0].Attributes, "arca.telemetry.path"); got != "/system" {
+		t.Fatalf("OTLP path attribute = %q, want /system", got)
+	}
+	if got := otlpAttributeValue(records[0].Attributes, "arca.telemetry.sequence"); got != "7" {
+		t.Fatalf("OTLP sequence attribute = %q, want 7", got)
+	}
+}
+
 func TestFilterSnapshotPathsByCardinality(t *testing.T) {
 	catalog := telemetryCatalogResponse{Paths: []telemetryCatalogPath{
 		{Path: "/system", Cardinality: "single"},
@@ -449,4 +561,16 @@ func TestRequestTimeoutIncludesSnapshotBudget(t *testing.T) {
 	if got := requestTimeout(collectorConfig{mode: "status"}); got != 10*time.Second {
 		t.Fatalf("requestTimeout(status) = %v, want 10s", got)
 	}
+}
+
+func otlpAttributeValue(attrs []otlpKeyValue, key string) string {
+	for _, attr := range attrs {
+		if attr.Key == key {
+			if attr.Value.StringValue != "" {
+				return attr.Value.StringValue
+			}
+			return attr.Value.IntValue
+		}
+	}
+	return ""
 }

@@ -25,6 +25,19 @@ go run ./examples/nms \
   -max-payload-bytes 8388608 \
   -max-events 64
 
+# Collect the same snapshot and forward its events to an OTLP/HTTP logs endpoint.
+go run ./examples/nms \
+  -base-url http://127.0.0.1:8080 \
+  -user monitor \
+  -password ReadOnly789 \
+  -path /system \
+  -path /interfaces \
+  -timeout 5s \
+  -max-payload-bytes 8388608 \
+  -max-events 64 \
+  -otlp-endpoint http://127.0.0.1:4318/v1/logs \
+  -otlp-service-name arca-router-nms-collector
+
 # Discover only selected default paths and path classes using server-side catalog filters.
 go run ./examples/nms \
   -base-url http://127.0.0.1:8080 \

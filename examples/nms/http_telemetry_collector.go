@@ -29,6 +29,8 @@ type collectorConfig struct {
 	username         string
 	password         string
 	mode             string
+	otlpEndpoint     string
+	otlpServiceName  string
 	paths            repeatedPathFlag
 	discoverPaths    bool
 	includedPath     repeatedPathFlag
@@ -90,6 +92,61 @@ type telemetryCatalogPath struct {
 	Aliases       []string `json:"aliases"`
 }
 
+type telemetrySnapshotResponse struct {
+	Events []telemetrySnapshotEvent `json:"events"`
+}
+
+type telemetrySnapshotEvent struct {
+	Sequence      uint64          `json:"sequence"`
+	Timestamp     string          `json:"timestamp,omitempty"`
+	Path          string          `json:"path"`
+	EventType     string          `json:"event_type"`
+	Encoding      string          `json:"encoding"`
+	SchemaVersion string          `json:"schema_version"`
+	PayloadBytes  int             `json:"payload_bytes"`
+	Payload       json.RawMessage `json:"payload"`
+}
+
+type otlpLogsRequest struct {
+	ResourceLogs []otlpResourceLogs `json:"resourceLogs"`
+}
+
+type otlpResourceLogs struct {
+	Resource  otlpResource    `json:"resource"`
+	ScopeLogs []otlpScopeLogs `json:"scopeLogs"`
+}
+
+type otlpResource struct {
+	Attributes []otlpKeyValue `json:"attributes,omitempty"`
+}
+
+type otlpScopeLogs struct {
+	Scope      otlpInstrumentationScope `json:"scope"`
+	LogRecords []otlpLogRecord          `json:"logRecords"`
+}
+
+type otlpInstrumentationScope struct {
+	Name string `json:"name"`
+}
+
+type otlpLogRecord struct {
+	TimeUnixNano   string         `json:"timeUnixNano,omitempty"`
+	SeverityText   string         `json:"severityText,omitempty"`
+	SeverityNumber int            `json:"severityNumber,omitempty"`
+	Body           otlpAnyValue   `json:"body"`
+	Attributes     []otlpKeyValue `json:"attributes,omitempty"`
+}
+
+type otlpKeyValue struct {
+	Key   string       `json:"key"`
+	Value otlpAnyValue `json:"value"`
+}
+
+type otlpAnyValue struct {
+	StringValue string `json:"stringValue,omitempty"`
+	IntValue    string `json:"intValue,omitempty"`
+}
+
 func main() {
 	cfg, err := parseCollectorConfig(os.Args[1:])
 	if err != nil {
@@ -113,6 +170,7 @@ func parseCollectorConfig(args []string) (collectorConfig, error) {
 	cfg := collectorConfig{
 		baseURL:         defaultBaseURL,
 		mode:            "snapshot",
+		otlpServiceName: "arca-router-nms-collector",
 		timeout:         defaultSnapshotTimeout,
 		maxPayloadBytes: defaultMaxPayloadBytes,
 		maxEvents:       defaultMaxEvents,
@@ -123,6 +181,8 @@ func parseCollectorConfig(args []string) (collectorConfig, error) {
 	fs.StringVar(&cfg.username, "user", "", "HTTP Basic username")
 	fs.StringVar(&cfg.password, "password", "", "HTTP Basic password")
 	fs.StringVar(&cfg.mode, "mode", cfg.mode, "Endpoint mode: snapshot, status, or catalog")
+	fs.StringVar(&cfg.otlpEndpoint, "otlp-endpoint", "", "OTLP/HTTP logs endpoint URL for snapshot export, for example http://127.0.0.1:4318/v1/logs")
+	fs.StringVar(&cfg.otlpServiceName, "otlp-service-name", cfg.otlpServiceName, "OpenTelemetry service.name resource attribute")
 	fs.Var(&cfg.paths, "path", "Telemetry path for snapshot mode; repeat for multiple paths")
 	fs.BoolVar(&cfg.discoverPaths, "discover-paths", false, "Use telemetry catalog paths as the snapshot path set")
 	fs.Var(&cfg.includedPath, "include-path", "Telemetry path or alias to request from catalog discovery; repeat for multiple values")
@@ -146,6 +206,7 @@ func parseCollectorConfig(args []string) (collectorConfig, error) {
 	default:
 		return cfg, fmt.Errorf("unsupported mode %q", cfg.mode)
 	}
+	cfg.otlpEndpoint = strings.TrimSpace(cfg.otlpEndpoint)
 	if cfg.mode == "snapshot" {
 		if cfg.timeout <= 0 {
 			return cfg, fmt.Errorf("timeout must be positive")
@@ -159,6 +220,12 @@ func parseCollectorConfig(args []string) (collectorConfig, error) {
 		if len(cfg.paths) == 0 && !usesCatalogDiscovery(cfg) {
 			cfg.paths = append(repeatedPathFlag(nil), defaultSnapshotPaths...)
 		}
+	} else if cfg.otlpEndpoint != "" {
+		return cfg, fmt.Errorf("otlp export requires snapshot mode")
+	}
+	cfg.otlpServiceName = strings.TrimSpace(cfg.otlpServiceName)
+	if cfg.otlpEndpoint != "" && cfg.otlpServiceName == "" {
+		return cfg, fmt.Errorf("otlp-service-name must not be empty")
 	}
 	return cfg, nil
 }
@@ -190,7 +257,16 @@ func fetchNMS(ctx context.Context, client *http.Client, cfg collectorConfig) ([]
 	if err != nil {
 		return nil, err
 	}
-	return fetchEndpoint(ctx, client, cfg, endpoint)
+	body, err := fetchEndpoint(ctx, client, cfg, endpoint)
+	if err != nil {
+		return nil, err
+	}
+	if cfg.mode == "snapshot" && cfg.otlpEndpoint != "" {
+		if err := exportSnapshotToOTLP(ctx, client, cfg, body); err != nil {
+			return nil, err
+		}
+	}
+	return body, nil
 }
 
 func fetchEndpoint(ctx context.Context, client *http.Client, cfg collectorConfig, endpoint string) ([]byte, error) {
@@ -215,6 +291,91 @@ func fetchEndpoint(ctx context.Context, client *http.Client, cfg collectorConfig
 		return nil, fmt.Errorf("GET %s returned %s: %s", endpoint, resp.Status, strings.TrimSpace(string(body)))
 	}
 	return body, nil
+}
+
+func exportSnapshotToOTLP(ctx context.Context, client *http.Client, cfg collectorConfig, snapshotBody []byte) error {
+	var snapshot telemetrySnapshotResponse
+	if err := json.Unmarshal(snapshotBody, &snapshot); err != nil {
+		return fmt.Errorf("decode telemetry snapshot for OTLP export: %w", err)
+	}
+	request := buildOTLPLogsRequest(cfg, snapshot.Events)
+	body, err := json.Marshal(request)
+	if err != nil {
+		return fmt.Errorf("encode OTLP logs request: %w", err)
+	}
+	endpoint, err := url.Parse(strings.TrimSpace(cfg.otlpEndpoint))
+	if err != nil || endpoint.Scheme == "" || endpoint.Host == "" {
+		return fmt.Errorf("otlp endpoint must include scheme and host")
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint.String(), bytes.NewReader(body))
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := client.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+
+	respBody, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+	if err != nil {
+		return err
+	}
+	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
+		return fmt.Errorf("POST %s returned %s: %s", endpoint.String(), resp.Status, strings.TrimSpace(string(respBody)))
+	}
+	return nil
+}
+
+func buildOTLPLogsRequest(cfg collectorConfig, events []telemetrySnapshotEvent) otlpLogsRequest {
+	records := make([]otlpLogRecord, 0, len(events))
+	for _, event := range events {
+		records = append(records, otlpLogRecord{
+			TimeUnixNano:   otlpTimeUnixNano(event.Timestamp),
+			SeverityText:   "Info",
+			SeverityNumber: 9,
+			Body:           otlpString(string(event.Payload)),
+			Attributes: []otlpKeyValue{
+				{Key: "arca.telemetry.path", Value: otlpString(event.Path)},
+				{Key: "arca.telemetry.event_type", Value: otlpString(event.EventType)},
+				{Key: "arca.telemetry.sequence", Value: otlpInt(event.Sequence)},
+				{Key: "arca.telemetry.schema_version", Value: otlpString(event.SchemaVersion)},
+				{Key: "arca.telemetry.encoding", Value: otlpString(event.Encoding)},
+				{Key: "arca.telemetry.payload_bytes", Value: otlpInt(uint64(event.PayloadBytes))},
+			},
+		})
+	}
+	return otlpLogsRequest{ResourceLogs: []otlpResourceLogs{{
+		Resource: otlpResource{Attributes: []otlpKeyValue{
+			{Key: "service.name", Value: otlpString(cfg.otlpServiceName)},
+			{Key: "arca.collector.name", Value: otlpString("http-telemetry-collector")},
+			{Key: "arca.collector.mode", Value: otlpString("nms-http")},
+		}},
+		ScopeLogs: []otlpScopeLogs{{
+			Scope:      otlpInstrumentationScope{Name: "arca-router.examples.nms"},
+			LogRecords: records,
+		}},
+	}}}
+}
+
+func otlpTimeUnixNano(timestamp string) string {
+	if strings.TrimSpace(timestamp) == "" {
+		return ""
+	}
+	parsed, err := time.Parse(time.RFC3339Nano, timestamp)
+	if err != nil {
+		return ""
+	}
+	return strconv.FormatInt(parsed.UnixNano(), 10)
+}
+
+func otlpString(value string) otlpAnyValue {
+	return otlpAnyValue{StringValue: value}
+}
+
+func otlpInt(value uint64) otlpAnyValue {
+	return otlpAnyValue{IntValue: strconv.FormatUint(value, 10)}
 }
 
 func resolveSnapshotPaths(ctx context.Context, client *http.Client, cfg collectorConfig) (repeatedPathFlag, error) {

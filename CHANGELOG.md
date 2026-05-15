@@ -2,6 +2,7 @@
 
 ## v0.8.x - Overlay and Streaming Telemetry (current)
 
+- **NMS OTLP snapshot exporter**: the example HTTP collector can forward bounded telemetry snapshot events to an OpenTelemetry OTLP/HTTP logs endpoint as JSON log records
 - **NMS snapshot event guardrail**: `/api/nms/v1/telemetry/snapshot` and the example HTTP collector now support `max_events` to bound one-shot telemetry event fan-out alongside timeout and payload byte budgets
 - **NETCONF session scale validation**: NETCONF session counting now has regression coverage for hundreds of active sessions, numeric session lookup, CloseAll cleanup, and lock release accounting
 - **Telemetry scale validation**: gRPC route telemetry snapshots now have regression coverage for larger route sets, payload byte accounting, and high-cardinality path de-duplication

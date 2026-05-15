@@ -74,7 +74,7 @@ Focus: add data-center overlay support and richer external observability.
 - **Streaming telemetry**
   - Structured gRPC telemetry event stream with JSON payload schemas for selected config, daemon, and routing state paths
   - Subscription path filtering, sample intervals, one-shot snapshots, and gRPC flow-control backpressure
-  - gNMI or OpenTelemetry exporter integration
+  - OpenTelemetry OTLP/HTTP snapshot exporter example
   - Expanded stable event schemas for additional dataplane and protocol state changes
 - **QoS dataplane enforcement**
   - VPP scheduler and policer capability detection
