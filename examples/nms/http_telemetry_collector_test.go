@@ -27,9 +27,11 @@ func TestParseCollectorConfigDefaults(t *testing.T) {
 	}
 }
 
-func TestParseCollectorConfigCardinalityFilters(t *testing.T) {
+func TestParseCollectorConfigCatalogFilters(t *testing.T) {
 	cfg, err := parseCollectorConfig([]string{
 		"-discover-paths",
+		"-include-cardinality", "single",
+		"-include-payload-schema", "arca.telemetry.system.v1",
 		"-exclude-cardinality", "per-route",
 		"-exclude-cardinality", "per-peer",
 		"-exclude-payload-schema", "arca.telemetry.bfd.v1",
@@ -43,11 +45,41 @@ func TestParseCollectorConfigCardinalityFilters(t *testing.T) {
 	if len(cfg.paths) != 0 {
 		t.Fatalf("paths = %#v, want catalog-discovered paths", cfg.paths)
 	}
+	if len(cfg.includedCard) != 1 || cfg.includedCard[0] != "single" {
+		t.Fatalf("included cardinalities = %#v, want single", cfg.includedCard)
+	}
+	if len(cfg.includedSchema) != 1 || cfg.includedSchema[0] != "arca.telemetry.system.v1" {
+		t.Fatalf("included schemas = %#v, want system payload schema", cfg.includedSchema)
+	}
 	if len(cfg.excludedCard) != 2 || cfg.excludedCard[0] != "per-route" || cfg.excludedCard[1] != "per-peer" {
 		t.Fatalf("excluded cardinalities = %#v, want per-route and per-peer", cfg.excludedCard)
 	}
 	if len(cfg.excludedSchema) != 1 || cfg.excludedSchema[0] != "arca.telemetry.bfd.v1" {
 		t.Fatalf("excluded schemas = %#v, want BFD payload schema", cfg.excludedSchema)
+	}
+}
+
+func TestParseCollectorConfigIncludeFiltersUseCatalogPaths(t *testing.T) {
+	cfg, err := parseCollectorConfig([]string{
+		"-include-cardinality", "per-route",
+	})
+	if err != nil {
+		t.Fatalf("parseCollectorConfig() error = %v", err)
+	}
+	if len(cfg.paths) != 0 {
+		t.Fatalf("paths = %#v, want catalog-discovered paths for include filter", cfg.paths)
+	}
+}
+
+func TestParseCollectorConfigExcludeFiltersKeepDefaultPaths(t *testing.T) {
+	cfg, err := parseCollectorConfig([]string{
+		"-exclude-cardinality", "per-route",
+	})
+	if err != nil {
+		t.Fatalf("parseCollectorConfig() error = %v", err)
+	}
+	if strings.Join(cfg.paths, ",") != strings.Join(defaultSnapshotPaths, ",") {
+		t.Fatalf("paths = %#v, want default snapshot paths", cfg.paths)
 	}
 }
 
@@ -78,6 +110,37 @@ func TestCollectorEndpointURLForSnapshot(t *testing.T) {
 		if !strings.Contains(got, want) {
 			t.Fatalf("snapshot URL = %q, missing %s", got, want)
 		}
+	}
+}
+
+func TestCollectorEndpointURLForCatalogFilters(t *testing.T) {
+	cfg, err := parseCollectorConfig([]string{
+		"-mode", "catalog",
+		"-base-url", "http://router.example:8080/arca",
+		"-include-cardinality", "per-route",
+		"-include-cardinality", "per-vni",
+		"-include-payload-schema", "arca.telemetry.routes.v1",
+	})
+	if err != nil {
+		t.Fatalf("parseCollectorConfig() error = %v", err)
+	}
+	got, err := collectorEndpointURL(cfg)
+	if err != nil {
+		t.Fatalf("collectorEndpointURL() error = %v", err)
+	}
+	parsed, err := url.Parse(got)
+	if err != nil {
+		t.Fatalf("catalog URL is invalid: %v", err)
+	}
+	if parsed.Scheme != "http" || parsed.Host != "router.example:8080" || parsed.Path != "/arca/api/nms/v1/telemetry/paths" {
+		t.Fatalf("catalog URL = %q, want endpoint under /arca", got)
+	}
+	query := parsed.Query()
+	if strings.Join(query["cardinality"], ",") != "per-route,per-vni" {
+		t.Fatalf("cardinality query = %#v, want per-route and per-vni", query["cardinality"])
+	}
+	if query.Get("payload_schema") != "arca.telemetry.routes.v1" {
+		t.Fatalf("payload_schema query = %#v, want routes schema", query["payload_schema"])
 	}
 }
 
@@ -120,6 +183,53 @@ func TestFetchNMSDiscoversAndFiltersSnapshotPaths(t *testing.T) {
 	}
 	gotPaths := snapshotQuery["path"]
 	wantPaths := []string{"/system", "/interfaces", "/overlays/evpn"}
+	if strings.Join(gotPaths, ",") != strings.Join(wantPaths, ",") {
+		t.Fatalf("snapshot paths = %#v, want %#v", gotPaths, wantPaths)
+	}
+}
+
+func TestFetchNMSUsesCatalogFiltersForSnapshotPaths(t *testing.T) {
+	var catalogQuery url.Values
+	var snapshotQuery url.Values
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/nms/v1/telemetry/paths":
+			catalogQuery = r.URL.Query()
+			_, _ = w.Write([]byte(`{"paths":[` +
+				`{"path":"/routes","cardinality":"per-route","payload_schema":"arca.telemetry.routes.v1"}` +
+				`]}`))
+		case "/api/nms/v1/telemetry/snapshot":
+			snapshotQuery = r.URL.Query()
+			_, _ = w.Write([]byte(`{"schema_version":"arca.nms.telemetry-snapshot.v1","events":[]}`))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+
+	cfg, err := parseCollectorConfig([]string{
+		"-base-url", server.URL,
+		"-include-cardinality", "per-route",
+		"-include-payload-schema", "arca.telemetry.routes.v1",
+	})
+	if err != nil {
+		t.Fatalf("parseCollectorConfig() error = %v", err)
+	}
+	body, err := fetchNMS(t.Context(), server.Client(), cfg)
+	if err != nil {
+		t.Fatalf("fetchNMS() error = %v", err)
+	}
+	if !json.Valid(body) {
+		t.Fatalf("fetchNMS() body is invalid JSON: %s", string(body))
+	}
+	if catalogQuery.Get("cardinality") != "per-route" {
+		t.Fatalf("catalog cardinality query = %#v, want per-route", catalogQuery["cardinality"])
+	}
+	if catalogQuery.Get("payload_schema") != "arca.telemetry.routes.v1" {
+		t.Fatalf("catalog payload_schema query = %#v, want routes schema", catalogQuery["payload_schema"])
+	}
+	gotPaths := snapshotQuery["path"]
+	wantPaths := []string{"/routes"}
 	if strings.Join(gotPaths, ",") != strings.Join(wantPaths, ",") {
 		t.Fatalf("snapshot paths = %#v, want %#v", gotPaths, wantPaths)
 	}

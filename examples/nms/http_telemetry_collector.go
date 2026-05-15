@@ -30,6 +30,8 @@ type collectorConfig struct {
 	mode            string
 	paths           repeatedPathFlag
 	discoverPaths   bool
+	includedCard    repeatedStringFlag
+	includedSchema  repeatedStringFlag
 	excludedCard    repeatedStringFlag
 	excludedSchema  repeatedStringFlag
 	timeout         time.Duration
@@ -110,6 +112,8 @@ func parseCollectorConfig(args []string) (collectorConfig, error) {
 	fs.StringVar(&cfg.mode, "mode", cfg.mode, "Endpoint mode: snapshot, status, or catalog")
 	fs.Var(&cfg.paths, "path", "Telemetry path for snapshot mode; repeat for multiple paths")
 	fs.BoolVar(&cfg.discoverPaths, "discover-paths", false, "Use telemetry catalog paths as the snapshot path set")
+	fs.Var(&cfg.includedCard, "include-cardinality", "Telemetry cardinality to request from catalog discovery; repeat for multiple values")
+	fs.Var(&cfg.includedSchema, "include-payload-schema", "Telemetry payload schema ID to request from catalog discovery; repeat for multiple values")
 	fs.Var(&cfg.excludedCard, "exclude-cardinality", "Telemetry cardinality to exclude from snapshot mode; repeat for multiple values")
 	fs.Var(&cfg.excludedSchema, "exclude-payload-schema", "Telemetry payload schema ID to exclude from snapshot mode; repeat for multiple values")
 	fs.DurationVar(&cfg.timeout, "timeout", cfg.timeout, "Snapshot timeout")
@@ -130,11 +134,19 @@ func parseCollectorConfig(args []string) (collectorConfig, error) {
 		if cfg.maxPayloadBytes <= 0 {
 			return cfg, fmt.Errorf("max-payload-bytes must be positive")
 		}
-		if len(cfg.paths) == 0 && !cfg.discoverPaths {
+		if len(cfg.paths) == 0 && !usesCatalogDiscovery(cfg) {
 			cfg.paths = append(repeatedPathFlag(nil), defaultSnapshotPaths...)
 		}
 	}
 	return cfg, nil
+}
+
+func usesCatalogDiscovery(cfg collectorConfig) bool {
+	return cfg.discoverPaths || len(cfg.includedCard) > 0 || len(cfg.includedSchema) > 0
+}
+
+func needsCatalogResolution(cfg collectorConfig) bool {
+	return usesCatalogDiscovery(cfg) || len(cfg.excludedCard) > 0 || len(cfg.excludedSchema) > 0
 }
 
 func requestTimeout(cfg collectorConfig) time.Duration {
@@ -146,7 +158,7 @@ func requestTimeout(cfg collectorConfig) time.Duration {
 
 func fetchNMS(ctx context.Context, client *http.Client, cfg collectorConfig) ([]byte, error) {
 	var err error
-	if cfg.mode == "snapshot" && (cfg.discoverPaths || len(cfg.excludedCard) > 0 || len(cfg.excludedSchema) > 0) {
+	if cfg.mode == "snapshot" && needsCatalogResolution(cfg) {
 		cfg.paths, err = resolveSnapshotPaths(ctx, client, cfg)
 		if err != nil {
 			return nil, err
@@ -185,10 +197,12 @@ func fetchEndpoint(ctx context.Context, client *http.Client, cfg collectorConfig
 
 func resolveSnapshotPaths(ctx context.Context, client *http.Client, cfg collectorConfig) (repeatedPathFlag, error) {
 	catalogURL, err := collectorEndpointURL(collectorConfig{
-		baseURL:  cfg.baseURL,
-		username: cfg.username,
-		password: cfg.password,
-		mode:     "catalog",
+		baseURL:        cfg.baseURL,
+		username:       cfg.username,
+		password:       cfg.password,
+		mode:           "catalog",
+		includedCard:   append(repeatedStringFlag(nil), cfg.includedCard...),
+		includedSchema: append(repeatedStringFlag(nil), cfg.includedSchema...),
 	})
 	if err != nil {
 		return nil, err
@@ -202,7 +216,7 @@ func resolveSnapshotPaths(ctx context.Context, client *http.Client, cfg collecto
 		return nil, fmt.Errorf("decode telemetry catalog: %w", err)
 	}
 	paths := cfg.paths
-	if cfg.discoverPaths {
+	if cfg.discoverPaths || len(paths) == 0 {
 		paths = pathsFromCatalog(catalog)
 	}
 	filtered := filterSnapshotPathsByCardinality(paths, catalog, cfg.excludedCard)
@@ -283,7 +297,17 @@ func collectorEndpointURL(cfg collectorConfig) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	if cfg.mode == "snapshot" {
+	switch cfg.mode {
+	case "catalog":
+		query := u.Query()
+		for _, value := range cfg.includedCard {
+			query.Add("cardinality", value)
+		}
+		for _, value := range cfg.includedSchema {
+			query.Add("payload_schema", value)
+		}
+		u.RawQuery = query.Encode()
+	case "snapshot":
 		query := u.Query()
 		for _, path := range cfg.paths {
 			query.Add("path", path)
