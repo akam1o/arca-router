@@ -513,6 +513,92 @@ func validateNMSStatusData(data json.RawMessage) error {
 	if len(object) == 0 {
 		return fmt.Errorf("nms status data object is empty")
 	}
+	if err := validateNMSStatusDataFields(object); err != nil {
+		return err
+	}
+	return nil
+}
+
+func validateNMSStatusDataFields(object map[string]json.RawMessage) error {
+	for _, field := range []string{"version", "commit", "build_date", "running_hostname"} {
+		if err := validateNMSStatusStringField(object, field); err != nil {
+			return err
+		}
+	}
+	if err := validateNMSStatusFloatField(object, "uptime_seconds"); err != nil {
+		return err
+	}
+	if err := validateNMSStatusUintField(object, "config_version"); err != nil {
+		return err
+	}
+	for _, section := range []string{"datastore", "config_sync", "cluster", "overlay", "ha", "class_of_service", "frr", "vpp", "netconf"} {
+		if err := validateNMSStatusObjectField(object, section); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func validateNMSStatusStringField(object map[string]json.RawMessage, field string) error {
+	raw, ok := object[field]
+	if !ok {
+		return fmt.Errorf("nms status data %s is missing", field)
+	}
+	var value *string
+	if err := json.Unmarshal(raw, &value); err != nil || value == nil {
+		if err != nil {
+			return fmt.Errorf("nms status data %s must be a string: %w", field, err)
+		}
+		return fmt.Errorf("nms status data %s must be a string", field)
+	}
+	return nil
+}
+
+func validateNMSStatusFloatField(object map[string]json.RawMessage, field string) error {
+	raw, ok := object[field]
+	if !ok {
+		return fmt.Errorf("nms status data %s is missing", field)
+	}
+	var value *float64
+	if err := json.Unmarshal(raw, &value); err != nil || value == nil {
+		if err != nil {
+			return fmt.Errorf("nms status data %s must be a number: %w", field, err)
+		}
+		return fmt.Errorf("nms status data %s must be a number", field)
+	}
+	if *value < 0 {
+		return fmt.Errorf("nms status data %s must be non-negative", field)
+	}
+	return nil
+}
+
+func validateNMSStatusUintField(object map[string]json.RawMessage, field string) error {
+	raw, ok := object[field]
+	if !ok {
+		return fmt.Errorf("nms status data %s is missing", field)
+	}
+	var value *uint64
+	if err := json.Unmarshal(raw, &value); err != nil || value == nil {
+		if err != nil {
+			return fmt.Errorf("nms status data %s must be an unsigned integer: %w", field, err)
+		}
+		return fmt.Errorf("nms status data %s must be an unsigned integer", field)
+	}
+	return nil
+}
+
+func validateNMSStatusObjectField(object map[string]json.RawMessage, field string) error {
+	raw, ok := object[field]
+	if !ok {
+		return fmt.Errorf("nms status data %s is missing", field)
+	}
+	var section map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &section); err != nil {
+		return fmt.Errorf("nms status data %s must be a JSON object: %w", field, err)
+	}
+	if len(section) == 0 {
+		return fmt.Errorf("nms status data %s object is empty", field)
+	}
 	return nil
 }
 
