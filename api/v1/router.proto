@@ -104,6 +104,9 @@ service StateService {
 
 // TelemetryService provides structured streaming telemetry snapshots.
 service TelemetryService {
+  // GetTelemetryCatalog returns supported telemetry paths and metadata.
+  rpc GetTelemetryCatalog(GetTelemetryCatalogRequest) returns (GetTelemetryCatalogResponse);
+
   // SubscribeTelemetry streams selected operational/config state paths.
   rpc SubscribeTelemetry(SubscribeTelemetryRequest) returns (stream TelemetryEvent);
 }
@@ -487,6 +490,22 @@ message GetSystemInfoResponse {
 }
 
 // --- Telemetry messages ---
+
+message GetTelemetryCatalogRequest {}
+
+message GetTelemetryCatalogResponse {
+  string event_schema_version = 1;
+  string encoding = 2;
+  repeated string default_paths = 3;
+  repeated TelemetryPath paths = 4;
+}
+
+message TelemetryPath {
+  string path = 1;
+  string description = 2;
+  string cardinality = 3;
+  bool default = 4;
+}
 
 message SubscribeTelemetryRequest {
   // Optional paths. Empty selects the safe default paths.

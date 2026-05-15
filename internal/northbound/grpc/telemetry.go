@@ -77,6 +77,14 @@ type TelemetryPathInfo struct {
 	Default     bool
 }
 
+// TelemetryCatalog describes the structured telemetry stream inputs.
+type TelemetryCatalog struct {
+	EventSchemaVersion string
+	Encoding           string
+	DefaultPaths       []string
+	Paths              []TelemetryPathInfo
+}
+
 // TelemetryEvent is one structured telemetry update emitted over gRPC.
 type TelemetryEvent struct {
 	Sequence      uint64
@@ -97,6 +105,16 @@ func TelemetryEventSchemaVersion() string {
 // TelemetryEncoding returns the payload encoding used by structured telemetry events.
 func TelemetryEncoding() string {
 	return telemetryEncodingJSON
+}
+
+// NewTelemetryCatalog returns the supported telemetry catalog with schema metadata.
+func NewTelemetryCatalog() TelemetryCatalog {
+	return TelemetryCatalog{
+		EventSchemaVersion: telemetrySchemaVersion,
+		Encoding:           telemetryEncodingJSON,
+		DefaultPaths:       append([]string(nil), defaultTelemetryPaths...),
+		Paths:              TelemetryPathCatalog(),
+	}
 }
 
 // TelemetryPathCatalog returns the supported structured telemetry paths in canonical emission order.

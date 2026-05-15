@@ -522,6 +522,31 @@ type TelemetryReceiver interface {
 	Recv() (*TelemetryEvent, error)
 }
 
+// GetTelemetryCatalog returns the daemon's supported telemetry path catalog.
+func (c *Client) GetTelemetryCatalog(ctx context.Context) (TelemetryCatalog, error) {
+	ctx, cancel := contextWithDefaultTimeout(ctx)
+	defer cancel()
+	resp, err := c.telemetry.GetTelemetryCatalog(ctx, &apiv1.GetTelemetryCatalogRequest{})
+	if err != nil {
+		return TelemetryCatalog{}, err
+	}
+	catalog := TelemetryCatalog{
+		EventSchemaVersion: resp.GetEventSchemaVersion(),
+		Encoding:           resp.GetEncoding(),
+		DefaultPaths:       append([]string(nil), resp.GetDefaultPaths()...),
+		Paths:              make([]TelemetryPathInfo, 0, len(resp.GetPaths())),
+	}
+	for _, path := range resp.GetPaths() {
+		catalog.Paths = append(catalog.Paths, TelemetryPathInfo{
+			Path:        path.GetPath(),
+			Description: path.GetDescription(),
+			Cardinality: path.GetCardinality(),
+			Default:     path.GetDefault(),
+		})
+	}
+	return catalog, nil
+}
+
 // SubscribeTelemetry starts a structured telemetry stream.
 func (c *Client) SubscribeTelemetry(ctx context.Context, paths []string, sampleInterval time.Duration, once bool) (TelemetryReceiver, error) {
 	stream, err := c.telemetry.SubscribeTelemetry(ctx, &apiv1.SubscribeTelemetryRequest{

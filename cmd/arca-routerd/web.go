@@ -1441,27 +1441,23 @@ func newNMSStatusResponse(now time.Time, metrics routerMetrics) nmsStatusRespons
 }
 
 func newNMSTelemetryCatalogResponse(now time.Time) nmsTelemetryCatalogResponse {
-	catalog := nbgrpc.TelemetryPathCatalog()
-	paths := make([]nmsTelemetryPath, 0, len(catalog))
-	defaultPaths := make([]string, 0, len(catalog))
-	for _, info := range catalog {
+	catalog := nbgrpc.NewTelemetryCatalog()
+	paths := make([]nmsTelemetryPath, 0, len(catalog.Paths))
+	for _, info := range catalog.Paths {
 		paths = append(paths, nmsTelemetryPath{
 			Path:        info.Path,
 			Description: info.Description,
 			Cardinality: info.Cardinality,
 			Default:     info.Default,
 		})
-		if info.Default {
-			defaultPaths = append(defaultPaths, info.Path)
-		}
 	}
 	return nmsTelemetryCatalogResponse{
 		SchemaVersion:      nmsTelemetryCatalogSchemaVersion,
 		GeneratedAt:        formatWebOptionalTime(now),
 		Resource:           "/api/nms/v1/telemetry/paths",
-		EventSchemaVersion: nbgrpc.TelemetryEventSchemaVersion(),
-		Encoding:           nbgrpc.TelemetryEncoding(),
-		DefaultPaths:       defaultPaths,
+		EventSchemaVersion: catalog.EventSchemaVersion,
+		Encoding:           catalog.Encoding,
+		DefaultPaths:       catalog.DefaultPaths,
 		Paths:              paths,
 	}
 }

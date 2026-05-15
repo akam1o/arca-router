@@ -221,6 +221,21 @@ func TestClientServerConfigFlow(t *testing.T) {
 		t.Fatalf("Diff() has changes after commit: %q", diffText)
 	}
 
+	catalog, err := client.GetTelemetryCatalog(ctx)
+	if err != nil {
+		t.Fatalf("GetTelemetryCatalog() error = %v", err)
+	}
+	if catalog.EventSchemaVersion != telemetrySchemaVersion || catalog.Encoding != telemetryEncodingJSON {
+		t.Fatalf("telemetry catalog schema/encoding = %q/%q, want %q/%q",
+			catalog.EventSchemaVersion, catalog.Encoding, telemetrySchemaVersion, telemetryEncodingJSON)
+	}
+	if len(catalog.DefaultPaths) != len(defaultTelemetryPaths) || catalog.DefaultPaths[0] != "/system" || catalog.DefaultPaths[1] != "/config/running" {
+		t.Fatalf("telemetry catalog default paths = %#v, want system/config defaults", catalog.DefaultPaths)
+	}
+	if len(catalog.Paths) != len(telemetryPathOrder) || catalog.Paths[0].Path != "/system" {
+		t.Fatalf("telemetry catalog paths = %#v, want canonical path catalog", catalog.Paths)
+	}
+
 	stream, err := client.SubscribeTelemetry(ctx, []string{"/config/running"}, time.Second, true)
 	if err != nil {
 		t.Fatalf("SubscribeTelemetry() error = %v", err)
@@ -382,6 +397,14 @@ func TestTelemetryPathCatalog(t *testing.T) {
 	}
 	if TelemetryEncoding() != telemetryEncodingJSON {
 		t.Fatalf("TelemetryEncoding() = %q, want %q", TelemetryEncoding(), telemetryEncodingJSON)
+	}
+	envelope := NewTelemetryCatalog()
+	if envelope.EventSchemaVersion != telemetrySchemaVersion || envelope.Encoding != telemetryEncodingJSON {
+		t.Fatalf("NewTelemetryCatalog() schema/encoding = %q/%q, want %q/%q",
+			envelope.EventSchemaVersion, envelope.Encoding, telemetrySchemaVersion, telemetryEncodingJSON)
+	}
+	if len(envelope.DefaultPaths) != len(defaultTelemetryPaths) || len(envelope.Paths) != len(telemetryPathOrder) {
+		t.Fatalf("NewTelemetryCatalog() = %#v, want default paths and path catalog", envelope)
 	}
 }
 

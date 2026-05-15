@@ -463,11 +463,33 @@ type telemetryServiceAdapter struct {
 	server *Server
 }
 
+func (a *telemetryServiceAdapter) GetTelemetryCatalog(context.Context, *apiv1.GetTelemetryCatalogRequest) (*apiv1.GetTelemetryCatalogResponse, error) {
+	return telemetryCatalogToProto(NewTelemetryCatalog()), nil
+}
+
 func (a *telemetryServiceAdapter) SubscribeTelemetry(req *apiv1.SubscribeTelemetryRequest, stream apiv1.TelemetryService_SubscribeTelemetryServer) error {
 	interval := time.Duration(req.GetSampleIntervalMs()) * time.Millisecond
 	return a.server.SubscribeTelemetry(stream.Context(), req.GetPaths(), interval, req.GetOnce(), func(event TelemetryEvent) error {
 		return stream.Send(telemetryEventToProto(event))
 	})
+}
+
+func telemetryCatalogToProto(catalog TelemetryCatalog) *apiv1.GetTelemetryCatalogResponse {
+	resp := &apiv1.GetTelemetryCatalogResponse{
+		EventSchemaVersion: catalog.EventSchemaVersion,
+		Encoding:           catalog.Encoding,
+		DefaultPaths:       append([]string(nil), catalog.DefaultPaths...),
+		Paths:              make([]*apiv1.TelemetryPath, 0, len(catalog.Paths)),
+	}
+	for _, info := range catalog.Paths {
+		resp.Paths = append(resp.Paths, &apiv1.TelemetryPath{
+			Path:        info.Path,
+			Description: info.Description,
+			Cardinality: info.Cardinality,
+			Default:     info.Default,
+		})
+	}
+	return resp
 }
 
 func telemetryEventToProto(event TelemetryEvent) *apiv1.TelemetryEvent {
