@@ -87,13 +87,16 @@ type nmsStatusResponse struct {
 }
 
 type nmsTelemetryCatalogResponse struct {
-	SchemaVersion      string             `json:"schema_version"`
-	GeneratedAt        string             `json:"generated_at"`
-	Resource           string             `json:"resource"`
-	EventSchemaVersion string             `json:"event_schema_version"`
-	Encoding           string             `json:"encoding"`
-	DefaultPaths       []string           `json:"default_paths"`
-	Paths              []nmsTelemetryPath `json:"paths"`
+	SchemaVersion           string             `json:"schema_version"`
+	GeneratedAt             string             `json:"generated_at"`
+	Resource                string             `json:"resource"`
+	EventSchemaVersion      string             `json:"event_schema_version"`
+	Encoding                string             `json:"encoding"`
+	DefaultPaths            []string           `json:"default_paths"`
+	DefaultSampleIntervalMs uint32             `json:"default_sample_interval_ms"`
+	MinSampleIntervalMs     uint32             `json:"min_sample_interval_ms"`
+	MaxSampleIntervalMs     uint32             `json:"max_sample_interval_ms"`
+	Paths                   []nmsTelemetryPath `json:"paths"`
 }
 
 type nmsTelemetrySnapshotResponse struct {
@@ -1470,13 +1473,16 @@ func newNMSTelemetryCatalogResponse(now time.Time, filters nmsTelemetryCatalogFi
 		}
 	}
 	return nmsTelemetryCatalogResponse{
-		SchemaVersion:      nmsTelemetryCatalogSchemaVersion,
-		GeneratedAt:        formatWebOptionalTime(now),
-		Resource:           "/api/nms/v1/telemetry/paths",
-		EventSchemaVersion: catalog.EventSchemaVersion,
-		Encoding:           catalog.Encoding,
-		DefaultPaths:       catalog.DefaultPaths,
-		Paths:              paths,
+		SchemaVersion:           nmsTelemetryCatalogSchemaVersion,
+		GeneratedAt:             formatWebOptionalTime(now),
+		Resource:                "/api/nms/v1/telemetry/paths",
+		EventSchemaVersion:      catalog.EventSchemaVersion,
+		Encoding:                catalog.Encoding,
+		DefaultPaths:            catalog.DefaultPaths,
+		DefaultSampleIntervalMs: catalog.DefaultSampleIntervalMs,
+		MinSampleIntervalMs:     catalog.MinSampleIntervalMs,
+		MaxSampleIntervalMs:     catalog.MaxSampleIntervalMs,
+		Paths:                   paths,
 	}
 }
 

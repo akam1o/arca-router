@@ -304,6 +304,14 @@ func TestNMSTelemetryCatalogEndpoint(t *testing.T) {
 	if len(resp.DefaultPaths) != 2 || resp.DefaultPaths[0] != "/system" || resp.DefaultPaths[1] != "/config/running" {
 		t.Fatalf("DefaultPaths = %#v, want system and config/running", resp.DefaultPaths)
 	}
+	catalog := nbgrpc.NewTelemetryCatalog()
+	if resp.DefaultSampleIntervalMs != catalog.DefaultSampleIntervalMs ||
+		resp.MinSampleIntervalMs != catalog.MinSampleIntervalMs ||
+		resp.MaxSampleIntervalMs != catalog.MaxSampleIntervalMs {
+		t.Fatalf("sample intervals = %d/%d/%d, want %d/%d/%d",
+			resp.DefaultSampleIntervalMs, resp.MinSampleIntervalMs, resp.MaxSampleIntervalMs,
+			catalog.DefaultSampleIntervalMs, catalog.MinSampleIntervalMs, catalog.MaxSampleIntervalMs)
+	}
 	if len(resp.Paths) == 0 {
 		t.Fatal("Paths is empty, want telemetry path catalog")
 	}

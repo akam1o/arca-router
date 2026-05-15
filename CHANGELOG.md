@@ -2,6 +2,7 @@
 
 ## v0.8.x - Overlay and Streaming Telemetry (current)
 
+- **NMS telemetry catalog interval hints**: `/api/nms/v1/telemetry/paths` advertises default, minimum, and maximum sample intervals in milliseconds for HTTP collector discovery
 - **gRPC telemetry catalog interval hints**: `TelemetryService.GetTelemetryCatalog` advertises default, minimum, and maximum sample intervals in milliseconds for stream collectors
 - **NMS collector encoding exclude filters**: the example HTTP collector can skip catalog-discovered snapshot paths when the advertised payload encoding matches `-exclude-encoding`
 - **NMS collector alias exclude filters**: the example HTTP collector applies path, cardinality, and payload schema exclusions to snapshot paths selected by catalog aliases
