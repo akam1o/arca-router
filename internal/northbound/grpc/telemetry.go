@@ -66,6 +66,14 @@ var (
 		"/lcp":                     "single",
 		"/ha":                      "single",
 	}
+	telemetryPathAliases = map[string][]string{
+		"/config/running":          {"/running", "/config"},
+		"/routing/bgp/neighbors":   {"/bgp", "/bgp/neighbors"},
+		"/routing/ospf/neighbors":  {"/ospf", "/ospf/neighbors"},
+		"/routing/ospf3/neighbors": {"/ospf3", "/ospf3/neighbors"},
+		"/overlays/evpn":           {"/evpn", "/overlay/evpn"},
+		"/class-of-service":        {"/cos"},
+	}
 	telemetryPathSet = buildTelemetryPathSet(telemetryPathOrder)
 )
 
@@ -74,6 +82,7 @@ type TelemetryPathInfo struct {
 	Path        string
 	Description string
 	Cardinality string
+	Aliases     []string
 	Default     bool
 }
 
@@ -127,6 +136,7 @@ func TelemetryPathCatalog() []TelemetryPathInfo {
 			Path:        path,
 			Description: telemetryPathDescriptions[path],
 			Cardinality: telemetryPathCardinality[path],
+			Aliases:     append([]string(nil), telemetryPathAliases[path]...),
 			Default:     isDefault,
 		})
 	}

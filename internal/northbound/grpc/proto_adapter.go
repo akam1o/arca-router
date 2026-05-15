@@ -486,6 +486,7 @@ func telemetryCatalogToProto(catalog TelemetryCatalog) *apiv1.GetTelemetryCatalo
 			Path:        info.Path,
 			Description: info.Description,
 			Cardinality: info.Cardinality,
+			Aliases:     append([]string(nil), info.Aliases...),
 			Default:     info.Default,
 		})
 	}

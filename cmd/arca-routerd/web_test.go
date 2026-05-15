@@ -311,15 +311,20 @@ func TestNMSTelemetryCatalogEndpoint(t *testing.T) {
 		resp.Paths[0].Cardinality != "single" {
 		t.Fatalf("Paths[0] = %#v, want default system path with description and single cardinality", resp.Paths[0])
 	}
-	var routesPath nmsTelemetryPath
+	var routesPath, evpnPath nmsTelemetryPath
 	for _, path := range resp.Paths {
-		if path.Path == "/routes" {
+		switch path.Path {
+		case "/routes":
 			routesPath = path
-			break
+		case "/overlays/evpn":
+			evpnPath = path
 		}
 	}
 	if routesPath.Cardinality != "per-route" {
 		t.Fatalf("/routes cardinality = %q, want per-route", routesPath.Cardinality)
+	}
+	if len(evpnPath.Aliases) != 2 || evpnPath.Aliases[0] != "/evpn" || evpnPath.Aliases[1] != "/overlay/evpn" {
+		t.Fatalf("/overlays/evpn aliases = %#v, want EVPN aliases", evpnPath.Aliases)
 	}
 }
 

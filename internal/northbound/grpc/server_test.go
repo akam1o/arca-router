@@ -235,6 +235,9 @@ func TestClientServerConfigFlow(t *testing.T) {
 	if len(catalog.Paths) != len(telemetryPathOrder) || catalog.Paths[0].Path != "/system" {
 		t.Fatalf("telemetry catalog paths = %#v, want canonical path catalog", catalog.Paths)
 	}
+	if len(catalog.Paths[1].Aliases) != 2 || catalog.Paths[1].Aliases[0] != "/running" {
+		t.Fatalf("telemetry catalog aliases for config/running = %#v, want running aliases", catalog.Paths[1].Aliases)
+	}
 
 	stream, err := client.SubscribeTelemetry(ctx, []string{"/config/running"}, time.Second, true)
 	if err != nil {
@@ -375,17 +378,28 @@ func TestTelemetryPathCatalog(t *testing.T) {
 		if info.Cardinality == "" {
 			t.Fatalf("catalog[%d].Cardinality is empty for %s", i, info.Path)
 		}
+		for _, alias := range info.Aliases {
+			if got := normalizeTelemetryPath(alias); got != info.Path {
+				t.Fatalf("alias %q normalizes to %q, want %q", alias, got, info.Path)
+			}
+		}
 		if info.Default {
 			defaults[info.Path] = true
 		}
 	}
 	cardinality := map[string]string{}
+	aliases := map[string][]string{}
 	for _, info := range catalog {
 		cardinality[info.Path] = info.Cardinality
+		aliases[info.Path] = info.Aliases
 	}
 	if cardinality["/routes"] != "per-route" || cardinality["/overlays/evpn"] != "per-vni" ||
 		cardinality["/interfaces"] != "per-interface" {
 		t.Fatalf("cardinality hints = %#v, want route/evpn/interface hints", cardinality)
+	}
+	if len(aliases["/overlays/evpn"]) != 2 || aliases["/overlays/evpn"][0] != "/evpn" ||
+		len(aliases["/class-of-service"]) != 1 || aliases["/class-of-service"][0] != "/cos" {
+		t.Fatalf("aliases = %#v, want EVPN and CoS path aliases", aliases)
 	}
 	for _, path := range defaultTelemetryPaths {
 		if !defaults[path] {

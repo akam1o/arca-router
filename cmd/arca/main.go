@@ -1932,13 +1932,14 @@ func printTelemetryPathCatalog(catalog []grpcclient.TelemetryPathInfo) {
 		fmt.Println("No telemetry paths found")
 		return
 	}
-	fmt.Printf("%-28s %-18s %-8s %s\n", "Path", "Cardinality", "Default", "Description")
-	fmt.Println(strings.Repeat("-", 96))
+	fmt.Printf("%-28s %-18s %-8s %-28s %s\n", "Path", "Cardinality", "Default", "Aliases", "Description")
+	fmt.Println(strings.Repeat("-", 125))
 	for _, info := range catalog {
-		fmt.Printf("%-28s %-18s %-8s %s\n",
+		fmt.Printf("%-28s %-18s %-8s %-28s %s\n",
 			formatTelemetryCatalogValue(info.Path),
 			formatTelemetryCatalogValue(info.Cardinality),
 			yesNo(info.Default),
+			formatTelemetryCatalogList(info.Aliases),
 			formatTelemetryCatalogValue(info.Description),
 		)
 	}
@@ -1949,6 +1950,13 @@ func formatTelemetryCatalogValue(value string) string {
 		return "-"
 	}
 	return value
+}
+
+func formatTelemetryCatalogList(values []string) string {
+	if len(values) == 0 {
+		return "-"
+	}
+	return strings.Join(values, ",")
 }
 
 func telemetryOptions(args []string) (telemetryCLIOptions, error) {

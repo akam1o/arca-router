@@ -541,6 +541,7 @@ func (c *Client) GetTelemetryCatalog(ctx context.Context) (TelemetryCatalog, err
 			Path:        path.GetPath(),
 			Description: path.GetDescription(),
 			Cardinality: path.GetCardinality(),
+			Aliases:     append([]string(nil), path.GetAliases()...),
 			Default:     path.GetDefault(),
 		})
 	}
