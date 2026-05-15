@@ -542,7 +542,28 @@ func validateNMSStatusDataFields(object map[string]json.RawMessage, generatedAt 
 	if err := validateNMSStatusUintField(object, "config_version"); err != nil {
 		return err
 	}
+	if err := validateNMSStatusBuildMetadata(object, generatedAt); err != nil {
+		return err
+	}
 	return validateNMSStatusSections(object, generatedAt)
+}
+
+func validateNMSStatusBuildMetadata(object map[string]json.RawMessage, generatedAt time.Time) error {
+	buildDate, err := nmsStatusStringFieldValuePath(object, "build_date", "build_date")
+	if err != nil {
+		return err
+	}
+	if strings.EqualFold(buildDate, "unknown") {
+		return nil
+	}
+	parsed, err := time.Parse(time.RFC3339, buildDate)
+	if err != nil {
+		return fmt.Errorf("nms status data build_date = %q, want RFC3339 or unknown: %w", buildDate, err)
+	}
+	if parsed.After(generatedAt) {
+		return fmt.Errorf("nms status data build_date = %q, want no later than nms status generated_at %q", parsed.Format(time.RFC3339), generatedAt.Format(time.RFC3339))
+	}
+	return nil
 }
 
 func validateNMSStatusSections(object map[string]json.RawMessage, generatedAt time.Time) error {

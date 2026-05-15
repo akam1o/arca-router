@@ -247,6 +247,11 @@ func TestDecodeStatusResponseRejectsInvalidEnvelope(t *testing.T) {
 	if err := decodeStatusResponse(validStatus); err != nil {
 		t.Fatalf("decodeStatusResponse(valid) error = %v", err)
 	}
+	unknownBuildDateData := validStatusData()
+	unknownBuildDateData["build_date"] = "unknown"
+	if err := decodeStatusResponse(statusEnvelope(unknownBuildDateData)); err != nil {
+		t.Fatalf("decodeStatusResponse(unknown build_date) error = %v", err)
+	}
 
 	err := decodeStatusResponse([]byte(`[{"data":{}}]`))
 	if err == nil || !strings.Contains(err.Error(), "decode nms status response") {
@@ -287,6 +292,18 @@ func TestDecodeStatusResponseRejectsInvalidEnvelope(t *testing.T) {
 	err = decodeStatusResponse(statusEnvelope(data))
 	if err == nil || !strings.Contains(err.Error(), "running_hostname") {
 		t.Fatalf("decodeStatusResponse() error = %v, want running_hostname mismatch", err)
+	}
+	data = validStatusData()
+	data["build_date"] = "yesterday"
+	err = decodeStatusResponse(statusEnvelope(data))
+	if err == nil || !strings.Contains(err.Error(), "build_date") {
+		t.Fatalf("decodeStatusResponse() error = %v, want build_date format mismatch", err)
+	}
+	data = validStatusData()
+	data["build_date"] = "2026-05-15T12:37:56Z"
+	err = decodeStatusResponse(statusEnvelope(data))
+	if err == nil || !strings.Contains(err.Error(), "build_date") {
+		t.Fatalf("decodeStatusResponse() error = %v, want build_date timing mismatch", err)
 	}
 	data = validStatusData()
 	data["uptime_seconds"] = -1
