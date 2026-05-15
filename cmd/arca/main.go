@@ -1141,6 +1141,9 @@ func (sh *interactiveShell) printChangeImpactPreview(ctx context.Context) error 
 	for _, line := range formatChangeImpactPreview(diffText, hasChanges) {
 		fmt.Println(line)
 	}
+	for _, line := range sh.classOfServicePreflightLines(ctx, diffText, hasChanges) {
+		fmt.Println(line)
+	}
 	return nil
 }
 
@@ -1153,8 +1156,22 @@ func (sh *interactiveShell) printCommitFailureDiagnostics(ctx context.Context) e
 	for _, line := range formatChangeImpactPreview(diffText, hasChanges) {
 		fmt.Printf("  %s\n", line)
 	}
+	for _, line := range sh.classOfServicePreflightLines(ctx, diffText, hasChanges) {
+		fmt.Printf("  %s\n", line)
+	}
 	fmt.Println("  next step: resolve the error and run 'commit check'")
 	return nil
+}
+
+func (sh *interactiveShell) classOfServicePreflightLines(ctx context.Context, diffText string, hasChanges bool) []string {
+	if !hasChanges || !analyzeChangeImpact(diffText).classOfService.hasChanges() {
+		return nil
+	}
+	info, err := sh.client.GetClassOfService(ctx)
+	if err != nil {
+		return []string{"qos preflight: capability check unavailable: " + err.Error()}
+	}
+	return formatClassOfServicePreflight(info)
 }
 
 type changeImpactPreview struct {
@@ -1356,6 +1373,39 @@ func (c changeImpactBGPPolicyBinding) summary() string {
 		action = "remove"
 	}
 	return fmt.Sprintf("%s bgp group %s %s route-map %s", action, c.groupName, c.direction, c.policy)
+}
+
+func formatClassOfServicePreflight(info *grpcclient.ClassOfServiceInfo) []string {
+	if info == nil || info.Capabilities == nil {
+		return []string{"qos preflight: capability snapshot unavailable"}
+	}
+	capabilities := info.Capabilities
+	lines := []string{
+		"qos preflight:",
+		fmt.Sprintf("  metadata binding: %s", yesNo(capabilities.MetadataBindingSupported)),
+		fmt.Sprintf("  queue scheduler: %s", yesNo(capabilities.QueueSchedulerSupported)),
+		fmt.Sprintf("  policer: %s", yesNo(capabilities.PolicerSupported)),
+		fmt.Sprintf("  counters: %s", yesNo(capabilities.CountersSupported)),
+	}
+	if capabilities.LastError != "" {
+		lines = append(lines, "  warning: capability detection error: "+capabilities.LastError)
+	}
+	if !capabilities.MetadataBindingSupported {
+		lines = append(lines, "  warning: metadata binding is unavailable; QoS intent may not persist on VPP interfaces")
+	}
+	if !capabilities.QueueSchedulerSupported {
+		lines = append(lines, "  warning: queue scheduler is unavailable; output QoS remains intent-only")
+	}
+	if !capabilities.PolicerSupported {
+		lines = append(lines, "  warning: policer is unavailable; traffic policing remains intent-only")
+	}
+	for _, diagnostic := range capabilities.Diagnostics {
+		if diagnostic == "" {
+			continue
+		}
+		lines = append(lines, "  diagnostic: "+diagnostic)
+	}
+	return lines
 }
 
 func analyzeChangeImpact(diffText string) changeImpactPreview {

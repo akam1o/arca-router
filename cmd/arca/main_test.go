@@ -40,6 +40,7 @@ type fakeInteractiveClient struct {
 	lcpInfo          *grpcclient.LCPReconciliationInfo
 	haInfo           *grpcclient.HAStatusInfo
 	cosInfo          *grpcclient.ClassOfServiceInfo
+	cosErr           error
 	telemetryCatalog grpcclient.TelemetryCatalog
 	telemetryEvents  []*grpcclient.TelemetryEvent
 	diffText         string
@@ -53,6 +54,7 @@ type fakeInteractiveClient struct {
 	diffCalls                     int
 	routeCalls                    int
 	bfdStatusCalls                int
+	cosCalls                      int
 	routingCalls                  int
 	bgpNeighborCalls              int
 	ospfNeighborCalls             int
@@ -227,6 +229,10 @@ func (f *fakeInteractiveClient) GetHAStatus(ctx context.Context) (*grpcclient.HA
 }
 
 func (f *fakeInteractiveClient) GetClassOfService(ctx context.Context) (*grpcclient.ClassOfServiceInfo, error) {
+	f.cosCalls++
+	if f.cosErr != nil {
+		return nil, f.cosErr
+	}
 	if f.cosInfo != nil {
 		return f.cosInfo, nil
 	}
@@ -539,6 +545,56 @@ func TestCommitCheckBuildsChangeImpactPreview(t *testing.T) {
 	}
 }
 
+func TestCommitCheckRunsClassOfServicePreflight(t *testing.T) {
+	ctx := context.Background()
+	client := &fakeInteractiveClient{
+		diffText:       "+ set class-of-service interfaces ge-0/0/0 output-traffic-control-profile WAN",
+		diffHasChanges: true,
+		cosInfo: &grpcclient.ClassOfServiceInfo{
+			Capabilities: &grpcclient.ClassOfServiceCapabilitiesInfo{
+				MetadataBindingSupported: true,
+				Diagnostics:              []string{"scheduler unavailable"},
+			},
+		},
+	}
+	sh := &interactiveShell{
+		client:    client,
+		hostname:  "router",
+		mode:      modeConfiguration,
+		sessionID: "session-1",
+		hasLock:   true,
+	}
+
+	if err := sh.cmdCommit(ctx, []string{"check"}); err != nil {
+		t.Fatalf("cmdCommit(check) error = %v", err)
+	}
+	if client.validateCalls != 1 || client.diffCalls != 1 || client.cosCalls != 1 || client.commitCalls != 0 {
+		t.Fatalf("validate/diff/cos/commit calls = %d/%d/%d/%d, want 1/1/1/0", client.validateCalls, client.diffCalls, client.cosCalls, client.commitCalls)
+	}
+}
+
+func TestCommitCheckSkipsClassOfServicePreflightWithoutCosDiff(t *testing.T) {
+	ctx := context.Background()
+	client := &fakeInteractiveClient{
+		diffText:       "+ set routing-options static route 198.51.100.0/24 next-hop 192.0.2.1",
+		diffHasChanges: true,
+	}
+	sh := &interactiveShell{
+		client:    client,
+		hostname:  "router",
+		mode:      modeConfiguration,
+		sessionID: "session-1",
+		hasLock:   true,
+	}
+
+	if err := sh.cmdCommit(ctx, []string{"check"}); err != nil {
+		t.Fatalf("cmdCommit(check) error = %v", err)
+	}
+	if client.cosCalls != 0 {
+		t.Fatalf("GetClassOfService calls = %d, want 0", client.cosCalls)
+	}
+}
+
 func TestFormatChangeImpactPreviewSummarizesRouteAndPolicyDiff(t *testing.T) {
 	lines := formatChangeImpactPreview(strings.Join([]string{
 		"+ set routing-options static route 0.0.0.0/0 next-hop 198.51.100.2",
@@ -675,6 +731,35 @@ func TestFormatChangeImpactPreviewNoChanges(t *testing.T) {
 	lines := formatChangeImpactPreview("", false)
 	if got, want := strings.Join(lines, "\n"), "change impact preview: no candidate changes"; got != want {
 		t.Fatalf("formatChangeImpactPreview(no changes) = %q, want %q", got, want)
+	}
+}
+
+func TestFormatClassOfServicePreflightWarnsOnCapabilityGaps(t *testing.T) {
+	lines := formatClassOfServicePreflight(&grpcclient.ClassOfServiceInfo{
+		Capabilities: &grpcclient.ClassOfServiceCapabilitiesInfo{
+			MetadataBindingSupported: true,
+			QueueSchedulerSupported:  false,
+			PolicerSupported:         false,
+			CountersSupported:        true,
+			LastError:                "capability probe failed",
+			Diagnostics:              []string{"scheduler unsupported"},
+		},
+	})
+	got := strings.Join(lines, "\n")
+	for _, want := range []string{
+		"qos preflight:",
+		"metadata binding: yes",
+		"queue scheduler: no",
+		"policer: no",
+		"counters: yes",
+		"warning: capability detection error: capability probe failed",
+		"warning: queue scheduler is unavailable; output QoS remains intent-only",
+		"warning: policer is unavailable; traffic policing remains intent-only",
+		"diagnostic: scheduler unsupported",
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("formatClassOfServicePreflight() = %q, want substring %q", got, want)
+		}
 	}
 }
 

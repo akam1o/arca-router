@@ -2,6 +2,7 @@
 
 ## v0.9.x - NETCONF/YANG and Operational Safety (current)
 
+- **CLI QoS preflight diagnostics**: `commit check` and failed commit diagnostics now include VPP class-of-service capability gaps when class-of-service changes are pending
 - **CLI policy impact summaries**: commit impact previews now list representative prefix-list, route-map, and BGP import/export route-map binding changes before commit
 - **CLI route impact summaries**: commit impact previews now list representative static route prefixes and next-hops, including routing-instance scoped routes, before commit
 - **CLI failed commit diagnostics**: failed `commit` operations now print the candidate impact summary and keep the original failure while reporting diagnostics collection errors separately
