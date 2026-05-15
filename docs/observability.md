@@ -163,6 +163,7 @@ Endpoints:
 - `GET /api/status`
 - `GET /api/nms/v1/status`
 - `GET /api/nms/v1/telemetry/paths`
+- `GET /api/nms/v1/telemetry/schemas`
 - `GET /api/nms/v1/telemetry/snapshot`
 - `POST /api/config/validate`
 - `POST /api/config/commit`
@@ -171,9 +172,10 @@ The Web UI is intended for trusted management networks. It exposes the same daem
 
 `/api/nms/v1/status` returns the same read-only operational status in a schema-versioned envelope with `schema_version`, `generated_at`, `resource`, and `data` fields. External NMS collectors should use this endpoint when they need a stable API shape instead of scraping the dashboard page.
 `/api/nms/v1/telemetry/paths` returns the supported structured telemetry paths, the default path set, event schema version, payload encoding, default/min/max sample interval hints in milliseconds, per-path cardinality hints, payload schema IDs, and accepted aliases so collectors can discover stream inputs before subscribing over gRPC or invoking the CLI for local validation. The endpoint accepts `default=true` plus repeated `path`, `cardinality`, `payload_schema`, and `encoding` query parameters to return a filtered catalog; path filters match canonical paths or aliases, for example `?path=/evpn`.
-`/api/nms/v1/telemetry/snapshot` returns a one-shot structured telemetry snapshot for HTTP-only collectors. Use repeated `path` query parameters, for example `?path=/system&path=/interfaces`; omitting `path` uses the same default telemetry paths as the gRPC stream. `timeout` defaults to `5s` and is capped at `30s`. `max_payload_bytes` defaults to `8388608` and is capped at `67108864`; the response echoes total `payload_bytes`, per-event `payload_bytes`, `max_payload_bytes`, and `timeout_ms`.
+`/api/nms/v1/telemetry/schemas` returns the structured telemetry payload schema registry for collector validation and routing. Each schema entry includes the telemetry path, description, cardinality hint, payload schema ID, accepted aliases, default membership, and stable top-level JSON field names with type hints and descriptions. The endpoint accepts the same `default=true`, `path`, `cardinality`, `payload_schema`, and `encoding` filters as the path catalog.
+`/api/nms/v1/telemetry/snapshot` returns a one-shot structured telemetry snapshot for HTTP-only collectors. Use repeated `path` query parameters, for example `?path=/system&path=/interfaces`; omitting `path` uses the same default telemetry paths as the gRPC stream. `timeout` defaults to `5s` and is capped at `30s`. `max_payload_bytes` defaults to `8388608` and is capped at `67108864`; `max_events` defaults to `64` and is capped at `1024`. The response echoes total `payload_bytes`, per-event `payload_bytes`, `max_payload_bytes`, `max_events`, and `timeout_ms`.
 
-An HTTP-only collector example is included in `examples/nms`. It decodes catalog sample interval hints, can pass include-default, path, cardinality, payload schema, or encoding filters into telemetry catalog discovery, and can exclude selected paths, aliases, cardinalities, payload schema IDs, or encodings before requesting a bounded snapshot; exclusions resolve catalog aliases before matching metadata.
+An HTTP-only collector example is included in `examples/nms`. It decodes catalog sample interval hints, can pass include-default, path, cardinality, payload schema, or encoding filters into telemetry catalog and schema discovery, and can exclude selected paths, aliases, cardinalities, payload schema IDs, or encodings before requesting a bounded snapshot; exclusions resolve catalog aliases before matching metadata.
 
 HA convergence is evaluated when chassis clustering is enabled and at least one VRRP group is configured. The status is converged only when there are at least two cluster nodes, etcd cluster sync is configured and aligned with the daemon datastore, the etcd config synchronizer is healthy, FRR VRRP operational state reports every configured group as active, and VPP LCP reconciliation has run without errors or inconsistencies.
 
@@ -183,7 +185,8 @@ When the running configuration contains password-backed `security users`, the We
 curl -u monitor:ReadOnly789 http://127.0.0.1:8080/api/status
 curl -u monitor:ReadOnly789 http://127.0.0.1:8080/api/nms/v1/status
 curl -u monitor:ReadOnly789 http://127.0.0.1:8080/api/nms/v1/telemetry/paths
-curl -u monitor:ReadOnly789 'http://127.0.0.1:8080/api/nms/v1/telemetry/snapshot?path=/system&path=/interfaces&path=/overlays/evpn&timeout=5s&max_payload_bytes=8388608'
+curl -u monitor:ReadOnly789 'http://127.0.0.1:8080/api/nms/v1/telemetry/schemas?path=/evpn'
+curl -u monitor:ReadOnly789 'http://127.0.0.1:8080/api/nms/v1/telemetry/snapshot?path=/system&path=/interfaces&path=/overlays/evpn&timeout=5s&max_payload_bytes=8388608&max_events=64'
 curl -u monitor:ReadOnly789 http://127.0.0.1:8080/api/config
 curl -u monitor:ReadOnly789 http://127.0.0.1:8080/api/config/history
 ```
