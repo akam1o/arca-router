@@ -134,6 +134,10 @@ func TestDecodeDiscoveryResponseRejectsInvalidSchemaEnvelope(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "cardinality") {
 		t.Fatalf("decodeDiscoveryResponse() error = %v, want catalog cardinality mismatch", err)
 	}
+	err = decodeDiscoveryResponse(collectorConfig{mode: "catalog"}, []byte(`{"schema_version":"arca.nms.telemetry-catalog.v1","resource":"/api/nms/v1/telemetry/paths","event_schema_version":"arca.telemetry.v1","encoding":"json","default_paths":["/system"],"default_sample_interval_ms":30000,"min_sample_interval_ms":1000,"max_sample_interval_ms":3600000,"path_count":1,"paths":[{"path":"/system","cardinality":"per-device","payload_schema":"arca.telemetry.system.v1"}]}`))
+	if err == nil || !strings.Contains(err.Error(), "cardinality") {
+		t.Fatalf("decodeDiscoveryResponse() error = %v, want catalog cardinality value mismatch", err)
+	}
 	err = decodeDiscoveryResponse(collectorConfig{mode: "catalog"}, []byte(`{"schema_version":"arca.nms.telemetry-catalog.v1","resource":"/api/nms/v1/telemetry/paths","event_schema_version":"arca.telemetry.v1","encoding":"json","default_paths":["/system"],"default_sample_interval_ms":30000,"min_sample_interval_ms":1000,"max_sample_interval_ms":3600000,"path_count":1,"paths":[{"path":"/system","cardinality":"single","payload_schema":"arca.telemetry.system.v1","aliases":["/system"]}]}`))
 	if err == nil || !strings.Contains(err.Error(), "duplicates") {
 		t.Fatalf("decodeDiscoveryResponse() error = %v, want catalog duplicate path mismatch", err)
@@ -696,6 +700,10 @@ func TestDecodeSnapshotResponseRejectsInvalidEnvelope(t *testing.T) {
 	_, err = decodeSnapshotResponse([]byte(`{"schema_version":"arca.nms.telemetry-snapshot.v1","resource":"/api/nms/v1/telemetry/snapshot","event_schema_version":"arca.telemetry.v1","encoding":"json","event_count":1,"events":[{"path":"/system","event_type":"snapshot","encoding":"json","schema_version":"arca.telemetry.v1","payload_bytes":2,"payload":{}}]}`))
 	if err == nil || !strings.Contains(err.Error(), "cardinality") {
 		t.Fatalf("decodeSnapshotResponse() error = %v, want event cardinality mismatch", err)
+	}
+	_, err = decodeSnapshotResponse([]byte(`{"schema_version":"arca.nms.telemetry-snapshot.v1","resource":"/api/nms/v1/telemetry/snapshot","event_schema_version":"arca.telemetry.v1","encoding":"json","event_count":1,"events":[{"path":"/system","cardinality":"per-device","payload_schema":"arca.telemetry.system.v1","event_type":"snapshot","encoding":"json","schema_version":"arca.telemetry.v1","payload_bytes":2,"payload":{}}]}`))
+	if err == nil || !strings.Contains(err.Error(), "cardinality") {
+		t.Fatalf("decodeSnapshotResponse() error = %v, want event cardinality value mismatch", err)
 	}
 	_, err = decodeSnapshotResponse([]byte(`{"schema_version":"arca.nms.telemetry-snapshot.v1","resource":"/api/nms/v1/telemetry/snapshot","event_schema_version":"arca.telemetry.v1","encoding":"json","event_count":1,"events":[{"path":"/system","cardinality":"single","event_type":"snapshot","encoding":"json","schema_version":"arca.telemetry.v1","payload_bytes":2,"payload":{}}]}`))
 	if err == nil || !strings.Contains(err.Error(), "payload_schema") {

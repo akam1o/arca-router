@@ -1658,6 +1658,9 @@ func validateTelemetryPathMetadata(kind, path, cardinality, payloadSchema string
 	if strings.TrimSpace(cardinality) == "" {
 		return fmt.Errorf("%s cardinality is empty", kind)
 	}
+	if err := validateTelemetryCardinality(kind, cardinality); err != nil {
+		return err
+	}
 	if strings.TrimSpace(payloadSchema) == "" {
 		return fmt.Errorf("%s payload_schema is empty", kind)
 	}
@@ -1667,6 +1670,22 @@ func validateTelemetryPathMetadata(kind, path, cardinality, payloadSchema string
 		}
 	}
 	return nil
+}
+
+func validateTelemetryCardinality(kind, cardinality string) error {
+	switch cardinality {
+	case "single",
+		"per-interface",
+		"per-route",
+		"per-neighbor",
+		"per-instance",
+		"per-vni",
+		"per-intent-object",
+		"per-peer":
+		return nil
+	default:
+		return fmt.Errorf("%s cardinality = %q, want one of single, per-interface, per-route, per-neighbor, per-instance, per-vni, per-intent-object, or per-peer", kind, cardinality)
+	}
 }
 
 func validateTelemetryPathValue(kind, field, value string) error {
