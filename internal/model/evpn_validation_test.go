@@ -28,6 +28,7 @@ func TestEVPNValidationAcceptsL2AndL3VNIs(t *testing.T) {
 				VNI:             20010,
 				Type:            "l3",
 				RoutingInstance: "BLUE",
+				RemoteVTEP:      "198.51.100.20",
 			},
 		}},
 	}
@@ -62,6 +63,16 @@ func TestEVPNValidationRejectsInvalidVNIs(t *testing.T) {
 			name: "bad multicast",
 			vni:  &EVPNVNI{VNI: 10010, Type: "l2", BridgeDomain: "BD-10", MulticastGroup: "192.0.2.10"},
 			want: `evpn vni 10010: invalid multicast-group "192.0.2.10"`,
+		},
+		{
+			name: "bad remote vtep",
+			vni:  &EVPNVNI{VNI: 10010, Type: "l2", BridgeDomain: "BD-10", RemoteVTEP: "239.0.0.10"},
+			want: `evpn vni 10010: invalid remote-vtep "239.0.0.10"`,
+		},
+		{
+			name: "multicast and remote vtep",
+			vni:  &EVPNVNI{VNI: 10010, Type: "l2", BridgeDomain: "BD-10", MulticastGroup: "239.0.0.10", RemoteVTEP: "198.51.100.10"},
+			want: "evpn vni 10010: multicast-group and remote-vtep are mutually exclusive",
 		},
 	}
 

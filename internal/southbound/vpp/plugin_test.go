@@ -410,6 +410,36 @@ func TestValidateChangesAllowsEVPNL3VXLAN(t *testing.T) {
 	}
 }
 
+func TestValidateChangesAllowsEVPNRemoteVTEP(t *testing.T) {
+	plugin := NewVPPPlugin(pkgvpp.NewMockClient(), &device.HardwareConfig{
+		Interfaces: []device.PhysicalInterface{
+			{Name: "ge-0/0/0", PCI: "0000:03:00.0", Driver: "avf"},
+		},
+	}, testLogger())
+	newCfg := model.NewRouterConfig()
+	newCfg.Interfaces["ge-0/0/0"] = &model.InterfaceConfig{Units: map[int]*model.Unit{
+		0: {Family: map[string]*model.AddressFamily{
+			"inet": {Addresses: []string{"192.0.2.1/24"}},
+		}},
+	}}
+	newCfg.Protocols = &model.ProtocolsConfig{
+		EVPN: &model.EVPNConfig{VNIs: map[int]*model.EVPNVNI{
+			10010: {
+				VNI:             10010,
+				Type:            "l2",
+				BridgeDomain:    "BD-10",
+				SourceInterface: "ge-0/0/0",
+				RemoteVTEP:      "198.51.100.10",
+			},
+		}},
+	}
+	diff := engine.ComputeDiff(model.NewRouterConfig(), newCfg)
+
+	if err := plugin.ValidateChanges(context.Background(), diff); err != nil {
+		t.Fatalf("ValidateChanges() error = %v, want nil", err)
+	}
+}
+
 func TestValidateChangesRejectsInvalidEVPNDataplane(t *testing.T) {
 	tests := []struct {
 		name string
@@ -419,12 +449,17 @@ func TestValidateChangesRejectsInvalidEVPNDataplane(t *testing.T) {
 		{
 			name: "missing multicast",
 			vni:  &model.EVPNVNI{VNI: 10010, Type: "l2", BridgeDomain: "BD-10", SourceInterface: "ge-0/0/0"},
-			want: "multicast-group is required",
+			want: "multicast-group or remote-vtep is required",
 		},
 		{
 			name: "unknown l3 routing instance",
 			vni:  &model.EVPNVNI{VNI: 20010, Type: "l3", RoutingInstance: "RED", SourceInterface: "ge-0/0/0", MulticastGroup: "239.0.0.20"},
 			want: "routing-instance RED is not configured for VPP VXLAN L3 dataplane",
+		},
+		{
+			name: "multicast and remote vtep",
+			vni:  &model.EVPNVNI{VNI: 10010, Type: "l2", BridgeDomain: "BD-10", SourceInterface: "ge-0/0/0", MulticastGroup: "239.0.0.10", RemoteVTEP: "198.51.100.10"},
+			want: "multicast-group and remote-vtep are mutually exclusive",
 		},
 	}
 	for _, tt := range tests {
@@ -687,6 +722,61 @@ func TestApplyChangesConfiguresEVPNL2VXLAN(t *testing.T) {
 	}
 	if client.VXLANExists(vxlanReq) {
 		t.Fatal("ApplyChanges() left VXLAN tunnel after removing EVPN")
+	}
+}
+
+func TestApplyChangesConfiguresEVPNL2RemoteVTEP(t *testing.T) {
+	ctx := context.Background()
+	client := pkgvpp.NewMockClient()
+	plugin := NewVPPPlugin(client, &device.HardwareConfig{
+		Interfaces: []device.PhysicalInterface{
+			{Name: "ge-0/0/0", PCI: "0000:03:00.0", Driver: "avf"},
+		},
+	}, testLogger())
+	if err := plugin.Init(ctx); err != nil {
+		t.Fatalf("Init() error = %v", err)
+	}
+	t.Cleanup(func() { _ = plugin.Close() })
+
+	newCfg := model.NewRouterConfig()
+	newCfg.Interfaces["ge-0/0/0"] = &model.InterfaceConfig{Units: map[int]*model.Unit{
+		0: {Family: map[string]*model.AddressFamily{
+			"inet": {Addresses: []string{"192.0.2.1/24"}},
+		}},
+	}}
+	newCfg.Protocols = &model.ProtocolsConfig{
+		EVPN: &model.EVPNConfig{VNIs: map[int]*model.EVPNVNI{
+			10010: {
+				VNI:             10010,
+				Type:            "l2",
+				BridgeDomain:    "BD-10",
+				SourceInterface: "ge-0/0/0",
+				RemoteVTEP:      "198.51.100.10",
+			},
+		}},
+	}
+
+	diff := engine.ComputeDiff(model.NewRouterConfig(), newCfg)
+	if err := plugin.ValidateChanges(ctx, diff); err != nil {
+		t.Fatalf("ValidateChanges() error = %v", err)
+	}
+	if err := plugin.ApplyChanges(ctx, diff); err != nil {
+		t.Fatalf("ApplyChanges() error = %v", err)
+	}
+	vxlanIndex, ok := plugin.vxlanIfIndex[10010]
+	if !ok {
+		t.Fatal("ApplyChanges() did not add remote VTEP VXLAN interface index")
+	}
+	vxlanReq := pkgvpp.VXLANRequest{
+		VNI:                10010,
+		SourceAddress:      net.ParseIP("192.0.2.1").To4(),
+		DestinationAddress: net.ParseIP("198.51.100.10").To4(),
+	}
+	if !client.VXLANExists(vxlanReq) {
+		t.Fatalf("ApplyChanges() did not create remote VTEP VXLAN tunnel %#v", vxlanReq)
+	}
+	if bdID, ok := client.L2BridgeDomain(vxlanIndex); !ok || bdID != 10010 {
+		t.Fatalf("L2BridgeDomain(%d) = %d, %t; want 10010, true", vxlanIndex, bdID, ok)
 	}
 }
 

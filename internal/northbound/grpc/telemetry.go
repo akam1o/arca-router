@@ -301,6 +301,7 @@ type telemetryEVPNVNIPayload struct {
 	SourceInterface    string   `json:"source_interface,omitempty"`
 	SourceAddress      string   `json:"source_address,omitempty"`
 	MulticastGroup     string   `json:"multicast_group,omitempty"`
+	RemoteVTEP         string   `json:"remote_vtep,omitempty"`
 }
 
 func buildTelemetryPathSet(paths []string) map[string]struct{} {
@@ -606,6 +607,7 @@ func (s *Server) telemetryEVPNPayload() telemetryEVPNPayload {
 			SourceInterface:    vni.SourceInterface,
 			SourceAddress:      vni.SourceAddress,
 			MulticastGroup:     vni.MulticastGroup,
+			RemoteVTEP:         vni.RemoteVTEP,
 		})
 	}
 	return payload

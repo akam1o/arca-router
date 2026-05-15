@@ -294,6 +294,7 @@ type EVPNVNI struct {
 	SourceInterface    string   `json:"source-interface,omitempty"`
 	SourceAddress      string   `json:"source-address,omitempty"`
 	MulticastGroup     string   `json:"multicast-group,omitempty"`
+	RemoteVTEP         string   `json:"remote-vtep,omitempty"`
 }
 
 // MPLSConfig represents MPLS forwarding configuration.

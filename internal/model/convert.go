@@ -392,6 +392,7 @@ func evpnFromLegacy(old *config.EVPNConfig) *EVPNConfig {
 				SourceInterface:    vni.SourceInterface,
 				SourceAddress:      vni.SourceAddress,
 				MulticastGroup:     vni.MulticastGroup,
+				RemoteVTEP:         vni.RemoteVTEP,
 			}
 		}
 	}
@@ -703,6 +704,7 @@ func evpnToLegacy(c *EVPNConfig) *config.EVPNConfig {
 				SourceInterface:    vni.SourceInterface,
 				SourceAddress:      vni.SourceAddress,
 				MulticastGroup:     vni.MulticastGroup,
+				RemoteVTEP:         vni.RemoteVTEP,
 			}
 		}
 	}

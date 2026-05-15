@@ -1614,6 +1614,7 @@ type evpnTelemetryVNI struct {
 	SourceInterface    string   `json:"source_interface,omitempty"`
 	SourceAddress      string   `json:"source_address,omitempty"`
 	MulticastGroup     string   `json:"multicast_group,omitempty"`
+	RemoteVTEP         string   `json:"remote_vtep,omitempty"`
 }
 
 type evpnTelemetryCounts struct {
@@ -1669,7 +1670,7 @@ func printEVPN(snapshot *evpnTelemetrySnapshot) {
 	fmt.Println()
 	fmt.Println("VNIs")
 	fmt.Printf("%-8s %-6s %-20s %-20s %-8s %-18s %-28s %-24s %s\n",
-		"VNI", "Type", "Bridge domain", "Routing instance", "VLAN", "RD", "Route targets", "Source", "Multicast")
+		"VNI", "Type", "Bridge domain", "Routing instance", "VLAN", "RD", "Route targets", "Source", "Endpoint")
 	fmt.Println(strings.Repeat("-", 169))
 	for _, vni := range snapshot.VNIs {
 		fmt.Printf("%-8d %-6s %-20s %-20s %-8s %-18s %-28s %-24s %s\n",
@@ -1681,7 +1682,7 @@ func printEVPN(snapshot *evpnTelemetrySnapshot) {
 			formatEVPNValue(vni.RouteDistinguisher),
 			formatEVPNRouteTargets(vni),
 			formatEVPNSource(vni),
-			formatEVPNValue(vni.MulticastGroup),
+			formatEVPNEndpoint(vni),
 		)
 	}
 }
@@ -1742,6 +1743,17 @@ func formatEVPNSource(vni evpnTelemetryVNI) string {
 		return vni.SourceInterface
 	case vni.SourceAddress != "":
 		return vni.SourceAddress
+	default:
+		return "-"
+	}
+}
+
+func formatEVPNEndpoint(vni evpnTelemetryVNI) string {
+	switch {
+	case vni.MulticastGroup != "":
+		return "multicast:" + vni.MulticastGroup
+	case vni.RemoteVTEP != "":
+		return "remote:" + vni.RemoteVTEP
 	default:
 		return "-"
 	}

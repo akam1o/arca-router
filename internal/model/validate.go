@@ -386,6 +386,15 @@ func (c *RouterConfig) validateEVPNVNI(id int, vni *EVPNVNI) error {
 			return fmt.Errorf("%s: invalid multicast-group %q", context, vni.MulticastGroup)
 		}
 	}
+	if vni.RemoteVTEP != "" {
+		remoteIP := net.ParseIP(vni.RemoteVTEP)
+		if remoteIP == nil || remoteIP.IsMulticast() {
+			return fmt.Errorf("%s: invalid remote-vtep %q", context, vni.RemoteVTEP)
+		}
+	}
+	if vni.MulticastGroup != "" && vni.RemoteVTEP != "" {
+		return fmt.Errorf("%s: multicast-group and remote-vtep are mutually exclusive", context)
+	}
 	return nil
 }
 

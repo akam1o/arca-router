@@ -351,6 +351,7 @@ func TestSubscribeTelemetryEVPNOverlaySnapshot(t *testing.T) {
 				Type:            "l3",
 				RoutingInstance: "BLUE",
 				VRFTargetImport: []string{"target:65000:20010"},
+				RemoteVTEP:      "198.51.100.20",
 			},
 			10010: {
 				VNI:                10010,
@@ -389,8 +390,8 @@ func TestSubscribeTelemetryEVPNOverlaySnapshot(t *testing.T) {
 	if payload.VNIs[0].BridgeDomain != "BD-10" || payload.VNIs[0].MulticastGroup != "239.0.0.10" {
 		t.Fatalf("L2 EVPN VNI payload = %#v, want bridge-domain and multicast group", payload.VNIs[0])
 	}
-	if payload.VNIs[1].RoutingInstance != "BLUE" || len(payload.VNIs[1].VRFTargetImport) != 1 {
-		t.Fatalf("L3 EVPN VNI payload = %#v, want routing-instance and import target", payload.VNIs[1])
+	if payload.VNIs[1].RoutingInstance != "BLUE" || payload.VNIs[1].RemoteVTEP != "198.51.100.20" || len(payload.VNIs[1].VRFTargetImport) != 1 {
+		t.Fatalf("L3 EVPN VNI payload = %#v, want routing-instance, remote VTEP, and import target", payload.VNIs[1])
 	}
 }
 

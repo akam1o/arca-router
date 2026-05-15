@@ -1206,6 +1206,18 @@ func TestCountEVPNVNIs(t *testing.T) {
 	}
 }
 
+func TestFormatEVPNEndpoint(t *testing.T) {
+	if got := formatEVPNEndpoint(evpnTelemetryVNI{MulticastGroup: "239.0.0.10"}); got != "multicast:239.0.0.10" {
+		t.Fatalf("formatEVPNEndpoint(multicast) = %q", got)
+	}
+	if got := formatEVPNEndpoint(evpnTelemetryVNI{RemoteVTEP: "198.51.100.10"}); got != "remote:198.51.100.10" {
+		t.Fatalf("formatEVPNEndpoint(remote) = %q", got)
+	}
+	if got := formatEVPNEndpoint(evpnTelemetryVNI{}); got != "-" {
+		t.Fatalf("formatEVPNEndpoint(empty) = %q", got)
+	}
+}
+
 func TestTelemetryOptions(t *testing.T) {
 	opts, err := telemetryOptions([]string{"path", "/system", "path", "/routes", "interval", "5s", "count", "3"})
 	if err != nil {

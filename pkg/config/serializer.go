@@ -396,6 +396,9 @@ func writeEVPN(b *strings.Builder, evpn *EVPNConfig) {
 		if entry.MulticastGroup != "" {
 			writeLine(b, "%s multicast-group %s", base, entry.MulticastGroup)
 		}
+		if entry.RemoteVTEP != "" {
+			writeLine(b, "%s remote-vtep %s", base, entry.RemoteVTEP)
+		}
 	}
 }
 

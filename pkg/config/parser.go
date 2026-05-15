@@ -914,6 +914,13 @@ func (p *Parser) parseEVPN(pc *ProtocolConfig) error {
 		evpnVNI.MulticastGroup = p.current.Value
 		p.nextToken()
 		return nil
+	case "remote-vtep":
+		if p.current.Type != TokenWord {
+			return p.error("expected EVPN remote VTEP")
+		}
+		evpnVNI.RemoteVTEP = p.current.Value
+		p.nextToken()
+		return nil
 	default:
 		return p.error(fmt.Sprintf("unsupported EVPN VNI parameter: %s", param))
 	}

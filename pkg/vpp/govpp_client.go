@@ -901,7 +901,7 @@ func (c *govppClient) CreateVXLAN(ctx context.Context, req VXLANRequest) (*Inter
 		SrcAddress:     govppiptypes.NewAddress(req.SourceAddress),
 		DstAddress:     govppiptypes.NewAddress(req.DestinationAddress),
 		DstPort:        4789,
-		McastSwIfIndex: govppiftypes.InterfaceIndex(req.MulticastInterfaceIndex),
+		McastSwIfIndex: govppiftypes.InterfaceIndex(vxlanMulticastInterfaceIndex(req)),
 		EncapVrfID:     req.EncapsulationTable,
 		DecapNextIndex: ^uint32(0),
 		Vni:            req.VNI,
@@ -933,7 +933,7 @@ func (c *govppClient) DeleteVXLAN(ctx context.Context, req VXLANRequest) error {
 		SrcAddress:     govppiptypes.NewAddress(req.SourceAddress),
 		DstAddress:     govppiptypes.NewAddress(req.DestinationAddress),
 		DstPort:        4789,
-		McastSwIfIndex: govppiftypes.InterfaceIndex(req.MulticastInterfaceIndex),
+		McastSwIfIndex: govppiftypes.InterfaceIndex(vxlanMulticastInterfaceIndex(req)),
 		EncapVrfID:     req.EncapsulationTable,
 		DecapNextIndex: ^uint32(0),
 		Vni:            req.VNI,
@@ -943,6 +943,13 @@ func (c *govppClient) DeleteVXLAN(ctx context.Context, req VXLANRequest) error {
 		return fmt.Errorf("delete VXLAN tunnel VNI %d: %w", req.VNI, err)
 	}
 	return nil
+}
+
+func vxlanMulticastInterfaceIndex(req VXLANRequest) uint32 {
+	if req.DestinationAddress != nil && req.DestinationAddress.IsMulticast() {
+		return req.MulticastInterfaceIndex
+	}
+	return ^uint32(0)
 }
 
 // SetInterfaceL2Bridge attaches or detaches an interface to a VPP bridge domain.

@@ -895,6 +895,14 @@ func writeEVPNXML(buf *bytes.Buffer, evpn *config.EVPNConfig) error {
 			buf.WriteString(`</multicast-group>`)
 			buf.WriteString("\n")
 		}
+		if entry.RemoteVTEP != "" {
+			buf.WriteString(`        <remote-vtep>`)
+			if err := xml.EscapeText(buf, []byte(entry.RemoteVTEP)); err != nil {
+				return err
+			}
+			buf.WriteString(`</remote-vtep>`)
+			buf.WriteString("\n")
+		}
 		buf.WriteString(`      </vni>`)
 		buf.WriteString("\n")
 	}
@@ -1254,6 +1262,7 @@ type xmlEVPNProtocol struct {
 		SourceInterface    string   `xml:"source-interface"`
 		SourceAddress      string   `xml:"source-address"`
 		MulticastGroup     string   `xml:"multicast-group"`
+		RemoteVTEP         string   `xml:"remote-vtep"`
 	} `xml:"vni"`
 }
 
@@ -1313,6 +1322,7 @@ func evpnConfigFromXML(evpn *xmlEVPNProtocol) *config.EVPNConfig {
 			SourceInterface:    vni.SourceInterface,
 			SourceAddress:      vni.SourceAddress,
 			MulticastGroup:     vni.MulticastGroup,
+			RemoteVTEP:         vni.RemoteVTEP,
 		}
 	}
 	return cfgEVPN
@@ -1877,6 +1887,7 @@ var allowedConfigElementPaths = map[string]struct{}{
 	"config/protocols/evpn/vni/source-interface":        {},
 	"config/protocols/evpn/vni/source-address":          {},
 	"config/protocols/evpn/vni/multicast-group":         {},
+	"config/protocols/evpn/vni/remote-vtep":             {},
 	"config/protocols/ospf":                             {},
 	"config/protocols/ospf/router-id":                   {},
 	"config/protocols/ospf/area":                        {},
@@ -2021,6 +2032,7 @@ var configTextContentPaths = map[string]struct{}{
 	"config/protocols/evpn/vni/source-interface":    {},
 	"config/protocols/evpn/vni/source-address":      {},
 	"config/protocols/evpn/vni/multicast-group":     {},
+	"config/protocols/evpn/vni/remote-vtep":         {},
 
 	"config/protocols/ospf/router-id":                   {},
 	"config/protocols/ospf/area/name":                   {},
@@ -2960,6 +2972,9 @@ func countConfigElements(cfg *config.Config) int {
 					count++
 				}
 				if vni.MulticastGroup != "" {
+					count++
+				}
+				if vni.RemoteVTEP != "" {
 					count++
 				}
 			}

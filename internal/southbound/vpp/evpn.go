@@ -90,19 +90,31 @@ func evpnVXLANPlanMap(cfg *model.RouterConfig, ifaceIndex map[string]uint32, req
 			}
 			routingTableID = plan.tableID
 		}
-		if vni.MulticastGroup == "" {
-			return nil, fmt.Errorf("EVPN VNI %d: multicast-group is required for VPP VXLAN dataplane until remote VTEP support is implemented", id)
+		if vni.MulticastGroup == "" && vni.RemoteVTEP == "" {
+			return nil, fmt.Errorf("EVPN VNI %d: multicast-group or remote-vtep is required for VPP VXLAN dataplane", id)
+		}
+		if vni.MulticastGroup != "" && vni.RemoteVTEP != "" {
+			return nil, fmt.Errorf("EVPN VNI %d: multicast-group and remote-vtep are mutually exclusive for VPP VXLAN dataplane", id)
 		}
 		if vni.SourceInterface == "" {
-			return nil, fmt.Errorf("EVPN VNI %d: source-interface is required for VPP VXLAN multicast dataplane", id)
+			return nil, fmt.Errorf("EVPN VNI %d: source-interface is required for VPP VXLAN dataplane", id)
 		}
 		if cfg.Interfaces == nil || cfg.Interfaces[vni.SourceInterface] == nil {
 			return nil, fmt.Errorf("EVPN VNI %d: source-interface %s is not configured", id, vni.SourceInterface)
 		}
 
-		dst := net.ParseIP(vni.MulticastGroup)
-		if dst == nil || !dst.IsMulticast() {
+		dstValue := vni.MulticastGroup
+		if dstValue == "" {
+			dstValue = vni.RemoteVTEP
+		}
+		dst := net.ParseIP(dstValue)
+		switch {
+		case dst == nil:
+			return nil, fmt.Errorf("EVPN VNI %d: VXLAN destination %s is invalid", id, dstValue)
+		case vni.MulticastGroup != "" && !dst.IsMulticast():
 			return nil, fmt.Errorf("EVPN VNI %d: multicast-group %s is invalid", id, vni.MulticastGroup)
+		case vni.RemoteVTEP != "" && dst.IsMulticast():
+			return nil, fmt.Errorf("EVPN VNI %d: remote-vtep %s must be a unicast address", id, vni.RemoteVTEP)
 		}
 		dst = normalizeIP(dst)
 		src, err := evpnSourceAddress(cfg, vni, dst.To4() == nil)
@@ -119,7 +131,9 @@ func evpnVXLANPlanMap(cfg *model.RouterConfig, ifaceIndex map[string]uint32, req
 			if !ok {
 				return nil, fmt.Errorf("EVPN VNI %d: source-interface %s is not present in VPP", id, vni.SourceInterface)
 			}
-			sourceIfIndex = idx
+			if dst.IsMulticast() {
+				sourceIfIndex = idx
+			}
 		}
 
 		plans[id] = evpnVXLANPlan{

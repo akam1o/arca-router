@@ -2,7 +2,8 @@
 
 ## v0.8.x - Overlay and Streaming Telemetry (current)
 
-- **VPP VXLAN L3 dataplane plumbing**: VPP southbound validation and apply now support multicast VXLAN for L3 EVPN VNIs by creating L3 VXLAN tunnel interfaces, binding them to the routing-instance table, and deleting tunnels before stale routing-instance tables; unicast remote-VTEP dataplane remains intentionally rejected
+- **EVPN remote VTEP dataplane**: EVPN VNI intent now accepts `remote-vtep` unicast endpoints and VPP southbound creates unicast VXLAN tunnels for L2/L3 VNIs while keeping multicast groups mutually exclusive
+- **VPP VXLAN L3 dataplane plumbing**: VPP southbound validation and apply now support multicast VXLAN for L3 EVPN VNIs by creating L3 VXLAN tunnel interfaces, binding them to the routing-instance table, and deleting tunnels before stale routing-instance tables
 - **NMS collector catalog interval hints**: the example HTTP collector decodes default, minimum, and maximum sample interval hints from telemetry catalog discovery responses
 - **Telemetry CLI catalog interval hints**: `arca show telemetry paths` and `arca show telemetry paths live` print default, minimum, and maximum sample intervals when the catalog advertises them
 - **NMS telemetry catalog interval hints**: `/api/nms/v1/telemetry/paths` advertises default, minimum, and maximum sample intervals in milliseconds for HTTP collector discovery
@@ -49,7 +50,7 @@
 - **NMS operational status API**: the Web API now exposes `/api/nms/v1/status`, a schema-versioned JSON envelope for external NMS and collectors that need a stable read-only operational status shape
 - **Telemetry CLI snapshots**: `arca show telemetry` now consumes the structured gRPC telemetry stream and prints selected telemetry events as JSON lines for local debugging and collector validation
 - **Structured gRPC telemetry stream**: the internal gRPC API now exposes `TelemetryService.SubscribeTelemetry` for selected config, daemon, interface, routing, BFD, LCP, HA, routing-instance, and class-of-service paths with JSON payload events, interval sampling, one-shot snapshots, and gRPC flow-control backpressure
-- **VPP VXLAN L2 dataplane plumbing**: VPP southbound validation and apply now support multicast VXLAN for L2 EVPN VNIs by creating bridge domains, creating VXLAN tunnel interfaces, bringing them up, and attaching them to L2 bridge domains with rollback coverage; unicast remote-VTEP dataplane remains intentionally rejected
+- **VPP VXLAN L2 dataplane plumbing**: VPP southbound validation and apply now support multicast VXLAN for L2 EVPN VNIs by creating bridge domains, creating VXLAN tunnel interfaces, bringing them up, and attaching them to L2 bridge domains with rollback coverage
 - **FRR EVPN control-plane generation**: FRR file-backend generation now renders global BGP `l2vpn evpn` with `advertise-all-vni`, explicit L2 VNI route-targets, L3 VNI VRF bindings, and per-VRF EVPN route-targets while transactional mgmtd support is pending
 - **EVPN/VXLAN VNI intent model**: CLI parser/serializer, validation, internal model conversion/clone/diff, NETCONF XML/YANG, and commit-time southbound safety gates cover L2/L3 `protocols evpn vni` configuration with explicit rejection for unsupported VPP dataplane modes
 

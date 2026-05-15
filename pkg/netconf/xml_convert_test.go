@@ -514,6 +514,7 @@ func TestV08EVPNConfigXMLRoundTrip(t *testing.T) {
 					VNI:             20010,
 					Type:            "l3",
 					RoutingInstance: "BLUE",
+					RemoteVTEP:      "198.51.100.20",
 				},
 			}},
 		},
@@ -529,6 +530,7 @@ func TestV08EVPNConfigXMLRoundTrip(t *testing.T) {
 		"<id>10010</id>",
 		"<bridge-domain>BD-10</bridge-domain>",
 		"<routing-instance>BLUE</routing-instance>",
+		"<remote-vtep>198.51.100.20</remote-vtep>",
 	} {
 		if !strings.Contains(xmlStr, want) {
 			t.Fatalf("ConfigToXML() missing %q:\n%s", want, xmlStr)
@@ -545,6 +547,7 @@ func TestV08EVPNConfigXMLRoundTrip(t *testing.T) {
 		"set protocols evpn vni 10010 bridge-domain BD-10",
 		"set protocols evpn vni 10010 vrf-target import target:65000:10011",
 		"set protocols evpn vni 20010 routing-instance BLUE",
+		"set protocols evpn vni 20010 remote-vtep 198.51.100.20",
 	} {
 		if !strings.Contains(setCommands, want) {
 			t.Fatalf("ToSetCommands() missing %q:\n%s", want, setCommands)

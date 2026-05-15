@@ -498,6 +498,11 @@ module arca-router {
           type string;
           description "Multicast group for flood-and-learn VXLAN replication.";
         }
+
+        leaf remote-vtep {
+          type string;
+          description "Remote VTEP unicast address for VXLAN replication.";
+        }
       }
     }
 

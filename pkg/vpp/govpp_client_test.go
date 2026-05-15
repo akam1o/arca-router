@@ -413,6 +413,21 @@ func TestGovppClient_CreateInterface_NilRequest(t *testing.T) {
 	}
 }
 
+func TestVXLANMulticastInterfaceIndex(t *testing.T) {
+	multicast := VXLANRequest{
+		DestinationAddress:      net.ParseIP("239.0.0.10").To4(),
+		MulticastInterfaceIndex: 7,
+	}
+	if got := vxlanMulticastInterfaceIndex(multicast); got != 7 {
+		t.Fatalf("vxlanMulticastInterfaceIndex(multicast) = %d, want 7", got)
+	}
+
+	unicast := VXLANRequest{DestinationAddress: net.ParseIP("198.51.100.10").To4()}
+	if got := vxlanMulticastInterfaceIndex(unicast); got != ^uint32(0) {
+		t.Fatalf("vxlanMulticastInterfaceIndex(unicast) = %d, want %d", got, ^uint32(0))
+	}
+}
+
 // TestGovppClient_CreateInterface_NotConnected tests CreateInterface when not connected
 func TestGovppClient_CreateInterface_NotConnected(t *testing.T) {
 	client := &govppClient{}

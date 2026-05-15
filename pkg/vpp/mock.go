@@ -866,13 +866,15 @@ func (m *MockClient) CreateVXLAN(ctx context.Context, req VXLANRequest) (*Interf
 			"Remove the existing VXLAN tunnel before adding it again",
 		)
 	}
-	if _, ok := m.interfaces[req.MulticastInterfaceIndex]; !ok {
-		return nil, errors.New(
-			errors.ErrCodeVPPOperation,
-			fmt.Sprintf("Multicast interface with index %d not found", req.MulticastInterfaceIndex),
-			"VXLAN multicast interface does not exist",
-			"Create the source interface before creating the VXLAN tunnel",
-		)
+	if req.DestinationAddress.IsMulticast() {
+		if _, ok := m.interfaces[req.MulticastInterfaceIndex]; !ok {
+			return nil, errors.New(
+				errors.ErrCodeVPPOperation,
+				fmt.Sprintf("Multicast interface with index %d not found", req.MulticastInterfaceIndex),
+				"VXLAN multicast interface does not exist",
+				"Create the source interface before creating the VXLAN tunnel",
+			)
+		}
 	}
 	iface := &Interface{
 		SwIfIndex: m.nextIfIdx,

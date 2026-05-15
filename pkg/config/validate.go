@@ -955,6 +955,15 @@ func validateEVPNVNI(cfg *Config, id int, vni *EVPNVNI) error {
 			return errors.New(errors.ErrCodeConfigValidation, fmt.Sprintf("%s has invalid multicast-group: %s", context, vni.MulticastGroup), "EVPN multicast-group must be a valid multicast IP address", "Use an IPv4 224.0.0.0/4 or IPv6 ff00::/8 group")
 		}
 	}
+	if vni.RemoteVTEP != "" {
+		remoteIP := net.ParseIP(vni.RemoteVTEP)
+		if remoteIP == nil || remoteIP.IsMulticast() {
+			return errors.New(errors.ErrCodeConfigValidation, fmt.Sprintf("%s has invalid remote-vtep: %s", context, vni.RemoteVTEP), "EVPN remote-vtep must be a valid unicast IP address", "Use the remote VTEP IPv4 or IPv6 address")
+		}
+	}
+	if vni.MulticastGroup != "" && vni.RemoteVTEP != "" {
+		return errors.New(errors.ErrCodeConfigValidation, fmt.Sprintf("%s has both multicast-group and remote-vtep", context), "EVPN VNI dataplane endpoint must be multicast or unicast", "Set either multicast-group or remote-vtep, not both")
+	}
 	return nil
 }
 

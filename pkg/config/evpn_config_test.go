@@ -22,6 +22,7 @@ func TestEVPNConfigRoundTrip(t *testing.T) {
 		"set protocols evpn vni 10010 multicast-group 239.0.0.10",
 		"set protocols evpn vni 20010 type l3",
 		"set protocols evpn vni 20010 routing-instance BLUE",
+		"set protocols evpn vni 20010 remote-vtep 198.51.100.20",
 	)
 	if err := cfg.Validate(); err != nil {
 		t.Fatalf("Validate() error = %v", err)
@@ -32,7 +33,7 @@ func TestEVPNConfigRoundTrip(t *testing.T) {
 		t.Fatalf("L2 EVPN VNI = %#v, want configured VNI", l2)
 	}
 	l3 := cfg.Protocols.EVPN.VNIs[20010]
-	if l3 == nil || l3.Type != "l3" || l3.RoutingInstance != "BLUE" {
+	if l3 == nil || l3.Type != "l3" || l3.RoutingInstance != "BLUE" || l3.RemoteVTEP != "198.51.100.20" {
 		t.Fatalf("L3 EVPN VNI = %#v, want routing-instance BLUE", l3)
 	}
 	assertSetCommandRoundTrip(t, cfg)
@@ -79,6 +80,24 @@ func TestEVPNValidationRejectsInvalidVNIReferences(t *testing.T) {
 				}}}
 			},
 			want: "EVPN VNI 10010 has invalid multicast-group",
+		},
+		{
+			name: "invalid remote vtep",
+			configure: func(cfg *Config) {
+				cfg.Protocols = &ProtocolConfig{EVPN: &EVPNConfig{VNIs: map[int]*EVPNVNI{
+					10010: {VNI: 10010, Type: "l2", BridgeDomain: "BD-10", RemoteVTEP: "239.0.0.10"},
+				}}}
+			},
+			want: "EVPN VNI 10010 has invalid remote-vtep",
+		},
+		{
+			name: "multicast and remote vtep",
+			configure: func(cfg *Config) {
+				cfg.Protocols = &ProtocolConfig{EVPN: &EVPNConfig{VNIs: map[int]*EVPNVNI{
+					10010: {VNI: 10010, Type: "l2", BridgeDomain: "BD-10", MulticastGroup: "239.0.0.10", RemoteVTEP: "198.51.100.10"},
+				}}}
+			},
+			want: "EVPN VNI 10010 has both multicast-group and remote-vtep",
 		},
 	}
 
