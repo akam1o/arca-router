@@ -104,10 +104,13 @@ type TelemetryPathInfo struct {
 
 // TelemetryCatalog describes the structured telemetry stream inputs.
 type TelemetryCatalog struct {
-	EventSchemaVersion string
-	Encoding           string
-	DefaultPaths       []string
-	Paths              []TelemetryPathInfo
+	EventSchemaVersion      string
+	Encoding                string
+	DefaultPaths            []string
+	DefaultSampleIntervalMs uint32
+	MinSampleIntervalMs     uint32
+	MaxSampleIntervalMs     uint32
+	Paths                   []TelemetryPathInfo
 }
 
 // TelemetryCatalogFilter selects a subset of the advertised telemetry path catalog.
@@ -144,10 +147,13 @@ func TelemetryEncoding() string {
 // NewTelemetryCatalog returns the supported telemetry catalog with schema metadata.
 func NewTelemetryCatalog() TelemetryCatalog {
 	return TelemetryCatalog{
-		EventSchemaVersion: telemetrySchemaVersion,
-		Encoding:           telemetryEncodingJSON,
-		DefaultPaths:       append([]string(nil), defaultTelemetryPaths...),
-		Paths:              TelemetryPathCatalog(),
+		EventSchemaVersion:      telemetrySchemaVersion,
+		Encoding:                telemetryEncodingJSON,
+		DefaultPaths:            append([]string(nil), defaultTelemetryPaths...),
+		DefaultSampleIntervalMs: telemetrySampleIntervalMillis(defaultTelemetrySampleInterval),
+		MinSampleIntervalMs:     telemetrySampleIntervalMillis(minTelemetrySampleInterval),
+		MaxSampleIntervalMs:     telemetrySampleIntervalMillis(maxTelemetrySampleInterval),
+		Paths:                   TelemetryPathCatalog(),
 	}
 }
 
@@ -256,6 +262,10 @@ func telemetryCatalogEncodingMatches(encoding string, filters []string) bool {
 	}
 	_, ok := encodings[normalizedTelemetryCatalogFilterValue(encoding)]
 	return ok
+}
+
+func telemetrySampleIntervalMillis(interval time.Duration) uint32 {
+	return uint32(interval / time.Millisecond)
 }
 
 type telemetryErrorPayload struct {

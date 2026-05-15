@@ -556,10 +556,13 @@ func (c *Client) GetTelemetryCatalogWithFilter(ctx context.Context, filter Telem
 		return TelemetryCatalog{}, err
 	}
 	catalog := TelemetryCatalog{
-		EventSchemaVersion: resp.GetEventSchemaVersion(),
-		Encoding:           resp.GetEncoding(),
-		DefaultPaths:       append([]string(nil), resp.GetDefaultPaths()...),
-		Paths:              make([]TelemetryPathInfo, 0, len(resp.GetPaths())),
+		EventSchemaVersion:      resp.GetEventSchemaVersion(),
+		Encoding:                resp.GetEncoding(),
+		DefaultPaths:            append([]string(nil), resp.GetDefaultPaths()...),
+		DefaultSampleIntervalMs: resp.GetDefaultSampleIntervalMs(),
+		MinSampleIntervalMs:     resp.GetMinSampleIntervalMs(),
+		MaxSampleIntervalMs:     resp.GetMaxSampleIntervalMs(),
+		Paths:                   make([]TelemetryPathInfo, 0, len(resp.GetPaths())),
 	}
 	for _, path := range resp.GetPaths() {
 		catalog.Paths = append(catalog.Paths, TelemetryPathInfo{

@@ -513,6 +513,9 @@ message GetTelemetryCatalogResponse {
   string encoding = 2;
   repeated string default_paths = 3;
   repeated TelemetryPath paths = 4;
+  uint32 default_sample_interval_ms = 5;
+  uint32 min_sample_interval_ms = 6;
+  uint32 max_sample_interval_ms = 7;
 }
 
 message TelemetryPath {

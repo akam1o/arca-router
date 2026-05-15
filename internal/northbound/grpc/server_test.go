@@ -232,6 +232,15 @@ func TestClientServerConfigFlow(t *testing.T) {
 	if len(catalog.DefaultPaths) != len(defaultTelemetryPaths) || catalog.DefaultPaths[0] != "/system" || catalog.DefaultPaths[1] != "/config/running" {
 		t.Fatalf("telemetry catalog default paths = %#v, want system/config defaults", catalog.DefaultPaths)
 	}
+	if catalog.DefaultSampleIntervalMs != telemetrySampleIntervalMillis(defaultTelemetrySampleInterval) ||
+		catalog.MinSampleIntervalMs != telemetrySampleIntervalMillis(minTelemetrySampleInterval) ||
+		catalog.MaxSampleIntervalMs != telemetrySampleIntervalMillis(maxTelemetrySampleInterval) {
+		t.Fatalf("telemetry catalog intervals = %d/%d/%d, want %d/%d/%d",
+			catalog.DefaultSampleIntervalMs, catalog.MinSampleIntervalMs, catalog.MaxSampleIntervalMs,
+			telemetrySampleIntervalMillis(defaultTelemetrySampleInterval),
+			telemetrySampleIntervalMillis(minTelemetrySampleInterval),
+			telemetrySampleIntervalMillis(maxTelemetrySampleInterval))
+	}
 	if len(catalog.Paths) != len(telemetryPathOrder) || catalog.Paths[0].Path != "/system" {
 		t.Fatalf("telemetry catalog paths = %#v, want canonical path catalog", catalog.Paths)
 	}
@@ -463,6 +472,12 @@ func TestTelemetryPathCatalog(t *testing.T) {
 	}
 	if len(envelope.DefaultPaths) != len(defaultTelemetryPaths) || len(envelope.Paths) != len(telemetryPathOrder) {
 		t.Fatalf("NewTelemetryCatalog() = %#v, want default paths and path catalog", envelope)
+	}
+	if envelope.DefaultSampleIntervalMs != telemetrySampleIntervalMillis(defaultTelemetrySampleInterval) ||
+		envelope.MinSampleIntervalMs != telemetrySampleIntervalMillis(minTelemetrySampleInterval) ||
+		envelope.MaxSampleIntervalMs != telemetrySampleIntervalMillis(maxTelemetrySampleInterval) {
+		t.Fatalf("NewTelemetryCatalog() intervals = %d/%d/%d, want sample interval hints",
+			envelope.DefaultSampleIntervalMs, envelope.MinSampleIntervalMs, envelope.MaxSampleIntervalMs)
 	}
 	filtered := NewFilteredTelemetryCatalog(TelemetryCatalogFilter{
 		Cardinalities:  []string{"PER-ROUTE", "per-peer"},

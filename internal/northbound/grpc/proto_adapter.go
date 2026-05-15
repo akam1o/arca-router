@@ -486,10 +486,13 @@ func (a *telemetryServiceAdapter) SubscribeTelemetry(req *apiv1.SubscribeTelemet
 
 func telemetryCatalogToProto(catalog TelemetryCatalog) *apiv1.GetTelemetryCatalogResponse {
 	resp := &apiv1.GetTelemetryCatalogResponse{
-		EventSchemaVersion: catalog.EventSchemaVersion,
-		Encoding:           catalog.Encoding,
-		DefaultPaths:       append([]string(nil), catalog.DefaultPaths...),
-		Paths:              make([]*apiv1.TelemetryPath, 0, len(catalog.Paths)),
+		EventSchemaVersion:      catalog.EventSchemaVersion,
+		Encoding:                catalog.Encoding,
+		DefaultPaths:            append([]string(nil), catalog.DefaultPaths...),
+		DefaultSampleIntervalMs: catalog.DefaultSampleIntervalMs,
+		MinSampleIntervalMs:     catalog.MinSampleIntervalMs,
+		MaxSampleIntervalMs:     catalog.MaxSampleIntervalMs,
+		Paths:                   make([]*apiv1.TelemetryPath, 0, len(catalog.Paths)),
 	}
 	for _, info := range catalog.Paths {
 		resp.Paths = append(resp.Paths, &apiv1.TelemetryPath{
