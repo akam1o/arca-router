@@ -340,23 +340,41 @@ func fetchNMS(ctx context.Context, client *http.Client, cfg collectorConfig) ([]
 func decodeDiscoveryResponse(cfg collectorConfig, body []byte) error {
 	switch cfg.mode {
 	case "catalog":
-		var catalog telemetryCatalogResponse
-		if err := json.Unmarshal(body, &catalog); err != nil {
-			return fmt.Errorf("decode telemetry catalog response: %w", err)
-		}
-		if err := validateNMSEnvelope("telemetry catalog", catalog.SchemaVersion, catalog.Resource, nmsTelemetryCatalogV1, "/api/nms/v1/telemetry/paths"); err != nil {
-			return err
-		}
+		_, err := decodeCatalogResponse(body)
+		return err
 	case "schemas":
-		var schemas telemetrySchemasResponse
-		if err := json.Unmarshal(body, &schemas); err != nil {
-			return fmt.Errorf("decode telemetry schemas response: %w", err)
-		}
-		if err := validateNMSEnvelope("telemetry schemas", schemas.SchemaVersion, schemas.Resource, nmsTelemetrySchemasV1, "/api/nms/v1/telemetry/schemas"); err != nil {
-			return err
-		}
+		_, err := decodeSchemasResponse(body)
+		return err
 	}
 	return nil
+}
+
+func decodeCatalogResponse(body []byte) (telemetryCatalogResponse, error) {
+	var catalog telemetryCatalogResponse
+	if err := json.Unmarshal(body, &catalog); err != nil {
+		return catalog, fmt.Errorf("decode telemetry catalog response: %w", err)
+	}
+	if err := validateNMSEnvelope("telemetry catalog", catalog.SchemaVersion, catalog.Resource, nmsTelemetryCatalogV1, "/api/nms/v1/telemetry/paths"); err != nil {
+		return catalog, err
+	}
+	if err := validateNMSResultCount("telemetry catalog", "path_count", catalog.PathCount, "paths", len(catalog.Paths)); err != nil {
+		return catalog, err
+	}
+	return catalog, nil
+}
+
+func decodeSchemasResponse(body []byte) (telemetrySchemasResponse, error) {
+	var schemas telemetrySchemasResponse
+	if err := json.Unmarshal(body, &schemas); err != nil {
+		return schemas, fmt.Errorf("decode telemetry schemas response: %w", err)
+	}
+	if err := validateNMSEnvelope("telemetry schemas", schemas.SchemaVersion, schemas.Resource, nmsTelemetrySchemasV1, "/api/nms/v1/telemetry/schemas"); err != nil {
+		return schemas, err
+	}
+	if err := validateNMSResultCount("telemetry schemas", "schema_count", schemas.SchemaCount, "schemas", len(schemas.Schemas)); err != nil {
+		return schemas, err
+	}
+	return schemas, nil
 }
 
 func decodeStatusResponse(body []byte) error {
@@ -378,6 +396,9 @@ func decodeSnapshotResponse(body []byte) (telemetrySnapshotResponse, error) {
 	if err := validateNMSEnvelope("telemetry snapshot", snapshot.SchemaVersion, snapshot.Resource, nmsTelemetrySnapshotV1, "/api/nms/v1/telemetry/snapshot"); err != nil {
 		return snapshot, err
 	}
+	if err := validateNMSResultCount("telemetry snapshot", "event_count", snapshot.EventCount, "events", len(snapshot.Events)); err != nil {
+		return snapshot, err
+	}
 	return snapshot, nil
 }
 
@@ -387,6 +408,13 @@ func validateNMSEnvelope(kind, schemaVersion, resource, wantSchemaVersion, wantR
 	}
 	if resource != wantResource {
 		return fmt.Errorf("%s resource = %q, want %q", kind, resource, wantResource)
+	}
+	return nil
+}
+
+func validateNMSResultCount(kind, countField string, count int, resultField string, resultLen int) error {
+	if count != resultLen {
+		return fmt.Errorf("%s %s = %d, want len(%s) %d", kind, countField, count, resultField, resultLen)
 	}
 	return nil
 }
@@ -517,9 +545,9 @@ func resolveSnapshotPaths(ctx context.Context, client *http.Client, cfg collecto
 	if err != nil {
 		return nil, err
 	}
-	var catalog telemetryCatalogResponse
-	if err := json.Unmarshal(body, &catalog); err != nil {
-		return nil, fmt.Errorf("decode telemetry catalog: %w", err)
+	catalog, err := decodeCatalogResponse(body)
+	if err != nil {
+		return nil, err
 	}
 	paths := cfg.paths
 	if cfg.discoverPaths || len(paths) == 0 {
