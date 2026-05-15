@@ -1868,11 +1868,15 @@ func validateTelemetrySnapshotAggregates(snapshot telemetrySnapshotResponse) err
 	if len(snapshot.Paths) != len(snapshot.Events) {
 		return fmt.Errorf("telemetry snapshot paths length = %d, want event count %d", len(snapshot.Paths), len(snapshot.Events))
 	}
+	seenPaths := map[string]string{}
 	payloadBytes := 0
 	for i, event := range snapshot.Events {
 		payloadBytes += event.PayloadBytes
 		if snapshot.Paths[i] != event.Path {
 			return fmt.Errorf("telemetry snapshot paths[%d] = %q, want event path %q", i, snapshot.Paths[i], event.Path)
+		}
+		if err := rememberTelemetryDiscoveryPath(seenPaths, "telemetry snapshot", fmt.Sprintf("paths[%d]", i), snapshot.Paths[i]); err != nil {
+			return err
 		}
 	}
 	if snapshot.PayloadBytes != payloadBytes {
