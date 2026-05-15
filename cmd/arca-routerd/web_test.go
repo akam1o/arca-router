@@ -525,6 +525,7 @@ func TestNMSTelemetrySnapshotEndpoint(t *testing.T) {
 			Sequence:      1,
 			Timestamp:     time.Unix(1700000600, 123).UTC(),
 			Path:          "/system",
+			PayloadSchema: "arca.telemetry.system.v1",
 			EventType:     "snapshot",
 			Encoding:      nbgrpc.TelemetryEncoding(),
 			SchemaVersion: nbgrpc.TelemetryEventSchemaVersion(),
@@ -534,6 +535,7 @@ func TestNMSTelemetrySnapshotEndpoint(t *testing.T) {
 			Sequence:      2,
 			Timestamp:     time.Unix(1700000601, 0).UTC(),
 			Path:          "/interfaces",
+			PayloadSchema: "arca.telemetry.interfaces.v1",
 			EventType:     "snapshot",
 			Encoding:      nbgrpc.TelemetryEncoding(),
 			SchemaVersion: nbgrpc.TelemetryEventSchemaVersion(),
@@ -576,6 +578,11 @@ func TestNMSTelemetrySnapshotEndpoint(t *testing.T) {
 	}
 	if len(resp.Events) != 2 || resp.Events[0].Path != "/system" || string(resp.Events[0].Payload) != `{"hostname":"edge01"}` {
 		t.Fatalf("Events = %#v, want system payload event", resp.Events)
+	}
+	if resp.Events[0].PayloadSchema != "arca.telemetry.system.v1" ||
+		resp.Events[1].PayloadSchema != "arca.telemetry.interfaces.v1" {
+		t.Fatalf("event payload schemas = %q/%q, want system/interfaces schema IDs",
+			resp.Events[0].PayloadSchema, resp.Events[1].PayloadSchema)
 	}
 	if resp.Events[0].PayloadBytes != len(`{"hostname":"edge01"}`) ||
 		resp.Events[1].PayloadBytes != len(`{"interfaces":[]}`) {

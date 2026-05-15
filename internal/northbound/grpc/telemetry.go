@@ -190,6 +190,7 @@ type TelemetryEvent struct {
 	Sequence      uint64
 	Timestamp     time.Time
 	Path          string
+	PayloadSchema string
 	EventType     string
 	Encoding      string
 	JSONPayload   string
@@ -476,6 +477,7 @@ func (s *Server) collectTelemetryEvents(ctx context.Context, paths []string, now
 			Sequence:      *sequence,
 			Timestamp:     now,
 			Path:          path,
+			PayloadSchema: telemetryPathPayloadSchemas[path],
 			EventType:     eventType,
 			Encoding:      telemetryEncodingJSON,
 			JSONPayload:   jsonPayload,

@@ -100,6 +100,7 @@ type telemetrySnapshotEvent struct {
 	Sequence      uint64          `json:"sequence"`
 	Timestamp     string          `json:"timestamp,omitempty"`
 	Path          string          `json:"path"`
+	PayloadSchema string          `json:"payload_schema"`
 	EventType     string          `json:"event_type"`
 	Encoding      string          `json:"encoding"`
 	SchemaVersion string          `json:"schema_version"`
@@ -338,6 +339,7 @@ func buildOTLPLogsRequest(cfg collectorConfig, events []telemetrySnapshotEvent) 
 			Body:           otlpString(string(event.Payload)),
 			Attributes: []otlpKeyValue{
 				{Key: "arca.telemetry.path", Value: otlpString(event.Path)},
+				{Key: "arca.telemetry.payload_schema", Value: otlpString(event.PayloadSchema)},
 				{Key: "arca.telemetry.event_type", Value: otlpString(event.EventType)},
 				{Key: "arca.telemetry.sequence", Value: otlpInt(event.Sequence)},
 				{Key: "arca.telemetry.schema_version", Value: otlpString(event.SchemaVersion)},

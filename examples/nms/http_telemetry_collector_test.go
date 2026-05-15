@@ -345,6 +345,7 @@ func TestFetchNMSExportsSnapshotToOTLP(t *testing.T) {
 				`"sequence":7,` +
 				`"timestamp":"2026-05-15T12:34:56.000000789Z",` +
 				`"path":"/system",` +
+				`"payload_schema":"arca.telemetry.system.v1",` +
 				`"event_type":"snapshot",` +
 				`"encoding":"json",` +
 				`"schema_version":"arca.telemetry.v1",` +
@@ -407,6 +408,9 @@ func TestFetchNMSExportsSnapshotToOTLP(t *testing.T) {
 	}
 	if got := otlpAttributeValue(records[0].Attributes, "arca.telemetry.path"); got != "/system" {
 		t.Fatalf("OTLP path attribute = %q, want /system", got)
+	}
+	if got := otlpAttributeValue(records[0].Attributes, "arca.telemetry.payload_schema"); got != "arca.telemetry.system.v1" {
+		t.Fatalf("OTLP payload_schema attribute = %q, want system schema", got)
 	}
 	if got := otlpAttributeValue(records[0].Attributes, "arca.telemetry.sequence"); got != "7" {
 		t.Fatalf("OTLP sequence attribute = %q, want 7", got)

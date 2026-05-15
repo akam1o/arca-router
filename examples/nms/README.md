@@ -81,4 +81,4 @@ go run ./examples/nms \
   -max-events 64
 ```
 
-The example prints the returned JSON envelope with indentation so it can be piped into downstream tooling or inspected during collector integration tests.
+The example prints the returned JSON envelope with indentation so it can be piped into downstream tooling or inspected during collector integration tests. Snapshot events include `payload_schema`, and OTLP exports copy it to the `arca.telemetry.payload_schema` log attribute for routing and validation.

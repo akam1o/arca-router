@@ -132,6 +132,7 @@ type nmsTelemetrySnapshotEvent struct {
 	Sequence      uint64          `json:"sequence"`
 	Timestamp     string          `json:"timestamp,omitempty"`
 	Path          string          `json:"path"`
+	PayloadSchema string          `json:"payload_schema,omitempty"`
 	EventType     string          `json:"event_type"`
 	Encoding      string          `json:"encoding"`
 	SchemaVersion string          `json:"schema_version"`
@@ -1748,6 +1749,7 @@ func newNMSTelemetrySnapshotEvent(event nbgrpc.TelemetryEvent) nmsTelemetrySnaps
 	output := nmsTelemetrySnapshotEvent{
 		Sequence:      event.Sequence,
 		Path:          event.Path,
+		PayloadSchema: event.PayloadSchema,
 		EventType:     event.EventType,
 		Encoding:      event.Encoding,
 		SchemaVersion: event.SchemaVersion,
