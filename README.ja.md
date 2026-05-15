@@ -229,12 +229,21 @@ sudo journalctl -u arca-routerd -n 50
 # arca で running configuration を確認
 arca show configuration
 
-# arca-routerd 経由で interface state、counter、QoS profile、queue placement を確認
+# arca-routerd 経由で interface state、counter、QoS profile、queue placement、QoS capability を確認
 arca show interfaces
+arca show routing-instances
+arca show routes
+arca show routes protocol bgp
 arca show route
+arca show route inet6
+arca show bgp neighbors
 arca show bgp summary
 arca show ospf neighbor
+arca show ospf3 neighbor
 arca show vrrp
+arca show bfd status
+arca show bfd
+arca show bfd counters
 arca show evpn
 arca show lcp
 arca show ha
@@ -249,7 +258,10 @@ arca show telemetry path /system path /interfaces path /overlays/evpn
 curl -u monitor:ReadOnly789 http://127.0.0.1:8080/api/nms/v1/status
 curl -u monitor:ReadOnly789 http://127.0.0.1:8080/api/nms/v1/telemetry/paths
 curl -u monitor:ReadOnly789 'http://127.0.0.1:8080/api/nms/v1/telemetry/paths?cardinality=per-route&payload_schema=arca.telemetry.routes.v1'
-curl -u monitor:ReadOnly789 'http://127.0.0.1:8080/api/nms/v1/telemetry/snapshot?path=/system&path=/interfaces&path=/overlays/evpn&timeout=5s&max_payload_bytes=8388608'
+curl -u monitor:ReadOnly789 'http://127.0.0.1:8080/api/nms/v1/telemetry/paths?path=system,evpn&encoding=json'
+curl -u monitor:ReadOnly789 'http://127.0.0.1:8080/api/nms/v1/telemetry/schemas?path=/evpn'
+curl -u monitor:ReadOnly789 'http://127.0.0.1:8080/api/nms/v1/telemetry/snapshot?path=/system&path=/interfaces&path=/overlays/evpn&timeout=5s&max_payload_bytes=8388608&max_events=64'
+curl -u monitor:ReadOnly789 'http://127.0.0.1:8080/api/nms/v1/telemetry/snapshot?cardinality=per-route&payload_schema=arca.telemetry.routes.v1&max_events=1'
 
 # VPP/FRR を直接確認（任意）
 sudo vppctl show interface
