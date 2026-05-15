@@ -2,6 +2,7 @@
 
 ## v0.8.x - Overlay and Streaming Telemetry (current)
 
+- **NMS collector cardinality filters**: the example HTTP collector can discover telemetry paths from the catalog and exclude selected cardinalities, such as `per-route`, before requesting bounded snapshots
 - **Telemetry cardinality hints**: the NMS telemetry catalog now advertises per-path cardinality hints so collectors can distinguish single-object snapshots from per-route, per-interface, per-peer, and per-VNI payloads before subscribing
 - **NMS collector example**: `examples/nms` now includes a standard-library HTTP collector for the schema-versioned status, telemetry catalog, and bounded telemetry snapshot APIs
 - **EVPN CLI status**: `arca show evpn` now renders the EVPN/VXLAN overlay telemetry snapshot as a human-readable VNI summary

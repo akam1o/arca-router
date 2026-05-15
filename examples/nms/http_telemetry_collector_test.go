@@ -3,6 +3,9 @@ package main
 import (
 	"bytes"
 	"encoding/json"
+	"net/http"
+	"net/http/httptest"
+	"net/url"
 	"strings"
 	"testing"
 	"time"
@@ -21,6 +24,26 @@ func TestParseCollectorConfigDefaults(t *testing.T) {
 	}
 	if len(cfg.paths) != len(defaultSnapshotPaths) {
 		t.Fatalf("default paths = %#v, want %#v", cfg.paths, defaultSnapshotPaths)
+	}
+}
+
+func TestParseCollectorConfigCardinalityFilters(t *testing.T) {
+	cfg, err := parseCollectorConfig([]string{
+		"-discover-paths",
+		"-exclude-cardinality", "per-route",
+		"-exclude-cardinality", "per-peer",
+	})
+	if err != nil {
+		t.Fatalf("parseCollectorConfig() error = %v", err)
+	}
+	if !cfg.discoverPaths {
+		t.Fatal("discoverPaths = false, want true")
+	}
+	if len(cfg.paths) != 0 {
+		t.Fatalf("paths = %#v, want catalog-discovered paths", cfg.paths)
+	}
+	if len(cfg.excludedCard) != 2 || cfg.excludedCard[0] != "per-route" || cfg.excludedCard[1] != "per-peer" {
+		t.Fatalf("excluded cardinalities = %#v, want per-route and per-peer", cfg.excludedCard)
 	}
 }
 
@@ -51,6 +74,84 @@ func TestCollectorEndpointURLForSnapshot(t *testing.T) {
 		if !strings.Contains(got, want) {
 			t.Fatalf("snapshot URL = %q, missing %s", got, want)
 		}
+	}
+}
+
+func TestFetchNMSDiscoversAndFiltersSnapshotPaths(t *testing.T) {
+	var snapshotQuery url.Values
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/nms/v1/telemetry/paths":
+			_, _ = w.Write([]byte(`{"paths":[` +
+				`{"path":"/system","cardinality":"single"},` +
+				`{"path":"/interfaces","cardinality":"per-interface"},` +
+				`{"path":"/routes","cardinality":"per-route"},` +
+				`{"path":"/overlays/evpn","cardinality":"per-vni"}` +
+				`]}`))
+		case "/api/nms/v1/telemetry/snapshot":
+			snapshotQuery = r.URL.Query()
+			_, _ = w.Write([]byte(`{"schema_version":"arca.nms.telemetry-snapshot.v1","events":[]}`))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+
+	cfg, err := parseCollectorConfig([]string{
+		"-base-url", server.URL,
+		"-discover-paths",
+		"-exclude-cardinality", "per-route",
+	})
+	if err != nil {
+		t.Fatalf("parseCollectorConfig() error = %v", err)
+	}
+	body, err := fetchNMS(t.Context(), server.Client(), cfg)
+	if err != nil {
+		t.Fatalf("fetchNMS() error = %v", err)
+	}
+	if !json.Valid(body) {
+		t.Fatalf("fetchNMS() body is invalid JSON: %s", string(body))
+	}
+	gotPaths := snapshotQuery["path"]
+	wantPaths := []string{"/system", "/interfaces", "/overlays/evpn"}
+	if strings.Join(gotPaths, ",") != strings.Join(wantPaths, ",") {
+		t.Fatalf("snapshot paths = %#v, want %#v", gotPaths, wantPaths)
+	}
+}
+
+func TestFilterSnapshotPathsByCardinality(t *testing.T) {
+	catalog := telemetryCatalogResponse{Paths: []telemetryCatalogPath{
+		{Path: "/system", Cardinality: "single"},
+		{Path: "/routes", Cardinality: "per-route"},
+		{Path: "/bfd", Cardinality: "per-peer"},
+	}}
+	got := filterSnapshotPathsByCardinality(
+		repeatedPathFlag{"/system", "/routes", "/bfd"},
+		catalog,
+		repeatedStringFlag{"per-route", "per-peer"},
+	)
+	if len(got) != 1 || got[0] != "/system" {
+		t.Fatalf("filterSnapshotPathsByCardinality() = %#v, want only /system", got)
+	}
+}
+
+func TestResolveSnapshotPathsRejectsEmptyFilteredSet(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(`{"paths":[{"path":"/routes","cardinality":"per-route"}]}`))
+	}))
+	defer server.Close()
+
+	cfg, err := parseCollectorConfig([]string{
+		"-base-url", server.URL,
+		"-discover-paths",
+		"-exclude-cardinality", "per-route",
+	})
+	if err != nil {
+		t.Fatalf("parseCollectorConfig() error = %v", err)
+	}
+	_, err = resolveSnapshotPaths(t.Context(), server.Client(), cfg)
+	if err == nil || !strings.Contains(err.Error(), "snapshot path set is empty") {
+		t.Fatalf("resolveSnapshotPaths() error = %v, want empty filtered set", err)
 	}
 }
 
