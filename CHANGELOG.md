@@ -2,6 +2,7 @@
 
 ## v0.8.x - Overlay and Streaming Telemetry (current)
 
+- **NMS collector result count validation**: the example HTTP collector now validates telemetry catalog `path_count`, schema registry `schema_count`, and snapshot `event_count` values against decoded result arrays
 - **NMS collector status validation**: the example HTTP collector now validates operational status `schema_version` and `resource` values before printing status responses
 - **NMS collector snapshot validation**: the example HTTP collector now validates telemetry snapshot `schema_version` and `resource` values before printing or exporting snapshot events
 - **NMS collector discovery validation**: the example HTTP collector now validates telemetry discovery `schema_version` and `resource` values before using catalog or schema responses
