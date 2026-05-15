@@ -365,6 +365,41 @@ func TestNMSTelemetryCatalogEndpointFilters(t *testing.T) {
 	}
 }
 
+func TestNMSTelemetryCatalogEndpointIgnoresEmptyFilters(t *testing.T) {
+	req := httptest.NewRequest(http.MethodGet, "/api/nms/v1/telemetry/paths?path=&cardinality=&payload_schema=&payload-schema=&encoding=", nil)
+	rec := httptest.NewRecorder()
+	metricsSource{}.handleNMSTelemetryCatalog(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d", rec.Code, http.StatusOK)
+	}
+	var resp nmsTelemetryCatalogResponse
+	if err := json.NewDecoder(rec.Result().Body).Decode(&resp); err != nil {
+		t.Fatalf("Decode() error = %v", err)
+	}
+	catalog := nbgrpc.NewTelemetryCatalog()
+	if resp.PathCount != len(catalog.Paths) {
+		t.Fatalf("PathCount = %d, want full catalog count %d", resp.PathCount, len(catalog.Paths))
+	}
+}
+
+func TestNMSTelemetryCatalogEndpointSplitsCommaSeparatedFilters(t *testing.T) {
+	req := httptest.NewRequest(http.MethodGet, "/api/nms/v1/telemetry/paths?path=system,evpn&payload_schema=arca.telemetry.system.v1,arca.telemetry.overlays.evpn.v1&encoding=json,", nil)
+	rec := httptest.NewRecorder()
+	metricsSource{}.handleNMSTelemetryCatalog(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d", rec.Code, http.StatusOK)
+	}
+	var resp nmsTelemetryCatalogResponse
+	if err := json.NewDecoder(rec.Result().Body).Decode(&resp); err != nil {
+		t.Fatalf("Decode() error = %v", err)
+	}
+	if len(resp.Paths) != 2 || resp.Paths[0].Path != "/system" || resp.Paths[1].Path != "/overlays/evpn" {
+		t.Fatalf("filtered paths = %#v, want system and EVPN from comma-separated filters", resp.Paths)
+	}
+}
+
 func TestNMSTelemetryCatalogEndpointFiltersUnsupportedEncoding(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "/api/nms/v1/telemetry/paths?encoding=protobuf", nil)
 	rec := httptest.NewRecorder()
@@ -714,6 +749,17 @@ func TestNMSTelemetrySnapshotOptionsFiltersDefaultCatalogPaths(t *testing.T) {
 	}
 	if len(opts.paths) != 2 || opts.paths[0] != "/system" || opts.paths[1] != "/config/running" {
 		t.Fatalf("paths = %#v, want default single-cardinality snapshot paths", opts.paths)
+	}
+}
+
+func TestNMSTelemetrySnapshotOptionsNormalizesCatalogFilters(t *testing.T) {
+	req := httptest.NewRequest(http.MethodGet, "/api/nms/v1/telemetry/snapshot?path=system,evpn&payload_schema=arca.telemetry.system.v1,arca.telemetry.overlays.evpn.v1&encoding=json,", nil)
+	opts, err := nmsTelemetrySnapshotOptionsFromRequest(req)
+	if err != nil {
+		t.Fatalf("nmsTelemetrySnapshotOptionsFromRequest() error = %v", err)
+	}
+	if len(opts.paths) != 2 || opts.paths[0] != "/system" || opts.paths[1] != "/overlays/evpn" {
+		t.Fatalf("paths = %#v, want normalized system and EVPN snapshot paths", opts.paths)
 	}
 }
 
