@@ -87,12 +87,14 @@ func (f *repeatedStringFlag) Set(value string) error {
 
 type nmsStatusResponse struct {
 	SchemaVersion string          `json:"schema_version"`
+	GeneratedAt   string          `json:"generated_at"`
 	Resource      string          `json:"resource"`
 	Data          json.RawMessage `json:"data"`
 }
 
 type telemetryCatalogResponse struct {
 	SchemaVersion           string                 `json:"schema_version"`
+	GeneratedAt             string                 `json:"generated_at"`
 	Resource                string                 `json:"resource"`
 	EventSchemaVersion      string                 `json:"event_schema_version"`
 	Encoding                string                 `json:"encoding"`
@@ -115,6 +117,7 @@ type telemetryCatalogPath struct {
 
 type telemetrySchemasResponse struct {
 	SchemaVersion           string                   `json:"schema_version"`
+	GeneratedAt             string                   `json:"generated_at"`
 	Resource                string                   `json:"resource"`
 	EventSchemaVersion      string                   `json:"event_schema_version"`
 	Encoding                string                   `json:"encoding"`
@@ -144,6 +147,7 @@ type telemetryPayloadField struct {
 
 type telemetrySnapshotResponse struct {
 	SchemaVersion           string                   `json:"schema_version"`
+	GeneratedAt             string                   `json:"generated_at"`
 	Resource                string                   `json:"resource"`
 	EventSchemaVersion      string                   `json:"event_schema_version"`
 	Encoding                string                   `json:"encoding"`
@@ -388,6 +392,9 @@ func decodeCatalogResponse(body []byte) (telemetryCatalogResponse, error) {
 	if err := validateTelemetryCatalogPaths(catalog.Paths); err != nil {
 		return catalog, err
 	}
+	if err := validateNMSGeneratedAt("telemetry catalog", catalog.GeneratedAt); err != nil {
+		return catalog, err
+	}
 	return catalog, nil
 }
 
@@ -417,6 +424,9 @@ func decodeSchemasResponse(body []byte) (telemetrySchemasResponse, error) {
 	if err := validateTelemetryPayloadSchemas(schemas.Schemas); err != nil {
 		return schemas, err
 	}
+	if err := validateNMSGeneratedAt("telemetry schemas", schemas.GeneratedAt); err != nil {
+		return schemas, err
+	}
 	return schemas, nil
 }
 
@@ -426,6 +436,9 @@ func decodeStatusResponse(body []byte) error {
 		return fmt.Errorf("decode nms status response: %w", err)
 	}
 	if err := validateNMSEnvelope("nms status", status.SchemaVersion, status.Resource, nmsOperationalStatusV1, "/api/nms/v1/status"); err != nil {
+		return err
+	}
+	if err := validateNMSGeneratedAt("nms status", status.GeneratedAt); err != nil {
 		return err
 	}
 	return nil
@@ -460,6 +473,9 @@ func decodeSnapshotResponse(body []byte) (telemetrySnapshotResponse, error) {
 	); err != nil {
 		return snapshot, err
 	}
+	if err := validateNMSGeneratedAt("telemetry snapshot", snapshot.GeneratedAt); err != nil {
+		return snapshot, err
+	}
 	return snapshot, nil
 }
 
@@ -469,6 +485,16 @@ func validateNMSEnvelope(kind, schemaVersion, resource, wantSchemaVersion, wantR
 	}
 	if resource != wantResource {
 		return fmt.Errorf("%s resource = %q, want %q", kind, resource, wantResource)
+	}
+	return nil
+}
+
+func validateNMSGeneratedAt(kind, generatedAt string) error {
+	if strings.TrimSpace(generatedAt) == "" {
+		return fmt.Errorf("%s generated_at is empty", kind)
+	}
+	if _, err := time.Parse(time.RFC3339, generatedAt); err != nil {
+		return fmt.Errorf("%s generated_at = %q, want RFC3339: %w", kind, generatedAt, err)
 	}
 	return nil
 }
