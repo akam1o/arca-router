@@ -2,6 +2,7 @@
 
 ## v0.8.x - Overlay and Streaming Telemetry (current)
 
+- **NMS collector catalog interval hints**: the example HTTP collector decodes default, minimum, and maximum sample interval hints from telemetry catalog discovery responses
 - **Telemetry CLI catalog interval hints**: `arca show telemetry paths` and `arca show telemetry paths live` print default, minimum, and maximum sample intervals when the catalog advertises them
 - **NMS telemetry catalog interval hints**: `/api/nms/v1/telemetry/paths` advertises default, minimum, and maximum sample intervals in milliseconds for HTTP collector discovery
 - **gRPC telemetry catalog interval hints**: `TelemetryService.GetTelemetryCatalog` advertises default, minimum, and maximum sample intervals in milliseconds for stream collectors

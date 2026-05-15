@@ -27,6 +27,21 @@ func TestParseCollectorConfigDefaults(t *testing.T) {
 	}
 }
 
+func TestDecodeTelemetryCatalogResponseIntervalHints(t *testing.T) {
+	var catalog telemetryCatalogResponse
+	body := []byte(`{"encoding":"json","default_sample_interval_ms":30000,"min_sample_interval_ms":1000,"max_sample_interval_ms":3600000,"paths":[]}`)
+	if err := json.Unmarshal(body, &catalog); err != nil {
+		t.Fatalf("json.Unmarshal() error = %v", err)
+	}
+	if catalog.DefaultSampleIntervalMs != 30000 || catalog.MinSampleIntervalMs != 1000 || catalog.MaxSampleIntervalMs != 3600000 {
+		t.Fatalf("interval hints = default %d min %d max %d, want 30000 1000 3600000",
+			catalog.DefaultSampleIntervalMs,
+			catalog.MinSampleIntervalMs,
+			catalog.MaxSampleIntervalMs,
+		)
+	}
+}
+
 func TestParseCollectorConfigCatalogFilters(t *testing.T) {
 	cfg, err := parseCollectorConfig([]string{
 		"-discover-paths",

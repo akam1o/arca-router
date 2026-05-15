@@ -74,8 +74,11 @@ func (f *repeatedStringFlag) Set(value string) error {
 }
 
 type telemetryCatalogResponse struct {
-	Encoding string                 `json:"encoding"`
-	Paths    []telemetryCatalogPath `json:"paths"`
+	Encoding                string                 `json:"encoding"`
+	DefaultSampleIntervalMs uint32                 `json:"default_sample_interval_ms"`
+	MinSampleIntervalMs     uint32                 `json:"min_sample_interval_ms"`
+	MaxSampleIntervalMs     uint32                 `json:"max_sample_interval_ms"`
+	Paths                   []telemetryCatalogPath `json:"paths"`
 }
 
 type telemetryCatalogPath struct {
