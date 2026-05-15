@@ -100,6 +100,26 @@ func TestDecodeDiscoveryResponseRejectsInvalidSchemaEnvelope(t *testing.T) {
 	}
 }
 
+func TestDecodeStatusResponseRejectsInvalidEnvelope(t *testing.T) {
+	validStatus := []byte(`{"schema_version":"arca.nms.operational.v1","resource":"/api/nms/v1/status","data":{"running_hostname":"edge01"}}`)
+	if err := decodeStatusResponse(validStatus); err != nil {
+		t.Fatalf("decodeStatusResponse(valid) error = %v", err)
+	}
+
+	err := decodeStatusResponse([]byte(`[{"data":{}}]`))
+	if err == nil || !strings.Contains(err.Error(), "decode nms status response") {
+		t.Fatalf("decodeStatusResponse() error = %v, want status decode error", err)
+	}
+	err = decodeStatusResponse([]byte(`{"schema_version":"wrong","resource":"/api/nms/v1/status","data":{}}`))
+	if err == nil || !strings.Contains(err.Error(), "schema_version") {
+		t.Fatalf("decodeStatusResponse() error = %v, want schema_version mismatch", err)
+	}
+	err = decodeStatusResponse([]byte(`{"schema_version":"arca.nms.operational.v1","resource":"/wrong","data":{}}`))
+	if err == nil || !strings.Contains(err.Error(), "resource") {
+		t.Fatalf("decodeStatusResponse() error = %v, want resource mismatch", err)
+	}
+}
+
 func TestDecodeTelemetrySnapshotResponseIntervalHints(t *testing.T) {
 	var snapshot telemetrySnapshotResponse
 	body := []byte(`{"schema_version":"arca.nms.telemetry-snapshot.v1","resource":"/api/nms/v1/telemetry/snapshot","default_paths":["/system","/config/running"],"default_sample_interval_ms":30000,"min_sample_interval_ms":1000,"max_sample_interval_ms":3600000,"event_count":2,"events":[]}`)
@@ -362,6 +382,29 @@ func TestCollectorEndpointURLForCatalogFilters(t *testing.T) {
 	}
 	if query.Get("encoding") != "json" {
 		t.Fatalf("encoding query = %#v, want json", query["encoding"])
+	}
+}
+
+func TestFetchNMSValidatesStatusEnvelope(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/nms/v1/status" {
+			http.NotFound(w, r)
+			return
+		}
+		_, _ = w.Write([]byte(`{"schema_version":"wrong","resource":"/api/nms/v1/status","data":{}}`))
+	}))
+	defer server.Close()
+
+	cfg, err := parseCollectorConfig([]string{
+		"-base-url", server.URL,
+		"-mode", "status",
+	})
+	if err != nil {
+		t.Fatalf("parseCollectorConfig() error = %v", err)
+	}
+	_, err = fetchNMS(t.Context(), server.Client(), cfg)
+	if err == nil || !strings.Contains(err.Error(), "schema_version") {
+		t.Fatalf("fetchNMS() error = %v, want status schema_version mismatch", err)
 	}
 }
 
