@@ -9,6 +9,7 @@ import (
 	"log/slog"
 	"net"
 	"net/http"
+	"net/url"
 	"strconv"
 	"strings"
 	"time"
@@ -132,6 +133,7 @@ type nmsTelemetryCatalogFilters struct {
 	paths          []string
 	cardinalities  []string
 	payloadSchemas []string
+	defaultOnly    bool
 }
 
 type nmsTelemetrySnapshotOptions struct {
@@ -1481,10 +1483,14 @@ func nmsTelemetryCatalogFiltersFromRequest(r *http.Request) nmsTelemetryCatalogF
 		paths:          append([]string(nil), query["path"]...),
 		cardinalities:  append([]string(nil), query["cardinality"]...),
 		payloadSchemas: append(append([]string(nil), query["payload_schema"]...), query["payload-schema"]...),
+		defaultOnly:    nmsTelemetryCatalogDefaultOnlyFromQuery(query),
 	}
 }
 
 func nmsTelemetryPathMatchesCatalogFilters(info nbgrpc.TelemetryPathInfo, filters nmsTelemetryCatalogFilters) bool {
+	if filters.defaultOnly && !info.Default {
+		return false
+	}
 	if len(filters.paths) > 0 && !nmsTelemetryCatalogPathMatches(info, filters.paths) {
 		return false
 	}
@@ -1495,6 +1501,16 @@ func nmsTelemetryPathMatchesCatalogFilters(info nbgrpc.TelemetryPathInfo, filter
 		return false
 	}
 	return true
+}
+
+func nmsTelemetryCatalogDefaultOnlyFromQuery(query url.Values) bool {
+	for _, value := range append(append([]string(nil), query["default"]...), query["default_only"]...) {
+		switch strings.ToLower(strings.TrimSpace(value)) {
+		case "", "1", "true", "yes":
+			return true
+		}
+	}
+	return false
 }
 
 func nmsTelemetryCatalogPathMatches(info nbgrpc.TelemetryPathInfo, filters []string) bool {

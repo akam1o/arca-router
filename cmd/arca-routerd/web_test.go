@@ -385,6 +385,28 @@ func TestNMSTelemetryCatalogEndpointAcceptsPathAliasFilter(t *testing.T) {
 	}
 }
 
+func TestNMSTelemetryCatalogEndpointAcceptsDefaultFilter(t *testing.T) {
+	req := httptest.NewRequest(http.MethodGet, "/api/nms/v1/telemetry/paths?default=true", nil)
+	rec := httptest.NewRecorder()
+	metricsSource{}.handleNMSTelemetryCatalog(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d", rec.Code, http.StatusOK)
+	}
+	var resp nmsTelemetryCatalogResponse
+	if err := json.NewDecoder(rec.Result().Body).Decode(&resp); err != nil {
+		t.Fatalf("Decode() error = %v", err)
+	}
+	if len(resp.Paths) != len(resp.DefaultPaths) {
+		t.Fatalf("filtered paths = %#v, want default path count %d", resp.Paths, len(resp.DefaultPaths))
+	}
+	for _, path := range resp.Paths {
+		if !path.Default {
+			t.Fatalf("filtered path = %#v, want only default paths", path)
+		}
+	}
+}
+
 func TestNMSTelemetrySnapshotEndpoint(t *testing.T) {
 	telemetry := &webTelemetryTestAPI{events: []nbgrpc.TelemetryEvent{
 		{
