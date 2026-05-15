@@ -2,6 +2,7 @@
 
 ## v0.8.x - Overlay and Streaming Telemetry (current)
 
+- **NMS collector snapshot event timing validation**: the example HTTP collector now validates positive, increasing `sequence` values and RFC3339Nano `timestamp` values in telemetry snapshot events
 - **NMS collector snapshot event metadata validation**: the example HTTP collector now validates per-event `cardinality` and `payload_schema` metadata in telemetry snapshot responses before printing or exporting events
 - **NMS collector discovery entry validation**: the example HTTP collector now validates telemetry catalog path metadata, schema registry entries, and payload field declarations before using discovery responses
 - **NMS collector telemetry hint validation**: the example HTTP collector now validates telemetry default path lists and sample interval hints in catalog, schema registry, and snapshot envelopes

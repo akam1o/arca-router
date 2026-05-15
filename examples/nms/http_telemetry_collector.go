@@ -601,6 +601,7 @@ func rememberTelemetryDiscoveryPath(seen map[string]string, kind, field, value s
 }
 
 func validateTelemetrySnapshotEvents(events []telemetrySnapshotEvent) error {
+	var previousSequence uint64
 	for i, event := range events {
 		kind := fmt.Sprintf("telemetry snapshot events[%d]", i)
 		if event.SchemaVersion != telemetryEventSchemaV1 {
@@ -623,6 +624,19 @@ func validateTelemetrySnapshotEvents(events []telemetrySnapshotEvent) error {
 		}
 		if err := validateTelemetryPathMetadata(kind, event.Path, event.Cardinality, event.PayloadSchema, nil); err != nil {
 			return err
+		}
+		if event.Sequence == 0 {
+			return fmt.Errorf("%s sequence is zero", kind)
+		}
+		if previousSequence != 0 && event.Sequence <= previousSequence {
+			return fmt.Errorf("%s sequence = %d, want greater than previous sequence %d", kind, event.Sequence, previousSequence)
+		}
+		previousSequence = event.Sequence
+		if strings.TrimSpace(event.Timestamp) == "" {
+			return fmt.Errorf("%s timestamp is empty", kind)
+		}
+		if _, err := time.Parse(time.RFC3339Nano, event.Timestamp); err != nil {
+			return fmt.Errorf("%s timestamp = %q, want RFC3339Nano: %w", kind, event.Timestamp, err)
 		}
 	}
 	return nil
