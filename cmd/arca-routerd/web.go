@@ -1592,12 +1592,27 @@ func newNMSTelemetrySchemasResponse(now time.Time, filters nmsTelemetryCatalogFi
 func nmsTelemetryCatalogFiltersFromRequest(r *http.Request) nmsTelemetryCatalogFilters {
 	query := r.URL.Query()
 	return nmsTelemetryCatalogFilters{
-		paths:          append([]string(nil), query["path"]...),
-		cardinalities:  append([]string(nil), query["cardinality"]...),
-		payloadSchemas: append(append([]string(nil), query["payload_schema"]...), query["payload-schema"]...),
-		encodings:      append([]string(nil), query["encoding"]...),
+		paths:          nmsTelemetryCatalogFilterValues(query, "path"),
+		cardinalities:  nmsTelemetryCatalogFilterValues(query, "cardinality"),
+		payloadSchemas: nmsTelemetryCatalogFilterValues(query, "payload_schema", "payload-schema"),
+		encodings:      nmsTelemetryCatalogFilterValues(query, "encoding"),
 		defaultOnly:    nmsTelemetryCatalogDefaultOnlyFromQuery(query),
 	}
+}
+
+func nmsTelemetryCatalogFilterValues(query url.Values, keys ...string) []string {
+	var values []string
+	for _, key := range keys {
+		for _, raw := range query[key] {
+			for _, part := range strings.Split(raw, ",") {
+				value := strings.TrimSpace(part)
+				if value != "" {
+					values = append(values, value)
+				}
+			}
+		}
+	}
+	return values
 }
 
 func nmsTelemetryPathMatchesCatalogFilters(info nbgrpc.TelemetryPathInfo, filters nmsTelemetryCatalogFilters) bool {

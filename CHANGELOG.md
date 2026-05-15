@@ -2,6 +2,7 @@
 
 ## v0.8.x - Overlay and Streaming Telemetry (current)
 
+- **NMS telemetry filter normalization**: `/api/nms/v1/telemetry/paths`, `/schemas`, and `/snapshot` now ignore empty metadata filter values and accept comma-separated filter lists
 - **NMS collector schema field uniqueness validation**: the example HTTP collector now rejects duplicate telemetry payload field names before using schema registry responses
 - **NMS collector snapshot path uniqueness validation**: the example HTTP collector now rejects duplicate emitted telemetry snapshot paths before using snapshot responses
 - **NMS collector snapshot guardrail cap validation**: the example HTTP collector now rejects snapshot guardrails that exceed the advertised NMS caps before using snapshot responses
