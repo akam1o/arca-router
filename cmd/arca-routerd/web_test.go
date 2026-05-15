@@ -565,6 +565,14 @@ func TestNMSTelemetrySnapshotEndpoint(t *testing.T) {
 	if resp.EventSchemaVersion != nbgrpc.TelemetryEventSchemaVersion() || resp.Encoding != nbgrpc.TelemetryEncoding() {
 		t.Fatalf("snapshot schema/encoding = %q/%q", resp.EventSchemaVersion, resp.Encoding)
 	}
+	catalog := nbgrpc.NewTelemetryCatalog()
+	if resp.DefaultSampleIntervalMs != catalog.DefaultSampleIntervalMs ||
+		resp.MinSampleIntervalMs != catalog.MinSampleIntervalMs ||
+		resp.MaxSampleIntervalMs != catalog.MaxSampleIntervalMs {
+		t.Fatalf("sample intervals = %d/%d/%d, want %d/%d/%d",
+			resp.DefaultSampleIntervalMs, resp.MinSampleIntervalMs, resp.MaxSampleIntervalMs,
+			catalog.DefaultSampleIntervalMs, catalog.MinSampleIntervalMs, catalog.MaxSampleIntervalMs)
+	}
 	if len(resp.Paths) != 2 || resp.Paths[0] != "/system" || resp.Paths[1] != "/interfaces" {
 		t.Fatalf("Paths = %#v, want emitted paths", resp.Paths)
 	}

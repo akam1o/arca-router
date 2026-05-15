@@ -115,17 +115,20 @@ type nmsTelemetrySchemasResponse struct {
 }
 
 type nmsTelemetrySnapshotResponse struct {
-	SchemaVersion      string                      `json:"schema_version"`
-	GeneratedAt        string                      `json:"generated_at"`
-	Resource           string                      `json:"resource"`
-	EventSchemaVersion string                      `json:"event_schema_version"`
-	Encoding           string                      `json:"encoding"`
-	Paths              []string                    `json:"paths"`
-	PayloadBytes       int                         `json:"payload_bytes"`
-	MaxPayloadBytes    int                         `json:"max_payload_bytes"`
-	MaxEvents          int                         `json:"max_events"`
-	TimeoutMs          int64                       `json:"timeout_ms"`
-	Events             []nmsTelemetrySnapshotEvent `json:"events"`
+	SchemaVersion           string                      `json:"schema_version"`
+	GeneratedAt             string                      `json:"generated_at"`
+	Resource                string                      `json:"resource"`
+	EventSchemaVersion      string                      `json:"event_schema_version"`
+	Encoding                string                      `json:"encoding"`
+	DefaultSampleIntervalMs uint32                      `json:"default_sample_interval_ms"`
+	MinSampleIntervalMs     uint32                      `json:"min_sample_interval_ms"`
+	MaxSampleIntervalMs     uint32                      `json:"max_sample_interval_ms"`
+	Paths                   []string                    `json:"paths"`
+	PayloadBytes            int                         `json:"payload_bytes"`
+	MaxPayloadBytes         int                         `json:"max_payload_bytes"`
+	MaxEvents               int                         `json:"max_events"`
+	TimeoutMs               int64                       `json:"timeout_ms"`
+	Events                  []nmsTelemetrySnapshotEvent `json:"events"`
 }
 
 type nmsTelemetrySnapshotEvent struct {
@@ -1752,6 +1755,7 @@ func nmsTelemetrySnapshotPaths(r *http.Request) []string {
 }
 
 func newNMSTelemetrySnapshotResponse(now time.Time, events []nbgrpc.TelemetryEvent, opts nmsTelemetrySnapshotOptions, payloadBytes int) nmsTelemetrySnapshotResponse {
+	catalog := nbgrpc.NewTelemetryCatalog()
 	responseEvents := make([]nmsTelemetrySnapshotEvent, 0, len(events))
 	paths := make([]string, 0, len(events))
 	for _, event := range events {
@@ -1759,17 +1763,20 @@ func newNMSTelemetrySnapshotResponse(now time.Time, events []nbgrpc.TelemetryEve
 		paths = append(paths, event.Path)
 	}
 	return nmsTelemetrySnapshotResponse{
-		SchemaVersion:      nmsTelemetrySnapshotSchemaVersion,
-		GeneratedAt:        formatWebOptionalTime(now),
-		Resource:           "/api/nms/v1/telemetry/snapshot",
-		EventSchemaVersion: nbgrpc.TelemetryEventSchemaVersion(),
-		Encoding:           nbgrpc.TelemetryEncoding(),
-		Paths:              paths,
-		PayloadBytes:       payloadBytes,
-		MaxPayloadBytes:    opts.maxPayloadBytes,
-		MaxEvents:          opts.maxEvents,
-		TimeoutMs:          opts.timeout.Milliseconds(),
-		Events:             responseEvents,
+		SchemaVersion:           nmsTelemetrySnapshotSchemaVersion,
+		GeneratedAt:             formatWebOptionalTime(now),
+		Resource:                "/api/nms/v1/telemetry/snapshot",
+		EventSchemaVersion:      catalog.EventSchemaVersion,
+		Encoding:                catalog.Encoding,
+		DefaultSampleIntervalMs: catalog.DefaultSampleIntervalMs,
+		MinSampleIntervalMs:     catalog.MinSampleIntervalMs,
+		MaxSampleIntervalMs:     catalog.MaxSampleIntervalMs,
+		Paths:                   paths,
+		PayloadBytes:            payloadBytes,
+		MaxPayloadBytes:         opts.maxPayloadBytes,
+		MaxEvents:               opts.maxEvents,
+		TimeoutMs:               opts.timeout.Milliseconds(),
+		Events:                  responseEvents,
 	}
 }
 
