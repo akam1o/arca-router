@@ -32,9 +32,12 @@ func TestParseCollectorConfigDefaults(t *testing.T) {
 
 func TestDecodeTelemetryCatalogResponseIntervalHints(t *testing.T) {
 	var catalog telemetryCatalogResponse
-	body := []byte(`{"encoding":"json","default_sample_interval_ms":30000,"min_sample_interval_ms":1000,"max_sample_interval_ms":3600000,"path_count":2,"paths":[]}`)
+	body := []byte(`{"encoding":"json","default_paths":["/system","/config/running"],"default_sample_interval_ms":30000,"min_sample_interval_ms":1000,"max_sample_interval_ms":3600000,"path_count":2,"paths":[]}`)
 	if err := json.Unmarshal(body, &catalog); err != nil {
 		t.Fatalf("json.Unmarshal() error = %v", err)
+	}
+	if strings.Join(catalog.DefaultPaths, ",") != "/system,/config/running" {
+		t.Fatalf("catalog default paths = %#v, want system/config", catalog.DefaultPaths)
 	}
 	if catalog.DefaultSampleIntervalMs != 30000 || catalog.MinSampleIntervalMs != 1000 || catalog.MaxSampleIntervalMs != 3600000 {
 		t.Fatalf("interval hints = default %d min %d max %d, want 30000 1000 3600000",
@@ -45,6 +48,38 @@ func TestDecodeTelemetryCatalogResponseIntervalHints(t *testing.T) {
 	}
 	if catalog.PathCount != 2 {
 		t.Fatalf("path count = %d, want 2", catalog.PathCount)
+	}
+}
+
+func TestDecodeTelemetrySchemasResponseDefaultHints(t *testing.T) {
+	var schemas telemetrySchemasResponse
+	body := []byte(`{"encoding":"json","default_paths":["/system","/config/running"],"default_sample_interval_ms":30000,"min_sample_interval_ms":1000,"max_sample_interval_ms":3600000,"schema_count":1,"schemas":[{"path":"/system","cardinality":"single","payload_schema":"arca.telemetry.system.v1","fields":[{"name":"hostname","type":"string","description":"daemon hostname"}]}]}`)
+	if err := json.Unmarshal(body, &schemas); err != nil {
+		t.Fatalf("json.Unmarshal() error = %v", err)
+	}
+	if strings.Join(schemas.DefaultPaths, ",") != "/system,/config/running" {
+		t.Fatalf("schema default paths = %#v, want system/config", schemas.DefaultPaths)
+	}
+	if schemas.DefaultSampleIntervalMs != 30000 || schemas.MinSampleIntervalMs != 1000 || schemas.MaxSampleIntervalMs != 3600000 {
+		t.Fatalf("schema interval hints = default %d min %d max %d, want 30000 1000 3600000",
+			schemas.DefaultSampleIntervalMs,
+			schemas.MinSampleIntervalMs,
+			schemas.MaxSampleIntervalMs,
+		)
+	}
+	if schemas.SchemaCount != 1 || len(schemas.Schemas) != 1 {
+		t.Fatalf("schema count = %d len %d, want 1/1", schemas.SchemaCount, len(schemas.Schemas))
+	}
+	if schemas.Schemas[0].PayloadSchema != "arca.telemetry.system.v1" ||
+		len(schemas.Schemas[0].Fields) != 1 || schemas.Schemas[0].Fields[0].Name != "hostname" {
+		t.Fatalf("schema payload metadata = %#v, want system hostname field", schemas.Schemas[0])
+	}
+}
+
+func TestDecodeDiscoveryResponseRejectsInvalidSchemaEnvelope(t *testing.T) {
+	err := decodeDiscoveryResponse(collectorConfig{mode: "schemas"}, []byte(`[{"path":"/system"}]`))
+	if err == nil || !strings.Contains(err.Error(), "decode telemetry schemas response") {
+		t.Fatalf("decodeDiscoveryResponse() error = %v, want telemetry schemas decode error", err)
 	}
 }
 

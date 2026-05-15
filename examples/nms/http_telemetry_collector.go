@@ -79,6 +79,7 @@ func (f *repeatedStringFlag) Set(value string) error {
 
 type telemetryCatalogResponse struct {
 	Encoding                string                 `json:"encoding"`
+	DefaultPaths            []string               `json:"default_paths"`
 	DefaultSampleIntervalMs uint32                 `json:"default_sample_interval_ms"`
 	MinSampleIntervalMs     uint32                 `json:"min_sample_interval_ms"`
 	MaxSampleIntervalMs     uint32                 `json:"max_sample_interval_ms"`
@@ -91,6 +92,30 @@ type telemetryCatalogPath struct {
 	Cardinality   string   `json:"cardinality"`
 	PayloadSchema string   `json:"payload_schema"`
 	Aliases       []string `json:"aliases"`
+}
+
+type telemetrySchemasResponse struct {
+	Encoding                string                   `json:"encoding"`
+	DefaultPaths            []string                 `json:"default_paths"`
+	DefaultSampleIntervalMs uint32                   `json:"default_sample_interval_ms"`
+	MinSampleIntervalMs     uint32                   `json:"min_sample_interval_ms"`
+	MaxSampleIntervalMs     uint32                   `json:"max_sample_interval_ms"`
+	SchemaCount             int                      `json:"schema_count"`
+	Schemas                 []telemetryPayloadSchema `json:"schemas"`
+}
+
+type telemetryPayloadSchema struct {
+	Path          string                  `json:"path"`
+	Cardinality   string                  `json:"cardinality"`
+	PayloadSchema string                  `json:"payload_schema"`
+	Aliases       []string                `json:"aliases"`
+	Fields        []telemetryPayloadField `json:"fields"`
+}
+
+type telemetryPayloadField struct {
+	Name        string `json:"name"`
+	Type        string `json:"type"`
+	Description string `json:"description"`
 }
 
 type telemetrySnapshotResponse struct {
@@ -269,12 +294,31 @@ func fetchNMS(ctx context.Context, client *http.Client, cfg collectorConfig) ([]
 	if err != nil {
 		return nil, err
 	}
+	if err := decodeDiscoveryResponse(cfg, body); err != nil {
+		return nil, err
+	}
 	if cfg.mode == "snapshot" && cfg.otlpEndpoint != "" {
 		if err := exportSnapshotToOTLP(ctx, client, cfg, body); err != nil {
 			return nil, err
 		}
 	}
 	return body, nil
+}
+
+func decodeDiscoveryResponse(cfg collectorConfig, body []byte) error {
+	switch cfg.mode {
+	case "catalog":
+		var catalog telemetryCatalogResponse
+		if err := json.Unmarshal(body, &catalog); err != nil {
+			return fmt.Errorf("decode telemetry catalog response: %w", err)
+		}
+	case "schemas":
+		var schemas telemetrySchemasResponse
+		if err := json.Unmarshal(body, &schemas); err != nil {
+			return fmt.Errorf("decode telemetry schemas response: %w", err)
+		}
+	}
+	return nil
 }
 
 func fetchEndpoint(ctx context.Context, client *http.Client, cfg collectorConfig, endpoint string) ([]byte, error) {
