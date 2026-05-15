@@ -35,7 +35,8 @@ const (
 
 	defaultSocket = "/run/arca-router/routerd.sock"
 
-	maxChangeImpactRouteDetails = 5
+	maxChangeImpactRouteDetails  = 5
+	maxChangeImpactPolicyDetails = 5
 )
 
 var errTelemetryUsage = errors.New("telemetry usage error")
@@ -1162,6 +1163,8 @@ type changeImpactPreview struct {
 	staticRoutes       changeImpactLineCount
 	staticRouteChanges []changeImpactRouteChange
 	policyOptions      changeImpactLineCount
+	policyChanges      []changeImpactPolicyChange
+	bgpPolicyBindings  []changeImpactBGPPolicyBinding
 	bgp                changeImpactLineCount
 	ospf               changeImpactLineCount
 	bfd                changeImpactLineCount
@@ -1183,6 +1186,21 @@ type changeImpactRouteChange struct {
 	routingInstance string
 }
 
+type changeImpactPolicyChange struct {
+	sign   byte
+	kind   string
+	name   string
+	term   string
+	prefix string
+}
+
+type changeImpactBGPPolicyBinding struct {
+	sign      byte
+	groupName string
+	direction string
+	policy    string
+}
+
 func formatChangeImpactPreview(diffText string, hasChanges bool) []string {
 	if !hasChanges || strings.TrimSpace(diffText) == "" {
 		return []string{"change impact preview: no candidate changes"}
@@ -1196,6 +1214,7 @@ func formatChangeImpactPreview(diffText string, hasChanges bool) []string {
 	lines = appendChangeImpactLine(lines, "static routes", preview.staticRoutes)
 	lines = appendStaticRouteImpactLines(lines, preview.staticRouteChanges)
 	lines = appendChangeImpactLine(lines, "policy-options", preview.policyOptions)
+	lines = appendPolicyImpactLines(lines, preview.policyChanges, preview.bgpPolicyBindings)
 	lines = appendChangeImpactLine(lines, "bgp", preview.bgp)
 	lines = appendChangeImpactLine(lines, "ospf", preview.ospf)
 	lines = appendChangeImpactLine(lines, "bfd", preview.bfd)
@@ -1228,6 +1247,32 @@ func formatChangeImpactPreview(diffText string, hasChanges bool) []string {
 	}
 	if preview.classOfService.hasChanges() {
 		lines = append(lines, "  warning: class-of-service changes can alter traffic treatment")
+	}
+	return lines
+}
+
+func appendPolicyImpactLines(lines []string, policyChanges []changeImpactPolicyChange, bgpBindings []changeImpactBGPPolicyBinding) []string {
+	if len(policyChanges) == 0 && len(bgpBindings) == 0 {
+		return lines
+	}
+	lines = append(lines, "  policy diff:")
+	remainingSlots := maxChangeImpactPolicyDetails
+	for _, change := range policyChanges {
+		if remainingSlots == 0 {
+			break
+		}
+		lines = append(lines, "    "+change.summary())
+		remainingSlots--
+	}
+	for _, binding := range bgpBindings {
+		if remainingSlots == 0 {
+			break
+		}
+		lines = append(lines, "    "+binding.summary())
+		remainingSlots--
+	}
+	if remaining := len(policyChanges) + len(bgpBindings) - maxChangeImpactPolicyDetails; remaining > 0 {
+		lines = append(lines, fmt.Sprintf("    ... %d more policy changes", remaining))
 	}
 	return lines
 }
@@ -1284,6 +1329,35 @@ func (c changeImpactRouteChange) summary() string {
 	return fmt.Sprintf("%s %s via %s", action, target, c.nextHop)
 }
 
+func (c changeImpactPolicyChange) summary() string {
+	action := "add"
+	if c.sign == '-' {
+		action = "remove"
+	}
+	switch c.kind {
+	case "prefix-list":
+		if c.prefix != "" {
+			return fmt.Sprintf("%s prefix-list %s %s", action, c.name, c.prefix)
+		}
+		return fmt.Sprintf("%s prefix-list %s", action, c.name)
+	case "route-map":
+		if c.term != "" {
+			return fmt.Sprintf("%s route-map %s term %s", action, c.name, c.term)
+		}
+		return fmt.Sprintf("%s route-map %s", action, c.name)
+	default:
+		return fmt.Sprintf("%s policy %s", action, c.name)
+	}
+}
+
+func (c changeImpactBGPPolicyBinding) summary() string {
+	action := "add"
+	if c.sign == '-' {
+		action = "remove"
+	}
+	return fmt.Sprintf("%s bgp group %s %s route-map %s", action, c.groupName, c.direction, c.policy)
+}
+
 func analyzeChangeImpact(diffText string) changeImpactPreview {
 	var preview changeImpactPreview
 	for _, rawLine := range strings.Split(diffText, "\n") {
@@ -1315,9 +1389,15 @@ func analyzeChangeImpact(diffText string) changeImpactPreview {
 		}
 		if strings.HasPrefix(configLine, "set policy-options ") {
 			preview.policyOptions.add(sign)
+			if change, ok := parsePolicyImpactChange(sign, configLine); ok {
+				preview.policyChanges = append(preview.policyChanges, change)
+			}
 		}
 		if strings.HasPrefix(configLine, "set protocols bgp ") {
 			preview.bgp.add(sign)
+			if binding, ok := parseBGPPolicyImpactBinding(sign, configLine); ok {
+				preview.bgpPolicyBindings = append(preview.bgpPolicyBindings, binding)
+			}
 		}
 		if strings.HasPrefix(configLine, "set protocols ospf ") || strings.HasPrefix(configLine, "set protocols ospf3 ") {
 			preview.ospf.add(sign)
@@ -1373,6 +1453,50 @@ func parseStaticRouteImpactChange(sign byte, line string) (changeImpactRouteChan
 		return change, change.prefix != ""
 	}
 	return changeImpactRouteChange{}, false
+}
+
+func parsePolicyImpactChange(sign byte, line string) (changeImpactPolicyChange, bool) {
+	tokens := tokenize(line)
+	if len(tokens) < 4 || tokens[0] != "set" || tokens[1] != "policy-options" {
+		return changeImpactPolicyChange{}, false
+	}
+	switch tokens[2] {
+	case "prefix-list":
+		change := changeImpactPolicyChange{sign: sign, kind: "prefix-list", name: tokens[3]}
+		if len(tokens) > 4 {
+			change.prefix = tokens[4]
+		}
+		return change, change.name != ""
+	case "policy-statement":
+		change := changeImpactPolicyChange{sign: sign, kind: "route-map", name: tokens[3]}
+		for i := 4; i+1 < len(tokens); i++ {
+			if tokens[i] == "term" {
+				change.term = tokens[i+1]
+				break
+			}
+		}
+		return change, change.name != ""
+	default:
+		return changeImpactPolicyChange{}, false
+	}
+}
+
+func parseBGPPolicyImpactBinding(sign byte, line string) (changeImpactBGPPolicyBinding, bool) {
+	tokens := tokenize(line)
+	if len(tokens) < 7 || tokens[0] != "set" || tokens[1] != "protocols" || tokens[2] != "bgp" || tokens[3] != "group" {
+		return changeImpactBGPPolicyBinding{}, false
+	}
+	direction := tokens[5]
+	if direction != "import" && direction != "export" {
+		return changeImpactBGPPolicyBinding{}, false
+	}
+	binding := changeImpactBGPPolicyBinding{
+		sign:      sign,
+		groupName: tokens[4],
+		direction: direction,
+		policy:    tokens[6],
+	}
+	return binding, binding.groupName != "" && binding.policy != ""
 }
 
 func (sh *interactiveShell) cmdEdit(args []string) error {

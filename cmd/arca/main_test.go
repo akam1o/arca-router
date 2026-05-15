@@ -554,6 +554,8 @@ func TestFormatChangeImpactPreviewSummarizesRouteAndPolicyDiff(t *testing.T) {
 		"add 0.0.0.0/0 via 198.51.100.2",
 		"remove 203.0.113.0/24 via 198.51.100.3",
 		"policy-options: +1 -0",
+		"policy diff:",
+		"add route-map EXPORT term ALLOW",
 		"warning: default route changes can affect all unmatched traffic",
 		"warning: static route removals can withdraw forwarding entries",
 		"warning: policy-options changes can regenerate FRR route-maps",
@@ -561,6 +563,47 @@ func TestFormatChangeImpactPreviewSummarizesRouteAndPolicyDiff(t *testing.T) {
 		if !strings.Contains(got, want) {
 			t.Fatalf("formatChangeImpactPreview() = %q, want substring %q", got, want)
 		}
+	}
+}
+
+func TestFormatChangeImpactPreviewSummarizesPolicyAndBGPRouteMapDiff(t *testing.T) {
+	lines := formatChangeImpactPreview(strings.Join([]string{
+		"+ set policy-options prefix-list CUSTOMER 10.100.0.0/16",
+		"+ set policy-options policy-statement EXPORT term ALLOW then accept",
+		"+ set protocols bgp group external export EXPORT",
+	}, "\n"), true)
+	got := strings.Join(lines, "\n")
+	for _, want := range []string{
+		"policy-options: +2 -0",
+		"bgp: +1 -0",
+		"policy diff:",
+		"add prefix-list CUSTOMER 10.100.0.0/16",
+		"add route-map EXPORT term ALLOW",
+		"add bgp group external export route-map EXPORT",
+		"warning: policy-options changes can regenerate FRR route-maps",
+		"warning: BGP changes can reset sessions or change route advertisements",
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("formatChangeImpactPreview() = %q, want substring %q", got, want)
+		}
+	}
+}
+
+func TestFormatChangeImpactPreviewLimitsPolicyDiffDetails(t *testing.T) {
+	var diff []string
+	for i := 0; i < maxChangeImpactPolicyDetails+2; i++ {
+		diff = append(diff, fmt.Sprintf("+ set policy-options policy-statement EXPORT-%d term ALLOW then accept", i))
+	}
+	lines := formatChangeImpactPreview(strings.Join(diff, "\n"), true)
+	got := strings.Join(lines, "\n")
+	if !strings.Contains(got, "policy-options: +7 -0") {
+		t.Fatalf("formatChangeImpactPreview() = %q, want policy count", got)
+	}
+	if !strings.Contains(got, "... 2 more policy changes") {
+		t.Fatalf("formatChangeImpactPreview() = %q, want capped policy details", got)
+	}
+	if strings.Contains(got, "EXPORT-6") {
+		t.Fatalf("formatChangeImpactPreview() = %q, want details capped before final policy", got)
 	}
 }
 
