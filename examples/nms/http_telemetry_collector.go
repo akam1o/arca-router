@@ -20,6 +20,7 @@ const (
 	defaultSnapshotTimeout = 5 * time.Second
 	defaultMaxPayloadBytes = 8 << 20
 	defaultMaxEvents       = 64
+	nmsOperationalStatusV1 = "arca.nms.operational.v1"
 	nmsTelemetryCatalogV1  = "arca.nms.telemetry-catalog.v1"
 	nmsTelemetrySchemasV1  = "arca.nms.telemetry-schemas.v1"
 	nmsTelemetrySnapshotV1 = "arca.nms.telemetry-snapshot.v1"
@@ -78,6 +79,12 @@ func (f *repeatedStringFlag) Set(value string) error {
 	}
 	*f = append(*f, value)
 	return nil
+}
+
+type nmsStatusResponse struct {
+	SchemaVersion string          `json:"schema_version"`
+	Resource      string          `json:"resource"`
+	Data          json.RawMessage `json:"data"`
 }
 
 type telemetryCatalogResponse struct {
@@ -310,6 +317,11 @@ func fetchNMS(ctx context.Context, client *http.Client, cfg collectorConfig) ([]
 	if err := decodeDiscoveryResponse(cfg, body); err != nil {
 		return nil, err
 	}
+	if cfg.mode == "status" {
+		if err := decodeStatusResponse(body); err != nil {
+			return nil, err
+		}
+	}
 	var snapshot telemetrySnapshotResponse
 	if cfg.mode == "snapshot" {
 		snapshot, err = decodeSnapshotResponse(body)
@@ -343,6 +355,17 @@ func decodeDiscoveryResponse(cfg collectorConfig, body []byte) error {
 		if err := validateNMSEnvelope("telemetry schemas", schemas.SchemaVersion, schemas.Resource, nmsTelemetrySchemasV1, "/api/nms/v1/telemetry/schemas"); err != nil {
 			return err
 		}
+	}
+	return nil
+}
+
+func decodeStatusResponse(body []byte) error {
+	var status nmsStatusResponse
+	if err := json.Unmarshal(body, &status); err != nil {
+		return fmt.Errorf("decode nms status response: %w", err)
+	}
+	if err := validateNMSEnvelope("nms status", status.SchemaVersion, status.Resource, nmsOperationalStatusV1, "/api/nms/v1/status"); err != nil {
+		return err
 	}
 	return nil
 }
