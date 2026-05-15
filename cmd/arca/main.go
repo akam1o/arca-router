@@ -110,7 +110,7 @@ Show subcommands:
   bfd [brief|counters]        Show raw BFD status
   bfd peer <ip> [counters]    Show BFD peer details
   evpn                        Show EVPN/VXLAN overlay intent
-  telemetry paths [live] [path <path>] [cardinality <hint>] [payload-schema <id>]
+  telemetry paths [live] [default] [path <path>] [cardinality <hint>] [payload-schema <id>]
                               Show supported telemetry path catalog
   telemetry [path <path>]... [interval <duration>] [count <events>]
                               Show telemetry events as JSON lines
@@ -483,6 +483,7 @@ type showClient interface {
 	GetTelemetryCatalog(context.Context) (grpcclient.TelemetryCatalog, error)
 	GetFilteredTelemetryCatalog(context.Context, []string, []string) (grpcclient.TelemetryCatalog, error)
 	GetPathFilteredTelemetryCatalog(context.Context, []string, []string, []string) (grpcclient.TelemetryCatalog, error)
+	GetTelemetryCatalogWithFilter(context.Context, grpcclient.TelemetryCatalogFilter) (grpcclient.TelemetryCatalog, error)
 	SubscribeTelemetry(context.Context, []string, time.Duration, bool) (grpcclient.TelemetryReceiver, error)
 }
 
@@ -1894,11 +1895,17 @@ func showTelemetry(ctx context.Context, client showClient, args []string) error 
 		}
 		catalog := grpcclient.NewTelemetryCatalog()
 		if catalogOpts.live {
-			liveCatalog, err := client.GetPathFilteredTelemetryCatalog(ctx, catalogOpts.paths, catalogOpts.cardinalities, catalogOpts.payloadSchemas)
+			liveCatalog, err := client.GetTelemetryCatalogWithFilter(ctx, grpcclient.TelemetryCatalogFilter{
+				Paths:          catalogOpts.paths,
+				Cardinalities:  catalogOpts.cardinalities,
+				PayloadSchemas: catalogOpts.payloadSchemas,
+				DefaultOnly:    catalogOpts.defaultOnly,
+			})
 			if err != nil {
 				return err
 			}
 			catalog = liveCatalog
+			catalogOpts.defaultOnly = false
 			catalogOpts.paths = nil
 			catalogOpts.cardinalities = nil
 			catalogOpts.payloadSchemas = nil
@@ -1938,6 +1945,7 @@ func showTelemetry(ctx context.Context, client showClient, args []string) error 
 
 type telemetryCatalogCLIOptions struct {
 	live           bool
+	defaultOnly    bool
 	paths          []string
 	cardinalities  []string
 	payloadSchemas []string
@@ -1972,6 +1980,9 @@ func telemetryCatalogOptions(args []string) (telemetryCatalogCLIOptions, bool, e
 			}
 			opts.live = true
 			args = args[1:]
+		case "default", "default-only":
+			opts.defaultOnly = true
+			args = args[1:]
 		case "cardinality":
 			if len(args) < 2 {
 				return opts, true, telemetryUsageError("'show telemetry paths cardinality' requires a cardinality hint")
@@ -2001,12 +2012,15 @@ func filterTelemetryPathCatalog(catalog []grpcclient.TelemetryPathInfo, opts tel
 	paths := normalizedCatalogPathFilterSet(opts.paths)
 	cardinalities := normalizedCatalogFilterSet(opts.cardinalities)
 	payloadSchemas := normalizedCatalogFilterSet(opts.payloadSchemas)
-	if len(paths) == 0 && len(cardinalities) == 0 && len(payloadSchemas) == 0 {
+	if !opts.defaultOnly && len(paths) == 0 && len(cardinalities) == 0 && len(payloadSchemas) == 0 {
 		return catalog
 	}
 
 	filtered := make([]grpcclient.TelemetryPathInfo, 0, len(catalog))
 	for _, info := range catalog {
+		if opts.defaultOnly && !info.Default {
+			continue
+		}
 		if len(paths) > 0 && !telemetryCatalogInfoMatchesPath(info, paths) {
 			continue
 		}
