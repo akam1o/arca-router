@@ -126,6 +126,7 @@ Local operators can inspect the same stream through the CLI. The command prints 
 ```bash
 arca show telemetry paths
 arca show telemetry paths live
+arca show telemetry paths default
 arca show telemetry paths path /evpn
 arca show telemetry paths cardinality per-route
 arca show telemetry paths live payload-schema arca.telemetry.routes.v1
@@ -135,7 +136,7 @@ arca show telemetry path /overlays/evpn
 arca show evpn
 ```
 
-`arca show telemetry paths` prints the same local path catalog used by the stream implementation, including cardinality hints, payload schema IDs, default membership, and descriptions, without requiring a daemon connection. It accepts `path <path-or-alias>`, `cardinality <hint>`, and `payload-schema <id>` filters. `arca show telemetry paths live` queries `TelemetryService.GetTelemetryCatalog` from the connected daemon and pushes those filters into that RPC.
+`arca show telemetry paths` prints the same local path catalog used by the stream implementation, including cardinality hints, payload schema IDs, default membership, and descriptions, without requiring a daemon connection. It accepts `default`, `path <path-or-alias>`, `cardinality <hint>`, and `payload-schema <id>` filters. `arca show telemetry paths live` queries `TelemetryService.GetTelemetryCatalog` from the connected daemon and pushes those filters into that RPC.
 
 ## Web UI
 

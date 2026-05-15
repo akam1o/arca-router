@@ -2,6 +2,7 @@
 
 ## v0.8.x - Overlay and Streaming Telemetry (current)
 
+- **Telemetry CLI catalog default filters**: `arca show telemetry paths` and `arca show telemetry paths live` can show only the default subscription paths
 - **gRPC telemetry catalog default filters**: `TelemetryService.GetTelemetryCatalog` can return only the default subscription paths alongside path, cardinality, and payload schema filters
 - **NMS collector catalog path filters**: the example HTTP collector can pass `-include-path` filters to the telemetry catalog endpoint before deriving snapshot paths
 - **NMS telemetry catalog path filters**: `/api/nms/v1/telemetry/paths` accepts repeated `path` query parameters that match canonical telemetry paths or advertised aliases such as `/evpn`
