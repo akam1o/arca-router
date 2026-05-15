@@ -1122,7 +1122,7 @@ Local operator は `arca show telemetry path /system path /interfaces` で同じ
 
 外部 NMS の polling 用に、Web API は `GET /api/nms/v1/status` を公開します。Response は `schema_version` に `arca.nms.operational.v1`、`generated_at`、`resource`、`data` を持つ stable JSON envelope です。`data` には `/api/status` と同じ read-only operational status が入り、build metadata、config version、datastore state、config sync、HA、CoS、FRR、VPP LCP、NETCONF counters を含みます。
 
-Collector discovery 用に、Web API は `GET /api/nms/v1/telemetry/paths` も公開します。Response は `schema_version` に `arca.nms.telemetry-catalog.v1`、`event_schema_version`、`encoding`、`default_paths`、description と default membership を含む順序付き telemetry `paths` catalog を持つ stable JSON envelope です。
+Collector discovery 用に、Web API は `GET /api/nms/v1/telemetry/paths` も公開します。Response は `schema_version` に `arca.nms.telemetry-catalog.v1`、`event_schema_version`、`encoding`、`default_paths`、description、cardinality hint、default membership を含む順序付き telemetry `paths` catalog を持つ stable JSON envelope です。
 
 HTTP-only collector は `GET /api/nms/v1/telemetry/snapshot` で one-shot telemetry を取得できます。Endpoint は `?path=/system&path=/interfaces` のように repeated `path` query parameter を受け取り、`path` を省略した場合は gRPC telemetry stream と同じ default path set を使用します。`timeout` は Go duration string として受け取り、default は `5s`、最大は `30s` です。`max_payload_bytes` は default `8388608`、最大 `67108864` で、`/routes` のような大きい path の応答を bounded にします。Response は `schema_version` に `arca.nms.telemetry-snapshot.v1`、`event_schema_version`、`encoding`、配信された `paths`、`payload_bytes`、`max_payload_bytes`、`timeout_ms`、gRPC stream と同じ structured telemetry event field と JSON payload を持つ `events` を含む stable JSON envelope です。
 

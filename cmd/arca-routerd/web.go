@@ -121,6 +121,7 @@ type nmsTelemetrySnapshotEvent struct {
 type nmsTelemetryPath struct {
 	Path        string `json:"path"`
 	Description string `json:"description"`
+	Cardinality string `json:"cardinality"`
 	Default     bool   `json:"default"`
 }
 
@@ -1446,6 +1447,7 @@ func newNMSTelemetryCatalogResponse(now time.Time) nmsTelemetryCatalogResponse {
 		paths = append(paths, nmsTelemetryPath{
 			Path:        info.Path,
 			Description: info.Description,
+			Cardinality: info.Cardinality,
 			Default:     info.Default,
 		})
 		if info.Default {

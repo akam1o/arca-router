@@ -307,8 +307,19 @@ func TestNMSTelemetryCatalogEndpoint(t *testing.T) {
 	if len(resp.Paths) == 0 {
 		t.Fatal("Paths is empty, want telemetry path catalog")
 	}
-	if resp.Paths[0].Path != "/system" || !resp.Paths[0].Default || resp.Paths[0].Description == "" {
-		t.Fatalf("Paths[0] = %#v, want default system path with description", resp.Paths[0])
+	if resp.Paths[0].Path != "/system" || !resp.Paths[0].Default || resp.Paths[0].Description == "" ||
+		resp.Paths[0].Cardinality != "single" {
+		t.Fatalf("Paths[0] = %#v, want default system path with description and single cardinality", resp.Paths[0])
+	}
+	var routesPath nmsTelemetryPath
+	for _, path := range resp.Paths {
+		if path.Path == "/routes" {
+			routesPath = path
+			break
+		}
+	}
+	if routesPath.Cardinality != "per-route" {
+		t.Fatalf("/routes cardinality = %q, want per-route", routesPath.Cardinality)
 	}
 }
 

@@ -351,9 +351,20 @@ func TestTelemetryPathCatalog(t *testing.T) {
 		if info.Description == "" {
 			t.Fatalf("catalog[%d].Description is empty for %s", i, info.Path)
 		}
+		if info.Cardinality == "" {
+			t.Fatalf("catalog[%d].Cardinality is empty for %s", i, info.Path)
+		}
 		if info.Default {
 			defaults[info.Path] = true
 		}
+	}
+	cardinality := map[string]string{}
+	for _, info := range catalog {
+		cardinality[info.Path] = info.Cardinality
+	}
+	if cardinality["/routes"] != "per-route" || cardinality["/overlays/evpn"] != "per-vni" ||
+		cardinality["/interfaces"] != "per-interface" {
+		t.Fatalf("cardinality hints = %#v, want route/evpn/interface hints", cardinality)
 	}
 	for _, path := range defaultTelemetryPaths {
 		if !defaults[path] {
