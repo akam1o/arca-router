@@ -2,6 +2,7 @@
 
 ## v0.8.x - Overlay and Streaming Telemetry (current)
 
+- **NMS collector encoding exclude filters**: the example HTTP collector can skip catalog-discovered snapshot paths when the advertised payload encoding matches `-exclude-encoding`
 - **NMS collector alias exclude filters**: the example HTTP collector applies path, cardinality, and payload schema exclusions to snapshot paths selected by catalog aliases
 - **NMS collector path exclude filters**: the example HTTP collector can skip selected telemetry paths or aliases after catalog discovery before requesting bounded snapshots
 - **NMS collector catalog encoding filters**: the example HTTP collector can pass `-include-encoding` filters to telemetry catalog discovery before deriving snapshot paths

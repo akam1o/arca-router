@@ -38,6 +38,7 @@ type collectorConfig struct {
 	excludedPath     repeatedPathFlag
 	excludedCard     repeatedStringFlag
 	excludedSchema   repeatedStringFlag
+	excludedEncoding repeatedStringFlag
 	timeout          time.Duration
 	maxPayloadBytes  int
 }
@@ -73,7 +74,8 @@ func (f *repeatedStringFlag) Set(value string) error {
 }
 
 type telemetryCatalogResponse struct {
-	Paths []telemetryCatalogPath `json:"paths"`
+	Encoding string                 `json:"encoding"`
+	Paths    []telemetryCatalogPath `json:"paths"`
 }
 
 type telemetryCatalogPath struct {
@@ -125,6 +127,7 @@ func parseCollectorConfig(args []string) (collectorConfig, error) {
 	fs.Var(&cfg.excludedPath, "exclude-path", "Telemetry path or alias to exclude from snapshot mode; repeat for multiple values")
 	fs.Var(&cfg.excludedCard, "exclude-cardinality", "Telemetry cardinality to exclude from snapshot mode; repeat for multiple values")
 	fs.Var(&cfg.excludedSchema, "exclude-payload-schema", "Telemetry payload schema ID to exclude from snapshot mode; repeat for multiple values")
+	fs.Var(&cfg.excludedEncoding, "exclude-encoding", "Telemetry payload encoding to exclude from snapshot mode; repeat for multiple values")
 	fs.DurationVar(&cfg.timeout, "timeout", cfg.timeout, "Snapshot timeout")
 	fs.IntVar(&cfg.maxPayloadBytes, "max-payload-bytes", cfg.maxPayloadBytes, "Snapshot payload byte budget")
 	if err := fs.Parse(args); err != nil {
@@ -155,7 +158,7 @@ func usesCatalogDiscovery(cfg collectorConfig) bool {
 }
 
 func needsCatalogResolution(cfg collectorConfig) bool {
-	return usesCatalogDiscovery(cfg) || len(cfg.excludedPath) > 0 || len(cfg.excludedCard) > 0 || len(cfg.excludedSchema) > 0
+	return usesCatalogDiscovery(cfg) || len(cfg.excludedPath) > 0 || len(cfg.excludedCard) > 0 || len(cfg.excludedSchema) > 0 || len(cfg.excludedEncoding) > 0
 }
 
 func requestTimeout(cfg collectorConfig) time.Duration {
@@ -231,7 +234,8 @@ func resolveSnapshotPaths(ctx context.Context, client *http.Client, cfg collecto
 	if cfg.discoverPaths || len(paths) == 0 {
 		paths = pathsFromCatalog(catalog)
 	}
-	filtered := filterSnapshotPathsByPath(paths, catalog, cfg.excludedPath)
+	filtered := filterSnapshotPathsByEncoding(paths, catalog, cfg.excludedEncoding)
+	filtered = filterSnapshotPathsByPath(filtered, catalog, cfg.excludedPath)
 	filtered = filterSnapshotPathsByCardinality(filtered, catalog, cfg.excludedCard)
 	filtered = filterSnapshotPathsByPayloadSchema(filtered, catalog, cfg.excludedSchema)
 	if len(filtered) == 0 {
@@ -245,6 +249,22 @@ func pathsFromCatalog(catalog telemetryCatalogResponse) repeatedPathFlag {
 	for _, path := range catalog.Paths {
 		if path.Path != "" {
 			paths = append(paths, path.Path)
+		}
+	}
+	return paths
+}
+
+func filterSnapshotPathsByEncoding(paths repeatedPathFlag, catalog telemetryCatalogResponse, excluded repeatedStringFlag) repeatedPathFlag {
+	if len(excluded) == 0 {
+		return paths
+	}
+	encoding := strings.ToLower(strings.TrimSpace(catalog.Encoding))
+	if encoding == "" {
+		return paths
+	}
+	for _, value := range excluded {
+		if encoding == strings.ToLower(strings.TrimSpace(value)) {
+			return nil
 		}
 	}
 	return paths

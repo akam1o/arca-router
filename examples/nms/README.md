@@ -56,6 +56,7 @@ go run ./examples/nms \
   -discover-paths \
   -exclude-payload-schema arca.telemetry.routes.v1 \
   -exclude-payload-schema arca.telemetry.bfd.v1 \
+  -exclude-encoding protobuf \
   -timeout 5s \
   -max-payload-bytes 8388608
 ```
