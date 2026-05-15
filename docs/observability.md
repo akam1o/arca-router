@@ -266,6 +266,11 @@ arca-router custom OIDs currently use the provisional experimental base `1.3.6.1
 | `1.3.6.1.3.9950.1.36.0` | `arcaRouterFrrBfdConvergenceIssues` |
 | `1.3.6.1.3.9950.1.37.0` | `arcaRouterFrrBfdStatusError` |
 | `1.3.6.1.3.9950.1.38.0` | `arcaRouterFrrBfdLastCheck` |
+| `1.3.6.1.3.9950.1.39.0` | `arcaRouterOverlayEvpnConfigured` |
+| `1.3.6.1.3.9950.1.40.0` | `arcaRouterOverlayEvpnVnis` |
+| `1.3.6.1.3.9950.1.41.0` | `arcaRouterOverlayEvpnL2Vnis` |
+| `1.3.6.1.3.9950.1.42.0` | `arcaRouterOverlayEvpnL3Vnis` |
+| `1.3.6.1.3.9950.1.43.0` | `arcaRouterOverlayEvpnMulticastVnis` |
 
 Example:
 

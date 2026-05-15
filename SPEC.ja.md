@@ -1187,7 +1187,7 @@ set system services snmp community public
 arca-routerd --snmp-listen=:161 --snmp-community=<read-only-community>
 ```
 
-SNMP は監視用途のみを想定しています。信頼できないネットワークには公開しないでください。custom arca-router OID subtree は daemon、config、NETCONF、class-of-service intent、FRR VRRP operational、HA convergence、VPP LCP reconciliation counters を公開します。
+SNMP は監視用途のみを想定しています。信頼できないネットワークには公開しないでください。custom arca-router OID subtree は daemon、config、NETCONF、EVPN/VXLAN overlay intent、class-of-service intent、FRR VRRP operational、HA convergence、VPP LCP reconciliation counters を公開します。
 
 ---
 

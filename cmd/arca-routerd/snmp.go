@@ -62,6 +62,11 @@ const (
 	snmpOIDFRRBFDIssues      = arcaSNMPBaseOID + ".36.0"
 	snmpOIDFRRBFDError       = arcaSNMPBaseOID + ".37.0"
 	snmpOIDFRRBFDLastRun     = arcaSNMPBaseOID + ".38.0"
+	snmpOIDEVPNConfigured    = arcaSNMPBaseOID + ".39.0"
+	snmpOIDEVPNVNIs          = arcaSNMPBaseOID + ".40.0"
+	snmpOIDEVPNL2VNIs        = arcaSNMPBaseOID + ".41.0"
+	snmpOIDEVPNL3VNIs        = arcaSNMPBaseOID + ".42.0"
+	snmpOIDEVPNMulticastVNIs = arcaSNMPBaseOID + ".43.0"
 
 	defaultSNMPPort      = 161
 	defaultSNMPCommunity = "public"
@@ -496,6 +501,49 @@ func snmpOIDs(source metricsSource) []*snmpserver.PDUValueControlItem {
 				return snmpserver.Asn1Gauge32Wrap(uint(unixTimestampSeconds(source.snapshot(time.Now()).FRRBFDLastRun))), nil
 			},
 			Document: "arcaRouterFrrBfdLastCheck",
+		},
+		{
+			OID:  snmpOIDEVPNConfigured,
+			Type: gosnmp.Integer,
+			OnGet: func() (interface{}, error) {
+				if source.snapshot(time.Now()).OverlayEVPNConfigured {
+					return snmpserver.Asn1IntegerWrap(1), nil
+				}
+				return snmpserver.Asn1IntegerWrap(0), nil
+			},
+			Document: "arcaRouterOverlayEvpnConfigured",
+		},
+		{
+			OID:  snmpOIDEVPNVNIs,
+			Type: gosnmp.Gauge32,
+			OnGet: func() (interface{}, error) {
+				return snmpserver.Asn1Gauge32Wrap(uint(source.snapshot(time.Now()).OverlayEVPNVNIs)), nil
+			},
+			Document: "arcaRouterOverlayEvpnVnis",
+		},
+		{
+			OID:  snmpOIDEVPNL2VNIs,
+			Type: gosnmp.Gauge32,
+			OnGet: func() (interface{}, error) {
+				return snmpserver.Asn1Gauge32Wrap(uint(source.snapshot(time.Now()).OverlayEVPNL2VNIs)), nil
+			},
+			Document: "arcaRouterOverlayEvpnL2Vnis",
+		},
+		{
+			OID:  snmpOIDEVPNL3VNIs,
+			Type: gosnmp.Gauge32,
+			OnGet: func() (interface{}, error) {
+				return snmpserver.Asn1Gauge32Wrap(uint(source.snapshot(time.Now()).OverlayEVPNL3VNIs)), nil
+			},
+			Document: "arcaRouterOverlayEvpnL3Vnis",
+		},
+		{
+			OID:  snmpOIDEVPNMulticastVNIs,
+			Type: gosnmp.Gauge32,
+			OnGet: func() (interface{}, error) {
+				return snmpserver.Asn1Gauge32Wrap(uint(source.snapshot(time.Now()).OverlayEVPNMulticastVNIs)), nil
+			},
+			Document: "arcaRouterOverlayEvpnMulticastVnis",
 		},
 	}
 }
