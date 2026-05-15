@@ -411,6 +411,37 @@ func TestDecodeStatusResponseRejectsInvalidEnvelope(t *testing.T) {
 		t.Fatalf("decodeStatusResponse() error = %v, want class_of_service.enforcement_status mismatch", err)
 	}
 	data = validStatusData()
+	data["ha"].(map[string]any)["configured"] = true
+	err = decodeStatusResponse(statusEnvelope(data))
+	if err == nil || !strings.Contains(err.Error(), "ha.configured") {
+		t.Fatalf("decodeStatusResponse() error = %v, want ha.configured relationship mismatch", err)
+	}
+	data = validStatusData()
+	data["ha"].(map[string]any)["converged"] = true
+	err = decodeStatusResponse(statusEnvelope(data))
+	if err == nil || !strings.Contains(err.Error(), "ha.converged") {
+		t.Fatalf("decodeStatusResponse() error = %v, want ha.converged relationship mismatch", err)
+	}
+	data = validStatusData()
+	data["class_of_service"].(map[string]any)["intent_only"] = true
+	err = decodeStatusResponse(statusEnvelope(data))
+	if err == nil || !strings.Contains(err.Error(), "class_of_service.intent_only") {
+		t.Fatalf("decodeStatusResponse() error = %v, want class_of_service.intent_only relationship mismatch", err)
+	}
+	data = validStatusData()
+	data["class_of_service"].(map[string]any)["configured"] = true
+	data["class_of_service"].(map[string]any)["intent_only"] = true
+	err = decodeStatusResponse(statusEnvelope(data))
+	if err == nil || !strings.Contains(err.Error(), "class_of_service.enforcement_status") {
+		t.Fatalf("decodeStatusResponse() error = %v, want class_of_service.enforcement_status relationship mismatch", err)
+	}
+	data = validStatusData()
+	data["class_of_service"].(map[string]any)["forwarding_classes"] = 1
+	err = decodeStatusResponse(statusEnvelope(data))
+	if err == nil || !strings.Contains(err.Error(), "class_of_service.forwarding_classes") {
+		t.Fatalf("decodeStatusResponse() error = %v, want class_of_service.forwarding_classes relationship mismatch", err)
+	}
+	data = validStatusData()
 	data["frr"].(map[string]any)["vrrp"].(map[string]any)["groups"] = []any{map[string]any{"interface": "ge-0/0/0", "id": 10, "state": "Idle", "observed": true, "active": true}}
 	err = decodeStatusResponse(statusEnvelope(data))
 	if err == nil || !strings.Contains(err.Error(), "frr.vrrp.groups[0].state") {
