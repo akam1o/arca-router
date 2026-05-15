@@ -1664,6 +1664,9 @@ func validateTelemetryPathMetadata(kind, path, cardinality, payloadSchema string
 	if strings.TrimSpace(payloadSchema) == "" {
 		return fmt.Errorf("%s payload_schema is empty", kind)
 	}
+	if err := validateTelemetryPayloadSchema(kind, payloadSchema); err != nil {
+		return err
+	}
 	for i, alias := range aliases {
 		if err := validateTelemetryPathValue(kind, fmt.Sprintf("aliases[%d]", i), alias); err != nil {
 			return err
@@ -1685,6 +1688,27 @@ func validateTelemetryCardinality(kind, cardinality string) error {
 		return nil
 	default:
 		return fmt.Errorf("%s cardinality = %q, want one of single, per-interface, per-route, per-neighbor, per-instance, per-vni, per-intent-object, or per-peer", kind, cardinality)
+	}
+}
+
+func validateTelemetryPayloadSchema(kind, payloadSchema string) error {
+	switch payloadSchema {
+	case "arca.telemetry.system.v1",
+		"arca.telemetry.config.running.v1",
+		"arca.telemetry.interfaces.v1",
+		"arca.telemetry.routes.v1",
+		"arca.telemetry.routing.bgp.neighbors.v1",
+		"arca.telemetry.routing.ospf.neighbors.v1",
+		"arca.telemetry.routing.ospf3.neighbors.v1",
+		"arca.telemetry.routing.instances.v1",
+		"arca.telemetry.overlays.evpn.v1",
+		"arca.telemetry.class_of_service.v1",
+		"arca.telemetry.bfd.v1",
+		"arca.telemetry.lcp.v1",
+		"arca.telemetry.ha.v1":
+		return nil
+	default:
+		return fmt.Errorf("%s payload_schema = %q, want supported telemetry payload schema", kind, payloadSchema)
 	}
 }
 

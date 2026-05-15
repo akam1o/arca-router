@@ -2,6 +2,7 @@
 
 ## v0.8.x - Overlay and Streaming Telemetry (current)
 
+- **NMS collector payload schema hint validation**: the example HTTP collector now validates telemetry payload schema hints against the supported NMS schema IDs before using discovery and snapshot responses
 - **NMS collector cardinality hint validation**: the example HTTP collector now validates telemetry cardinality hints against the supported NMS values before using discovery and snapshot responses
 - **NMS collector default path validation**: the example HTTP collector now validates default telemetry path hints as unique absolute paths before using discovery and snapshot responses
 - **NMS collector status build metadata validation**: the example HTTP collector now validates operational status build timestamps before printing status responses
