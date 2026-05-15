@@ -125,13 +125,14 @@ Local operators can inspect the same stream through the CLI. The command prints 
 
 ```bash
 arca show telemetry paths
+arca show telemetry paths live
 arca show telemetry path /system path /interfaces
 arca show telemetry path /routes interval 5s count 3
 arca show telemetry path /overlays/evpn
 arca show evpn
 ```
 
-`arca show telemetry paths` prints the same local path catalog used by the stream implementation, including cardinality hints, default membership, and descriptions, without requiring a daemon connection.
+`arca show telemetry paths` prints the same local path catalog used by the stream implementation, including cardinality hints, default membership, and descriptions, without requiring a daemon connection. `arca show telemetry paths live` queries `TelemetryService.GetTelemetryCatalog` from the connected daemon.
 
 ## Web UI
 

@@ -2,6 +2,7 @@
 
 ## v0.8.x - Overlay and Streaming Telemetry (current)
 
+- **Telemetry CLI live catalog**: `arca show telemetry paths live` now queries `TelemetryService.GetTelemetryCatalog` so operators can compare the connected daemon's telemetry catalog with the local CLI catalog
 - **gRPC telemetry catalog**: `TelemetryService.GetTelemetryCatalog` now exposes supported telemetry paths, default paths, cardinality hints, event schema version, and encoding to gRPC collectors
 - **Telemetry CLI path catalog**: `arca show telemetry paths` now prints the supported telemetry paths, cardinality hints, default membership, and descriptions without requiring a daemon connection for local collector discovery
 - **Telemetry payload byte counts**: structured gRPC telemetry events and `arca show telemetry` output now include `payload_bytes` so local collectors can budget high-cardinality paths before forwarding events

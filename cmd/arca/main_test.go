@@ -38,25 +38,27 @@ type fakeInteractiveClient struct {
 	lcpInfo          *grpcclient.LCPReconciliationInfo
 	haInfo           *grpcclient.HAStatusInfo
 	cosInfo          *grpcclient.ClassOfServiceInfo
+	telemetryCatalog grpcclient.TelemetryCatalog
 	telemetryEvents  []*grpcclient.TelemetryEvent
 
-	acquireLockCalls  int
-	discardCalls      int
-	releaseLockCalls  int
-	commitCalls       int
-	routeCalls        int
-	bfdStatusCalls    int
-	routingCalls      int
-	bgpNeighborCalls  int
-	ospfNeighborCalls int
-	listHistoryCalls  int
-	rollbackCalls     int
-	telemetryCalls    int
-	validateCalls     int
-	editTexts         []string
-	telemetryPaths    []string
-	telemetryInterval time.Duration
-	telemetryOnce     bool
+	acquireLockCalls      int
+	discardCalls          int
+	releaseLockCalls      int
+	commitCalls           int
+	routeCalls            int
+	bfdStatusCalls        int
+	routingCalls          int
+	bgpNeighborCalls      int
+	ospfNeighborCalls     int
+	listHistoryCalls      int
+	rollbackCalls         int
+	telemetryCatalogCalls int
+	telemetryCalls        int
+	validateCalls         int
+	editTexts             []string
+	telemetryPaths        []string
+	telemetryInterval     time.Duration
+	telemetryOnce         bool
 }
 
 func (f *fakeInteractiveClient) GetRunning(ctx context.Context) (string, uint64, error) {
@@ -213,6 +215,15 @@ func (f *fakeInteractiveClient) GetClassOfService(ctx context.Context) (*grpccli
 		return f.cosInfo, nil
 	}
 	return &grpcclient.ClassOfServiceInfo{}, nil
+}
+
+func (f *fakeInteractiveClient) GetTelemetryCatalog(ctx context.Context) (grpcclient.TelemetryCatalog, error) {
+	f.telemetryCatalogCalls++
+	if len(f.telemetryCatalog.Paths) > 0 || len(f.telemetryCatalog.DefaultPaths) > 0 ||
+		f.telemetryCatalog.EventSchemaVersion != "" || f.telemetryCatalog.Encoding != "" {
+		return f.telemetryCatalog, nil
+	}
+	return grpcclient.NewTelemetryCatalog(), nil
 }
 
 func (f *fakeInteractiveClient) SubscribeTelemetry(ctx context.Context, paths []string, sampleInterval time.Duration, once bool) (grpcclient.TelemetryReceiver, error) {
@@ -964,12 +975,39 @@ func TestOneShotShowTelemetryPathsDoesNotSubscribe(t *testing.T) {
 	if client.telemetryCalls != 0 {
 		t.Fatalf("telemetry calls = %d, want local catalog output without subscription", client.telemetryCalls)
 	}
+	if client.telemetryCatalogCalls != 0 {
+		t.Fatalf("telemetry catalog calls = %d, want local catalog output without RPC", client.telemetryCatalogCalls)
+	}
+}
+
+func TestOneShotShowTelemetryPathsLiveUsesCatalogRPC(t *testing.T) {
+	client := &fakeInteractiveClient{telemetryCatalog: grpcclient.TelemetryCatalog{
+		EventSchemaVersion: "arca.telemetry.v1",
+		Encoding:           "json",
+		DefaultPaths:       []string{"/system"},
+		Paths: []grpcclient.TelemetryPathInfo{
+			{Path: "/system", Description: "system", Cardinality: "single", Default: true},
+		},
+	}}
+	code := oneShotShow(context.Background(), client, []string{"telemetry", "paths", "live"}, &cliFlags{})
+	if code != ExitSuccess {
+		t.Fatalf("oneShotShow(telemetry paths live) = %d, want %d", code, ExitSuccess)
+	}
+	if client.telemetryCatalogCalls != 1 {
+		t.Fatalf("telemetry catalog calls = %d, want 1 live catalog RPC", client.telemetryCatalogCalls)
+	}
+	if client.telemetryCalls != 0 {
+		t.Fatalf("telemetry calls = %d, want catalog lookup without subscription", client.telemetryCalls)
+	}
 }
 
 func TestRunLocalOneShotTelemetryPaths(t *testing.T) {
 	handled, code := runLocalOneShotCommand([]string{"show", "telemetry", "paths"})
 	if !handled || code != ExitSuccess {
 		t.Fatalf("runLocalOneShotCommand(show telemetry paths) = handled %v code %d, want local success", handled, code)
+	}
+	if handled, _ := runLocalOneShotCommand([]string{"show", "telemetry", "paths", "live"}); handled {
+		t.Fatal("runLocalOneShotCommand(show telemetry paths live) handled live catalog command locally")
 	}
 	if handled, _ := runLocalOneShotCommand([]string{"show", "telemetry", "path", "/system"}); handled {
 		t.Fatal("runLocalOneShotCommand(show telemetry path /system) handled streaming command locally")
@@ -979,6 +1017,9 @@ func TestRunLocalOneShotTelemetryPaths(t *testing.T) {
 func TestTelemetryCatalogCommand(t *testing.T) {
 	if !isTelemetryCatalogCommand([]string{"paths"}) || !isTelemetryCatalogCommand([]string{"catalog"}) {
 		t.Fatal("isTelemetryCatalogCommand() did not recognize paths/catalog")
+	}
+	if !isTelemetryCatalogCommand([]string{"paths", "live"}) || !isTelemetryCatalogCommand([]string{"catalog", "live"}) {
+		t.Fatal("isTelemetryCatalogCommand() did not recognize live paths/catalog")
 	}
 	if isTelemetryCatalogCommand([]string{"path", "/system"}) || isTelemetryCatalogCommand(nil) {
 		t.Fatal("isTelemetryCatalogCommand() recognized non-catalog telemetry arguments")

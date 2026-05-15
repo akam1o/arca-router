@@ -240,6 +240,7 @@ arca show lcp
 arca show ha
 arca show class-of-service
 arca show telemetry paths
+arca show telemetry paths live
 arca show telemetry path /system path /interfaces path /overlays/evpn
 
 # Web API が有効な場合は schema-versioned NMS status API を確認

@@ -110,7 +110,7 @@ Show subcommands:
   bfd [brief|counters]        Show raw BFD status
   bfd peer <ip> [counters]    Show BFD peer details
   evpn                        Show EVPN/VXLAN overlay intent
-  telemetry paths             Show supported telemetry path catalog
+  telemetry paths [live]      Show supported telemetry path catalog
   telemetry [path <path>]... [interval <duration>] [count <events>]
                               Show telemetry events as JSON lines
   route [inet|inet6]                 Show routing table
@@ -198,7 +198,7 @@ func runOneShotCommand(ctx context.Context, f *cliFlags, args []string) int {
 }
 
 func runLocalOneShotCommand(args []string) (bool, int) {
-	if len(args) >= 3 && args[0] == "show" && args[1] == "telemetry" && isTelemetryCatalogCommand(args[2:]) {
+	if len(args) >= 3 && args[0] == "show" && args[1] == "telemetry" && isLocalTelemetryCatalogCommand(args[2:]) {
 		printTelemetryPathCatalog(grpcclient.TelemetryPathCatalog())
 		return true, ExitSuccess
 	}
@@ -468,6 +468,7 @@ type showClient interface {
 	GetLCPReconciliation(context.Context) (*grpcclient.LCPReconciliationInfo, error)
 	GetHAStatus(context.Context) (*grpcclient.HAStatusInfo, error)
 	GetClassOfService(context.Context) (*grpcclient.ClassOfServiceInfo, error)
+	GetTelemetryCatalog(context.Context) (grpcclient.TelemetryCatalog, error)
 	SubscribeTelemetry(context.Context, []string, time.Duration, bool) (grpcclient.TelemetryReceiver, error)
 }
 
@@ -1873,7 +1874,15 @@ type telemetryOutputEvent struct {
 
 func showTelemetry(ctx context.Context, client showClient, args []string) error {
 	if isTelemetryCatalogCommand(args) {
-		printTelemetryPathCatalog(grpcclient.TelemetryPathCatalog())
+		catalog := grpcclient.NewTelemetryCatalog()
+		if isLiveTelemetryCatalogCommand(args) {
+			liveCatalog, err := client.GetTelemetryCatalog(ctx)
+			if err != nil {
+				return err
+			}
+			catalog = liveCatalog
+		}
+		printTelemetryPathCatalog(catalog.Paths)
 		return nil
 	}
 	opts, err := telemetryOptions(args)
@@ -1907,7 +1916,15 @@ func showTelemetry(ctx context.Context, client showClient, args []string) error 
 }
 
 func isTelemetryCatalogCommand(args []string) bool {
+	return isLocalTelemetryCatalogCommand(args) || isLiveTelemetryCatalogCommand(args)
+}
+
+func isLocalTelemetryCatalogCommand(args []string) bool {
 	return len(args) == 1 && (args[0] == "paths" || args[0] == "catalog")
+}
+
+func isLiveTelemetryCatalogCommand(args []string) bool {
+	return len(args) == 2 && (args[0] == "paths" || args[0] == "catalog") && args[1] == "live"
 }
 
 func printTelemetryPathCatalog(catalog []grpcclient.TelemetryPathInfo) {
