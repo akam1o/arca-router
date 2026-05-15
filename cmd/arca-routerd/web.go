@@ -129,6 +129,7 @@ type nmsTelemetryPath struct {
 }
 
 type nmsTelemetryCatalogFilters struct {
+	paths          []string
 	cardinalities  []string
 	payloadSchemas []string
 }
@@ -1477,12 +1478,16 @@ func newNMSTelemetryCatalogResponse(now time.Time, filters nmsTelemetryCatalogFi
 func nmsTelemetryCatalogFiltersFromRequest(r *http.Request) nmsTelemetryCatalogFilters {
 	query := r.URL.Query()
 	return nmsTelemetryCatalogFilters{
+		paths:          append([]string(nil), query["path"]...),
 		cardinalities:  append([]string(nil), query["cardinality"]...),
 		payloadSchemas: append(append([]string(nil), query["payload_schema"]...), query["payload-schema"]...),
 	}
 }
 
 func nmsTelemetryPathMatchesCatalogFilters(info nbgrpc.TelemetryPathInfo, filters nmsTelemetryCatalogFilters) bool {
+	if len(filters.paths) > 0 && !nmsTelemetryCatalogPathMatches(info, filters.paths) {
+		return false
+	}
 	if len(filters.cardinalities) > 0 && !nmsTelemetryCatalogFilterMatches(info.Cardinality, filters.cardinalities) {
 		return false
 	}
@@ -1490,6 +1495,36 @@ func nmsTelemetryPathMatchesCatalogFilters(info nbgrpc.TelemetryPathInfo, filter
 		return false
 	}
 	return true
+}
+
+func nmsTelemetryCatalogPathMatches(info nbgrpc.TelemetryPathInfo, filters []string) bool {
+	if nmsTelemetryCatalogFilterMatchesPathValue(info.Path, filters) {
+		return true
+	}
+	for _, alias := range info.Aliases {
+		if nmsTelemetryCatalogFilterMatchesPathValue(alias, filters) {
+			return true
+		}
+	}
+	return false
+}
+
+func nmsTelemetryCatalogFilterMatchesPathValue(value string, filters []string) bool {
+	value = normalizeNMSTelemetryCatalogPathFilter(value)
+	for _, filter := range filters {
+		if value == normalizeNMSTelemetryCatalogPathFilter(filter) {
+			return true
+		}
+	}
+	return false
+}
+
+func normalizeNMSTelemetryCatalogPathFilter(value string) string {
+	path := strings.ToLower(strings.TrimSpace(value))
+	if path == "" {
+		return ""
+	}
+	return "/" + strings.Trim(path, "/")
 }
 
 func nmsTelemetryCatalogFilterMatches(value string, filters []string) bool {

@@ -368,6 +368,23 @@ func TestNMSTelemetryCatalogEndpointAcceptsPayloadSchemaAlias(t *testing.T) {
 	}
 }
 
+func TestNMSTelemetryCatalogEndpointAcceptsPathAliasFilter(t *testing.T) {
+	req := httptest.NewRequest(http.MethodGet, "/api/nms/v1/telemetry/paths?path=evpn", nil)
+	rec := httptest.NewRecorder()
+	metricsSource{}.handleNMSTelemetryCatalog(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d", rec.Code, http.StatusOK)
+	}
+	var resp nmsTelemetryCatalogResponse
+	if err := json.NewDecoder(rec.Result().Body).Decode(&resp); err != nil {
+		t.Fatalf("Decode() error = %v", err)
+	}
+	if len(resp.Paths) != 1 || resp.Paths[0].Path != "/overlays/evpn" {
+		t.Fatalf("filtered paths = %#v, want only /overlays/evpn", resp.Paths)
+	}
+}
+
 func TestNMSTelemetrySnapshotEndpoint(t *testing.T) {
 	telemetry := &webTelemetryTestAPI{events: []nbgrpc.TelemetryEvent{
 		{
