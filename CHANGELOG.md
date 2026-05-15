@@ -2,6 +2,7 @@
 
 ## v0.8.x - Overlay and Streaming Telemetry (current)
 
+- **NMS collector snapshot event timing bounds**: the example HTTP collector now rejects telemetry snapshot event timestamps that are later than the snapshot envelope `generated_at`
 - **NMS collector path alias validation**: the example HTTP collector now validates telemetry path aliases against the supported NMS path mappings before using discovery responses
 - **NMS collector path metadata mapping validation**: the example HTTP collector now validates telemetry path, cardinality, and payload schema mappings before using discovery and snapshot responses
 - **NMS collector payload schema hint validation**: the example HTTP collector now validates telemetry payload schema hints against the supported NMS schema IDs before using discovery and snapshot responses

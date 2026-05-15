@@ -504,7 +504,11 @@ func decodeSnapshotResponse(body []byte) (telemetrySnapshotResponse, error) {
 	); err != nil {
 		return snapshot, err
 	}
-	if err := validateNMSGeneratedAt("telemetry snapshot", snapshot.GeneratedAt); err != nil {
+	generatedAt, err := parseNMSGeneratedAt("telemetry snapshot", snapshot.GeneratedAt)
+	if err != nil {
+		return snapshot, err
+	}
+	if err := validateTelemetrySnapshotEventTiming(snapshot.Events, generatedAt); err != nil {
 		return snapshot, err
 	}
 	return snapshot, nil
@@ -1838,6 +1842,20 @@ func validateTelemetrySnapshotEvents(events []telemetrySnapshotEvent) error {
 		}
 		if _, err := time.Parse(time.RFC3339Nano, event.Timestamp); err != nil {
 			return fmt.Errorf("%s timestamp = %q, want RFC3339Nano: %w", kind, event.Timestamp, err)
+		}
+	}
+	return nil
+}
+
+func validateTelemetrySnapshotEventTiming(events []telemetrySnapshotEvent, generatedAt time.Time) error {
+	generatedAtCeiling := generatedAt.Add(time.Second)
+	for i, event := range events {
+		timestamp, err := time.Parse(time.RFC3339Nano, event.Timestamp)
+		if err != nil {
+			return fmt.Errorf("telemetry snapshot events[%d] timestamp = %q, want RFC3339Nano: %w", i, event.Timestamp, err)
+		}
+		if !timestamp.Before(generatedAtCeiling) {
+			return fmt.Errorf("telemetry snapshot events[%d] timestamp = %q, want earlier than telemetry snapshot generated_at second %q", i, timestamp.Format(time.RFC3339Nano), generatedAtCeiling.Format(time.RFC3339))
 		}
 	}
 	return nil
