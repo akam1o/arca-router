@@ -2,6 +2,7 @@
 
 ## v0.8.x - Overlay and Streaming Telemetry (current)
 
+- **NMS collector status metadata validation**: the example HTTP collector now validates optional operational status revision, commit, and last-error metadata before printing status responses
 - **NMS collector status aggregate validation**: the example HTTP collector now validates operational status issue counts, FRR VRRP/BFD counters, and VPP LCP inconsistency counts against decoded status arrays
 - **NMS collector status timestamp validation**: the example HTTP collector now validates optional RFC3339 operational status section timestamps before printing status responses
 - **NMS collector status array validation**: the example HTTP collector now validates optional operational status arrays, including issue lists, VPP LCP inconsistencies, FRR VRRP groups, and FRR BFD peers

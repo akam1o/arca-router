@@ -158,10 +158,19 @@ func TestDecodeStatusResponseRejectsInvalidEnvelope(t *testing.T) {
 			"config_version":   uint64(77),
 			"running_hostname": "edge01",
 			"datastore":        map[string]any{"backend": "memory", "etcd_endpoints": []string{"http://127.0.0.1:2379"}},
-			"config_sync":      map[string]any{"enabled": false, "healthy": false, "last_check": "2026-05-15T12:34:56Z", "last_apply": "2026-05-15T12:35:56Z"},
-			"cluster":          map[string]any{"enabled": false, "node_count": 0, "etcd_sync_configured": false, "etcd_endpoints": []string{"http://127.0.0.1:2379"}, "sync_aligned": false},
-			"overlay":          map[string]any{"evpn": map[string]any{"configured": false, "vnis": 0, "l2_vnis": 0, "l3_vnis": 0, "multicast_vnis": 0}},
-			"ha":               map[string]any{"configured": false, "converged": false, "vrrp_groups": 0, "issue_count": 1, "issues": []string{"cluster disabled"}},
+			"config_sync": map[string]any{
+				"enabled":           false,
+				"healthy":           false,
+				"etcd_revision":     12,
+				"running_revision":  11,
+				"running_commit_id": "commit-11",
+				"last_error":        "sync delayed",
+				"last_check":        "2026-05-15T12:34:56Z",
+				"last_apply":        "2026-05-15T12:35:56Z",
+			},
+			"cluster": map[string]any{"enabled": false, "node_count": 0, "etcd_sync_configured": false, "etcd_endpoints": []string{"http://127.0.0.1:2379"}, "sync_aligned": false},
+			"overlay": map[string]any{"evpn": map[string]any{"configured": false, "vnis": 0, "l2_vnis": 0, "l3_vnis": 0, "multicast_vnis": 0}},
+			"ha":      map[string]any{"configured": false, "converged": false, "vrrp_groups": 0, "issue_count": 1, "issues": []string{"cluster disabled"}},
 			"class_of_service": map[string]any{
 				"configured":               false,
 				"enforcement_status":       "not-configured",
@@ -176,6 +185,7 @@ func TestDecodeStatusResponseRejectsInvalidEnvelope(t *testing.T) {
 					"counters_supported":         false,
 					"diagnostics":                []string{"scheduler unsupported"},
 					"last_check":                 "2026-05-15T12:34:56Z",
+					"last_error":                 "capability partial",
 				},
 			},
 			"frr": map[string]any{
@@ -184,6 +194,7 @@ func TestDecodeStatusResponseRejectsInvalidEnvelope(t *testing.T) {
 					"observed_groups":   1,
 					"active_groups":     1,
 					"last_check":        "2026-05-15T12:34:56Z",
+					"last_error":        "status stale",
 					"groups":            []any{map[string]any{"interface": "ge-0/0/0", "id": 10, "virtual_address": "192.0.2.1", "state": "Master", "observed": true, "active": true}},
 					"issue_count":       1,
 					"issues":            []string{"backup not observed"},
@@ -196,6 +207,7 @@ func TestDecodeStatusResponseRejectsInvalidEnvelope(t *testing.T) {
 					"session_down_events": 0,
 					"rx_fail_packets":     0,
 					"last_check":          "2026-05-15T12:34:56Z",
+					"last_error":          "counter stale",
 					"peers": []any{map[string]any{
 						"peer":                "192.0.2.2",
 						"local_address":       "192.0.2.1",
@@ -213,7 +225,7 @@ func TestDecodeStatusResponseRejectsInvalidEnvelope(t *testing.T) {
 					"issues":      []string{"remote diagnostic degraded"},
 				},
 			},
-			"vpp":     map[string]any{"lcp": map[string]any{"last_reconcile": "2026-05-15T12:34:56Z", "pair_count": 0, "inconsistency_count": 1, "inconsistencies": []string{"missing pair"}}},
+			"vpp":     map[string]any{"lcp": map[string]any{"last_reconcile": "2026-05-15T12:34:56Z", "last_error": "reconcile stale", "pair_count": 0, "inconsistency_count": 1, "inconsistencies": []string{"missing pair"}}},
 			"netconf": map[string]any{"listening": false, "active_sessions": 0, "active_connections": 0, "total_connections": uint64(0), "successful_auth": uint64(0), "failed_auth": uint64(0)},
 		}
 	}
@@ -287,6 +299,18 @@ func TestDecodeStatusResponseRejectsInvalidEnvelope(t *testing.T) {
 	err = decodeStatusResponse(statusEnvelope(data))
 	if err == nil || !strings.Contains(err.Error(), "config_sync.enabled") {
 		t.Fatalf("decodeStatusResponse() error = %v, want config_sync.enabled mismatch", err)
+	}
+	data = validStatusData()
+	data["config_sync"].(map[string]any)["etcd_revision"] = -1
+	err = decodeStatusResponse(statusEnvelope(data))
+	if err == nil || !strings.Contains(err.Error(), "config_sync.etcd_revision") {
+		t.Fatalf("decodeStatusResponse() error = %v, want config_sync.etcd_revision mismatch", err)
+	}
+	data = validStatusData()
+	data["config_sync"].(map[string]any)["running_commit_id"] = 11
+	err = decodeStatusResponse(statusEnvelope(data))
+	if err == nil || !strings.Contains(err.Error(), "config_sync.running_commit_id") {
+		t.Fatalf("decodeStatusResponse() error = %v, want config_sync.running_commit_id mismatch", err)
 	}
 	data = validStatusData()
 	data["overlay"].(map[string]any)["evpn"] = []string{}
@@ -374,6 +398,18 @@ func TestDecodeStatusResponseRejectsInvalidEnvelope(t *testing.T) {
 		t.Fatalf("decodeStatusResponse() error = %v, want class_of_service.capabilities.last_check mismatch", err)
 	}
 	data = validStatusData()
+	data["class_of_service"].(map[string]any)["capabilities"].(map[string]any)["last_error"] = []string{"bad"}
+	err = decodeStatusResponse(statusEnvelope(data))
+	if err == nil || !strings.Contains(err.Error(), "class_of_service.capabilities.last_error") {
+		t.Fatalf("decodeStatusResponse() error = %v, want class_of_service.capabilities.last_error mismatch", err)
+	}
+	data = validStatusData()
+	data["frr"].(map[string]any)["vrrp"].(map[string]any)["last_error"] = []string{"bad"}
+	err = decodeStatusResponse(statusEnvelope(data))
+	if err == nil || !strings.Contains(err.Error(), "frr.vrrp.last_error") {
+		t.Fatalf("decodeStatusResponse() error = %v, want frr.vrrp.last_error mismatch", err)
+	}
+	data = validStatusData()
 	data["frr"].(map[string]any)["bfd"].(map[string]any)["last_check"] = "bad"
 	err = decodeStatusResponse(statusEnvelope(data))
 	if err == nil || !strings.Contains(err.Error(), "frr.bfd.last_check") {
@@ -384,6 +420,12 @@ func TestDecodeStatusResponseRejectsInvalidEnvelope(t *testing.T) {
 	err = decodeStatusResponse(statusEnvelope(data))
 	if err == nil || !strings.Contains(err.Error(), "vpp.lcp.last_reconcile") {
 		t.Fatalf("decodeStatusResponse() error = %v, want vpp.lcp.last_reconcile mismatch", err)
+	}
+	data = validStatusData()
+	data["vpp"].(map[string]any)["lcp"].(map[string]any)["last_error"] = 1
+	err = decodeStatusResponse(statusEnvelope(data))
+	if err == nil || !strings.Contains(err.Error(), "vpp.lcp.last_error") {
+		t.Fatalf("decodeStatusResponse() error = %v, want vpp.lcp.last_error mismatch", err)
 	}
 }
 

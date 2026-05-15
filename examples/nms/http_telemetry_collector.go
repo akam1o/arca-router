@@ -553,6 +553,16 @@ func validateNMSStatusSections(object map[string]json.RawMessage) error {
 	if err := validateNMSStatusBoolFields(configSync, "config_sync", "enabled", "healthy"); err != nil {
 		return err
 	}
+	for _, field := range []string{"etcd_revision", "running_revision"} {
+		if err := validateNMSStatusIntFieldOptional(configSync, field, nmsStatusDataPath("config_sync", field)); err != nil {
+			return err
+		}
+	}
+	for _, field := range []string{"running_commit_id", "last_error"} {
+		if err := validateNMSStatusStringFieldOptional(configSync, field, nmsStatusDataPath("config_sync", field)); err != nil {
+			return err
+		}
+	}
 	for _, field := range []string{"last_check", "last_apply"} {
 		if err := validateNMSStatusRFC3339FieldOptional(configSync, field, nmsStatusDataPath("config_sync", field)); err != nil {
 			return err
@@ -631,6 +641,9 @@ func validateNMSStatusSections(object map[string]json.RawMessage) error {
 	if err := validateNMSStatusRFC3339FieldOptional(capabilities, "last_check", "class_of_service.capabilities.last_check"); err != nil {
 		return err
 	}
+	if err := validateNMSStatusStringFieldOptional(capabilities, "last_error", "class_of_service.capabilities.last_error"); err != nil {
+		return err
+	}
 
 	frr, err := validateNMSStatusObjectField(object, "frr")
 	if err != nil {
@@ -644,6 +657,9 @@ func validateNMSStatusSections(object map[string]json.RawMessage) error {
 		return err
 	}
 	if err := validateNMSStatusRFC3339FieldOptional(vrrp, "last_check", "frr.vrrp.last_check"); err != nil {
+		return err
+	}
+	if err := validateNMSStatusStringFieldOptional(vrrp, "last_error", "frr.vrrp.last_error"); err != nil {
 		return err
 	}
 	vrrpGroups, err := nmsStatusObjectArrayFieldOptional(vrrp, "groups", "frr.vrrp.groups", validateNMSStatusVRRPGroup)
@@ -667,6 +683,9 @@ func validateNMSStatusSections(object map[string]json.RawMessage) error {
 		return err
 	}
 	if err := validateNMSStatusRFC3339FieldOptional(bfd, "last_check", "frr.bfd.last_check"); err != nil {
+		return err
+	}
+	if err := validateNMSStatusStringFieldOptional(bfd, "last_error", "frr.bfd.last_error"); err != nil {
 		return err
 	}
 	bfdPeers, err := nmsStatusObjectArrayFieldOptional(bfd, "peers", "frr.bfd.peers", validateNMSStatusBFDPeer)
@@ -695,6 +714,9 @@ func validateNMSStatusSections(object map[string]json.RawMessage) error {
 		return err
 	}
 	if err := validateNMSStatusRFC3339FieldOptional(lcp, "last_reconcile", "vpp.lcp.last_reconcile"); err != nil {
+		return err
+	}
+	if err := validateNMSStatusStringFieldOptional(lcp, "last_error", "vpp.lcp.last_error"); err != nil {
 		return err
 	}
 	if err := validateNMSStatusStringArrayFieldOptional(lcp, "inconsistencies", "vpp.lcp.inconsistencies"); err != nil {
@@ -823,6 +845,24 @@ func validateNMSStatusIntFields(object map[string]json.RawMessage, parent string
 func validateNMSStatusIntFieldPath(object map[string]json.RawMessage, field, path string) error {
 	_, err := nmsStatusIntFieldValuePath(object, field, path)
 	return err
+}
+
+func validateNMSStatusIntFieldOptional(object map[string]json.RawMessage, field, path string) error {
+	raw, ok := object[field]
+	if !ok {
+		return nil
+	}
+	var value *int64
+	if err := json.Unmarshal(raw, &value); err != nil || value == nil {
+		if err != nil {
+			return fmt.Errorf("nms status data %s must be an integer: %w", path, err)
+		}
+		return fmt.Errorf("nms status data %s must be an integer", path)
+	}
+	if *value < 0 {
+		return fmt.Errorf("nms status data %s must be non-negative", path)
+	}
+	return nil
 }
 
 func nmsStatusIntFieldValuePath(object map[string]json.RawMessage, field, path string) (int64, error) {
