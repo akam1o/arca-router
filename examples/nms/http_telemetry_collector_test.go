@@ -47,9 +47,12 @@ func TestDecodeTelemetryCatalogResponseIntervalHints(t *testing.T) {
 
 func TestDecodeTelemetrySnapshotResponseIntervalHints(t *testing.T) {
 	var snapshot telemetrySnapshotResponse
-	body := []byte(`{"default_sample_interval_ms":30000,"min_sample_interval_ms":1000,"max_sample_interval_ms":3600000,"events":[]}`)
+	body := []byte(`{"default_paths":["/system","/config/running"],"default_sample_interval_ms":30000,"min_sample_interval_ms":1000,"max_sample_interval_ms":3600000,"events":[]}`)
 	if err := json.Unmarshal(body, &snapshot); err != nil {
 		t.Fatalf("json.Unmarshal() error = %v", err)
+	}
+	if strings.Join(snapshot.DefaultPaths, ",") != "/system,/config/running" {
+		t.Fatalf("snapshot default paths = %#v, want system/config", snapshot.DefaultPaths)
 	}
 	if snapshot.DefaultSampleIntervalMs != 30000 || snapshot.MinSampleIntervalMs != 1000 || snapshot.MaxSampleIntervalMs != 3600000 {
 		t.Fatalf("snapshot interval hints = default %d min %d max %d, want 30000 1000 3600000",

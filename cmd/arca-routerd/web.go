@@ -120,6 +120,7 @@ type nmsTelemetrySnapshotResponse struct {
 	Resource                string                      `json:"resource"`
 	EventSchemaVersion      string                      `json:"event_schema_version"`
 	Encoding                string                      `json:"encoding"`
+	DefaultPaths            []string                    `json:"default_paths"`
 	DefaultSampleIntervalMs uint32                      `json:"default_sample_interval_ms"`
 	MinSampleIntervalMs     uint32                      `json:"min_sample_interval_ms"`
 	MaxSampleIntervalMs     uint32                      `json:"max_sample_interval_ms"`
@@ -1768,6 +1769,7 @@ func newNMSTelemetrySnapshotResponse(now time.Time, events []nbgrpc.TelemetryEve
 		Resource:                "/api/nms/v1/telemetry/snapshot",
 		EventSchemaVersion:      catalog.EventSchemaVersion,
 		Encoding:                catalog.Encoding,
+		DefaultPaths:            append([]string(nil), catalog.DefaultPaths...),
 		DefaultSampleIntervalMs: catalog.DefaultSampleIntervalMs,
 		MinSampleIntervalMs:     catalog.MinSampleIntervalMs,
 		MaxSampleIntervalMs:     catalog.MaxSampleIntervalMs,

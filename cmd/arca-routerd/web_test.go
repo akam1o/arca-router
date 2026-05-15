@@ -566,6 +566,9 @@ func TestNMSTelemetrySnapshotEndpoint(t *testing.T) {
 		t.Fatalf("snapshot schema/encoding = %q/%q", resp.EventSchemaVersion, resp.Encoding)
 	}
 	catalog := nbgrpc.NewTelemetryCatalog()
+	if strings.Join(resp.DefaultPaths, ",") != strings.Join(catalog.DefaultPaths, ",") {
+		t.Fatalf("DefaultPaths = %#v, want %#v", resp.DefaultPaths, catalog.DefaultPaths)
+	}
 	if resp.DefaultSampleIntervalMs != catalog.DefaultSampleIntervalMs ||
 		resp.MinSampleIntervalMs != catalog.MinSampleIntervalMs ||
 		resp.MaxSampleIntervalMs != catalog.MaxSampleIntervalMs {
