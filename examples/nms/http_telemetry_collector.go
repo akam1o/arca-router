@@ -621,6 +621,9 @@ func validateTelemetrySnapshotEvents(events []telemetrySnapshotEvent) error {
 		if event.PayloadBytes != len(event.Payload) {
 			return fmt.Errorf("%s payload_bytes = %d, want len(payload) %d", kind, event.PayloadBytes, len(event.Payload))
 		}
+		if err := validateTelemetryPathMetadata(kind, event.Path, event.Cardinality, event.PayloadSchema, nil); err != nil {
+			return err
+		}
 	}
 	return nil
 }
