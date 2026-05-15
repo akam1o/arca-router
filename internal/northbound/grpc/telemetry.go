@@ -110,6 +110,12 @@ type TelemetryCatalog struct {
 	Paths              []TelemetryPathInfo
 }
 
+// TelemetryCatalogFilter selects a subset of the advertised telemetry path catalog.
+type TelemetryCatalogFilter struct {
+	Cardinalities  []string
+	PayloadSchemas []string
+}
+
 // TelemetryEvent is one structured telemetry update emitted over gRPC.
 type TelemetryEvent struct {
 	Sequence      uint64
@@ -142,6 +148,13 @@ func NewTelemetryCatalog() TelemetryCatalog {
 	}
 }
 
+// NewFilteredTelemetryCatalog returns the supported telemetry catalog with path filters applied.
+func NewFilteredTelemetryCatalog(filter TelemetryCatalogFilter) TelemetryCatalog {
+	catalog := NewTelemetryCatalog()
+	catalog.Paths = filterTelemetryPathCatalog(catalog.Paths, filter)
+	return catalog
+}
+
 // TelemetryPathCatalog returns the supported structured telemetry paths in canonical emission order.
 func TelemetryPathCatalog() []TelemetryPathInfo {
 	defaults := buildTelemetryPathSet(defaultTelemetryPaths)
@@ -158,6 +171,45 @@ func TelemetryPathCatalog() []TelemetryPathInfo {
 		})
 	}
 	return catalog
+}
+
+func filterTelemetryPathCatalog(catalog []TelemetryPathInfo, filter TelemetryCatalogFilter) []TelemetryPathInfo {
+	cardinalities := normalizedTelemetryCatalogFilterSet(filter.Cardinalities)
+	payloadSchemas := normalizedTelemetryCatalogFilterSet(filter.PayloadSchemas)
+	if len(cardinalities) == 0 && len(payloadSchemas) == 0 {
+		return catalog
+	}
+
+	filtered := make([]TelemetryPathInfo, 0, len(catalog))
+	for _, info := range catalog {
+		if len(cardinalities) > 0 {
+			if _, ok := cardinalities[normalizedTelemetryCatalogFilterValue(info.Cardinality)]; !ok {
+				continue
+			}
+		}
+		if len(payloadSchemas) > 0 {
+			if _, ok := payloadSchemas[normalizedTelemetryCatalogFilterValue(info.PayloadSchema)]; !ok {
+				continue
+			}
+		}
+		filtered = append(filtered, info)
+	}
+	return filtered
+}
+
+func normalizedTelemetryCatalogFilterSet(values []string) map[string]struct{} {
+	set := make(map[string]struct{}, len(values))
+	for _, value := range values {
+		normalized := normalizedTelemetryCatalogFilterValue(value)
+		if normalized != "" {
+			set[normalized] = struct{}{}
+		}
+	}
+	return set
+}
+
+func normalizedTelemetryCatalogFilterValue(value string) string {
+	return strings.ToLower(strings.TrimSpace(value))
 }
 
 type telemetryErrorPayload struct {

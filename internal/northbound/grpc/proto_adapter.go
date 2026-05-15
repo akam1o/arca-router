@@ -463,8 +463,15 @@ type telemetryServiceAdapter struct {
 	server *Server
 }
 
-func (a *telemetryServiceAdapter) GetTelemetryCatalog(context.Context, *apiv1.GetTelemetryCatalogRequest) (*apiv1.GetTelemetryCatalogResponse, error) {
-	return telemetryCatalogToProto(NewTelemetryCatalog()), nil
+func (a *telemetryServiceAdapter) GetTelemetryCatalog(_ context.Context, req *apiv1.GetTelemetryCatalogRequest) (*apiv1.GetTelemetryCatalogResponse, error) {
+	var filter TelemetryCatalogFilter
+	if req != nil {
+		filter = TelemetryCatalogFilter{
+			Cardinalities:  append([]string(nil), req.GetCardinality()...),
+			PayloadSchemas: append([]string(nil), req.GetPayloadSchema()...),
+		}
+	}
+	return telemetryCatalogToProto(NewFilteredTelemetryCatalog(filter)), nil
 }
 
 func (a *telemetryServiceAdapter) SubscribeTelemetry(req *apiv1.SubscribeTelemetryRequest, stream apiv1.TelemetryService_SubscribeTelemetryServer) error {

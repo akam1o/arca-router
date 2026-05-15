@@ -524,9 +524,17 @@ type TelemetryReceiver interface {
 
 // GetTelemetryCatalog returns the daemon's supported telemetry path catalog.
 func (c *Client) GetTelemetryCatalog(ctx context.Context) (TelemetryCatalog, error) {
+	return c.GetFilteredTelemetryCatalog(ctx, nil, nil)
+}
+
+// GetFilteredTelemetryCatalog returns the daemon's supported telemetry path catalog after server-side filters.
+func (c *Client) GetFilteredTelemetryCatalog(ctx context.Context, cardinalities []string, payloadSchemas []string) (TelemetryCatalog, error) {
 	ctx, cancel := contextWithDefaultTimeout(ctx)
 	defer cancel()
-	resp, err := c.telemetry.GetTelemetryCatalog(ctx, &apiv1.GetTelemetryCatalogRequest{})
+	resp, err := c.telemetry.GetTelemetryCatalog(ctx, &apiv1.GetTelemetryCatalogRequest{
+		Cardinality:   append([]string(nil), cardinalities...),
+		PayloadSchema: append([]string(nil), payloadSchemas...),
+	})
 	if err != nil {
 		return TelemetryCatalog{}, err
 	}

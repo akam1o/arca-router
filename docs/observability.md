@@ -101,7 +101,7 @@ observability/grafana/arca-routerd-dashboard.json
 
 ## gRPC Telemetry Stream
 
-The internal Unix socket gRPC API exposes `TelemetryService.GetTelemetryCatalog` for stream discovery and `TelemetryService.SubscribeTelemetry` for local collectors and NMS sidecars. The catalog returns the event schema version, payload encoding, default paths, supported paths, descriptions, cardinality hints, per-path payload schema IDs, accepted aliases, and default membership. Events use the `arca.telemetry.v1` schema envelope with `sequence`, `timestamp`, `path`, `event_type`, `encoding`, `json_payload`, and `payload_bytes` fields. Payloads are encoded as JSON.
+The internal Unix socket gRPC API exposes `TelemetryService.GetTelemetryCatalog` for stream discovery and `TelemetryService.SubscribeTelemetry` for local collectors and NMS sidecars. The catalog returns the event schema version, payload encoding, default paths, supported paths, descriptions, cardinality hints, per-path payload schema IDs, accepted aliases, and default membership. `GetTelemetryCatalog` accepts repeated cardinality and payload schema filters when collectors only need a subset of the advertised paths. Events use the `arca.telemetry.v1` schema envelope with `sequence`, `timestamp`, `path`, `event_type`, `encoding`, `json_payload`, and `payload_bytes` fields. Payloads are encoded as JSON.
 
 Supported paths:
 

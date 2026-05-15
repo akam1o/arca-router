@@ -243,6 +243,16 @@ func TestClientServerConfigFlow(t *testing.T) {
 	if len(catalog.Paths[1].Aliases) != 2 || catalog.Paths[1].Aliases[0] != "/running" {
 		t.Fatalf("telemetry catalog aliases for config/running = %#v, want running aliases", catalog.Paths[1].Aliases)
 	}
+	filteredCatalog, err := client.GetFilteredTelemetryCatalog(ctx, []string{"per-route"}, []string{"arca.telemetry.routes.v1"})
+	if err != nil {
+		t.Fatalf("GetFilteredTelemetryCatalog() error = %v", err)
+	}
+	if len(filteredCatalog.Paths) != 1 || filteredCatalog.Paths[0].Path != "/routes" {
+		t.Fatalf("filtered telemetry catalog paths = %#v, want only /routes", filteredCatalog.Paths)
+	}
+	if len(filteredCatalog.DefaultPaths) != len(defaultTelemetryPaths) {
+		t.Fatalf("filtered telemetry catalog default paths = %#v, want unfiltered defaults", filteredCatalog.DefaultPaths)
+	}
 
 	stream, err := client.SubscribeTelemetry(ctx, []string{"/config/running"}, time.Second, true)
 	if err != nil {
@@ -434,6 +444,13 @@ func TestTelemetryPathCatalog(t *testing.T) {
 	}
 	if len(envelope.DefaultPaths) != len(defaultTelemetryPaths) || len(envelope.Paths) != len(telemetryPathOrder) {
 		t.Fatalf("NewTelemetryCatalog() = %#v, want default paths and path catalog", envelope)
+	}
+	filtered := NewFilteredTelemetryCatalog(TelemetryCatalogFilter{
+		Cardinalities:  []string{"PER-ROUTE", "per-peer"},
+		PayloadSchemas: []string{"arca.telemetry.routes.v1"},
+	})
+	if len(filtered.Paths) != 1 || filtered.Paths[0].Path != "/routes" {
+		t.Fatalf("NewFilteredTelemetryCatalog() paths = %#v, want only /routes", filtered.Paths)
 	}
 }
 

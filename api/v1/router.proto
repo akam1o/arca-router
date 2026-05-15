@@ -491,7 +491,13 @@ message GetSystemInfoResponse {
 
 // --- Telemetry messages ---
 
-message GetTelemetryCatalogRequest {}
+message GetTelemetryCatalogRequest {
+  // Optional cardinality filters, such as "single" or "per-route".
+  repeated string cardinality = 1;
+
+  // Optional payload schema filters, such as "arca.telemetry.routes.v1".
+  repeated string payload_schema = 2;
+}
 
 message GetTelemetryCatalogResponse {
   string event_schema_version = 1;
