@@ -553,6 +553,10 @@ func (s *TelemetryStream) Recv() (*TelemetryEvent, error) {
 		Encoding:      resp.GetEncoding(),
 		JSONPayload:   resp.GetJsonPayload(),
 		SchemaVersion: resp.GetSchemaVersion(),
+		PayloadBytes:  int(resp.GetPayloadBytes()),
+	}
+	if event.PayloadBytes == 0 && event.JSONPayload != "" {
+		event.PayloadBytes = len(event.JSONPayload)
 	}
 	if rawTimestamp := resp.GetTimestamp(); rawTimestamp != "" {
 		if parsed, err := time.Parse(time.RFC3339Nano, rawTimestamp); err == nil {

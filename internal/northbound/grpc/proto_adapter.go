@@ -478,6 +478,7 @@ func telemetryEventToProto(event TelemetryEvent) *apiv1.TelemetryEvent {
 		Encoding:      event.Encoding,
 		JsonPayload:   event.JSONPayload,
 		SchemaVersion: event.SchemaVersion,
+		PayloadBytes:  uint64(event.PayloadBytes),
 	}
 	if !event.Timestamp.IsZero() {
 		resp.Timestamp = event.Timestamp.UTC().Format(time.RFC3339Nano)

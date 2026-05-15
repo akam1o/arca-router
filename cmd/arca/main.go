@@ -1855,6 +1855,7 @@ type telemetryOutputEvent struct {
 	EventType     string          `json:"event_type"`
 	Encoding      string          `json:"encoding"`
 	SchemaVersion string          `json:"schema_version"`
+	PayloadBytes  int             `json:"payload_bytes"`
 	Payload       json.RawMessage `json:"payload"`
 }
 
@@ -1966,11 +1967,19 @@ func printTelemetryEvent(event *grpcclient.TelemetryEvent) error {
 		EventType:     event.EventType,
 		Encoding:      event.Encoding,
 		SchemaVersion: event.SchemaVersion,
+		PayloadBytes:  telemetryPayloadBytes(event),
 		Payload:       payload,
 	}
 	encoder := json.NewEncoder(os.Stdout)
 	encoder.SetEscapeHTML(false)
 	return encoder.Encode(output)
+}
+
+func telemetryPayloadBytes(event *grpcclient.TelemetryEvent) int {
+	if event.PayloadBytes > 0 {
+		return event.PayloadBytes
+	}
+	return len(event.JSONPayload)
 }
 
 func routeTextOptions(args []string) (protocol, addressFamily string, err error) {
