@@ -15,6 +15,8 @@ type evpnVXLANPlan struct {
 	vni             int
 	bridgeID        uint32
 	bridgeDomain    string
+	routingInstance string
+	routingTableID  uint32
 	sourceInterface string
 	request         pkgvpp.VXLANRequest
 }
@@ -54,6 +56,10 @@ func evpnVXLANPlanMap(cfg *model.RouterConfig, ifaceIndex map[string]uint32, req
 	if cfg == nil || cfg.Protocols == nil || cfg.Protocols.EVPN == nil || len(cfg.Protocols.EVPN.VNIs) == 0 {
 		return nil, nil
 	}
+	routingPlans, err := routingInstancePlanMap(cfg.RoutingInstances)
+	if err != nil {
+		return nil, err
+	}
 
 	ids := make([]int, 0, len(cfg.Protocols.EVPN.VNIs))
 	for id := range cfg.Protocols.EVPN.VNIs {
@@ -70,14 +76,19 @@ func evpnVXLANPlanMap(cfg *model.RouterConfig, ifaceIndex map[string]uint32, req
 		if id <= 0 || id > 16777215 {
 			return nil, fmt.Errorf("EVPN VNI %d: VXLAN VNI must be between 1 and 16777215", id)
 		}
-		if vni.Type == "l3" {
-			return nil, fmt.Errorf("EVPN VNI %d: VPP VXLAN L3 VNI dataplane apply is not implemented yet", id)
+		if vni.Type != "l2" && vni.Type != "l3" {
+			return nil, fmt.Errorf("EVPN VNI %d: VPP VXLAN dataplane supports only L2 or L3 VNIs", id)
 		}
-		if vni.Type != "l2" {
-			return nil, fmt.Errorf("EVPN VNI %d: VPP VXLAN dataplane supports only L2 VNIs", id)
-		}
-		if vni.BridgeDomain == "" {
+		if vni.Type == "l2" && vni.BridgeDomain == "" {
 			return nil, fmt.Errorf("EVPN VNI %d: bridge-domain is required for VPP VXLAN L2 dataplane", id)
+		}
+		var routingTableID uint32
+		if vni.Type == "l3" {
+			plan, ok := routingPlans[vni.RoutingInstance]
+			if !ok {
+				return nil, fmt.Errorf("EVPN VNI %d: routing-instance %s is not configured for VPP VXLAN L3 dataplane", id, vni.RoutingInstance)
+			}
+			routingTableID = plan.tableID
 		}
 		if vni.MulticastGroup == "" {
 			return nil, fmt.Errorf("EVPN VNI %d: multicast-group is required for VPP VXLAN dataplane until remote VTEP support is implemented", id)
@@ -115,12 +126,16 @@ func evpnVXLANPlanMap(cfg *model.RouterConfig, ifaceIndex map[string]uint32, req
 			vni:             id,
 			bridgeID:        uint32(id),
 			bridgeDomain:    vni.BridgeDomain,
+			routingInstance: vni.RoutingInstance,
+			routingTableID:  routingTableID,
 			sourceInterface: vni.SourceInterface,
 			request: pkgvpp.VXLANRequest{
 				VNI:                     uint32(id),
 				SourceAddress:           src,
 				DestinationAddress:      dst,
 				MulticastInterfaceIndex: sourceIfIndex,
+				EncapsulationTable:      routingTableID,
+				L3:                      vni.Type == "l3",
 			},
 		}
 	}
@@ -186,6 +201,8 @@ func evpnPlansEqual(a, b evpnVXLANPlan) bool {
 	return a.vni == b.vni &&
 		a.bridgeID == b.bridgeID &&
 		a.bridgeDomain == b.bridgeDomain &&
+		a.routingInstance == b.routingInstance &&
+		a.routingTableID == b.routingTableID &&
 		a.sourceInterface == b.sourceInterface &&
 		a.request.VNI == b.request.VNI &&
 		a.request.SourceAddress.Equal(b.request.SourceAddress) &&
@@ -207,15 +224,17 @@ func evpnBridgeDomain(plan evpnVXLANPlan) pkgvpp.BridgeDomain {
 }
 
 func (p *VPPPlugin) createEVPNVXLAN(ctx context.Context, plan evpnVXLANPlan, rollback *[]func(context.Context) error) error {
-	bridge := evpnBridgeDomain(plan)
-	if err := p.client.AddBridgeDomain(ctx, bridge); err != nil {
-		return fmt.Errorf("create bridge-domain %s/%d: %w", plan.bridgeDomain, plan.bridgeID, err)
-	}
-	if rollback != nil {
-		bridgeID := plan.bridgeID
-		*rollback = append(*rollback, func(ctx context.Context) error {
-			return p.client.DeleteBridgeDomain(ctx, bridgeID)
-		})
+	if !plan.request.L3 {
+		bridge := evpnBridgeDomain(plan)
+		if err := p.client.AddBridgeDomain(ctx, bridge); err != nil {
+			return fmt.Errorf("create bridge-domain %s/%d: %w", plan.bridgeDomain, plan.bridgeID, err)
+		}
+		if rollback != nil {
+			bridgeID := plan.bridgeID
+			*rollback = append(*rollback, func(ctx context.Context) error {
+				return p.client.DeleteBridgeDomain(ctx, bridgeID)
+			})
+		}
 	}
 
 	vxlanIface, err := p.client.CreateVXLAN(ctx, plan.request)
@@ -231,6 +250,19 @@ func (p *VPPPlugin) createEVPNVXLAN(ctx context.Context, plan evpnVXLANPlan, rol
 		})
 	}
 
+	if plan.request.L3 {
+		if err := p.setEVPNVXLANL3Tables(ctx, vxlanIface.SwIfIndex, plan.routingTableID, 0); err != nil {
+			return fmt.Errorf("bind VXLAN VNI %d to routing-instance %s table %d: %w", plan.vni, plan.routingInstance, plan.routingTableID, err)
+		}
+		if rollback != nil {
+			ifIndex := vxlanIface.SwIfIndex
+			tableID := plan.routingTableID
+			*rollback = append(*rollback, func(ctx context.Context) error {
+				return p.setEVPNVXLANL3Tables(ctx, ifIndex, 0, tableID)
+			})
+		}
+	}
+
 	if err := p.client.SetInterfaceUp(ctx, vxlanIface.SwIfIndex); err != nil {
 		return fmt.Errorf("set VXLAN VNI %d interface up: %w", plan.vni, err)
 	}
@@ -241,15 +273,28 @@ func (p *VPPPlugin) createEVPNVXLAN(ctx context.Context, plan evpnVXLANPlan, rol
 		})
 	}
 
-	if err := p.client.SetInterfaceL2Bridge(ctx, vxlanIface.SwIfIndex, plan.bridgeID, true); err != nil {
-		return fmt.Errorf("attach VXLAN VNI %d to bridge-domain %d: %w", plan.vni, plan.bridgeID, err)
+	if !plan.request.L3 {
+		if err := p.client.SetInterfaceL2Bridge(ctx, vxlanIface.SwIfIndex, plan.bridgeID, true); err != nil {
+			return fmt.Errorf("attach VXLAN VNI %d to bridge-domain %d: %w", plan.vni, plan.bridgeID, err)
+		}
+		if rollback != nil {
+			ifIndex := vxlanIface.SwIfIndex
+			bridgeID := plan.bridgeID
+			*rollback = append(*rollback, func(ctx context.Context) error {
+				return p.client.SetInterfaceL2Bridge(ctx, ifIndex, bridgeID, false)
+			})
+		}
 	}
-	if rollback != nil {
-		ifIndex := vxlanIface.SwIfIndex
-		bridgeID := plan.bridgeID
-		*rollback = append(*rollback, func(ctx context.Context) error {
-			return p.client.SetInterfaceL2Bridge(ctx, ifIndex, bridgeID, false)
-		})
+	return nil
+}
+
+func (p *VPPPlugin) setEVPNVXLANL3Tables(ctx context.Context, ifIndex uint32, tableID uint32, rollbackTableID uint32) error {
+	if err := p.client.SetInterfaceTable(ctx, ifIndex, tableID, false); err != nil {
+		return fmt.Errorf("set IPv4 table: %w", err)
+	}
+	if err := p.client.SetInterfaceTable(ctx, ifIndex, tableID, true); err != nil {
+		_ = p.client.SetInterfaceTable(ctx, ifIndex, rollbackTableID, false)
+		return fmt.Errorf("set IPv6 table: %w", err)
 	}
 	return nil
 }
@@ -273,10 +318,12 @@ func (p *VPPPlugin) deleteEVPNVXLAN(ctx context.Context, plan evpnVXLANPlan, rol
 	if idx, ok := p.vxlanIfIndex[plan.vni]; ok {
 		ifIndex = idx
 		hadIfIndex = true
-		if err := p.client.SetInterfaceL2Bridge(ctx, ifIndex, plan.bridgeID, false); err != nil {
-			return fmt.Errorf("detach VXLAN VNI %d from bridge-domain %d: %w", plan.vni, plan.bridgeID, err)
+		if !plan.request.L3 {
+			if err := p.client.SetInterfaceL2Bridge(ctx, ifIndex, plan.bridgeID, false); err != nil {
+				return fmt.Errorf("detach VXLAN VNI %d from bridge-domain %d: %w", plan.vni, plan.bridgeID, err)
+			}
+			detached = true
 		}
-		detached = true
 		if err := p.client.SetInterfaceDown(ctx, ifIndex); err != nil {
 			return fmt.Errorf("set VXLAN VNI %d interface down: %w", plan.vni, err)
 		}
@@ -287,16 +334,18 @@ func (p *VPPPlugin) deleteEVPNVXLAN(ctx context.Context, plan evpnVXLANPlan, rol
 	}
 	tunnelDeleted = true
 	delete(p.vxlanIfIndex, plan.vni)
-	if err := p.client.DeleteBridgeDomain(ctx, plan.bridgeID); err != nil {
-		return fmt.Errorf("delete bridge-domain %s/%d: %w", plan.bridgeDomain, plan.bridgeID, err)
+	if !plan.request.L3 {
+		if err := p.client.DeleteBridgeDomain(ctx, plan.bridgeID); err != nil {
+			return fmt.Errorf("delete bridge-domain %s/%d: %w", plan.bridgeDomain, plan.bridgeID, err)
+		}
+		bridgeDeleted = true
 	}
-	bridgeDeleted = true
 	return nil
 }
 
 func (p *VPPPlugin) restoreDeletedEVPNVXLAN(ctx context.Context, plan evpnVXLANPlan, ifIndex uint32, hadIfIndex bool, detached bool, downed bool, tunnelDeleted bool, bridgeDeleted bool) error {
 	if tunnelDeleted {
-		if bridgeDeleted {
+		if !plan.request.L3 && bridgeDeleted {
 			if err := p.client.AddBridgeDomain(ctx, evpnBridgeDomain(plan)); err != nil {
 				return fmt.Errorf("restore bridge-domain %s/%d: %w", plan.bridgeDomain, plan.bridgeID, err)
 			}
@@ -306,11 +355,18 @@ func (p *VPPPlugin) restoreDeletedEVPNVXLAN(ctx context.Context, plan evpnVXLANP
 			return fmt.Errorf("restore VXLAN VNI %d: %w", plan.vni, err)
 		}
 		p.vxlanIfIndex[plan.vni] = vxlanIface.SwIfIndex
+		if plan.request.L3 {
+			if err := p.setEVPNVXLANL3Tables(ctx, vxlanIface.SwIfIndex, plan.routingTableID, 0); err != nil {
+				return fmt.Errorf("restore VXLAN VNI %d routing table: %w", plan.vni, err)
+			}
+		}
 		if err := p.client.SetInterfaceUp(ctx, vxlanIface.SwIfIndex); err != nil {
 			return fmt.Errorf("restore VXLAN VNI %d interface up: %w", plan.vni, err)
 		}
-		if err := p.client.SetInterfaceL2Bridge(ctx, vxlanIface.SwIfIndex, plan.bridgeID, true); err != nil {
-			return fmt.Errorf("restore VXLAN VNI %d bridge membership: %w", plan.vni, err)
+		if !plan.request.L3 {
+			if err := p.client.SetInterfaceL2Bridge(ctx, vxlanIface.SwIfIndex, plan.bridgeID, true); err != nil {
+				return fmt.Errorf("restore VXLAN VNI %d bridge membership: %w", plan.vni, err)
+			}
 		}
 		return nil
 	}
@@ -319,7 +375,7 @@ func (p *VPPPlugin) restoreDeletedEVPNVXLAN(ctx context.Context, plan evpnVXLANP
 			return fmt.Errorf("restore VXLAN VNI %d interface up: %w", plan.vni, err)
 		}
 	}
-	if hadIfIndex && detached {
+	if !plan.request.L3 && hadIfIndex && detached {
 		if err := p.client.SetInterfaceL2Bridge(ctx, ifIndex, plan.bridgeID, true); err != nil {
 			return fmt.Errorf("restore VXLAN VNI %d bridge membership: %w", plan.vni, err)
 		}
