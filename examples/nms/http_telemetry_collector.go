@@ -34,7 +34,29 @@ const (
 	nmsStatusBackendEtcd   = "etcd"
 )
 
-var defaultSnapshotPaths = []string{"/system", "/interfaces", "/overlays/evpn"}
+var (
+	defaultSnapshotPaths = []string{"/system", "/interfaces", "/overlays/evpn"}
+	telemetryPathHints   = map[string]telemetryPathHint{
+		"/system":                  {cardinality: "single", payloadSchema: "arca.telemetry.system.v1"},
+		"/config/running":          {cardinality: "single", payloadSchema: "arca.telemetry.config.running.v1"},
+		"/interfaces":              {cardinality: "per-interface", payloadSchema: "arca.telemetry.interfaces.v1"},
+		"/routes":                  {cardinality: "per-route", payloadSchema: "arca.telemetry.routes.v1"},
+		"/routing/bgp/neighbors":   {cardinality: "per-neighbor", payloadSchema: "arca.telemetry.routing.bgp.neighbors.v1"},
+		"/routing/ospf/neighbors":  {cardinality: "per-neighbor", payloadSchema: "arca.telemetry.routing.ospf.neighbors.v1"},
+		"/routing/ospf3/neighbors": {cardinality: "per-neighbor", payloadSchema: "arca.telemetry.routing.ospf3.neighbors.v1"},
+		"/routing-instances":       {cardinality: "per-instance", payloadSchema: "arca.telemetry.routing.instances.v1"},
+		"/overlays/evpn":           {cardinality: "per-vni", payloadSchema: "arca.telemetry.overlays.evpn.v1"},
+		"/class-of-service":        {cardinality: "per-intent-object", payloadSchema: "arca.telemetry.class_of_service.v1"},
+		"/bfd":                     {cardinality: "per-peer", payloadSchema: "arca.telemetry.bfd.v1"},
+		"/lcp":                     {cardinality: "single", payloadSchema: "arca.telemetry.lcp.v1"},
+		"/ha":                      {cardinality: "single", payloadSchema: "arca.telemetry.ha.v1"},
+	}
+)
+
+type telemetryPathHint struct {
+	cardinality   string
+	payloadSchema string
+}
 
 type collectorConfig struct {
 	baseURL          string
@@ -1667,6 +1689,9 @@ func validateTelemetryPathMetadata(kind, path, cardinality, payloadSchema string
 	if err := validateTelemetryPayloadSchema(kind, payloadSchema); err != nil {
 		return err
 	}
+	if err := validateTelemetryPathHint(kind, path, cardinality, payloadSchema); err != nil {
+		return err
+	}
 	for i, alias := range aliases {
 		if err := validateTelemetryPathValue(kind, fmt.Sprintf("aliases[%d]", i), alias); err != nil {
 			return err
@@ -1710,6 +1735,21 @@ func validateTelemetryPayloadSchema(kind, payloadSchema string) error {
 	default:
 		return fmt.Errorf("%s payload_schema = %q, want supported telemetry payload schema", kind, payloadSchema)
 	}
+}
+
+func validateTelemetryPathHint(kind, path, cardinality, payloadSchema string) error {
+	normalizedPath := normalizeCatalogPath(path)
+	hint, ok := telemetryPathHints[normalizedPath]
+	if !ok {
+		return fmt.Errorf("%s path = %q, want supported telemetry path", kind, path)
+	}
+	if cardinality != hint.cardinality {
+		return fmt.Errorf("%s cardinality = %q, want %q for path %q", kind, cardinality, hint.cardinality, normalizedPath)
+	}
+	if payloadSchema != hint.payloadSchema {
+		return fmt.Errorf("%s payload_schema = %q, want %q for path %q", kind, payloadSchema, hint.payloadSchema, normalizedPath)
+	}
+	return nil
 }
 
 func validateTelemetryPathValue(kind, field, value string) error {
