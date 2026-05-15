@@ -112,6 +112,7 @@ type TelemetryCatalog struct {
 
 // TelemetryCatalogFilter selects a subset of the advertised telemetry path catalog.
 type TelemetryCatalogFilter struct {
+	Paths          []string
 	Cardinalities  []string
 	PayloadSchemas []string
 }
@@ -174,14 +175,18 @@ func TelemetryPathCatalog() []TelemetryPathInfo {
 }
 
 func filterTelemetryPathCatalog(catalog []TelemetryPathInfo, filter TelemetryCatalogFilter) []TelemetryPathInfo {
+	paths := normalizedTelemetryCatalogPathFilterSet(filter.Paths)
 	cardinalities := normalizedTelemetryCatalogFilterSet(filter.Cardinalities)
 	payloadSchemas := normalizedTelemetryCatalogFilterSet(filter.PayloadSchemas)
-	if len(cardinalities) == 0 && len(payloadSchemas) == 0 {
+	if len(paths) == 0 && len(cardinalities) == 0 && len(payloadSchemas) == 0 {
 		return catalog
 	}
 
 	filtered := make([]TelemetryPathInfo, 0, len(catalog))
 	for _, info := range catalog {
+		if len(paths) > 0 && !telemetryCatalogPathMatches(info, paths) {
+			continue
+		}
 		if len(cardinalities) > 0 {
 			if _, ok := cardinalities[normalizedTelemetryCatalogFilterValue(info.Cardinality)]; !ok {
 				continue
@@ -195,6 +200,29 @@ func filterTelemetryPathCatalog(catalog []TelemetryPathInfo, filter TelemetryCat
 		filtered = append(filtered, info)
 	}
 	return filtered
+}
+
+func normalizedTelemetryCatalogPathFilterSet(values []string) map[string]struct{} {
+	set := make(map[string]struct{}, len(values))
+	for _, value := range values {
+		normalized := normalizeTelemetryPath(value)
+		if normalized != "" {
+			set[normalized] = struct{}{}
+		}
+	}
+	return set
+}
+
+func telemetryCatalogPathMatches(info TelemetryPathInfo, paths map[string]struct{}) bool {
+	if _, ok := paths[normalizeTelemetryPath(info.Path)]; ok {
+		return true
+	}
+	for _, alias := range info.Aliases {
+		if _, ok := paths[normalizeTelemetryPath(alias)]; ok {
+			return true
+		}
+	}
+	return false
 }
 
 func normalizedTelemetryCatalogFilterSet(values []string) map[string]struct{} {

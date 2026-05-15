@@ -497,6 +497,9 @@ message GetTelemetryCatalogRequest {
 
   // Optional payload schema filters, such as "arca.telemetry.routes.v1".
   repeated string payload_schema = 2;
+
+  // Optional canonical path or alias filters, such as "/routes" or "/evpn".
+  repeated string path = 3;
 }
 
 message GetTelemetryCatalogResponse {
