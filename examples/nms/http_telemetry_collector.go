@@ -24,6 +24,8 @@ const (
 	nmsTelemetryCatalogV1  = "arca.nms.telemetry-catalog.v1"
 	nmsTelemetrySchemasV1  = "arca.nms.telemetry-schemas.v1"
 	nmsTelemetrySnapshotV1 = "arca.nms.telemetry-snapshot.v1"
+	telemetryEventSchemaV1 = "arca.telemetry.v1"
+	telemetryEncodingJSON  = "json"
 )
 
 var defaultSnapshotPaths = []string{"/system", "/interfaces", "/overlays/evpn"}
@@ -357,6 +359,9 @@ func decodeCatalogResponse(body []byte) (telemetryCatalogResponse, error) {
 	if err := validateNMSEnvelope("telemetry catalog", catalog.SchemaVersion, catalog.Resource, nmsTelemetryCatalogV1, "/api/nms/v1/telemetry/paths"); err != nil {
 		return catalog, err
 	}
+	if err := validateNMSTelemetryMetadata("telemetry catalog", catalog.EventSchemaVersion, catalog.Encoding); err != nil {
+		return catalog, err
+	}
 	if err := validateNMSResultCount("telemetry catalog", "path_count", catalog.PathCount, "paths", len(catalog.Paths)); err != nil {
 		return catalog, err
 	}
@@ -369,6 +374,9 @@ func decodeSchemasResponse(body []byte) (telemetrySchemasResponse, error) {
 		return schemas, fmt.Errorf("decode telemetry schemas response: %w", err)
 	}
 	if err := validateNMSEnvelope("telemetry schemas", schemas.SchemaVersion, schemas.Resource, nmsTelemetrySchemasV1, "/api/nms/v1/telemetry/schemas"); err != nil {
+		return schemas, err
+	}
+	if err := validateNMSTelemetryMetadata("telemetry schemas", schemas.EventSchemaVersion, schemas.Encoding); err != nil {
 		return schemas, err
 	}
 	if err := validateNMSResultCount("telemetry schemas", "schema_count", schemas.SchemaCount, "schemas", len(schemas.Schemas)); err != nil {
@@ -396,6 +404,9 @@ func decodeSnapshotResponse(body []byte) (telemetrySnapshotResponse, error) {
 	if err := validateNMSEnvelope("telemetry snapshot", snapshot.SchemaVersion, snapshot.Resource, nmsTelemetrySnapshotV1, "/api/nms/v1/telemetry/snapshot"); err != nil {
 		return snapshot, err
 	}
+	if err := validateNMSTelemetryMetadata("telemetry snapshot", snapshot.EventSchemaVersion, snapshot.Encoding); err != nil {
+		return snapshot, err
+	}
 	if err := validateNMSResultCount("telemetry snapshot", "event_count", snapshot.EventCount, "events", len(snapshot.Events)); err != nil {
 		return snapshot, err
 	}
@@ -408,6 +419,16 @@ func validateNMSEnvelope(kind, schemaVersion, resource, wantSchemaVersion, wantR
 	}
 	if resource != wantResource {
 		return fmt.Errorf("%s resource = %q, want %q", kind, resource, wantResource)
+	}
+	return nil
+}
+
+func validateNMSTelemetryMetadata(kind, eventSchemaVersion, encoding string) error {
+	if eventSchemaVersion != telemetryEventSchemaV1 {
+		return fmt.Errorf("%s event_schema_version = %q, want %q", kind, eventSchemaVersion, telemetryEventSchemaV1)
+	}
+	if encoding != telemetryEncodingJSON {
+		return fmt.Errorf("%s encoding = %q, want %q", kind, encoding, telemetryEncodingJSON)
 	}
 	return nil
 }
