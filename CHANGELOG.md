@@ -2,6 +2,7 @@
 
 ## v0.8.x - Overlay and Streaming Telemetry (current)
 
+- **NMS collector status section validation**: the example HTTP collector now validates required nested operational status section fields for datastore, cluster, overlay, HA, CoS, FRR, VPP, and NETCONF status data
 - **NMS collector status field validation**: the example HTTP collector now validates required top-level operational status fields and section objects inside status `data`
 - **NMS collector status data validation**: the example HTTP collector now validates that operational status envelopes include a non-empty JSON `data` object before printing status responses
 - **NMS collector generated timestamp validation**: the example HTTP collector now validates RFC3339 `generated_at` timestamps across status, telemetry catalog, schema registry, and snapshot envelopes
