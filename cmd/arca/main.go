@@ -110,7 +110,7 @@ Show subcommands:
   bfd [brief|counters]        Show raw BFD status
   bfd peer <ip> [counters]    Show BFD peer details
   evpn                        Show EVPN/VXLAN overlay intent
-  telemetry paths [live] [cardinality <hint>] [payload-schema <id>]
+  telemetry paths [live] [path <path>] [cardinality <hint>] [payload-schema <id>]
                               Show supported telemetry path catalog
   telemetry [path <path>]... [interval <duration>] [count <events>]
                               Show telemetry events as JSON lines
@@ -482,6 +482,7 @@ type showClient interface {
 	GetClassOfService(context.Context) (*grpcclient.ClassOfServiceInfo, error)
 	GetTelemetryCatalog(context.Context) (grpcclient.TelemetryCatalog, error)
 	GetFilteredTelemetryCatalog(context.Context, []string, []string) (grpcclient.TelemetryCatalog, error)
+	GetPathFilteredTelemetryCatalog(context.Context, []string, []string, []string) (grpcclient.TelemetryCatalog, error)
 	SubscribeTelemetry(context.Context, []string, time.Duration, bool) (grpcclient.TelemetryReceiver, error)
 }
 
@@ -1893,11 +1894,12 @@ func showTelemetry(ctx context.Context, client showClient, args []string) error 
 		}
 		catalog := grpcclient.NewTelemetryCatalog()
 		if catalogOpts.live {
-			liveCatalog, err := client.GetFilteredTelemetryCatalog(ctx, catalogOpts.cardinalities, catalogOpts.payloadSchemas)
+			liveCatalog, err := client.GetPathFilteredTelemetryCatalog(ctx, catalogOpts.paths, catalogOpts.cardinalities, catalogOpts.payloadSchemas)
 			if err != nil {
 				return err
 			}
 			catalog = liveCatalog
+			catalogOpts.paths = nil
 			catalogOpts.cardinalities = nil
 			catalogOpts.payloadSchemas = nil
 		}
@@ -1936,6 +1938,7 @@ func showTelemetry(ctx context.Context, client showClient, args []string) error 
 
 type telemetryCatalogCLIOptions struct {
 	live           bool
+	paths          []string
 	cardinalities  []string
 	payloadSchemas []string
 }
@@ -1975,6 +1978,12 @@ func telemetryCatalogOptions(args []string) (telemetryCatalogCLIOptions, bool, e
 			}
 			opts.cardinalities = append(opts.cardinalities, args[1])
 			args = args[2:]
+		case "path":
+			if len(args) < 2 {
+				return opts, true, telemetryUsageError("'show telemetry paths path' requires a telemetry path or alias")
+			}
+			opts.paths = append(opts.paths, args[1])
+			args = args[2:]
 		case "payload-schema", "schema":
 			if len(args) < 2 {
 				return opts, true, telemetryUsageError("'show telemetry paths payload-schema' requires a schema ID")
@@ -1989,14 +1998,18 @@ func telemetryCatalogOptions(args []string) (telemetryCatalogCLIOptions, bool, e
 }
 
 func filterTelemetryPathCatalog(catalog []grpcclient.TelemetryPathInfo, opts telemetryCatalogCLIOptions) []grpcclient.TelemetryPathInfo {
+	paths := normalizedCatalogPathFilterSet(opts.paths)
 	cardinalities := normalizedCatalogFilterSet(opts.cardinalities)
 	payloadSchemas := normalizedCatalogFilterSet(opts.payloadSchemas)
-	if len(cardinalities) == 0 && len(payloadSchemas) == 0 {
+	if len(paths) == 0 && len(cardinalities) == 0 && len(payloadSchemas) == 0 {
 		return catalog
 	}
 
 	filtered := make([]grpcclient.TelemetryPathInfo, 0, len(catalog))
 	for _, info := range catalog {
+		if len(paths) > 0 && !telemetryCatalogInfoMatchesPath(info, paths) {
+			continue
+		}
 		if len(cardinalities) > 0 {
 			if _, ok := cardinalities[normalizedCatalogFilterValue(info.Cardinality)]; !ok {
 				continue
@@ -2010,6 +2023,37 @@ func filterTelemetryPathCatalog(catalog []grpcclient.TelemetryPathInfo, opts tel
 		filtered = append(filtered, info)
 	}
 	return filtered
+}
+
+func normalizedCatalogPathFilterSet(values []string) map[string]struct{} {
+	set := make(map[string]struct{}, len(values))
+	for _, value := range values {
+		normalized := normalizedCatalogPathFilterValue(value)
+		if normalized != "" {
+			set[normalized] = struct{}{}
+		}
+	}
+	return set
+}
+
+func telemetryCatalogInfoMatchesPath(info grpcclient.TelemetryPathInfo, paths map[string]struct{}) bool {
+	if _, ok := paths[normalizedCatalogPathFilterValue(info.Path)]; ok {
+		return true
+	}
+	for _, alias := range info.Aliases {
+		if _, ok := paths[normalizedCatalogPathFilterValue(alias)]; ok {
+			return true
+		}
+	}
+	return false
+}
+
+func normalizedCatalogPathFilterValue(value string) string {
+	path := strings.ToLower(strings.TrimSpace(value))
+	if path == "" {
+		return ""
+	}
+	return "/" + strings.Trim(path, "/")
 }
 
 func normalizedCatalogFilterSet(values []string) map[string]struct{} {

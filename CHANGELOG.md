@@ -2,6 +2,7 @@
 
 ## v0.8.x - Overlay and Streaming Telemetry (current)
 
+- **Telemetry CLI catalog path filters**: `arca show telemetry paths` and `arca show telemetry paths live` can filter the catalog by canonical path or advertised alias before showing collector inputs
 - **gRPC telemetry catalog path filters**: `TelemetryService.GetTelemetryCatalog` accepts repeated path filters, including advertised aliases such as `/evpn`, alongside cardinality and payload schema filters
 - **NMS collector catalog filters**: the example HTTP collector can pass include cardinality and payload schema filters to the telemetry catalog endpoint before deriving snapshot paths
 - **Telemetry CLI live filter pushdown**: `arca show telemetry paths live` now sends cardinality and payload schema filters to `TelemetryService.GetTelemetryCatalog` instead of always fetching the full daemon catalog first
