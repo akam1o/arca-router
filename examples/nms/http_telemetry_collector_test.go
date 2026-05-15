@@ -753,6 +753,10 @@ func TestDecodeSnapshotResponseRejectsInvalidEnvelope(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "paths[0]") {
 		t.Fatalf("decodeSnapshotResponse() error = %v, want emitted path mismatch", err)
 	}
+	_, err = decodeSnapshotResponse([]byte(`{"schema_version":"arca.nms.telemetry-snapshot.v1","resource":"/api/nms/v1/telemetry/snapshot","event_schema_version":"arca.telemetry.v1","encoding":"json","paths":["/system","/system"],"event_count":2,"payload_bytes":4,"events":[{"sequence":1,"timestamp":"2026-05-15T12:34:56Z","path":"/system","cardinality":"single","payload_schema":"arca.telemetry.system.v1","event_type":"snapshot","encoding":"json","schema_version":"arca.telemetry.v1","payload_bytes":2,"payload":{}},{"sequence":2,"timestamp":"2026-05-15T12:34:56Z","path":"/system","cardinality":"single","payload_schema":"arca.telemetry.system.v1","event_type":"snapshot","encoding":"json","schema_version":"arca.telemetry.v1","payload_bytes":2,"payload":{}}]}`))
+	if err == nil || !strings.Contains(err.Error(), "duplicates") {
+		t.Fatalf("decodeSnapshotResponse() error = %v, want duplicate emitted path mismatch", err)
+	}
 	_, err = decodeSnapshotResponse([]byte(`{"schema_version":"arca.nms.telemetry-snapshot.v1","resource":"/api/nms/v1/telemetry/snapshot","event_schema_version":"arca.telemetry.v1","encoding":"json","paths":["/system"],"event_count":1,"payload_bytes":3,"events":[{"sequence":1,"timestamp":"2026-05-15T12:34:56Z","path":"/system","cardinality":"single","payload_schema":"arca.telemetry.system.v1","event_type":"snapshot","encoding":"json","schema_version":"arca.telemetry.v1","payload_bytes":2,"payload":{}}]}`))
 	if err == nil || !strings.Contains(err.Error(), "payload_bytes") {
 		t.Fatalf("decodeSnapshotResponse() error = %v, want aggregate payload_bytes mismatch", err)
