@@ -2,6 +2,7 @@
 
 ## v0.8.x - Overlay and Streaming Telemetry (current)
 
+- **Telemetry CLI catalog encoding filters**: `arca show telemetry paths` and `arca show telemetry paths live` can filter the catalog by payload encoding before showing collector inputs
 - **gRPC telemetry catalog encoding filters**: `TelemetryService.GetTelemetryCatalog` accepts repeated payload encoding filters so collectors can explicitly discover JSON-compatible telemetry paths
 - **NMS collector catalog default filters**: the example HTTP collector can pass `-include-default` to catalog discovery before deriving snapshot paths
 - **NMS telemetry catalog default filters**: `/api/nms/v1/telemetry/paths` accepts `default=true` to return only default subscription paths
