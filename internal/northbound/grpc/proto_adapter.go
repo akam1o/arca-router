@@ -418,6 +418,19 @@ func (a *stateServiceAdapter) GetClassOfService(ctx context.Context, _ *apiv1.Ge
 	resp := &apiv1.GetClassOfServiceResponse{
 		EnforcementStatus: info.EnforcementStatus,
 	}
+	if capabilities := info.Capabilities; capabilities != nil {
+		resp.Capabilities = &apiv1.ClassOfServiceCapabilities{
+			MetadataBindingSupported: capabilities.MetadataBindingSupported,
+			QueueSchedulerSupported:  capabilities.QueueSchedulerSupported,
+			PolicerSupported:         capabilities.PolicerSupported,
+			CountersSupported:        capabilities.CountersSupported,
+			LastError:                capabilities.LastError,
+			Diagnostics:              append([]string(nil), capabilities.Diagnostics...),
+		}
+		if !capabilities.LastCheck.IsZero() {
+			resp.Capabilities.LastCheck = capabilities.LastCheck.UTC().Format(time.RFC3339Nano)
+		}
+	}
 	for _, fc := range info.ForwardingClasses {
 		queue := uint32(0)
 		if fc.Queue > 0 {

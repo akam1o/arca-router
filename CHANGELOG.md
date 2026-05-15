@@ -2,6 +2,7 @@
 
 ## v0.8.x - Overlay and Streaming Telemetry (current)
 
+- **QoS capability gRPC telemetry**: `GetClassOfService`, `arca show class-of-service`, and the `/class-of-service` telemetry payload now include VPP QoS capability support, diagnostics, errors, and last-check time
 - **QoS capability SNMP OIDs**: the read-only SNMP subtree now exposes VPP QoS metadata binding, scheduler, policer, counter, capability error, and last-check gauges
 - **QoS capability Grafana panels**: the packaged Grafana dashboard now shows metadata binding, scheduler, policer, counter, capability error, and last-check gauges from the VPP QoS capability metrics
 - **VPP LCP Grafana panels**: the packaged Grafana dashboard now includes VPP LCP pair, inconsistency, reconcile error, and last-check panels backed by the Prometheus LCP metrics

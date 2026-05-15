@@ -730,7 +730,7 @@ NETCONF XML の get-config/edit-config は、v0.6 management-plane model の `sy
 
 NETCONF `<get>` は config 由来の system/routing state に加えて、arca-routerd が VPP state を取得できる場合は managed interface の admin/oper status、physical address、bound `qos-profile`、counter（`rx-packets`、`tx-packets`、`rx-bytes`、`tx-bytes`、`rx-errors`、`tx-errors`、`drops`）、VPP RX/TX queue placement を返します。live collection に失敗した場合、interface output は設定済み address と unknown operational status にフォールバックします。
 
-internal gRPC の interface state API と `arca show interfaces` も、同じ bound QoS profile、packet counter、queue placement summary を local operator 向けに表示します。
+internal gRPC の interface state API と `arca show interfaces` も、同じ bound QoS profile、packet counter、queue placement summary を local operator 向けに表示します。internal gRPC の class-of-service API、`arca show class-of-service`、`/class-of-service` telemetry path は、Web/NMS status API と同じ VPP QoS capability diagnostics を公開します。
 
 server hello は arca-router YANG module capability として `urn:arca:router:config:1.0?module=arca-router&revision=2025-12-27` を広告します。
 
@@ -1241,7 +1241,7 @@ arca show class-of-service
 arca show configuration
 ```
 
-`show interfaces` は live VPP admin/oper status、bound QoS profile、packet counter、RX/TX queue placement を取得できる場合に表示します。名前フィルターには `ge-0/0/0` のような設定上の interface 名を使用します。`show vrrp` は arca-routerd 経由で FRR `show vrrp` output を表示します。`show evpn` は `/overlays/evpn` telemetry snapshot を VNI summary として表示し、local overlay inspection に利用できます。`show lcp` は HA convergence check で使う cached VPP LCP reconciliation state を表示します。`show ha` は Web UI、Prometheus、SNMP と同じ HA convergence summary を表示します。`show class-of-service` は running CoS intent を表示し、VPP enforcement support が段階的対応の間は scheduler/policer enforcement を `intent-only` として報告します。
+`show interfaces` は live VPP admin/oper status、bound QoS profile、packet counter、RX/TX queue placement を取得できる場合に表示します。名前フィルターには `ge-0/0/0` のような設定上の interface 名を使用します。`show vrrp` は arca-routerd 経由で FRR `show vrrp` output を表示します。`show evpn` は `/overlays/evpn` telemetry snapshot を VNI summary として表示し、local overlay inspection に利用できます。`show lcp` は HA convergence check で使う cached VPP LCP reconciliation state を表示します。`show ha` は Web UI、Prometheus、SNMP と同じ HA convergence summary を表示します。`show class-of-service` は running CoS intent を表示し、VPP enforcement support が段階的対応の間は scheduler/policer enforcement を `intent-only` として報告し、VPP QoS capability diagnostics も表示します。
 
 対話型の設定モードでは、`show history [N]` で commit history も表示できます。
 

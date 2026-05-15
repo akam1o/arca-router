@@ -16,6 +16,7 @@ import (
 	"github.com/akam1o/arca-router/internal/engine"
 	"github.com/akam1o/arca-router/internal/model"
 	sbfrr "github.com/akam1o/arca-router/internal/southbound/frr"
+	sbvpp "github.com/akam1o/arca-router/internal/southbound/vpp"
 	"github.com/akam1o/arca-router/internal/store"
 	pkgconfig "github.com/akam1o/arca-router/pkg/config"
 	pkgvpp "github.com/akam1o/arca-router/pkg/vpp"
@@ -75,6 +76,14 @@ type fakeBFDOperationalSource struct {
 }
 
 func (f fakeBFDOperationalSource) BFDOperationalStatus() sbfrr.BFDOperationalStatus {
+	return f.status
+}
+
+type fakeQoSCapabilitySource struct {
+	status sbvpp.QoSCapabilityStatus
+}
+
+func (f fakeQoSCapabilitySource) QoSCapabilityStatus() sbvpp.QoSCapabilityStatus {
 	return f.status
 }
 
@@ -158,6 +167,16 @@ func TestClientServerConfigFlow(t *testing.T) {
 	}
 
 	srv := NewServer(eng, &fakeStore{commitID: "commit-1"}, testLogger())
+	srv.SetQoSCapabilitySource(fakeQoSCapabilitySource{status: sbvpp.QoSCapabilityStatus{
+		LastCheck: time.Unix(1700000500, 0),
+		Capabilities: pkgvpp.QoSCapabilities{
+			MetadataBinding:     true,
+			QueueScheduler:      true,
+			Policer:             false,
+			OperationalCounters: true,
+			Diagnostics:         []string{"scheduler api available"},
+		},
+	}})
 	errCh := make(chan error, 1)
 	go func() {
 		errCh <- srv.Serve(lis)
@@ -213,6 +232,16 @@ func TestClientServerConfigFlow(t *testing.T) {
 	}
 	if commitID != "commit-1" || version != 2 {
 		t.Fatalf("Commit() = (%q, %d), want commit-1 version 2", commitID, version)
+	}
+	cosInfo, err := client.GetClassOfService(ctx)
+	if err != nil {
+		t.Fatalf("GetClassOfService() error = %v", err)
+	}
+	if cosInfo.Capabilities == nil || !cosInfo.Capabilities.MetadataBindingSupported ||
+		!cosInfo.Capabilities.QueueSchedulerSupported || !cosInfo.Capabilities.CountersSupported ||
+		cosInfo.Capabilities.PolicerSupported || cosInfo.Capabilities.LastCheck.Unix() != 1700000500 ||
+		len(cosInfo.Capabilities.Diagnostics) != 1 {
+		t.Fatalf("GetClassOfService() capabilities = %#v, want VPP QoS capability diagnostics", cosInfo.Capabilities)
 	}
 	diffText, hasChanges, err := client.Diff(ctx, sessionID)
 	if err != nil {
@@ -465,6 +494,55 @@ func TestSubscribeTelemetryEVPNOverlaySnapshot(t *testing.T) {
 	}
 	if payload.VNIs[1].RoutingInstance != "BLUE" || payload.VNIs[1].RemoteVTEP != "198.51.100.20" || len(payload.VNIs[1].VRFTargetImport) != 1 {
 		t.Fatalf("L3 EVPN VNI payload = %#v, want routing-instance, remote VTEP, and import target", payload.VNIs[1])
+	}
+}
+
+func TestSubscribeTelemetryClassOfServiceIncludesQoSCapabilities(t *testing.T) {
+	eng := engine.NewEngine(nil, testLogger())
+	eng.InitializeRunning(&model.RouterConfig{
+		ClassOfService: &model.ClassOfServiceConfig{
+			TrafficControlProfiles: map[string]*model.TrafficControlProfile{
+				"WAN": {ShapingRate: 1000000000},
+			},
+		},
+	}, 3)
+	srv := NewServer(eng, &fakeStore{}, testLogger())
+	srv.SetQoSCapabilitySource(fakeQoSCapabilitySource{status: sbvpp.QoSCapabilityStatus{
+		LastCheck: time.Unix(1700000500, 0),
+		Capabilities: pkgvpp.QoSCapabilities{
+			MetadataBinding:     true,
+			QueueScheduler:      true,
+			Policer:             false,
+			OperationalCounters: true,
+			Diagnostics:         []string{"scheduler api available"},
+		},
+	}})
+
+	var events []TelemetryEvent
+	err := srv.SubscribeTelemetry(context.Background(), []string{"/class-of-service"}, 0, true, func(event TelemetryEvent) error {
+		events = append(events, event)
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("SubscribeTelemetry(class-of-service) error = %v", err)
+	}
+	if len(events) != 1 || events[0].Path != "/class-of-service" {
+		t.Fatalf("events = %#v, want one class-of-service snapshot", events)
+	}
+	var payload struct {
+		ClassOfService *ClassOfServiceInfo `json:"class_of_service"`
+	}
+	if err := json.Unmarshal([]byte(events[0].JSONPayload), &payload); err != nil {
+		t.Fatalf("class-of-service telemetry payload is invalid JSON: %v", err)
+	}
+	if payload.ClassOfService == nil || payload.ClassOfService.Capabilities == nil {
+		t.Fatalf("class-of-service payload = %#v, want QoS capability diagnostics", payload)
+	}
+	capabilities := payload.ClassOfService.Capabilities
+	if !capabilities.MetadataBindingSupported || !capabilities.QueueSchedulerSupported || capabilities.PolicerSupported ||
+		!capabilities.CountersSupported || capabilities.LastCheck.Unix() != 1700000500 ||
+		len(capabilities.Diagnostics) != 1 {
+		t.Fatalf("capabilities = %#v, want VPP QoS capability snapshot", capabilities)
 	}
 }
 
@@ -1217,6 +1295,16 @@ func TestGetClassOfServiceReturnsRunningConfig(t *testing.T) {
 		},
 	}, 1)
 	srv := NewServer(eng, &fakeStore{}, testLogger())
+	srv.SetQoSCapabilitySource(fakeQoSCapabilitySource{status: sbvpp.QoSCapabilityStatus{
+		LastCheck: time.Unix(1700000500, 0),
+		Capabilities: pkgvpp.QoSCapabilities{
+			MetadataBinding:     true,
+			QueueScheduler:      false,
+			Policer:             false,
+			OperationalCounters: false,
+			Diagnostics:         []string{"scheduler api unavailable"},
+		},
+	}})
 
 	info, err := srv.GetClassOfService(context.Background())
 	if err != nil {
@@ -1238,6 +1326,11 @@ func TestGetClassOfServiceReturnsRunningConfig(t *testing.T) {
 		info.Interfaces[0].OutputTrafficControlProfile != "WAN" ||
 		info.Interfaces[0].EnforcementStatus != "intent-only" {
 		t.Fatalf("Interfaces = %#v, want interface binding", info.Interfaces)
+	}
+	if info.Capabilities == nil || !info.Capabilities.MetadataBindingSupported ||
+		info.Capabilities.QueueSchedulerSupported || info.Capabilities.LastCheck.Unix() != 1700000500 ||
+		len(info.Capabilities.Diagnostics) != 1 {
+		t.Fatalf("Capabilities = %#v, want metadata-only VPP QoS capability status", info.Capabilities)
 	}
 }
 

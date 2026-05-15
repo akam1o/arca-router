@@ -46,7 +46,7 @@ var (
 		"/routing/ospf3/neighbors": "OSPFv3 neighbor operational state",
 		"/routing-instances":       "routing instance operational summary",
 		"/overlays/evpn":           "EVPN/VXLAN VNI overlay intent",
-		"/class-of-service":        "class-of-service intent and enforcement status",
+		"/class-of-service":        "class-of-service intent, enforcement status, and QoS capability diagnostics",
 		"/bfd":                     "BFD peer operational status",
 		"/lcp":                     "VPP LCP reconciliation status",
 		"/ha":                      "control-plane HA convergence status",
@@ -114,7 +114,7 @@ var (
 			{Name: "vnis", Type: "[]EVPNVNI", Description: "EVPN/VXLAN VNI intent entries"},
 		},
 		"/class-of-service": {
-			{Name: "class_of_service", Type: "ClassOfServiceInfo", Description: "class-of-service intent and enforcement status"},
+			{Name: "class_of_service", Type: "ClassOfServiceInfo", Description: "class-of-service intent, enforcement status, and QoS capability diagnostics"},
 		},
 		"/bfd": {
 			{Name: "status", Type: "BFDStatusInfo", Description: "BFD peer operational status"},

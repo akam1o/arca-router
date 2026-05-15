@@ -422,6 +422,7 @@ func run(ctx context.Context, f *daemonFlags, log *logger.Logger) error {
 	grpcServer.SetInterfaceStateCollector(vppPlugin)
 	grpcServer.SetLCPReconciliationSource(newGRPCLCPReconciliationSource(vppPlugin))
 	grpcServer.SetBFDOperationalSource(frrPlugin)
+	grpcServer.SetQoSCapabilitySource(vppPlugin)
 
 	observabilitySource := metricsSource{
 		startedAt:     time.Now(),

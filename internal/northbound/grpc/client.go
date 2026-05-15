@@ -478,6 +478,22 @@ func (c *Client) GetClassOfService(ctx context.Context) (*ClassOfServiceInfo, er
 	info := &ClassOfServiceInfo{
 		EnforcementStatus: resp.GetEnforcementStatus(),
 	}
+	if capabilities := resp.GetCapabilities(); capabilities != nil {
+		info.Capabilities = &ClassOfServiceCapabilitiesInfo{
+			MetadataBindingSupported: capabilities.GetMetadataBindingSupported(),
+			QueueSchedulerSupported:  capabilities.GetQueueSchedulerSupported(),
+			PolicerSupported:         capabilities.GetPolicerSupported(),
+			CountersSupported:        capabilities.GetCountersSupported(),
+			LastError:                capabilities.GetLastError(),
+			Diagnostics:              append([]string(nil), capabilities.GetDiagnostics()...),
+		}
+		if rawLastCheck := capabilities.GetLastCheck(); rawLastCheck != "" {
+			parsed, err := time.Parse(time.RFC3339Nano, rawLastCheck)
+			if err == nil {
+				info.Capabilities.LastCheck = parsed
+			}
+		}
+	}
 	for _, fc := range resp.GetForwardingClasses() {
 		info.ForwardingClasses = append(info.ForwardingClasses, ClassOfServiceForwardingClassInfo{
 			Name:  fc.GetName(),
@@ -880,6 +896,18 @@ type ClassOfServiceInfo struct {
 	TrafficControlProfiles []ClassOfServiceTrafficControlProfileInfo
 	Interfaces             []ClassOfServiceInterfaceInfo
 	EnforcementStatus      string
+	Capabilities           *ClassOfServiceCapabilitiesInfo
+}
+
+// ClassOfServiceCapabilitiesInfo represents detected VPP QoS dataplane support.
+type ClassOfServiceCapabilitiesInfo struct {
+	MetadataBindingSupported bool
+	QueueSchedulerSupported  bool
+	PolicerSupported         bool
+	CountersSupported        bool
+	LastCheck                time.Time
+	LastError                string
+	Diagnostics              []string
 }
 
 // ClassOfServiceForwardingClassInfo maps a forwarding class to a queue.

@@ -1551,11 +1551,15 @@ func printBFDStatus(info *grpcclient.BFDStatusInfo) {
 }
 
 func printClassOfService(info *grpcclient.ClassOfServiceInfo) {
-	if info == nil || (len(info.ForwardingClasses) == 0 && len(info.TrafficControlProfiles) == 0 && len(info.Interfaces) == 0) {
+	if info == nil || (len(info.ForwardingClasses) == 0 && len(info.TrafficControlProfiles) == 0 && len(info.Interfaces) == 0 && info.Capabilities == nil) {
 		fmt.Println("No class-of-service configuration found")
 		return
 	}
-	fmt.Printf("%-18s %s\n", "Enforcement", formatCoSValue(info.EnforcementStatus))
+	if len(info.ForwardingClasses) == 0 && len(info.TrafficControlProfiles) == 0 && len(info.Interfaces) == 0 {
+		fmt.Println("No class-of-service configuration found")
+	} else {
+		fmt.Printf("%-18s %s\n", "Enforcement", formatCoSValue(info.EnforcementStatus))
+	}
 
 	if len(info.ForwardingClasses) > 0 {
 		fmt.Println()
@@ -1593,6 +1597,24 @@ func printClassOfService(info *grpcclient.ClassOfServiceInfo) {
 				formatCoSValue(iface.OutputTrafficControlProfile),
 				formatCoSValue(iface.EnforcementStatus),
 			)
+		}
+	}
+
+	if info.Capabilities != nil {
+		fmt.Println()
+		fmt.Println("VPP QoS capabilities")
+		fmt.Printf("%-24s %s\n", "Metadata binding", yesNo(info.Capabilities.MetadataBindingSupported))
+		fmt.Printf("%-24s %s\n", "Queue scheduler", yesNo(info.Capabilities.QueueSchedulerSupported))
+		fmt.Printf("%-24s %s\n", "Policer", yesNo(info.Capabilities.PolicerSupported))
+		fmt.Printf("%-24s %s\n", "Counters", yesNo(info.Capabilities.CountersSupported))
+		fmt.Printf("%-24s %s\n", "Last check", formatOptionalTime(info.Capabilities.LastCheck))
+		fmt.Printf("%-24s %s\n", "Last error", formatCoSValue(info.Capabilities.LastError))
+		if len(info.Capabilities.Diagnostics) > 0 {
+			fmt.Println()
+			fmt.Println("VPP QoS diagnostics")
+			for _, diagnostic := range info.Capabilities.Diagnostics {
+				fmt.Printf("  - %s\n", diagnostic)
+			}
 		}
 	}
 }

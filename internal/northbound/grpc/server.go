@@ -19,6 +19,7 @@ import (
 	"github.com/akam1o/arca-router/internal/engine"
 	"github.com/akam1o/arca-router/internal/model"
 	sbfrr "github.com/akam1o/arca-router/internal/southbound/frr"
+	sbvpp "github.com/akam1o/arca-router/internal/southbound/vpp"
 	"github.com/akam1o/arca-router/internal/store"
 	"github.com/akam1o/arca-router/pkg/cli"
 	pkgconfig "github.com/akam1o/arca-router/pkg/config"
@@ -40,6 +41,7 @@ type Server struct {
 	lcpSource      lcpReconciliationSource
 	haSource       haStatusSource
 	bfdSource      bfdOperationalSource
+	qosSource      qosCapabilitySource
 	routeReader    pkgfrr.RouteStatusReader
 	bgpReader      pkgfrr.BGPSummaryStatusReader
 	ospfReader     pkgfrr.OSPFNeighborStatusReader
@@ -71,6 +73,10 @@ type haStatusSource interface {
 
 type bfdOperationalSource interface {
 	BFDOperationalStatus() sbfrr.BFDOperationalStatus
+}
+
+type qosCapabilitySource interface {
+	QoSCapabilityStatus() sbvpp.QoSCapabilityStatus
 }
 
 // NewServer creates a new gRPC server.
@@ -122,6 +128,11 @@ func (s *Server) SetHAStatusSource(source haStatusSource) {
 // SetBFDOperationalSource installs an FRR BFD operational state source.
 func (s *Server) SetBFDOperationalSource(source bfdOperationalSource) {
 	s.bfdSource = source
+}
+
+// SetQoSCapabilitySource installs a VPP QoS capability source.
+func (s *Server) SetQoSCapabilitySource(source qosCapabilitySource) {
+	s.qosSource = source
 }
 
 func newOperationalRouteStatusReader() pkgfrr.RouteStatusReader {
@@ -954,6 +965,7 @@ func (s *Server) GetRoutingInstances(ctx context.Context) ([]RoutingInstanceInfo
 // GetClassOfService returns running class-of-service intent.
 func (s *Server) GetClassOfService(ctx context.Context) (*ClassOfServiceInfo, error) {
 	info := &ClassOfServiceInfo{EnforcementStatus: classOfServiceEnforcementNotConfigured}
+	s.applyClassOfServiceCapabilities(info)
 	if s.engine == nil {
 		return info, nil
 	}
@@ -1002,6 +1014,25 @@ func (s *Server) GetClassOfService(ctx context.Context) (*ClassOfServiceInfo, er
 	}
 
 	return info, nil
+}
+
+func (s *Server) applyClassOfServiceCapabilities(info *ClassOfServiceInfo) {
+	if info == nil || s.qosSource == nil {
+		return
+	}
+	status := s.qosSource.QoSCapabilityStatus()
+	info.Capabilities = &ClassOfServiceCapabilitiesInfo{
+		MetadataBindingSupported: status.Capabilities.MetadataBinding,
+		QueueSchedulerSupported:  status.Capabilities.QueueScheduler,
+		PolicerSupported:         status.Capabilities.Policer,
+		CountersSupported:        status.Capabilities.OperationalCounters,
+		LastCheck:                status.LastCheck,
+		LastError:                status.LastError,
+		Diagnostics:              append([]string(nil), status.Capabilities.Diagnostics...),
+	}
+	if status.LastError != "" {
+		info.Capabilities.Diagnostics = append(info.Capabilities.Diagnostics, "capability detection failed: "+status.LastError)
+	}
 }
 
 // GetSystemInfo returns basic system information.
