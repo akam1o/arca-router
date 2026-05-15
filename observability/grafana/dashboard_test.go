@@ -126,6 +126,22 @@ func TestDashboardIncludesEVPNPanels(t *testing.T) {
 	}
 }
 
+func TestDashboardIncludesVPPLCPPanels(t *testing.T) {
+	dash := loadDashboard(t)
+	want := map[string]string{
+		"arca_router_vpp_lcp_pairs":                                   "VPP LCP Pairs",
+		"arca_router_vpp_lcp_inconsistencies":                         "VPP LCP Inconsistencies",
+		"arca_router_vpp_lcp_reconcile_error":                         "VPP LCP Errors",
+		"arca_router_vpp_lcp_last_reconcile_timestamp_seconds * 1000": "VPP LCP Last Check",
+	}
+	expressions := panelExpressions(dash.Panels)
+	for expr, title := range want {
+		if got := expressions[expr]; got != title {
+			t.Fatalf("expression %q is on panel %q, want %q", expr, got, title)
+		}
+	}
+}
+
 func loadDashboard(t *testing.T) dashboard {
 	t.Helper()
 	data, err := os.ReadFile("arca-routerd-dashboard.json")
