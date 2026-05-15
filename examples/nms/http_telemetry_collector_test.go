@@ -32,7 +32,7 @@ func TestParseCollectorConfigDefaults(t *testing.T) {
 
 func TestDecodeTelemetryCatalogResponseIntervalHints(t *testing.T) {
 	var catalog telemetryCatalogResponse
-	body := []byte(`{"encoding":"json","default_sample_interval_ms":30000,"min_sample_interval_ms":1000,"max_sample_interval_ms":3600000,"paths":[]}`)
+	body := []byte(`{"encoding":"json","default_sample_interval_ms":30000,"min_sample_interval_ms":1000,"max_sample_interval_ms":3600000,"path_count":2,"paths":[]}`)
 	if err := json.Unmarshal(body, &catalog); err != nil {
 		t.Fatalf("json.Unmarshal() error = %v", err)
 	}
@@ -42,6 +42,9 @@ func TestDecodeTelemetryCatalogResponseIntervalHints(t *testing.T) {
 			catalog.MinSampleIntervalMs,
 			catalog.MaxSampleIntervalMs,
 		)
+	}
+	if catalog.PathCount != 2 {
+		t.Fatalf("path count = %d, want 2", catalog.PathCount)
 	}
 }
 

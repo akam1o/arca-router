@@ -2,6 +2,7 @@
 
 ## v0.8.x - Overlay and Streaming Telemetry (current)
 
+- **NMS telemetry result counts**: `/api/nms/v1/telemetry/paths` and `/api/nms/v1/telemetry/schemas` now report filtered result counts so collectors can distinguish empty filters from missing arrays
 - **NMS snapshot event counts**: `/api/nms/v1/telemetry/snapshot` now reports `event_count` alongside `max_events` so HTTP-only collectors can distinguish emitted event fan-out from the configured guardrail
 - **NMS snapshot default paths**: `/api/nms/v1/telemetry/snapshot` now echoes the default telemetry path set so HTTP-only collectors can discover default polling inputs from the snapshot envelope
 - **NMS snapshot interval hints**: `/api/nms/v1/telemetry/snapshot` now echoes default, minimum, and maximum sample interval hints so HTTP-only collectors can poll filtered snapshots without a separate catalog lookup

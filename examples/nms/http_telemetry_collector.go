@@ -82,6 +82,7 @@ type telemetryCatalogResponse struct {
 	DefaultSampleIntervalMs uint32                 `json:"default_sample_interval_ms"`
 	MinSampleIntervalMs     uint32                 `json:"min_sample_interval_ms"`
 	MaxSampleIntervalMs     uint32                 `json:"max_sample_interval_ms"`
+	PathCount               int                    `json:"path_count"`
 	Paths                   []telemetryCatalogPath `json:"paths"`
 }
 
