@@ -102,9 +102,12 @@ func TestDecodeDiscoveryResponseRejectsInvalidSchemaEnvelope(t *testing.T) {
 
 func TestDecodeTelemetrySnapshotResponseIntervalHints(t *testing.T) {
 	var snapshot telemetrySnapshotResponse
-	body := []byte(`{"default_paths":["/system","/config/running"],"default_sample_interval_ms":30000,"min_sample_interval_ms":1000,"max_sample_interval_ms":3600000,"event_count":2,"events":[]}`)
+	body := []byte(`{"schema_version":"arca.nms.telemetry-snapshot.v1","resource":"/api/nms/v1/telemetry/snapshot","default_paths":["/system","/config/running"],"default_sample_interval_ms":30000,"min_sample_interval_ms":1000,"max_sample_interval_ms":3600000,"event_count":2,"events":[]}`)
 	if err := json.Unmarshal(body, &snapshot); err != nil {
 		t.Fatalf("json.Unmarshal() error = %v", err)
+	}
+	if _, err := decodeSnapshotResponse(body); err != nil {
+		t.Fatalf("decodeSnapshotResponse() error = %v", err)
 	}
 	if strings.Join(snapshot.DefaultPaths, ",") != "/system,/config/running" {
 		t.Fatalf("snapshot default paths = %#v, want system/config", snapshot.DefaultPaths)
@@ -118,6 +121,21 @@ func TestDecodeTelemetrySnapshotResponseIntervalHints(t *testing.T) {
 	}
 	if snapshot.EventCount != 2 {
 		t.Fatalf("snapshot event count = %d, want 2", snapshot.EventCount)
+	}
+}
+
+func TestDecodeSnapshotResponseRejectsInvalidEnvelope(t *testing.T) {
+	_, err := decodeSnapshotResponse([]byte(`[{"path":"/system"}]`))
+	if err == nil || !strings.Contains(err.Error(), "decode telemetry snapshot response") {
+		t.Fatalf("decodeSnapshotResponse() error = %v, want snapshot decode error", err)
+	}
+	_, err = decodeSnapshotResponse([]byte(`{"schema_version":"wrong","resource":"/api/nms/v1/telemetry/snapshot","events":[]}`))
+	if err == nil || !strings.Contains(err.Error(), "schema_version") {
+		t.Fatalf("decodeSnapshotResponse() error = %v, want schema_version mismatch", err)
+	}
+	_, err = decodeSnapshotResponse([]byte(`{"schema_version":"arca.nms.telemetry-snapshot.v1","resource":"/wrong","events":[]}`))
+	if err == nil || !strings.Contains(err.Error(), "resource") {
+		t.Fatalf("decodeSnapshotResponse() error = %v, want resource mismatch", err)
 	}
 }
 
@@ -361,7 +379,7 @@ func TestFetchNMSDiscoversAndFiltersSnapshotPaths(t *testing.T) {
 				`]}`))
 		case "/api/nms/v1/telemetry/snapshot":
 			snapshotQuery = r.URL.Query()
-			_, _ = w.Write([]byte(`{"schema_version":"arca.nms.telemetry-snapshot.v1","events":[]}`))
+			_, _ = w.Write([]byte(`{"schema_version":"arca.nms.telemetry-snapshot.v1","resource":"/api/nms/v1/telemetry/snapshot","events":[]}`))
 		default:
 			http.NotFound(w, r)
 		}
@@ -402,7 +420,7 @@ func TestFetchNMSUsesSnapshotMetadataFilters(t *testing.T) {
 			http.Error(w, "unexpected catalog request", http.StatusInternalServerError)
 		case "/api/nms/v1/telemetry/snapshot":
 			snapshotQuery = r.URL.Query()
-			_, _ = w.Write([]byte(`{"schema_version":"arca.nms.telemetry-snapshot.v1","events":[]}`))
+			_, _ = w.Write([]byte(`{"schema_version":"arca.nms.telemetry-snapshot.v1","resource":"/api/nms/v1/telemetry/snapshot","events":[]}`))
 		default:
 			http.NotFound(w, r)
 		}
@@ -454,7 +472,7 @@ func TestFetchNMSExportsSnapshotToOTLP(t *testing.T) {
 		switch r.URL.Path {
 		case "/api/nms/v1/telemetry/snapshot":
 			snapshotQuery = r.URL.Query()
-			_, _ = w.Write([]byte(`{"schema_version":"arca.nms.telemetry-snapshot.v1","events":[{` +
+			_, _ = w.Write([]byte(`{"schema_version":"arca.nms.telemetry-snapshot.v1","resource":"/api/nms/v1/telemetry/snapshot","events":[{` +
 				`"sequence":7,` +
 				`"timestamp":"2026-05-15T12:34:56.000000789Z",` +
 				`"path":"/system",` +

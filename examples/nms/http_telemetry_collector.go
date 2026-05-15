@@ -22,6 +22,7 @@ const (
 	defaultMaxEvents       = 64
 	nmsTelemetryCatalogV1  = "arca.nms.telemetry-catalog.v1"
 	nmsTelemetrySchemasV1  = "arca.nms.telemetry-schemas.v1"
+	nmsTelemetrySnapshotV1 = "arca.nms.telemetry-snapshot.v1"
 )
 
 var defaultSnapshotPaths = []string{"/system", "/interfaces", "/overlays/evpn"}
@@ -127,6 +128,10 @@ type telemetryPayloadField struct {
 }
 
 type telemetrySnapshotResponse struct {
+	SchemaVersion           string                   `json:"schema_version"`
+	Resource                string                   `json:"resource"`
+	EventSchemaVersion      string                   `json:"event_schema_version"`
+	Encoding                string                   `json:"encoding"`
 	DefaultPaths            []string                 `json:"default_paths"`
 	DefaultSampleIntervalMs uint32                   `json:"default_sample_interval_ms"`
 	MinSampleIntervalMs     uint32                   `json:"min_sample_interval_ms"`
@@ -305,8 +310,15 @@ func fetchNMS(ctx context.Context, client *http.Client, cfg collectorConfig) ([]
 	if err := decodeDiscoveryResponse(cfg, body); err != nil {
 		return nil, err
 	}
+	var snapshot telemetrySnapshotResponse
+	if cfg.mode == "snapshot" {
+		snapshot, err = decodeSnapshotResponse(body)
+		if err != nil {
+			return nil, err
+		}
+	}
 	if cfg.mode == "snapshot" && cfg.otlpEndpoint != "" {
-		if err := exportSnapshotToOTLP(ctx, client, cfg, body); err != nil {
+		if err := exportSnapshotToOTLP(ctx, client, cfg, snapshot); err != nil {
 			return nil, err
 		}
 	}
@@ -320,7 +332,7 @@ func decodeDiscoveryResponse(cfg collectorConfig, body []byte) error {
 		if err := json.Unmarshal(body, &catalog); err != nil {
 			return fmt.Errorf("decode telemetry catalog response: %w", err)
 		}
-		if err := validateNMSDiscoveryEnvelope("telemetry catalog", catalog.SchemaVersion, catalog.Resource, nmsTelemetryCatalogV1, "/api/nms/v1/telemetry/paths"); err != nil {
+		if err := validateNMSEnvelope("telemetry catalog", catalog.SchemaVersion, catalog.Resource, nmsTelemetryCatalogV1, "/api/nms/v1/telemetry/paths"); err != nil {
 			return err
 		}
 	case "schemas":
@@ -328,14 +340,25 @@ func decodeDiscoveryResponse(cfg collectorConfig, body []byte) error {
 		if err := json.Unmarshal(body, &schemas); err != nil {
 			return fmt.Errorf("decode telemetry schemas response: %w", err)
 		}
-		if err := validateNMSDiscoveryEnvelope("telemetry schemas", schemas.SchemaVersion, schemas.Resource, nmsTelemetrySchemasV1, "/api/nms/v1/telemetry/schemas"); err != nil {
+		if err := validateNMSEnvelope("telemetry schemas", schemas.SchemaVersion, schemas.Resource, nmsTelemetrySchemasV1, "/api/nms/v1/telemetry/schemas"); err != nil {
 			return err
 		}
 	}
 	return nil
 }
 
-func validateNMSDiscoveryEnvelope(kind, schemaVersion, resource, wantSchemaVersion, wantResource string) error {
+func decodeSnapshotResponse(body []byte) (telemetrySnapshotResponse, error) {
+	var snapshot telemetrySnapshotResponse
+	if err := json.Unmarshal(body, &snapshot); err != nil {
+		return snapshot, fmt.Errorf("decode telemetry snapshot response: %w", err)
+	}
+	if err := validateNMSEnvelope("telemetry snapshot", snapshot.SchemaVersion, snapshot.Resource, nmsTelemetrySnapshotV1, "/api/nms/v1/telemetry/snapshot"); err != nil {
+		return snapshot, err
+	}
+	return snapshot, nil
+}
+
+func validateNMSEnvelope(kind, schemaVersion, resource, wantSchemaVersion, wantResource string) error {
 	if schemaVersion != wantSchemaVersion {
 		return fmt.Errorf("%s schema_version = %q, want %q", kind, schemaVersion, wantSchemaVersion)
 	}
@@ -369,11 +392,7 @@ func fetchEndpoint(ctx context.Context, client *http.Client, cfg collectorConfig
 	return body, nil
 }
 
-func exportSnapshotToOTLP(ctx context.Context, client *http.Client, cfg collectorConfig, snapshotBody []byte) error {
-	var snapshot telemetrySnapshotResponse
-	if err := json.Unmarshal(snapshotBody, &snapshot); err != nil {
-		return fmt.Errorf("decode telemetry snapshot for OTLP export: %w", err)
-	}
+func exportSnapshotToOTLP(ctx context.Context, client *http.Client, cfg collectorConfig, snapshot telemetrySnapshotResponse) error {
 	request := buildOTLPLogsRequest(cfg, snapshot.Events)
 	body, err := json.Marshal(request)
 	if err != nil {
