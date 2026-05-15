@@ -38,15 +38,15 @@ var (
 	defaultSnapshotPaths = []string{"/system", "/interfaces", "/overlays/evpn"}
 	telemetryPathHints   = map[string]telemetryPathHint{
 		"/system":                  {cardinality: "single", payloadSchema: "arca.telemetry.system.v1"},
-		"/config/running":          {cardinality: "single", payloadSchema: "arca.telemetry.config.running.v1"},
+		"/config/running":          {cardinality: "single", payloadSchema: "arca.telemetry.config.running.v1", aliases: []string{"/running", "/config"}},
 		"/interfaces":              {cardinality: "per-interface", payloadSchema: "arca.telemetry.interfaces.v1"},
 		"/routes":                  {cardinality: "per-route", payloadSchema: "arca.telemetry.routes.v1"},
-		"/routing/bgp/neighbors":   {cardinality: "per-neighbor", payloadSchema: "arca.telemetry.routing.bgp.neighbors.v1"},
-		"/routing/ospf/neighbors":  {cardinality: "per-neighbor", payloadSchema: "arca.telemetry.routing.ospf.neighbors.v1"},
-		"/routing/ospf3/neighbors": {cardinality: "per-neighbor", payloadSchema: "arca.telemetry.routing.ospf3.neighbors.v1"},
+		"/routing/bgp/neighbors":   {cardinality: "per-neighbor", payloadSchema: "arca.telemetry.routing.bgp.neighbors.v1", aliases: []string{"/bgp", "/bgp/neighbors"}},
+		"/routing/ospf/neighbors":  {cardinality: "per-neighbor", payloadSchema: "arca.telemetry.routing.ospf.neighbors.v1", aliases: []string{"/ospf", "/ospf/neighbors"}},
+		"/routing/ospf3/neighbors": {cardinality: "per-neighbor", payloadSchema: "arca.telemetry.routing.ospf3.neighbors.v1", aliases: []string{"/ospf3", "/ospf3/neighbors"}},
 		"/routing-instances":       {cardinality: "per-instance", payloadSchema: "arca.telemetry.routing.instances.v1"},
-		"/overlays/evpn":           {cardinality: "per-vni", payloadSchema: "arca.telemetry.overlays.evpn.v1"},
-		"/class-of-service":        {cardinality: "per-intent-object", payloadSchema: "arca.telemetry.class_of_service.v1"},
+		"/overlays/evpn":           {cardinality: "per-vni", payloadSchema: "arca.telemetry.overlays.evpn.v1", aliases: []string{"/evpn", "/overlay/evpn"}},
+		"/class-of-service":        {cardinality: "per-intent-object", payloadSchema: "arca.telemetry.class_of_service.v1", aliases: []string{"/cos"}},
 		"/bfd":                     {cardinality: "per-peer", payloadSchema: "arca.telemetry.bfd.v1"},
 		"/lcp":                     {cardinality: "single", payloadSchema: "arca.telemetry.lcp.v1"},
 		"/ha":                      {cardinality: "single", payloadSchema: "arca.telemetry.ha.v1"},
@@ -56,6 +56,7 @@ var (
 type telemetryPathHint struct {
 	cardinality   string
 	payloadSchema string
+	aliases       []string
 }
 
 type collectorConfig struct {
@@ -1697,6 +1698,9 @@ func validateTelemetryPathMetadata(kind, path, cardinality, payloadSchema string
 			return err
 		}
 	}
+	if err := validateTelemetryPathAliases(kind, path, aliases); err != nil {
+		return err
+	}
 	return nil
 }
 
@@ -1748,6 +1752,28 @@ func validateTelemetryPathHint(kind, path, cardinality, payloadSchema string) er
 	}
 	if payloadSchema != hint.payloadSchema {
 		return fmt.Errorf("%s payload_schema = %q, want %q for path %q", kind, payloadSchema, hint.payloadSchema, normalizedPath)
+	}
+	return nil
+}
+
+func validateTelemetryPathAliases(kind, path string, aliases []string) error {
+	normalizedPath := normalizeCatalogPath(path)
+	hint, ok := telemetryPathHints[normalizedPath]
+	if !ok {
+		return fmt.Errorf("%s path = %q, want supported telemetry path", kind, path)
+	}
+	allowedAliases := make(map[string]struct{}, len(hint.aliases))
+	for _, alias := range hint.aliases {
+		allowedAliases[normalizeCatalogPath(alias)] = struct{}{}
+	}
+	for i, alias := range aliases {
+		normalizedAlias := normalizeCatalogPath(alias)
+		if normalizedAlias == normalizedPath {
+			continue
+		}
+		if _, ok := allowedAliases[normalizedAlias]; !ok {
+			return fmt.Errorf("%s aliases[%d] = %q, want supported alias for path %q", kind, i, alias, normalizedPath)
+		}
 	}
 	return nil
 }
