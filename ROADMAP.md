@@ -31,7 +31,7 @@ Focus: expand the hardened unified daemon into higher-level router features.
   - Bound QoS profile visibility in interface operational state
   - VPP RX/TX queue placement telemetry for managed interfaces
   - Class-of-service intent status through CLI, Web UI, Prometheus, SNMP, and Grafana
-  - Scheduler and policer enforcement deferred to v0.8 until supported VPP binapi coverage is available
+  - Scheduler and policer enforcement deferred to v0.8 capability detection and fallback until supported VPP binapi coverage is available
 - **Observability services**
   - Config-driven NETCONF listen port from `security netconf ssh port`
   - Live managed VPP interface status and counters in NETCONF `<get>`
@@ -63,9 +63,9 @@ Focus: close common router feature gaps before adding more advanced overlays.
   - CLI, gRPC, and NETCONF configuration paths
   - Operational state and failure counters
 
-## v0.8.x - Overlay and Streaming Telemetry
+## v0.8.x - Overlay and Streaming Telemetry (implementation complete)
 
-Focus: add data-center overlay support and richer external observability.
+Focus: deliver data-center overlay support and richer external observability.
 
 - **EVPN / VXLAN**
   - L2/L3 VNI configuration model with CLI, validation, diff, and NETCONF/YANG coverage
@@ -77,10 +77,10 @@ Focus: add data-center overlay support and richer external observability.
   - OpenTelemetry OTLP/HTTP snapshot exporter example
   - Expanded stable event schemas for additional dataplane and protocol state changes
 - **QoS dataplane enforcement**
-  - VPP scheduler and policer capability detection
-  - Queue scheduler and policer apply support
-  - Operational QoS counters
-  - Version-specific fallback and diagnostics
+  - VPP scheduler, policer, and counter capability detection
+  - Interface metadata binding for output QoS policy intent when scheduler/policer services are unavailable
+  - Operational QoS counter visibility through interface telemetry where VPP stats expose them
+  - Version-specific fallback and diagnostics for the VPP 24.10 binapi surface
 - **NMS integration**
   - Stable operational API shape for external systems
   - Telemetry payload schema registry for collector validation and routing
