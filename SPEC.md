@@ -1035,7 +1035,7 @@ It includes daemon, NETCONF, config sync, HA, FRR VRRP, EVPN/VXLAN overlay inten
 
 ### gRPC Telemetry Stream
 
-The internal Unix socket gRPC API includes `TelemetryService.SubscribeTelemetry` for structured streaming telemetry. Events use the `arca.telemetry.v1` envelope with `sequence`, `timestamp`, `path`, `event_type`, `encoding`, and `json_payload`; payloads are JSON. Subscriptions can select paths, set a sample interval, or request a one-shot snapshot. Empty path selection defaults to `/system` and `/config/running`.
+The internal Unix socket gRPC API includes `TelemetryService.SubscribeTelemetry` for structured streaming telemetry. Events use the `arca.telemetry.v1` envelope with `sequence`, `timestamp`, `path`, `event_type`, `encoding`, `json_payload`, and `payload_bytes`; payloads are JSON. Subscriptions can select paths, set a sample interval, or request a one-shot snapshot. Empty path selection defaults to `/system` and `/config/running`.
 
 Supported paths are `/system`, `/config/running`, `/interfaces`, `/routes`, `/routing/bgp/neighbors`, `/routing/ospf/neighbors`, `/routing/ospf3/neighbors`, `/routing-instances`, `/overlays/evpn`, `/class-of-service`, `/bfd`, `/lcp`, and `/ha`. The server writes events synchronously to the gRPC stream, so gRPC flow control provides the backpressure boundary and the daemon does not keep unbounded per-subscriber event buffers.
 

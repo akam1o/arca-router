@@ -1470,7 +1470,7 @@ func (s metricsSource) collectNMSTelemetrySnapshot(ctx context.Context, opts nms
 	var events []nbgrpc.TelemetryEvent
 	payloadBytes := 0
 	err := s.telemetryAPI.SubscribeTelemetry(ctx, opts.paths, 0, true, func(event nbgrpc.TelemetryEvent) error {
-		payloadBytes += len(event.JSONPayload)
+		payloadBytes += telemetryEventPayloadBytes(event)
 		if payloadBytes > opts.maxPayloadBytes {
 			return fmt.Errorf("%w: %d bytes exceeds max_payload_bytes %d", errNMSTelemetrySnapshotTooLarge, payloadBytes, opts.maxPayloadBytes)
 		}
@@ -1553,13 +1553,20 @@ func newNMSTelemetrySnapshotEvent(event nbgrpc.TelemetryEvent) nmsTelemetrySnaps
 		EventType:     event.EventType,
 		Encoding:      event.Encoding,
 		SchemaVersion: event.SchemaVersion,
-		PayloadBytes:  len(event.JSONPayload),
+		PayloadBytes:  telemetryEventPayloadBytes(event),
 		Payload:       telemetrySnapshotPayload(event.JSONPayload),
 	}
 	if !event.Timestamp.IsZero() {
 		output.Timestamp = event.Timestamp.UTC().Format(time.RFC3339Nano)
 	}
 	return output
+}
+
+func telemetryEventPayloadBytes(event nbgrpc.TelemetryEvent) int {
+	if event.PayloadBytes > 0 {
+		return event.PayloadBytes
+	}
+	return len(event.JSONPayload)
 }
 
 func telemetrySnapshotPayload(payload string) json.RawMessage {

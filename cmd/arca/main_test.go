@@ -955,6 +955,20 @@ func TestOneShotShowTelemetryReturnsSuccess(t *testing.T) {
 	}
 }
 
+func TestTelemetryPayloadBytes(t *testing.T) {
+	event := &grpcclient.TelemetryEvent{
+		JSONPayload:  `{"hostname":"router1"}`,
+		PayloadBytes: 99,
+	}
+	if got := telemetryPayloadBytes(event); got != 99 {
+		t.Fatalf("telemetryPayloadBytes() = %d, want explicit payload bytes", got)
+	}
+	event.PayloadBytes = 0
+	if got, want := telemetryPayloadBytes(event), len(event.JSONPayload); got != want {
+		t.Fatalf("telemetryPayloadBytes() = %d, want fallback payload length %d", got, want)
+	}
+}
+
 func TestShowEVPNRejectsInvalidPayload(t *testing.T) {
 	client := &fakeInteractiveClient{telemetryEvents: []*grpcclient.TelemetryEvent{
 		{

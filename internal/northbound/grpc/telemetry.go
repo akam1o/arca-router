@@ -86,6 +86,7 @@ type TelemetryEvent struct {
 	Encoding      string
 	JSONPayload   string
 	SchemaVersion string
+	PayloadBytes  int
 }
 
 // TelemetryEventSchemaVersion returns the current structured telemetry event schema version.
@@ -217,6 +218,7 @@ func (s *Server) collectTelemetryEvents(ctx context.Context, paths []string, now
 			rawPayload, _ = json.Marshal(telemetryErrorPayload{Error: err.Error()})
 		}
 
+		jsonPayload := string(rawPayload)
 		*sequence = *sequence + 1
 		events = append(events, TelemetryEvent{
 			Sequence:      *sequence,
@@ -224,8 +226,9 @@ func (s *Server) collectTelemetryEvents(ctx context.Context, paths []string, now
 			Path:          path,
 			EventType:     eventType,
 			Encoding:      telemetryEncodingJSON,
-			JSONPayload:   string(rawPayload),
+			JSONPayload:   jsonPayload,
 			SchemaVersion: telemetrySchemaVersion,
+			PayloadBytes:  len(jsonPayload),
 		})
 	}
 	return events

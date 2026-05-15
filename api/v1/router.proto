@@ -507,4 +507,5 @@ message TelemetryEvent {
   string encoding = 5;
   string json_payload = 6;
   string schema_version = 7;
+  uint64 payload_bytes = 8;
 }

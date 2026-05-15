@@ -240,6 +240,9 @@ func TestClientServerConfigFlow(t *testing.T) {
 	if payload["version"] != float64(2) || !strings.Contains(event.JSONPayload, "router2") {
 		t.Fatalf("telemetry payload = %s, want running config version 2", event.JSONPayload)
 	}
+	if event.PayloadBytes != len(event.JSONPayload) {
+		t.Fatalf("telemetry payload bytes = %d, want %d", event.PayloadBytes, len(event.JSONPayload))
+	}
 	if _, err := stream.Recv(); err != io.EOF {
 		t.Fatalf("TelemetryStream.Recv() after once = %v, want EOF", err)
 	}
@@ -272,6 +275,9 @@ func TestSubscribeTelemetrySelectedSnapshots(t *testing.T) {
 	}
 	if !strings.Contains(events[0].JSONPayload, "router1") || !strings.Contains(events[1].JSONPayload, "router1") {
 		t.Fatalf("telemetry payloads = %#v, want hostname/config content", events)
+	}
+	if events[0].PayloadBytes != len(events[0].JSONPayload) || events[1].PayloadBytes != len(events[1].JSONPayload) {
+		t.Fatalf("payload bytes = %d/%d, want JSON payload lengths", events[0].PayloadBytes, events[1].PayloadBytes)
 	}
 }
 
