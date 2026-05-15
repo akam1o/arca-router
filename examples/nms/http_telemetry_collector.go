@@ -30,6 +30,8 @@ const (
 	telemetryEventError    = "error"
 	nmsStatusCoSIntentOnly = "intent-only"
 	nmsStatusCoSDisabled   = "not configured"
+	nmsStatusBackendSQLite = "sqlite"
+	nmsStatusBackendEtcd   = "etcd"
 )
 
 var defaultSnapshotPaths = []string{"/system", "/interfaces", "/overlays/evpn"}
@@ -554,6 +556,9 @@ func validateNMSStatusSections(object map[string]json.RawMessage, generatedAt ti
 	if err := validateNMSStatusStringArrayFieldOptional(datastore, "etcd_endpoints", "datastore.etcd_endpoints"); err != nil {
 		return err
 	}
+	if err := validateNMSStatusDatastoreConsistency(datastore); err != nil {
+		return err
+	}
 
 	configSync, err := validateNMSStatusObjectField(object, "config_sync")
 	if err != nil {
@@ -1072,6 +1077,30 @@ func validateNMSStatusCoSEnforcementStatus(status string) error {
 	default:
 		return fmt.Errorf("nms status data class_of_service.enforcement_status = %q, want %s or %s", status, nmsStatusCoSDisabled, nmsStatusCoSIntentOnly)
 	}
+}
+
+func validateNMSStatusDatastoreConsistency(datastore map[string]json.RawMessage) error {
+	backend, err := nmsStatusStringFieldValuePath(datastore, "backend", "datastore.backend")
+	if err != nil {
+		return err
+	}
+	endpoints, err := nmsStatusStringArrayFieldLengthOptional(datastore, "etcd_endpoints", "datastore.etcd_endpoints")
+	if err != nil {
+		return err
+	}
+	switch strings.TrimSpace(backend) {
+	case nmsStatusBackendSQLite:
+		if endpoints > 0 {
+			return fmt.Errorf("nms status data datastore.etcd_endpoints must be empty when datastore.backend = %q", nmsStatusBackendSQLite)
+		}
+	case nmsStatusBackendEtcd:
+		if endpoints == 0 {
+			return fmt.Errorf("nms status data datastore.etcd_endpoints must be non-empty when datastore.backend = %q", nmsStatusBackendEtcd)
+		}
+	default:
+		return fmt.Errorf("nms status data datastore.backend = %q, want %s or %s", backend, nmsStatusBackendSQLite, nmsStatusBackendEtcd)
+	}
+	return nil
 }
 
 func validateNMSStatusConfigSyncConsistency(configSync map[string]json.RawMessage) error {

@@ -157,7 +157,7 @@ func TestDecodeStatusResponseRejectsInvalidEnvelope(t *testing.T) {
 			"uptime_seconds":   120.5,
 			"config_version":   uint64(77),
 			"running_hostname": "edge01",
-			"datastore":        map[string]any{"backend": "memory", "etcd_endpoints": []string{"http://127.0.0.1:2379"}},
+			"datastore":        map[string]any{"backend": "sqlite", "etcd_endpoints": []string{}},
 			"config_sync": map[string]any{
 				"enabled":           false,
 				"healthy":           false,
@@ -299,6 +299,24 @@ func TestDecodeStatusResponseRejectsInvalidEnvelope(t *testing.T) {
 	err = decodeStatusResponse(statusEnvelope(data))
 	if err == nil || !strings.Contains(err.Error(), "datastore") {
 		t.Fatalf("decodeStatusResponse() error = %v, want datastore mismatch", err)
+	}
+	data = validStatusData()
+	data["datastore"].(map[string]any)["backend"] = "memory"
+	err = decodeStatusResponse(statusEnvelope(data))
+	if err == nil || !strings.Contains(err.Error(), "datastore.backend") {
+		t.Fatalf("decodeStatusResponse() error = %v, want datastore.backend value mismatch", err)
+	}
+	data = validStatusData()
+	data["datastore"].(map[string]any)["etcd_endpoints"] = []string{"http://127.0.0.1:2379"}
+	err = decodeStatusResponse(statusEnvelope(data))
+	if err == nil || !strings.Contains(err.Error(), "datastore.etcd_endpoints") {
+		t.Fatalf("decodeStatusResponse() error = %v, want sqlite datastore endpoint mismatch", err)
+	}
+	data = validStatusData()
+	data["datastore"].(map[string]any)["backend"] = "etcd"
+	err = decodeStatusResponse(statusEnvelope(data))
+	if err == nil || !strings.Contains(err.Error(), "datastore.etcd_endpoints") {
+		t.Fatalf("decodeStatusResponse() error = %v, want etcd datastore endpoint mismatch", err)
 	}
 	data = validStatusData()
 	data["config_sync"].(map[string]any)["enabled"] = "false"

@@ -2,6 +2,7 @@
 
 ## v0.8.x - Overlay and Streaming Telemetry (current)
 
+- **NMS collector status datastore validation**: the example HTTP collector now validates operational status datastore backend values and etcd endpoint consistency before printing status responses
 - **NMS collector status sync validation**: the example HTTP collector now validates config-sync health/timestamp ordering and cluster etcd-sync endpoint consistency before printing operational status responses
 - **NMS collector status timing validation**: the example HTTP collector now rejects operational status section timestamps that are later than the status envelope `generated_at`
 - **NMS collector status relationship validation**: the example HTTP collector now validates HA and CoS boolean, state, and counter relationships before printing operational status responses
