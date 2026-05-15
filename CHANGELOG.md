@@ -2,6 +2,7 @@
 
 ## v0.8.x - Overlay and Streaming Telemetry (current)
 
+- **NMS telemetry schema registry**: `/api/nms/v1/telemetry/schemas` and the example HTTP collector expose per-path payload schema IDs and stable top-level JSON fields so collectors can validate and route snapshot payloads before polling or subscribing
 - **NMS OTLP snapshot exporter**: the example HTTP collector can forward bounded telemetry snapshot events to an OpenTelemetry OTLP/HTTP logs endpoint as JSON log records
 - **NMS snapshot event guardrail**: `/api/nms/v1/telemetry/snapshot` and the example HTTP collector now support `max_events` to bound one-shot telemetry event fan-out alongside timeout and payload byte budgets
 - **NETCONF session scale validation**: NETCONF session counting now has regression coverage for hundreds of active sessions, numeric session lookup, CloseAll cleanup, and lock release accounting

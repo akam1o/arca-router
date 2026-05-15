@@ -33,6 +33,7 @@ const webConfigEditBodyLimit = 1 << 20
 
 const nmsOperationalStatusSchemaVersion = "arca.nms.operational.v1"
 const nmsTelemetryCatalogSchemaVersion = "arca.nms.telemetry-catalog.v1"
+const nmsTelemetrySchemasSchemaVersion = "arca.nms.telemetry-schemas.v1"
 const nmsTelemetrySnapshotSchemaVersion = "arca.nms.telemetry-snapshot.v1"
 
 const (
@@ -104,6 +105,15 @@ type nmsTelemetryCatalogResponse struct {
 	Paths                   []nmsTelemetryPath `json:"paths"`
 }
 
+type nmsTelemetrySchemasResponse struct {
+	SchemaVersion      string                      `json:"schema_version"`
+	GeneratedAt        string                      `json:"generated_at"`
+	Resource           string                      `json:"resource"`
+	EventSchemaVersion string                      `json:"event_schema_version"`
+	Encoding           string                      `json:"encoding"`
+	Schemas            []nmsTelemetryPayloadSchema `json:"schemas"`
+}
+
 type nmsTelemetrySnapshotResponse struct {
 	SchemaVersion      string                      `json:"schema_version"`
 	GeneratedAt        string                      `json:"generated_at"`
@@ -136,6 +146,22 @@ type nmsTelemetryPath struct {
 	PayloadSchema string   `json:"payload_schema"`
 	Aliases       []string `json:"aliases,omitempty"`
 	Default       bool     `json:"default"`
+}
+
+type nmsTelemetryPayloadSchema struct {
+	Path          string                     `json:"path"`
+	Description   string                     `json:"description"`
+	Cardinality   string                     `json:"cardinality"`
+	PayloadSchema string                     `json:"payload_schema"`
+	Aliases       []string                   `json:"aliases,omitempty"`
+	Default       bool                       `json:"default"`
+	Fields        []nmsTelemetryPayloadField `json:"fields"`
+}
+
+type nmsTelemetryPayloadField struct {
+	Name        string `json:"name"`
+	Type        string `json:"type"`
+	Description string `json:"description"`
 }
 
 type nmsTelemetryCatalogFilters struct {
@@ -722,7 +748,7 @@ var webIndexTemplate = template.Must(template.New("web-index").Parse(`<!doctype 
 
     <footer>
       <span>Generated {{.GeneratedAt}}</span>
-      <span>/api/status | /api/nms/v1/status | /api/nms/v1/telemetry/paths | /api/nms/v1/telemetry/snapshot | /api/config | /api/config/history | /api/config/validate | /api/config/commit</span>
+      <span>/api/status | /api/nms/v1/status | /api/nms/v1/telemetry/paths | /api/nms/v1/telemetry/schemas | /api/nms/v1/telemetry/snapshot | /api/config | /api/config/history | /api/config/validate | /api/config/commit</span>
     </footer>
   </main>
   <script>
@@ -924,6 +950,7 @@ func newWebMux(source metricsSource) *http.ServeMux {
 	mux.HandleFunc("/api/status", source.handleWebStatus)
 	mux.HandleFunc("/api/nms/v1/status", source.handleNMSStatus)
 	mux.HandleFunc("/api/nms/v1/telemetry/paths", source.handleNMSTelemetryCatalog)
+	mux.HandleFunc("/api/nms/v1/telemetry/schemas", source.handleNMSTelemetrySchemas)
 	mux.HandleFunc("/api/nms/v1/telemetry/snapshot", source.handleNMSTelemetrySnapshot)
 	mux.HandleFunc("/api/config/validate", source.handleWebConfigValidate)
 	return mux
@@ -964,6 +991,17 @@ func (s metricsSource) handleNMSTelemetryCatalog(w http.ResponseWriter, r *http.
 		return
 	}
 	writeWebJSON(w, http.StatusOK, newNMSTelemetryCatalogResponse(time.Now(), nmsTelemetryCatalogFiltersFromRequest(r)))
+}
+
+func (s metricsSource) handleNMSTelemetrySchemas(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	if !s.authorizeWebRead(w, r) {
+		return
+	}
+	writeWebJSON(w, http.StatusOK, newNMSTelemetrySchemasResponse(time.Now(), nmsTelemetryCatalogFiltersFromRequest(r)))
 }
 
 func (s metricsSource) handleNMSTelemetrySnapshot(w http.ResponseWriter, r *http.Request) {
@@ -1490,6 +1528,44 @@ func newNMSTelemetryCatalogResponse(now time.Time, filters nmsTelemetryCatalogFi
 		MinSampleIntervalMs:     catalog.MinSampleIntervalMs,
 		MaxSampleIntervalMs:     catalog.MaxSampleIntervalMs,
 		Paths:                   paths,
+	}
+}
+
+func newNMSTelemetrySchemasResponse(now time.Time, filters nmsTelemetryCatalogFilters) nmsTelemetrySchemasResponse {
+	catalog := nbgrpc.NewFilteredTelemetryPayloadSchemaCatalog(nbgrpc.TelemetryCatalogFilter{
+		Paths:          filters.paths,
+		Cardinalities:  filters.cardinalities,
+		PayloadSchemas: filters.payloadSchemas,
+		Encodings:      filters.encodings,
+		DefaultOnly:    filters.defaultOnly,
+	})
+	schemas := make([]nmsTelemetryPayloadSchema, 0, len(catalog))
+	for _, info := range catalog {
+		fields := make([]nmsTelemetryPayloadField, 0, len(info.Fields))
+		for _, field := range info.Fields {
+			fields = append(fields, nmsTelemetryPayloadField{
+				Name:        field.Name,
+				Type:        field.Type,
+				Description: field.Description,
+			})
+		}
+		schemas = append(schemas, nmsTelemetryPayloadSchema{
+			Path:          info.Path,
+			Description:   info.Description,
+			Cardinality:   info.Cardinality,
+			PayloadSchema: info.PayloadSchema,
+			Aliases:       append([]string(nil), info.Aliases...),
+			Default:       info.Default,
+			Fields:        fields,
+		})
+	}
+	return nmsTelemetrySchemasResponse{
+		SchemaVersion:      nmsTelemetrySchemasSchemaVersion,
+		GeneratedAt:        formatWebOptionalTime(now),
+		Resource:           "/api/nms/v1/telemetry/schemas",
+		EventSchemaVersion: nbgrpc.TelemetryEventSchemaVersion(),
+		Encoding:           nbgrpc.TelemetryEncoding(),
+		Schemas:            schemas,
 	}
 }
 

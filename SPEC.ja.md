@@ -1126,9 +1126,11 @@ Local operator は `arca show telemetry path /system path /interfaces` で同じ
 
 Collector discovery 用に、Web API は `GET /api/nms/v1/telemetry/paths` も公開します。Response は `schema_version` に `arca.nms.telemetry-catalog.v1`、`event_schema_version`、`encoding`、`default_paths`、millisecond 単位の default/min/max sample interval hint、description、cardinality hint、payload schema ID、accepted alias、default membership を含む順序付き telemetry `paths` catalog を持つ stable JSON envelope です。Repeated `path`、`cardinality`、`payload_schema`、`encoding` query parameter で返却 catalog を絞り込めます。`default=true` は default subscription path だけを返します。`path` 値は canonical path または advertise された alias に一致します。例えば `?path=/evpn` は EVPN path を返し、`?cardinality=per-route&payload_schema=arca.telemetry.routes.v1&encoding=json` は JSON route snapshot を返します。
 
+Stable payload field metadata が必要な collector 向けに、Web API は `GET /api/nms/v1/telemetry/schemas` も公開します。Response は `schema_version` に `arca.nms.telemetry-schemas.v1`、`event_schema_version`、`encoding`、telemetry path ごとの順序付き `schemas` を持つ stable JSON envelope です。各 schema entry は path description、cardinality hint、payload schema ID、accepted alias、default membership、top-level JSON `fields` の field name、type hint、description を含みます。この endpoint は `/api/nms/v1/telemetry/paths` と同じ repeated `path`、`cardinality`、`payload_schema`、`encoding`、`default=true` filter を受け付けます。
+
 HTTP-only collector は `GET /api/nms/v1/telemetry/snapshot` で one-shot telemetry を取得できます。Endpoint は `?path=/system&path=/interfaces` のように repeated `path` query parameter を受け取り、`path` を省略した場合は gRPC telemetry stream と同じ default path set を使用します。`timeout` は Go duration string として受け取り、default は `5s`、最大は `30s` です。`max_payload_bytes` は default `8388608`、最大 `67108864`、`max_events` は default `64`、最大 `1024` で、`/routes` のような大きい path や予期しない event fan-out の応答を bounded にします。Response は `schema_version` に `arca.nms.telemetry-snapshot.v1`、`event_schema_version`、`encoding`、配信された `paths`、total `payload_bytes`、`max_payload_bytes`、`max_events`、`timeout_ms`、gRPC stream と同じ structured telemetry event field、event ごとの `payload_bytes`、JSON payload を持つ `events` を含む stable JSON envelope です。
 
-`examples/nms` には status、telemetry catalog、bounded telemetry snapshot endpoint 用の標準ライブラリ HTTP collector example を含めています。この example は catalog sample interval hint を decode し、telemetry catalog に default-only、指定 path または alias、cardinality、payload schema ID、payload encoding の include filter を渡して snapshot path を導出でき、snapshot 要求前に指定 path または alias、`per-route` など指定した cardinality、`arca.telemetry.routes.v1` など指定した payload schema ID、payload encoding を除外することもできます。Exclude filter は catalog alias も使うため、`evpn` として選択された snapshot path でも `/overlays/evpn` の metadata で filter できます。Snapshot mode で `-otlp-endpoint` を指定すると、collector は snapshot event を OTLP/HTTP JSON log record として `/v1/logs` などの OpenTelemetry logs endpoint へ送信し、`service.name` には `-otlp-service-name` の値を使用します。
+`examples/nms` には status、telemetry catalog、telemetry payload schema registry、bounded telemetry snapshot endpoint 用の標準ライブラリ HTTP collector example を含めています。この example は catalog sample interval hint を decode し、telemetry catalog に default-only、指定 path または alias、cardinality、payload schema ID、payload encoding の include filter を渡して snapshot path を導出でき、schema registry にも同じ include filter を渡して取得できます。さらに snapshot 要求前に指定 path または alias、`per-route` など指定した cardinality、`arca.telemetry.routes.v1` など指定した payload schema ID、payload encoding を除外することもできます。Exclude filter は catalog alias も使うため、`evpn` として選択された snapshot path でも `/overlays/evpn` の metadata で filter できます。Snapshot mode で `-otlp-endpoint` を指定すると、collector は snapshot event を OTLP/HTTP JSON log record として `/v1/logs` などの OpenTelemetry logs endpoint へ送信し、`service.name` には `-otlp-service-name` の値を使用します。
 
 ### Web UI
 
@@ -1154,6 +1156,7 @@ Endpoints:
 - `GET /api/status`
 - `GET /api/nms/v1/status`
 - `GET /api/nms/v1/telemetry/paths`
+- `GET /api/nms/v1/telemetry/schemas`
 - `GET /api/nms/v1/telemetry/snapshot`
 - `POST /api/config/validate`
 - `POST /api/config/commit`
@@ -1161,6 +1164,7 @@ Endpoints:
 `/api/status` は build metadata、uptime、running config version、datastore backend、cluster sync state、EVPN/VXLAN overlay intent count、VPP QoS capability diagnostics を含む class-of-service intent state、per-group detail を含む FRR VRRP operational state、HA convergence state、VPP LCP reconciliation state、NETCONF counters を返します。
 `/api/nms/v1/status` は同じ read-only status を external NMS collector 用の `arca.nms.operational.v1` schema envelope で包んで返します。
 `/api/nms/v1/telemetry/paths` は structured telemetry path catalog を collector discovery 用の `arca.nms.telemetry-catalog.v1` schema envelope で包んで返します。
+`/api/nms/v1/telemetry/schemas` は structured telemetry payload schema registry を collector validation と routing 用の `arca.nms.telemetry-schemas.v1` schema envelope で包んで返します。
 `/api/nms/v1/telemetry/snapshot` は one-shot structured telemetry event を HTTP-only collector 用の `arca.nms.telemetry-snapshot.v1` schema envelope で包み、configurable な timeout、payload byte、event count guardrail を強制します。
 `/api/config` は running configuration を set-command text と running config version として返します。dashboard でも同じ running configuration を browser editor に表示します。
 `/api/config/history` は recent configuration commits を返し、dashboard の commit history panel で使用します。

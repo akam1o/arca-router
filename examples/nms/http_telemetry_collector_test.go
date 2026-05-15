@@ -494,13 +494,14 @@ func TestResolveSnapshotPathsRejectsEmptyFilteredSet(t *testing.T) {
 	}
 }
 
-func TestCollectorEndpointURLForStatusAndCatalog(t *testing.T) {
+func TestCollectorEndpointURLForDiscoveryModes(t *testing.T) {
 	tests := []struct {
 		mode string
 		want string
 	}{
 		{mode: "status", want: "http://127.0.0.1:8080/api/nms/v1/status"},
 		{mode: "catalog", want: "http://127.0.0.1:8080/api/nms/v1/telemetry/paths"},
+		{mode: "schemas", want: "http://127.0.0.1:8080/api/nms/v1/telemetry/schemas"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.mode, func(t *testing.T) {
@@ -516,6 +517,48 @@ func TestCollectorEndpointURLForStatusAndCatalog(t *testing.T) {
 				t.Fatalf("collectorEndpointURL() = %q, want %q", got, tt.want)
 			}
 		})
+	}
+}
+
+func TestCollectorEndpointURLForSchemaFilters(t *testing.T) {
+	cfg, err := parseCollectorConfig([]string{
+		"-mode", "schemas",
+		"-base-url", "http://router.example:8080/arca",
+		"-include-default",
+		"-include-path", "evpn",
+		"-include-cardinality", "per-vni",
+		"-include-payload-schema", "arca.telemetry.overlays.evpn.v1",
+		"-include-encoding", "json",
+	})
+	if err != nil {
+		t.Fatalf("parseCollectorConfig() error = %v", err)
+	}
+	got, err := collectorEndpointURL(cfg)
+	if err != nil {
+		t.Fatalf("collectorEndpointURL() error = %v", err)
+	}
+	parsed, err := url.Parse(got)
+	if err != nil {
+		t.Fatalf("schema URL is invalid: %v", err)
+	}
+	if parsed.Scheme != "http" || parsed.Host != "router.example:8080" || parsed.Path != "/arca/api/nms/v1/telemetry/schemas" {
+		t.Fatalf("schema URL = %q, want endpoint under /arca", got)
+	}
+	query := parsed.Query()
+	if query.Get("default") != "true" {
+		t.Fatalf("default query = %#v, want true", query["default"])
+	}
+	if query.Get("path") != "evpn" {
+		t.Fatalf("path query = %#v, want evpn", query["path"])
+	}
+	if query.Get("cardinality") != "per-vni" {
+		t.Fatalf("cardinality query = %#v, want per-vni", query["cardinality"])
+	}
+	if query.Get("payload_schema") != "arca.telemetry.overlays.evpn.v1" {
+		t.Fatalf("payload_schema query = %#v, want EVPN schema", query["payload_schema"])
+	}
+	if query.Get("encoding") != "json" {
+		t.Fatalf("encoding query = %#v, want json", query["encoding"])
 	}
 }
 

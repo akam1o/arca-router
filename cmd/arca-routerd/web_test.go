@@ -435,6 +435,90 @@ func TestNMSTelemetryCatalogEndpointAcceptsDefaultFilter(t *testing.T) {
 	}
 }
 
+func TestNMSTelemetrySchemasEndpoint(t *testing.T) {
+	req := httptest.NewRequest(http.MethodGet, "/api/nms/v1/telemetry/schemas", nil)
+	rec := httptest.NewRecorder()
+	metricsSource{}.handleNMSTelemetrySchemas(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d", rec.Code, http.StatusOK)
+	}
+	var resp nmsTelemetrySchemasResponse
+	if err := json.NewDecoder(rec.Result().Body).Decode(&resp); err != nil {
+		t.Fatalf("Decode() error = %v", err)
+	}
+	if resp.SchemaVersion != nmsTelemetrySchemasSchemaVersion {
+		t.Fatalf("SchemaVersion = %q, want %q", resp.SchemaVersion, nmsTelemetrySchemasSchemaVersion)
+	}
+	if resp.Resource != "/api/nms/v1/telemetry/schemas" {
+		t.Fatalf("Resource = %q, want /api/nms/v1/telemetry/schemas", resp.Resource)
+	}
+	if resp.EventSchemaVersion != nbgrpc.TelemetryEventSchemaVersion() || resp.Encoding != nbgrpc.TelemetryEncoding() {
+		t.Fatalf("event schema/encoding = %q/%q, want %q/%q",
+			resp.EventSchemaVersion, resp.Encoding, nbgrpc.TelemetryEventSchemaVersion(), nbgrpc.TelemetryEncoding())
+	}
+	if len(resp.Schemas) == 0 {
+		t.Fatal("Schemas is empty, want telemetry payload schemas")
+	}
+	byPath := map[string]nmsTelemetryPayloadSchema{}
+	for _, schema := range resp.Schemas {
+		byPath[schema.Path] = schema
+	}
+	routes := byPath["/routes"]
+	if routes.PayloadSchema != "arca.telemetry.routes.v1" || routes.Cardinality != "per-route" ||
+		len(routes.Fields) != 1 || routes.Fields[0].Name != "routes" || routes.Fields[0].Type != "[]RouteInfo" {
+		t.Fatalf("/routes schema = %#v, want route payload field metadata", routes)
+	}
+	evpn := byPath["/overlays/evpn"]
+	if evpn.PayloadSchema != "arca.telemetry.overlays.evpn.v1" ||
+		len(evpn.Fields) != 1 || evpn.Fields[0].Name != "vnis" || evpn.Fields[0].Type != "[]EVPNVNI" {
+		t.Fatalf("/overlays/evpn schema = %#v, want EVPN VNI field metadata", evpn)
+	}
+	if cos := byPath["/class-of-service"]; len(cos.Fields) != 1 || cos.Fields[0].Name != "class_of_service" {
+		t.Fatalf("/class-of-service schema = %#v, want class_of_service field metadata", cos)
+	}
+}
+
+func TestNMSTelemetrySchemasEndpointFilters(t *testing.T) {
+	req := httptest.NewRequest(http.MethodGet, "/api/nms/v1/telemetry/schemas?path=evpn&payload_schema=arca.telemetry.overlays.evpn.v1&encoding=json", nil)
+	rec := httptest.NewRecorder()
+	metricsSource{}.handleNMSTelemetrySchemas(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d", rec.Code, http.StatusOK)
+	}
+	var resp nmsTelemetrySchemasResponse
+	if err := json.NewDecoder(rec.Result().Body).Decode(&resp); err != nil {
+		t.Fatalf("Decode() error = %v", err)
+	}
+	if len(resp.Schemas) != 1 || resp.Schemas[0].Path != "/overlays/evpn" {
+		t.Fatalf("filtered schemas = %#v, want only /overlays/evpn", resp.Schemas)
+	}
+	if len(resp.Schemas[0].Fields) != 1 || resp.Schemas[0].Fields[0].Name != "vnis" {
+		t.Fatalf("filtered schema fields = %#v, want EVPN VNI field", resp.Schemas[0].Fields)
+	}
+}
+
+func TestNMSTelemetrySchemasEndpointFiltersUnsupportedEncoding(t *testing.T) {
+	req := httptest.NewRequest(http.MethodGet, "/api/nms/v1/telemetry/schemas?encoding=protobuf", nil)
+	rec := httptest.NewRecorder()
+	metricsSource{}.handleNMSTelemetrySchemas(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d", rec.Code, http.StatusOK)
+	}
+	var resp nmsTelemetrySchemasResponse
+	if err := json.NewDecoder(rec.Result().Body).Decode(&resp); err != nil {
+		t.Fatalf("Decode() error = %v", err)
+	}
+	if resp.Encoding != nbgrpc.TelemetryEncoding() {
+		t.Fatalf("Encoding = %q, want %q", resp.Encoding, nbgrpc.TelemetryEncoding())
+	}
+	if len(resp.Schemas) != 0 {
+		t.Fatalf("filtered schemas = %#v, want none for unsupported encoding", resp.Schemas)
+	}
+}
+
 func TestNMSTelemetrySnapshotEndpoint(t *testing.T) {
 	telemetry := &webTelemetryTestAPI{events: []nbgrpc.TelemetryEvent{
 		{
@@ -797,6 +881,7 @@ func TestWebIndexEndpoint(t *testing.T) {
 		"/api/status",
 		"/api/nms/v1/status",
 		"/api/nms/v1/telemetry/paths",
+		"/api/nms/v1/telemetry/schemas",
 		"/api/nms/v1/telemetry/snapshot",
 		"/api/config",
 		"/api/config/history",

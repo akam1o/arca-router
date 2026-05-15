@@ -83,6 +83,7 @@ Focus: add data-center overlay support and richer external observability.
   - Version-specific fallback and diagnostics
 - **NMS integration**
   - Stable operational API shape for external systems
+  - Telemetry payload schema registry for collector validation and routing
   - Integration examples for collectors and dashboards
 - **Scale validation**
   - Route scale and telemetry cardinality regression coverage
