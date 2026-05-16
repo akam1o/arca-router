@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"strings"
 
 	"github.com/akam1o/arca-router/pkg/config"
 	dsstore "github.com/akam1o/arca-router/pkg/datastore"
@@ -235,7 +236,7 @@ func (s *Server) handleEditConfig(ctx context.Context, sess *Session, rpc *RPC) 
 
 	testOption := TestTestThenSet
 	if req.TestOption != nil {
-		testOption = *req.TestOption
+		testOption = TestOption(strings.TrimSpace(string(*req.TestOption)))
 		switch testOption {
 		case TestSet, TestTestThenSet, TestTestOnly:
 		default:
@@ -248,14 +249,15 @@ func (s *Server) handleEditConfig(ctx context.Context, sess *Session, rpc *RPC) 
 	}
 
 	if req.ErrorOption != nil {
-		switch *req.ErrorOption {
+		errorOption := ErrorOption(strings.TrimSpace(string(*req.ErrorOption)))
+		switch errorOption {
 		case ErrorStop, ErrorContinue, ErrorRollbackOnError:
 		default:
 			return NewErrorReply(rpc.MessageID,
 				NewRPCError(ErrorTypeProtocol, ErrorTagOperationNotSupported,
-					fmt.Sprintf("unsupported error-option: %s", *req.ErrorOption)).
+					fmt.Sprintf("unsupported error-option: %s", errorOption)).
 					WithPath("/rpc/edit-config/error-option").
-					WithBadElement(string(*req.ErrorOption)))
+					WithBadElement(string(errorOption)))
 		}
 	}
 
@@ -263,7 +265,7 @@ func (s *Server) handleEditConfig(ctx context.Context, sess *Session, rpc *RPC) 
 	// but default-operation=none is valid and applies no implicit changes.
 	defaultOp := DefaultOpMerge
 	if req.DefaultOperation != nil {
-		defaultOp = *req.DefaultOperation
+		defaultOp = DefaultOperation(strings.TrimSpace(string(*req.DefaultOperation)))
 		switch defaultOp {
 		case DefaultOpMerge, DefaultOpReplace, DefaultOpNone:
 		default:

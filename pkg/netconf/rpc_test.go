@@ -670,6 +670,12 @@ func TestFilterValidate(t *testing.T) {
 			wantErr: false,
 		},
 		{
+			name:    "xpath filter trims type",
+			filter:  &Filter{Type: "\n xpath \t", Select: "/interfaces"},
+			rpcName: "get-config",
+			wantErr: false,
+		},
+		{
 			name:    "xpath filter nested model path",
 			filter:  &Filter{Type: "xpath", Select: "/protocols/bgp/group/neighbor/peer-as"},
 			rpcName: "get-config",
@@ -774,6 +780,12 @@ func TestFilterValidate(t *testing.T) {
 		{
 			name:    "default to subtree",
 			filter:  &Filter{Content: []byte("<interfaces/>")},
+			rpcName: "get-config",
+			wantErr: false,
+		},
+		{
+			name:    "subtree filter trims type",
+			filter:  &Filter{Type: "\n subtree \t", Content: []byte("<interfaces/>")},
 			rpcName: "get-config",
 			wantErr: false,
 		},
