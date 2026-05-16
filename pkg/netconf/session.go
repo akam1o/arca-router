@@ -310,6 +310,9 @@ type Session = NETCONFSession
 func (s *NETCONFSession) AddLock(target string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if s.datastoreLocks == nil {
+		s.datastoreLocks = make(map[string]struct{})
+	}
 	s.datastoreLocks[target] = struct{}{}
 }
 
