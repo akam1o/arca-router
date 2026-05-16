@@ -184,6 +184,10 @@ func (s *Server) handleKillSession(ctx context.Context, sess *Session, rpc *RPC)
 		return NewErrorReply(rpc.MessageID, NewRPCError(ErrorTypeProtocol, ErrorTagInvalidValue, "cannot kill own session"))
 	}
 
+	if s.sessions == nil {
+		return NewErrorReply(rpc.MessageID, ErrOperationFailed("session manager unavailable"))
+	}
+
 	// Kill the target session by numeric ID
 	if err := s.sessions.CloseSessionByNumericID(req.SessionID); err != nil {
 		log.Printf("[NETCONF] Failed to kill session %d: %v", req.SessionID, err)
@@ -201,6 +205,9 @@ func ErrOperationFailed(message string) *RPCError {
 // sessionIDToNumeric converts UUID session ID to numeric ID for RFC 6241 compliance
 // Returns 0 if session not found (caller should handle as unknown session)
 func (s *Server) sessionIDToNumeric(sessionID string) uint32 {
+	if s == nil || s.sessions == nil {
+		return 0
+	}
 	if sess, ok := s.sessions.Get(sessionID); ok {
 		return sess.NumericID
 	}
