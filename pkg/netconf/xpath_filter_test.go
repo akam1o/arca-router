@@ -76,8 +76,15 @@ func TestParseXPathFilter(t *testing.T) {
 			wantErr: true,
 		},
 		{
-			name:    "invalid: namespace prefix not supported",
-			path:    "/if:interfaces",
+			name:           "namespace prefix is normalized",
+			path:           "/if:interfaces/if:interface[if:name='ge-0/0/0']",
+			wantErr:        false,
+			wantSegments:   []string{"interfaces", "interface"},
+			wantPredicates: map[int]map[string]string{1: {"name": "ge-0/0/0"}},
+		},
+		{
+			name:    "invalid: multiple namespace separators",
+			path:    "/if:interfaces/foo:bar:baz",
 			wantErr: true,
 		},
 		{
@@ -371,6 +378,17 @@ func TestFilterMatchesEnhancedXPathPath(t *testing.T) {
 	}
 	if filterMatchesEnhanced(filter, []string{"state", "protocols", "bgp"}) {
 		t.Fatal("filterMatchesEnhanced() = true, want false for sibling protocol state branch")
+	}
+}
+
+func TestFilterMatchesEnhancedPrefixedXPathPath(t *testing.T) {
+	filter := &Filter{Type: "xpath", Select: "/if:interfaces/if:interface[if:name='ge-0/0/0']"}
+
+	if !filterMatchesEnhanced(filter, []string{"interfaces"}) {
+		t.Fatal("filterMatchesEnhanced() = false, want true for selected prefixed interfaces branch")
+	}
+	if filterMatchesEnhanced(filter, []string{"protocols"}) {
+		t.Fatal("filterMatchesEnhanced() = true, want false for unrelated branch")
 	}
 }
 

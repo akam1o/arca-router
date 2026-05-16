@@ -14,11 +14,15 @@ import (
 type XPathFilter struct {
 	// Path segments (e.g., ["interfaces", "interface", "name"])
 	Segments []string
+	// Namespace URI per path segment when a namespace prefix was used.
+	SegmentNamespaces []string
 
 	// Predicates per segment (e.g., map[segmentIndex]map["name"]="ge-0/0/0")
 	// Phase 3: Basic key-value matching only, single predicate per segment
 	// Phase 4: Multiple predicates and complex boolean expressions
 	Predicates map[int]map[string]string
+	// Namespace URI per predicate key when a namespace prefix was used.
+	PredicateNamespaces map[int]map[string]string
 }
 
 // ParseXPathFilter parses a simplified XPath expression
@@ -27,12 +31,22 @@ type XPathFilter struct {
 // - /interfaces/interface
 // - /interfaces/interface[name='ge-0/0/0']
 // - /routing-options/static/route[prefix='10.0.0.0/24']
+// - /if:interfaces/if:interface[if:name='ge-0/0/0']
 //
 // Not supported (Phase 4):
 // - Functions (count(), contains(), etc.)
 // - Multiple predicates
 // - Complex boolean expressions
 func ParseXPathFilter(path string) (*XPathFilter, error) {
+	return parseXPathFilter(path, nil)
+}
+
+func ParseXPathFilterWithContext(path string, namespaceAttrs []xml.Attr) (*XPathFilter, error) {
+	namespaceCtx := newXPathNamespaceContext(namespaceAttrs)
+	return parseXPathFilter(path, namespaceCtx)
+}
+
+func parseXPathFilter(path string, namespaceCtx map[string]string) (*XPathFilter, error) {
 	if path == "" || path == "/" {
 		return nil, nil // Empty filter matches all
 	}
@@ -48,8 +62,10 @@ func ParseXPathFilter(path string) (*XPathFilter, error) {
 	}
 
 	filter := &XPathFilter{
-		Segments:   make([]string, 0),
-		Predicates: make(map[int]map[string]string),
+		Segments:            make([]string, 0),
+		SegmentNamespaces:   make([]string, 0),
+		Predicates:          make(map[int]map[string]string),
+		PredicateNamespaces: make(map[int]map[string]string),
 	}
 
 	// Parse segments manually to handle predicates with / in values
@@ -100,15 +116,18 @@ func ParseXPathFilter(path string) (*XPathFilter, error) {
 		// Check for predicate: interface[name='value']
 		if idx := strings.Index(seg, "["); idx != -1 {
 			// Extract element name
-			elemName := seg[:idx]
-			if err := validateXPathName(elemName); err != nil {
-				return nil, fmt.Errorf("invalid XPath segment %q: %w", elemName, err)
+			rawElemName := seg[:idx]
+			elemName, namespace, err := normalizeXPathName(rawElemName, namespaceCtx)
+			if err != nil {
+				return nil, fmt.Errorf("invalid XPath segment %q: %w", rawElemName, err)
 			}
 			segmentIndex := len(filter.Segments)
 			filter.Segments = append(filter.Segments, elemName)
+			filter.SegmentNamespaces = append(filter.SegmentNamespaces, namespace)
 
 			// Extract ALL predicates (Phase 3: only store first, warn on multiple)
 			predicateMap := make(map[string]string)
+			predicateNamespaces := make(map[string]string)
 			remaining := seg[idx:]
 			predicateCount := 0
 
@@ -120,7 +139,7 @@ func ParseXPathFilter(path string) (*XPathFilter, error) {
 
 				predicate := remaining[1:predEnd]
 				// Parse key='value' or key="value"
-				if err := parsePredicate(predicate, predicateMap); err != nil {
+				if err := parsePredicate(predicate, predicateMap, predicateNamespaces, namespaceCtx); err != nil {
 					return nil, fmt.Errorf("invalid predicate in %s: %w", seg, err)
 				}
 
@@ -138,12 +157,15 @@ func ParseXPathFilter(path string) (*XPathFilter, error) {
 
 			if len(predicateMap) > 0 {
 				filter.Predicates[segmentIndex] = predicateMap
+				filter.PredicateNamespaces[segmentIndex] = predicateNamespaces
 			}
 		} else {
-			if err := validateXPathName(seg); err != nil {
+			segment, namespace, err := normalizeXPathName(seg, namespaceCtx)
+			if err != nil {
 				return nil, fmt.Errorf("invalid XPath segment %q: %w", seg, err)
 			}
-			filter.Segments = append(filter.Segments, seg)
+			filter.Segments = append(filter.Segments, segment)
+			filter.SegmentNamespaces = append(filter.SegmentNamespaces, namespace)
 		}
 	}
 
@@ -152,17 +174,18 @@ func ParseXPathFilter(path string) (*XPathFilter, error) {
 
 // parsePredicate parses a single predicate expression
 // Supported: key='value' or key="value"
-func parsePredicate(pred string, predicates map[string]string) error {
+func parsePredicate(pred string, predicates map[string]string, namespaces map[string]string, namespaceCtx map[string]string) error {
 	// Look for = operator
 	eqIdx := strings.Index(pred, "=")
 	if eqIdx == -1 {
 		return fmt.Errorf("predicate must contain =: %s", pred)
 	}
 
-	key := strings.TrimSpace(pred[:eqIdx])
+	rawKey := strings.TrimSpace(pred[:eqIdx])
 	valueRaw := strings.TrimSpace(pred[eqIdx+1:])
-	if err := validateXPathName(key); err != nil {
-		return fmt.Errorf("invalid predicate key %q: %w", key, err)
+	key, namespace, err := normalizeXPathName(rawKey, namespaceCtx)
+	if err != nil {
+		return fmt.Errorf("invalid predicate key %q: %w", rawKey, err)
 	}
 
 	// Remove quotes
@@ -177,10 +200,63 @@ func parsePredicate(pred string, predicates map[string]string) error {
 
 	value := valueRaw[1 : len(valueRaw)-1]
 	predicates[key] = value
+	namespaces[key] = namespace
 	return nil
 }
 
-func validateXPathName(name string) error {
+func normalizeXPathName(name string, namespaceCtx map[string]string) (string, string, error) {
+	prefix, local, prefixed, err := splitXPathQName(name)
+	if err != nil {
+		return "", "", err
+	}
+	if !prefixed {
+		return local, "", nil
+	}
+	namespace := namespaceCtx[prefix]
+	if namespaceCtx != nil && namespace == "" {
+		return "", "", fmt.Errorf("namespace prefix %q is not declared", prefix)
+	}
+	return local, namespace, nil
+}
+
+func splitXPathQName(name string) (string, string, bool, error) {
+	if name == "" {
+		return "", "", false, fmt.Errorf("name must not be empty")
+	}
+	if strings.Count(name, ":") > 1 {
+		return "", "", false, fmt.Errorf("name must contain at most one namespace prefix")
+	}
+	prefix, local, prefixed := strings.Cut(name, ":")
+	if !prefixed {
+		if err := validateXPathNamePart(name); err != nil {
+			return "", "", false, err
+		}
+		return "", name, false, nil
+	}
+	if prefix == "" || local == "" {
+		return "", "", false, fmt.Errorf("namespace prefix and local name must not be empty")
+	}
+	if err := validateXPathNamePart(prefix); err != nil {
+		return "", "", false, fmt.Errorf("invalid namespace prefix: %w", err)
+	}
+	if err := validateXPathNamePart(local); err != nil {
+		return "", "", false, err
+	}
+	return prefix, local, true, nil
+}
+
+func newXPathNamespaceContext(attrs []xml.Attr) map[string]string {
+	ctx := make(map[string]string)
+	for _, attr := range attrs {
+		if attr.Name.Space != "xmlns" {
+			continue
+		}
+		ctx[attr.Name.Local] = attr.Value
+	}
+	return ctx
+}
+
+func validateXPathNamePart(name string) error {
 	if name == "" {
 		return fmt.Errorf("name must not be empty")
 	}

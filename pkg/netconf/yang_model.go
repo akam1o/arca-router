@@ -338,3 +338,48 @@ func validateYANGPredicates(node *yangPathNode, predicates map[string]string, tr
 	}
 	return nil
 }
+
+func validateXPathFilterNamespaces(filter *XPathFilter) error {
+	if filter == nil {
+		return nil
+	}
+
+	for index, namespace := range filter.SegmentNamespaces {
+		if namespace == "" {
+			continue
+		}
+		path := filter.Segments[:index+1]
+		if expected := expectedXPathNamespace(path); namespace != expected {
+			return fmt.Errorf("/%s uses namespace %q, want %q", strings.Join(path, "/"), namespace, expected)
+		}
+	}
+
+	for index, predicates := range filter.PredicateNamespaces {
+		path := filter.Segments[:index+1]
+		for key, namespace := range predicates {
+			if namespace == "" {
+				continue
+			}
+			predicatePath := append(append([]string{}, path...), key)
+			if expected := expectedXPathNamespace(predicatePath); namespace != expected {
+				return fmt.Errorf("predicate %q for /%s uses namespace %q, want %q", key, strings.Join(path, "/"), namespace, expected)
+			}
+		}
+	}
+
+	return nil
+}
+
+func expectedXPathNamespace(path []string) string {
+	if len(path) == 0 {
+		return ""
+	}
+	switch path[0] {
+	case "interfaces":
+		return IETFInterfacesNS
+	case "routing":
+		return IETFRoutingNS
+	default:
+		return ArcaConfigNS
+	}
+}
