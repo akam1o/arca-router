@@ -2,6 +2,7 @@
 
 ## v0.9.x - NETCONF/YANG and Operational Safety (current)
 
+- **NETCONF XPath model validation**: XPath filters now validate nested element paths and predicate keys against the implemented NETCONF/YANG path schema before request handling
 - **NETCONF capability URI compliance**: hello negotiation now uses RFC 6241 capability URIs and accepts base:1.1-only clients while preserving the XML namespace separately
 - **NETCONF capability accuracy**: server hello now advertises the Arca XPath filter subset separately while avoiding unsupported standard XPath, startup, writable-running, and rollback-on-error capabilities
 - **NETCONF validate source coverage**: `<validate>` now checks both running and candidate datastore sources while continuing to reject unsupported startup validation
