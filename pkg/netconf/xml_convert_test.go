@@ -515,6 +515,22 @@ func TestApplyConfigEditMergesV06AdvancedConfig(t *testing.T) {
 	}
 }
 
+func TestApplyConfigEditDefaultOperationNoneIgnoresImplicitEdit(t *testing.T) {
+	existing := config.NewConfig()
+	existing.System = &config.SystemConfig{HostName: "old-router"}
+
+	edit := config.NewConfig()
+	edit.System = &config.SystemConfig{HostName: "new-router"}
+
+	merged, err := ApplyConfigEdit(existing, edit, DefaultOpNone)
+	if err != nil {
+		t.Fatalf("ApplyConfigEdit() error = %v", err)
+	}
+	if merged.System.HostName != "old-router" {
+		t.Fatalf("merged hostname = %q, want unchanged old-router", merged.System.HostName)
+	}
+}
+
 func TestV08EVPNConfigXMLRoundTrip(t *testing.T) {
 	cfg := &config.Config{
 		Protocols: &config.ProtocolConfig{

@@ -252,13 +252,13 @@ func (s *Server) handleEditConfig(ctx context.Context, sess *Session, rpc *RPC) 
 		}
 	}
 
-	// Set default operation. Per-element operation attributes are not supported,
-	// so default-operation=none remains unsupported.
+	// Set default operation. Per-element operation attributes remain unsupported,
+	// but default-operation=none is valid and applies no implicit changes.
 	defaultOp := DefaultOpMerge
 	if req.DefaultOperation != nil {
 		defaultOp = *req.DefaultOperation
 		switch defaultOp {
-		case DefaultOpMerge, DefaultOpReplace:
+		case DefaultOpMerge, DefaultOpReplace, DefaultOpNone:
 		default:
 			return NewErrorReply(rpc.MessageID,
 				NewRPCError(ErrorTypeProtocol, ErrorTagOperationNotSupported,

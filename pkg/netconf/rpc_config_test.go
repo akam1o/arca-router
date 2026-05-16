@@ -150,7 +150,7 @@ func TestEditConfigDefaultOperationReplaceSavesReplacedSubtree(t *testing.T) {
 	}
 }
 
-func TestEditConfigDefaultOperationNoneStillRejected(t *testing.T) {
+func TestEditConfigDefaultOperationNonePreservesCandidate(t *testing.T) {
 	ds := &copyConfigDatastore{
 		candidate: &datastore.CandidateConfig{ConfigText: "set system host-name old-router\n"},
 		lockInfo: &datastore.LockInfo{
@@ -160,18 +160,17 @@ func TestEditConfigDefaultOperationNoneStillRejected(t *testing.T) {
 	}
 
 	reply := editConfigRPCWithDefaultOperation(t, ds, "none", "<config><system><host-name>router1</host-name></system></config>")
-	if len(reply.Errors) != 1 {
-		t.Fatalf("edit-config default-operation none errors = %d, want 1", len(reply.Errors))
+	if len(reply.Errors) != 0 {
+		t.Fatalf("edit-config default-operation none errors = %#v, want none", reply.Errors)
 	}
-	err := reply.Errors[0]
-	if err.ErrorTag != ErrorTagOperationNotSupported {
-		t.Fatalf("edit-config default-operation none error tag = %s, want %s", err.ErrorTag, ErrorTagOperationNotSupported)
+	if reply.OK == nil {
+		t.Fatal("edit-config default-operation none OK = nil, want ok")
 	}
-	if err.ErrorPath != "/rpc/edit-config/default-operation" {
-		t.Fatalf("edit-config default-operation none error path = %q, want /rpc/edit-config/default-operation", err.ErrorPath)
+	if !ds.saveCalled {
+		t.Fatal("edit-config default-operation none did not save candidate")
 	}
-	if ds.saveCalled {
-		t.Fatal("edit-config default-operation none saved candidate")
+	if ds.savedText != "set system host-name old-router\n" {
+		t.Fatalf("saved candidate = %q, want unchanged candidate", ds.savedText)
 	}
 }
 

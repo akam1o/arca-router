@@ -2268,8 +2268,7 @@ func configElementRPCPath(path []string) string {
 	return "/rpc/edit-config/config/" + strings.Join(path[1:], "/")
 }
 
-// ApplyConfigEdit applies edit-config changes to existing config based on default-operation
-// This implements Phase 2 Step 3 with merge/replace/create/delete operations
+// ApplyConfigEdit applies edit-config changes to existing config based on default-operation.
 func ApplyConfigEdit(existing, edit *config.Config, defaultOp DefaultOperation) (*config.Config, error) {
 	if existing == nil {
 		return edit, nil
@@ -2296,7 +2295,8 @@ func ApplyConfigEdit(existing, edit *config.Config, defaultOp DefaultOperation) 
 		return replaceConfigs(&merged, edit)
 
 	case DefaultOpNone:
-		// None: Only explicit operations allowed (not implemented in Phase 2)
+		// None: only explicit per-element operations apply. They are rejected
+		// during XML parsing, so implicit edit payloads leave the config unchanged.
 		return &merged, nil
 
 	default:
