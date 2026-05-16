@@ -2,6 +2,7 @@
 
 ## v0.9.x - NETCONF/YANG and Operational Safety (current)
 
+- **NETCONF candidate read fallback**: `get-config`, `copy-config`, `validate`, and first candidate edits now treat a missing session candidate as the current running baseline instead of failing or depending on nil datastore values
 - **NETCONF confirmed-commit rejection**: `commit` confirmed-commit options now parse and return `operation-not-supported` with precise error paths when confirmed-commit capability is not advertised
 - **NETCONF continue-on-error support**: `edit-config` now accepts `error-option=continue-on-error` while preserving atomic validation and candidate writes for the current edit engine
 - **NETCONF operational XPath predicate filtering**: `<get>` operational state output now applies XPath list predicates to route, neighbor, routing-instance, interface, and BFD peer entries

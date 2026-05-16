@@ -247,6 +247,39 @@ func TestEditConfigContinueOnErrorSavesValidCandidate(t *testing.T) {
 	}
 }
 
+func TestEditConfigInitializesMissingCandidateFromRunning(t *testing.T) {
+	ds := &copyConfigDatastore{
+		running: &datastore.RunningConfig{ConfigText: strings.Join([]string{
+			"set system host-name old-router",
+			"set routing-options router-id 192.0.2.1",
+			"",
+		}, "\n")},
+		lockInfo: &datastore.LockInfo{
+			IsLocked:  true,
+			SessionID: "session-1",
+		},
+	}
+
+	reply := editConfigRPC(t, ds, "test-then-set", "<config><system><host-name>router1</host-name></system></config>")
+	if len(reply.Errors) != 0 {
+		t.Fatalf("edit-config missing candidate errors = %#v, want none", reply.Errors)
+	}
+	if reply.OK == nil {
+		t.Fatal("edit-config missing candidate OK = nil, want ok")
+	}
+	if !ds.saveCalled {
+		t.Fatal("edit-config missing candidate did not save candidate")
+	}
+	for _, want := range []string{
+		"set system host-name router1",
+		"set routing-options router-id 192.0.2.1",
+	} {
+		if !strings.Contains(ds.savedText, want) {
+			t.Fatalf("saved candidate missing %q:\n%s", want, ds.savedText)
+		}
+	}
+}
+
 func TestGetConfigStartupDatastoreRejectedAsUnsupported(t *testing.T) {
 	reply := copyConfigParsedRPC(t, &copyConfigDatastore{}, `<rpc message-id="101" xmlns="urn:ietf:params:xml:ns:netconf:base:1.0">
 		<get-config>
@@ -255,6 +288,27 @@ func TestGetConfigStartupDatastoreRejectedAsUnsupported(t *testing.T) {
 	</rpc>`)
 
 	assertStartupUnsupported(t, reply, "/rpc/get-config/source")
+}
+
+func TestGetConfigCandidateFallsBackToRunningWhenMissing(t *testing.T) {
+	ds := &copyConfigDatastore{
+		running: &datastore.RunningConfig{ConfigText: "set system host-name running-router\n"},
+	}
+
+	reply := copyConfigParsedRPC(t, ds, `<rpc message-id="101" xmlns="urn:ietf:params:xml:ns:netconf:base:1.0">
+		<get-config>
+			<source><candidate/></source>
+		</get-config>
+	</rpc>`)
+	if len(reply.Errors) != 0 {
+		t.Fatalf("get-config candidate fallback errors = %#v, want none", reply.Errors)
+	}
+	if reply.Data == nil {
+		t.Fatal("get-config candidate fallback data = nil, want data")
+	}
+	if !strings.Contains(string(reply.Data.Content), "<host-name>running-router</host-name>") {
+		t.Fatalf("get-config candidate fallback data = %s, want running host-name", reply.Data.Content)
+	}
 }
 
 func TestEditConfigStartupTargetRejectedAsUnsupported(t *testing.T) {
@@ -388,6 +442,31 @@ func TestCopyConfigSavesValidatedRunningSource(t *testing.T) {
 	}
 	if ds.savedText != runningConfig {
 		t.Fatalf("saved candidate = %q, want %q", ds.savedText, runningConfig)
+	}
+}
+
+func TestCopyConfigCandidateSourceFallsBackToRunningWhenMissing(t *testing.T) {
+	const runningConfig = "set system host-name running-router\n"
+	ds := &copyConfigDatastore{
+		running: &datastore.RunningConfig{ConfigText: runningConfig},
+		lockInfo: &datastore.LockInfo{
+			IsLocked:  true,
+			SessionID: "session-1",
+		},
+	}
+
+	reply := copyConfigRPC(t, ds, "<source><candidate/></source>")
+	if len(reply.Errors) != 0 {
+		t.Fatalf("copy-config candidate fallback errors = %#v, want none", reply.Errors)
+	}
+	if reply.OK == nil {
+		t.Fatal("copy-config candidate fallback OK = nil, want ok")
+	}
+	if !ds.saveCalled {
+		t.Fatal("copy-config candidate fallback did not save candidate")
+	}
+	if ds.savedText != runningConfig {
+		t.Fatalf("saved candidate = %q, want running fallback %q", ds.savedText, runningConfig)
 	}
 }
 

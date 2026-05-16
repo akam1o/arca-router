@@ -74,6 +74,19 @@ func TestValidateCandidateDatastoreStillSupported(t *testing.T) {
 	}
 }
 
+func TestValidateCandidateFallsBackToRunningWhenMissing(t *testing.T) {
+	reply := validateRPC(t, &validateDatastore{
+		running: &datastore.RunningConfig{ConfigText: "set system host-name router1\n"},
+	}, "<source><candidate/></source>")
+
+	if len(reply.Errors) != 0 {
+		t.Fatalf("validate missing candidate errors = %#v, want none", reply.Errors)
+	}
+	if reply.OK == nil {
+		t.Fatal("validate missing candidate OK = nil, want ok")
+	}
+}
+
 func TestValidateInlineConfigSource(t *testing.T) {
 	reply := validateRPC(t, &validateDatastore{}, "<source><config><system><host-name>router1</host-name></system></config></source>")
 

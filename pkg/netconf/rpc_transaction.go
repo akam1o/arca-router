@@ -202,19 +202,24 @@ func (s *Server) validateSourceConfig(ctx context.Context, sess *Session, source
 func (s *Server) validateSourceConfigText(ctx context.Context, sess *Session, source string) (string, *RPCError) {
 	switch source {
 	case DatastoreRunning:
-		running, err := s.datastore.GetRunning(ctx)
-		if err != nil || running == nil {
-			log.Printf("[NETCONF] No running config to validate for session %s: %v", sess.ID, err)
-			return "", ErrOperationFailed("no running configuration to validate")
+		text, rpcErr := s.readRunningConfigText(ctx, false, "no running configuration to validate", "failed to retrieve running config for validate")
+		if rpcErr != nil {
+			log.Printf("[NETCONF] Failed to read running config to validate for session %s: %v", sess.ID, rpcErr)
+			return "", rpcErr
 		}
-		return running.ConfigText, nil
+		return text, nil
 	case DatastoreCandidate:
-		candidate, err := s.datastore.GetCandidate(ctx, sess.ID)
-		if err != nil || candidate == nil {
-			log.Printf("[NETCONF] No candidate config to validate for session %s: %v", sess.ID, err)
-			return "", ErrOperationFailed("no candidate configuration to validate")
+		text, rpcErr := s.readCandidateOrRunningConfigText(
+			ctx,
+			sess.ID,
+			"failed to retrieve candidate config for validate",
+			"failed to retrieve running config for candidate validate fallback",
+		)
+		if rpcErr != nil {
+			log.Printf("[NETCONF] Failed to read candidate config to validate for session %s: %v", sess.ID, rpcErr)
+			return "", rpcErr
 		}
-		return candidate.ConfigText, nil
+		return text, nil
 	case DatastoreStartup:
 		return "", ErrStartupNotSupported("validate", "source")
 	default:

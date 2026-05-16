@@ -4,10 +4,12 @@ import (
 	"bytes"
 	"context"
 	"encoding/xml"
+	"errors"
 	"fmt"
 	"log"
 
 	"github.com/akam1o/arca-router/pkg/config"
+	dsstore "github.com/akam1o/arca-router/pkg/datastore"
 )
 
 // GetConfigRequest represents <get-config> RPC
@@ -68,7 +70,7 @@ func (s *Server) handleGetConfig(ctx context.Context, sess *Session, rpc *RPC) *
 	}
 
 	// Get datastore name
-	datastore, err := req.Source.GetDatastore()
+	source, err := req.Source.GetDatastore()
 	if err != nil {
 		return NewErrorReply(rpc.MessageID, err.(*RPCError))
 	}
@@ -85,32 +87,37 @@ func (s *Server) handleGetConfig(ctx context.Context, sess *Session, rpc *RPC) *
 
 	// Get configuration text from datastore
 	var textCfg string
-	switch datastore {
+	switch source {
 	case DatastoreRunning:
-		runningCfg, err := s.datastore.GetRunning(ctx)
-		if err != nil {
-			log.Printf("[NETCONF] GetConfig error for %s: %v", datastore, err)
-			return NewErrorReply(rpc.MessageID, ErrDatastoreError(fmt.Sprintf("failed to retrieve %s config: %v", datastore, err)))
+		runningText, rpcErr := s.readRunningConfigText(ctx, false, "no running configuration to retrieve", "failed to retrieve running config")
+		if rpcErr != nil {
+			log.Printf("[NETCONF] GetConfig error for %s: %v", source, rpcErr)
+			return NewErrorReply(rpc.MessageID, rpcErr)
 		}
-		textCfg = runningCfg.ConfigText
+		textCfg = runningText
 	case DatastoreCandidate:
-		candidateCfg, err := s.datastore.GetCandidate(ctx, sess.ID)
-		if err != nil {
-			log.Printf("[NETCONF] GetConfig error for %s: %v", datastore, err)
-			return NewErrorReply(rpc.MessageID, ErrDatastoreError(fmt.Sprintf("failed to retrieve %s config: %v", datastore, err)))
+		candidateText, rpcErr := s.readCandidateOrRunningConfigText(
+			ctx,
+			sess.ID,
+			"failed to retrieve candidate config",
+			"failed to retrieve running config for candidate fallback",
+		)
+		if rpcErr != nil {
+			log.Printf("[NETCONF] GetConfig error for %s: %v", source, rpcErr)
+			return NewErrorReply(rpc.MessageID, rpcErr)
 		}
-		textCfg = candidateCfg.ConfigText
+		textCfg = candidateText
 	case DatastoreStartup:
 		return NewErrorReply(rpc.MessageID, ErrStartupNotSupported("get-config", "source"))
 	default:
-		return NewErrorReply(rpc.MessageID, ErrInvalidTarget("get-config", datastore))
+		return NewErrorReply(rpc.MessageID, ErrInvalidTarget("get-config", source))
 	}
 
 	// Convert text to config.Config structure
 	cfg, err := TextToConfig(textCfg)
 	if err != nil {
 		log.Printf("[NETCONF] Text to config conversion error: %v", err)
-		return NewErrorReply(rpc.MessageID, ErrDatastoreError(fmt.Sprintf("failed to parse %s config: %v", datastore, err)))
+		return NewErrorReply(rpc.MessageID, ErrDatastoreError(fmt.Sprintf("failed to parse %s config: %v", source, err)))
 	}
 
 	// Convert config to XML
@@ -282,19 +289,16 @@ func (s *Server) handleEditConfig(ctx context.Context, sess *Session, rpc *RPC) 
 		return NewErrorReply(rpc.MessageID, ErrOperationFailed(fmt.Sprintf("config parsing failed: %v", err)))
 	}
 
-	// Get existing candidate text or create new from running
-	var existingTextCfg string
-	candidateCfg, err := s.datastore.GetCandidate(ctx, sess.ID)
-	if err != nil {
-		// Candidate doesn't exist, copy from running
-		runningCfg, err := s.datastore.GetRunning(ctx)
-		if err != nil {
-			log.Printf("[NETCONF] Failed to get running config: %v", err)
-			return NewErrorReply(rpc.MessageID, ErrDatastoreError("failed to initialize candidate"))
-		}
-		existingTextCfg = runningCfg.ConfigText
-	} else {
-		existingTextCfg = candidateCfg.ConfigText
+	// Get existing candidate text or initialize from running.
+	existingTextCfg, rpcErr := s.readCandidateOrRunningConfigText(
+		ctx,
+		sess.ID,
+		"failed to read candidate config",
+		"failed to initialize candidate from running config",
+	)
+	if rpcErr != nil {
+		log.Printf("[NETCONF] Failed to load candidate base config: %v", rpcErr)
+		return NewErrorReply(rpc.MessageID, rpcErr)
 	}
 
 	// Convert existing text to config struct
@@ -408,19 +412,24 @@ func (s *Server) handleCopyConfig(ctx context.Context, sess *Session, rpc *RPC) 
 		}
 		switch source {
 		case DatastoreRunning:
-			runningCfg, err := s.datastore.GetRunning(ctx)
-			if err != nil {
-				log.Printf("[NETCONF] CopyConfig source read error: %v", err)
-				return NewErrorReply(rpc.MessageID, ErrDatastoreError(fmt.Sprintf("failed to read source %s: %v", source, err)))
+			runningText, rpcErr := s.readRunningConfigText(ctx, false, "no running configuration to copy", "failed to read source running")
+			if rpcErr != nil {
+				log.Printf("[NETCONF] CopyConfig source read error: %v", rpcErr)
+				return NewErrorReply(rpc.MessageID, rpcErr)
 			}
-			srcTextCfg = runningCfg.ConfigText
+			srcTextCfg = runningText
 		case DatastoreCandidate:
-			candidateCfg, err := s.datastore.GetCandidate(ctx, sess.ID)
-			if err != nil {
-				log.Printf("[NETCONF] CopyConfig source read error: %v", err)
-				return NewErrorReply(rpc.MessageID, ErrDatastoreError(fmt.Sprintf("failed to read source %s: %v", source, err)))
+			candidateText, rpcErr := s.readCandidateOrRunningConfigText(
+				ctx,
+				sess.ID,
+				"failed to read source candidate",
+				"failed to read running config for candidate source fallback",
+			)
+			if rpcErr != nil {
+				log.Printf("[NETCONF] CopyConfig source read error: %v", rpcErr)
+				return NewErrorReply(rpc.MessageID, rpcErr)
 			}
-			srcTextCfg = candidateCfg.ConfigText
+			srcTextCfg = candidateText
 		case DatastoreStartup:
 			return NewErrorReply(rpc.MessageID, ErrStartupNotSupported("copy-config", "source"))
 		default:
@@ -445,6 +454,56 @@ func (s *Server) handleCopyConfig(ctx context.Context, sess *Session, rpc *RPC) 
 	}
 
 	return NewOKReply(rpc.MessageID)
+}
+
+func (s *Server) readCandidateOrRunningConfigText(ctx context.Context, sessionID, candidateFailure, runningFailure string) (string, *RPCError) {
+	candidateText, ok, rpcErr := s.readCandidateConfigText(ctx, sessionID, candidateFailure)
+	if rpcErr != nil {
+		return "", rpcErr
+	}
+	if ok {
+		return candidateText, nil
+	}
+	return s.readRunningConfigText(ctx, true, "no running configuration found", runningFailure)
+}
+
+func (s *Server) readCandidateConfigText(ctx context.Context, sessionID, failureMessage string) (string, bool, *RPCError) {
+	candidate, err := s.datastore.GetCandidate(ctx, sessionID)
+	if err != nil {
+		if isDatastoreNotFound(err) {
+			return "", false, nil
+		}
+		return "", false, ErrDatastoreError(fmt.Sprintf("%s: %v", failureMessage, err))
+	}
+	if candidate == nil {
+		return "", false, nil
+	}
+	return candidate.ConfigText, true, nil
+}
+
+func (s *Server) readRunningConfigText(ctx context.Context, emptyOnMissing bool, missingMessage, failureMessage string) (string, *RPCError) {
+	running, err := s.datastore.GetRunning(ctx)
+	if err != nil {
+		if isDatastoreNotFound(err) {
+			if emptyOnMissing {
+				return "", nil
+			}
+			return "", ErrOperationFailed(missingMessage)
+		}
+		return "", ErrDatastoreError(fmt.Sprintf("%s: %v", failureMessage, err))
+	}
+	if running == nil {
+		if emptyOnMissing {
+			return "", nil
+		}
+		return "", ErrOperationFailed(missingMessage)
+	}
+	return running.ConfigText, nil
+}
+
+func isDatastoreNotFound(err error) bool {
+	var dsErr *dsstore.Error
+	return errors.As(err, &dsErr) && dsErr.Code == dsstore.ErrCodeNotFound
 }
 
 // DeleteConfigRequest represents <delete-config> RPC
