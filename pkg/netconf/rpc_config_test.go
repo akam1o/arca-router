@@ -249,6 +249,65 @@ func TestEditConfigContinueOnErrorStillRejected(t *testing.T) {
 	}
 }
 
+func TestGetConfigStartupDatastoreRejectedAsUnsupported(t *testing.T) {
+	reply := copyConfigParsedRPC(t, &copyConfigDatastore{}, `<rpc message-id="101" xmlns="urn:ietf:params:xml:ns:netconf:base:1.0">
+		<get-config>
+			<source><startup/></source>
+		</get-config>
+	</rpc>`)
+
+	assertStartupUnsupported(t, reply, "/rpc/get-config/source")
+}
+
+func TestEditConfigStartupTargetRejectedAsUnsupported(t *testing.T) {
+	reply := copyConfigParsedRPC(t, &copyConfigDatastore{}, `<rpc message-id="101" xmlns="urn:ietf:params:xml:ns:netconf:base:1.0">
+		<edit-config>
+			<target><startup/></target>
+			<config><system><host-name>router1</host-name></system></config>
+		</edit-config>
+	</rpc>`)
+
+	assertStartupUnsupported(t, reply, "/rpc/edit-config/target")
+}
+
+func TestCopyConfigStartupTargetRejectedAsUnsupported(t *testing.T) {
+	reply := copyConfigParsedRPC(t, &copyConfigDatastore{}, `<rpc message-id="101" xmlns="urn:ietf:params:xml:ns:netconf:base:1.0">
+		<copy-config>
+			<target><startup/></target>
+			<source><running/></source>
+		</copy-config>
+	</rpc>`)
+
+	assertStartupUnsupported(t, reply, "/rpc/copy-config/target")
+}
+
+func TestCopyConfigStartupSourceRejectedAsUnsupported(t *testing.T) {
+	ds := &copyConfigDatastore{
+		lockInfo: &datastore.LockInfo{
+			IsLocked:  true,
+			SessionID: "session-1",
+		},
+	}
+	reply := copyConfigParsedRPC(t, ds, `<rpc message-id="101" xmlns="urn:ietf:params:xml:ns:netconf:base:1.0">
+		<copy-config>
+			<target><candidate/></target>
+			<source><startup/></source>
+		</copy-config>
+	</rpc>`)
+
+	assertStartupUnsupported(t, reply, "/rpc/copy-config/source")
+}
+
+func TestDeleteConfigStartupTargetRejectedAsUnsupported(t *testing.T) {
+	reply := copyConfigParsedRPC(t, &copyConfigDatastore{}, `<rpc message-id="101" xmlns="urn:ietf:params:xml:ns:netconf:base:1.0">
+		<delete-config>
+			<target><startup/></target>
+		</delete-config>
+	</rpc>`)
+
+	assertStartupUnsupported(t, reply, "/rpc/delete-config/target")
+}
+
 func TestCopyConfigValidatesRunningSourceBeforeSavingCandidate(t *testing.T) {
 	ds := &copyConfigDatastore{
 		running: &datastore.RunningConfig{ConfigText: "set system host-name bad_name\n"},
@@ -431,6 +490,24 @@ func copyConfigParsedRPC(t *testing.T, ds datastore.Datastore, rpcXML string) *R
 		t.Fatalf("ParseRPC() error = %v", err)
 	}
 	return srv.HandleRPC(context.Background(), sess, rpc)
+}
+
+func assertStartupUnsupported(t *testing.T, reply *RPCReply, wantPath string) {
+	t.Helper()
+
+	if len(reply.Errors) != 1 {
+		t.Fatalf("reply errors = %d, want 1", len(reply.Errors))
+	}
+	err := reply.Errors[0]
+	if err.ErrorTag != ErrorTagOperationNotSupported {
+		t.Fatalf("error tag = %s, want %s", err.ErrorTag, ErrorTagOperationNotSupported)
+	}
+	if err.ErrorPath != wantPath {
+		t.Fatalf("error path = %q, want %s", err.ErrorPath, wantPath)
+	}
+	if err.ErrorInfo == nil || err.ErrorInfo.BadElement != DatastoreStartup {
+		t.Fatalf("error info = %#v, want bad-element startup", err.ErrorInfo)
+	}
 }
 
 func editConfigRPC(t *testing.T, ds datastore.Datastore, testOption string, configXML string) *RPCReply {

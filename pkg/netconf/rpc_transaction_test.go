@@ -124,8 +124,11 @@ func TestValidateStartupDatastoreRejected(t *testing.T) {
 		t.Fatalf("validate startup errors = %d, want 1", len(reply.Errors))
 	}
 	err := reply.Errors[0]
-	if err.ErrorTag != ErrorTagInvalidValue {
-		t.Fatalf("validate startup error tag = %s, want %s", err.ErrorTag, ErrorTagInvalidValue)
+	if err.ErrorTag != ErrorTagOperationNotSupported {
+		t.Fatalf("validate startup error tag = %s, want %s", err.ErrorTag, ErrorTagOperationNotSupported)
+	}
+	if err.ErrorPath != "/rpc/validate/source" {
+		t.Fatalf("validate startup error path = %q, want /rpc/validate/source", err.ErrorPath)
 	}
 }
 
