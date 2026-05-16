@@ -712,6 +712,12 @@ func TestFilterValidate(t *testing.T) {
 			wantErr: false,
 		},
 		{
+			name:    "xpath filter accepts multiple predicates",
+			filter:  &Filter{Type: "xpath", Select: "/state/routes/route[prefix='192.0.2.0/24'][protocol='static']"},
+			rpcName: "get",
+			wantErr: false,
+		},
+		{
 			name:    "xpath filter requires select",
 			filter:  &Filter{Type: "xpath"},
 			rpcName: "get-config",

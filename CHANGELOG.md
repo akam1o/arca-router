@@ -2,6 +2,7 @@
 
 ## v0.9.x - NETCONF/YANG and Operational Safety (current)
 
+- **NETCONF XPath multiple predicates**: XPath filters now accept multiple simple key-value predicates on the same path segment while still rejecting duplicate keys and complex predicate expressions
 - **NETCONF edit-config none default-operation**: `edit-config` now accepts `default-operation=none` and treats implicit config payloads as no-op edits while continuing to reject unsupported per-element operations
 - **NETCONF writable-running rejection**: running datastore write RPCs now consistently return `operation-not-supported` with operation-specific target paths when writable-running is not advertised
 - **NETCONF startup datastore rejection**: startup datastore RPC requests now consistently return `operation-not-supported` with source/target error paths when startup capability is not advertised

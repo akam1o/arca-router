@@ -199,6 +199,11 @@ func TestYANGValidator_ValidateElementPath(t *testing.T) {
 			wantErr: false,
 		},
 		{
+			name:    "valid route state multiple predicates",
+			path:    "/state/routes/route[prefix='192.0.2.0/24'][protocol='static']",
+			wantErr: false,
+		},
+		{
 			name:    "valid BFD peer state path",
 			path:    "/state/protocols/bfd/peer/status",
 			wantErr: false,
