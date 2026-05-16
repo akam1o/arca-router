@@ -131,6 +131,17 @@ func TestNewSessionManagerDefaultsNilDependencies(t *testing.T) {
 	}
 }
 
+func TestSessionAddLockInitializesNilTrackingMap(t *testing.T) {
+	session := &Session{}
+
+	session.AddLock("candidate")
+
+	locks := session.GetLocks()
+	if len(locks) != 1 || locks[0] != "candidate" {
+		t.Fatalf("GetLocks() = %#v, want candidate", locks)
+	}
+}
+
 func newTestSessionManager(store DatastoreLockReleaser) *SessionManager {
 	cfg := DefaultSSHConfig()
 	cfg.IdleTimeout = time.Hour
