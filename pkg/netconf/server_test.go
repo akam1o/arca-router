@@ -101,6 +101,70 @@ func TestDatastoreBackedRPCWithoutDatastoreReturnsOperationFailed(t *testing.T) 
 	}
 }
 
+func TestHandleRPCWithoutSessionReturnsOperationFailed(t *testing.T) {
+	srv := NewServer(nil, nil)
+	rpc, err := ParseRPC([]byte(`<rpc message-id="101" xmlns="urn:ietf:params:xml:ns:netconf:base:1.0">
+		<get/>
+	</rpc>`))
+	if err != nil {
+		t.Fatalf("ParseRPC() error = %v", err)
+	}
+
+	reply := srv.HandleRPC(context.Background(), nil, rpc)
+	if len(reply.Errors) != 1 {
+		t.Fatalf("nil session errors = %d, want 1", len(reply.Errors))
+	}
+	if reply.Errors[0].ErrorTag != ErrorTagOperationFailed {
+		t.Fatalf("nil session error tag = %s, want %s", reply.Errors[0].ErrorTag, ErrorTagOperationFailed)
+	}
+}
+
+func TestHandleRPCWithoutServerReturnsOperationFailed(t *testing.T) {
+	var srv *Server
+	sess := &Session{
+		ID:             "session-1",
+		NumericID:      1,
+		Username:       "alice",
+		Role:           RoleOperator,
+		LastUsed:       time.Now(),
+		datastoreLocks: map[string]struct{}{},
+	}
+	rpc, err := ParseRPC([]byte(`<rpc message-id="101" xmlns="urn:ietf:params:xml:ns:netconf:base:1.0">
+		<get/>
+	</rpc>`))
+	if err != nil {
+		t.Fatalf("ParseRPC() error = %v", err)
+	}
+
+	reply := srv.HandleRPC(context.Background(), sess, rpc)
+	if len(reply.Errors) != 1 {
+		t.Fatalf("nil server errors = %d, want 1", len(reply.Errors))
+	}
+	if reply.Errors[0].ErrorTag != ErrorTagOperationFailed {
+		t.Fatalf("nil server error tag = %s, want %s", reply.Errors[0].ErrorTag, ErrorTagOperationFailed)
+	}
+}
+
+func TestHandleRPCWithoutRPCReturnsOperationFailed(t *testing.T) {
+	srv := NewServer(nil, nil)
+	sess := &Session{
+		ID:             "session-1",
+		NumericID:      1,
+		Username:       "alice",
+		Role:           RoleOperator,
+		LastUsed:       time.Now(),
+		datastoreLocks: map[string]struct{}{},
+	}
+
+	reply := srv.HandleRPC(context.Background(), sess, nil)
+	if len(reply.Errors) != 1 {
+		t.Fatalf("nil rpc errors = %d, want 1", len(reply.Errors))
+	}
+	if reply.Errors[0].ErrorTag != ErrorTagOperationFailed {
+		t.Fatalf("nil rpc error tag = %s, want %s", reply.Errors[0].ErrorTag, ErrorTagOperationFailed)
+	}
+}
+
 func TestValidateInlineSourceWithoutDatastoreSucceeds(t *testing.T) {
 	srv := NewServer(nil, nil)
 	sess := &Session{
