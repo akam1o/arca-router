@@ -38,6 +38,10 @@ func (r *GetConfigRequest) SetInheritedNamespaceAttrs(attrs []xml.Attr) {
 // - /rpc/{rpcName}/target for operations with explicit target element
 // - /rpc/{rpcName} for operations without target element (commit, discard-changes)
 func (s *Server) checkLockOwnership(ctx context.Context, sess *Session, target, rpcName string) *RPCError {
+	if s == nil || s.datastore == nil {
+		return ErrOperationFailed("datastore unavailable")
+	}
+
 	lockInfo, err := s.datastore.GetLockInfo(ctx, target)
 	if err != nil {
 		log.Printf("[NETCONF] Failed to get lock info for %s: %v", target, err)
@@ -470,6 +474,10 @@ func (s *Server) readCandidateOrRunningConfigText(ctx context.Context, sessionID
 }
 
 func (s *Server) readCandidateConfigText(ctx context.Context, sessionID, failureMessage string) (string, bool, *RPCError) {
+	if s == nil || s.datastore == nil {
+		return "", false, ErrOperationFailed("datastore unavailable")
+	}
+
 	candidate, err := s.datastore.GetCandidate(ctx, sessionID)
 	if err != nil {
 		if isDatastoreNotFound(err) {
@@ -484,6 +492,10 @@ func (s *Server) readCandidateConfigText(ctx context.Context, sessionID, failure
 }
 
 func (s *Server) readRunningConfigText(ctx context.Context, emptyOnMissing bool, missingMessage, failureMessage string) (string, *RPCError) {
+	if s == nil || s.datastore == nil {
+		return "", ErrOperationFailed("datastore unavailable")
+	}
+
 	running, err := s.datastore.GetRunning(ctx)
 	if err != nil {
 		if isDatastoreNotFound(err) {

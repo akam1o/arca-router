@@ -2,6 +2,7 @@
 
 ## v0.9.x - NETCONF/YANG and Operational Safety (current)
 
+- **NETCONF datastore availability guards**: datastore-backed RPC paths now return stable `operation-failed` replies when a server is embedded without a datastore while inline `validate` remains usable
 - **NETCONF nil lock state handling**: write RPC lock checks now return `lock-denied` when an embedded datastore reports no lock state instead of panicking on nil lock metadata
 - **NETCONF session manager hardening**: `kill-session` and lock-owner reporting now return stable RPC errors when a server is embedded without a session manager instead of dereferencing nil session state
 - **NETCONF option value normalization**: `edit-config` operation options and filter `type` attributes now trim surrounding whitespace before capability and enum validation for better client interoperability
