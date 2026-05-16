@@ -247,12 +247,14 @@ func (s *Server) handleEditConfig(ctx context.Context, sess *Session, rpc *RPC) 
 				WithBadElement(string(*req.ErrorOption)))
 	}
 
-	// Set default operation (Phase 2: only merge supported)
+	// Set default operation. Per-element operation attributes are not supported,
+	// so default-operation=none remains unsupported.
 	defaultOp := DefaultOpMerge
 	if req.DefaultOperation != nil {
 		defaultOp = *req.DefaultOperation
-		// Validate: Phase 2 only supports merge
-		if defaultOp != DefaultOpMerge {
+		switch defaultOp {
+		case DefaultOpMerge, DefaultOpReplace:
+		default:
 			return NewErrorReply(rpc.MessageID,
 				NewRPCError(ErrorTypeProtocol, ErrorTagOperationNotSupported,
 					fmt.Sprintf("unsupported default-operation: %s", defaultOp)).

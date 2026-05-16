@@ -2,6 +2,7 @@ package netconf
 
 import (
 	"context"
+	"strings"
 	"testing"
 	"time"
 
@@ -104,6 +105,73 @@ func TestEditConfigTestThenSetSavesCandidate(t *testing.T) {
 	}
 	if ds.savedText != "set system host-name router1\n" {
 		t.Fatalf("saved candidate = %q, want test-then-set edit", ds.savedText)
+	}
+}
+
+func TestEditConfigDefaultOperationReplaceSavesReplacedSubtree(t *testing.T) {
+	ds := &copyConfigDatastore{
+		candidate: &datastore.CandidateConfig{ConfigText: strings.Join([]string{
+			"set system host-name old-router",
+			"set system services web-ui enabled true",
+			"set routing-options router-id 192.0.2.1",
+			"",
+		}, "\n")},
+		lockInfo: &datastore.LockInfo{
+			IsLocked:  true,
+			SessionID: "session-1",
+		},
+	}
+
+	reply := editConfigRPCWithDefaultOperation(t, ds, "replace", "<config><system><host-name>router1</host-name></system></config>")
+	if len(reply.Errors) != 0 {
+		t.Fatalf("edit-config replace errors = %#v, want none", reply.Errors)
+	}
+	if reply.OK == nil {
+		t.Fatal("edit-config replace OK = nil, want ok")
+	}
+	if !ds.saveCalled {
+		t.Fatal("edit-config replace did not save candidate")
+	}
+	for _, want := range []string{
+		"set system host-name router1",
+		"set routing-options router-id 192.0.2.1",
+	} {
+		if !strings.Contains(ds.savedText, want) {
+			t.Fatalf("saved candidate missing %q:\n%s", want, ds.savedText)
+		}
+	}
+	for _, unwanted := range []string{
+		"old-router",
+		"set system services web-ui enabled true",
+	} {
+		if strings.Contains(ds.savedText, unwanted) {
+			t.Fatalf("saved candidate contains %q after replace:\n%s", unwanted, ds.savedText)
+		}
+	}
+}
+
+func TestEditConfigDefaultOperationNoneStillRejected(t *testing.T) {
+	ds := &copyConfigDatastore{
+		candidate: &datastore.CandidateConfig{ConfigText: "set system host-name old-router\n"},
+		lockInfo: &datastore.LockInfo{
+			IsLocked:  true,
+			SessionID: "session-1",
+		},
+	}
+
+	reply := editConfigRPCWithDefaultOperation(t, ds, "none", "<config><system><host-name>router1</host-name></system></config>")
+	if len(reply.Errors) != 1 {
+		t.Fatalf("edit-config default-operation none errors = %d, want 1", len(reply.Errors))
+	}
+	err := reply.Errors[0]
+	if err.ErrorTag != ErrorTagOperationNotSupported {
+		t.Fatalf("edit-config default-operation none error tag = %s, want %s", err.ErrorTag, ErrorTagOperationNotSupported)
+	}
+	if err.ErrorPath != "/rpc/edit-config/default-operation" {
+		t.Fatalf("edit-config default-operation none error path = %q, want /rpc/edit-config/default-operation", err.ErrorPath)
+	}
+	if ds.saveCalled {
+		t.Fatal("edit-config default-operation none saved candidate")
 	}
 }
 
@@ -294,13 +362,30 @@ func copyConfigParsedRPC(t *testing.T, ds datastore.Datastore, rpcXML string) *R
 func editConfigRPC(t *testing.T, ds datastore.Datastore, testOption string, configXML string) *RPCReply {
 	t.Helper()
 
+	return editConfigRPCWithOptions(t, ds, testOption, "", configXML)
+}
+
+func editConfigRPCWithDefaultOperation(t *testing.T, ds datastore.Datastore, defaultOperation string, configXML string) *RPCReply {
+	t.Helper()
+
+	return editConfigRPCWithOptions(t, ds, "", defaultOperation, configXML)
+}
+
+func editConfigRPCWithOptions(t *testing.T, ds datastore.Datastore, testOption string, defaultOperation string, configXML string) *RPCReply {
+	t.Helper()
+
 	testOptionXML := ""
 	if testOption != "" {
 		testOptionXML = "<test-option>" + testOption + "</test-option>"
 	}
+	defaultOperationXML := ""
+	if defaultOperation != "" {
+		defaultOperationXML = "<default-operation>" + defaultOperation + "</default-operation>"
+	}
 	return copyConfigParsedRPC(t, ds, `<rpc message-id="101" xmlns="urn:ietf:params:xml:ns:netconf:base:1.0">
 		<edit-config>
 			<target><candidate/></target>
+			`+defaultOperationXML+`
 			`+testOptionXML+`
 			`+configXML+`
 		</edit-config>
