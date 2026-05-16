@@ -541,6 +541,7 @@ var rpcOperationElementPaths = map[string]map[string]struct{}{
 	"validate": {
 		"validate":                  {},
 		"validate/source":           {},
+		"validate/source/config":    {},
 		"validate/source/running":   {},
 		"validate/source/candidate": {},
 		"validate/source/startup":   {},
@@ -626,6 +627,7 @@ func isOpenRPCContentPath(path []string) bool {
 	key := rpcPathKey(path)
 	return key == "edit-config/config" ||
 		key == "copy-config/source/config" ||
+		key == "validate/source/config" ||
 		key == "get-config/filter" ||
 		key == "get/filter"
 }
@@ -647,7 +649,8 @@ var rpcTextContentPaths = map[string]struct{}{
 }
 
 func allowsConfigSourceChoice(path string) bool {
-	return path == "copy-config/source"
+	return path == "copy-config/source" ||
+		path == "validate/source"
 }
 
 func rpcPathKey(path []string) string {

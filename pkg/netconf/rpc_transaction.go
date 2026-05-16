@@ -2,9 +2,11 @@ package netconf
 
 import (
 	"context"
+	"encoding/xml"
 	"fmt"
 	"log"
 
+	"github.com/akam1o/arca-router/pkg/config"
 	"github.com/akam1o/arca-router/pkg/datastore"
 )
 
@@ -112,6 +114,12 @@ type ValidateRequest struct {
 	Source  Source   `xml:"source"`
 }
 
+func (r *ValidateRequest) SetInheritedNamespaceAttrs(attrs []xml.Attr) {
+	if r.Source.Config != nil {
+		r.Source.Config.InheritedAttrs = cloneXMLAttrs(attrs)
+	}
+}
+
 // handleValidate handles <validate> RPC - validates datastore config
 func (s *Server) handleValidate(ctx context.Context, sess *Session, rpc *RPC) *RPCReply {
 	var req ValidateRequest
@@ -119,21 +127,9 @@ func (s *Server) handleValidate(ctx context.Context, sess *Session, rpc *RPC) *R
 		return NewErrorReply(rpc.MessageID, err.(*RPCError))
 	}
 
-	// Get source datastore
-	source, err := req.Source.GetDatastore()
-	if err != nil {
-		return NewErrorReply(rpc.MessageID, err.(*RPCError))
-	}
-
-	configText, rpcErr := s.validateSourceConfigText(ctx, sess, source)
+	cfg, rpcErr := s.validateSourceConfig(ctx, sess, &req.Source)
 	if rpcErr != nil {
 		return NewErrorReply(rpc.MessageID, rpcErr)
-	}
-
-	cfg, err := TextToConfig(configText)
-	if err != nil {
-		log.Printf("[NETCONF] Failed to parse %s config: %v", source, err)
-		return NewErrorReply(rpc.MessageID, ErrValidationFailed(fmt.Sprintf("config parsing failed: %v", err)))
 	}
 
 	if rpcErr := validateConfigSemantics("validate", cfg); rpcErr != nil {
@@ -141,9 +137,44 @@ func (s *Server) handleValidate(ctx context.Context, sess *Session, rpc *RPC) *R
 		return NewErrorReply(rpc.MessageID, rpcErr)
 	}
 
-	log.Printf("[NETCONF] Validation successful for %s datastore (session %s)", source, sess.ID)
+	log.Printf("[NETCONF] Validation successful for source config (session %s)", sess.ID)
 
 	return NewOKReply(rpc.MessageID)
+}
+
+func (s *Server) validateSourceConfig(ctx context.Context, sess *Session, sourceReq *Source) (*config.Config, *RPCError) {
+	if sourceReq.Config != nil {
+		configXML, err := sourceReq.Config.XML()
+		if err != nil {
+			return nil, err.(*RPCError)
+		}
+		cfg, err := XMLToConfig(configXML, DefaultOpMerge)
+		if err != nil {
+			log.Printf("[NETCONF] Failed to parse inline validate source: %v", err)
+			if rpcErr, ok := err.(*RPCError); ok {
+				return nil, rpcErr.WithPath("/rpc/validate/source")
+			}
+			return nil, ErrValidationFailed(fmt.Sprintf("config parsing failed: %v", err))
+		}
+		return cfg, nil
+	}
+
+	source, err := sourceReq.GetDatastore()
+	if err != nil {
+		return nil, err.(*RPCError)
+	}
+
+	configText, rpcErr := s.validateSourceConfigText(ctx, sess, source)
+	if rpcErr != nil {
+		return nil, rpcErr
+	}
+
+	cfg, err := TextToConfig(configText)
+	if err != nil {
+		log.Printf("[NETCONF] Failed to parse %s config: %v", source, err)
+		return nil, ErrValidationFailed(fmt.Sprintf("config parsing failed: %v", err))
+	}
+	return cfg, nil
 }
 
 func (s *Server) validateSourceConfigText(ctx context.Context, sess *Session, source string) (string, *RPCError) {

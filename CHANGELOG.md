@@ -2,6 +2,7 @@
 
 ## v0.9.x - NETCONF/YANG and Operational Safety (current)
 
+- **NETCONF validate inline source**: `<validate>` now accepts inline `<source><config>` payloads and validates them with the same YANG/XML and semantic checks as datastore-backed sources
 - **NETCONF copy-config inline source**: `copy-config` now accepts inline `<source><config>` payloads, validates them, and converts them to candidate configuration safely
 - **NETCONF copy-config semantic validation**: `copy-config` now parses and semantically validates source datastore content before saving candidate state
 - **NETCONF subtree filter model validation**: subtree filters now validate nested element paths and namespaces against the implemented NETCONF/YANG path schema before request handling
