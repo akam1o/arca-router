@@ -255,7 +255,7 @@ func writeChassisXML(buf *bytes.Buffer, chassis *config.ChassisConfig) error {
 
 // writeInterfacesXML writes interfaces configuration to XML with IETF namespace.
 func writeInterfacesXML(buf *bytes.Buffer, interfaces map[string]*config.Interface, filter *Filter) error {
-	xpathFilter := configOutputXPathFilter(filter)
+	xpathFilter := outputXPathFilter(filter)
 	buf.WriteString(`  <interfaces xmlns="` + IETFInterfacesNS + `">`)
 	buf.WriteString("\n")
 
@@ -340,7 +340,7 @@ func writeInterfacesXML(buf *bytes.Buffer, interfaces map[string]*config.Interfa
 
 // writeRoutingOptionsXML writes routing options to XML with IETF routing namespace.
 func writeRoutingOptionsXML(buf *bytes.Buffer, ro *config.RoutingOptions, filter *Filter) error {
-	xpathFilter := configOutputXPathFilter(filter)
+	xpathFilter := outputXPathFilter(filter)
 	buf.WriteString(`  <routing xmlns="` + IETFRoutingNS + `">`)
 	buf.WriteString("\n")
 
@@ -429,7 +429,7 @@ func writeRoutingOptionsXML(buf *bytes.Buffer, ro *config.RoutingOptions, filter
 	return nil
 }
 
-func configOutputXPathFilter(filter *Filter) *XPathFilter {
+func outputXPathFilter(filter *Filter) *XPathFilter {
 	if filter == nil || filter.Type != "xpath" {
 		return nil
 	}
