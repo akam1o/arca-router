@@ -242,7 +242,7 @@ func (s *Server) handleEditConfig(ctx context.Context, sess *Session, rpc *RPC) 
 
 	if req.ErrorOption != nil {
 		switch *req.ErrorOption {
-		case ErrorStop, ErrorRollbackOnError:
+		case ErrorStop, ErrorContinue, ErrorRollbackOnError:
 		default:
 			return NewErrorReply(rpc.MessageID,
 				NewRPCError(ErrorTypeProtocol, ErrorTagOperationNotSupported,
