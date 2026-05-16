@@ -37,6 +37,76 @@ func (d *copyConfigDatastore) GetLockInfo(context.Context, string) (*datastore.L
 	return d.lockInfo, nil
 }
 
+func TestEditConfigTestOnlyValidatesWithoutSavingCandidate(t *testing.T) {
+	ds := &copyConfigDatastore{
+		candidate: &datastore.CandidateConfig{ConfigText: "set system host-name old-router\n"},
+		lockInfo: &datastore.LockInfo{
+			IsLocked:  true,
+			SessionID: "session-1",
+		},
+	}
+
+	reply := editConfigRPC(t, ds, "test-only", "<config><system><host-name>router1</host-name></system></config>")
+	if len(reply.Errors) != 0 {
+		t.Fatalf("edit-config test-only errors = %#v, want none", reply.Errors)
+	}
+	if reply.OK == nil {
+		t.Fatal("edit-config test-only OK = nil, want ok")
+	}
+	if ds.saveCalled {
+		t.Fatal("edit-config test-only saved candidate")
+	}
+}
+
+func TestEditConfigTestOnlyReturnsSemanticError(t *testing.T) {
+	ds := &copyConfigDatastore{
+		candidate: &datastore.CandidateConfig{ConfigText: "set system host-name old-router\n"},
+		lockInfo: &datastore.LockInfo{
+			IsLocked:  true,
+			SessionID: "session-1",
+		},
+	}
+
+	reply := editConfigRPC(t, ds, "test-only", "<config><system><host-name>bad_name</host-name></system></config>")
+	if len(reply.Errors) != 1 {
+		t.Fatalf("edit-config test-only errors = %d, want 1", len(reply.Errors))
+	}
+	err := reply.Errors[0]
+	if err.ErrorTag != ErrorTagInvalidValue {
+		t.Fatalf("edit-config test-only error tag = %s, want %s", err.ErrorTag, ErrorTagInvalidValue)
+	}
+	if err.ErrorPath != "/rpc/edit-config/config" {
+		t.Fatalf("edit-config test-only error path = %q, want /rpc/edit-config/config", err.ErrorPath)
+	}
+	if ds.saveCalled {
+		t.Fatal("edit-config test-only saved invalid candidate")
+	}
+}
+
+func TestEditConfigTestThenSetSavesCandidate(t *testing.T) {
+	ds := &copyConfigDatastore{
+		candidate: &datastore.CandidateConfig{ConfigText: "set system host-name old-router\n"},
+		lockInfo: &datastore.LockInfo{
+			IsLocked:  true,
+			SessionID: "session-1",
+		},
+	}
+
+	reply := editConfigRPC(t, ds, "test-then-set", "<config><system><host-name>router1</host-name></system></config>")
+	if len(reply.Errors) != 0 {
+		t.Fatalf("edit-config test-then-set errors = %#v, want none", reply.Errors)
+	}
+	if reply.OK == nil {
+		t.Fatal("edit-config test-then-set OK = nil, want ok")
+	}
+	if !ds.saveCalled {
+		t.Fatal("edit-config test-then-set did not save candidate")
+	}
+	if ds.savedText != "set system host-name router1\n" {
+		t.Fatalf("saved candidate = %q, want test-then-set edit", ds.savedText)
+	}
+}
+
 func TestCopyConfigValidatesRunningSourceBeforeSavingCandidate(t *testing.T) {
 	ds := &copyConfigDatastore{
 		running: &datastore.RunningConfig{ConfigText: "set system host-name bad_name\n"},
@@ -219,4 +289,20 @@ func copyConfigParsedRPC(t *testing.T, ds datastore.Datastore, rpcXML string) *R
 		t.Fatalf("ParseRPC() error = %v", err)
 	}
 	return srv.HandleRPC(context.Background(), sess, rpc)
+}
+
+func editConfigRPC(t *testing.T, ds datastore.Datastore, testOption string, configXML string) *RPCReply {
+	t.Helper()
+
+	testOptionXML := ""
+	if testOption != "" {
+		testOptionXML = "<test-option>" + testOption + "</test-option>"
+	}
+	return copyConfigParsedRPC(t, ds, `<rpc message-id="101" xmlns="urn:ietf:params:xml:ns:netconf:base:1.0">
+		<edit-config>
+			<target><candidate/></target>
+			`+testOptionXML+`
+			`+configXML+`
+		</edit-config>
+	</rpc>`)
 }

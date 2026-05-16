@@ -2,6 +2,7 @@
 
 ## v0.9.x - NETCONF/YANG and Operational Safety (current)
 
+- **NETCONF edit-config test-option coverage**: `edit-config` now supports `test-only` validation without candidate writes and `test-then-set` validation before saving
 - **NETCONF validate inline source**: `<validate>` now accepts inline `<source><config>` payloads and validates them with the same YANG/XML and semantic checks as datastore-backed sources
 - **NETCONF copy-config inline source**: `copy-config` now accepts inline `<source><config>` payloads, validates them, and converts them to candidate configuration safely
 - **NETCONF copy-config semantic validation**: `copy-config` now parses and semantically validates source datastore content before saving candidate state
