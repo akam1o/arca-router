@@ -110,6 +110,27 @@ func TestSessionManagerCloseAllClearsScaledSessionsAndLocks(t *testing.T) {
 	}
 }
 
+func TestNewSessionManagerDefaultsNilDependencies(t *testing.T) {
+	sm := NewSessionManager(nil, nil, nil)
+	if sm == nil {
+		t.Fatal("NewSessionManager() = nil")
+	}
+
+	session := sm.Create("alice", RoleOperator, nil, nil)
+	if session == nil {
+		t.Fatal("Create() = nil")
+	}
+	if session.IdleTimeout != 30*time.Minute {
+		t.Fatalf("IdleTimeout = %s, want 30m", session.IdleTimeout)
+	}
+	if session.AbsoluteTimeout != 24*time.Hour {
+		t.Fatalf("AbsoluteTimeout = %s, want 24h", session.AbsoluteTimeout)
+	}
+	if sm.log == nil {
+		t.Fatal("session manager logger = nil")
+	}
+}
+
 func newTestSessionManager(store DatastoreLockReleaser) *SessionManager {
 	cfg := DefaultSSHConfig()
 	cfg.IdleTimeout = time.Hour

@@ -58,6 +58,13 @@ type DatastoreLockReleaser interface {
 
 // NewSessionManager creates a new session manager
 func NewSessionManager(config *SSHConfig, ds DatastoreLockReleaser, log *logger.Logger) *SessionManager {
+	if config == nil {
+		config = DefaultSSHConfig()
+	}
+	if log == nil {
+		log = logger.New("netconf-session", logger.DefaultConfig())
+	}
+
 	return &SessionManager{
 		sessions:       make(map[string]*NETCONFSession),
 		numericIDIndex: make(map[uint32]*NETCONFSession),
