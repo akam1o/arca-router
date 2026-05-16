@@ -2,6 +2,7 @@ package netconf
 
 import (
 	"encoding/xml"
+	"strings"
 	"testing"
 )
 
@@ -400,6 +401,62 @@ func TestIncludeOperationalSectionXPath(t *testing.T) {
 	}
 	if includeOperationalSection(filter, "state", "protocols", "bgp") {
 		t.Fatal("includeOperationalSection() = true, want false for sibling protocol state branch")
+	}
+}
+
+func TestApplySubtreeFilterUsesXMLTokenExtraction(t *testing.T) {
+	xmlData := []byte(`<data xmlns="urn:ietf:params:xml:ns:netconf:base:1.0">
+  <interfaces xmlns="urn:ietf:params:xml:ns:yang:ietf-interfaces">
+    <interface><name>ge-0/0/0</name></interface>
+  </interfaces>
+  <protocols xmlns="urn:arca:router:config:1.0">
+    <bgp/>
+  </protocols>
+</data>`)
+	filter := &Filter{
+		Content: []byte(`<if:interfaces/>`),
+		InheritedAttrs: []xml.Attr{
+			{Name: xml.Name{Space: "xmlns", Local: "if"}, Value: IETFInterfacesNS},
+		},
+	}
+
+	got, err := ApplySubtreeFilter(xmlData, filter)
+	if err != nil {
+		t.Fatalf("ApplySubtreeFilter() error = %v", err)
+	}
+	gotText := string(got)
+	if !strings.Contains(gotText, "<interfaces") || !strings.Contains(gotText, "ge-0/0/0") {
+		t.Fatalf("ApplySubtreeFilter() missing interfaces subtree:\n%s", gotText)
+	}
+	if strings.Contains(gotText, "<protocols") {
+		t.Fatalf("ApplySubtreeFilter() included unmatched protocols subtree:\n%s", gotText)
+	}
+}
+
+func TestApplySubtreeFilterMatchesOnlyDataChildren(t *testing.T) {
+	xmlData := []byte(`<data>
+  <wrapper><interfaces><interface><name>nested</name></interface></interfaces></wrapper>
+  <interfaces><interface><name>top-level</name></interface></interfaces>
+</data>`)
+	filter := &Filter{Content: []byte(`<interfaces/>`)}
+
+	got, err := ApplySubtreeFilter(xmlData, filter)
+	if err != nil {
+		t.Fatalf("ApplySubtreeFilter() error = %v", err)
+	}
+	gotText := string(got)
+	if !strings.Contains(gotText, "top-level") {
+		t.Fatalf("ApplySubtreeFilter() missing direct data child:\n%s", gotText)
+	}
+	if strings.Contains(gotText, "nested") || strings.Contains(gotText, "<wrapper") {
+		t.Fatalf("ApplySubtreeFilter() included nested non-child subtree:\n%s", gotText)
+	}
+}
+
+func TestApplySubtreeFilterRejectsMalformedData(t *testing.T) {
+	_, err := ApplySubtreeFilter([]byte(`<data><interfaces>`), &Filter{Content: []byte(`<interfaces/>`)})
+	if err == nil {
+		t.Fatal("ApplySubtreeFilter() error = nil, want malformed data error")
 	}
 }
 
