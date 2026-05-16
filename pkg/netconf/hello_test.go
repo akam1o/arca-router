@@ -19,6 +19,7 @@ func TestServerHello(t *testing.T) {
 		CapabilityBase11,
 		CapabilityCandidate,
 		CapabilityValidate,
+		CapabilityRollback,
 		CapabilityArcaRouter,
 		CapabilityArcaXPathFilterSubset,
 	}
@@ -43,7 +44,6 @@ func TestServerHelloDoesNotAdvertiseUnsupportedCapabilities(t *testing.T) {
 		"urn:ietf:params:netconf:capability:xpath:1.0",
 		"urn:ietf:params:netconf:capability:startup:1.0",
 		"urn:ietf:params:netconf:capability:writable-running:1.0",
-		"urn:ietf:params:netconf:capability:rollback-on-error:1.0",
 	}
 
 	for _, cap := range unsupportedCaps {

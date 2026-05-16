@@ -2,6 +2,7 @@
 
 ## v0.9.x - NETCONF/YANG and Operational Safety (current)
 
+- **NETCONF rollback-on-error support**: server hello now advertises rollback-on-error and `edit-config` accepts `error-option=rollback-on-error` while preserving atomic candidate writes
 - **NETCONF edit-config replace default-operation**: `edit-config` now accepts `default-operation=replace` and replaces edited top-level configuration subtrees while preserving unrelated candidate state
 - **NETCONF edit-config test-option coverage**: `edit-config` now supports `test-only` validation without candidate writes and `test-then-set` validation before saving
 - **NETCONF validate inline source**: `<validate>` now accepts inline `<source><config>` payloads and validates them with the same YANG/XML and semantic checks as datastore-backed sources
@@ -13,7 +14,7 @@
 - **NETCONF namespace-aware XPath filters**: XPath filters now accept declared namespace prefixes for implemented IETF and Arca model paths while rejecting undeclared or mismatched prefixes
 - **NETCONF XPath model validation**: XPath filters now validate nested element paths and predicate keys against the implemented NETCONF/YANG path schema before request handling
 - **NETCONF capability URI compliance**: hello negotiation now uses RFC 6241 capability URIs and accepts base:1.1-only clients while preserving the XML namespace separately
-- **NETCONF capability accuracy**: server hello now advertises the Arca XPath filter subset separately while avoiding unsupported standard XPath, startup, writable-running, and rollback-on-error capabilities
+- **NETCONF capability accuracy**: server hello now advertises the Arca XPath filter subset separately while avoiding unsupported standard XPath, startup, and writable-running capabilities
 - **NETCONF validate source coverage**: `<validate>` now checks both running and candidate datastore sources while continuing to reject unsupported startup validation
 - **NETCONF semantic candidate validation**: `edit-config`, `commit`, `validate`, and YANG XML validation now enforce the internal config semantic rules before accepting candidate state
 - **NETCONF XPath filter subset**: `get` and `get-config` now accept simple absolute XPath filters and use them for configuration and operational section pruning

@@ -238,13 +238,16 @@ func (s *Server) handleEditConfig(ctx context.Context, sess *Session, rpc *RPC) 
 		}
 	}
 
-	// Only stop-on-error is meaningful while edit-config is applied as one candidate update.
-	if req.ErrorOption != nil && *req.ErrorOption != ErrorStop {
-		return NewErrorReply(rpc.MessageID,
-			NewRPCError(ErrorTypeProtocol, ErrorTagOperationNotSupported,
-				fmt.Sprintf("unsupported error-option: %s", *req.ErrorOption)).
-				WithPath("/rpc/edit-config/error-option").
-				WithBadElement(string(*req.ErrorOption)))
+	if req.ErrorOption != nil {
+		switch *req.ErrorOption {
+		case ErrorStop, ErrorRollbackOnError:
+		default:
+			return NewErrorReply(rpc.MessageID,
+				NewRPCError(ErrorTypeProtocol, ErrorTagOperationNotSupported,
+					fmt.Sprintf("unsupported error-option: %s", *req.ErrorOption)).
+					WithPath("/rpc/edit-config/error-option").
+					WithBadElement(string(*req.ErrorOption)))
+		}
 	}
 
 	// Set default operation. Per-element operation attributes are not supported,

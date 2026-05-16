@@ -175,6 +175,80 @@ func TestEditConfigDefaultOperationNoneStillRejected(t *testing.T) {
 	}
 }
 
+func TestEditConfigRollbackOnErrorSavesValidCandidate(t *testing.T) {
+	ds := &copyConfigDatastore{
+		candidate: &datastore.CandidateConfig{ConfigText: "set system host-name old-router\n"},
+		lockInfo: &datastore.LockInfo{
+			IsLocked:  true,
+			SessionID: "session-1",
+		},
+	}
+
+	reply := editConfigRPCWithErrorOption(t, ds, "rollback-on-error", "<config><system><host-name>router1</host-name></system></config>")
+	if len(reply.Errors) != 0 {
+		t.Fatalf("edit-config rollback-on-error errors = %#v, want none", reply.Errors)
+	}
+	if reply.OK == nil {
+		t.Fatal("edit-config rollback-on-error OK = nil, want ok")
+	}
+	if !ds.saveCalled {
+		t.Fatal("edit-config rollback-on-error did not save candidate")
+	}
+	if ds.savedText != "set system host-name router1\n" {
+		t.Fatalf("saved candidate = %q, want rollback-on-error edit", ds.savedText)
+	}
+}
+
+func TestEditConfigRollbackOnErrorDoesNotSaveInvalidCandidate(t *testing.T) {
+	ds := &copyConfigDatastore{
+		candidate: &datastore.CandidateConfig{ConfigText: "set system host-name old-router\n"},
+		lockInfo: &datastore.LockInfo{
+			IsLocked:  true,
+			SessionID: "session-1",
+		},
+	}
+
+	reply := editConfigRPCWithErrorOption(t, ds, "rollback-on-error", "<config><system><host-name>bad_name</host-name></system></config>")
+	if len(reply.Errors) != 1 {
+		t.Fatalf("edit-config rollback-on-error errors = %d, want 1", len(reply.Errors))
+	}
+	err := reply.Errors[0]
+	if err.ErrorTag != ErrorTagInvalidValue {
+		t.Fatalf("edit-config rollback-on-error error tag = %s, want %s", err.ErrorTag, ErrorTagInvalidValue)
+	}
+	if err.ErrorPath != "/rpc/edit-config/config" {
+		t.Fatalf("edit-config rollback-on-error error path = %q, want /rpc/edit-config/config", err.ErrorPath)
+	}
+	if ds.saveCalled {
+		t.Fatal("edit-config rollback-on-error saved invalid candidate")
+	}
+}
+
+func TestEditConfigContinueOnErrorStillRejected(t *testing.T) {
+	ds := &copyConfigDatastore{
+		candidate: &datastore.CandidateConfig{ConfigText: "set system host-name old-router\n"},
+		lockInfo: &datastore.LockInfo{
+			IsLocked:  true,
+			SessionID: "session-1",
+		},
+	}
+
+	reply := editConfigRPCWithErrorOption(t, ds, "continue-on-error", "<config><system><host-name>router1</host-name></system></config>")
+	if len(reply.Errors) != 1 {
+		t.Fatalf("edit-config continue-on-error errors = %d, want 1", len(reply.Errors))
+	}
+	err := reply.Errors[0]
+	if err.ErrorTag != ErrorTagOperationNotSupported {
+		t.Fatalf("edit-config continue-on-error error tag = %s, want %s", err.ErrorTag, ErrorTagOperationNotSupported)
+	}
+	if err.ErrorPath != "/rpc/edit-config/error-option" {
+		t.Fatalf("edit-config continue-on-error error path = %q, want /rpc/edit-config/error-option", err.ErrorPath)
+	}
+	if ds.saveCalled {
+		t.Fatal("edit-config continue-on-error saved candidate")
+	}
+}
+
 func TestCopyConfigValidatesRunningSourceBeforeSavingCandidate(t *testing.T) {
 	ds := &copyConfigDatastore{
 		running: &datastore.RunningConfig{ConfigText: "set system host-name bad_name\n"},
@@ -362,16 +436,22 @@ func copyConfigParsedRPC(t *testing.T, ds datastore.Datastore, rpcXML string) *R
 func editConfigRPC(t *testing.T, ds datastore.Datastore, testOption string, configXML string) *RPCReply {
 	t.Helper()
 
-	return editConfigRPCWithOptions(t, ds, testOption, "", configXML)
+	return editConfigRPCWithOptions(t, ds, testOption, "", "", configXML)
 }
 
 func editConfigRPCWithDefaultOperation(t *testing.T, ds datastore.Datastore, defaultOperation string, configXML string) *RPCReply {
 	t.Helper()
 
-	return editConfigRPCWithOptions(t, ds, "", defaultOperation, configXML)
+	return editConfigRPCWithOptions(t, ds, "", defaultOperation, "", configXML)
 }
 
-func editConfigRPCWithOptions(t *testing.T, ds datastore.Datastore, testOption string, defaultOperation string, configXML string) *RPCReply {
+func editConfigRPCWithErrorOption(t *testing.T, ds datastore.Datastore, errorOption string, configXML string) *RPCReply {
+	t.Helper()
+
+	return editConfigRPCWithOptions(t, ds, "", "", errorOption, configXML)
+}
+
+func editConfigRPCWithOptions(t *testing.T, ds datastore.Datastore, testOption string, defaultOperation string, errorOption string, configXML string) *RPCReply {
 	t.Helper()
 
 	testOptionXML := ""
@@ -382,11 +462,16 @@ func editConfigRPCWithOptions(t *testing.T, ds datastore.Datastore, testOption s
 	if defaultOperation != "" {
 		defaultOperationXML = "<default-operation>" + defaultOperation + "</default-operation>"
 	}
+	errorOptionXML := ""
+	if errorOption != "" {
+		errorOptionXML = "<error-option>" + errorOption + "</error-option>"
+	}
 	return copyConfigParsedRPC(t, ds, `<rpc message-id="101" xmlns="urn:ietf:params:xml:ns:netconf:base:1.0">
 		<edit-config>
 			<target><candidate/></target>
 			`+defaultOperationXML+`
 			`+testOptionXML+`
+			`+errorOptionXML+`
 			`+configXML+`
 		</edit-config>
 	</rpc>`)

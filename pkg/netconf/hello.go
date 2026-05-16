@@ -12,6 +12,7 @@ const (
 	CapabilityBase11     = "urn:ietf:params:netconf:base:1.1"
 	CapabilityCandidate  = "urn:ietf:params:netconf:capability:candidate:1.0"
 	CapabilityValidate   = "urn:ietf:params:netconf:capability:validate:1.1"
+	CapabilityRollback   = "urn:ietf:params:netconf:capability:rollback-on-error:1.0"
 	CapabilityArcaRouter = "urn:arca:router:config:1.0?module=arca-router&revision=2025-12-27"
 	// Arca-specific capability for the safe absolute XPath subset accepted by filters.
 	CapabilityArcaXPathFilterSubset = "urn:arca:router:netconf:capability:xpath-filter-subset:1.0"
@@ -39,6 +40,7 @@ func ServerHello(sessionID uint32) *Hello {
 		CapabilityBase11,
 		CapabilityCandidate,
 		CapabilityValidate,
+		CapabilityRollback,
 		CapabilityArcaRouter,
 		CapabilityArcaXPathFilterSubset,
 	}
