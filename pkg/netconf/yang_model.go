@@ -370,13 +370,41 @@ func validateXPathFilterNamespaces(filter *XPathFilter) error {
 	return nil
 }
 
-func validateSubtreeFilterNamespaces(elements []subtreeFilterElement) error {
-	for _, element := range elements {
+func validateSubtreeFilterPaths(paths [][]subtreeFilterElement) error {
+	for _, path := range paths {
+		if len(path) == 0 {
+			continue
+		}
+		segments := subtreeFilterPathSegments(path)
+		if err := implementedYANGPathSchema.validate(&XPathFilter{
+			Segments:   segments,
+			Predicates: map[int]map[string]string{},
+		}); err != nil {
+			return err
+		}
+		if err := validateSubtreeFilterPathNamespaces(path, segments); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func subtreeFilterPathSegments(path []subtreeFilterElement) []string {
+	segments := make([]string, 0, len(path))
+	for _, element := range path {
+		segments = append(segments, element.LocalName)
+	}
+	return segments
+}
+
+func validateSubtreeFilterPathNamespaces(path []subtreeFilterElement, segments []string) error {
+	for index, element := range path {
 		if element.Namespace == "" || element.Namespace == NetconfBaseNS {
 			continue
 		}
-		if expected := expectedXPathNamespace([]string{element.LocalName}); element.Namespace != expected {
-			return fmt.Errorf("/%s uses namespace %q, want %q", element.LocalName, element.Namespace, expected)
+		currentPath := segments[:index+1]
+		if expected := expectedXPathNamespace(currentPath); element.Namespace != expected {
+			return fmt.Errorf("/%s uses namespace %q, want %q", strings.Join(currentPath, "/"), element.Namespace, expected)
 		}
 	}
 	return nil

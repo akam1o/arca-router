@@ -530,3 +530,31 @@ func TestParseFilterElements(t *testing.T) {
 		})
 	}
 }
+
+func TestParseFilterElementPaths(t *testing.T) {
+	paths, err := parseFilterElementPathsWithContext(
+		[]byte(`<if:interfaces><if:interface><if:name/></if:interface></if:interfaces>`),
+		[]xml.Attr{{Name: xml.Name{Space: "xmlns", Local: "if"}, Value: IETFInterfacesNS}},
+	)
+	if err != nil {
+		t.Fatalf("parseFilterElementPathsWithContext() error = %v", err)
+	}
+	want := [][]subtreeFilterElement{
+		{{LocalName: "interfaces", Namespace: IETFInterfacesNS}},
+		{{LocalName: "interfaces", Namespace: IETFInterfacesNS}, {LocalName: "interface", Namespace: IETFInterfacesNS}},
+		{{LocalName: "interfaces", Namespace: IETFInterfacesNS}, {LocalName: "interface", Namespace: IETFInterfacesNS}, {LocalName: "name", Namespace: IETFInterfacesNS}},
+	}
+	if len(paths) != len(want) {
+		t.Fatalf("paths length = %d, want %d: %#v", len(paths), len(want), paths)
+	}
+	for i := range want {
+		if len(paths[i]) != len(want[i]) {
+			t.Fatalf("paths[%d] length = %d, want %d", i, len(paths[i]), len(want[i]))
+		}
+		for j := range want[i] {
+			if paths[i][j] != want[i][j] {
+				t.Fatalf("paths[%d][%d] = %#v, want %#v", i, j, paths[i][j], want[i][j])
+			}
+		}
+	}
+}

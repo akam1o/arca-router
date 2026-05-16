@@ -402,6 +402,28 @@ func (f *Filter) parseTopLevelElementSpecs() ([]subtreeFilterElement, error) {
 }
 
 func parseFilterElementSpecsWithContext(filterXML []byte, namespaceAttrs []xml.Attr) ([]subtreeFilterElement, error) {
+	paths, err := parseFilterElementPathsWithContext(filterXML, namespaceAttrs)
+	if err != nil {
+		return nil, err
+	}
+	elements := make([]subtreeFilterElement, 0, len(paths))
+	for _, path := range paths {
+		if len(path) == 1 {
+			elements = append(elements, path[0])
+		}
+	}
+	return elements, nil
+}
+
+func (f *Filter) parseElementPaths() ([][]subtreeFilterElement, error) {
+	if f == nil {
+		return nil, nil
+	}
+	namespaceAttrs := collectNamespaceAttrs(f.InheritedAttrs, f.Attrs)
+	return parseFilterElementPathsWithContext(f.Content, namespaceAttrs)
+}
+
+func parseFilterElementPathsWithContext(filterXML []byte, namespaceAttrs []xml.Attr) ([][]subtreeFilterElement, error) {
 	var wrapped bytes.Buffer
 	wrapped.WriteString("<filter")
 	writeNamespaceDeclarationAttrs(&wrapped, namespaceAttrs, map[string]string{})
@@ -412,7 +434,8 @@ func parseFilterElementSpecsWithContext(filterXML []byte, namespaceAttrs []xml.A
 	decoder := xml.NewDecoder(bytes.NewReader(wrapped.Bytes()))
 	decoder.Strict = true
 	decoder.Entity = nil
-	elements := make([]subtreeFilterElement, 0)
+	paths := make([][]subtreeFilterElement, 0)
+	stack := make([]subtreeFilterElement, 0)
 	depth := 0
 
 	for {
@@ -427,21 +450,24 @@ func parseFilterElementSpecsWithContext(filterXML []byte, namespaceAttrs []xml.A
 		switch t := token.(type) {
 		case xml.StartElement:
 			depth++
-			if depth == 2 {
-				// Top-level element
-				elements = append(elements, subtreeFilterElement{
+			if depth >= 2 {
+				stack = append(stack, subtreeFilterElement{
 					LocalName: t.Name.Local,
 					Namespace: t.Name.Space,
 				})
+				paths = append(paths, append([]subtreeFilterElement(nil), stack...))
 			}
 		case xml.EndElement:
+			if depth >= 2 && len(stack) > 0 {
+				stack = stack[:len(stack)-1]
+			}
 			if depth > 0 {
 				depth--
 			}
 		}
 	}
 
-	return elements, nil
+	return paths, nil
 }
 
 func extractMatchingSubtrees(xmlData []byte, element subtreeFilterElement) ([][]byte, error) {

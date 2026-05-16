@@ -600,11 +600,63 @@ func TestFilterValidate(t *testing.T) {
 			wantErr: false,
 		},
 		{
+			name: "subtree filter nested model path",
+			filter: &Filter{
+				Type:    "subtree",
+				Content: []byte(`<interfaces><interface><name/></interface></interfaces>`),
+			},
+			rpcName: "get-config",
+			wantErr: false,
+		},
+		{
+			name: "subtree filter nested namespace prefix",
+			filter: &Filter{
+				Type:    "subtree",
+				Content: []byte(`<if:interfaces><if:interface><if:name/></if:interface></if:interfaces>`),
+				Attrs: []xml.Attr{
+					{Name: xml.Name{Space: "xmlns", Local: "if"}, Value: IETFInterfacesNS},
+				},
+			},
+			rpcName: "get-config",
+			wantErr: false,
+		},
+		{
 			name: "subtree filter namespace prefix mismatch",
 			filter: &Filter{
 				Type:    "subtree",
 				Content: []byte(`<rt:interfaces/>`),
 				Attrs: []xml.Attr{
+					{Name: xml.Name{Space: "xmlns", Local: "rt"}, Value: IETFRoutingNS},
+				},
+			},
+			rpcName: "get-config",
+			wantErr: true,
+		},
+		{
+			name: "subtree filter rejects unknown top-level element",
+			filter: &Filter{
+				Type:    "subtree",
+				Content: []byte(`<unknown/>`),
+			},
+			rpcName: "get-config",
+			wantErr: true,
+		},
+		{
+			name: "subtree filter rejects unknown nested element",
+			filter: &Filter{
+				Type:    "subtree",
+				Content: []byte(`<interfaces><interface><unknown/></interface></interfaces>`),
+			},
+			rpcName: "get-config",
+			wantErr: true,
+		},
+		{
+			name: "subtree filter rejects nested namespace prefix mismatch",
+			filter: &Filter{
+				Type:    "subtree",
+				Content: []byte(`<if:interfaces><rt:interface/></if:interfaces>`),
+				Attrs: []xml.Attr{
+					{Name: xml.Name{Space: "xmlns", Local: "if"}, Value: IETFInterfacesNS},
 					{Name: xml.Name{Space: "xmlns", Local: "rt"}, Value: IETFRoutingNS},
 				},
 			},

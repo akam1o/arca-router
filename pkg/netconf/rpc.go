@@ -867,15 +867,15 @@ func (f *Filter) validateSubtreeContent(rpcName string) error {
 	if topLevelElements == 0 {
 		return ErrInvalidFilter(rpcName, "subtree filter must contain at least one element")
 	}
-	filterElements, err := f.parseTopLevelElementSpecs()
+	filterPaths, err := f.parseElementPaths()
 	if err != nil {
 		return NewRPCError(ErrorTypeRPC, ErrorTagMalformedMessage,
 			fmt.Sprintf("invalid subtree filter XML: %v", err)).
 			WithPath(fmt.Sprintf("/rpc/%s/filter", rpcName)).
 			WithBadElement("filter")
 	}
-	if err := validateSubtreeFilterNamespaces(filterElements); err != nil {
-		return ErrInvalidFilter(rpcName, fmt.Sprintf("invalid subtree filter namespace: %v", err))
+	if err := validateSubtreeFilterPaths(filterPaths); err != nil {
+		return ErrInvalidFilter(rpcName, fmt.Sprintf("invalid subtree filter path: %v", err))
 	}
 	return nil
 }
