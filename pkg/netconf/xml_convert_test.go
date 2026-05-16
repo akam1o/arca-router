@@ -92,6 +92,7 @@ func TestConfigToXMLWithXPathFilter(t *testing.T) {
 		System: &config.SystemConfig{HostName: "router1"},
 		Interfaces: map[string]*config.Interface{
 			"ge-0/0/0": {Description: "uplink"},
+			"ge-0/0/1": {Description: "peer"},
 		},
 	}
 	filter := &Filter{Type: "xpath", Select: "/interfaces/interface[name='ge-0/0/0']"}
@@ -106,6 +107,38 @@ func TestConfigToXMLWithXPathFilter(t *testing.T) {
 	}
 	if strings.Contains(xmlStr, "<system") {
 		t.Fatalf("ConfigToXML() included unrelated system section:\n%s", xmlStr)
+	}
+	if strings.Contains(xmlStr, "ge-0/0/1") || strings.Contains(xmlStr, "peer") {
+		t.Fatalf("ConfigToXML() included predicate-mismatched interface:\n%s", xmlStr)
+	}
+}
+
+func TestConfigToXMLWithXPathFilterFiltersStaticRoutePredicates(t *testing.T) {
+	cfg := &config.Config{
+		RoutingOptions: &config.RoutingOptions{
+			RouterID: "203.0.113.254",
+			StaticRoutes: []*config.StaticRoute{
+				{Prefix: "10.0.0.0/24", NextHop: "192.0.2.1", Distance: 10},
+				{Prefix: "10.0.1.0/24", NextHop: "192.0.2.2", Distance: 20},
+			},
+		},
+	}
+	filter := &Filter{Type: "xpath", Select: "/routing/static-routes/route[prefix='10.0.0.0/24'][next-hop='192.0.2.1']"}
+
+	xmlData, err := ConfigToXML(cfg, filter)
+	if err != nil {
+		t.Fatalf("ConfigToXML() error = %v", err)
+	}
+	xmlStr := string(xmlData)
+	for _, want := range []string{"<routing", "10.0.0.0/24", "192.0.2.1"} {
+		if !strings.Contains(xmlStr, want) {
+			t.Fatalf("ConfigToXML() missing %q for XPath route predicate:\n%s", want, xmlStr)
+		}
+	}
+	for _, unwanted := range []string{"10.0.1.0/24", "192.0.2.2"} {
+		if strings.Contains(xmlStr, unwanted) {
+			t.Fatalf("ConfigToXML() included predicate-mismatched static route %q:\n%s", unwanted, xmlStr)
+		}
 	}
 }
 

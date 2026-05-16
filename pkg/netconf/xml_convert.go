@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/akam1o/arca-router/pkg/config"
@@ -53,7 +54,7 @@ func ConfigToXML(cfg *config.Config, filter *Filter) ([]byte, error) {
 
 	// Interfaces configuration - use IETF interfaces namespace
 	if len(cfg.Interfaces) > 0 && (filter == nil || filterMatches(filter, "interfaces")) {
-		if err := writeInterfacesXML(&buf, cfg.Interfaces); err != nil {
+		if err := writeInterfacesXML(&buf, cfg.Interfaces, filter); err != nil {
 			return nil, fmt.Errorf("failed to serialize interfaces: %w", err)
 		}
 	}
@@ -61,7 +62,7 @@ func ConfigToXML(cfg *config.Config, filter *Filter) ([]byte, error) {
 	// Routing options - use IETF routing namespace
 	// Note: XML element is "routing" but internal name is "routing-options"
 	if cfg.RoutingOptions != nil && (filter == nil || filterMatches(filter, "routing") || filterMatches(filter, "routing-options")) {
-		if err := writeRoutingOptionsXML(&buf, cfg.RoutingOptions); err != nil {
+		if err := writeRoutingOptionsXML(&buf, cfg.RoutingOptions, filter); err != nil {
 			return nil, fmt.Errorf("failed to serialize routing options: %w", err)
 		}
 	}
@@ -252,13 +253,18 @@ func writeChassisXML(buf *bytes.Buffer, chassis *config.ChassisConfig) error {
 	return nil
 }
 
-// writeInterfacesXML writes interfaces configuration to XML with IETF namespace
-func writeInterfacesXML(buf *bytes.Buffer, interfaces map[string]*config.Interface) error {
+// writeInterfacesXML writes interfaces configuration to XML with IETF namespace.
+func writeInterfacesXML(buf *bytes.Buffer, interfaces map[string]*config.Interface, filter *Filter) error {
+	xpathFilter := configOutputXPathFilter(filter)
 	buf.WriteString(`  <interfaces xmlns="` + IETFInterfacesNS + `">`)
 	buf.WriteString("\n")
 
 	for _, name := range sortedStringKeys(interfaces) {
 		iface := interfaces[name]
+		if !interfaceMatchesXPathPredicates(xpathFilter, name, iface) {
+			continue
+		}
+
 		buf.WriteString(`    <interface>`)
 		buf.WriteString("\n")
 
@@ -332,8 +338,9 @@ func writeInterfacesXML(buf *bytes.Buffer, interfaces map[string]*config.Interfa
 	return nil
 }
 
-// writeRoutingOptionsXML writes routing options to XML with IETF routing namespace
-func writeRoutingOptionsXML(buf *bytes.Buffer, ro *config.RoutingOptions) error {
+// writeRoutingOptionsXML writes routing options to XML with IETF routing namespace.
+func writeRoutingOptionsXML(buf *bytes.Buffer, ro *config.RoutingOptions, filter *Filter) error {
+	xpathFilter := configOutputXPathFilter(filter)
 	buf.WriteString(`  <routing xmlns="` + IETFRoutingNS + `">`)
 	buf.WriteString("\n")
 
@@ -356,6 +363,10 @@ func writeRoutingOptionsXML(buf *bytes.Buffer, ro *config.RoutingOptions) error 
 		buf.WriteString("\n")
 
 		for _, route := range ro.StaticRoutes {
+			if !staticRouteMatchesXPathPredicates(xpathFilter, route) {
+				continue
+			}
+
 			buf.WriteString(`      <route>`)
 			buf.WriteString("\n")
 
@@ -416,6 +427,108 @@ func writeRoutingOptionsXML(buf *bytes.Buffer, ro *config.RoutingOptions) error 
 	buf.WriteString(`  </routing>`)
 	buf.WriteString("\n")
 	return nil
+}
+
+func configOutputXPathFilter(filter *Filter) *XPathFilter {
+	if filter == nil || filter.Type != "xpath" {
+		return nil
+	}
+	xpathFilter, err := ParseXPathFilter(strings.TrimSpace(filter.Select))
+	if err != nil {
+		return nil
+	}
+	return xpathFilter
+}
+
+func interfaceMatchesXPathPredicates(xpathFilter *XPathFilter, name string, iface *config.Interface) bool {
+	segmentIndex, ok := xpathListSegmentIndex(xpathFilter, []string{"interfaces", "interface"})
+	if !ok {
+		return true
+	}
+	for key, want := range xpathFilter.Predicates[segmentIndex] {
+		var got string
+		switch key {
+		case "name":
+			got = name
+		case "description":
+			if iface != nil {
+				got = iface.Description
+			}
+		default:
+			return false
+		}
+		if got != want {
+			return false
+		}
+	}
+	return true
+}
+
+func staticRouteMatchesXPathPredicates(xpathFilter *XPathFilter, route *config.StaticRoute) bool {
+	segmentIndex, ok := xpathStaticRouteSegmentIndex(xpathFilter)
+	if !ok {
+		return true
+	}
+	if route == nil {
+		return false
+	}
+	for key, want := range xpathFilter.Predicates[segmentIndex] {
+		var got string
+		switch key {
+		case "prefix":
+			got = route.Prefix
+		case "next-hop":
+			got = route.NextHop
+		case "distance":
+			if route.Distance == 0 {
+				return false
+			}
+			got = strconv.Itoa(route.Distance)
+		case "bfd":
+			if !route.BFD && route.BFDProfile == "" && route.BFDSource == "" && !route.BFDMultihop {
+				return false
+			}
+			got = "true"
+		case "bfd-profile":
+			got = route.BFDProfile
+		case "bfd-source":
+			got = route.BFDSource
+		case "bfd-multihop":
+			if !route.BFDMultihop {
+				return false
+			}
+			got = "true"
+		default:
+			return false
+		}
+		if got != want {
+			return false
+		}
+	}
+	return true
+}
+
+func xpathStaticRouteSegmentIndex(xpathFilter *XPathFilter) (int, bool) {
+	if index, ok := xpathListSegmentIndex(xpathFilter, []string{"routing", "static-routes", "route"}); ok {
+		return index, true
+	}
+	return xpathListSegmentIndex(xpathFilter, []string{"routing-options", "static", "route"})
+}
+
+func xpathListSegmentIndex(xpathFilter *XPathFilter, path []string) (int, bool) {
+	if xpathFilter == nil || len(xpathFilter.Segments) < len(path) {
+		return 0, false
+	}
+	for i, segment := range path {
+		if xpathFilter.Segments[i] != segment {
+			return 0, false
+		}
+	}
+	index := len(path) - 1
+	if len(xpathFilter.Predicates[index]) == 0 {
+		return 0, false
+	}
+	return index, true
 }
 
 func writeRoutingInstancesXML(buf *bytes.Buffer, instances map[string]*config.RoutingInstance) error {
