@@ -402,6 +402,30 @@ func TestEditConfigRunningTargetRejectedAsUnsupported(t *testing.T) {
 	assertRunningWriteUnsupported(t, reply, "/rpc/edit-config/target")
 }
 
+func TestEditConfigLockDeniedWithMissingSessionManager(t *testing.T) {
+	ds := &copyConfigDatastore{
+		lockInfo: &datastore.LockInfo{
+			IsLocked:  true,
+			SessionID: "other-session",
+		},
+	}
+
+	reply := editConfigRPC(t, ds, "test-then-set", "<config><system><host-name>router1</host-name></system></config>")
+	if len(reply.Errors) != 1 {
+		t.Fatalf("edit-config lock denied errors = %d, want 1", len(reply.Errors))
+	}
+	err := reply.Errors[0]
+	if err.ErrorTag != ErrorTagLockDenied {
+		t.Fatalf("edit-config lock denied tag = %s, want %s", err.ErrorTag, ErrorTagLockDenied)
+	}
+	if err.ErrorPath != "/rpc/edit-config/target" {
+		t.Fatalf("edit-config lock denied path = %q, want /rpc/edit-config/target", err.ErrorPath)
+	}
+	if err.ErrorInfo != nil && err.ErrorInfo.LockOwnerSession != "" {
+		t.Fatalf("edit-config lock owner = %#v, want omitted unknown owner", err.ErrorInfo)
+	}
+}
+
 func TestCopyConfigRunningTargetRejectedAsUnsupported(t *testing.T) {
 	reply := copyConfigParsedRPC(t, &copyConfigDatastore{}, `<rpc message-id="101" xmlns="urn:ietf:params:xml:ns:netconf:base:1.0">
 		<copy-config>
