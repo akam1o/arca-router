@@ -90,7 +90,119 @@ func TestCopyConfigSavesValidatedRunningSource(t *testing.T) {
 	}
 }
 
+func TestCopyConfigSavesInlineConfigSource(t *testing.T) {
+	ds := &copyConfigDatastore{
+		lockInfo: &datastore.LockInfo{
+			IsLocked:  true,
+			SessionID: "session-1",
+		},
+	}
+
+	reply := copyConfigRPC(t, ds, "<source><config><system><host-name>router1</host-name></system></config></source>")
+	if len(reply.Errors) != 0 {
+		t.Fatalf("copy-config inline source errors = %#v, want none", reply.Errors)
+	}
+	if reply.OK == nil {
+		t.Fatal("copy-config inline source OK = nil, want ok")
+	}
+	if !ds.saveCalled {
+		t.Fatal("copy-config inline source did not save candidate")
+	}
+	if ds.savedText != "set system host-name router1\n" {
+		t.Fatalf("saved candidate = %q, want host-name config", ds.savedText)
+	}
+}
+
+func TestCopyConfigInlineSourcePreservesAncestorNamespaceDeclarations(t *testing.T) {
+	ds := &copyConfigDatastore{
+		lockInfo: &datastore.LockInfo{
+			IsLocked:  true,
+			SessionID: "session-1",
+		},
+	}
+
+	reply := copyConfigParsedRPC(t, ds, `<rpc message-id="101"
+		xmlns="urn:ietf:params:xml:ns:netconf:base:1.0"
+		xmlns:arca="`+ArcaConfigNS+`">
+		<copy-config>
+			<target><candidate/></target>
+			<source><config><arca:system><arca:host-name>router1</arca:host-name></arca:system></config></source>
+		</copy-config>
+	</rpc>`)
+	if len(reply.Errors) != 0 {
+		t.Fatalf("copy-config namespace-prefixed inline source errors = %#v, want none", reply.Errors)
+	}
+	if ds.savedText != "set system host-name router1\n" {
+		t.Fatalf("saved candidate = %q, want namespace-prefixed host-name config", ds.savedText)
+	}
+}
+
+func TestCopyConfigValidatesInlineConfigSourceBeforeSavingCandidate(t *testing.T) {
+	ds := &copyConfigDatastore{
+		lockInfo: &datastore.LockInfo{
+			IsLocked:  true,
+			SessionID: "session-1",
+		},
+	}
+
+	reply := copyConfigRPC(t, ds, "<source><config><system><host-name>bad_name</host-name></system></config></source>")
+	if len(reply.Errors) != 1 {
+		t.Fatalf("copy-config inline source errors = %d, want 1", len(reply.Errors))
+	}
+	err := reply.Errors[0]
+	if err.ErrorTag != ErrorTagInvalidValue {
+		t.Fatalf("copy-config inline source error tag = %s, want %s", err.ErrorTag, ErrorTagInvalidValue)
+	}
+	if err.ErrorPath != "/rpc/copy-config/source" {
+		t.Fatalf("copy-config inline source error path = %q, want /rpc/copy-config/source", err.ErrorPath)
+	}
+	if ds.saveCalled {
+		t.Fatal("copy-config saved invalid inline source config")
+	}
+}
+
+func TestParseRPCRejectsCopyConfigMultipleSourceChoices(t *testing.T) {
+	_, err := ParseRPC([]byte(`<rpc message-id="101" xmlns="urn:ietf:params:xml:ns:netconf:base:1.0">
+		<copy-config>
+			<target><candidate/></target>
+			<source><running/><config><system><host-name>router1</host-name></system></config></source>
+		</copy-config>
+	</rpc>`))
+	if err == nil {
+		t.Fatal("ParseRPC() error = nil, want multiple source choices error")
+	}
+	rpcErr, ok := err.(*RPCError)
+	if !ok {
+		t.Fatalf("ParseRPC() error = %T, want *RPCError", err)
+	}
+	if rpcErr.ErrorTag != ErrorTagMalformedMessage {
+		t.Fatalf("ParseRPC() error tag = %s, want %s", rpcErr.ErrorTag, ErrorTagMalformedMessage)
+	}
+}
+
+func TestParseRPCAcceptsCopyConfigInlineSource(t *testing.T) {
+	if _, err := ParseRPC([]byte(`<rpc message-id="101" xmlns="urn:ietf:params:xml:ns:netconf:base:1.0">
+		<copy-config>
+			<target><candidate/></target>
+			<source><config><system><host-name>router1</host-name></system></config></source>
+		</copy-config>
+	</rpc>`)); err != nil {
+		t.Fatalf("ParseRPC() inline copy-config source error = %v", err)
+	}
+}
+
 func copyConfigRPC(t *testing.T, ds datastore.Datastore, source string) *RPCReply {
+	t.Helper()
+
+	return copyConfigParsedRPC(t, ds, `<rpc message-id="101" xmlns="urn:ietf:params:xml:ns:netconf:base:1.0">
+		<copy-config>
+			<target><candidate/></target>
+			`+source+`
+		</copy-config>
+	</rpc>`)
+}
+
+func copyConfigParsedRPC(t *testing.T, ds datastore.Datastore, rpcXML string) *RPCReply {
 	t.Helper()
 
 	srv := NewServer(ds, nil)
@@ -102,12 +214,7 @@ func copyConfigRPC(t *testing.T, ds datastore.Datastore, source string) *RPCRepl
 		LastUsed:       time.Now(),
 		datastoreLocks: map[string]struct{}{},
 	}
-	rpc, err := ParseRPC([]byte(`<rpc message-id="101" xmlns="urn:ietf:params:xml:ns:netconf:base:1.0">
-		<copy-config>
-			<target><candidate/></target>
-			` + source + `
-		</copy-config>
-	</rpc>`))
+	rpc, err := ParseRPC([]byte(rpcXML))
 	if err != nil {
 		t.Fatalf("ParseRPC() error = %v", err)
 	}

@@ -6,6 +6,8 @@ import (
 	"encoding/xml"
 	"fmt"
 	"log"
+
+	"github.com/akam1o/arca-router/pkg/config"
 )
 
 // GetConfigRequest represents <get-config> RPC
@@ -326,6 +328,12 @@ type CopyConfigRequest struct {
 	Source  Source   `xml:"source"`
 }
 
+func (r *CopyConfigRequest) SetInheritedNamespaceAttrs(attrs []xml.Attr) {
+	if r.Source.Config != nil {
+		r.Source.Config.InheritedAttrs = cloneXMLAttrs(attrs)
+	}
+}
+
 // handleCopyConfig handles <copy-config> RPC
 func (s *Server) handleCopyConfig(ctx context.Context, sess *Session, rpc *RPC) *RPCReply {
 	var req CopyConfigRequest
@@ -333,13 +341,8 @@ func (s *Server) handleCopyConfig(ctx context.Context, sess *Session, rpc *RPC) 
 		return NewErrorReply(rpc.MessageID, err.(*RPCError))
 	}
 
-	// Get target and source datastores
+	// Get target datastore
 	target, err := req.Target.GetDatastore()
-	if err != nil {
-		return NewErrorReply(rpc.MessageID, err.(*RPCError))
-	}
-
-	source, err := req.Source.GetDatastore()
 	if err != nil {
 		return NewErrorReply(rpc.MessageID, err.(*RPCError))
 	}
@@ -359,29 +362,54 @@ func (s *Server) handleCopyConfig(ctx context.Context, sess *Session, rpc *RPC) 
 
 	// Get source config text
 	var srcTextCfg string
-	switch source {
-	case DatastoreRunning:
-		runningCfg, err := s.datastore.GetRunning(ctx)
+	var srcCfg *config.Config
+	if req.Source.Config != nil {
+		configXML, err := req.Source.Config.XML()
 		if err != nil {
-			log.Printf("[NETCONF] CopyConfig source read error: %v", err)
-			return NewErrorReply(rpc.MessageID, ErrDatastoreError(fmt.Sprintf("failed to read source %s: %v", source, err)))
+			return NewErrorReply(rpc.MessageID, err.(*RPCError))
 		}
-		srcTextCfg = runningCfg.ConfigText
-	case DatastoreCandidate:
-		candidateCfg, err := s.datastore.GetCandidate(ctx, sess.ID)
+		srcCfg, err = XMLToConfig(configXML, DefaultOpMerge)
 		if err != nil {
-			log.Printf("[NETCONF] CopyConfig source read error: %v", err)
-			return NewErrorReply(rpc.MessageID, ErrDatastoreError(fmt.Sprintf("failed to read source %s: %v", source, err)))
+			log.Printf("[NETCONF] CopyConfig inline source parse error: %v", err)
+			if rpcErr, ok := err.(*RPCError); ok {
+				return NewErrorReply(rpc.MessageID, rpcErr.WithPath("/rpc/copy-config/source"))
+			}
+			return NewErrorReply(rpc.MessageID, ErrConfigValidationFailed("copy-config", fmt.Sprintf("config parsing failed: %v", err)))
 		}
-		srcTextCfg = candidateCfg.ConfigText
-	default:
-		return NewErrorReply(rpc.MessageID, ErrInvalidTarget("copy-config", source))
-	}
+		srcTextCfg, err = ConfigToText(srcCfg)
+		if err != nil {
+			log.Printf("[NETCONF] CopyConfig inline source serialization error: %v", err)
+			return NewErrorReply(rpc.MessageID, ErrDatastoreError("failed to serialize inline source config"))
+		}
+	} else {
+		source, err := req.Source.GetDatastore()
+		if err != nil {
+			return NewErrorReply(rpc.MessageID, err.(*RPCError))
+		}
+		switch source {
+		case DatastoreRunning:
+			runningCfg, err := s.datastore.GetRunning(ctx)
+			if err != nil {
+				log.Printf("[NETCONF] CopyConfig source read error: %v", err)
+				return NewErrorReply(rpc.MessageID, ErrDatastoreError(fmt.Sprintf("failed to read source %s: %v", source, err)))
+			}
+			srcTextCfg = runningCfg.ConfigText
+		case DatastoreCandidate:
+			candidateCfg, err := s.datastore.GetCandidate(ctx, sess.ID)
+			if err != nil {
+				log.Printf("[NETCONF] CopyConfig source read error: %v", err)
+				return NewErrorReply(rpc.MessageID, ErrDatastoreError(fmt.Sprintf("failed to read source %s: %v", source, err)))
+			}
+			srcTextCfg = candidateCfg.ConfigText
+		default:
+			return NewErrorReply(rpc.MessageID, ErrInvalidTarget("copy-config", source))
+		}
 
-	srcCfg, err := TextToConfig(srcTextCfg)
-	if err != nil {
-		log.Printf("[NETCONF] CopyConfig source parse error: %v", err)
-		return NewErrorReply(rpc.MessageID, ErrConfigValidationFailed("copy-config", fmt.Sprintf("config parsing failed: %v", err)))
+		srcCfg, err = TextToConfig(srcTextCfg)
+		if err != nil {
+			log.Printf("[NETCONF] CopyConfig source parse error: %v", err)
+			return NewErrorReply(rpc.MessageID, ErrConfigValidationFailed("copy-config", fmt.Sprintf("config parsing failed: %v", err)))
+		}
 	}
 	if rpcErr := validateConfigSemantics("copy-config", srcCfg); rpcErr != nil {
 		log.Printf("[NETCONF] CopyConfig source validation error: %v", rpcErr)

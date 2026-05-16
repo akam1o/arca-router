@@ -397,12 +397,17 @@ func (r *RPC) validateOperationCardinality(counts map[string]int) error {
 		for _, datastore := range rpcDatastoreElements {
 			count += counts[choicePath+"/"+datastore]
 		}
+		choiceName := "datastore"
+		if allowsConfigSourceChoice(choicePath) {
+			count += counts[choicePath+"/config"]
+			choiceName = "source choice"
+		}
 		path := rpcPathFromKey(choicePath)
 		switch {
 		case count == 0:
 			return missingRPCElement(path, "datastore")
 		case count > 1:
-			return ErrMalformedMessage(fmt.Sprintf("%s must contain exactly one datastore", choicePath)).
+			return ErrMalformedMessage(fmt.Sprintf("%s must contain exactly one %s", choicePath, choiceName)).
 				WithPath(rpcElementRPCPath(path))
 		}
 	}
@@ -501,6 +506,7 @@ var rpcOperationElementPaths = map[string]map[string]struct{}{
 		"copy-config/target/candidate": {},
 		"copy-config/target/startup":   {},
 		"copy-config/source":           {},
+		"copy-config/source/config":    {},
 		"copy-config/source/running":   {},
 		"copy-config/source/candidate": {},
 		"copy-config/source/startup":   {},
@@ -619,6 +625,7 @@ func rpcElementAllowedAttrs(path string) map[string]bool {
 func isOpenRPCContentPath(path []string) bool {
 	key := rpcPathKey(path)
 	return key == "edit-config/config" ||
+		key == "copy-config/source/config" ||
 		key == "get-config/filter" ||
 		key == "get/filter"
 }
@@ -637,6 +644,10 @@ var rpcTextContentPaths = map[string]struct{}{
 	"edit-config/test-option":       {},
 	"edit-config/error-option":      {},
 	"kill-session/session-id":       {},
+}
+
+func allowsConfigSourceChoice(path string) bool {
+	return path == "copy-config/source"
 }
 
 func rpcPathKey(path []string) string {
@@ -683,11 +694,12 @@ const (
 	DatastoreStartup   = "startup"
 )
 
-// Source represents <source> element in get-config
+// Source represents <source> element in get-config, copy-config, and validate.
 type Source struct {
-	Running   *struct{} `xml:"running"`
-	Candidate *struct{} `xml:"candidate"`
-	Startup   *struct{} `xml:"startup"`
+	Running   *struct{}      `xml:"running"`
+	Candidate *struct{}      `xml:"candidate"`
+	Startup   *struct{}      `xml:"startup"`
+	Config    *ConfigElement `xml:"config"`
 }
 
 // GetDatastore returns the datastore name from Source
