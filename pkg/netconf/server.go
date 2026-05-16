@@ -50,6 +50,16 @@ func (s *Server) SetOperationalStateProvider(provider OperationalStateProvider) 
 
 // HandleRPC dispatches RPC to appropriate handler with RBAC enforcement
 func (s *Server) HandleRPC(ctx context.Context, sess *Session, rpc *RPC) *RPCReply {
+	if rpc == nil {
+		return NewErrorReply("", ErrOperationFailed("rpc unavailable"))
+	}
+	if s == nil {
+		return NewErrorReply(rpc.MessageID, ErrOperationFailed("server unavailable")).WithAttributes(rpc.ReplyAttrs)
+	}
+	if sess == nil {
+		return NewErrorReply(rpc.MessageID, ErrOperationFailed("session unavailable")).WithAttributes(rpc.ReplyAttrs)
+	}
+
 	opName := rpc.GetOperationName()
 
 	// Update session last used timestamp

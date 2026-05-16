@@ -2,6 +2,7 @@
 
 ## v0.9.x - NETCONF/YANG and Operational Safety (current)
 
+- **NETCONF RPC entrypoint hardening**: `HandleRPC` now returns stable `operation-failed` replies for missing server, session, or RPC context instead of panicking in embedded callers
 - **NETCONF commit failure mapping**: datastore commit failures now surface as `datastore-error` RPC replies instead of being reported as backend validation failures
 - **NETCONF commit candidate read diagnostics**: `commit` now distinguishes datastore read failures from missing candidate configuration instead of reporting backend errors as an empty candidate
 - **NETCONF datastore availability guards**: datastore-backed RPC paths now return stable `operation-failed` replies when a server is embedded without a datastore while inline `validate` remains usable
