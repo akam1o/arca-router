@@ -17,6 +17,7 @@ type validateDatastore struct {
 	lockInfo     *datastore.LockInfo
 	runningErr   error
 	candidateErr error
+	commitErr    error
 }
 
 func (d *validateDatastore) GetRunning(context.Context) (*datastore.RunningConfig, error) {
@@ -35,6 +36,13 @@ func (d *validateDatastore) GetCandidate(context.Context, string) (*datastore.Ca
 
 func (d *validateDatastore) GetLockInfo(context.Context, string) (*datastore.LockInfo, error) {
 	return d.lockInfo, nil
+}
+
+func (d *validateDatastore) Commit(context.Context, *datastore.CommitRequest) (string, error) {
+	if d.commitErr != nil {
+		return "", d.commitErr
+	}
+	return "commit-1", nil
 }
 
 func TestValidateRunningDatastore(t *testing.T) {
@@ -250,6 +258,31 @@ func TestCommitCandidateReadErrorReturnsDatastoreError(t *testing.T) {
 	}
 	if !strings.Contains(err.ErrorMessage, "failed to read candidate config") {
 		t.Fatalf("commit candidate read message = %q, want read failure detail", err.ErrorMessage)
+	}
+}
+
+func TestCommitDatastoreFailureReturnsDatastoreError(t *testing.T) {
+	reply := commitRPC(t, &validateDatastore{
+		candidate: &datastore.CandidateConfig{ConfigText: "set system host-name router1\n"},
+		lockInfo: &datastore.LockInfo{
+			IsLocked:  true,
+			SessionID: "session-1",
+		},
+		commitErr: datastore.NewError(datastore.ErrCodeInternal, "failed to insert commit history", errors.New("disk full")),
+	}, "")
+
+	if len(reply.Errors) != 1 {
+		t.Fatalf("commit datastore errors = %d, want 1", len(reply.Errors))
+	}
+	err := reply.Errors[0]
+	if err.ErrorTag != ErrorTagOperationFailed {
+		t.Fatalf("commit datastore error tag = %s, want %s", err.ErrorTag, ErrorTagOperationFailed)
+	}
+	if err.ErrorAppTag != "datastore-error" {
+		t.Fatalf("commit datastore app-tag = %q, want datastore-error", err.ErrorAppTag)
+	}
+	if !strings.Contains(err.ErrorMessage, "failed to insert commit history") {
+		t.Fatalf("commit datastore message = %q, want datastore failure detail", err.ErrorMessage)
 	}
 }
 

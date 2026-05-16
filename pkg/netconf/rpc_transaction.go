@@ -3,6 +3,7 @@ package netconf
 import (
 	"context"
 	"encoding/xml"
+	"errors"
 	"fmt"
 	"log"
 
@@ -85,14 +86,21 @@ func (s *Server) handleCommit(ctx context.Context, sess *Session, rpc *RPC) *RPC
 	}
 	if err != nil {
 		log.Printf("[NETCONF] Commit failed for session %s: %v", sess.ID, err)
-		// Check if it's a backend validation error
-		return NewErrorReply(rpc.MessageID, ErrBackendValidationFailed(fmt.Sprintf("commit failed: %v", err)))
+		return NewErrorReply(rpc.MessageID, commitFailureError(err))
 	}
 	sess.RemoveLock(DatastoreCandidate)
 
 	log.Printf("[NETCONF] Commit successful: %s (session: %s, user: %s)", commitID, sess.ID, sess.Username)
 
 	return NewOKReply(rpc.MessageID)
+}
+
+func commitFailureError(err error) *RPCError {
+	var dsErr *datastore.Error
+	if errors.As(err, &dsErr) {
+		return ErrDatastoreError(fmt.Sprintf("commit failed: %v", err))
+	}
+	return ErrBackendValidationFailed(fmt.Sprintf("commit failed: %v", err))
 }
 
 func unsupportedCommitOption(req *CommitRequest) *RPCError {
