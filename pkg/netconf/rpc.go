@@ -786,6 +786,7 @@ func (f *Filter) Validate(rpcName string) error {
 	}
 
 	// Check filter type
+	f.Type = strings.TrimSpace(f.Type)
 	if f.Type == "" {
 		// Default to subtree if not specified
 		f.Type = "subtree"

@@ -108,6 +108,37 @@ func TestEditConfigTestThenSetSavesCandidate(t *testing.T) {
 	}
 }
 
+func TestEditConfigTrimsOperationOptions(t *testing.T) {
+	ds := &copyConfigDatastore{
+		candidate: &datastore.CandidateConfig{ConfigText: "set system host-name old-router\n"},
+		lockInfo: &datastore.LockInfo{
+			IsLocked:  true,
+			SessionID: "session-1",
+		},
+	}
+
+	reply := editConfigRPCWithOptions(
+		t,
+		ds,
+		"\n test-then-set \t",
+		"\n replace \t",
+		"\n rollback-on-error \t",
+		"<config><system><host-name>router1</host-name></system></config>",
+	)
+	if len(reply.Errors) != 0 {
+		t.Fatalf("edit-config trimmed options errors = %#v, want none", reply.Errors)
+	}
+	if reply.OK == nil {
+		t.Fatal("edit-config trimmed options OK = nil, want ok")
+	}
+	if !ds.saveCalled {
+		t.Fatal("edit-config trimmed options did not save candidate")
+	}
+	if ds.savedText != "set system host-name router1\n" {
+		t.Fatalf("saved candidate = %q, want replace edit", ds.savedText)
+	}
+}
+
 func TestEditConfigDefaultOperationReplaceSavesReplacedSubtree(t *testing.T) {
 	ds := &copyConfigDatastore{
 		candidate: &datastore.CandidateConfig{ConfigText: strings.Join([]string{
