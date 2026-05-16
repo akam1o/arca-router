@@ -2,6 +2,7 @@
 
 ## v0.9.x - NETCONF/YANG and Operational Safety (current)
 
+- **NETCONF continue-on-error support**: `edit-config` now accepts `error-option=continue-on-error` while preserving atomic validation and candidate writes for the current edit engine
 - **NETCONF operational XPath predicate filtering**: `<get>` operational state output now applies XPath list predicates to route, neighbor, routing-instance, interface, and BFD peer entries
 - **NETCONF XPath predicate output filtering**: `get-config` XML output now applies XPath list predicates to interface and static route entries instead of only pruning top-level sections
 - **NETCONF XPath multiple predicates**: XPath filters now accept multiple simple key-value predicates on the same path segment while still rejecting duplicate keys and complex predicate expressions

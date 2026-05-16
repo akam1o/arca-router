@@ -223,7 +223,7 @@ func TestEditConfigRollbackOnErrorDoesNotSaveInvalidCandidate(t *testing.T) {
 	}
 }
 
-func TestEditConfigContinueOnErrorStillRejected(t *testing.T) {
+func TestEditConfigContinueOnErrorSavesValidCandidate(t *testing.T) {
 	ds := &copyConfigDatastore{
 		candidate: &datastore.CandidateConfig{ConfigText: "set system host-name old-router\n"},
 		lockInfo: &datastore.LockInfo{
@@ -233,18 +233,17 @@ func TestEditConfigContinueOnErrorStillRejected(t *testing.T) {
 	}
 
 	reply := editConfigRPCWithErrorOption(t, ds, "continue-on-error", "<config><system><host-name>router1</host-name></system></config>")
-	if len(reply.Errors) != 1 {
-		t.Fatalf("edit-config continue-on-error errors = %d, want 1", len(reply.Errors))
+	if len(reply.Errors) != 0 {
+		t.Fatalf("edit-config continue-on-error errors = %#v, want none", reply.Errors)
 	}
-	err := reply.Errors[0]
-	if err.ErrorTag != ErrorTagOperationNotSupported {
-		t.Fatalf("edit-config continue-on-error error tag = %s, want %s", err.ErrorTag, ErrorTagOperationNotSupported)
+	if reply.OK == nil {
+		t.Fatal("edit-config continue-on-error OK = nil, want ok")
 	}
-	if err.ErrorPath != "/rpc/edit-config/error-option" {
-		t.Fatalf("edit-config continue-on-error error path = %q, want /rpc/edit-config/error-option", err.ErrorPath)
+	if !ds.saveCalled {
+		t.Fatal("edit-config continue-on-error did not save candidate")
 	}
-	if ds.saveCalled {
-		t.Fatal("edit-config continue-on-error saved candidate")
+	if ds.savedText != "set system host-name router1\n" {
+		t.Fatalf("saved candidate = %q, want continue-on-error edit", ds.savedText)
 	}
 }
 
