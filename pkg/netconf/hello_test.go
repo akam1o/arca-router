@@ -20,6 +20,7 @@ func TestServerHello(t *testing.T) {
 		CapabilityCandidate,
 		CapabilityValidate,
 		CapabilityArcaRouter,
+		CapabilityArcaXPathFilterSubset,
 	}
 
 	for _, cap := range requiredCaps {
@@ -29,6 +30,23 @@ func TestServerHello(t *testing.T) {
 	}
 	if !strings.Contains(CapabilityArcaRouter, "revision=2025-12-27") {
 		t.Errorf("CapabilityArcaRouter = %q, want current YANG revision", CapabilityArcaRouter)
+	}
+}
+
+func TestServerHelloDoesNotAdvertiseUnsupportedCapabilities(t *testing.T) {
+	hello := ServerHello(12345)
+
+	unsupportedCaps := []string{
+		"urn:ietf:params:netconf:capability:xpath:1.0",
+		"urn:ietf:params:netconf:capability:startup:1.0",
+		"urn:ietf:params:netconf:capability:writable-running:1.0",
+		"urn:ietf:params:netconf:capability:rollback-on-error:1.0",
+	}
+
+	for _, cap := range unsupportedCaps {
+		if hello.HasCapability(cap) {
+			t.Errorf("ServerHello() advertised unsupported capability %q", cap)
+		}
 	}
 }
 

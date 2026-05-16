@@ -2,6 +2,7 @@
 
 ## v0.9.x - NETCONF/YANG and Operational Safety (current)
 
+- **NETCONF capability accuracy**: server hello now advertises the Arca XPath filter subset separately while avoiding unsupported standard XPath, startup, writable-running, and rollback-on-error capabilities
 - **NETCONF validate source coverage**: `<validate>` now checks both running and candidate datastore sources while continuing to reject unsupported startup validation
 - **NETCONF semantic candidate validation**: `edit-config`, `commit`, `validate`, and YANG XML validation now enforce the internal config semantic rules before accepting candidate state
 - **NETCONF XPath filter subset**: `get` and `get-config` now accept simple absolute XPath filters and use them for configuration and operational section pruning
