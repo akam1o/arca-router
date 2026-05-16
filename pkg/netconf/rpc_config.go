@@ -213,7 +213,7 @@ func (s *Server) handleEditConfig(ctx context.Context, sess *Session, rpc *RPC) 
 	// Only candidate is writable (writable-running not supported)
 	if target != DatastoreCandidate {
 		if target == DatastoreRunning {
-			return NewErrorReply(rpc.MessageID, ErrWritableRunningNotSupported())
+			return NewErrorReply(rpc.MessageID, ErrWritableRunningNotSupported("edit-config", "target"))
 		}
 		if target == DatastoreStartup {
 			return NewErrorReply(rpc.MessageID, ErrStartupNotSupported("edit-config", "target"))
@@ -367,7 +367,7 @@ func (s *Server) handleCopyConfig(ctx context.Context, sess *Session, rpc *RPC) 
 	// Only candidate is writable as target
 	if target != DatastoreCandidate {
 		if target == DatastoreRunning {
-			return NewErrorReply(rpc.MessageID, ErrWritableRunningNotSupported())
+			return NewErrorReply(rpc.MessageID, ErrWritableRunningNotSupported("copy-config", "target"))
 		}
 		if target == DatastoreStartup {
 			return NewErrorReply(rpc.MessageID, ErrStartupNotSupported("copy-config", "target"))
@@ -469,7 +469,7 @@ func (s *Server) handleDeleteConfig(ctx context.Context, sess *Session, rpc *RPC
 	// Only candidate can be deleted
 	if target != DatastoreCandidate {
 		if target == DatastoreRunning {
-			return NewErrorReply(rpc.MessageID, NewRPCError(ErrorTypeProtocol, ErrorTagOperationNotSupported, "cannot delete running datastore"))
+			return NewErrorReply(rpc.MessageID, ErrWritableRunningNotSupported("delete-config", "target"))
 		}
 		if target == DatastoreStartup {
 			return NewErrorReply(rpc.MessageID, ErrStartupNotSupported("delete-config", "target"))

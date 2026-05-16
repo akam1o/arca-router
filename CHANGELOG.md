@@ -2,6 +2,7 @@
 
 ## v0.9.x - NETCONF/YANG and Operational Safety (current)
 
+- **NETCONF writable-running rejection**: running datastore write RPCs now consistently return `operation-not-supported` with operation-specific target paths when writable-running is not advertised
 - **NETCONF startup datastore rejection**: startup datastore RPC requests now consistently return `operation-not-supported` with source/target error paths when startup capability is not advertised
 - **NETCONF rollback-on-error support**: server hello now advertises rollback-on-error and `edit-config` accepts `error-option=rollback-on-error` while preserving atomic candidate writes
 - **NETCONF edit-config replace default-operation**: `edit-config` now accepts `default-operation=replace` and replaces edited top-level configuration subtrees while preserving unrelated candidate state

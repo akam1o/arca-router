@@ -332,11 +332,12 @@ func ErrTransportClosed() *RPCError {
 	return NewRPCError(ErrorTypeTransport, ErrorTagOperationFailed, "transport connection closed")
 }
 
-// ErrWritableRunningNotSupported returns error for writable-running capability not advertised
-func ErrWritableRunningNotSupported() *RPCError {
+// ErrWritableRunningNotSupported returns error for running datastore write
+// operations when writable-running is not advertised.
+func ErrWritableRunningNotSupported(rpcName, container string) *RPCError {
 	return NewRPCError(ErrorTypeProtocol, ErrorTagOperationNotSupported, "writable-running capability not supported").
-		WithPath("/rpc/edit-config/target").
-		WithBadElement("running")
+		WithPath(fmt.Sprintf("/rpc/%s/%s", rpcName, container)).
+		WithBadElement(DatastoreRunning)
 }
 
 // ErrBackendValidationFailed returns error for backend (VPP/FRR) validation failure

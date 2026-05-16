@@ -308,6 +308,38 @@ func TestDeleteConfigStartupTargetRejectedAsUnsupported(t *testing.T) {
 	assertStartupUnsupported(t, reply, "/rpc/delete-config/target")
 }
 
+func TestEditConfigRunningTargetRejectedAsUnsupported(t *testing.T) {
+	reply := copyConfigParsedRPC(t, &copyConfigDatastore{}, `<rpc message-id="101" xmlns="urn:ietf:params:xml:ns:netconf:base:1.0">
+		<edit-config>
+			<target><running/></target>
+			<config><system><host-name>router1</host-name></system></config>
+		</edit-config>
+	</rpc>`)
+
+	assertRunningWriteUnsupported(t, reply, "/rpc/edit-config/target")
+}
+
+func TestCopyConfigRunningTargetRejectedAsUnsupported(t *testing.T) {
+	reply := copyConfigParsedRPC(t, &copyConfigDatastore{}, `<rpc message-id="101" xmlns="urn:ietf:params:xml:ns:netconf:base:1.0">
+		<copy-config>
+			<target><running/></target>
+			<source><candidate/></source>
+		</copy-config>
+	</rpc>`)
+
+	assertRunningWriteUnsupported(t, reply, "/rpc/copy-config/target")
+}
+
+func TestDeleteConfigRunningTargetRejectedAsUnsupported(t *testing.T) {
+	reply := copyConfigParsedRPC(t, &copyConfigDatastore{}, `<rpc message-id="101" xmlns="urn:ietf:params:xml:ns:netconf:base:1.0">
+		<delete-config>
+			<target><running/></target>
+		</delete-config>
+	</rpc>`)
+
+	assertRunningWriteUnsupported(t, reply, "/rpc/delete-config/target")
+}
+
 func TestCopyConfigValidatesRunningSourceBeforeSavingCandidate(t *testing.T) {
 	ds := &copyConfigDatastore{
 		running: &datastore.RunningConfig{ConfigText: "set system host-name bad_name\n"},
@@ -507,6 +539,24 @@ func assertStartupUnsupported(t *testing.T, reply *RPCReply, wantPath string) {
 	}
 	if err.ErrorInfo == nil || err.ErrorInfo.BadElement != DatastoreStartup {
 		t.Fatalf("error info = %#v, want bad-element startup", err.ErrorInfo)
+	}
+}
+
+func assertRunningWriteUnsupported(t *testing.T, reply *RPCReply, wantPath string) {
+	t.Helper()
+
+	if len(reply.Errors) != 1 {
+		t.Fatalf("reply errors = %d, want 1", len(reply.Errors))
+	}
+	err := reply.Errors[0]
+	if err.ErrorTag != ErrorTagOperationNotSupported {
+		t.Fatalf("error tag = %s, want %s", err.ErrorTag, ErrorTagOperationNotSupported)
+	}
+	if err.ErrorPath != wantPath {
+		t.Fatalf("error path = %q, want %s", err.ErrorPath, wantPath)
+	}
+	if err.ErrorInfo == nil || err.ErrorInfo.BadElement != DatastoreRunning {
+		t.Fatalf("error info = %#v, want bad-element running", err.ErrorInfo)
 	}
 }
 
