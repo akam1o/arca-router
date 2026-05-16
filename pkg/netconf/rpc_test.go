@@ -2,6 +2,7 @@ package netconf
 
 import (
 	"bytes"
+	"encoding/xml"
 	"fmt"
 	"strings"
 	"testing"
@@ -403,6 +404,52 @@ func TestUnmarshalOperationPreservesFilterNamespaceDeclarations(t *testing.T) {
 	}
 }
 
+func TestUnmarshalOperationPreservesXPathFilterNamespaceDeclarations(t *testing.T) {
+	tests := []struct {
+		name string
+		xml  string
+	}{
+		{
+			name: "rpc namespace declaration",
+			xml: `<rpc message-id="101" xmlns="urn:ietf:params:xml:ns:netconf:base:1.0" xmlns:if="urn:ietf:params:xml:ns:yang:ietf-interfaces">
+				<get-config>
+					<source><running/></source>
+					<filter type="xpath" select="/if:interfaces/if:interface[if:name='ge-0/0/0']"/>
+				</get-config>
+			</rpc>`,
+		},
+		{
+			name: "filter namespace declaration",
+			xml: `<rpc message-id="101" xmlns="urn:ietf:params:xml:ns:netconf:base:1.0">
+				<get-config>
+					<source><running/></source>
+					<filter type="xpath" select="/if:interfaces/if:interface[if:name='ge-0/0/0']" xmlns:if="urn:ietf:params:xml:ns:yang:ietf-interfaces"/>
+				</get-config>
+			</rpc>`,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			rpc, err := ParseRPC([]byte(tt.xml))
+			if err != nil {
+				t.Fatalf("ParseRPC() error = %v", err)
+			}
+
+			var req GetConfigRequest
+			if err := rpc.UnmarshalOperation(&req); err != nil {
+				t.Fatalf("UnmarshalOperation() error = %v", err)
+			}
+			if err := req.Filter.Validate("get-config"); err != nil {
+				t.Fatalf("Filter.Validate() error = %v", err)
+			}
+			if !filterMatches(req.Filter, "interfaces") {
+				t.Fatalf("filterMatches() = false, want true for namespace-prefixed xpath filter")
+			}
+		})
+	}
+}
+
 func TestRPCGetOperationName(t *testing.T) {
 	xml := `<rpc message-id="101" xmlns="urn:ietf:params:xml:ns:netconf:base:1.0">
 		<get-config>
@@ -553,6 +600,42 @@ func TestFilterValidate(t *testing.T) {
 			wantErr: false,
 		},
 		{
+			name: "xpath filter namespace prefix on filter",
+			filter: &Filter{
+				Type:   "xpath",
+				Select: "/if:interfaces/if:interface[if:name='ge-0/0/0']",
+				Attrs: []xml.Attr{
+					{Name: xml.Name{Space: "xmlns", Local: "if"}, Value: IETFInterfacesNS},
+				},
+			},
+			rpcName: "get-config",
+			wantErr: false,
+		},
+		{
+			name: "xpath filter namespace prefix inherited from rpc",
+			filter: &Filter{
+				Type:   "xpath",
+				Select: "/arca:protocols/arca:bgp/arca:group/arca:neighbor",
+				InheritedAttrs: []xml.Attr{
+					{Name: xml.Name{Space: "xmlns", Local: "arca"}, Value: ArcaConfigNS},
+				},
+			},
+			rpcName: "get-config",
+			wantErr: false,
+		},
+		{
+			name: "xpath filter routing namespace prefix",
+			filter: &Filter{
+				Type:   "xpath",
+				Select: "/rt:routing/rt:static-routes/rt:route[rt:prefix='10.0.0.0/24']",
+				Attrs: []xml.Attr{
+					{Name: xml.Name{Space: "xmlns", Local: "rt"}, Value: IETFRoutingNS},
+				},
+			},
+			rpcName: "get-config",
+			wantErr: false,
+		},
+		{
 			name:    "xpath filter requires select",
 			filter:  &Filter{Type: "xpath"},
 			rpcName: "get-config",
@@ -573,6 +656,24 @@ func TestFilterValidate(t *testing.T) {
 		{
 			name:    "xpath filter rejects unknown predicate key",
 			filter:  &Filter{Type: "xpath", Select: "/interfaces/interface[foo='bar']"},
+			rpcName: "get-config",
+			wantErr: true,
+		},
+		{
+			name:    "xpath filter rejects undeclared namespace prefix",
+			filter:  &Filter{Type: "xpath", Select: "/if:interfaces"},
+			rpcName: "get-config",
+			wantErr: true,
+		},
+		{
+			name: "xpath filter rejects namespace prefix mismatch",
+			filter: &Filter{
+				Type:   "xpath",
+				Select: "/rt:interfaces",
+				Attrs: []xml.Attr{
+					{Name: xml.Name{Space: "xmlns", Local: "rt"}, Value: IETFRoutingNS},
+				},
+			},
 			rpcName: "get-config",
 			wantErr: true,
 		},
