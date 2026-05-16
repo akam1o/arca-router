@@ -18,8 +18,7 @@ type XPathFilter struct {
 	SegmentNamespaces []string
 
 	// Predicates per segment (e.g., map[segmentIndex]map["name"]="ge-0/0/0")
-	// Phase 3: Basic key-value matching only, single predicate per segment
-	// Phase 4: Multiple predicates and complex boolean expressions
+	// Supports multiple simple key-value predicates per segment.
 	Predicates map[int]map[string]string
 	// Namespace URI per predicate key when a namespace prefix was used.
 	PredicateNamespaces map[int]map[string]string
@@ -35,12 +34,12 @@ type subtreeFilterElement struct {
 // - /interfaces
 // - /interfaces/interface
 // - /interfaces/interface[name='ge-0/0/0']
+// - /interfaces/interface[name='ge-0/0/0'][unit='0']
 // - /routing-options/static/route[prefix='10.0.0.0/24']
 // - /if:interfaces/if:interface[if:name='ge-0/0/0']
 //
 // Not supported (Phase 4):
 // - Functions (count(), contains(), etc.)
-// - Multiple predicates
 // - Complex boolean expressions
 func ParseXPathFilter(path string) (*XPathFilter, error) {
 	return parseXPathFilter(path, nil)
@@ -130,14 +129,13 @@ func parseXPathFilter(path string, namespaceCtx map[string]string) (*XPathFilter
 			filter.Segments = append(filter.Segments, elemName)
 			filter.SegmentNamespaces = append(filter.SegmentNamespaces, namespace)
 
-			// Extract ALL predicates (Phase 3: only store first, warn on multiple)
+			// Extract all simple key-value predicates.
 			predicateMap := make(map[string]string)
 			predicateNamespaces := make(map[string]string)
 			remaining := seg[idx:]
-			predicateCount := 0
 
 			for len(remaining) > 0 && remaining[0] == '[' {
-				predEnd := strings.Index(remaining, "]")
+				predEnd := findXPathPredicateEnd(remaining)
 				if predEnd == -1 {
 					return nil, fmt.Errorf("unclosed predicate in: %s", seg)
 				}
@@ -148,14 +146,9 @@ func parseXPathFilter(path string, namespaceCtx map[string]string) (*XPathFilter
 					return nil, fmt.Errorf("invalid predicate in %s: %w", seg, err)
 				}
 
-				predicateCount++
 				remaining = remaining[predEnd+1:]
 			}
 
-			// Phase 3 limitation: only one predicate supported
-			if predicateCount > 1 {
-				return nil, fmt.Errorf("multiple predicates not supported in Phase 3 (found %d in %s)", predicateCount, seg)
-			}
 			if remaining != "" {
 				return nil, fmt.Errorf("invalid predicate suffix in: %s", seg)
 			}
@@ -177,6 +170,27 @@ func parseXPathFilter(path string, namespaceCtx map[string]string) (*XPathFilter
 	return filter, nil
 }
 
+func findXPathPredicateEnd(expr string) int {
+	inQuote := false
+	var quoteChar byte
+
+	for i := 0; i < len(expr); i++ {
+		ch := expr[i]
+		switch {
+		case ch == '\'' || ch == '"':
+			if !inQuote {
+				inQuote = true
+				quoteChar = ch
+			} else if ch == quoteChar {
+				inQuote = false
+			}
+		case ch == ']' && !inQuote:
+			return i
+		}
+	}
+	return -1
+}
+
 // parsePredicate parses a single predicate expression
 // Supported: key='value' or key="value"
 func parsePredicate(pred string, predicates map[string]string, namespaces map[string]string, namespaceCtx map[string]string) error {
@@ -192,6 +206,9 @@ func parsePredicate(pred string, predicates map[string]string, namespaces map[st
 	if err != nil {
 		return fmt.Errorf("invalid predicate key %q: %w", rawKey, err)
 	}
+	if _, exists := predicates[key]; exists {
+		return fmt.Errorf("duplicate predicate key: %s", key)
+	}
 
 	// Remove quotes
 	if len(valueRaw) < 2 {
@@ -204,6 +221,9 @@ func parsePredicate(pred string, predicates map[string]string, namespaces map[st
 	}
 
 	value := valueRaw[1 : len(valueRaw)-1]
+	if strings.Contains(value, string(quote)) {
+		return fmt.Errorf("complex predicate expressions are not supported: %s", pred)
+	}
 	predicates[key] = value
 	namespaces[key] = namespace
 	return nil

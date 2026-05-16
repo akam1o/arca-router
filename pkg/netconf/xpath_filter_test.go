@@ -62,6 +62,13 @@ func TestParseXPathFilter(t *testing.T) {
 			wantPredicates: map[int]map[string]string{2: {"prefix": "10.0.0.0/24"}},
 		},
 		{
+			name:           "path with multiple predicates",
+			path:           "/interfaces/interface[name='ge-0/0/0'][unit='0']",
+			wantErr:        false,
+			wantSegments:   []string{"interfaces", "interface"},
+			wantPredicates: map[int]map[string]string{1: {"name": "ge-0/0/0", "unit": "0"}},
+		},
+		{
 			name:    "invalid: no leading slash",
 			path:    "interfaces",
 			wantErr: true,
@@ -114,8 +121,13 @@ func TestParseXPathFilter(t *testing.T) {
 			wantErr: true,
 		},
 		{
-			name:    "invalid: multiple predicates not supported in Phase 3",
-			path:    "/interfaces/interface[name='ge-0/0/0'][foo='bar']",
+			name:    "invalid: duplicate predicate key",
+			path:    "/interfaces/interface[name='ge-0/0/0'][name='ge-0/0/1']",
+			wantErr: true,
+		},
+		{
+			name:    "invalid: complex predicate expression",
+			path:    "/interfaces/interface[name='ge-0/0/0' and unit='0']",
 			wantErr: true,
 		},
 	}
