@@ -2,6 +2,7 @@
 
 ## v0.9.x - NETCONF/YANG and Operational Safety (current)
 
+- **NETCONF copy-config semantic validation**: `copy-config` now parses and semantically validates source datastore content before saving candidate state
 - **NETCONF subtree filter model validation**: subtree filters now validate nested element paths and namespaces against the implemented NETCONF/YANG path schema before request handling
 - **NETCONF subtree filter namespace matching**: subtree filters now honor explicit model namespaces when selecting data so same-name elements from other namespaces are not returned
 - **NETCONF subtree filter extraction**: subtree filters now use XML token-based extraction so namespace-qualified data and nested same-name elements are handled without string matching

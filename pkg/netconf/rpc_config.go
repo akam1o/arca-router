@@ -378,6 +378,16 @@ func (s *Server) handleCopyConfig(ctx context.Context, sess *Session, rpc *RPC) 
 		return NewErrorReply(rpc.MessageID, ErrInvalidTarget("copy-config", source))
 	}
 
+	srcCfg, err := TextToConfig(srcTextCfg)
+	if err != nil {
+		log.Printf("[NETCONF] CopyConfig source parse error: %v", err)
+		return NewErrorReply(rpc.MessageID, ErrConfigValidationFailed("copy-config", fmt.Sprintf("config parsing failed: %v", err)))
+	}
+	if rpcErr := validateConfigSemantics("copy-config", srcCfg); rpcErr != nil {
+		log.Printf("[NETCONF] CopyConfig source validation error: %v", rpcErr)
+		return NewErrorReply(rpc.MessageID, rpcErr)
+	}
+
 	// Save to candidate
 	if err := s.datastore.SaveCandidate(ctx, sess.ID, srcTextCfg); err != nil {
 		log.Printf("[NETCONF] CopyConfig target write error: %v", err)

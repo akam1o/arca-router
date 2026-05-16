@@ -23,6 +23,8 @@ func configValidationErrorPath(rpcName string) string {
 	switch rpcName {
 	case "edit-config":
 		return "/rpc/edit-config/config"
+	case "copy-config":
+		return "/rpc/copy-config/source"
 	case "validate":
 		return "/rpc/validate/source"
 	default:
