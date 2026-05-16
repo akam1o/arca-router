@@ -20,6 +20,10 @@ type YANGValidator struct {
 	mu      sync.RWMutex
 }
 
+type yangPathNode struct {
+	children map[string]*yangPathNode
+}
+
 var (
 	globalValidator     *YANGValidator
 	globalValidatorOnce sync.Once
@@ -150,51 +154,187 @@ func (v *YANGValidator) ValidateElementPath(path string) error {
 		return fmt.Errorf("YANG validator not initialized")
 	}
 
-	// Phase 3: Basic allowlist validation
-	// Accept paths matching top-level containers:
-	// - /system
-	// - /chassis
-	// - /interfaces
-	// - /routing-options
-	// - /routing-instances
-	// - /protocols
-	// - /class-of-service
-	// - /security
-	// - /state (read-only)
-
-	allowedPaths := map[string]bool{
-		"/system":            true,
-		"/chassis":           true,
-		"/interfaces":        true,
-		"/routing-options":   true,
-		"/routing-instances": true,
-		"/protocols":         true,
-		"/class-of-service":  true,
-		"/security":          true,
-		"/state":             true,
+	xpathFilter, err := ParseXPathFilter(path)
+	if err != nil {
+		return err
+	}
+	if xpathFilter == nil {
+		return fmt.Errorf("path must include at least one element")
 	}
 
-	// For Phase 3, we only validate the first path segment
-	// Full path validation with YANG schema traversal is Phase 4
-	if len(path) == 0 || path[0] != '/' {
-		return fmt.Errorf("path must start with /")
-	}
+	return v.validateXPathFilterPath(xpathFilter)
+}
 
-	// Extract first segment
-	var firstSegment string
-	for i := 1; i < len(path); i++ {
-		if path[i] == '/' {
-			firstSegment = path[:i]
-			break
+func (v *YANGValidator) validateXPathFilterPath(xpathFilter *XPathFilter) error {
+	v.mu.RLock()
+	defer v.mu.RUnlock()
+
+	return implementedYANGPathSchema.validate(xpathFilter)
+}
+
+var implementedYANGPathSchema = newYANGPathSchema(implementedYANGElementPaths())
+
+func implementedYANGElementPaths() []string {
+	paths := make([]string, 0, len(allowedConfigElementPaths)+len(routingOptionsYANGAliasPaths)+len(operationalStateYANGPaths))
+	for path := range allowedConfigElementPaths {
+		path = strings.TrimPrefix(path, "config")
+		path = strings.TrimPrefix(path, "/")
+		if path != "" {
+			paths = append(paths, path)
 		}
 	}
-	if firstSegment == "" {
-		firstSegment = path
+	paths = append(paths, routingOptionsYANGAliasPaths...)
+	paths = append(paths, operationalStateYANGPaths...)
+	return paths
+}
+
+var routingOptionsYANGAliasPaths = []string{
+	"routing-options",
+	"routing-options/router-id",
+	"routing-options/autonomous-system",
+	"routing-options/static",
+	"routing-options/static/route",
+	"routing-options/static/route/prefix",
+	"routing-options/static/route/next-hop",
+	"routing-options/static/route/distance",
+	"routing-options/static/route/bfd",
+	"routing-options/static/route/bfd-profile",
+	"routing-options/static/route/bfd-source",
+	"routing-options/static/route/bfd-multihop",
+}
+
+var operationalStateYANGPaths = []string{
+	"state",
+	"state/interfaces",
+	"state/routes",
+	"state/routes/route",
+	"state/routes/route/prefix",
+	"state/routes/route/next-hop",
+	"state/routes/route/protocol",
+	"state/routes/route/metric",
+	"state/routes/route/interface",
+	"state/routes/route/active",
+	"state/routing-instances",
+	"state/routing-instances/instance",
+	"state/routing-instances/instance/name",
+	"state/routing-instances/instance/instance-type",
+	"state/routing-instances/instance/route-distinguisher",
+	"state/routing-instances/instance/ipv4-table-id",
+	"state/routing-instances/instance/ipv6-table-id",
+	"state/routing-instances/instance/import-target",
+	"state/routing-instances/instance/export-target",
+	"state/routing-instances/instance/import-policy",
+	"state/routing-instances/instance/export-policy",
+	"state/routing-instances/instance/interface",
+	"state/protocols",
+	"state/protocols/bgp",
+	"state/protocols/bgp/neighbor",
+	"state/protocols/bgp/neighbor/peer-address",
+	"state/protocols/bgp/neighbor/peer-as",
+	"state/protocols/bgp/neighbor/state",
+	"state/protocols/bgp/neighbor/uptime-seconds",
+	"state/protocols/bgp/neighbor/prefix-received",
+	"state/protocols/bgp/neighbor/prefix-sent",
+	"state/protocols/ospf",
+	"state/protocols/ospf/neighbor",
+	"state/protocols/ospf/neighbor/router-id",
+	"state/protocols/ospf/neighbor/address",
+	"state/protocols/ospf/neighbor/interface",
+	"state/protocols/ospf/neighbor/state",
+	"state/protocols/ospf/neighbor/role",
+	"state/protocols/ospf/neighbor/priority",
+	"state/protocols/ospf/neighbor/dead-time-seconds",
+	"state/protocols/ospf/neighbor/uptime-seconds",
+	"state/protocols/ospf3",
+	"state/protocols/ospf3/neighbor",
+	"state/protocols/ospf3/neighbor/router-id",
+	"state/protocols/ospf3/neighbor/address",
+	"state/protocols/ospf3/neighbor/interface",
+	"state/protocols/ospf3/neighbor/state",
+	"state/protocols/ospf3/neighbor/role",
+	"state/protocols/ospf3/neighbor/priority",
+	"state/protocols/ospf3/neighbor/dead-time-seconds",
+	"state/protocols/ospf3/neighbor/uptime-seconds",
+	"state/protocols/bfd",
+	"state/protocols/bfd/last-run",
+	"state/protocols/bfd/configured-peers",
+	"state/protocols/bfd/observed-peers",
+	"state/protocols/bfd/up-peers",
+	"state/protocols/bfd/down-peers",
+	"state/protocols/bfd/session-down-events",
+	"state/protocols/bfd/rx-fail-packets",
+	"state/protocols/bfd/peer",
+	"state/protocols/bfd/peer/address",
+	"state/protocols/bfd/peer/local-address",
+	"state/protocols/bfd/peer/interface",
+	"state/protocols/bfd/peer/vrf",
+	"state/protocols/bfd/peer/status",
+	"state/protocols/bfd/peer/diagnostic",
+	"state/protocols/bfd/peer/remote-diagnostic",
+	"state/protocols/bfd/peer/observed",
+	"state/protocols/bfd/peer/up",
+	"state/protocols/bfd/peer/session-down-events",
+	"state/protocols/bfd/peer/rx-fail-packets",
+	"state/protocols/bfd/issue",
+	"state/protocols/bfd/last-error",
+}
+
+func newYANGPathSchema(paths []string) *yangPathNode {
+	root := &yangPathNode{children: make(map[string]*yangPathNode)}
+	for _, path := range paths {
+		root.add(path)
+	}
+	return root
+}
+
+func (n *yangPathNode) add(path string) {
+	path = strings.Trim(path, "/")
+	if path == "" {
+		return
+	}
+	current := n
+	for _, segment := range strings.Split(path, "/") {
+		if segment == "" {
+			continue
+		}
+		if current.children == nil {
+			current.children = make(map[string]*yangPathNode)
+		}
+		child := current.children[segment]
+		if child == nil {
+			child = &yangPathNode{children: make(map[string]*yangPathNode)}
+			current.children[segment] = child
+		}
+		current = child
+	}
+}
+
+func (n *yangPathNode) validate(filter *XPathFilter) error {
+	if filter == nil || len(filter.Segments) == 0 {
+		return fmt.Errorf("path must include at least one element")
 	}
 
-	if !allowedPaths[firstSegment] {
-		return fmt.Errorf("unsupported top-level path: %s", firstSegment)
+	current := n
+	traversed := make([]string, 0, len(filter.Segments))
+	for index, segment := range filter.Segments {
+		child := current.children[segment]
+		traversed = append(traversed, segment)
+		if child == nil {
+			return fmt.Errorf("unsupported element path: /%s", strings.Join(traversed, "/"))
+		}
+		if err := validateYANGPredicates(child, filter.Predicates[index], traversed); err != nil {
+			return err
+		}
+		current = child
 	}
+	return nil
+}
 
+func validateYANGPredicates(node *yangPathNode, predicates map[string]string, traversed []string) error {
+	for key := range predicates {
+		if node.children[key] == nil {
+			return fmt.Errorf("unsupported predicate %q for /%s", key, strings.Join(traversed, "/"))
+		}
+	}
 	return nil
 }

@@ -547,6 +547,12 @@ func TestFilterValidate(t *testing.T) {
 			wantErr: false,
 		},
 		{
+			name:    "xpath filter nested model path",
+			filter:  &Filter{Type: "xpath", Select: "/protocols/bgp/group/neighbor/peer-as"},
+			rpcName: "get-config",
+			wantErr: false,
+		},
+		{
 			name:    "xpath filter requires select",
 			filter:  &Filter{Type: "xpath"},
 			rpcName: "get-config",
@@ -555,6 +561,18 @@ func TestFilterValidate(t *testing.T) {
 		{
 			name:    "xpath filter rejects relative select",
 			filter:  &Filter{Type: "xpath", Select: "interfaces"},
+			rpcName: "get-config",
+			wantErr: true,
+		},
+		{
+			name:    "xpath filter rejects unknown model path",
+			filter:  &Filter{Type: "xpath", Select: "/interfaces/interface/unknown"},
+			rpcName: "get-config",
+			wantErr: true,
+		},
+		{
+			name:    "xpath filter rejects unknown predicate key",
+			filter:  &Filter{Type: "xpath", Select: "/interfaces/interface[foo='bar']"},
 			rpcName: "get-config",
 			wantErr: true,
 		},

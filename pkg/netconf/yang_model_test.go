@@ -119,8 +119,23 @@ func TestYANGValidator_ValidateElementPath(t *testing.T) {
 			wantErr: false,
 		},
 		{
+			name:    "valid system leaf path",
+			path:    "/system/host-name",
+			wantErr: false,
+		},
+		{
 			name:    "valid interfaces path",
 			path:    "/interfaces",
+			wantErr: false,
+		},
+		{
+			name:    "valid interface list key predicate",
+			path:    "/interfaces/interface[name='ge-0/0/0']",
+			wantErr: false,
+		},
+		{
+			name:    "valid interface nested leaf path",
+			path:    "/interfaces/interface/unit/family/address",
 			wantErr: false,
 		},
 		{
@@ -134,6 +149,16 @@ func TestYANGValidator_ValidateElementPath(t *testing.T) {
 			wantErr: false,
 		},
 		{
+			name:    "valid routing-options static route predicate",
+			path:    "/routing-options/static/route[prefix='10.0.0.0/24']",
+			wantErr: false,
+		},
+		{
+			name:    "valid NETCONF routing XML alias path",
+			path:    "/routing/static-routes/route/prefix",
+			wantErr: false,
+		},
+		{
 			name:    "valid routing-instances path",
 			path:    "/routing-instances",
 			wantErr: false,
@@ -141,6 +166,16 @@ func TestYANGValidator_ValidateElementPath(t *testing.T) {
 		{
 			name:    "valid protocols path",
 			path:    "/protocols",
+			wantErr: false,
+		},
+		{
+			name:    "valid BGP neighbor leaf path",
+			path:    "/protocols/bgp/group/neighbor/peer-as",
+			wantErr: false,
+		},
+		{
+			name:    "valid EVPN VNI leaf path",
+			path:    "/protocols/evpn/vni/remote-vtep",
 			wantErr: false,
 		},
 		{
@@ -159,6 +194,16 @@ func TestYANGValidator_ValidateElementPath(t *testing.T) {
 			wantErr: false,
 		},
 		{
+			name:    "valid route state predicate",
+			path:    "/state/routes/route[prefix='192.0.2.0/24']",
+			wantErr: false,
+		},
+		{
+			name:    "valid BFD peer state path",
+			path:    "/state/protocols/bfd/peer/status",
+			wantErr: false,
+		},
+		{
 			name:    "invalid path - no leading slash",
 			path:    "system",
 			wantErr: true,
@@ -166,6 +211,26 @@ func TestYANGValidator_ValidateElementPath(t *testing.T) {
 		{
 			name:    "invalid path - unknown element",
 			path:    "/unknown",
+			wantErr: true,
+		},
+		{
+			name:    "invalid path - unknown nested element",
+			path:    "/system/unknown",
+			wantErr: true,
+		},
+		{
+			name:    "invalid path - missing BGP group segment",
+			path:    "/protocols/bgp/neighbor",
+			wantErr: true,
+		},
+		{
+			name:    "invalid path - unknown operational state leaf",
+			path:    "/state/routes/route/unknown",
+			wantErr: true,
+		},
+		{
+			name:    "invalid path - unknown predicate key",
+			path:    "/interfaces/interface[foo='bar']",
 			wantErr: true,
 		},
 		{

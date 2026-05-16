@@ -793,8 +793,18 @@ func (f *Filter) validateXPathFilter(rpcName string) error {
 	if len(bytes.TrimSpace(f.Content)) > 0 {
 		return ErrInvalidFilter(rpcName, "xpath filter must not contain subtree content")
 	}
-	if _, err := ParseXPathFilter(selectExpr); err != nil {
+	xpathFilter, err := ParseXPathFilter(selectExpr)
+	if err != nil {
 		return ErrInvalidFilter(rpcName, fmt.Sprintf("invalid xpath filter: %v", err))
+	}
+	if xpathFilter != nil {
+		validator, err := GetGlobalValidator()
+		if err != nil {
+			return ErrInvalidFilter(rpcName, fmt.Sprintf("failed to initialize YANG validator: %v", err))
+		}
+		if err := validator.validateXPathFilterPath(xpathFilter); err != nil {
+			return ErrInvalidFilter(rpcName, fmt.Sprintf("unsupported xpath filter path: %v", err))
+		}
 	}
 	f.Select = selectExpr
 	return nil
