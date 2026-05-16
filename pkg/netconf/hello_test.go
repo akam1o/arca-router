@@ -37,6 +37,9 @@ func TestServerHelloDoesNotAdvertiseUnsupportedCapabilities(t *testing.T) {
 	hello := ServerHello(12345)
 
 	unsupportedCaps := []string{
+		"urn:ietf:params:xml:ns:netconf:base:1.0",
+		"urn:ietf:params:xml:ns:netconf:base:1.1",
+		"urn:ietf:params:xml:ns:netconf:capability:candidate:1.0",
 		"urn:ietf:params:netconf:capability:xpath:1.0",
 		"urn:ietf:params:netconf:capability:startup:1.0",
 		"urn:ietf:params:netconf:capability:writable-running:1.0",
@@ -82,8 +85,8 @@ func TestUnmarshalClientHello(t *testing.T) {
 	clientHelloXML := `<?xml version="1.0" encoding="UTF-8"?>
 <hello xmlns="urn:ietf:params:xml:ns:netconf:base:1.0">
   <capabilities>
-    <capability>urn:ietf:params:xml:ns:netconf:base:1.0</capability>
-    <capability>urn:ietf:params:xml:ns:netconf:base:1.1</capability>
+    <capability>urn:ietf:params:netconf:base:1.0</capability>
+    <capability>urn:ietf:params:netconf:base:1.1</capability>
   </capabilities>
 </hello>`
 
@@ -119,6 +122,11 @@ func TestNegotiateBaseVersion(t *testing.T) {
 		{
 			name:         "only 1.1",
 			capabilities: []string{CapabilityBase11},
+			want:         "1.1",
+		},
+		{
+			name:         "only 1.1 with parameters",
+			capabilities: []string{CapabilityBase11 + "?foo=bar"},
 			want:         "1.1",
 		},
 		{
@@ -175,7 +183,7 @@ func TestValidateClientHello(t *testing.T) {
 			wantError: false,
 		},
 		{
-			name: "invalid hello with only base:1.1 (RFC violation)",
+			name: "valid hello with base:1.1 only",
 			hello: &Hello{
 				Capabilities: struct {
 					Capability []string `xml:"capability"`
@@ -183,7 +191,18 @@ func TestValidateClientHello(t *testing.T) {
 					Capability: []string{CapabilityBase11},
 				},
 			},
-			wantError: true,
+			wantError: false,
+		},
+		{
+			name: "valid hello with base capability parameters",
+			hello: &Hello{
+				Capabilities: struct {
+					Capability []string `xml:"capability"`
+				}{
+					Capability: []string{CapabilityBase11 + "?foo=bar"},
+				},
+			},
+			wantError: false,
 		},
 		{
 			name: "invalid - no base capability",
@@ -286,25 +305,30 @@ func TestGetClientCapabilities(t *testing.T) {
 	hello.Capabilities.Capability = []string{
 		CapabilityBase10,
 		CapabilityBase11,
+		CapabilityCandidate,
 		"custom:capability",
 	}
 
 	caps := GetClientCapabilities(hello)
-	if len(caps) != 3 {
-		t.Errorf("GetClientCapabilities() returned %d capabilities, want 3", len(caps))
+	if len(caps) != 4 {
+		t.Errorf("GetClientCapabilities() returned %d capabilities, want 4", len(caps))
 	}
 
-	// Should contain short names
-	foundBase10 := false
-	for _, cap := range caps {
-		if cap == "1.0" || strings.Contains(cap, "base:1.0") {
-			foundBase10 = true
-			break
+	wantCaps := []string{"base:1.0", "base:1.1", "candidate:1.0", "custom:capability"}
+	for _, want := range wantCaps {
+		if !containsString(caps, want) {
+			t.Errorf("GetClientCapabilities() = %v, missing %q", caps, want)
 		}
 	}
-	if !foundBase10 {
-		t.Errorf("GetClientCapabilities() did not contain base:1.0: %v", caps)
+}
+
+func containsString(items []string, want string) bool {
+	for _, cap := range items {
+		if cap == want {
+			return true
+		}
 	}
+	return false
 }
 
 func TestHelloXMLNamespace(t *testing.T) {
@@ -331,7 +355,7 @@ func TestUnmarshalHelloWrongNamespace(t *testing.T) {
 	wrongNamespaceXML := `<?xml version="1.0" encoding="UTF-8"?>
 <hello xmlns="http://wrong.namespace.com">
   <capabilities>
-    <capability>urn:ietf:params:xml:ns:netconf:base:1.0</capability>
+    <capability>urn:ietf:params:netconf:base:1.0</capability>
   </capabilities>
 </hello>`
 
@@ -350,7 +374,7 @@ func TestUnmarshalHelloWrongElementName(t *testing.T) {
 	wrongElementXML := `<?xml version="1.0" encoding="UTF-8"?>
 <goodbye xmlns="urn:ietf:params:xml:ns:netconf:base:1.0">
   <capabilities>
-    <capability>urn:ietf:params:xml:ns:netconf:base:1.0</capability>
+    <capability>urn:ietf:params:netconf:base:1.0</capability>
   </capabilities>
 </goodbye>`
 

@@ -8,10 +8,10 @@ import (
 
 const (
 	// NETCONF capabilities
-	CapabilityBase10     = "urn:ietf:params:xml:ns:netconf:base:1.0"
-	CapabilityBase11     = "urn:ietf:params:xml:ns:netconf:base:1.1"
-	CapabilityCandidate  = "urn:ietf:params:xml:ns:netconf:capability:candidate:1.0"
-	CapabilityValidate   = "urn:ietf:params:xml:ns:netconf:capability:validate:1.1"
+	CapabilityBase10     = "urn:ietf:params:netconf:base:1.0"
+	CapabilityBase11     = "urn:ietf:params:netconf:base:1.1"
+	CapabilityCandidate  = "urn:ietf:params:netconf:capability:candidate:1.0"
+	CapabilityValidate   = "urn:ietf:params:netconf:capability:validate:1.1"
 	CapabilityArcaRouter = "urn:arca:router:config:1.0?module=arca-router&revision=2025-12-27"
 	// Arca-specific capability for the safe absolute XPath subset accepted by filters.
 	CapabilityArcaXPathFilterSubset = "urn:arca:router:netconf:capability:xpath-filter-subset:1.0"
@@ -88,7 +88,7 @@ func (h *Hello) HasCapability(capability string) bool {
 // NegotiateBaseVersion determines the NETCONF base version to use based on client capabilities
 // Returns "1.1" if client supports base:1.1, otherwise "1.0"
 func NegotiateBaseVersion(clientHello *Hello) string {
-	if clientHello.HasCapability(CapabilityBase11) {
+	if clientHello.hasBaseCapability(CapabilityBase11) {
 		return "1.1"
 	}
 	return "1.0"
@@ -96,10 +96,8 @@ func NegotiateBaseVersion(clientHello *Hello) string {
 
 // ValidateClientHello validates a client <hello> message
 func ValidateClientHello(clientHello *Hello) error {
-	// RFC 6241: Client must support base:1.0 (required capability)
-	// base:1.1 is optional and indicates preference for chunked framing
-	if !clientHello.HasCapability(CapabilityBase10) {
-		return fmt.Errorf("client must support base:1.0 (RFC 6241 required capability)")
+	if !clientHello.hasBaseCapability(CapabilityBase10) && !clientHello.hasBaseCapability(CapabilityBase11) {
+		return fmt.Errorf("client must support base:1.0 or base:1.1")
 	}
 
 	// Client hello must not include session-id
@@ -120,14 +118,36 @@ func GetClientCapabilities(clientHello *Hello) []string {
 	capabilities := make([]string, 0, len(clientHello.Capabilities.Capability))
 	for _, cap := range clientHello.Capabilities.Capability {
 		// Extract short name for common capabilities
-		shortName := cap
-		if strings.HasPrefix(cap, "urn:ietf:params:xml:ns:netconf:") {
-			parts := strings.Split(cap, ":")
-			if len(parts) > 0 {
-				shortName = parts[len(parts)-1]
-			}
-		}
-		capabilities = append(capabilities, shortName)
+		capabilities = append(capabilities, shortCapabilityName(cap))
 	}
 	return capabilities
+}
+
+func (h *Hello) hasBaseCapability(capability string) bool {
+	if h == nil {
+		return false
+	}
+	for _, cap := range h.Capabilities.Capability {
+		if capabilityBasePart(cap) == capability {
+			return true
+		}
+	}
+	return false
+}
+
+func capabilityBasePart(capability string) string {
+	if idx := strings.Index(capability, "?"); idx != -1 {
+		return capability[:idx]
+	}
+	return capability
+}
+
+func shortCapabilityName(capability string) string {
+	base := capabilityBasePart(capability)
+	const prefix = "urn:ietf:params:netconf:"
+	if !strings.HasPrefix(base, prefix) {
+		return capability
+	}
+	name := strings.TrimPrefix(base, prefix)
+	return strings.TrimPrefix(name, "capability:")
 }
