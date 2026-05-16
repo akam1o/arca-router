@@ -36,8 +36,16 @@ func (s *Server) handleCommit(ctx context.Context, sess *Session, rpc *RPC) *RPC
 
 	// Check if candidate exists
 	candidate, err := s.datastore.GetCandidate(ctx, sess.ID)
-	if err != nil || candidate == nil {
-		log.Printf("[NETCONF] No candidate config to commit for session %s: %v", sess.ID, err)
+	if err != nil {
+		if isDatastoreNotFound(err) {
+			log.Printf("[NETCONF] No candidate config to commit for session %s: %v", sess.ID, err)
+			return NewErrorReply(rpc.MessageID, ErrOperationFailed("no candidate configuration to commit"))
+		}
+		log.Printf("[NETCONF] Failed to read candidate config for commit session %s: %v", sess.ID, err)
+		return NewErrorReply(rpc.MessageID, ErrDatastoreError(fmt.Sprintf("failed to read candidate config: %v", err)))
+	}
+	if candidate == nil {
+		log.Printf("[NETCONF] No candidate config to commit for session %s", sess.ID)
 		return NewErrorReply(rpc.MessageID, ErrOperationFailed("no candidate configuration to commit"))
 	}
 

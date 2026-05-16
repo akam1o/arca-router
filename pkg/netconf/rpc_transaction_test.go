@@ -3,6 +3,7 @@ package netconf
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
@@ -13,6 +14,7 @@ type validateDatastore struct {
 	datastore.Datastore
 	running      *datastore.RunningConfig
 	candidate    *datastore.CandidateConfig
+	lockInfo     *datastore.LockInfo
 	runningErr   error
 	candidateErr error
 }
@@ -29,6 +31,10 @@ func (d *validateDatastore) GetCandidate(context.Context, string) (*datastore.Ca
 		return nil, d.candidateErr
 	}
 	return d.candidate, nil
+}
+
+func (d *validateDatastore) GetLockInfo(context.Context, string) (*datastore.LockInfo, error) {
+	return d.lockInfo, nil
 }
 
 func TestValidateRunningDatastore(t *testing.T) {
@@ -220,6 +226,30 @@ func TestCommitConfirmedOptionsRejectedAsUnsupported(t *testing.T) {
 
 			assertConfirmedCommitUnsupported(t, reply, tt.element)
 		})
+	}
+}
+
+func TestCommitCandidateReadErrorReturnsDatastoreError(t *testing.T) {
+	reply := commitRPC(t, &validateDatastore{
+		candidateErr: errors.New("backend unavailable"),
+		lockInfo: &datastore.LockInfo{
+			IsLocked:  true,
+			SessionID: "session-1",
+		},
+	}, "")
+
+	if len(reply.Errors) != 1 {
+		t.Fatalf("commit candidate read errors = %d, want 1", len(reply.Errors))
+	}
+	err := reply.Errors[0]
+	if err.ErrorTag != ErrorTagOperationFailed {
+		t.Fatalf("commit candidate read error tag = %s, want %s", err.ErrorTag, ErrorTagOperationFailed)
+	}
+	if err.ErrorAppTag != "datastore-error" {
+		t.Fatalf("commit candidate read app-tag = %q, want datastore-error", err.ErrorAppTag)
+	}
+	if !strings.Contains(err.ErrorMessage, "failed to read candidate config") {
+		t.Fatalf("commit candidate read message = %q, want read failure detail", err.ErrorMessage)
 	}
 }
 
