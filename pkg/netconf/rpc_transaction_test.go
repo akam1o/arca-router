@@ -173,6 +173,43 @@ func TestParseRPCRejectsValidateMultipleSourceChoices(t *testing.T) {
 	}
 }
 
+func TestCommitConfirmedOptionsRejectedAsUnsupported(t *testing.T) {
+	tests := []struct {
+		name    string
+		content string
+		element string
+	}{
+		{
+			name:    "confirmed",
+			content: "<confirmed/>",
+			element: "confirmed",
+		},
+		{
+			name:    "confirm-timeout",
+			content: "<confirm-timeout>60</confirm-timeout>",
+			element: "confirm-timeout",
+		},
+		{
+			name:    "persist",
+			content: "<persist>commit-token</persist>",
+			element: "persist",
+		},
+		{
+			name:    "persist-id",
+			content: "<persist-id>commit-token</persist-id>",
+			element: "persist-id",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			reply := commitRPC(t, &validateDatastore{}, tt.content)
+
+			assertConfirmedCommitUnsupported(t, reply, tt.element)
+		})
+	}
+}
+
 func validateRPC(t *testing.T, ds datastore.Datastore, content string) *RPCReply {
 	t.Helper()
 
@@ -200,4 +237,33 @@ func validateParsedRPC(t *testing.T, ds datastore.Datastore, rpcXML string) *RPC
 		t.Fatalf("ParseRPC() error = %v", err)
 	}
 	return srv.HandleRPC(context.Background(), sess, rpc)
+}
+
+func commitRPC(t *testing.T, ds datastore.Datastore, content string) *RPCReply {
+	t.Helper()
+
+	return validateParsedRPC(t, ds, `<rpc message-id="101" xmlns="urn:ietf:params:xml:ns:netconf:base:1.0">
+		<commit>
+			`+content+`
+		</commit>
+	</rpc>`)
+}
+
+func assertConfirmedCommitUnsupported(t *testing.T, reply *RPCReply, element string) {
+	t.Helper()
+
+	if len(reply.Errors) != 1 {
+		t.Fatalf("commit errors = %d, want 1", len(reply.Errors))
+	}
+	err := reply.Errors[0]
+	if err.ErrorTag != ErrorTagOperationNotSupported {
+		t.Fatalf("commit error tag = %s, want %s", err.ErrorTag, ErrorTagOperationNotSupported)
+	}
+	wantPath := "/rpc/commit/" + element
+	if err.ErrorPath != wantPath {
+		t.Fatalf("commit error path = %q, want %s", err.ErrorPath, wantPath)
+	}
+	if err.ErrorInfo == nil || err.ErrorInfo.BadElement != element {
+		t.Fatalf("commit error info = %#v, want bad-element %s", err.ErrorInfo, element)
+	}
 }

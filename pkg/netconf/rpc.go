@@ -533,7 +533,11 @@ var rpcOperationElementPaths = map[string]map[string]struct{}{
 		"unlock/target/startup":   {},
 	},
 	"commit": {
-		"commit": {},
+		"commit":                 {},
+		"commit/confirmed":       {},
+		"commit/confirm-timeout": {},
+		"commit/persist":         {},
+		"commit/persist-id":      {},
 	},
 	"discard-changes": {
 		"discard-changes": {},
@@ -593,6 +597,12 @@ var rpcOperationCardinalityRules = map[string][]rpcCardinalityRule{
 	"kill-session": {
 		{path: "kill-session/session-id", min: 1, max: 1},
 	},
+	"commit": {
+		{path: "commit/confirmed", min: 0, max: 1},
+		{path: "commit/confirm-timeout", min: 0, max: 1},
+		{path: "commit/persist", min: 0, max: 1},
+		{path: "commit/persist-id", min: 0, max: 1},
+	},
 }
 
 var rpcDatastoreChoicePaths = map[string][]string{
@@ -645,6 +655,9 @@ var rpcTextContentPaths = map[string]struct{}{
 	"edit-config/default-operation": {},
 	"edit-config/test-option":       {},
 	"edit-config/error-option":      {},
+	"commit/confirm-timeout":        {},
+	"commit/persist":                {},
+	"commit/persist-id":             {},
 	"kill-session/session-id":       {},
 }
 

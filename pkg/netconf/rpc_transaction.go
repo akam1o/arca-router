@@ -12,7 +12,11 @@ import (
 
 // CommitRequest represents <commit> RPC
 type CommitRequest struct {
-	XMLName struct{} `xml:"commit"`
+	XMLName        xml.Name  `xml:"commit"`
+	Confirmed      *struct{} `xml:"confirmed"`
+	ConfirmTimeout *string   `xml:"confirm-timeout"`
+	Persist        *string   `xml:"persist"`
+	PersistID      *string   `xml:"persist-id"`
 }
 
 // handleCommit handles <commit> RPC - promotes candidate to running
@@ -20,6 +24,9 @@ func (s *Server) handleCommit(ctx context.Context, sess *Session, rpc *RPC) *RPC
 	var req CommitRequest
 	if err := rpc.UnmarshalOperation(&req); err != nil {
 		return NewErrorReply(rpc.MessageID, err.(*RPCError))
+	}
+	if rpcErr := unsupportedCommitOption(&req); rpcErr != nil {
+		return NewErrorReply(rpc.MessageID, rpcErr)
 	}
 
 	// Check if candidate lock is held by this session
@@ -78,6 +85,21 @@ func (s *Server) handleCommit(ctx context.Context, sess *Session, rpc *RPC) *RPC
 	log.Printf("[NETCONF] Commit successful: %s (session: %s, user: %s)", commitID, sess.ID, sess.Username)
 
 	return NewOKReply(rpc.MessageID)
+}
+
+func unsupportedCommitOption(req *CommitRequest) *RPCError {
+	switch {
+	case req.Confirmed != nil:
+		return ErrConfirmedCommitNotSupported("confirmed")
+	case req.ConfirmTimeout != nil:
+		return ErrConfirmedCommitNotSupported("confirm-timeout")
+	case req.Persist != nil:
+		return ErrConfirmedCommitNotSupported("persist")
+	case req.PersistID != nil:
+		return ErrConfirmedCommitNotSupported("persist-id")
+	default:
+		return nil
+	}
 }
 
 // DiscardChangesRequest represents <discard-changes> RPC

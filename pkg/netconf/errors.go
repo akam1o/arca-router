@@ -169,6 +169,14 @@ func ErrStartupNotSupported(rpcName, container string) *RPCError {
 		WithBadElement(DatastoreStartup)
 }
 
+// ErrConfirmedCommitNotSupported returns an error for confirmed-commit options
+// when the capability is not advertised.
+func ErrConfirmedCommitNotSupported(element string) *RPCError {
+	return NewRPCError(ErrorTypeProtocol, ErrorTagOperationNotSupported, "confirmed-commit capability not supported").
+		WithPath("/rpc/commit/" + element).
+		WithBadElement(element)
+}
+
 // ErrUnsupportedFilterType returns error for unsupported filter type
 func ErrUnsupportedFilterType(rpcName, filterType string) *RPCError {
 	return NewRPCError(ErrorTypeProtocol, ErrorTagInvalidValue, fmt.Sprintf("unsupported filter type: %s", filterType)).
