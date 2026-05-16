@@ -426,6 +426,25 @@ func TestEditConfigLockDeniedWithMissingSessionManager(t *testing.T) {
 	}
 }
 
+func TestEditConfigNilLockInfoReturnsLockDenied(t *testing.T) {
+	ds := &copyConfigDatastore{}
+
+	reply := editConfigRPC(t, ds, "test-then-set", "<config><system><host-name>router1</host-name></system></config>")
+	if len(reply.Errors) != 1 {
+		t.Fatalf("edit-config nil lock info errors = %d, want 1", len(reply.Errors))
+	}
+	err := reply.Errors[0]
+	if err.ErrorTag != ErrorTagLockDenied {
+		t.Fatalf("edit-config nil lock info tag = %s, want %s", err.ErrorTag, ErrorTagLockDenied)
+	}
+	if err.ErrorPath != "/rpc/edit-config/target" {
+		t.Fatalf("edit-config nil lock info path = %q, want /rpc/edit-config/target", err.ErrorPath)
+	}
+	if ds.saveCalled {
+		t.Fatal("edit-config saved candidate without lock info")
+	}
+}
+
 func TestCopyConfigRunningTargetRejectedAsUnsupported(t *testing.T) {
 	reply := copyConfigParsedRPC(t, &copyConfigDatastore{}, `<rpc message-id="101" xmlns="urn:ietf:params:xml:ns:netconf:base:1.0">
 		<copy-config>

@@ -48,7 +48,7 @@ func (s *Server) checkLockOwnership(ctx context.Context, sess *Session, target, 
 	hasTargetElement := (rpcName == "edit-config" || rpcName == "copy-config" || rpcName == "delete-config")
 
 	// Check if lock is acquired
-	if !lockInfo.IsLocked {
+	if lockInfo == nil || !lockInfo.IsLocked {
 		// Lock not acquired - deny operation
 		return ErrLockDenied(target, rpcName, hasTargetElement)
 	}
