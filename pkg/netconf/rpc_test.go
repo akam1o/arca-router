@@ -588,6 +588,30 @@ func TestFilterValidate(t *testing.T) {
 			wantErr: false,
 		},
 		{
+			name: "subtree filter namespace prefix on filter",
+			filter: &Filter{
+				Type:    "subtree",
+				Content: []byte(`<if:interfaces/>`),
+				Attrs: []xml.Attr{
+					{Name: xml.Name{Space: "xmlns", Local: "if"}, Value: IETFInterfacesNS},
+				},
+			},
+			rpcName: "get-config",
+			wantErr: false,
+		},
+		{
+			name: "subtree filter namespace prefix mismatch",
+			filter: &Filter{
+				Type:    "subtree",
+				Content: []byte(`<rt:interfaces/>`),
+				Attrs: []xml.Attr{
+					{Name: xml.Name{Space: "xmlns", Local: "rt"}, Value: IETFRoutingNS},
+				},
+			},
+			rpcName: "get-config",
+			wantErr: true,
+		},
+		{
 			name:    "xpath filter",
 			filter:  &Filter{Type: "xpath", Select: "/interfaces"},
 			rpcName: "get-config",

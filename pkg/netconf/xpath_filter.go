@@ -25,6 +25,11 @@ type XPathFilter struct {
 	PredicateNamespaces map[int]map[string]string
 }
 
+type subtreeFilterElement struct {
+	LocalName string
+	Namespace string
+}
+
 // ParseXPathFilter parses a simplified XPath expression
 // Supported formats (Phase 3):
 // - /interfaces
@@ -335,7 +340,7 @@ func ApplySubtreeFilter(xmlData []byte, filter *Filter) ([]byte, error) {
 	}
 
 	// Parse filter as XML to extract element structure
-	filterElements, err := filter.parseTopLevelElements()
+	filterElements, err := filter.parseTopLevelElementSpecs()
 	if err != nil {
 		return nil, fmt.Errorf("invalid subtree filter: %w", err)
 	}
@@ -377,6 +382,26 @@ func (f *Filter) parseTopLevelElements() ([]string, error) {
 }
 
 func parseFilterElementsWithContext(filterXML []byte, namespaceAttrs []xml.Attr) ([]string, error) {
+	specs, err := parseFilterElementSpecsWithContext(filterXML, namespaceAttrs)
+	if err != nil {
+		return nil, err
+	}
+	elements := make([]string, 0, len(specs))
+	for _, spec := range specs {
+		elements = append(elements, spec.LocalName)
+	}
+	return elements, nil
+}
+
+func (f *Filter) parseTopLevelElementSpecs() ([]subtreeFilterElement, error) {
+	if f == nil {
+		return nil, nil
+	}
+	namespaceAttrs := collectNamespaceAttrs(f.InheritedAttrs, f.Attrs)
+	return parseFilterElementSpecsWithContext(f.Content, namespaceAttrs)
+}
+
+func parseFilterElementSpecsWithContext(filterXML []byte, namespaceAttrs []xml.Attr) ([]subtreeFilterElement, error) {
 	var wrapped bytes.Buffer
 	wrapped.WriteString("<filter")
 	writeNamespaceDeclarationAttrs(&wrapped, namespaceAttrs, map[string]string{})
@@ -387,7 +412,7 @@ func parseFilterElementsWithContext(filterXML []byte, namespaceAttrs []xml.Attr)
 	decoder := xml.NewDecoder(bytes.NewReader(wrapped.Bytes()))
 	decoder.Strict = true
 	decoder.Entity = nil
-	elements := make([]string, 0)
+	elements := make([]subtreeFilterElement, 0)
 	depth := 0
 
 	for {
@@ -404,7 +429,10 @@ func parseFilterElementsWithContext(filterXML []byte, namespaceAttrs []xml.Attr)
 			depth++
 			if depth == 2 {
 				// Top-level element
-				elements = append(elements, t.Name.Local)
+				elements = append(elements, subtreeFilterElement{
+					LocalName: t.Name.Local,
+					Namespace: t.Name.Space,
+				})
 			}
 		case xml.EndElement:
 			if depth > 0 {
@@ -416,7 +444,7 @@ func parseFilterElementsWithContext(filterXML []byte, namespaceAttrs []xml.Attr)
 	return elements, nil
 }
 
-func extractMatchingSubtrees(xmlData []byte, elementName string) ([][]byte, error) {
+func extractMatchingSubtrees(xmlData []byte, element subtreeFilterElement) ([][]byte, error) {
 	decoder := xml.NewDecoder(bytes.NewReader(xmlData))
 	decoder.Strict = true
 	decoder.Entity = nil
@@ -444,7 +472,7 @@ func extractMatchingSubtrees(xmlData []byte, elementName string) ([][]byte, erro
 				rootSeen = true
 				rootIsData = t.Name.Local == "data"
 			}
-			shouldCollect := collectingDepth == 0 && t.Name.Local == elementName &&
+			shouldCollect := collectingDepth == 0 && element.matches(t.Name) &&
 				((rootIsData && depth == 1) || (!rootIsData && depth == 0))
 			switch {
 			case collectingDepth > 0:
@@ -486,6 +514,16 @@ func extractMatchingSubtrees(xmlData []byte, elementName string) ([][]byte, erro
 			}
 		}
 	}
+}
+
+func (e subtreeFilterElement) matches(name xml.Name) bool {
+	if name.Local != e.LocalName {
+		return false
+	}
+	if e.Namespace == "" || e.Namespace == NetconfBaseNS {
+		return true
+	}
+	return name.Space == e.Namespace
 }
 
 // filterMatches checks if a top-level element matches the filter

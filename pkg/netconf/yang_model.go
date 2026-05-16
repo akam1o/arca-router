@@ -370,6 +370,18 @@ func validateXPathFilterNamespaces(filter *XPathFilter) error {
 	return nil
 }
 
+func validateSubtreeFilterNamespaces(elements []subtreeFilterElement) error {
+	for _, element := range elements {
+		if element.Namespace == "" || element.Namespace == NetconfBaseNS {
+			continue
+		}
+		if expected := expectedXPathNamespace([]string{element.LocalName}); element.Namespace != expected {
+			return fmt.Errorf("/%s uses namespace %q, want %q", element.LocalName, element.Namespace, expected)
+		}
+	}
+	return nil
+}
+
 func expectedXPathNamespace(path []string) string {
 	if len(path) == 0 {
 		return ""

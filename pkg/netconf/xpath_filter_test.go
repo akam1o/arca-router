@@ -409,6 +409,9 @@ func TestApplySubtreeFilterUsesXMLTokenExtraction(t *testing.T) {
   <interfaces xmlns="urn:ietf:params:xml:ns:yang:ietf-interfaces">
     <interface><name>ge-0/0/0</name></interface>
   </interfaces>
+  <interfaces xmlns="urn:arca:router:config:1.0">
+    <interface><name>arca-local</name></interface>
+  </interfaces>
   <protocols xmlns="urn:arca:router:config:1.0">
     <bgp/>
   </protocols>
@@ -430,6 +433,9 @@ func TestApplySubtreeFilterUsesXMLTokenExtraction(t *testing.T) {
 	}
 	if strings.Contains(gotText, "<protocols") {
 		t.Fatalf("ApplySubtreeFilter() included unmatched protocols subtree:\n%s", gotText)
+	}
+	if strings.Contains(gotText, "arca-local") {
+		t.Fatalf("ApplySubtreeFilter() included namespace-mismatched interfaces subtree:\n%s", gotText)
 	}
 }
 

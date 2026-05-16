@@ -2,6 +2,7 @@
 
 ## v0.9.x - NETCONF/YANG and Operational Safety (current)
 
+- **NETCONF subtree filter namespace matching**: subtree filters now honor explicit model namespaces when selecting data so same-name elements from other namespaces are not returned
 - **NETCONF subtree filter extraction**: subtree filters now use XML token-based extraction so namespace-qualified data and nested same-name elements are handled without string matching
 - **NETCONF namespace-aware XPath filters**: XPath filters now accept declared namespace prefixes for implemented IETF and Arca model paths while rejecting undeclared or mismatched prefixes
 - **NETCONF XPath model validation**: XPath filters now validate nested element paths and predicate keys against the implemented NETCONF/YANG path schema before request handling
