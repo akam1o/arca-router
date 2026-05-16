@@ -2,6 +2,7 @@
 
 ## v0.9.x - NETCONF/YANG and Operational Safety (current)
 
+- **NETCONF validate source coverage**: `<validate>` now checks both running and candidate datastore sources while continuing to reject unsupported startup validation
 - **NETCONF semantic candidate validation**: `edit-config`, `commit`, `validate`, and YANG XML validation now enforce the internal config semantic rules before accepting candidate state
 - **NETCONF XPath filter subset**: `get` and `get-config` now accept simple absolute XPath filters and use them for configuration and operational section pruning
 - **CLI interface impact summaries**: commit impact previews now list representative interface changes and warn when address changes can affect connected route reachability

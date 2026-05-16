@@ -112,7 +112,7 @@ type ValidateRequest struct {
 	Source  Source   `xml:"source"`
 }
 
-// handleValidate handles <validate> RPC - validates candidate config
+// handleValidate handles <validate> RPC - validates datastore config
 func (s *Server) handleValidate(ctx context.Context, sess *Session, rpc *RPC) *RPCReply {
 	var req ValidateRequest
 	if err := rpc.UnmarshalOperation(&req); err != nil {
@@ -125,22 +125,14 @@ func (s *Server) handleValidate(ctx context.Context, sess *Session, rpc *RPC) *R
 		return NewErrorReply(rpc.MessageID, err.(*RPCError))
 	}
 
-	// Only candidate validation is supported
-	if source != DatastoreCandidate {
-		return NewErrorReply(rpc.MessageID, ErrInvalidTarget("validate", source))
+	configText, rpcErr := s.validateSourceConfigText(ctx, sess, source)
+	if rpcErr != nil {
+		return NewErrorReply(rpc.MessageID, rpcErr)
 	}
 
-	// Get candidate config
-	candidate, err := s.datastore.GetCandidate(ctx, sess.ID)
-	if err != nil || candidate == nil {
-		log.Printf("[NETCONF] No candidate config to validate for session %s: %v", sess.ID, err)
-		return NewErrorReply(rpc.MessageID, ErrOperationFailed("no candidate configuration to validate"))
-	}
-
-	// Parse candidate text to config structure
-	cfg, err := TextToConfig(candidate.ConfigText)
+	cfg, err := TextToConfig(configText)
 	if err != nil {
-		log.Printf("[NETCONF] Failed to parse candidate config: %v", err)
+		log.Printf("[NETCONF] Failed to parse %s config: %v", source, err)
 		return NewErrorReply(rpc.MessageID, ErrValidationFailed(fmt.Sprintf("config parsing failed: %v", err)))
 	}
 
@@ -149,7 +141,28 @@ func (s *Server) handleValidate(ctx context.Context, sess *Session, rpc *RPC) *R
 		return NewErrorReply(rpc.MessageID, rpcErr)
 	}
 
-	log.Printf("[NETCONF] Validation successful for session %s", sess.ID)
+	log.Printf("[NETCONF] Validation successful for %s datastore (session %s)", source, sess.ID)
 
 	return NewOKReply(rpc.MessageID)
+}
+
+func (s *Server) validateSourceConfigText(ctx context.Context, sess *Session, source string) (string, *RPCError) {
+	switch source {
+	case DatastoreRunning:
+		running, err := s.datastore.GetRunning(ctx)
+		if err != nil || running == nil {
+			log.Printf("[NETCONF] No running config to validate for session %s: %v", sess.ID, err)
+			return "", ErrOperationFailed("no running configuration to validate")
+		}
+		return running.ConfigText, nil
+	case DatastoreCandidate:
+		candidate, err := s.datastore.GetCandidate(ctx, sess.ID)
+		if err != nil || candidate == nil {
+			log.Printf("[NETCONF] No candidate config to validate for session %s: %v", sess.ID, err)
+			return "", ErrOperationFailed("no candidate configuration to validate")
+		}
+		return candidate.ConfigText, nil
+	default:
+		return "", ErrInvalidTarget("validate", source)
+	}
 }
