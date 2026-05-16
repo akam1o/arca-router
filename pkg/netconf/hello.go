@@ -13,6 +13,8 @@ const (
 	CapabilityCandidate  = "urn:ietf:params:xml:ns:netconf:capability:candidate:1.0"
 	CapabilityValidate   = "urn:ietf:params:xml:ns:netconf:capability:validate:1.1"
 	CapabilityArcaRouter = "urn:arca:router:config:1.0?module=arca-router&revision=2025-12-27"
+	// Arca-specific capability for the safe absolute XPath subset accepted by filters.
+	CapabilityArcaXPathFilterSubset = "urn:arca:router:netconf:capability:xpath-filter-subset:1.0"
 
 	// NETCONF namespace
 	NetconfNamespace = "urn:ietf:params:xml:ns:netconf:base:1.0"
@@ -38,6 +40,7 @@ func ServerHello(sessionID uint32) *Hello {
 		CapabilityCandidate,
 		CapabilityValidate,
 		CapabilityArcaRouter,
+		CapabilityArcaXPathFilterSubset,
 	}
 	return hello
 }
