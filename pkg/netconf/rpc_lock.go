@@ -36,6 +36,9 @@ func (s *Server) handleLock(ctx context.Context, sess *Session, rpc *RPC) *RPCRe
 
 	// Validate target (candidate and running are allowed)
 	if target != DatastoreCandidate && target != DatastoreRunning {
+		if target == DatastoreStartup {
+			return NewErrorReply(rpc.MessageID, ErrStartupNotSupported("lock", "target"))
+		}
 		return NewErrorReply(rpc.MessageID, ErrInvalidTarget("lock", target))
 	}
 
@@ -84,6 +87,9 @@ func (s *Server) handleUnlock(ctx context.Context, sess *Session, rpc *RPC) *RPC
 
 	// Validate target
 	if target != DatastoreCandidate && target != DatastoreRunning {
+		if target == DatastoreStartup {
+			return NewErrorReply(rpc.MessageID, ErrStartupNotSupported("unlock", "target"))
+		}
 		return NewErrorReply(rpc.MessageID, ErrInvalidTarget("unlock", target))
 	}
 

@@ -161,6 +161,14 @@ func ErrInvalidTarget(rpcName, target string) *RPCError {
 		WithBadElement(target)
 }
 
+// ErrStartupNotSupported returns error for startup datastore operations when
+// the startup capability is not advertised.
+func ErrStartupNotSupported(rpcName, container string) *RPCError {
+	return NewRPCError(ErrorTypeProtocol, ErrorTagOperationNotSupported, "startup datastore capability not supported").
+		WithPath(fmt.Sprintf("/rpc/%s/%s", rpcName, container)).
+		WithBadElement(DatastoreStartup)
+}
+
 // ErrUnsupportedFilterType returns error for unsupported filter type
 func ErrUnsupportedFilterType(rpcName, filterType string) *RPCError {
 	return NewRPCError(ErrorTypeProtocol, ErrorTagInvalidValue, fmt.Sprintf("unsupported filter type: %s", filterType)).

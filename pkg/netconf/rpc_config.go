@@ -101,8 +101,7 @@ func (s *Server) handleGetConfig(ctx context.Context, sess *Session, rpc *RPC) *
 		}
 		textCfg = candidateCfg.ConfigText
 	case DatastoreStartup:
-		// Startup datastore not implemented (reads from /etc/arca-router/arca-router.conf at boot)
-		return NewErrorReply(rpc.MessageID, ErrInvalidTarget("get-config", "startup"))
+		return NewErrorReply(rpc.MessageID, ErrStartupNotSupported("get-config", "source"))
 	default:
 		return NewErrorReply(rpc.MessageID, ErrInvalidTarget("get-config", datastore))
 	}
@@ -215,6 +214,9 @@ func (s *Server) handleEditConfig(ctx context.Context, sess *Session, rpc *RPC) 
 	if target != DatastoreCandidate {
 		if target == DatastoreRunning {
 			return NewErrorReply(rpc.MessageID, ErrWritableRunningNotSupported())
+		}
+		if target == DatastoreStartup {
+			return NewErrorReply(rpc.MessageID, ErrStartupNotSupported("edit-config", "target"))
 		}
 		return NewErrorReply(rpc.MessageID, ErrInvalidTarget("edit-config", target))
 	}
@@ -367,6 +369,9 @@ func (s *Server) handleCopyConfig(ctx context.Context, sess *Session, rpc *RPC) 
 		if target == DatastoreRunning {
 			return NewErrorReply(rpc.MessageID, ErrWritableRunningNotSupported())
 		}
+		if target == DatastoreStartup {
+			return NewErrorReply(rpc.MessageID, ErrStartupNotSupported("copy-config", "target"))
+		}
 		return NewErrorReply(rpc.MessageID, ErrInvalidTarget("copy-config", target))
 	}
 
@@ -416,6 +421,8 @@ func (s *Server) handleCopyConfig(ctx context.Context, sess *Session, rpc *RPC) 
 				return NewErrorReply(rpc.MessageID, ErrDatastoreError(fmt.Sprintf("failed to read source %s: %v", source, err)))
 			}
 			srcTextCfg = candidateCfg.ConfigText
+		case DatastoreStartup:
+			return NewErrorReply(rpc.MessageID, ErrStartupNotSupported("copy-config", "source"))
 		default:
 			return NewErrorReply(rpc.MessageID, ErrInvalidTarget("copy-config", source))
 		}
@@ -463,6 +470,9 @@ func (s *Server) handleDeleteConfig(ctx context.Context, sess *Session, rpc *RPC
 	if target != DatastoreCandidate {
 		if target == DatastoreRunning {
 			return NewErrorReply(rpc.MessageID, NewRPCError(ErrorTypeProtocol, ErrorTagOperationNotSupported, "cannot delete running datastore"))
+		}
+		if target == DatastoreStartup {
+			return NewErrorReply(rpc.MessageID, ErrStartupNotSupported("delete-config", "target"))
 		}
 		return NewErrorReply(rpc.MessageID, ErrInvalidTarget("delete-config", target))
 	}

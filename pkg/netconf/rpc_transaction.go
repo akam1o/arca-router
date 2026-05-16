@@ -193,6 +193,8 @@ func (s *Server) validateSourceConfigText(ctx context.Context, sess *Session, so
 			return "", ErrOperationFailed("no candidate configuration to validate")
 		}
 		return candidate.ConfigText, nil
+	case DatastoreStartup:
+		return "", ErrStartupNotSupported("validate", "source")
 	default:
 		return "", ErrInvalidTarget("validate", source)
 	}
