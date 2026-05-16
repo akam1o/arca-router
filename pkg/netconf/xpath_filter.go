@@ -344,23 +344,18 @@ func ApplySubtreeFilter(xmlData []byte, filter *Filter) ([]byte, error) {
 		return xmlData, nil // Empty filter matches all
 	}
 
-	// Phase 3: Simple element name matching
-	// For each filter element, check if it exists in the data
-	// If yes, include that subtree; if no, exclude it
-
-	// This is a simplified implementation
-	// Full subtree filtering would require proper XML tree manipulation
-	// For Phase 3, we use string-based matching
-
 	var result bytes.Buffer
 	result.WriteString(`<?xml version="1.0" encoding="UTF-8"?>` + "\n")
 	result.WriteString(`<data xmlns="` + NetconfBaseNS + `">` + "\n")
 
 	for _, elem := range filterElements {
-		// Extract matching subtrees from xmlData
-		subtree := extractSubtree(xmlData, elem)
-		if len(subtree) > 0 {
+		subtrees, err := extractMatchingSubtrees(xmlData, elem)
+		if err != nil {
+			return nil, err
+		}
+		for _, subtree := range subtrees {
 			result.Write(subtree)
+			result.WriteByte('\n')
 		}
 	}
 
@@ -421,28 +416,76 @@ func parseFilterElementsWithContext(filterXML []byte, namespaceAttrs []xml.Attr)
 	return elements, nil
 }
 
-// extractSubtree extracts a subtree matching the given element name
-// Phase 3: Simple element-based extraction
-func extractSubtree(xmlData []byte, elementName string) []byte {
-	// Find <elementName> and </elementName>
-	startTag := "<" + elementName
-	endTag := "</" + elementName + ">"
+func extractMatchingSubtrees(xmlData []byte, elementName string) ([][]byte, error) {
+	decoder := xml.NewDecoder(bytes.NewReader(xmlData))
+	decoder.Strict = true
+	decoder.Entity = nil
 
-	startIdx := bytes.Index(xmlData, []byte(startTag))
-	if startIdx == -1 {
-		return nil
+	var subtrees [][]byte
+	var subtree bytes.Buffer
+	var encoder *xml.Encoder
+	depth := 0
+	collectingDepth := 0
+	rootSeen := false
+	rootIsData := false
+
+	for {
+		token, err := decoder.Token()
+		if err == io.EOF {
+			return subtrees, nil
+		}
+		if err != nil {
+			return nil, fmt.Errorf("invalid XML data: %w", err)
+		}
+
+		switch t := token.(type) {
+		case xml.StartElement:
+			if !rootSeen {
+				rootSeen = true
+				rootIsData = t.Name.Local == "data"
+			}
+			shouldCollect := collectingDepth == 0 && t.Name.Local == elementName &&
+				((rootIsData && depth == 1) || (!rootIsData && depth == 0))
+			switch {
+			case collectingDepth > 0:
+				if err := encoder.EncodeToken(t); err != nil {
+					return nil, err
+				}
+				collectingDepth++
+			case shouldCollect:
+				subtree.Reset()
+				encoder = xml.NewEncoder(&subtree)
+				if err := encoder.EncodeToken(t); err != nil {
+					return nil, err
+				}
+				collectingDepth = 1
+			}
+			depth++
+		case xml.EndElement:
+			if collectingDepth > 0 {
+				if err := encoder.EncodeToken(t); err != nil {
+					return nil, err
+				}
+				collectingDepth--
+				if collectingDepth == 0 {
+					if err := encoder.Flush(); err != nil {
+						return nil, err
+					}
+					subtrees = append(subtrees, append([]byte(nil), subtree.Bytes()...))
+					encoder = nil
+				}
+			}
+			if depth > 0 {
+				depth--
+			}
+		default:
+			if collectingDepth > 0 {
+				if err := encoder.EncodeToken(token); err != nil {
+					return nil, err
+				}
+			}
+		}
 	}
-
-	// Find the matching end tag
-	// Simple implementation: find the first occurrence after start
-	// Phase 4 would use proper XML parsing with nesting awareness
-	endIdx := bytes.Index(xmlData[startIdx:], []byte(endTag))
-	if endIdx == -1 {
-		return nil
-	}
-
-	endIdx += startIdx + len(endTag)
-	return xmlData[startIdx:endIdx]
 }
 
 // filterMatches checks if a top-level element matches the filter
