@@ -197,6 +197,45 @@ func TestBuildOperationalDataWritesBFDState(t *testing.T) {
 	}
 }
 
+func TestBuildOperationalDataFiltersBFDPeerXPathPredicates(t *testing.T) {
+	cfg := config.NewConfig()
+	filter := &Filter{Type: "xpath", Select: "/state/protocols/bfd/peer[address='192.0.2.3'][status='down']"}
+	data, err := buildOperationalData(cfg, filter, time.Date(2026, 5, 12, 4, 0, 0, 0, time.UTC), nil, nil, nil, nil, nil, &BFDOperationalState{
+		ConfiguredPeers: 2,
+		ObservedPeers:   2,
+		Peers: []BFDPeerOperationalState{
+			{
+				Peer:      "192.0.2.2",
+				Interface: "ge-0/0/0",
+				Status:    "up",
+				Observed:  true,
+				Up:        true,
+			},
+			{
+				Peer:      "192.0.2.3",
+				Interface: "ge-0/0/1",
+				Status:    "down",
+				Observed:  true,
+				Up:        false,
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("buildOperationalData() error = %v", err)
+	}
+
+	for _, want := range []string{"<bfd>", "<configured-peers>2</configured-peers>", "<address>192.0.2.3</address>", "<status>down</status>"} {
+		if !bytes.Contains(data, []byte(want)) {
+			t.Fatalf("operational data missing filtered BFD value %q:\n%s", want, data)
+		}
+	}
+	for _, unexpected := range []string{"192.0.2.2", "ge-0/0/0", "<status>up</status>"} {
+		if bytes.Contains(data, []byte(unexpected)) {
+			t.Fatalf("operational data included predicate-mismatched BFD peer value %q:\n%s", unexpected, data)
+		}
+	}
+}
+
 func TestBuildOperationalDataWritesRoutingInstanceState(t *testing.T) {
 	cfg := config.NewConfig()
 	cfg.RoutingInstances = map[string]*config.RoutingInstance{}
@@ -279,6 +318,43 @@ func TestBuildOperationalDataWritesRouteState(t *testing.T) {
 	}
 }
 
+func TestBuildOperationalDataFiltersRouteXPathPredicates(t *testing.T) {
+	cfg := config.NewConfig()
+	filter := &Filter{Type: "xpath", Select: "/state/routes/route[prefix='192.0.2.0/24'][protocol='static']"}
+	data, err := buildOperationalData(cfg, filter, time.Date(2026, 5, 12, 4, 0, 0, 0, time.UTC), nil, []RouteOperationalState{
+		{
+			Prefix:    "192.0.2.0/24",
+			NextHop:   "192.0.2.1",
+			Protocol:  "static",
+			Metric:    10,
+			Interface: "ge-0/0/0",
+			Active:    true,
+		},
+		{
+			Prefix:    "198.51.100.0/24",
+			NextHop:   "192.0.2.2",
+			Protocol:  "bgp",
+			Metric:    20,
+			Interface: "ge-0/0/1",
+			Active:    true,
+		},
+	}, nil, nil, nil, nil)
+	if err != nil {
+		t.Fatalf("buildOperationalData() error = %v", err)
+	}
+
+	for _, want := range []string{"<routes>", "<prefix>192.0.2.0/24</prefix>", "<protocol>static</protocol>"} {
+		if !bytes.Contains(data, []byte(want)) {
+			t.Fatalf("operational data missing filtered route value %q:\n%s", want, data)
+		}
+	}
+	for _, unexpected := range []string{"198.51.100.0/24", "192.0.2.2", "<protocol>bgp</protocol>"} {
+		if bytes.Contains(data, []byte(unexpected)) {
+			t.Fatalf("operational data included predicate-mismatched route value %q:\n%s", unexpected, data)
+		}
+	}
+}
+
 func TestBuildOperationalDataWritesBGPNeighborState(t *testing.T) {
 	cfg := config.NewConfig()
 	data, err := buildOperationalData(cfg, nil, time.Date(2026, 5, 12, 4, 0, 0, 0, time.UTC), nil, nil, []BGPNeighborOperationalState{
@@ -309,6 +385,35 @@ func TestBuildOperationalDataWritesBGPNeighborState(t *testing.T) {
 	} {
 		if !bytes.Contains(data, []byte(want)) {
 			t.Fatalf("operational data missing %q:\n%s", want, data)
+		}
+	}
+}
+
+func TestBuildOperationalDataFiltersBGPNeighborXPathPredicates(t *testing.T) {
+	cfg := config.NewConfig()
+	filter := &Filter{Type: "xpath", Select: "/state/protocols/bgp/neighbor[peer-address='2001:db8::2'][state='Established']"}
+	data, err := buildOperationalData(cfg, filter, time.Date(2026, 5, 12, 4, 0, 0, 0, time.UTC), nil, nil, []BGPNeighborOperationalState{
+		{
+			PeerAddress: "2001:db8::2",
+			PeerAS:      65001,
+			State:       "Established",
+		},
+		{
+			PeerAddress: "2001:db8::3",
+			PeerAS:      65002,
+			State:       "Idle",
+		},
+	}, nil, nil, nil)
+	if err != nil {
+		t.Fatalf("buildOperationalData() error = %v", err)
+	}
+
+	if !bytes.Contains(data, []byte("<peer-address>2001:db8::2</peer-address>")) {
+		t.Fatalf("operational data missing filtered BGP neighbor:\n%s", data)
+	}
+	for _, unexpected := range []string{"2001:db8::3", "<peer-as>65002</peer-as>", "<state>Idle</state>"} {
+		if bytes.Contains(data, []byte(unexpected)) {
+			t.Fatalf("operational data included predicate-mismatched BGP neighbor value %q:\n%s", unexpected, data)
 		}
 	}
 }

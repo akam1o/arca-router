@@ -173,6 +173,7 @@ func buildOperationalData(cfg *config.Config, filter *Filter, now time.Time, int
 	if cfg == nil {
 		cfg = config.NewConfig()
 	}
+	xpathFilter := outputXPathFilter(filter)
 
 	var buf bytes.Buffer
 	if includeOperationalSection(filter, "system") {
@@ -181,7 +182,7 @@ func buildOperationalData(cfg *config.Config, filter *Filter, now time.Time, int
 		}
 	}
 	if includeOperationalSection(filter, "interfaces") && (len(cfg.Interfaces) > 0 || len(interfaceStates) > 0) {
-		if err := writeInterfaceStateXML(&buf, cfg.Interfaces, interfaceStates); err != nil {
+		if err := writeInterfaceStateXML(&buf, cfg.Interfaces, interfaceStates, xpathFilter); err != nil {
 			return nil, err
 		}
 	}
@@ -210,10 +211,16 @@ func buildOperationalData(cfg *config.Config, filter *Filter, now time.Time, int
 	if !includeOperationalSection(filter, "state", "protocols", "bfd") {
 		bfdStatus = nil
 	}
+	routes = filterRouteOperationalStates(routes, xpathFilter)
+	bgpNeighbors = filterBGPOperationalNeighbors(bgpNeighbors, xpathFilter)
+	ospfNeighbors = filterOSPFOperationalNeighbors(ospfNeighbors, xpathFilter, "ospf")
+	ospf3Neighbors = filterOSPFOperationalNeighbors(ospf3Neighbors, xpathFilter, "ospf3")
+	bfdStatus = filterBFDOperationalState(bfdStatus, xpathFilter)
 	routingInstances, err := collectRoutingInstanceOperationalState(cfg, filter)
 	if err != nil {
 		return nil, err
 	}
+	routingInstances = filterRoutingInstanceOperationalStates(routingInstances, xpathFilter)
 	if hasArcaOperationalState(routes, routingInstances, bgpNeighbors, ospfNeighbors, ospf3Neighbors, bfdStatus) {
 		if err := writeArcaStateXML(&buf, routes, routingInstances, bgpNeighbors, ospfNeighbors, ospf3Neighbors, bfdStatus); err != nil {
 			return nil, err
@@ -332,6 +339,185 @@ func hasBFDOperationalState(status *BFDOperationalState) bool {
 		status.LastError != ""
 }
 
+func filterRouteOperationalStates(routes []RouteOperationalState, xpathFilter *XPathFilter) []RouteOperationalState {
+	return filterOperationalList(routes, xpathFilter, []string{"state", "routes", "route"}, func(route RouteOperationalState, key string) []string {
+		switch key {
+		case "prefix":
+			return nonEmptyValues(route.Prefix)
+		case "next-hop":
+			return nonEmptyValues(route.NextHop)
+		case "protocol":
+			return nonEmptyValues(route.Protocol)
+		case "metric":
+			return []string{fmt.Sprintf("%d", route.Metric)}
+		case "interface":
+			return nonEmptyValues(route.Interface)
+		case "active":
+			return []string{fmt.Sprintf("%t", route.Active)}
+		default:
+			return nil
+		}
+	})
+}
+
+func filterRoutingInstanceOperationalStates(instances []RoutingInstanceOperationalState, xpathFilter *XPathFilter) []RoutingInstanceOperationalState {
+	return filterOperationalList(instances, xpathFilter, []string{"state", "routing-instances", "instance"}, func(instance RoutingInstanceOperationalState, key string) []string {
+		switch key {
+		case "name":
+			return nonEmptyValues(instance.Name)
+		case "instance-type":
+			return nonEmptyValues(instance.InstanceType)
+		case "route-distinguisher":
+			return nonEmptyValues(instance.RouteDistinguisher)
+		case "ipv4-table-id":
+			return []string{fmt.Sprintf("%d", instance.IPv4TableID)}
+		case "ipv6-table-id":
+			return []string{fmt.Sprintf("%d", instance.IPv6TableID)}
+		case "import-target":
+			return instance.ImportTargets
+		case "export-target":
+			return instance.ExportTargets
+		case "import-policy":
+			return instance.ImportPolicies
+		case "export-policy":
+			return instance.ExportPolicies
+		case "interface":
+			return instance.Interfaces
+		default:
+			return nil
+		}
+	})
+}
+
+func filterBGPOperationalNeighbors(neighbors []BGPNeighborOperationalState, xpathFilter *XPathFilter) []BGPNeighborOperationalState {
+	return filterOperationalList(neighbors, xpathFilter, []string{"state", "protocols", "bgp", "neighbor"}, func(neighbor BGPNeighborOperationalState, key string) []string {
+		switch key {
+		case "peer-address":
+			return nonEmptyValues(neighbor.PeerAddress)
+		case "peer-as":
+			return []string{fmt.Sprintf("%d", neighbor.PeerAS)}
+		case "state":
+			return nonEmptyValues(neighbor.State)
+		case "uptime-seconds":
+			return []string{fmt.Sprintf("%d", neighbor.UptimeSecs)}
+		case "prefix-received":
+			return []string{fmt.Sprintf("%d", neighbor.PrefixReceived)}
+		case "prefix-sent":
+			return []string{fmt.Sprintf("%d", neighbor.PrefixSent)}
+		default:
+			return nil
+		}
+	})
+}
+
+func filterOSPFOperationalNeighbors(neighbors []OSPFNeighborOperationalState, xpathFilter *XPathFilter, protocol string) []OSPFNeighborOperationalState {
+	return filterOperationalList(neighbors, xpathFilter, []string{"state", "protocols", protocol, "neighbor"}, func(neighbor OSPFNeighborOperationalState, key string) []string {
+		switch key {
+		case "router-id":
+			return nonEmptyValues(neighbor.RouterID)
+		case "address":
+			return nonEmptyValues(neighbor.Address)
+		case "interface":
+			return nonEmptyValues(neighbor.Interface)
+		case "state":
+			return nonEmptyValues(neighbor.State)
+		case "role":
+			return nonEmptyValues(neighbor.Role)
+		case "priority":
+			return []string{fmt.Sprintf("%d", neighbor.Priority)}
+		case "dead-time-seconds":
+			return []string{fmt.Sprintf("%d", neighbor.DeadTimeSecs)}
+		case "uptime-seconds":
+			return []string{fmt.Sprintf("%d", neighbor.UptimeSecs)}
+		default:
+			return nil
+		}
+	})
+}
+
+func filterBFDOperationalState(status *BFDOperationalState, xpathFilter *XPathFilter) *BFDOperationalState {
+	if status == nil {
+		return nil
+	}
+	filteredPeers := filterOperationalList(status.Peers, xpathFilter, []string{"state", "protocols", "bfd", "peer"}, func(peer BFDPeerOperationalState, key string) []string {
+		switch key {
+		case "address":
+			return nonEmptyValues(peer.Peer)
+		case "local-address":
+			return nonEmptyValues(peer.LocalAddress)
+		case "interface":
+			return nonEmptyValues(peer.Interface)
+		case "vrf":
+			return nonEmptyValues(peer.VRF)
+		case "status":
+			return nonEmptyValues(peer.Status)
+		case "diagnostic":
+			return nonEmptyValues(peer.Diagnostic)
+		case "remote-diagnostic":
+			return nonEmptyValues(peer.RemoteDiagnostic)
+		case "observed":
+			return []string{fmt.Sprintf("%t", peer.Observed)}
+		case "up":
+			return []string{fmt.Sprintf("%t", peer.Up)}
+		case "session-down-events":
+			return []string{fmt.Sprintf("%d", peer.SessionDownEvents)}
+		case "rx-fail-packets":
+			return []string{fmt.Sprintf("%d", peer.RxFailPackets)}
+		default:
+			return nil
+		}
+	})
+	if len(filteredPeers) == len(status.Peers) {
+		return status
+	}
+	filtered := *status
+	filtered.Peers = filteredPeers
+	return &filtered
+}
+
+func filterOperationalList[T any](items []T, xpathFilter *XPathFilter, path []string, values func(T, string) []string) []T {
+	segmentIndex, ok := xpathListSegmentIndex(xpathFilter, path)
+	if !ok {
+		return items
+	}
+	predicates := xpathFilter.Predicates[segmentIndex]
+	filtered := make([]T, 0, len(items))
+	for _, item := range items {
+		if operationalItemMatchesPredicates(item, predicates, values) {
+			filtered = append(filtered, item)
+		}
+	}
+	return filtered
+}
+
+func operationalItemMatchesPredicates[T any](item T, predicates map[string]string, values func(T, string) []string) bool {
+	for key, want := range predicates {
+		if !stringSliceContains(values(item, key), want) {
+			return false
+		}
+	}
+	return true
+}
+
+func nonEmptyValues(values ...string) []string {
+	out := make([]string, 0, len(values))
+	for _, value := range values {
+		if value != "" {
+			out = append(out, value)
+		}
+	}
+	return out
+}
+
+func stringSliceContains(values []string, want string) bool {
+	for _, value := range values {
+		if value == want {
+			return true
+		}
+	}
+	return false
+}
+
 func includeOperationalSection(filter *Filter, names ...string) bool {
 	return includeOperationalSectionPaths(filter, names)
 }
@@ -401,12 +587,15 @@ func writeSystemStateXML(buf *bytes.Buffer, cfg *config.Config, now time.Time) e
 	return nil
 }
 
-func writeInterfaceStateXML(buf *bytes.Buffer, interfaces map[string]*config.Interface, states map[string]*InterfaceOperationalState) error {
+func writeInterfaceStateXML(buf *bytes.Buffer, interfaces map[string]*config.Interface, states map[string]*InterfaceOperationalState, xpathFilter *XPathFilter) error {
 	buf.WriteString(`  <interfaces xmlns="` + IETFInterfacesNS + `">` + "\n")
 	for _, name := range sortedInterfaceStateNames(interfaces, states) {
 		iface := interfaces[name]
 		state := states[name]
 		if iface == nil && state == nil {
+			continue
+		}
+		if !interfaceMatchesXPathPredicates(xpathFilter, name, iface) {
 			continue
 		}
 		buf.WriteString("    <interface>\n")
