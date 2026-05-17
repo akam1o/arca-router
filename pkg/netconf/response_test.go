@@ -247,6 +247,37 @@ func TestMarshalReplyNormalizesNilErrors(t *testing.T) {
 	}
 }
 
+func TestMarshalReplyNormalizesIncompleteErrors(t *testing.T) {
+	err := &RPCError{
+		ErrorMessage: "hand-built error",
+		ErrorInfo: &ErrorInfo{
+			BadElement: "bad",
+		},
+	}
+	reply := NewErrorReply("105", err)
+
+	data, marshalErr := MarshalReply(reply)
+	if marshalErr != nil {
+		t.Fatalf("MarshalReply() error = %v", marshalErr)
+	}
+
+	xmlStr := string(data)
+	for _, want := range []string{
+		"<error-type>rpc</error-type>",
+		"<error-tag>operation-failed</error-tag>",
+		"<error-severity>error</error-severity>",
+		"<error-message>hand-built error</error-message>",
+		"<bad-element>bad</bad-element>",
+	} {
+		if !strings.Contains(xmlStr, want) {
+			t.Fatalf("MarshalReply() = %s, want %s", xmlStr, want)
+		}
+	}
+	if err.ErrorType != "" || err.ErrorTag != "" || err.ErrorSeverity != "" {
+		t.Fatalf("MarshalReply() mutated error = %#v", err)
+	}
+}
+
 func TestMarshalReplyRejectsInvalidPayloads(t *testing.T) {
 	tests := []struct {
 		name  string

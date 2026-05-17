@@ -2,6 +2,7 @@
 
 ## v0.9.x - NETCONF/YANG and Operational Safety (current)
 
+- **NETCONF RPC error field normalization**: RPC reply marshaling now fills missing required error fields on hand-built errors without mutating caller-owned values
 - **NETCONF reply marshal size validation**: RPC reply marshaling now rejects oversized generated envelopes before returning XML bytes
 - **NETCONF hello marshal size validation**: hello XML marshaling now rejects oversized generated payloads from hand-built capability sets
 - **NETCONF reply data XML validation**: RPC reply marshaling now rejects oversized, unsafe, malformed, or text-only data payloads before writing `<rpc-reply>` XML

@@ -70,10 +70,28 @@ func NewMultiErrorReply(messageID string, errors []*RPCError) *RPCReply {
 }
 
 func normalizeRPCError(err *RPCError) *RPCError {
-	if err != nil {
+	if err == nil {
+		return ErrOperationFailed("rpc error unavailable")
+	}
+	if err.ErrorType != "" && err.ErrorTag != "" && err.ErrorSeverity != "" {
 		return err
 	}
-	return ErrOperationFailed("rpc error unavailable")
+
+	normalized := *err
+	if err.ErrorInfo != nil {
+		info := *err.ErrorInfo
+		normalized.ErrorInfo = &info
+	}
+	if normalized.ErrorType == "" {
+		normalized.ErrorType = ErrorTypeRPC
+	}
+	if normalized.ErrorTag == "" {
+		normalized.ErrorTag = ErrorTagOperationFailed
+	}
+	if normalized.ErrorSeverity == "" {
+		normalized.ErrorSeverity = ErrorSeverityError
+	}
+	return &normalized
 }
 
 func cloneRPCError(err *RPCError) *RPCError {
