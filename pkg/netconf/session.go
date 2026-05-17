@@ -3,6 +3,7 @@ package netconf
 import (
 	"context"
 	"fmt"
+	"sort"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -442,6 +443,7 @@ func (s *NETCONFSession) GetLocks() []string {
 	for target := range s.datastoreLocks {
 		locks = append(locks, target)
 	}
+	sort.Strings(locks)
 	return locks
 }
 

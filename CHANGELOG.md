@@ -2,6 +2,7 @@
 
 ## v0.9.x - NETCONF/YANG and Operational Safety (current)
 
+- **NETCONF session lock listing stability**: session lock listings now return datastore names in sorted order for deterministic direct helper output
 - **NETCONF YANG module listing stability**: YANG module listing now returns module names in sorted order for deterministic direct helper output
 - **NETCONF filter validation immutability**: filter validation now normalizes type and XPath select values without rewriting caller-owned filter fields
 - **NETCONF subtree filter copy safety**: unfiltered subtree filter helper paths now copy returned XML bytes so caller-side buffer mutation cannot alter the source data
