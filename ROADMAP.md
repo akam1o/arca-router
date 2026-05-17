@@ -149,10 +149,10 @@ Focus: complete final pre-stable stabilization and compatibility work.
   - CLI and configuration compatibility policy
   - API versioning and deprecation policy
   - Supported VPP and FRR version matrix
-  - Formal standard NETCONF `:xpath` support is deferred to v0.11 and should
-    advertise `urn:ietf:params:netconf:capability:xpath:1.0` in `<hello>` only
-    after the implementation satisfies RFC 6241 response rules, interoperability
-    expectations, DoS guardrails, and external client coverage
+  - Standard NETCONF `:xpath` support is available as an explicit opt-in and
+    advertises `urn:ietf:params:netconf:capability:xpath:1.0` in `<hello>` only
+    when enabled after the implementation satisfies RFC 6241 response rules,
+    interoperability expectations, DoS guardrails, and external client coverage
 - **Long-run soak and failure testing**
   - HA failover soak (manual runbook documented; lab execution deferred to v0.11)
   - FRR and VPP restart recovery (manual runbook documented; lab execution deferred to v0.11)
@@ -182,7 +182,7 @@ dedicated lab environment or additional NETCONF compatibility specification.
     implemented
   - Preserve v0.10 behavior by leaving `<startup/>` targets
     `operation-not-supported` when the feature is disabled
-- **NETCONF standard XPath**
-  - Promote the Arca XPath filter subset to standard `:xpath` only after RFC
-    response behavior, external client interoperability, namespace coverage, and
-    DoS guardrails pass
+- **NETCONF standard XPath default promotion**
+  - Keep the v0.10 opt-in standard `:xpath` path evidence-gated, and promote it
+    to default advertisement only after release-candidate operators accept the
+    interoperability and DoS evidence.

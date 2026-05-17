@@ -1,12 +1,12 @@
 # NETCONF XPath Interoperability Runbook
 
-Use this runbook before promoting Arca's implementation-specific XPath support
-to the standard NETCONF `:xpath` capability. The goal is to prove that clients
-which do not share Arca test helpers can consume the server behavior safely.
+Use this runbook before enabling, documenting, or making default Arca's
+standard NETCONF `:xpath` capability. The goal is to prove that clients which
+do not share Arca test helpers can consume the server behavior safely.
 
-Do not enable or advertise
+Do not claim support for
 `urn:ietf:params:netconf:capability:xpath:1.0` until this runbook passes and
-the results are attached to the release sign-off or v0.11 tracking issue.
+the results are attached to the release sign-off.
 
 ## Scope
 
@@ -17,9 +17,12 @@ Validate these outcomes with at least two independent client families:
 - One `libnetconf2-family` client. Use Netopeer2 `netopeer2-cli` or another
   libnetconf2-based client as the required second family.
 
-- The server `<hello>` advertises `urn:arca:router:netconf:capability:xpath-filter-subset:1.0`.
-- The server `<hello>` does not advertise standard `:xpath` until the v0.11 gate
-  is explicitly closed.
+- The default server `<hello>` advertises
+  `urn:arca:router:netconf:capability:xpath-filter-subset:1.0` and does not
+  advertise standard `:xpath`.
+- The standard-mode server `<hello>` advertises
+  `urn:ietf:params:netconf:capability:xpath:1.0` only when started with
+  `--netconf-standard-xpath` or `-standard-xpath`.
 - XPath filters for `get-config` and `get` return node-set results.
 - Scalar expressions, attribute selection, invalid XPath, unsupported paths,
   undeclared prefixes, and namespace mismatches return deterministic
@@ -57,7 +60,8 @@ go run ./tools/netconf-interop-server \
   -host-key "$tmpdir/ssh_host_ed25519_key" \
   -user-db "$tmpdir/users.db" \
   -datastore "$tmpdir/config.db" \
-  -running-config "$tmpdir/running.conf"
+  -running-config "$tmpdir/running.conf" \
+  -standard-xpath
 ```
 
 Keep the server running while executing the client checks.
@@ -142,7 +146,9 @@ Run it:
 Expected result:
 
 - `SERVER_CAPABILITIES` includes the Arca XPath filter subset capability.
-- `SERVER_CAPABILITIES` does not include
+- In standard mode, `SERVER_CAPABILITIES` includes
+  `urn:ietf:params:netconf:capability:xpath:1.0`.
+- In default mode, `SERVER_CAPABILITIES` does not include
   `urn:ietf:params:netconf:capability:xpath:1.0`.
 - `node-set` includes `ge-0/0/0` and does not include `xe-0/0/0`.
 - `scalar-rejected` and `attribute-rejected` return `rpc-error` with
@@ -184,11 +190,14 @@ ncclient Python dependencies and libnetconf2 development packages, then run:
 ```bash
 make netconf-client-evidence
 make netconf-evidence-verify
+make netconf-standard-xpath-evidence
+make netconf-standard-xpath-evidence-verify
 ```
 
-The target writes ncclient and libnetconf2 evidence under
-`artifacts/netconf-clients/`. Run `make netconf-pyez-evidence` only when
-supplementary PyEZ evidence is useful.
+The default-mode targets write ncclient and libnetconf2 evidence under
+`artifacts/netconf-clients/`. The standard-mode targets write evidence under
+`artifacts/netconf-clients/standard-xpath/`. Run `make netconf-pyez-evidence`
+only when supplementary PyEZ evidence is useful.
 
 `netconf-console` is acceptable only when the deployed tool is confirmed not to
 be backed by ncclient. PyEZ is not acceptable for this required check when
@@ -197,17 +206,19 @@ family.
 
 Save the raw RPC payloads and responses. If a client cannot send a raw
 namespace-declared XPath filter, record that limitation as an interoperability
-deviation instead of enabling standard `:xpath`.
+deviation before claiming standard `:xpath` support.
 
 ## Evidence to Attach
 
-Attach the following before closing the v0.11 standard XPath gate:
+Attach the following before claiming standard XPath support:
 
 - GitHub Actions `NETCONF Client Interoperability` artifacts named
   `netconf-client-ncclient-evidence`, `netconf-client-libnetconf2-evidence`,
+  `netconf-client-ncclient-standard-xpath-evidence`,
+  `netconf-client-libnetconf2-standard-xpath-evidence`,
   and, when scheduled or manually run, `netconf-client-junos-eznc-evidence`.
-  The workflow `verify interop evidence` job must pass for the required
-  ncclient and libnetconf2 artifacts.
+  The workflow `verify interop evidence` and `verify standard xpath evidence`
+  jobs must pass for the required ncclient and libnetconf2 artifacts.
 - Arca commit SHA and package version.
 - Client family, client names, and versions.
 - Server `<hello>` output.
@@ -216,5 +227,5 @@ Attach the following before closing the v0.11 standard XPath gate:
 - PyEZ evidence, if collected, labeled as supplementary ncclient-family
   evidence.
 - Notes for every interoperability deviation.
-- Confirmation that standard `:xpath` remains unadvertised until all deviations
-  are accepted or fixed.
+- Confirmation that default mode remains unadvertised and standard mode
+  advertises `:xpath` only when explicitly enabled.

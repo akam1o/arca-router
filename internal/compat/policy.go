@@ -71,8 +71,8 @@ func ComponentMatrix() []ComponentSupport {
 		{
 			Component: "NETCONF",
 			Supported: "base:1.0 and base:1.1",
-			Required:  "candidate, validate, rollback-on-error",
-			Notes:     "standard :xpath and startup datastore capabilities remain unadvertised in v0.10 and are tracked as v0.11 deferred gates",
+			Required:  "candidate, validate, rollback-on-error; standard :xpath is opt-in",
+			Notes:     "standard :xpath is advertised only with explicit opt-in and verified client evidence; startup datastore remains unadvertised in v0.10",
 		},
 	}
 }
@@ -83,6 +83,5 @@ func DeferredCompatibilityGates() []string {
 	return []string{
 		"HA failover soak, FRR/VPP restart recovery, and 24-hour churn lab evidence",
 		"formal NETCONF startup datastore capability",
-		"standard NETCONF :xpath capability advertisement",
 	}
 }

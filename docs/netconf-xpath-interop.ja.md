@@ -1,9 +1,8 @@
 # NETCONF XPath Interoperability Runbook
 
-Arca の implementation-specific XPath support を standard NETCONF `:xpath`
-capability に昇格する前に、この runbook を実行する。目的は、Arca の test helper を共有しない client が server behavior を安全に扱えることを確認すること。
+Arca の standard NETCONF `:xpath` capability を enable、document、または default 化する前に、この runbook を実行する。目的は、Arca の test helper を共有しない client が server behavior を安全に扱えることを確認すること。
 
-この runbook が成功し、結果が release sign-off または v0.11 tracking issue に添付されるまで、`urn:ietf:params:netconf:capability:xpath:1.0` を enable / advertise しない。
+この runbook が成功し、結果が release sign-off に添付されるまで、`urn:ietf:params:netconf:capability:xpath:1.0` の support を claim しない。
 
 ## Scope
 
@@ -12,8 +11,8 @@ capability に昇格する前に、この runbook を実行する。目的は、
 - `ncclient-family` を 1 つ使う。baseline は `ncclient` とする。PyEZ は ncclient stack を使うため、supplementary evidence として記録できる。
 - `libnetconf2-family` を 1 つ使う。必須の 2 種類目として Netopeer2 `netopeer2-cli` またはその他の libnetconf2-based client を使う。
 
-- server `<hello>` が `urn:arca:router:netconf:capability:xpath-filter-subset:1.0` を advertise する。
-- v0.11 gate を明示的に close するまで、server `<hello>` は standard `:xpath` を advertise しない。
+- default server `<hello>` が `urn:arca:router:netconf:capability:xpath-filter-subset:1.0` を advertise し、standard `:xpath` は advertise しない。
+- standard-mode server `<hello>` は `--netconf-standard-xpath` または `-standard-xpath` で起動した場合のみ `urn:ietf:params:netconf:capability:xpath:1.0` を advertise する。
 - `get-config` と `get` の XPath filter が node-set result を返す。
 - scalar expression、attribute selection、invalid XPath、unsupported path、undeclared prefix、namespace mismatch が deterministic な `rpc-error` を返す。
 - expression size、input XML size、selected element count、output size、depth、attribute count、evaluation timeout guardrail を確認する。
@@ -48,7 +47,8 @@ go run ./tools/netconf-interop-server \
   -host-key "$tmpdir/ssh_host_ed25519_key" \
   -user-db "$tmpdir/users.db" \
   -datastore "$tmpdir/config.db" \
-  -running-config "$tmpdir/running.conf"
+  -running-config "$tmpdir/running.conf" \
+  -standard-xpath
 ```
 
 client check の間、server は起動したままにする。
@@ -133,7 +133,8 @@ with manager.connect(
 期待結果:
 
 - `SERVER_CAPABILITIES` に Arca XPath filter subset capability が含まれる。
-- `SERVER_CAPABILITIES` に `urn:ietf:params:netconf:capability:xpath:1.0` が含まれない。
+- standard mode では `SERVER_CAPABILITIES` に `urn:ietf:params:netconf:capability:xpath:1.0` が含まれる。
+- default mode では `SERVER_CAPABILITIES` に `urn:ietf:params:netconf:capability:xpath:1.0` が含まれない。
 - `node-set` は `ge-0/0/0` を含み、`xe-0/0/0` を含まない。
 - `scalar-rejected` と `attribute-rejected` は `invalid-value` の `rpc-error` を返す。
 
@@ -162,23 +163,27 @@ GitHub Actions 外で必須 evidence を収集する場合は、ncclient の Pyt
 ```bash
 make netconf-client-evidence
 make netconf-evidence-verify
+make netconf-standard-xpath-evidence
+make netconf-standard-xpath-evidence-verify
 ```
 
-この target は ncclient と libnetconf2 の evidence を `artifacts/netconf-clients/` に出力する。Supplementary PyEZ evidence が必要な場合のみ `make netconf-pyez-evidence` を実行する。
+default-mode target は ncclient と libnetconf2 の evidence を `artifacts/netconf-clients/` に出力する。standard-mode target は `artifacts/netconf-clients/standard-xpath/` に evidence を出力する。Supplementary PyEZ evidence が必要な場合のみ `make netconf-pyez-evidence` を実行する。
 
 `netconf-console` は、導入されている tool が ncclient-backed ではないことを確認できる場合のみ acceptable とする。ncclient がすでに pass している場合、PyEZ は同じ client family を確認しているため、この必須 check には使えない。
 
-raw RPC payload と response を保存する。raw namespace-declared XPath filter を送れない client の場合は、standard `:xpath` を enable せず、interoperability deviation として記録する。
+raw RPC payload と response を保存する。raw namespace-declared XPath filter を送れない client の場合は、standard `:xpath` support を claim する前に interoperability deviation として記録する。
 
 ## Evidence to Attach
 
-v0.11 standard XPath gate を close する前に、以下を添付する。
+standard XPath support を claim する前に、以下を添付する。
 
 - GitHub Actions `NETCONF Client Interoperability` の artifact
   `netconf-client-ncclient-evidence`、`netconf-client-libnetconf2-evidence`、
+  `netconf-client-ncclient-standard-xpath-evidence`、
+  `netconf-client-libnetconf2-standard-xpath-evidence`、
   および schedule / manual run 時の `netconf-client-junos-eznc-evidence`。
   必須の ncclient / libnetconf2 artifact については workflow の
-  `verify interop evidence` job が pass していること。
+  `verify interop evidence` と `verify standard xpath evidence` job が pass していること。
 - Arca commit SHA と package version。
 - client family、client name、version。
 - server `<hello>` output。
@@ -186,4 +191,4 @@ v0.11 standard XPath gate を close する前に、以下を添付する。
 - reply XML または exception output。
 - PyEZ evidence を収集した場合は、supplementary ncclient-family evidence として label する。
 - interoperability deviation の note。
-- standard `:xpath` は、すべての deviation が accept または fix されるまで advertise されていないことの確認。
+- default mode では advertise されず、standard mode では明示 enable 時のみ `:xpath` が advertise されることの確認。

@@ -144,6 +144,11 @@ Detailed future scope is maintained in [`ROADMAP.md`](../ROADMAP.md).
   `netconf-client-libnetconf2-evidence` artifacts are linked from sign-off, or
   `make netconf-client-evidence` and `make netconf-evidence-verify` were run
   locally and the artifacts are linked.
+  If standard NETCONF `:xpath` is enabled or claimed for v0.10, also link
+  `netconf-client-ncclient-standard-xpath-evidence` and
+  `netconf-client-libnetconf2-standard-xpath-evidence`, or run
+  `make netconf-standard-xpath-evidence` and
+  `make netconf-standard-xpath-evidence-verify` locally.
 
 - [ ] **FRR mgmtd smoke**: Transactional FRR apply works on a live FRR host
   ```bash
@@ -611,6 +616,7 @@ git push origin v0.10.0
 - [ ] `make release-check` passing
 - [ ] Installed-host `make security-audit` output linked, or deferred host evidence recorded
 - [ ] NETCONF client interop artifacts linked from release sign-off
+- [ ] Standard NETCONF `:xpath` evidence linked if `:xpath` is enabled or claimed
 - [ ] Live FRR mgmtd smoke checked, or explicitly recorded as a v0.11 deferred lab gate
 - [ ] v0.10 release sign-off recorded with `docs/v0.10-release-signoff.md`
 - [ ] Packages tested on all distros
