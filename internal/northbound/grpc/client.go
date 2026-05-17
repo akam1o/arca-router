@@ -819,6 +819,33 @@ type CommitInfo struct {
 	ConfigText string
 }
 
+// AuditLogOptions controls audit event export filtering.
+type AuditLogOptions struct {
+	Limit     int
+	Offset    int
+	StartTime time.Time
+	EndTime   time.Time
+	User      string
+	Action    string
+	Result    string
+}
+
+// AuditEventInfo represents one exported audit event.
+type AuditEventInfo struct {
+	ID            int64
+	Key           string
+	Timestamp     time.Time
+	User          string
+	SessionID     string
+	SourceIP      string
+	CorrelationID string
+	Action        string
+	Result        string
+	ErrorCode     string
+	Details       map[string]any
+	RawDetails    string
+}
+
 // InterfaceInfo represents interface operational state.
 type InterfaceInfo struct {
 	Name        string

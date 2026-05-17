@@ -55,6 +55,10 @@ func (s *initialConfigStore) AuditLog(ctx context.Context, event *store.AuditEve
 	return nil
 }
 
+func (s *initialConfigStore) ListAuditEvents(ctx context.Context, opts *store.AuditOptions) ([]*store.AuditEvent, error) {
+	return nil, nil
+}
+
 func (s *initialConfigStore) Close() error {
 	return nil
 }

@@ -35,6 +35,7 @@ const nmsOperationalStatusSchemaVersion = "arca.nms.operational.v1"
 const nmsTelemetryCatalogSchemaVersion = "arca.nms.telemetry-catalog.v1"
 const nmsTelemetrySchemasSchemaVersion = "arca.nms.telemetry-schemas.v1"
 const nmsTelemetrySnapshotSchemaVersion = "arca.nms.telemetry-snapshot.v1"
+const webAuditSchemaVersion = "arca.audit.v1"
 
 const (
 	defaultNMSTelemetrySnapshotTimeout         = 5 * time.Second
@@ -61,6 +62,7 @@ type webConfigAPI interface {
 	Diff(ctx context.Context, sessionID string) (string, bool, error)
 	Commit(ctx context.Context, sessionID, user, message string) (string, uint64, error)
 	ListHistory(ctx context.Context, limit, offset int) ([]nbgrpc.CommitInfo, error)
+	ListAuditEvents(ctx context.Context, opts nbgrpc.AuditLogOptions) ([]nbgrpc.AuditEventInfo, error)
 }
 
 type webTelemetryAPI interface {
@@ -357,6 +359,30 @@ type webConfigCommitResponse struct {
 
 type webConfigHistoryResponse struct {
 	Entries []webCommitEntry `json:"entries"`
+}
+
+type webAuditResponse struct {
+	SchemaVersion string          `json:"schema_version"`
+	GeneratedAt   string          `json:"generated_at"`
+	Limit         int             `json:"limit"`
+	Offset        int             `json:"offset"`
+	Count         int             `json:"count"`
+	Entries       []webAuditEntry `json:"entries"`
+}
+
+type webAuditEntry struct {
+	ID            int64          `json:"id,omitempty"`
+	Key           string         `json:"key,omitempty"`
+	Timestamp     string         `json:"timestamp"`
+	User          string         `json:"user"`
+	SessionID     string         `json:"session_id,omitempty"`
+	SourceIP      string         `json:"source_ip,omitempty"`
+	CorrelationID string         `json:"correlation_id,omitempty"`
+	Action        string         `json:"action"`
+	Result        string         `json:"result"`
+	ErrorCode     string         `json:"error_code,omitempty"`
+	Details       map[string]any `json:"details,omitempty"`
+	RawDetails    string         `json:"raw_details,omitempty"`
 }
 
 type webCommitEntry struct {
@@ -960,6 +986,7 @@ func newWebMux(source metricsSource) *http.ServeMux {
 	mux.HandleFunc("/api/config", source.handleWebConfig)
 	mux.HandleFunc("/api/config/commit", source.handleWebConfigCommit)
 	mux.HandleFunc("/api/config/history", source.handleWebConfigHistory)
+	mux.HandleFunc("/api/audit", source.handleWebAudit)
 	mux.HandleFunc("/api/status", source.handleWebStatus)
 	mux.HandleFunc("/api/nms/v1/status", source.handleNMSStatus)
 	mux.HandleFunc("/api/nms/v1/telemetry/paths", source.handleNMSTelemetryCatalog)
@@ -1087,6 +1114,38 @@ func (s metricsSource) handleWebConfigHistory(w http.ResponseWriter, r *http.Req
 		return
 	}
 	writeWebJSON(w, http.StatusOK, webConfigHistoryResponse{Entries: history})
+}
+
+func (s metricsSource) handleWebAudit(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	if !s.authorizeWebAdmin(w, r) {
+		return
+	}
+	if s.configAPI == nil {
+		writeWebJSONError(w, http.StatusServiceUnavailable, "audit API is not available")
+		return
+	}
+	opts, err := webAuditOptionsFromRequest(r)
+	if err != nil {
+		writeWebJSONError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	entries, err := s.auditEvents(r.Context(), opts)
+	if err != nil {
+		writeWebJSONError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeWebJSON(w, http.StatusOK, webAuditResponse{
+		SchemaVersion: webAuditSchemaVersion,
+		GeneratedAt:   time.Now().UTC().Format(time.RFC3339Nano),
+		Limit:         opts.Limit,
+		Offset:        opts.Offset,
+		Count:         len(entries),
+		Entries:       entries,
+	})
 }
 
 func (s metricsSource) handleWebConfigValidate(w http.ResponseWriter, r *http.Request) {
@@ -1266,6 +1325,21 @@ func (s metricsSource) configHistory(ctx context.Context, limit, offset int) ([]
 	return history, nil
 }
 
+func (s metricsSource) auditEvents(ctx context.Context, opts nbgrpc.AuditLogOptions) ([]webAuditEntry, error) {
+	if s.configAPI == nil {
+		return nil, fmt.Errorf("audit API is unavailable")
+	}
+	events, err := s.configAPI.ListAuditEvents(ctx, opts)
+	if err != nil {
+		return nil, fmt.Errorf("list audit events: %w", err)
+	}
+	result := make([]webAuditEntry, 0, len(events))
+	for _, event := range events {
+		result = append(result, newWebAuditEntry(event))
+	}
+	return result, nil
+}
+
 func (s metricsSource) authorizeWebRead(w http.ResponseWriter, r *http.Request) bool {
 	users := s.webAuthUsers()
 	if len(users) == 0 {
@@ -1276,6 +1350,23 @@ func (s metricsSource) authorizeWebRead(w http.ResponseWriter, r *http.Request) 
 		return false
 	}
 	if !webRoleCanRead(role) {
+		http.Error(w, "forbidden", http.StatusForbidden)
+		return false
+	}
+	return true
+}
+
+func (s metricsSource) authorizeWebAdmin(w http.ResponseWriter, r *http.Request) bool {
+	users := s.webAuthUsers()
+	if len(users) == 0 {
+		http.Error(w, "audit export requires password-backed security users", http.StatusForbidden)
+		return false
+	}
+	_, role, ok := authenticateWebUser(w, r, users)
+	if !ok {
+		return false
+	}
+	if role != pkgnetconf.RoleAdmin {
 		http.Error(w, "forbidden", http.StatusForbidden)
 		return false
 	}
@@ -1439,6 +1530,65 @@ func webHistoryOffset(r *http.Request) int {
 	return offset
 }
 
+func webAuditOptionsFromRequest(r *http.Request) (nbgrpc.AuditLogOptions, error) {
+	query := r.URL.Query()
+	limit, err := boundedWebIntQuery(query.Get("limit"), 100, 1, 1000, "limit")
+	if err != nil {
+		return nbgrpc.AuditLogOptions{}, err
+	}
+	offset, err := boundedWebIntQuery(query.Get("offset"), 0, 0, 1<<31-1, "offset")
+	if err != nil {
+		return nbgrpc.AuditLogOptions{}, err
+	}
+	since, err := optionalWebTimeQuery(query.Get("since"), "since")
+	if err != nil {
+		return nbgrpc.AuditLogOptions{}, err
+	}
+	until, err := optionalWebTimeQuery(query.Get("until"), "until")
+	if err != nil {
+		return nbgrpc.AuditLogOptions{}, err
+	}
+	if !since.IsZero() && !until.IsZero() && since.After(until) {
+		return nbgrpc.AuditLogOptions{}, fmt.Errorf("since must be before until")
+	}
+	return nbgrpc.AuditLogOptions{
+		Limit:     limit,
+		Offset:    offset,
+		StartTime: since,
+		EndTime:   until,
+		User:      strings.TrimSpace(query.Get("user")),
+		Action:    strings.TrimSpace(query.Get("action")),
+		Result:    strings.TrimSpace(query.Get("result")),
+	}, nil
+}
+
+func boundedWebIntQuery(raw string, defaultValue, minValue, maxValue int, name string) (int, error) {
+	value := strings.TrimSpace(raw)
+	if value == "" {
+		return defaultValue, nil
+	}
+	parsed, err := strconv.Atoi(value)
+	if err != nil {
+		return 0, fmt.Errorf("%s must be an integer", name)
+	}
+	if parsed < minValue || parsed > maxValue {
+		return 0, fmt.Errorf("%s must be between %d and %d", name, minValue, maxValue)
+	}
+	return parsed, nil
+}
+
+func optionalWebTimeQuery(raw, name string) (time.Time, error) {
+	value := strings.TrimSpace(raw)
+	if value == "" {
+		return time.Time{}, nil
+	}
+	parsed, err := time.Parse(time.RFC3339Nano, value)
+	if err != nil {
+		return time.Time{}, fmt.Errorf("%s must be RFC3339 timestamp", name)
+	}
+	return parsed, nil
+}
+
 func newWebCommitEntry(entry nbgrpc.CommitInfo) webCommitEntry {
 	message := entry.Message
 	if strings.TrimSpace(message) == "" {
@@ -1452,6 +1602,26 @@ func newWebCommitEntry(entry nbgrpc.CommitInfo) webCommitEntry {
 		Message:       message,
 		IsRollback:    entry.IsRollback,
 	}
+}
+
+func newWebAuditEntry(event nbgrpc.AuditEventInfo) webAuditEntry {
+	entry := webAuditEntry{
+		ID:            event.ID,
+		Key:           event.Key,
+		User:          event.User,
+		SessionID:     event.SessionID,
+		SourceIP:      event.SourceIP,
+		CorrelationID: event.CorrelationID,
+		Action:        event.Action,
+		Result:        event.Result,
+		ErrorCode:     event.ErrorCode,
+		Details:       event.Details,
+		RawDetails:    event.RawDetails,
+	}
+	if !event.Timestamp.IsZero() {
+		entry.Timestamp = event.Timestamp.UTC().Format(time.RFC3339Nano)
+	}
+	return entry
 }
 
 func shortCommitID(commitID string) string {

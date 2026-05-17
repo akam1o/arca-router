@@ -1038,6 +1038,81 @@ func TestWebConfigHistoryEndpointUsesConfigAPI(t *testing.T) {
 	}
 }
 
+func TestWebAuditEndpointRequiresAdminRole(t *testing.T) {
+	source := newWebAuthTestSource(t, "monitor", "secret", "read-only")
+	source.configAPI = &webAuditTestAPI{}
+
+	req := httptest.NewRequest(http.MethodGet, "/api/audit", nil)
+	req.SetBasicAuth("monitor", "secret")
+	rec := httptest.NewRecorder()
+	source.handleWebAudit(rec, req)
+
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("status = %d, want %d", rec.Code, http.StatusForbidden)
+	}
+}
+
+func TestWebAuditEndpointExportsFilteredEvents(t *testing.T) {
+	source := newWebAuthTestSource(t, "admin", "secret", "admin")
+	auditAPI := &webAuditTestAPI{events: []nbgrpc.AuditEventInfo{
+		{
+			ID:        7,
+			Timestamp: time.Date(2026, 5, 17, 10, 11, 12, 0, time.UTC),
+			User:      "alice",
+			SessionID: "session-1",
+			SourceIP:  "192.0.2.10",
+			Action:    "access_denied",
+			Result:    "denied",
+			ErrorCode: "rbac-deny",
+			Details:   map[string]any{"operation": "kill-session"},
+		},
+	}}
+	source.configAPI = auditAPI
+
+	req := httptest.NewRequest(http.MethodGet, "/api/audit?limit=1&offset=2&user=alice&action=access_denied&result=denied&since=2026-05-17T00:00:00Z&until=2026-05-18T00:00:00Z", nil)
+	req.SetBasicAuth("admin", "secret")
+	rec := httptest.NewRecorder()
+	source.handleWebAudit(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d: %s", rec.Code, http.StatusOK, rec.Body.String())
+	}
+	if auditAPI.opts.Limit != 1 || auditAPI.opts.Offset != 2 || auditAPI.opts.User != "alice" ||
+		auditAPI.opts.Action != "access_denied" || auditAPI.opts.Result != "denied" ||
+		auditAPI.opts.StartTime.IsZero() || auditAPI.opts.EndTime.IsZero() {
+		t.Fatalf("audit options = %#v, want filtered request options", auditAPI.opts)
+	}
+	var resp webAuditResponse
+	if err := json.NewDecoder(rec.Result().Body).Decode(&resp); err != nil {
+		t.Fatalf("Decode() error = %v", err)
+	}
+	if resp.SchemaVersion != webAuditSchemaVersion || resp.Count != 1 || resp.Limit != 1 || resp.Offset != 2 {
+		t.Fatalf("audit response metadata = %#v, want schema/count/limit/offset", resp)
+	}
+	entry := resp.Entries[0]
+	if entry.ID != 7 || entry.User != "alice" || entry.Action != "access_denied" ||
+		entry.ErrorCode != "rbac-deny" || entry.Timestamp != "2026-05-17T10:11:12Z" {
+		t.Fatalf("audit entry = %#v, want exported RBAC denial", entry)
+	}
+	if entry.Details["operation"] != "kill-session" {
+		t.Fatalf("audit entry details = %#v, want operation detail", entry.Details)
+	}
+}
+
+func TestWebAuditEndpointRejectsInvalidTimeRange(t *testing.T) {
+	source := newWebAuthTestSource(t, "admin", "secret", "admin")
+	source.configAPI = &webAuditTestAPI{}
+
+	req := httptest.NewRequest(http.MethodGet, "/api/audit?since=2026-05-18T00:00:00Z&until=2026-05-17T00:00:00Z", nil)
+	req.SetBasicAuth("admin", "secret")
+	rec := httptest.NewRecorder()
+	source.handleWebAudit(rec, req)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want %d", rec.Code, http.StatusBadRequest)
+	}
+}
+
 func TestWebIndexEndpoint(t *testing.T) {
 	eng := engine.NewEngine(nil, slog.Default())
 	cfg := model.NewRouterConfig()
@@ -1155,6 +1230,17 @@ func (a webHistoryTestAPI) ListHistory(ctx context.Context, limit, offset int) (
 		history = history[:limit]
 	}
 	return history, nil
+}
+
+type webAuditTestAPI struct {
+	webConfigAPI
+	events []nbgrpc.AuditEventInfo
+	opts   nbgrpc.AuditLogOptions
+}
+
+func (a *webAuditTestAPI) ListAuditEvents(ctx context.Context, opts nbgrpc.AuditLogOptions) ([]nbgrpc.AuditEventInfo, error) {
+	a.opts = opts
+	return a.events, nil
 }
 
 type webTelemetryTestAPI struct {

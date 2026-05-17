@@ -216,14 +216,67 @@ func (s *Store) AuditLog(ctx context.Context, event *store.AuditEvent) error {
 	detailsJSON, _ := json.Marshal(event.Details)
 
 	return s.ds.LogAuditEvent(ctx, &datastore.AuditEvent{
-		Timestamp: event.Timestamp,
-		User:      event.User,
-		SessionID: event.SessionID,
-		SourceIP:  event.SourceIP,
-		Action:    event.Action,
-		Result:    event.Result,
-		Details:   string(detailsJSON),
+		Timestamp:     event.Timestamp,
+		User:          event.User,
+		SessionID:     event.SessionID,
+		SourceIP:      event.SourceIP,
+		CorrelationID: event.CorrelationID,
+		Action:        event.Action,
+		Result:        event.Result,
+		ErrorCode:     event.ErrorCode,
+		Details:       string(detailsJSON),
 	})
+}
+
+func (s *Store) ListAuditEvents(ctx context.Context, opts *store.AuditOptions) ([]*store.AuditEvent, error) {
+	var dsOpts *datastore.AuditOptions
+	if opts != nil {
+		dsOpts = &datastore.AuditOptions{
+			Limit:     opts.Limit,
+			Offset:    opts.Offset,
+			StartTime: opts.StartTime,
+			EndTime:   opts.EndTime,
+			User:      opts.User,
+			Action:    opts.Action,
+			Result:    opts.Result,
+		}
+	}
+	events, err := s.ds.ListAuditEvents(ctx, dsOpts)
+	if err != nil {
+		return nil, err
+	}
+	result := make([]*store.AuditEvent, 0, len(events))
+	for _, event := range events {
+		result = append(result, storeAuditEventFromDatastore(event))
+	}
+	return result, nil
+}
+
+func storeAuditEventFromDatastore(event *datastore.AuditEvent) *store.AuditEvent {
+	if event == nil {
+		return nil
+	}
+	result := &store.AuditEvent{
+		ID:            event.ID,
+		Key:           event.Key,
+		Timestamp:     event.Timestamp,
+		User:          event.User,
+		SessionID:     event.SessionID,
+		SourceIP:      event.SourceIP,
+		CorrelationID: event.CorrelationID,
+		Action:        event.Action,
+		Result:        event.Result,
+		ErrorCode:     event.ErrorCode,
+		RawDetails:    event.Details,
+	}
+	if event.Details != "" {
+		var details map[string]any
+		if err := json.Unmarshal([]byte(event.Details), &details); err == nil {
+			result.Details = details
+			result.RawDetails = ""
+		}
+	}
+	return result
 }
 
 func (s *Store) Close() error {
