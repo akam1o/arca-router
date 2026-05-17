@@ -2239,6 +2239,7 @@ func validateConfigXMLAllowlist(xmlData []byte) error {
 	decoder.Entity = nil
 	stack := []string{}
 	elementCount := 0
+	rootSeen := false
 
 	for {
 		token, err := decoder.Token()
@@ -2253,6 +2254,14 @@ func validateConfigXMLAllowlist(xmlData []byte) error {
 
 		switch t := token.(type) {
 		case xml.StartElement:
+			if len(stack) == 0 {
+				if rootSeen {
+					return NewRPCError(ErrorTypeRPC, ErrorTagMalformedMessage,
+						"trailing content after config element").
+						WithPath("/rpc/edit-config/config")
+				}
+				rootSeen = true
+			}
 			elementCount++
 			if elementCount > MaxXMLElements {
 				return NewRPCError(ErrorTypeProtocol, ErrorTagInvalidValue,

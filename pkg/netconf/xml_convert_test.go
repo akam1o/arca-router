@@ -856,6 +856,22 @@ func TestXMLToConfigRejectsUnknownElement(t *testing.T) {
 	}
 }
 
+func TestXMLToConfigRejectsTrailingConfigContent(t *testing.T) {
+	xmlData := []byte(`<config><system><host-name>router1</host-name></system></config><config><system><host-name>router2</host-name></system></config>`)
+
+	_, err := XMLToConfig(xmlData, DefaultOpMerge)
+	if err == nil {
+		t.Fatal("XMLToConfig() error = nil, want trailing content error")
+	}
+	rpcErr, ok := err.(*RPCError)
+	if !ok {
+		t.Fatalf("XMLToConfig() error = %T, want *RPCError", err)
+	}
+	if rpcErr.ErrorTag != ErrorTagMalformedMessage {
+		t.Fatalf("XMLToConfig() error tag = %s, want %s", rpcErr.ErrorTag, ErrorTagMalformedMessage)
+	}
+}
+
 func TestXMLToConfigRejectsTextOnlyFragment(t *testing.T) {
 	xmlData := []byte(`junk`)
 
