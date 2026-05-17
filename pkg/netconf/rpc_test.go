@@ -781,6 +781,54 @@ func TestRPCZeroValueOperationAccessors(t *testing.T) {
 	}
 }
 
+func TestRPCUnmarshalOperationRejectsReservedNamespaceDeclarations(t *testing.T) {
+	tests := []struct {
+		name string
+		attr xml.Attr
+		want string
+	}{
+		{
+			name: "xml prefix rebound",
+			attr: xml.Attr{Name: xml.Name{Space: "xmlns", Local: "xml"}, Value: "urn:bad"},
+			want: "namespace prefix xml must be bound",
+		},
+		{
+			name: "xmlns prefix declared",
+			attr: xml.Attr{Name: xml.Name{Space: "xmlns", Local: "xmlns"}, Value: "urn:bad"},
+			want: "namespace prefix xmlns must not be declared",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			rpc := &RPC{
+				Operation:      xml.Name{Space: netconfNamespace, Local: "get-config"},
+				Content:        []byte(`<source><running/></source>`),
+				NamespaceAttrs: []xml.Attr{tt.attr},
+			}
+
+			var req GetConfigRequest
+			err := rpc.UnmarshalOperation(&req)
+			if err == nil {
+				t.Fatalf("UnmarshalOperation() error = nil, want %q", tt.want)
+			}
+			rpcErr, ok := err.(*RPCError)
+			if !ok {
+				t.Fatalf("UnmarshalOperation() error = %T, want *RPCError", err)
+			}
+			if rpcErr.ErrorTag != ErrorTagInvalidValue {
+				t.Fatalf("UnmarshalOperation() error tag = %s, want %s", rpcErr.ErrorTag, ErrorTagInvalidValue)
+			}
+			if rpcErr.ErrorPath != "/rpc/get-config" {
+				t.Fatalf("UnmarshalOperation() error path = %q, want /rpc/get-config", rpcErr.ErrorPath)
+			}
+			if !strings.Contains(rpcErr.ErrorMessage, tt.want) {
+				t.Fatalf("UnmarshalOperation() error = %v, want %q", rpcErr, tt.want)
+			}
+		})
+	}
+}
+
 func TestSourceGetDatastore(t *testing.T) {
 	tests := []struct {
 		name     string

@@ -149,6 +149,9 @@ func (r *RPC) UnmarshalOperation(v interface{}) error {
 	if r.Operation.Local == "" {
 		return ErrOperationFailed("rpc operation unavailable")
 	}
+	if err := validateRPCNamespaceDeclarationAttrs(r.Operation.Local, r.NamespaceAttrs); err != nil {
+		return err
+	}
 
 	// Wrap content in operation tag for proper unmarshaling
 	wrapped := r.operationXML()
@@ -306,6 +309,9 @@ func (r *RPC) validateOperationPayload() error {
 	if _, ok := rpcOperationElementPaths[r.Operation.Local]; !ok {
 		return nil
 	}
+	if err := validateRPCNamespaceDeclarationAttrs(r.Operation.Local, r.NamespaceAttrs); err != nil {
+		return err
+	}
 
 	decoder := xml.NewDecoder(bytes.NewReader(r.operationXML()))
 	decoder.Strict = true
@@ -426,6 +432,16 @@ func (r *RPC) validateOperationCardinality(counts map[string]int) error {
 		case count > 1:
 			return ErrMalformedMessage(fmt.Sprintf("%s must contain exactly one %s", choicePath, choiceName)).
 				WithPath(rpcElementRPCPath(path))
+		}
+	}
+	return nil
+}
+
+func validateRPCNamespaceDeclarationAttrs(operation string, attrs []xml.Attr) *RPCError {
+	for _, attr := range attrs {
+		if err := validateNamespaceDeclarationAttr(attr); err != nil {
+			return NewRPCError(ErrorTypeRPC, ErrorTagInvalidValue, err.Error()).
+				WithPath("/rpc/" + operation)
 		}
 	}
 	return nil
