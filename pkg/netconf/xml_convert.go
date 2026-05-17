@@ -2330,7 +2330,8 @@ func validateConfigAttributes(start xml.StartElement, path []string) error {
 }
 
 func isNamespaceDeclarationAttribute(attr xml.Attr) bool {
-	return attr.Name.Space == "xmlns" || (attr.Name.Space == "" && attr.Name.Local == "xmlns")
+	_, ok := namespaceDeclarationAttrName(attr)
+	return ok
 }
 
 func isAllowedConfigNamespaceDeclaration(namespace string) bool {

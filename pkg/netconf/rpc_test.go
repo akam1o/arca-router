@@ -405,6 +405,28 @@ func TestConfigElementXMLRejectsEmptyAttributeName(t *testing.T) {
 	}
 }
 
+func TestConfigElementXMLRejectsEmptyNamespacePrefixDeclaration(t *testing.T) {
+	config := ConfigElement{
+		XMLName: xml.Name{Local: "config"},
+		Attrs: []xml.Attr{
+			{Name: xml.Name{Space: "xmlns"}, Value: "urn:bad"},
+		},
+		Content: []byte(`<system><host-name>router1</host-name></system>`),
+	}
+
+	_, err := config.XML()
+	if err == nil {
+		t.Fatal("Config.XML() error = nil, want empty namespace prefix error")
+	}
+	rpcErr, ok := err.(*RPCError)
+	if !ok {
+		t.Fatalf("Config.XML() error = %T, want *RPCError", err)
+	}
+	if rpcErr.ErrorTag != ErrorTagInvalidValue {
+		t.Fatalf("Config.XML() error tag = %s, want %s", rpcErr.ErrorTag, ErrorTagInvalidValue)
+	}
+}
+
 func TestInheritedNamespaceReceiversNilSafe(t *testing.T) {
 	attrs := []xml.Attr{
 		{Name: xml.Name{Space: "xmlns", Local: "arca"}, Value: ArcaConfigNS},

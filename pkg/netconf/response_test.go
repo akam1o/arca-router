@@ -320,6 +320,20 @@ func TestMarshalReplyRejectsEmptyAttributeName(t *testing.T) {
 	}
 }
 
+func TestMarshalReplyRejectsEmptyNamespacePrefixDeclaration(t *testing.T) {
+	reply := NewOKReply("101").WithAttributes([]xml.Attr{
+		{Name: xml.Name{Space: "xmlns"}, Value: "urn:bad"},
+	})
+
+	_, err := MarshalReply(reply)
+	if err == nil {
+		t.Fatal("MarshalReply() error = nil, want empty namespace prefix error")
+	}
+	if !strings.Contains(err.Error(), "reply attribute name must not be empty") {
+		t.Fatalf("MarshalReply() error = %v, want empty attribute name", err)
+	}
+}
+
 func TestMarshalReplyOmitsEmptyMessageID(t *testing.T) {
 	reply := NewErrorReply("", ErrMissingAttribute("rpc", "message-id"))
 

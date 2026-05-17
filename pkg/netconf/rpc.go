@@ -481,6 +481,9 @@ func namespaceDeclarationAttrName(attr xml.Attr) (string, bool) {
 		return "xmlns", true
 	}
 	if attr.Name.Space == "xmlns" {
+		if attr.Name.Local == "" {
+			return "", false
+		}
 		return "xmlns:" + attr.Name.Local, true
 	}
 	return "", false

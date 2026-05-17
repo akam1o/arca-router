@@ -2,6 +2,7 @@
 
 ## v0.9.x - NETCONF/YANG and Operational Safety (current)
 
+- **NETCONF namespace declaration validation**: XML helpers now reject empty-prefix namespace declarations from direct attribute construction before malformed `xmlns:` output can be produced
 - **NETCONF client hello validation clarity**: client hello validation now reports nil and empty capability inputs before base capability negotiation checks
 - **NETCONF XML attribute name validation**: reply and config XML helpers now reject empty direct attribute names before writing malformed XML
 - **NETCONF hello capability normalization**: hello capability helpers now trim surrounding whitespace before matching base versions or reporting client capability names
