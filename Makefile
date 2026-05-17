@@ -1,4 +1,4 @@
-.PHONY: help build build-cli clean rpm rpm-package deb deb-package version test fmt vet check release-check install-nfpm integration-test netconf-client-lint netconf-client-evidence netconf-ncclient-evidence netconf-libnetconf2-evidence netconf-evidence-verify netconf-pyez-evidence frr-mgmtd-smoke security-audit package-lint generate-binapi generate-proto
+.PHONY: help build build-cli clean rpm rpm-package deb deb-package version test fmt vet check release-check install-nfpm integration-test script-lint netconf-client-lint netconf-client-evidence netconf-ncclient-evidence netconf-libnetconf2-evidence netconf-evidence-verify netconf-pyez-evidence frr-mgmtd-smoke security-audit package-lint generate-binapi generate-proto
 
 # Binary names
 BINARY_NAME=arca-routerd
@@ -77,7 +77,7 @@ vet: ## Run go vet
 check: fmt vet test ## Run all checks (fmt, vet, test)
 	@echo "All checks passed"
 
-release-check: package-lint netconf-client-lint ## Run local v0.10 release readiness checks
+release-check: package-lint script-lint netconf-client-lint ## Run local v0.10 release readiness checks
 	@echo "Running v0.10 release readiness checks..."
 	go test ./...
 	go vet ./...
@@ -192,6 +192,16 @@ integration-test: build ## Run integration tests
 	@echo "Running integration tests..."
 	@bash test/integration_test.sh
 
+script-lint: ## Syntax-check shell helper scripts
+	@echo "Linting shell helper scripts..."
+	@for script in \
+		build/package/scripts/*.sh \
+		scripts/*.sh \
+		test/integration_test.sh \
+		tests/netconf_clients/*.sh; do \
+		bash -n "$$script"; \
+	done
+
 netconf-client-lint: ## Syntax-check NETCONF client helper scripts
 	@echo "Linting NETCONF client helper scripts..."
 	@$(PYTHON) -c 'import pathlib; [compile(path.read_text(encoding="utf-8"), str(path), "exec") for path in pathlib.Path("tests/netconf_clients").glob("*.py")]'
@@ -224,7 +234,6 @@ security-audit: ## Audit installed service users, capabilities, and file/socket 
 
 package-lint: ## Validate package metadata and current service expectations
 	@echo "Linting package metadata..."
-	@for script in build/package/scripts/*.sh; do sh -n "$$script"; done
 	@grep -q 'SupplementaryGroups=vpp frrvty' build/systemd/arca-routerd.service
 	@if grep -Eq '^[[:space:]]*ReadWritePaths=.*\/etc\/frr' build/systemd/arca-routerd.service; then \
 		echo "Error: default service must not grant direct /etc/frr writes"; \
