@@ -2,6 +2,7 @@
 
 ## v0.9.x - NETCONF/YANG and Operational Safety (current)
 
+- **NETCONF error reply copy safety**: error reply construction now copies RPC error payloads so caller-side error mutation cannot change queued replies
 - **NETCONF data reply copy safety**: data reply construction now copies response payload bytes so caller-side buffer mutation cannot change queued replies
 - **NETCONF reply payload validation**: RPC reply marshaling now rejects hand-built replies with no payload or conflicting payload types instead of emitting invalid reply envelopes
 - **NETCONF reply marshal safety**: RPC reply marshaling now normalizes nil error entries from hand-built replies into operation-failed errors instead of emitting empty error payloads

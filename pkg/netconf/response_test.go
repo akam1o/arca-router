@@ -108,6 +108,21 @@ func TestNewErrorReplyDefaultsNilError(t *testing.T) {
 	}
 }
 
+func TestNewErrorReplyCopiesError(t *testing.T) {
+	err := ErrLockDeniedForLock("candidate", 123)
+	reply := NewErrorReply("103", err)
+
+	err.ErrorMessage = "mutated"
+	err.ErrorInfo.LockOwnerSession = "456"
+
+	if reply.Errors[0].ErrorMessage == "mutated" {
+		t.Fatal("reply error message changed after source mutation")
+	}
+	if reply.Errors[0].ErrorInfo.LockOwnerSession != "123" {
+		t.Fatalf("reply lock owner = %q, want copied lock owner", reply.Errors[0].ErrorInfo.LockOwnerSession)
+	}
+}
+
 func TestNewMultiErrorReply(t *testing.T) {
 	errors := []*RPCError{
 		NewRPCError(ErrorTypeProtocol, ErrorTagInvalidValue, "error 1"),
@@ -131,6 +146,21 @@ func TestNewMultiErrorReply(t *testing.T) {
 
 	if reply.Errors[1].ErrorMessage != "error 2" {
 		t.Errorf("Expected second error message 'error 2'")
+	}
+}
+
+func TestNewMultiErrorReplyCopiesErrors(t *testing.T) {
+	err := ErrLockDeniedForUnlock("candidate", 123)
+	reply := NewMultiErrorReply("104", []*RPCError{err})
+
+	err.ErrorMessage = "mutated"
+	err.ErrorInfo.LockOwnerSession = "456"
+
+	if reply.Errors[0].ErrorMessage == "mutated" {
+		t.Fatal("reply error message changed after source mutation")
+	}
+	if reply.Errors[0].ErrorInfo.LockOwnerSession != "123" {
+		t.Fatalf("reply lock owner = %q, want copied lock owner", reply.Errors[0].ErrorInfo.LockOwnerSession)
 	}
 }
 

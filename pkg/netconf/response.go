@@ -49,7 +49,7 @@ func NewDataReply(messageID string, data []byte) *RPCReply {
 func NewErrorReply(messageID string, err *RPCError) *RPCReply {
 	return &RPCReply{
 		MessageID: messageID,
-		Errors:    []*RPCError{normalizeRPCError(err)},
+		Errors:    []*RPCError{cloneRPCError(err)},
 	}
 }
 
@@ -60,7 +60,7 @@ func NewMultiErrorReply(messageID string, errors []*RPCError) *RPCReply {
 	}
 	normalized := make([]*RPCError, len(errors))
 	for i, err := range errors {
-		normalized[i] = normalizeRPCError(err)
+		normalized[i] = cloneRPCError(err)
 	}
 	return &RPCReply{
 		MessageID: messageID,
@@ -73,6 +73,16 @@ func normalizeRPCError(err *RPCError) *RPCError {
 		return err
 	}
 	return ErrOperationFailed("rpc error unavailable")
+}
+
+func cloneRPCError(err *RPCError) *RPCError {
+	normalized := normalizeRPCError(err)
+	clone := *normalized
+	if normalized.ErrorInfo != nil {
+		info := *normalized.ErrorInfo
+		clone.ErrorInfo = &info
+	}
+	return &clone
 }
 
 func (r *RPCReply) WithAttributes(attrs []xml.Attr) *RPCReply {
