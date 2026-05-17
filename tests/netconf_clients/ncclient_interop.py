@@ -125,6 +125,22 @@ def main():
                 session,
                 f"""
                 <get-config xmlns="{NETCONF_NS}">
+                  <source><running/></source>
+                  <filter
+                    type="xpath"
+                    xmlns:if="{IETF_INTERFACES_NS}"
+                    select="/if:interfaces/if:interface[if:ipv4-table-id='not-a-number']"/>
+                </get-config>
+                """,
+            ),
+            "invalid-value",
+        )
+
+        assert_rpc_error(
+            lambda: dispatch_xml(
+                session,
+                f"""
+                <get-config xmlns="{NETCONF_NS}">
                   <source><startup/></source>
                 </get-config>
                 """,
