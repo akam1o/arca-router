@@ -1237,6 +1237,18 @@ func TestFilterValidate(t *testing.T) {
 			wantErr: true,
 		},
 		{
+			name:    "xpath filter rejects invalid boolean predicate literal",
+			filter:  &Filter{Type: "xpath", Select: "/system/services/web-ui[enabled='yes']"},
+			rpcName: "get-config",
+			wantErr: true,
+		},
+		{
+			name:    "xpath filter rejects invalid uint predicate literal",
+			filter:  &Filter{Type: "xpath", Select: "/system/services/web-ui[port='https']"},
+			rpcName: "get-config",
+			wantErr: true,
+		},
+		{
 			name:    "xpath filter rejects undeclared namespace prefix",
 			filter:  &Filter{Type: "xpath", Select: "/if:interfaces"},
 			rpcName: "get-config",
