@@ -142,24 +142,47 @@ Focus: complete final pre-stable stabilization and compatibility work.
   - Datastore schema migration guardrails
   - Package preflight checks (implemented for packaged install path detection in `arca check upgrade`)
   - Rollback guidance for failed upgrades (implemented in `arca check upgrade` output and compatibility docs)
-  - Formal NETCONF startup datastore support, if required, should use a separate
-    startup config record with SQLite/etcd migrations, lock/validate/copy-config
-    semantics, and explicit compatibility tests instead of aliasing `startup` to
-    the latest running config
+  - Formal NETCONF startup datastore support is deferred to v0.11 and must use
+    a separate startup config record instead of aliasing `startup` to the latest
+    running config
 - **Compatibility guarantees**
   - CLI and configuration compatibility policy
   - API versioning and deprecation policy
   - Supported VPP and FRR version matrix
-  - Formal standard NETCONF `:xpath` support should advertise
-    `urn:ietf:params:netconf:capability:xpath:1.0` in `<hello>` only after the
-    implementation satisfies RFC 6241 response rules, interoperability
+  - Formal standard NETCONF `:xpath` support is deferred to v0.11 and should
+    advertise `urn:ietf:params:netconf:capability:xpath:1.0` in `<hello>` only
+    after the implementation satisfies RFC 6241 response rules, interoperability
     expectations, DoS guardrails, and external client coverage
 - **Long-run soak and failure testing**
-  - HA failover soak (manual runbook documented; release execution still required)
-  - FRR and VPP restart recovery (manual runbook documented; release execution still required)
+  - HA failover soak (manual runbook documented; lab execution deferred to v0.11)
+  - FRR and VPP restart recovery (manual runbook documented; lab execution deferred to v0.11)
   - Datastore lock recovery (startup cleanup covered in tests; release runbook documented)
-  - Resource leak and churn testing (manual runbook documented; release execution still required)
+  - Resource leak and churn testing (manual runbook documented; lab execution deferred to v0.11)
 - **Release readiness**
-  - Documentation freeze (checklist documented; final release sign-off still required)
+  - Documentation freeze (checklist documented; final release sign-off records
+    accepted v0.11 deferred gates)
   - Support matrix (published through compatibility policy and release readiness docs)
   - Operational runbooks (v0.10 runbook documented)
+
+## v0.11.x - Deferred Lab and NETCONF Compatibility Gates
+
+Focus: complete the gates intentionally deferred from v0.10 because they need a
+dedicated lab environment or additional NETCONF compatibility specification.
+
+- **Lab execution**
+  - Execute HA failover soak on clustered packages and attach convergence,
+    daemon log, and metrics evidence
+  - Execute FRR and VPP restart recovery on release-candidate packages with
+    protocol neighbors or traffic generation
+  - Execute 24-hour resource churn and leak checks with CLI, NETCONF, Web/NMS,
+    and telemetry traffic
+- **NETCONF startup datastore**
+  - Add opt-in `:startup` advertisement only after independent startup storage,
+    migrations, lock/validate/copy-config semantics, and compatibility tests are
+    implemented
+  - Preserve v0.10 behavior by leaving `<startup/>` targets
+    `operation-not-supported` when the feature is disabled
+- **NETCONF standard XPath**
+  - Promote the Arca XPath filter subset to standard `:xpath` only after RFC
+    response behavior, external client interoperability, namespace coverage, and
+    DoS guardrails pass
