@@ -935,6 +935,22 @@ func TestFilterValidate(t *testing.T) {
 	}
 }
 
+func TestValidateFilterDepthAndSizeTrimsFilterType(t *testing.T) {
+	filter := &Filter{Type: "\n xpath \t", Select: "interfaces"}
+
+	err := ValidateFilterDepthAndSize("get-config", filter)
+	if err == nil {
+		t.Fatal("ValidateFilterDepthAndSize() error = nil, want invalid xpath filter")
+	}
+	rpcErr, ok := err.(*RPCError)
+	if !ok {
+		t.Fatalf("ValidateFilterDepthAndSize() error = %T, want *RPCError", err)
+	}
+	if rpcErr.ErrorTag != ErrorTagInvalidValue {
+		t.Fatalf("ValidateFilterDepthAndSize() error tag = %s, want %s", rpcErr.ErrorTag, ErrorTagInvalidValue)
+	}
+}
+
 func TestParseSizeLimit(t *testing.T) {
 	// Create a large XML (> 10MB)
 	largeXML := `<rpc message-id="101" xmlns="urn:ietf:params:xml:ns:netconf:base:1.0"><get-config>`

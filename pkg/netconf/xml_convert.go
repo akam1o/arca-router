@@ -3297,7 +3297,8 @@ func ValidateFilterDepthAndSize(rpcName string, filter *Filter) error {
 	if filter == nil {
 		return nil
 	}
-	if filter.Type == "xpath" {
+	filterType := strings.TrimSpace(filter.Type)
+	if filterType == "xpath" {
 		return validateXPathFilterDepthAndSize(rpcName, filter.Select)
 	}
 	if len(filter.Content) == 0 {
