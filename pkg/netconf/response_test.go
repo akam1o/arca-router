@@ -278,6 +278,57 @@ func TestMarshalReplyNormalizesIncompleteErrors(t *testing.T) {
 	}
 }
 
+func TestMarshalReplyRejectsInvalidErrorEnums(t *testing.T) {
+	tests := []struct {
+		name string
+		err  *RPCError
+		want string
+	}{
+		{
+			name: "type",
+			err: &RPCError{
+				ErrorType:     ErrorType("bad-type"),
+				ErrorTag:      ErrorTagOperationFailed,
+				ErrorSeverity: ErrorSeverityError,
+			},
+			want: "invalid RPC error type",
+		},
+		{
+			name: "tag",
+			err: &RPCError{
+				ErrorType:     ErrorTypeRPC,
+				ErrorTag:      ErrorTag("bad-tag"),
+				ErrorSeverity: ErrorSeverityError,
+			},
+			want: "invalid RPC error tag",
+		},
+		{
+			name: "severity",
+			err: &RPCError{
+				ErrorType:     ErrorTypeRPC,
+				ErrorTag:      ErrorTagOperationFailed,
+				ErrorSeverity: ErrorSeverity("bad-severity"),
+			},
+			want: "invalid RPC error severity",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			data, err := MarshalReply(NewErrorReply("106", tt.err))
+			if err == nil {
+				t.Fatalf("MarshalReply() error = nil, want %q; data=%s", tt.want, string(data))
+			}
+			if data != nil {
+				t.Fatalf("MarshalReply() data length = %d, want nil", len(data))
+			}
+			if !strings.Contains(err.Error(), tt.want) {
+				t.Fatalf("MarshalReply() error = %v, want %q", err, tt.want)
+			}
+		})
+	}
+}
+
 func TestMarshalReplyRejectsInvalidPayloads(t *testing.T) {
 	tests := []struct {
 		name  string

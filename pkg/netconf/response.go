@@ -94,6 +94,57 @@ func normalizeRPCError(err *RPCError) *RPCError {
 	return &normalized
 }
 
+func validateRPCErrorFields(err *RPCError) error {
+	if !isValidErrorType(err.ErrorType) {
+		return fmt.Errorf("invalid RPC error type %q", err.ErrorType)
+	}
+	if !isValidErrorTag(err.ErrorTag) {
+		return fmt.Errorf("invalid RPC error tag %q", err.ErrorTag)
+	}
+	if !isValidErrorSeverity(err.ErrorSeverity) {
+		return fmt.Errorf("invalid RPC error severity %q", err.ErrorSeverity)
+	}
+	return nil
+}
+
+func isValidErrorType(errType ErrorType) bool {
+	switch errType {
+	case ErrorTypeProtocol, ErrorTypeApplication, ErrorTypeTransport, ErrorTypeRPC:
+		return true
+	default:
+		return false
+	}
+}
+
+func isValidErrorTag(errTag ErrorTag) bool {
+	switch errTag {
+	case ErrorTagInvalidValue,
+		ErrorTagMalformedMessage,
+		ErrorTagOperationNotSupported,
+		ErrorTagAccessDenied,
+		ErrorTagLockDenied,
+		ErrorTagInUse,
+		ErrorTagOperationFailed,
+		ErrorTagMissingElement,
+		ErrorTagMissingAttribute,
+		ErrorTagUnknownElement,
+		ErrorTagUnknownAttribute,
+		ErrorTagUnknownNamespace:
+		return true
+	default:
+		return false
+	}
+}
+
+func isValidErrorSeverity(severity ErrorSeverity) bool {
+	switch severity {
+	case ErrorSeverityError, ErrorSeverityWarning:
+		return true
+	default:
+		return false
+	}
+}
+
 func cloneRPCError(err *RPCError) *RPCError {
 	normalized := normalizeRPCError(err)
 	clone := *normalized
@@ -141,7 +192,11 @@ func MarshalReply(reply *RPCReply) ([]byte, error) {
 		buf.WriteString("</data>")
 	}
 	for _, rpcErr := range reply.Errors {
-		data, err := xml.Marshal(normalizeRPCError(rpcErr))
+		normalizedErr := normalizeRPCError(rpcErr)
+		if err := validateRPCErrorFields(normalizedErr); err != nil {
+			return nil, err
+		}
+		data, err := xml.Marshal(normalizedErr)
 		if err != nil {
 			return nil, err
 		}
