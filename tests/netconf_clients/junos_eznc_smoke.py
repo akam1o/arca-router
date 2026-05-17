@@ -10,6 +10,7 @@ CAP_BASE_11 = "urn:ietf:params:netconf:base:1.1"
 CAP_CANDIDATE = "urn:ietf:params:netconf:capability:candidate:1.0"
 CAP_VALIDATE = "urn:ietf:params:netconf:capability:validate:1.1"
 CAP_ROLLBACK = "urn:ietf:params:netconf:capability:rollback-on-error:1.0"
+CAP_XPATH = "urn:ietf:params:netconf:capability:xpath:1.0"
 CAP_STARTUP = "urn:ietf:params:netconf:capability:startup:1.0"
 CAP_WRITABLE_RUNNING = "urn:ietf:params:netconf:capability:writable-running:1.0"
 CAP_CONFIRMED_COMMIT = "urn:ietf:params:netconf:capability:confirmed-commit:1.1"
@@ -64,6 +65,7 @@ def main():
             fail(f"missing server capabilities: {missing}")
 
         forbidden = {
+            CAP_XPATH,
             CAP_STARTUP,
             CAP_WRITABLE_RUNNING,
             CAP_CONFIRMED_COMMIT,
