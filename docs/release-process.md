@@ -29,7 +29,7 @@ Examples:
 - `0.1.0` - Initial Phase 1 release
 - `0.2.0` - Phase 2 (VPP/FRR integration)
 - `0.2.1` - Patch release (bug fixes)
-- `0.5.0-rc1` - Release candidate
+- `0.10.0-rc1` - Release candidate
 - `1.0.0` - First stable release
 
 ### Version Increment Rules
@@ -55,9 +55,9 @@ Examples:
 
 **Release Candidates (rc)**:
 ```
-0.5.0-rc1  → Testing
-0.5.0-rc2  → Bug fixes
-0.5.0      → Stable release
+0.10.0-rc1  → Testing
+0.10.0-rc2  → Bug fixes
+0.10.0      → Stable release
 ```
 
 **Alpha/Beta** (for major versions):
@@ -183,7 +183,7 @@ Update version in relevant files:
 
 **Example CHANGELOG.md update:**
 ```markdown
-## [0.5.0] - 2026-05-12
+## [0.10.0] - 2026-05-12
 
 ### Added
 - Generated gRPC router API bindings wired into daemon and CLI
@@ -239,7 +239,7 @@ git pull origin main
 
 # Commit final changes
 git add CHANGELOG.md README.md
-git commit -m "chore: prepare for v0.5.0 release
+git commit -m "chore: prepare for v0.10.0 release
 
 - Update CHANGELOG.md
 - Update version references in README.md"
@@ -251,23 +251,23 @@ git push origin main
 
 ```bash
 # Create annotated tag
-git tag -a v0.5.0 -m "Release v0.5.0
+git tag -a v0.10.0 -m "Release v0.10.0
 
-Production hardening
+Stabilization and compatibility
 
 Key features:
-- Transactional FRR apply backend
-- gRPC daemon/CLI wiring
-- Prometheus, health, SNMP, and Grafana observability
-- daemon and CLI hardening
+- v0.10 compatibility and upgrade policy
+- gRPC TLS/mTLS and Web API token authentication
+- v0.10 operational runbooks and release readiness checklist
+- v0.11 deferred gate tracking for lab validation and NETCONF compatibility
 
 See CHANGELOG.md for full details."
 
 # Inspect tag
-git show --stat v0.5.0
+git show --stat v0.10.0
 
 # Push tag to GitHub
-git push origin v0.5.0
+git push origin v0.10.0
 ```
 
 **Important**: Use annotated tags (`-a`), not lightweight tags.
@@ -293,12 +293,12 @@ Once workflow completes:
 
 ```bash
 # Check GitHub Release page
-# https://github.com/akam1o/arca-router/releases/tag/v0.5.0
+# https://github.com/akam1o/arca-router/releases/tag/v0.10.0
 
 # Verify artifacts uploaded:
-# - arca-router_0.5.0-1~debian12_amd64.deb
-# - arca-router_0.5.0-1~ubuntu24.04_amd64.deb
-# - arca-router-0.5.0-1.el9.x86_64.rpm
+# - arca-router_0.10.0-1~debian12_amd64.deb
+# - arca-router_0.10.0-1~ubuntu24.04_amd64.deb
+# - arca-router-0.10.0-1.el9.x86_64.rpm
 # - SHA256SUMS
 ```
 
@@ -315,11 +315,11 @@ Download and test packages:
 **Debian:**
 ```bash
 # Download DEB package
-wget https://github.com/akam1o/arca-router/releases/download/v0.5.0/arca-router_0.5.0-1~debian12_amd64.deb
+wget https://github.com/akam1o/arca-router/releases/download/v0.10.0/arca-router_0.10.0-1~debian12_amd64.deb
 
 # Verify checksum
-sha256sum arca-router_0.5.0-1~debian12_amd64.deb
-curl -sL https://github.com/akam1o/arca-router/releases/download/v0.5.0/SHA256SUMS | grep deb
+sha256sum arca-router_0.10.0-1~debian12_amd64.deb
+curl -sL https://github.com/akam1o/arca-router/releases/download/v0.10.0/SHA256SUMS | grep deb
 
 # Test installation (in Docker)
 docker run --rm -it debian:12 bash
@@ -329,14 +329,14 @@ docker run --rm -it debian:12 bash
 **RHEL/Rocky:**
 ```bash
 # Download RPM package
-wget https://github.com/akam1o/arca-router/releases/download/v0.5.0/arca-router-0.5.0-1.el9.x86_64.rpm
+wget https://github.com/akam1o/arca-router/releases/download/v0.10.0/arca-router-0.10.0-1.el9.x86_64.rpm
 
 # Verify checksum
-sha256sum arca-router-0.5.0-1.el9.x86_64.rpm
-curl -sL https://github.com/akam1o/arca-router/releases/download/v0.5.0/SHA256SUMS | grep rpm
+sha256sum arca-router-0.10.0-1.el9.x86_64.rpm
+curl -sL https://github.com/akam1o/arca-router/releases/download/v0.10.0/SHA256SUMS | grep rpm
 
 # Test installation
-sudo yum install -y ./arca-router-0.5.0-1.el9.x86_64.rpm
+sudo yum install -y ./arca-router-0.10.0-1.el9.x86_64.rpm
 ```
 
 ---
@@ -351,29 +351,29 @@ sudo yum install -y ./arca-router-0.5.0-1.el9.x86_64.rpm
 
 **Release announcement template:**
 ```markdown
-# arca-router v0.5.0 Released
+# arca-router v0.10.0 Released
 
-arca-router v0.5.0 is the production hardening release for the unified daemon architecture.
+arca-router v0.10.0 is the stabilization and compatibility release for upgrade readiness.
 
 ## Highlights
 
-- **Transactional FRR Apply**: Default FRR changes go through the management candidate datastore
-- **gRPC Management API**: Generated router proto bindings are wired into daemon and CLI
-- **Observability**: Prometheus, health, SNMP, and Grafana dashboard assets
-- **Package Hardening**: Default service permissions avoid direct `/etc/frr` writes
+- **Compatibility Policy**: `arca show compatibility` and `arca check upgrade` expose the v0.10 support matrix and upgrade guardrails
+- **Management Security**: gRPC TLS/mTLS and Web/NMS API token authentication are available for remote automation
+- **Release Readiness**: operational runbooks, sign-off records, and deferred v0.11 gates are documented
+- **Packaging Guardrails**: package metadata lint and release readiness checks are available through `make release-check`
 
 ## Installation
 
 **Debian/Ubuntu:**
 ```bash
-wget https://github.com/akam1o/arca-router/releases/download/v0.5.0/arca-router_0.5.0-1~debian12_amd64.deb
-sudo dpkg -i arca-router_0.5.0-1~debian12_amd64.deb
+wget https://github.com/akam1o/arca-router/releases/download/v0.10.0/arca-router_0.10.0-1~debian12_amd64.deb
+sudo dpkg -i arca-router_0.10.0-1~debian12_amd64.deb
 ```
 
 **RHEL/Rocky/Alma:**
 ```bash
-wget https://github.com/akam1o/arca-router/releases/download/v0.5.0/arca-router-0.5.0-1.el9.x86_64.rpm
-sudo yum install -y ./arca-router-0.5.0-1.el9.x86_64.rpm
+wget https://github.com/akam1o/arca-router/releases/download/v0.10.0/arca-router-0.10.0-1.el9.x86_64.rpm
+sudo yum install -y ./arca-router-0.10.0-1.el9.x86_64.rpm
 ```
 
 See [CHANGELOG](https://github.com/akam1o/arca-router/blob/main/CHANGELOG.md) for full details.
@@ -399,7 +399,7 @@ cat >> CHANGELOG.md << 'EOF'
 EOF
 
 git add CHANGELOG.md
-git commit -m "chore: start v0.5.1 development"
+git commit -m "chore: start v0.10.1 development"
 git push origin main
 ```
 
@@ -420,7 +420,7 @@ For critical bugs in production:
 
 ```bash
 # Create hotfix branch from release tag
-git checkout -b hotfix/v0.5.1 v0.5.0
+git checkout -b hotfix/v0.10.1 v0.10.0
 
 # Fix the issue
 # ... make changes ...
@@ -448,7 +448,7 @@ make deb-test rpm-test
 ```bash
 # Update CHANGELOG.md
 cat > /tmp/changelog-entry << 'EOF'
-## [0.5.1] - YYYY-MM-DD
+## [0.10.1] - YYYY-MM-DD
 
 ### Fixed
 - Critical VPP crash on startup (#234)
@@ -457,20 +457,20 @@ EOF
 
 # Merge to main
 git checkout main
-git merge --no-ff hotfix/v0.5.1
+git merge --no-ff hotfix/v0.10.1
 git push origin main
 
 # Create tag
-git tag -a v0.5.1 -m "Hotfix v0.5.1
+git tag -a v0.10.1 -m "Hotfix v0.10.1
 
 Critical fixes:
 - VPP crash on startup
 - NETCONF memory leak"
 
-git push origin v0.5.1
+git push origin v0.10.1
 
 # Delete hotfix branch
-git branch -d hotfix/v0.5.1
+git branch -d hotfix/v0.10.1
 ```
 
 **Timeline for hotfixes:**
@@ -536,13 +536,13 @@ Common causes:
 **Solution:**
 ```bash
 # Delete failed tag
-git tag -d v0.5.0
-git push origin :refs/tags/v0.5.0
+git tag -d v0.10.0
+git push origin :refs/tags/v0.10.0
 
 # Fix issue, commit, re-tag
 git commit -am "fix: resolve build issue"
-git tag -a v0.5.0 -m "..."
-git push origin main v0.5.0
+git tag -a v0.10.0 -m "..."
+git push origin main v0.10.0
 ```
 
 ### Package Verification Failed
@@ -576,12 +576,12 @@ Caused by incorrect tag format.
 **Solution:**
 ```bash
 # Delete tag
-git tag -d v0.5.0
-git push origin :refs/tags/v0.5.0
+git tag -d v0.10.0
+git push origin :refs/tags/v0.10.0
 
 # Create proper tag
-git tag -a v0.5.0 -m "Release v0.5.0"
-git push origin v0.5.0
+git tag -a v0.10.0 -m "Release v0.10.0"
+git push origin v0.10.0
 ```
 
 ---
@@ -601,8 +601,8 @@ git push origin v0.5.0
 - [ ] Packages tested on all distros
 
 **Release:**
-- [ ] Create annotated tag (`git tag -a v0.5.0`)
-- [ ] Push tag (`git push origin v0.5.0`)
+- [ ] Create annotated tag (`git tag -a v0.10.0`)
+- [ ] Push tag (`git push origin v0.10.0`)
 - [ ] Monitor workflow completion
 - [ ] Verify artifacts on GitHub Release
 - [ ] Test installation from artifacts
@@ -628,16 +628,16 @@ git push origin v0.5.0
 
 ```bash
 # Create release
-git tag -a v0.5.0 -m "Release v0.5.0"
-git push origin v0.5.0
+git tag -a v0.10.0 -m "Release v0.10.0"
+git push origin v0.10.0
 
 # Hotfix
-git checkout -b hotfix/v0.5.1 v0.5.0
+git checkout -b hotfix/v0.10.1 v0.10.0
 # ... fix ...
 git checkout main
-git merge --no-ff hotfix/v0.5.1
-git tag -a v0.5.1 -m "Hotfix v0.5.1"
-git push origin main v0.5.1
+git merge --no-ff hotfix/v0.10.1
+git tag -a v0.10.1 -m "Hotfix v0.10.1"
+git push origin main v0.10.1
 
 # Verify release
 curl -sL https://api.github.com/repos/akam1o/arca-router/releases/latest | jq -r '.tag_name'

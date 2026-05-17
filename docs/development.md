@@ -153,7 +153,7 @@ Build uses version from git tags:
 make version
 
 # Override version
-VERSION=0.5.0 make build
+VERSION=0.10.0 make build
 ```
 
 **Version sources (priority order):**
@@ -586,6 +586,6 @@ make rpm                     # Build RPM
 make deb-test rpm-test       # Test packages
 
 # Release (maintainers only)
-git tag v0.5.0
-git push origin v0.5.0       # Triggers release workflow
+git tag -a v0.10.0 -m "Release v0.10.0"
+git push origin v0.10.0       # Triggers release workflow
 ```
