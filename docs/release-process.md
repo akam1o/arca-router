@@ -131,6 +131,11 @@ Detailed future scope is maintained in [`ROADMAP.md`](../ROADMAP.md).
   ```bash
   make release-check
   ```
+- [ ] **Local release evidence check**: local checks plus default and standard
+  NETCONF evidence verification pass before sign-off
+  ```bash
+  make release-evidence-check
+  ```
 
 - [ ] **Installed-host security audit**: service user, capabilities, config
   file modes, VPP socket access, and FRR file-backend readiness checked on a
@@ -614,6 +619,7 @@ git push origin v0.10.0
 - [ ] Security review done
 - [ ] `make package-lint` passing
 - [ ] `make release-check` passing
+- [ ] `make release-evidence-check` passing when using local sign-off evidence
 - [ ] Installed-host `make security-audit` output linked, or deferred host evidence recorded
 - [ ] NETCONF client interop artifacts linked from release sign-off
 - [ ] Standard NETCONF `:xpath` evidence linked if `:xpath` is enabled or claimed

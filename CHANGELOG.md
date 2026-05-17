@@ -2,6 +2,7 @@
 
 ## v0.10.x - Stabilization and Compatibility (current)
 
+- **Local release evidence gate**: `make release-evidence-check` now reruns local release checks and verifies default plus standard XPath NETCONF evidence before sign-off
 - **NETCONF evidence CI verification**: NETCONF client interoperability workflow now downloads ncclient and libnetconf2 artifacts and runs `make netconf-evidence-verify` before sign-off
 - **NETCONF client helper lint**: `make release-check` now syntax-checks NETCONF client helper scripts without importing external client packages
 - **Ubuntu 24.04 package target**: Release packaging now builds and verifies Ubuntu DEB artifacts on Ubuntu 24.04 only, dropping the older Ubuntu 22.04 target from the v0.10 matrix

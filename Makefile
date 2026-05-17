@@ -1,4 +1,4 @@
-.PHONY: help build build-cli clean rpm rpm-package deb deb-package version test fmt vet check release-check install-nfpm integration-test script-lint netconf-client-lint netconf-client-evidence netconf-ncclient-evidence netconf-libnetconf2-evidence netconf-evidence-verify netconf-standard-xpath-evidence netconf-standard-xpath-evidence-verify netconf-pyez-evidence frr-mgmtd-smoke security-audit package-lint generate-binapi generate-proto
+.PHONY: help build build-cli clean rpm rpm-package deb deb-package version test fmt vet check release-check release-evidence-check install-nfpm integration-test script-lint netconf-client-lint netconf-client-evidence netconf-ncclient-evidence netconf-libnetconf2-evidence netconf-evidence-verify netconf-standard-xpath-evidence netconf-standard-xpath-evidence-verify netconf-pyez-evidence frr-mgmtd-smoke security-audit package-lint generate-binapi generate-proto
 
 # Binary names
 BINARY_NAME=arca-routerd
@@ -83,6 +83,10 @@ release-check: package-lint script-lint netconf-client-lint ## Run local v0.10 r
 	go vet ./...
 	git diff --check
 	@echo "v0.10 release readiness checks passed"
+
+release-evidence-check: release-check netconf-evidence-verify netconf-standard-xpath-evidence-verify ## Verify local v0.10 release evidence before sign-off
+	@echo "Local v0.10 release evidence checks passed"
+	@echo "Attach artifacts from $(NETCONF_EVIDENCE_DIR) to sign-off; installed-host security audit, package install checks, and lab gates still require their release-candidate environments."
 
 clean: ## Clean build artifacts
 	@echo "Cleaning..."

@@ -485,6 +485,9 @@ make netconf-evidence-verify
 make netconf-standard-xpath-evidence
 make netconf-standard-xpath-evidence-verify
 
+# Re-run local release checks and verify required local evidence before sign-off
+make release-evidence-check
+
 # Run the live FRR mgmtd transactional apply smoke test
 make frr-mgmtd-smoke
 ```
@@ -493,6 +496,11 @@ Attach the ncclient and libnetconf2 artifacts from either
 `artifacts/netconf-clients/` or the `NETCONF Client Interoperability` workflow
 to the v0.10 release sign-off record. Attach the standard XPath artifacts as
 well before enabling or claiming standard NETCONF `:xpath`.
+
+`make release-evidence-check` validates the local checks plus the default and
+standard XPath NETCONF evidence directories. It does not replace installed-host
+`make security-audit`, package install verification, or lab-only soak/restart
+evidence.
 
 The security audit requires an installed release-candidate host. Attach the
 output to sign-off when that host is available, or record the missing host
