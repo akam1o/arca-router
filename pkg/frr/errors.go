@@ -1,6 +1,9 @@
 package frr
 
-import "fmt"
+import (
+	"errors"
+	"fmt"
+)
 
 // Error codes for FRR operations
 const (
@@ -101,4 +104,20 @@ func NewPermissionDeniedError(operation string, err error) *Error {
 // NewInvalidConfigError creates an error for invalid configuration.
 func NewInvalidConfigError(message string) *Error {
 	return NewError(ErrCodeInvalidConfig, message, nil)
+}
+
+// HasErrorCode reports whether err or any wrapped FRR error has code.
+func HasErrorCode(err error, code string) bool {
+	for err != nil {
+		if frrErr, ok := err.(*Error); ok && frrErr.Code == code {
+			return true
+		}
+		err = errors.Unwrap(err)
+	}
+	return false
+}
+
+// IsPermissionDenied reports whether err contains an FRR permission error.
+func IsPermissionDenied(err error) bool {
+	return HasErrorCode(err, ErrCodePermissionDenied)
 }
