@@ -2,6 +2,7 @@
 
 ## v0.9.x - NETCONF/YANG and Operational Safety (current)
 
+- **NETCONF subtree filter copy safety**: unfiltered subtree filter helper paths now copy returned XML bytes so caller-side buffer mutation cannot alter the source data
 - **NETCONF XPath parser input normalization**: direct XPath filter parsing now trims surrounding whitespace before validating absolute paths
 - **NETCONF output filter type normalization**: configuration and operational output filtering now trims filter type values before selecting XPath behavior in direct helper calls
 - **NETCONF filter limit validation normalization**: direct filter depth and size validation now trims filter type values before applying XPath-specific checks

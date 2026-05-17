@@ -365,7 +365,7 @@ func (f *XPathFilter) MatchesSection(elementPath []string) bool {
 // Phase 4: Full namespace-aware filtering
 func ApplySubtreeFilter(xmlData []byte, filter *Filter) ([]byte, error) {
 	if filter == nil || len(filter.Content) == 0 {
-		return xmlData, nil
+		return append([]byte(nil), xmlData...), nil
 	}
 
 	// Parse filter as XML to extract element structure
@@ -375,7 +375,7 @@ func ApplySubtreeFilter(xmlData []byte, filter *Filter) ([]byte, error) {
 	}
 
 	if len(filterElements) == 0 {
-		return xmlData, nil // Empty filter matches all
+		return append([]byte(nil), xmlData...), nil // Empty filter matches all
 	}
 
 	var result bytes.Buffer

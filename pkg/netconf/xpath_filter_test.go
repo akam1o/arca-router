@@ -1,6 +1,7 @@
 package netconf
 
 import (
+	"bytes"
 	"encoding/xml"
 	"strings"
 	"testing"
@@ -481,6 +482,41 @@ func TestApplySubtreeFilterMatchesOnlyDataChildren(t *testing.T) {
 	}
 	if strings.Contains(gotText, "nested") || strings.Contains(gotText, "<wrapper") {
 		t.Fatalf("ApplySubtreeFilter() included nested non-child subtree:\n%s", gotText)
+	}
+}
+
+func TestApplySubtreeFilterCopiesUnfilteredData(t *testing.T) {
+	tests := []struct {
+		name   string
+		filter *Filter
+	}{
+		{
+			name:   "nil filter",
+			filter: nil,
+		},
+		{
+			name:   "empty filter",
+			filter: &Filter{},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			xmlData := []byte(`<data><interfaces/></data>`)
+
+			got, err := ApplySubtreeFilter(xmlData, tt.filter)
+			if err != nil {
+				t.Fatalf("ApplySubtreeFilter() error = %v", err)
+			}
+			if !bytes.Equal(got, xmlData) {
+				t.Fatalf("ApplySubtreeFilter() = %s, want %s", got, xmlData)
+			}
+
+			got[0] = 'X'
+			if xmlData[0] == 'X' {
+				t.Fatal("ApplySubtreeFilter() returned data sharing caller buffer")
+			}
+		})
 	}
 }
 
