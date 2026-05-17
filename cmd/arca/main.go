@@ -1277,6 +1277,7 @@ func upgradePreflightLinesWithOptions(ctx context.Context, client showClient, op
 	packageLines, packageWarnings := upgradePackagePreflightLines()
 	lines = append(lines, packageLines...)
 	warnings += packageWarnings
+	lines = append(lines, upgradeReleaseReadinessLines()...)
 	lines = append(lines, upgradeRollbackGuidanceLines()...)
 
 	if warnings == 0 {
@@ -1350,6 +1351,14 @@ func upgradeRollbackGuidanceLines() []string {
 		"    keep the pre-upgrade package artifact or repository pin available until post-upgrade validation passes",
 		"    keep a fresh configuration backup and verify at least one rollback archive entry before replacing packages",
 		"    if daemon startup fails after upgrade, restore the previous package, then use arca backup/show configuration rollback output to recover config",
+	}
+}
+
+func upgradeReleaseReadinessLines() []string {
+	return []string{
+		"  release readiness:",
+		"    complete docs/v0.10-operational-runbook.md or docs/v0.10-operational-runbook.ja.md before release sign-off",
+		"    attach docs/v0.10-release-readiness.md evidence for package build, tests, compatibility output, and accepted warnings",
 	}
 }
 

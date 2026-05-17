@@ -1038,6 +1038,7 @@ func TestUpgradePreflightLinesReportsReadyState(t *testing.T) {
 		"telemetry catalog:",
 		"qos metadata binding: yes",
 		"package preflight:",
+		"release readiness:",
 		"rollback guidance:",
 		"status: ready for package-specific upgrade checks",
 	} {
@@ -1112,6 +1113,19 @@ func TestUpgradeRollbackGuidanceLines(t *testing.T) {
 	} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("upgradeRollbackGuidanceLines() = %q, want substring %q", got, want)
+		}
+	}
+}
+
+func TestUpgradeReleaseReadinessLines(t *testing.T) {
+	got := strings.Join(upgradeReleaseReadinessLines(), "\n")
+	for _, want := range []string{
+		"release readiness:",
+		"docs/v0.10-operational-runbook",
+		"docs/v0.10-release-readiness.md",
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("upgradeReleaseReadinessLines() = %q, want substring %q", got, want)
 		}
 	}
 }

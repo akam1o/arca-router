@@ -2,6 +2,7 @@
 
 ## v0.10.x - Stabilization and Compatibility (current)
 
+- **Upgrade release-readiness guidance**: `arca check upgrade` now points operators at the v0.10 operational runbook and release-readiness evidence checklist
 - **v0.10 release readiness checklist**: documented docs-freeze criteria, support matrix release gates, release-candidate evidence, and deferred compatibility gates
 - **v0.10 operational runbook**: documented release-candidate checks for management security, HA failover, FRR/VPP restart recovery, datastore lock recovery, resource churn, and upgrade rollback
 - **Web API token file permissions**: `--web-api-token-file` now rejects token files that are not restricted to `0600`
