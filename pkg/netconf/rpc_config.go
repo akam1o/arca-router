@@ -129,11 +129,26 @@ func (s *Server) handleGetConfig(ctx context.Context, sess *Session, rpc *RPC) *
 		return NewErrorReply(rpc.MessageID, ErrDatastoreError(fmt.Sprintf("failed to parse %s config: %v", source, err)))
 	}
 
-	// Convert config to XML
-	xmlData, err := ConfigToXML(cfg, req.Filter)
+	// Convert config to XML. Experimental XPath filters are evaluated after
+	// building the full response tree so XPath functions can inspect siblings.
+	outputFilter := req.Filter
+	if usesExperimentalXPathEngine(req.Filter) {
+		outputFilter = nil
+	}
+	xmlData, err := ConfigToXML(cfg, outputFilter)
 	if err != nil {
 		log.Printf("[NETCONF] Config to XML conversion error: %v", err)
 		return NewErrorReply(rpc.MessageID, ErrOperationFailed(fmt.Sprintf("config serialization failed: %v", err)))
+	}
+	if usesExperimentalXPathEngine(req.Filter) {
+		xmlData, err = applyExperimentalXPathFilter("get-config", xmlData, req.Filter)
+		if err != nil {
+			log.Printf("[NETCONF] XPath filter error: %v", err)
+			if rpcErr, ok := err.(*RPCError); ok {
+				return NewErrorReply(rpc.MessageID, rpcErr)
+			}
+			return NewErrorReply(rpc.MessageID, ErrOperationFailed(fmt.Sprintf("xpath filter failed: %v", err)))
+		}
 	}
 
 	return NewDataReply(rpc.MessageID, xmlData)

@@ -3360,7 +3360,10 @@ func validateXPathFilterDepthAndSize(rpcName string, filter *Filter) error {
 
 	xpathFilter, err := parseFilterXPathWithNamespaces(filter)
 	if err != nil {
-		return ErrInvalidFilter(rpcName, fmt.Sprintf("invalid xpath filter: %v", err))
+		if rpcErr := validateExperimentalXPathFilter(rpcName, filter); rpcErr != nil {
+			return rpcErr
+		}
+		return nil
 	}
 	if xpathFilter == nil {
 		return nil

@@ -78,20 +78,42 @@ func (s *Server) getOperationalData(ctx context.Context, filter *Filter) ([]byte
 		}
 	}
 
-	interfaceStates := s.collectInterfaceOperationalState(ctx, filter)
-	routes := s.collectRouteOperationalState(ctx, filter)
-	bgpNeighbors := s.collectBGPOperationalState(ctx, filter)
-	ospfNeighbors := s.collectOSPFOperationalState(ctx, filter, false)
-	ospf3Neighbors := s.collectOSPFOperationalState(ctx, filter, true)
-	bfdStatus := s.collectBFDOperationalState(ctx, filter)
-	return buildOperationalData(cfg, filter, time.Now().UTC(), interfaceStates, routes, bgpNeighbors, ospfNeighbors, ospf3Neighbors, bfdStatus)
+	collectionFilter := filter
+	if usesExperimentalXPathEngine(filter) {
+		collectionFilter = nil
+	}
+	interfaceStates := s.collectInterfaceOperationalState(ctx, collectionFilter)
+	routes := s.collectRouteOperationalState(ctx, collectionFilter)
+	bgpNeighbors := s.collectBGPOperationalState(ctx, collectionFilter)
+	ospfNeighbors := s.collectOSPFOperationalState(ctx, collectionFilter, false)
+	ospf3Neighbors := s.collectOSPFOperationalState(ctx, collectionFilter, true)
+	bfdStatus := s.collectBFDOperationalState(ctx, collectionFilter)
+	data, err := buildOperationalData(cfg, collectionFilter, time.Now().UTC(), interfaceStates, routes, bgpNeighbors, ospfNeighbors, ospf3Neighbors, bfdStatus)
+	if err != nil {
+		return nil, err
+	}
+	if usesExperimentalXPathEngine(filter) {
+		return applyExperimentalXPathFilter("get", data, filter)
+	}
+	return data, nil
 }
 
 // GetOperationalData builds operational state without a datastore-backed
 // server. It is kept for tests and callers that only need local system state.
 func GetOperationalData(ctx context.Context, filter *Filter) ([]byte, error) {
 	_ = ctx
-	return buildOperationalData(config.NewConfig(), filter, time.Now().UTC(), nil, nil, nil, nil, nil, nil)
+	outputFilter := filter
+	if usesExperimentalXPathEngine(filter) {
+		outputFilter = nil
+	}
+	data, err := buildOperationalData(config.NewConfig(), outputFilter, time.Now().UTC(), nil, nil, nil, nil, nil, nil)
+	if err != nil {
+		return nil, err
+	}
+	if usesExperimentalXPathEngine(filter) {
+		return applyExperimentalXPathFilter("get", data, filter)
+	}
+	return data, nil
 }
 
 // buildAllOperationalData builds operational data XML for the inside of <data>.

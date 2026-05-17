@@ -889,7 +889,10 @@ func (f *Filter) validateXPathFilter(rpcName string) error {
 	namespaceAttrs := collectNamespaceAttrs(f.InheritedAttrs, f.Attrs)
 	xpathFilter, err := ParseXPathFilterWithContext(selectExpr, namespaceAttrs)
 	if err != nil {
-		return ErrInvalidFilter(rpcName, fmt.Sprintf("invalid xpath filter: %v", err))
+		if rpcErr := validateExperimentalXPathFilter(rpcName, f); rpcErr != nil {
+			return rpcErr
+		}
+		return nil
 	}
 	if xpathFilter != nil {
 		if err := validateXPathFilterNamespaces(xpathFilter); err != nil {
