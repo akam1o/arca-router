@@ -193,10 +193,14 @@ func (c ConfigElement) XML() ([]byte, error) {
 		case attr.Name.Space == "":
 			writeXMLAttribute(&buf, attr.Name.Local, attr.Value)
 		default:
-			attrName := attr.Name.Local
-			if prefix := namespacePrefixes[attr.Name.Space]; prefix != "" {
-				attrName = prefix + ":" + attrName
+			prefix := namespacePrefixes[attr.Name.Space]
+			if prefix == "" {
+				return nil, NewRPCError(ErrorTypeRPC, ErrorTagUnknownNamespace,
+					fmt.Sprintf("missing namespace declaration for config attribute %s", attr.Name.Local)).
+					WithPath("/rpc/edit-config/config").
+					WithBadNamespace(attr.Name.Space)
 			}
+			attrName := prefix + ":" + attr.Name.Local
 			writeXMLAttribute(&buf, attrName, attr.Value)
 		}
 	}
