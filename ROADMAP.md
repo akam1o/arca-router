@@ -133,10 +133,10 @@ Focus: mature management-plane correctness and operator safety.
 Focus: complete final pre-stable stabilization and compatibility work.
 
 - **Security hardening**
-  - TLS/mTLS for gRPC
-  - Token or API key authentication for automation
-  - RBAC audit export
-  - Crypto policy alignment where required
+  - TLS/mTLS for gRPC (implemented for optional TCP listener; Unix socket remains the default local transport)
+  - Token or API key authentication for automation (implemented for Web/NMS API Bearer and `X-API-Key` access)
+  - RBAC audit export (implemented for admin-only Web API export)
+  - Crypto policy alignment where required (implemented for etcd and gRPC TLS policy)
 - **Upgrade path**
   - Supported upgrades from previous minor releases
   - Datastore schema migration guardrails

@@ -200,6 +200,11 @@ systemd `RuntimeDirectory`/`StateDirectory`により自動作成される。
 内部 gRPC ソケット `/run/arca-router/routerd.sock` は
 `arca-router:arca-router` の `0660` で作成される。root 以外で
 `arca` を実行する運用ユーザーは `arca-router` グループに所属させる。
+リモート管理が必要な場合は `--grpc-listen` と `--grpc-tls-cert` /
+`--grpc-tls-key` で TCP/TLS の gRPC endpoint を明示的に有効化する。
+`--grpc-client-ca` を指定すると client certificate を必須にする mTLS
+境界になる。CLI 側は `-grpc-address`、`-grpc-ca`、`-grpc-server-name`、
+`-grpc-client-cert`、`-grpc-client-key` でこの endpoint に接続する。
 
 ---
 
