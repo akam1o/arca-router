@@ -178,8 +178,8 @@ func validateExperimentalXPathRootStep(rpcName, selectExpr string, namespaceCtx 
 	if implementedYANGPathSchema.children[local] == nil {
 		return ErrInvalidFilter(rpcName, fmt.Sprintf("unsupported xpath filter path: unsupported root element /%s", local))
 	}
-	if expected := expectedXPathNamespace([]string{local}); namespace != expected {
-		return ErrInvalidFilter(rpcName, fmt.Sprintf("invalid xpath filter namespace: /%s uses namespace %q, want %q", local, namespace, expected))
+	if !isAllowedXPathNamespace([]string{local}, namespace) {
+		return ErrInvalidFilter(rpcName, fmt.Sprintf("invalid xpath filter namespace: /%s uses namespace %q, want %s", local, namespace, expectedXPathNamespaceDescription([]string{local})))
 	}
 	return nil
 }

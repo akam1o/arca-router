@@ -592,7 +592,7 @@ func writeSystemStateXML(buf *bytes.Buffer, cfg *config.Config, now time.Time) e
 		}
 	}
 
-	buf.WriteString(`  <system xmlns="urn:ietf:params:xml:ns:yang:ietf-system">` + "\n")
+	buf.WriteString(`  <system xmlns="` + IETFSystemNS + `">` + "\n")
 	buf.WriteString("    <system-state>\n")
 	if hostname != "" {
 		if err := writeEscapedElement(buf, "      ", "hostname", hostname); err != nil {

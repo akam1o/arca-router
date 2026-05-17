@@ -18,6 +18,7 @@ const (
 	NetconfBaseNS    = "urn:ietf:params:xml:ns:netconf:base:1.0"
 	IETFInterfacesNS = "urn:ietf:params:xml:ns:yang:ietf-interfaces"
 	IETFRoutingNS    = "urn:ietf:params:xml:ns:yang:ietf-routing"
+	IETFSystemNS     = "urn:ietf:params:xml:ns:yang:ietf-system"
 	ArcaConfigNS     = "urn:arca:router:config:1.0"
 	ArcaStateNS      = "urn:arca:router:state:1.0"
 )

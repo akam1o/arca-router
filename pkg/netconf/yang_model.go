@@ -132,6 +132,34 @@ module ietf-routing {
 }
 `
 
+const ietfSystemYANG = `
+module ietf-system {
+  namespace "urn:ietf:params:xml:ns:yang:ietf-system";
+  prefix sys;
+
+  container system {
+    container system-state {
+      leaf hostname {
+        type string;
+      }
+      container platform {
+        leaf os-name {
+          type string;
+        }
+        leaf machine {
+          type string;
+        }
+      }
+      container clock {
+        leaf current-datetime {
+          type string;
+        }
+      }
+    }
+  }
+}
+`
+
 // YANGValidator provides YANG model validation capabilities
 type YANGValidator struct {
 	modules *yang.Modules
@@ -171,6 +199,7 @@ func NewYANGValidator() (*YANGValidator, error) {
 	}{
 		{name: "ietf-interfaces.yang", model: ietfInterfacesYANG},
 		{name: "ietf-routing.yang", model: ietfRoutingYANG},
+		{name: "ietf-system.yang", model: ietfSystemYANG},
 	}
 	for _, dependency := range dependencies {
 		if err := ms.Parse(dependency.model, dependency.name); err != nil {
@@ -318,6 +347,13 @@ var routingOptionsYANGAliasPaths = []string{
 }
 
 var operationalStateYANGPaths = []string{
+	"system/system-state",
+	"system/system-state/hostname",
+	"system/system-state/platform",
+	"system/system-state/platform/os-name",
+	"system/system-state/platform/machine",
+	"system/system-state/clock",
+	"system/system-state/clock/current-datetime",
 	"interfaces/interface/admin-status",
 	"interfaces/interface/oper-status",
 	"interfaces/interface/phys-address",
@@ -494,8 +530,8 @@ func validateXPathFilterNamespaces(filter *XPathFilter) error {
 			continue
 		}
 		path := filter.Segments[:index+1]
-		if expected := expectedXPathNamespace(path); namespace != expected {
-			return fmt.Errorf("/%s uses namespace %q, want %q", strings.Join(path, "/"), namespace, expected)
+		if !isAllowedXPathNamespace(path, namespace) {
+			return fmt.Errorf("/%s uses namespace %q, want %s", strings.Join(path, "/"), namespace, expectedXPathNamespaceDescription(path))
 		}
 	}
 
@@ -506,8 +542,8 @@ func validateXPathFilterNamespaces(filter *XPathFilter) error {
 				continue
 			}
 			predicatePath := append(append([]string{}, path...), key)
-			if expected := expectedXPathNamespace(predicatePath); namespace != expected {
-				return fmt.Errorf("predicate %q for /%s uses namespace %q, want %q", key, strings.Join(path, "/"), namespace, expected)
+			if !isAllowedXPathNamespace(predicatePath, namespace) {
+				return fmt.Errorf("predicate %q for /%s uses namespace %q, want %s", key, strings.Join(path, "/"), namespace, expectedXPathNamespaceDescription(predicatePath))
 			}
 		}
 	}
@@ -548,23 +584,55 @@ func validateSubtreeFilterPathNamespaces(path []subtreeFilterElement, segments [
 			continue
 		}
 		currentPath := segments[:index+1]
-		if expected := expectedXPathNamespace(currentPath); element.Namespace != expected {
-			return fmt.Errorf("/%s uses namespace %q, want %q", strings.Join(currentPath, "/"), element.Namespace, expected)
+		if !isAllowedXPathNamespace(currentPath, element.Namespace) {
+			return fmt.Errorf("/%s uses namespace %q, want %s", strings.Join(currentPath, "/"), element.Namespace, expectedXPathNamespaceDescription(currentPath))
 		}
 	}
 	return nil
 }
 
-func expectedXPathNamespace(path []string) string {
+func isAllowedXPathNamespace(path []string, namespace string) bool {
+	if namespace == "" {
+		return true
+	}
+	for _, allowed := range allowedXPathNamespaces(path) {
+		if namespace == allowed {
+			return true
+		}
+	}
+	return false
+}
+
+func allowedXPathNamespaces(path []string) []string {
 	if len(path) == 0 {
-		return ""
+		return nil
 	}
 	switch path[0] {
 	case "interfaces":
-		return IETFInterfacesNS
+		return []string{IETFInterfacesNS}
 	case "routing":
-		return IETFRoutingNS
+		return []string{IETFRoutingNS}
+	case "system":
+		if len(path) == 1 {
+			return []string{ArcaConfigNS, IETFSystemNS}
+		}
+		if path[1] == "system-state" {
+			return []string{IETFSystemNS}
+		}
+		return []string{ArcaConfigNS}
 	default:
-		return ArcaConfigNS
+		return []string{ArcaConfigNS}
 	}
+}
+
+func expectedXPathNamespaceDescription(path []string) string {
+	allowed := allowedXPathNamespaces(path)
+	if len(allowed) == 0 {
+		return `""`
+	}
+	quoted := make([]string, 0, len(allowed))
+	for _, namespace := range allowed {
+		quoted = append(quoted, fmt.Sprintf("%q", namespace))
+	}
+	return strings.Join(quoted, " or ")
 }
