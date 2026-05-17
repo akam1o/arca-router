@@ -478,6 +478,9 @@ make package-lint
 make frr-mgmtd-smoke
 ```
 
+Attach the ncclient and libnetconf2 artifacts from the
+`NETCONF Client Interoperability` workflow to the v0.10 release sign-off record.
+
 The FRR smoke test requires a host with FRR running, the standard daemon set enabled
 in `/etc/frr/daemons`, and `vtysh` access for the current user.
 
