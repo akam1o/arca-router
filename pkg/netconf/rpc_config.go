@@ -167,6 +167,9 @@ func (c ConfigElement) XML() ([]byte, error) {
 	if c.XMLName.Local == "" {
 		return nil, ErrMissingElement("edit-config", "config")
 	}
+	if err := validateConfigNamespaceDeclarationAttrs(c.InheritedAttrs, c.Attrs); err != nil {
+		return nil, err
+	}
 
 	var buf bytes.Buffer
 	buf.WriteString("<config")
@@ -213,6 +216,18 @@ func (c ConfigElement) XML() ([]byte, error) {
 	buf.Write(c.Content)
 	buf.WriteString("</config>")
 	return buf.Bytes(), nil
+}
+
+func validateConfigNamespaceDeclarationAttrs(attrGroups ...[]xml.Attr) *RPCError {
+	for _, attrs := range attrGroups {
+		for _, attr := range attrs {
+			if err := validateNamespaceDeclarationAttr(attr); err != nil {
+				return NewRPCError(ErrorTypeRPC, ErrorTagInvalidValue, err.Error()).
+					WithPath("/rpc/edit-config/config")
+			}
+		}
+	}
+	return nil
 }
 
 func writeXMLAttribute(buf *bytes.Buffer, name, value string) {
