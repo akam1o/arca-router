@@ -504,6 +504,73 @@ func TestConfigElementXMLRejectsReservedNamespaceDeclarations(t *testing.T) {
 	}
 }
 
+func TestConfigElementXMLRejectsInvalidContent(t *testing.T) {
+	tests := []struct {
+		name    string
+		content []byte
+		want    string
+	}{
+		{
+			name:    "malformed xml",
+			content: []byte(`<system>`),
+			want:    "config XML is malformed",
+		},
+		{
+			name:    "unsafe directive",
+			content: []byte(`<!DOCTYPE config SYSTEM "evil.dtd"><system/>`),
+			want:    "unsafe XML directives",
+		},
+		{
+			name:    "root text",
+			content: []byte(`junk`),
+			want:    "text outside elements",
+		},
+		{
+			name:    "oversized",
+			content: bytes.Repeat([]byte("x"), MaxXMLSize+1),
+			want:    "config XML exceeds maximum",
+		},
+		{
+			name:    "reserved namespace declaration",
+			content: []byte(`<system xmlns:xml="urn:bad"/>`),
+			want:    "namespace prefix xml must be bound",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			config := ConfigElement{
+				XMLName: xml.Name{Local: "config"},
+				Content: tt.content,
+			}
+
+			_, err := config.XML()
+			if err == nil {
+				t.Fatalf("Config.XML() error = nil, want %q", tt.want)
+			}
+			rpcErr, ok := err.(*RPCError)
+			if !ok {
+				t.Fatalf("Config.XML() error = %T, want *RPCError", err)
+			}
+			if !strings.Contains(rpcErr.ErrorMessage, tt.want) {
+				t.Fatalf("Config.XML() error = %v, want %q", rpcErr, tt.want)
+			}
+		})
+	}
+}
+
+func TestConfigElementXMLAllowsEmptyContent(t *testing.T) {
+	config := ConfigElement{XMLName: xml.Name{Local: "config"}}
+
+	data, err := config.XML()
+	if err != nil {
+		t.Fatalf("Config.XML() error = %v", err)
+	}
+	if string(data) != "<config></config>" {
+		t.Fatalf("Config.XML() = %s, want empty config wrapper", data)
+	}
+}
+
 func TestInheritedNamespaceReceiversNilSafe(t *testing.T) {
 	attrs := []xml.Attr{
 		{Name: xml.Name{Space: "xmlns", Local: "arca"}, Value: ArcaConfigNS},
