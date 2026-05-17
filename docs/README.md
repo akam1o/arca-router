@@ -29,6 +29,8 @@ This directory contains user guides, design notes, and internal drafts for `arca
 - [`ROADMAP.md`](../ROADMAP.md)
 - `docs/compatibility.md`
 - `docs/development.md`
+- `docs/netconf-xpath-interop.md`
+- `docs/netconf-xpath-interop.ja.md`
 - `docs/release-process.md`
 - `docs/v0.10-release-readiness.md`
 - `docs/v0.10-release-readiness.ja.md`

@@ -2,6 +2,7 @@
 
 ## v0.10.x - Stabilization and Compatibility (current)
 
+- **NETCONF XPath interop runbook**: documented ncclient and second-client evidence collection before standard `:xpath` advertisement
 - **NETCONF experimental XPath guardrails**: XPath evaluation now enforces expression length, element count, depth, and attribute limits before response shaping
 - **v0.10 release process examples**: release guide and development quick reference now use v0.10 tag, artifact, and announcement examples
 - **Release readiness make target**: `make release-check` now runs package metadata lint, tests, vet, and whitespace checks for v0.10 sign-off evidence
