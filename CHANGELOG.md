@@ -2,6 +2,7 @@
 
 ## v0.9.x - NETCONF/YANG and Operational Safety (current)
 
+- **NETCONF user database operation safety**: user and public-key database operations now return stable initialization errors or authentication failures on nil or zero-value receivers instead of panicking
 - **NETCONF hello helper safety**: hello capability helpers now tolerate nil inputs and return conservative fallback results instead of panicking
 - **NETCONF namespace attribute setter safety**: RPC request namespace propagation setters now no-op on nil receivers instead of panicking in direct embedded callers
 - **NETCONF framing receiver safety**: framing reader and writer setters and I/O methods now tolerate nil or zero-value receivers and return initialization errors instead of panicking
