@@ -349,6 +349,26 @@ func TestYANGValidator_NilReceiver(t *testing.T) {
 	}
 }
 
+func TestYANGValidatorZeroValue(t *testing.T) {
+	v := &YANGValidator{}
+
+	if modules := v.ListModules(); modules != nil {
+		t.Errorf("ListModules() on zero value = %v, want nil", modules)
+	}
+
+	if err := v.ValidateConfig([]byte("<config/>")); err == nil {
+		t.Error("ValidateConfig() on zero value should return error")
+	}
+
+	if err := v.ValidateElementPath("/system"); err == nil {
+		t.Error("ValidateElementPath() on zero value should return error")
+	}
+
+	if _, err := v.GetModel("arca-router"); err == nil {
+		t.Error("GetModel() on zero value should return error")
+	}
+}
+
 func TestYANGValidator_ConcurrentAccess(t *testing.T) {
 	v, err := NewYANGValidator()
 	if err != nil {

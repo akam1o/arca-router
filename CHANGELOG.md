@@ -2,6 +2,7 @@
 
 ## v0.9.x - NETCONF/YANG and Operational Safety (current)
 
+- **NETCONF YANG validator zero-value safety**: uninitialized validators now return stable errors or empty module lists instead of dereferencing nil module state
 - **NETCONF user database defaults**: direct user database construction now installs a default logger when callers pass nil so schema initialization and auth audit logging stay stable
 - **NETCONF SSH server config defaults**: `NewSSHServer` now fills default listen, timeout, session-limit, rate-limit, and SSH algorithm settings for partial embedded configs without mutating caller values
 - **NETCONF rate limiter shutdown**: rate limiter cleanup shutdown is now idempotent so repeated embedded `Stop` calls do not panic
