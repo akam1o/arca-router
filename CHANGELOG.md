@@ -2,6 +2,7 @@
 
 ## v0.9.x - NETCONF/YANG and Operational Safety (current)
 
+- **CLI route-policy dry-run preview**: `commit check` now reports route-policy dry-run details for prefix-list, route-map, and BGP policy binding changes
 - **CLI upgrade preflight checks**: `arca check upgrade` verifies running config availability, rollback archive coverage, telemetry catalog metadata, and QoS capability snapshots before maintenance
 - **CLI QoS post-commit diagnostics**: successful commits that change class-of-service intent now print post-commit QoS enforcement and capability diagnostics
 - **CLI configuration restore**: interactive configuration mode can replace the candidate from a backup file or rollback archive without committing automatically
