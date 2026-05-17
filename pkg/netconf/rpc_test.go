@@ -213,6 +213,39 @@ func TestParseRPC(t *testing.T) {
 	}
 }
 
+func TestParseRPCRejectsOversizedXMLBeforeDirectiveScan(t *testing.T) {
+	data := append([]byte(`<!DOCTYPE rpc SYSTEM "evil.dtd">`), bytes.Repeat([]byte("x"), MaxXMLSize+1)...)
+
+	_, err := ParseRPC(data)
+	if err == nil {
+		t.Fatal("ParseRPC() error = nil, want size limit error")
+	}
+	rpcErr, ok := err.(*RPCError)
+	if !ok {
+		t.Fatalf("ParseRPC() error = %T, want *RPCError", err)
+	}
+	if !strings.Contains(rpcErr.ErrorMessage, "RPC size exceeds maximum") {
+		t.Fatalf("ParseRPC() error message = %q, want size limit", rpcErr.ErrorMessage)
+	}
+	if rpcErr.ErrorInfo != nil && rpcErr.ErrorInfo.BadElement == "DOCTYPE" {
+		t.Fatalf("ParseRPC() error info = %#v, want size limit before directive scan", rpcErr.ErrorInfo)
+	}
+}
+
+func TestParseRPCRejectsUnsafeDirectivesCaseInsensitive(t *testing.T) {
+	_, err := ParseRPC([]byte(`<!dOcTyPe rpc SYSTEM "evil.dtd"><rpc message-id="101" xmlns="urn:ietf:params:xml:ns:netconf:base:1.0"><get/></rpc>`))
+	if err == nil {
+		t.Fatal("ParseRPC() error = nil, want DTD error")
+	}
+	rpcErr, ok := err.(*RPCError)
+	if !ok {
+		t.Fatalf("ParseRPC() error = %T, want *RPCError", err)
+	}
+	if rpcErr.ErrorInfo == nil || rpcErr.ErrorInfo.BadElement != "DOCTYPE" {
+		t.Fatalf("ParseRPC() error info = %#v, want DOCTYPE", rpcErr.ErrorInfo)
+	}
+}
+
 func TestParseRPCContentIsOperationInnerXML(t *testing.T) {
 	xmlData := `<rpc message-id="101" xmlns="urn:ietf:params:xml:ns:netconf:base:1.0">
 		<get-config>

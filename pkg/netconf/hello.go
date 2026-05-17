@@ -71,8 +71,7 @@ func UnmarshalHello(data []byte) (*Hello, error) {
 		return nil, fmt.Errorf("unmarshal hello: XML size exceeds maximum (%d bytes)", MaxXMLSize)
 	}
 
-	upperData := bytes.ToUpper(data)
-	if bytes.Contains(upperData, []byte("<!DOCTYPE")) || bytes.Contains(upperData, []byte("<!ENTITY")) {
+	if containsUnsafeXMLDirective(data) {
 		return nil, fmt.Errorf("unmarshal hello: DTD and ENTITY declarations are not allowed")
 	}
 

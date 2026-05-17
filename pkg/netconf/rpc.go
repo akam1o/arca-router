@@ -35,15 +35,14 @@ type rpcOperation struct {
 
 // ParseRPC parses NETCONF RPC from XML bytes with security checks
 func ParseRPC(data []byte) (*RPC, error) {
-	// Security check: reject DTD/DOCTYPE
-	if bytes.Contains(data, []byte("<!DOCTYPE")) || bytes.Contains(data, []byte("<!ENTITY")) {
-		return nil, ErrDTDNotAllowed()
+	// Size limit check (10MB)
+	if len(data) > MaxXMLSize {
+		return nil, ErrMalformedMessage(fmt.Sprintf("RPC size exceeds maximum (%d bytes)", MaxXMLSize))
 	}
 
-	// Size limit check (10MB)
-	const maxRPCSize = 10 * 1024 * 1024
-	if len(data) > maxRPCSize {
-		return nil, ErrMalformedMessage(fmt.Sprintf("RPC size exceeds maximum (%d bytes)", maxRPCSize))
+	// Security check: reject DTD/DOCTYPE
+	if containsUnsafeXMLDirective(data) {
+		return nil, ErrDTDNotAllowed()
 	}
 
 	// Parse XML with strict settings
@@ -103,6 +102,11 @@ func ParseRPC(data []byte) (*RPC, error) {
 	}
 
 	return rpc, nil
+}
+
+func containsUnsafeXMLDirective(data []byte) bool {
+	upperData := bytes.ToUpper(data)
+	return bytes.Contains(upperData, []byte("<!DOCTYPE")) || bytes.Contains(upperData, []byte("<!ENTITY"))
 }
 
 func ensureNoTrailingXML(decoder *xml.Decoder, rootElement string) error {
