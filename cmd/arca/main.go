@@ -1580,6 +1580,7 @@ func formatChangeImpactPreview(diffText string, hasChanges bool) []string {
 	lines = appendStaticRouteImpactLines(lines, preview.staticRouteChanges)
 	lines = appendChangeImpactLine(lines, "policy-options", preview.policyOptions)
 	lines = appendPolicyImpactLines(lines, preview.policyChanges, preview.bgpPolicyBindings)
+	lines = appendRoutePolicyDryRunLines(lines, preview.policyChanges, preview.bgpPolicyBindings)
 	lines = appendChangeImpactLine(lines, "bgp", preview.bgp)
 	lines = appendChangeImpactLine(lines, "ospf", preview.ospf)
 	lines = appendChangeImpactLine(lines, "bfd", preview.bfd)
@@ -1619,6 +1620,34 @@ func formatChangeImpactPreview(diffText string, hasChanges bool) []string {
 	if preview.classOfService.hasChanges() {
 		lines = append(lines, "  warning: class-of-service changes can alter traffic treatment")
 	}
+	return lines
+}
+
+func appendRoutePolicyDryRunLines(lines []string, policyChanges []changeImpactPolicyChange, bgpBindings []changeImpactBGPPolicyBinding) []string {
+	if len(policyChanges) == 0 && len(bgpBindings) == 0 {
+		return lines
+	}
+	prefixLists := 0
+	routeMaps := 0
+	for _, change := range policyChanges {
+		switch change.kind {
+		case "prefix-list":
+			prefixLists++
+		case "route-map":
+			routeMaps++
+		}
+	}
+	lines = append(lines, "  route-policy dry-run:")
+	if prefixLists > 0 {
+		lines = append(lines, fmt.Sprintf("    prefix-list updates: %d", prefixLists))
+	}
+	if routeMaps > 0 {
+		lines = append(lines, fmt.Sprintf("    route-map regeneration planned: %d policy statement changes", routeMaps))
+	}
+	if len(bgpBindings) > 0 {
+		lines = append(lines, fmt.Sprintf("    bgp policy bindings updated: %d", len(bgpBindings)))
+	}
+	lines = append(lines, "    validation scope: candidate policy syntax and referenced BGP bindings")
 	return lines
 }
 
