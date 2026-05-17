@@ -19,8 +19,9 @@ type RateLimiter struct {
 	userMu       sync.RWMutex
 
 	// Cleanup ticker
-	ticker *time.Ticker
-	done   chan struct{}
+	ticker   *time.Ticker
+	done     chan struct{}
+	stopOnce sync.Once
 }
 
 // failureTracker tracks failures for an IP or user
@@ -248,7 +249,9 @@ func (rl *RateLimiter) cleanup() {
 
 // Stop stops the rate limiter cleanup goroutine
 func (rl *RateLimiter) Stop() {
-	close(rl.done)
+	rl.stopOnce.Do(func() {
+		close(rl.done)
+	})
 }
 
 // GetStats returns current rate limiter statistics

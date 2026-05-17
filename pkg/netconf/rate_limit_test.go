@@ -40,6 +40,13 @@ func TestNewRateLimiterDefaultsPartialConfig(t *testing.T) {
 	}
 }
 
+func TestRateLimiterStopIsIdempotent(t *testing.T) {
+	rl := NewRateLimiter(nil)
+
+	rl.Stop()
+	rl.Stop()
+}
+
 func TestRateLimiterIPLockout(t *testing.T) {
 	config := &SSHConfig{
 		IPFailureLimit:  3,
