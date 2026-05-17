@@ -1195,6 +1195,18 @@ func TestFilterValidate(t *testing.T) {
 			wantErr: false,
 		},
 		{
+			name: "xpath filter routing operational state route namespace prefix",
+			filter: &Filter{
+				Type:   "xpath",
+				Select: "/rt:routing/rt:routing-state/rt:routes/rt:route[rt:destination-prefix='0.0.0.0/0']",
+				Attrs: []xml.Attr{
+					{Name: xml.Name{Space: "xmlns", Local: "rt"}, Value: IETFRoutingNS},
+				},
+			},
+			rpcName: "get",
+			wantErr: false,
+		},
+		{
 			name:    "xpath filter accepts multiple predicates",
 			filter:  &Filter{Type: "xpath", Select: "/state/routes/route[prefix='192.0.2.0/24'][protocol='static']"},
 			rpcName: "get",

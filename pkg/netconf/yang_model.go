@@ -128,6 +128,37 @@ module ietf-routing {
   prefix rt;
 
   container routing {
+    container routing-state {
+      container routes {
+        list route {
+          leaf destination-prefix {
+            type string;
+          }
+          leaf next-hop {
+            type string;
+          }
+          leaf source-protocol {
+            type string;
+          }
+          leaf metric {
+            type uint32;
+          }
+        }
+      }
+      container routing-protocols {
+        list routing-protocol {
+          leaf type {
+            type string;
+          }
+          leaf name {
+            type string;
+          }
+          leaf admin-status {
+            type string;
+          }
+        }
+      }
+    }
   }
 }
 `
@@ -385,6 +416,18 @@ var operationalStateYANGPaths = []string{
 	"interfaces/interface/addresses/address/unit",
 	"interfaces/interface/addresses/address/family",
 	"interfaces/interface/addresses/address/ip",
+	"routing/routing-state",
+	"routing/routing-state/routes",
+	"routing/routing-state/routes/route",
+	"routing/routing-state/routes/route/destination-prefix",
+	"routing/routing-state/routes/route/next-hop",
+	"routing/routing-state/routes/route/source-protocol",
+	"routing/routing-state/routes/route/metric",
+	"routing/routing-state/routing-protocols",
+	"routing/routing-state/routing-protocols/routing-protocol",
+	"routing/routing-state/routing-protocols/routing-protocol/type",
+	"routing/routing-state/routing-protocols/routing-protocol/name",
+	"routing/routing-state/routing-protocols/routing-protocol/admin-status",
 	"state",
 	"state/interfaces",
 	"state/routes",

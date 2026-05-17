@@ -187,6 +187,16 @@ func TestYANGValidator_ValidateElementPath(t *testing.T) {
 			wantErr: false,
 		},
 		{
+			name:    "valid NETCONF routing state route path",
+			path:    "/routing/routing-state/routes/route/destination-prefix",
+			wantErr: false,
+		},
+		{
+			name:    "valid NETCONF routing state protocol path",
+			path:    "/routing/routing-state/routing-protocols/routing-protocol/admin-status",
+			wantErr: false,
+		},
+		{
 			name:    "valid routing-instances path",
 			path:    "/routing-instances",
 			wantErr: false,
@@ -346,6 +356,14 @@ func TestYANGValidatorValidateElementPathWithContext(t *testing.T) {
 			path: "/sys:system/sys:system-state/sys:clock/sys:current-datetime",
 			attrs: []xml.Attr{
 				{Name: xml.Name{Space: "xmlns", Local: "sys"}, Value: IETFSystemNS},
+			},
+			wantErr: false,
+		},
+		{
+			name: "valid ietf-routing operational path",
+			path: "/rt:routing/rt:routing-state/rt:routes/rt:route/rt:destination-prefix",
+			attrs: []xml.Attr{
+				{Name: xml.Name{Space: "xmlns", Local: "rt"}, Value: IETFRoutingNS},
 			},
 			wantErr: false,
 		},
