@@ -123,16 +123,26 @@ func ensureNoTrailingXML(decoder *xml.Decoder) error {
 
 // GetOperationName returns the RPC operation name (e.g., "get-config", "edit-config")
 func (r *RPC) GetOperationName() string {
+	if r == nil {
+		return ""
+	}
 	return r.Operation.Local
 }
 
 // GetOperationNamespace returns the RPC operation namespace
 func (r *RPC) GetOperationNamespace() string {
+	if r == nil {
+		return ""
+	}
 	return r.Operation.Space
 }
 
 // UnmarshalOperation unmarshals the RPC operation content into a specific struct
 func (r *RPC) UnmarshalOperation(v interface{}) error {
+	if r == nil {
+		return ErrOperationFailed("rpc unavailable")
+	}
+
 	// Wrap content in operation tag for proper unmarshaling
 	wrapped := r.operationXML()
 
@@ -700,6 +710,9 @@ func missingRPCElement(path []string, element string) *RPCError {
 
 // ValidateOperationNamespace checks if operation is in NETCONF namespace
 func (r *RPC) ValidateOperationNamespace() error {
+	if r == nil {
+		return ErrOperationFailed("rpc unavailable")
+	}
 	return ValidateProtocolNamespace(r.Operation)
 }
 
@@ -720,6 +733,9 @@ type Source struct {
 
 // GetDatastore returns the datastore name from Source
 func (s *Source) GetDatastore() (string, error) {
+	if s == nil {
+		return "", ErrMissingElement("source", "datastore")
+	}
 	return selectDatastore("source", s.Running != nil, s.Candidate != nil, s.Startup != nil)
 }
 
@@ -732,6 +748,9 @@ type Target struct {
 
 // GetDatastore returns the datastore name from Target
 func (t *Target) GetDatastore() (string, error) {
+	if t == nil {
+		return "", ErrMissingElement("target", "datastore")
+	}
 	return selectDatastore("target", t.Running != nil, t.Candidate != nil, t.Startup != nil)
 }
 

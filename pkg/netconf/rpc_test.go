@@ -468,6 +468,32 @@ func TestRPCGetOperationName(t *testing.T) {
 	}
 }
 
+func TestRPCAccessorsNilReceiver(t *testing.T) {
+	var rpc *RPC
+
+	if got := rpc.GetOperationName(); got != "" {
+		t.Fatalf("GetOperationName() = %q, want empty", got)
+	}
+	if got := rpc.GetOperationNamespace(); got != "" {
+		t.Fatalf("GetOperationNamespace() = %q, want empty", got)
+	}
+	var req GetConfigRequest
+	err := rpc.UnmarshalOperation(&req)
+	if err == nil {
+		t.Fatal("UnmarshalOperation() error = nil, want rpc unavailable")
+	}
+	if rpcErr, ok := err.(*RPCError); !ok || rpcErr.ErrorTag != ErrorTagOperationFailed {
+		t.Fatalf("UnmarshalOperation() error = %#v, want operation-failed RPCError", err)
+	}
+	err = rpc.ValidateOperationNamespace()
+	if err == nil {
+		t.Fatal("ValidateOperationNamespace() error = nil, want rpc unavailable")
+	}
+	if rpcErr, ok := err.(*RPCError); !ok || rpcErr.ErrorTag != ErrorTagOperationFailed {
+		t.Fatalf("ValidateOperationNamespace() error = %#v, want operation-failed RPCError", err)
+	}
+}
+
 func TestSourceGetDatastore(t *testing.T) {
 	tests := []struct {
 		name     string
@@ -521,6 +547,21 @@ func TestSourceGetDatastore(t *testing.T) {
 	}
 }
 
+func TestSourceGetDatastoreNilReceiver(t *testing.T) {
+	var source *Source
+
+	ds, err := source.GetDatastore()
+	if err == nil {
+		t.Fatal("GetDatastore() error = nil, want missing datastore")
+	}
+	if ds != "" {
+		t.Fatalf("GetDatastore() datastore = %q, want empty", ds)
+	}
+	if rpcErr, ok := err.(*RPCError); !ok || rpcErr.ErrorTag != ErrorTagMissingElement {
+		t.Fatalf("GetDatastore() error = %#v, want missing-element RPCError", err)
+	}
+}
+
 func TestTargetGetDatastore(t *testing.T) {
 	tests := []struct {
 		name     string
@@ -565,6 +606,21 @@ func TestTargetGetDatastore(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestTargetGetDatastoreNilReceiver(t *testing.T) {
+	var target *Target
+
+	ds, err := target.GetDatastore()
+	if err == nil {
+		t.Fatal("GetDatastore() error = nil, want missing datastore")
+	}
+	if ds != "" {
+		t.Fatalf("GetDatastore() datastore = %q, want empty", ds)
+	}
+	if rpcErr, ok := err.(*RPCError); !ok || rpcErr.ErrorTag != ErrorTagMissingElement {
+		t.Fatalf("GetDatastore() error = %#v, want missing-element RPCError", err)
 	}
 }
 
