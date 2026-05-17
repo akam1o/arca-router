@@ -1159,6 +1159,18 @@ func TestFilterValidate(t *testing.T) {
 			wantErr: false,
 		},
 		{
+			name: "xpath filter system operational state path",
+			filter: &Filter{
+				Type:   "xpath",
+				Select: "/sys:system/sys:system-state/sys:clock/sys:current-datetime",
+				Attrs: []xml.Attr{
+					{Name: xml.Name{Space: "xmlns", Local: "sys"}, Value: IETFSystemNS},
+				},
+			},
+			rpcName: "get",
+			wantErr: false,
+		},
+		{
 			name: "xpath filter namespace prefix inherited from rpc",
 			filter: &Filter{
 				Type:   "xpath",

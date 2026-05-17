@@ -88,7 +88,7 @@ func TestYANGValidator_ListModules(t *testing.T) {
 		t.Error("ListModules() returned empty list")
 	}
 
-	for _, want := range []string{"arca-router", "ietf-interfaces", "ietf-routing"} {
+	for _, want := range []string{"arca-router", "ietf-interfaces", "ietf-routing", "ietf-system"} {
 		found := false
 		for _, name := range modules {
 			if name == want {
@@ -124,6 +124,11 @@ func TestYANGValidator_ValidateElementPath(t *testing.T) {
 		{
 			name:    "valid system leaf path",
 			path:    "/system/host-name",
+			wantErr: false,
+		},
+		{
+			name:    "valid system operational clock path",
+			path:    "/system/system-state/clock/current-datetime",
 			wantErr: false,
 		},
 		{
@@ -335,6 +340,22 @@ func TestYANGValidatorValidateElementPathWithContext(t *testing.T) {
 				{Name: xml.Name{Space: "xmlns", Local: "arca"}, Value: ArcaConfigNS},
 			},
 			wantErr: false,
+		},
+		{
+			name: "valid ietf-system operational path",
+			path: "/sys:system/sys:system-state/sys:clock/sys:current-datetime",
+			attrs: []xml.Attr{
+				{Name: xml.Name{Space: "xmlns", Local: "sys"}, Value: IETFSystemNS},
+			},
+			wantErr: false,
+		},
+		{
+			name: "invalid ietf-system namespace on config leaf",
+			path: "/sys:system/sys:host-name",
+			attrs: []xml.Attr{
+				{Name: xml.Name{Space: "xmlns", Local: "sys"}, Value: IETFSystemNS},
+			},
+			wantErr: true,
 		},
 		{
 			name: "invalid namespace mismatch",
