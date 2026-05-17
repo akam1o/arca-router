@@ -85,6 +85,10 @@ func (m *sqliteMigrationManager) ApplyMigrations() error {
 	if len(migrations) == 0 {
 		return fmt.Errorf("no migration files found")
 	}
+	latestVersion := migrations[len(migrations)-1].version
+	if currentVersion > latestVersion {
+		return fmt.Errorf("datastore schema version %d is newer than supported version %d; refusing to start with an older binary", currentVersion, latestVersion)
+	}
 
 	// Find pending migrations
 	var pending []migration

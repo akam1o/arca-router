@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
@@ -100,6 +101,31 @@ func TestSQLiteMigrationRepairsUnrecordedTargetLockMigration(t *testing.T) {
 	}
 	if !info.IsLocked || info.SessionID != "unrecorded-session" || info.User != "bob" {
 		t.Fatalf("GetLockInfo() = %#v, want existing target lock", info)
+	}
+}
+
+func TestSQLiteMigrationRejectsNewerSchemaVersion(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "config.db")
+	db := openMigrationTestDB(t, dbPath)
+	mustExec(t, db, `
+		CREATE TABLE schema_version (
+			version INTEGER PRIMARY KEY,
+			applied_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+		);
+		INSERT INTO schema_version (version) VALUES (999);
+	`)
+	closeDB(t, db)
+
+	ds, err := NewSQLiteDatastore(&Config{
+		Backend:    BackendSQLite,
+		SQLitePath: dbPath,
+	})
+	if err == nil {
+		_ = ds.Close()
+		t.Fatal("NewSQLiteDatastore() error = nil, want newer schema version rejection")
+	}
+	if !strings.Contains(err.Error(), "newer than supported version") {
+		t.Fatalf("NewSQLiteDatastore() error = %v, want newer schema version rejection", err)
 	}
 }
 
