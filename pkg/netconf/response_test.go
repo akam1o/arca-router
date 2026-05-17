@@ -140,6 +140,29 @@ func TestNewMultiErrorReplyDefaultsNilErrors(t *testing.T) {
 	}
 }
 
+func TestNewMultiErrorReplyDefaultsEmptyErrors(t *testing.T) {
+	for _, errors := range [][]*RPCError{nil, []*RPCError{}} {
+		reply := NewMultiErrorReply("104", errors)
+
+		if len(reply.Errors) != 1 {
+			t.Fatalf("errors = %d, want 1", len(reply.Errors))
+		}
+		if reply.Errors[0] == nil {
+			t.Fatal("error = nil, want default RPC error")
+		}
+		if reply.Errors[0].ErrorTag != ErrorTagOperationFailed {
+			t.Fatalf("error tag = %s, want %s", reply.Errors[0].ErrorTag, ErrorTagOperationFailed)
+		}
+		data, err := MarshalReply(reply)
+		if err != nil {
+			t.Fatalf("MarshalReply() error = %v", err)
+		}
+		if !strings.Contains(string(data), "<rpc-error") {
+			t.Fatalf("MarshalReply() = %s, want rpc-error", string(data))
+		}
+	}
+}
+
 func TestMarshalOKReply(t *testing.T) {
 	reply := NewOKReply("101")
 	data, err := MarshalReply(reply)

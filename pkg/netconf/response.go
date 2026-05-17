@@ -55,6 +55,9 @@ func NewErrorReply(messageID string, err *RPCError) *RPCReply {
 
 // NewMultiErrorReply creates an error <rpc-reply> with multiple <rpc-error>
 func NewMultiErrorReply(messageID string, errors []*RPCError) *RPCReply {
+	if len(errors) == 0 {
+		errors = []*RPCError{nil}
+	}
 	normalized := make([]*RPCError, len(errors))
 	for i, err := range errors {
 		normalized[i] = normalizeRPCError(err)

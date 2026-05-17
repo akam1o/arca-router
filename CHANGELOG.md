@@ -2,6 +2,7 @@
 
 ## v0.9.x - NETCONF/YANG and Operational Safety (current)
 
+- **NETCONF multi-error reply safety**: multi-error reply construction now emits a default operation-failed RPC error for empty error lists instead of producing incomplete replies
 - **NETCONF hello marshal safety**: hello marshaling now rejects nil hello messages with an explicit error instead of producing incomplete output
 - **NETCONF user database operation safety**: user and public-key database operations now return stable initialization errors or authentication failures on nil or zero-value receivers instead of panicking
 - **NETCONF hello helper safety**: hello capability helpers now tolerate nil inputs and return conservative fallback results instead of panicking
