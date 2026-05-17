@@ -228,6 +228,19 @@ sudo journalctl -u arca-routerd -n 50
 
 # View running configuration with arca
 arca show configuration
+arca show configuration rollback 1
+
+# Save configuration backups before maintenance
+arca backup configuration /var/backups/arca-router/running.conf
+arca backup configuration rollback 1 /var/backups/arca-router/rollback-1.conf
+
+# Restore a backup into candidate configuration for review before commit
+arca
+configure
+restore configuration /var/backups/arca-router/running.conf
+show | compare
+commit check
+commit comment "Restore configuration backup"
 
 # Check managed interface state, counters, QoS profile, queue placement, and QoS capabilities through arca-routerd
 arca show interfaces
