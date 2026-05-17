@@ -263,6 +263,31 @@ func TestYANGValidator_ValidateElementPath(t *testing.T) {
 	}
 }
 
+func TestImplementedYANGElementPathsValidate(t *testing.T) {
+	v, err := NewYANGValidator()
+	if err != nil {
+		t.Fatalf("NewYANGValidator() error = %v", err)
+	}
+
+	seen := map[string]struct{}{}
+	for _, path := range implementedYANGElementPaths() {
+		if strings.TrimSpace(path) == "" {
+			t.Fatal("implementedYANGElementPaths() included empty path")
+		}
+		if strings.HasPrefix(path, "/") || strings.HasPrefix(path, "config/") {
+			t.Fatalf("implementedYANGElementPaths() included unnormalized path %q", path)
+		}
+		if _, ok := seen[path]; ok {
+			t.Fatalf("implementedYANGElementPaths() included duplicate path %q", path)
+		}
+		seen[path] = struct{}{}
+
+		if err := v.ValidateElementPath("/" + path); err != nil {
+			t.Fatalf("ValidateElementPath(%q) error = %v", "/"+path, err)
+		}
+	}
+}
+
 func TestYANGValidatorValidateElementPathWithContext(t *testing.T) {
 	v, err := NewYANGValidator()
 	if err != nil {
