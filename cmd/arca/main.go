@@ -1157,7 +1157,7 @@ func parseUpgradePreflightOptions(args []string) (upgradePreflightOptions, error
 	if len(args) == 3 && args[0] == "upgrade" && args[1] == "backup" {
 		return upgradePreflightOptions{BackupPath: args[2]}, nil
 	}
-	return upgradePreflightOptions{}, fmt.Errorf(checkUpgradeUsage)
+	return upgradePreflightOptions{}, errors.New(checkUpgradeUsage)
 }
 
 func upgradePreflightLinesWithOptions(ctx context.Context, client showClient, options upgradePreflightOptions) ([]string, error) {
