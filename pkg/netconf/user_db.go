@@ -53,6 +53,10 @@ type User struct {
 
 // NewUserDatabase creates a new user database connection
 func NewUserDatabase(path string, log *logger.Logger) (*UserDatabase, error) {
+	if log == nil {
+		log = logger.New("netconf-userdb", logger.DefaultConfig())
+	}
+
 	if err := prepareSecureUserDatabaseFile(path); err != nil {
 		return nil, err
 	}

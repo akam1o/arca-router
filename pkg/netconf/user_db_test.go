@@ -84,6 +84,23 @@ func TestUserDatabaseVerifyPasswordUsesDummyHashForDisabledUser(t *testing.T) {
 	}
 }
 
+func TestNewUserDatabaseDefaultsNilLogger(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "users.db")
+
+	userDB, err := NewUserDatabase(dbPath, nil)
+	if err != nil {
+		t.Fatalf("NewUserDatabase() error = %v", err)
+	}
+	t.Cleanup(func() { _ = userDB.Close() })
+
+	if userDB.log == nil {
+		t.Fatal("user database logger = nil")
+	}
+	if err := userDB.HealthCheck(); err != nil {
+		t.Fatalf("HealthCheck() error = %v", err)
+	}
+}
+
 func newTestUserDatabase(t *testing.T) *UserDatabase {
 	t.Helper()
 
