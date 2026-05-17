@@ -7,6 +7,7 @@ import (
 	"encoding/base64"
 	"encoding/binary"
 	"encoding/pem"
+	"encoding/xml"
 	"fmt"
 	"net"
 	"os"
@@ -874,8 +875,11 @@ func (s *SSHServer) handleNETCONF(ctx context.Context, sess *Session, channel ss
 				rpcErr = ErrOperationFailed(fmt.Sprintf("RPC parsing failed: %v", err))
 			}
 			messageID, replyAttrs := extractRPCReplyContext(rpcXML)
-			errorReply := NewErrorReply(messageID, rpcErr).WithAttributes(replyAttrs)
-			errorXML, _ := MarshalReply(errorReply)
+			errorXML, err := marshalErrorReply(messageID, rpcErr, replyAttrs)
+			if err != nil {
+				s.log.Error("Failed to serialize error reply", "error", err)
+				return
+			}
 			if err := writer.WriteMessage(errorXML); err != nil {
 				s.log.Error("Failed to send error reply", "error", err)
 				return
@@ -909,8 +913,11 @@ func (s *SSHServer) handleNETCONF(ctx context.Context, sess *Session, channel ss
 		if err != nil {
 			s.log.Error("Failed to serialize reply", "error", err)
 			// Send generic error
-			errorReply := NewErrorReply(rpc.MessageID, ErrOperationFailed("reply serialization failed")).WithAttributes(rpc.ReplyAttrs)
-			errorXML, _ := MarshalReply(errorReply)
+			errorXML, err := marshalErrorReply(rpc.MessageID, ErrOperationFailed("reply serialization failed"), rpc.ReplyAttrs)
+			if err != nil {
+				s.log.Error("Failed to serialize error reply", "error", err)
+				return
+			}
 			if err := writer.WriteMessage(errorXML); err != nil {
 				s.log.Error("Failed to send error reply", "error", err)
 				return
@@ -925,4 +932,18 @@ func (s *SSHServer) handleNETCONF(ctx context.Context, sess *Session, channel ss
 
 		s.log.Debug("RPC reply sent", "session", sess.ID, "message_id", rpc.MessageID)
 	}
+}
+
+func marshalErrorReply(messageID string, rpcErr *RPCError, attrs []xml.Attr) ([]byte, error) {
+	errorReply := NewErrorReply(messageID, rpcErr).WithAttributes(attrs)
+	errorXML, err := MarshalReply(errorReply)
+	if err == nil {
+		return errorXML, nil
+	}
+
+	fallbackXML, fallbackErr := MarshalReply(NewErrorReply(messageID, rpcErr))
+	if fallbackErr != nil {
+		return nil, fmt.Errorf("marshal error reply: %w; marshal fallback error reply: %v", err, fallbackErr)
+	}
+	return fallbackXML, nil
 }

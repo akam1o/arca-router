@@ -2,9 +2,11 @@ package netconf
 
 import (
 	"context"
+	"encoding/xml"
 	"net"
 	"path/filepath"
 	"slices"
+	"strings"
 	"testing"
 	"time"
 
@@ -240,6 +242,26 @@ func TestNewSSHServerDefaultsPartialConfig(t *testing.T) {
 		len(cfg.SSHKeyExchanges) != 0 ||
 		len(cfg.SSHMACs) != 0 {
 		t.Fatalf("caller config was mutated: %+v", cfg)
+	}
+}
+
+func TestMarshalErrorReplyFallsBackWithoutInvalidReplyAttrs(t *testing.T) {
+	data, err := marshalErrorReply("101", ErrOperationFailed("reply serialization failed"), []xml.Attr{
+		{Name: xml.Name{Local: ""}, Value: "bad"},
+	})
+	if err != nil {
+		t.Fatalf("marshalErrorReply() error = %v", err)
+	}
+
+	xmlData := string(data)
+	if !strings.Contains(xmlData, `<rpc-reply xmlns="urn:ietf:params:xml:ns:netconf:base:1.0" message-id="101"`) {
+		t.Fatalf("marshalErrorReply() = %s, want rpc-reply message-id", xmlData)
+	}
+	if strings.Contains(xmlData, "bad") {
+		t.Fatalf("marshalErrorReply() = %s, want invalid reply attributes omitted", xmlData)
+	}
+	if !strings.Contains(xmlData, "reply serialization failed") {
+		t.Fatalf("marshalErrorReply() = %s, want original RPC error", xmlData)
 	}
 }
 
