@@ -364,7 +364,16 @@ func (f *XPathFilter) MatchesSection(elementPath []string) bool {
 // Phase 3: Element name matching with basic predicates
 // Phase 4: Full namespace-aware filtering
 func ApplySubtreeFilter(xmlData []byte, filter *Filter) ([]byte, error) {
-	if filter == nil || len(filter.Content) == 0 {
+	if filter == nil {
+		return append([]byte(nil), xmlData...), nil
+	}
+	filterType := normalizedFilterType(filter)
+	switch filterType {
+	case "", "subtree":
+	default:
+		return nil, fmt.Errorf("unsupported subtree filter type: %s", filterType)
+	}
+	if len(filter.Content) == 0 {
 		return append([]byte(nil), xmlData...), nil
 	}
 

@@ -554,6 +554,10 @@ func TestApplySubtreeFilterCopiesUnfilteredData(t *testing.T) {
 			name:   "empty filter",
 			filter: &Filter{},
 		},
+		{
+			name:   "explicit subtree filter",
+			filter: &Filter{Type: "\n subtree \t"},
+		},
 	}
 
 	for _, tt := range tests {
@@ -571,6 +575,34 @@ func TestApplySubtreeFilterCopiesUnfilteredData(t *testing.T) {
 			got[0] = 'X'
 			if xmlData[0] == 'X' {
 				t.Fatal("ApplySubtreeFilter() returned data sharing caller buffer")
+			}
+		})
+	}
+}
+
+func TestApplySubtreeFilterRejectsUnsupportedFilterTypes(t *testing.T) {
+	tests := []struct {
+		name   string
+		filter *Filter
+	}{
+		{
+			name:   "xpath",
+			filter: &Filter{Type: "xpath", Select: "/interfaces"},
+		},
+		{
+			name:   "unsupported",
+			filter: &Filter{Type: "unsupported"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := ApplySubtreeFilter([]byte(`<data><interfaces/></data>`), tt.filter)
+			if err == nil {
+				t.Fatal("ApplySubtreeFilter() error = nil, want unsupported filter type error")
+			}
+			if !strings.Contains(err.Error(), "unsupported subtree filter type") {
+				t.Fatalf("ApplySubtreeFilter() error = %v, want unsupported subtree filter type", err)
 			}
 		})
 	}
