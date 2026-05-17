@@ -358,6 +358,31 @@ func TestUnmarshalOperationPreservesAncestorNamespaceDeclarations(t *testing.T) 
 	}
 }
 
+func TestConfigElementXMLRejectsUndeclaredAttributeNamespace(t *testing.T) {
+	config := ConfigElement{
+		XMLName: xml.Name{Local: "config"},
+		Attrs: []xml.Attr{
+			{Name: xml.Name{Space: "urn:example:attrs", Local: "mode"}, Value: "replace"},
+		},
+		Content: []byte(`<system><host-name>router1</host-name></system>`),
+	}
+
+	_, err := config.XML()
+	if err == nil {
+		t.Fatal("Config.XML() error = nil, want undeclared namespace error")
+	}
+	rpcErr, ok := err.(*RPCError)
+	if !ok {
+		t.Fatalf("Config.XML() error = %T, want *RPCError", err)
+	}
+	if rpcErr.ErrorTag != ErrorTagUnknownNamespace {
+		t.Fatalf("Config.XML() error tag = %s, want %s", rpcErr.ErrorTag, ErrorTagUnknownNamespace)
+	}
+	if rpcErr.ErrorInfo == nil || rpcErr.ErrorInfo.BadNamespace != "urn:example:attrs" {
+		t.Fatalf("Config.XML() error info = %#v, want bad namespace", rpcErr.ErrorInfo)
+	}
+}
+
 func TestInheritedNamespaceReceiversNilSafe(t *testing.T) {
 	attrs := []xml.Attr{
 		{Name: xml.Name{Space: "xmlns", Local: "arca"}, Value: ArcaConfigNS},
