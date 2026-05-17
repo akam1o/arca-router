@@ -186,6 +186,26 @@ func TestMarshalOKReply(t *testing.T) {
 	}
 }
 
+func TestMarshalReplyNormalizesNilErrors(t *testing.T) {
+	reply := &RPCReply{
+		MessageID: "105",
+		Errors:    []*RPCError{nil},
+	}
+
+	data, err := MarshalReply(reply)
+	if err != nil {
+		t.Fatalf("MarshalReply() error = %v", err)
+	}
+
+	xmlStr := string(data)
+	if !strings.Contains(xmlStr, "<rpc-error") {
+		t.Fatalf("MarshalReply() = %s, want rpc-error", xmlStr)
+	}
+	if !strings.Contains(xmlStr, "<error-tag>operation-failed</error-tag>") {
+		t.Fatalf("MarshalReply() = %s, want default operation-failed error", xmlStr)
+	}
+}
+
 func TestMarshalReplyPreservesAttributes(t *testing.T) {
 	reply := NewOKReply("101").WithAttributes([]xml.Attr{
 		{Name: xml.Name{Space: "xmlns", Local: "ex"}, Value: "http://example.net/content/1.0"},
