@@ -94,10 +94,36 @@ if [[ ! -r "$ACM_SCHEMA_SOURCE" ]] && command -v apt-get >/dev/null 2>&1 && comm
   mkdir -p "$TMPDIR/libyang2-tools-deb"
   (
     cd "$TMPDIR/libyang2-tools-deb"
-    apt-get -o APT::Sandbox::User=root download libyang2-tools >/dev/null
-    dpkg-deb -x libyang2-tools_*.deb extracted
-    cp extracted/usr/share/doc/libyang2-tools/examples/ietf-netconf-acm.yang "$ACM_SCHEMA_SOURCE"
-  )
+    apt-get -o APT::Sandbox::User=root download libyang2-tools >/dev/null 2>/dev/null &&
+      dpkg-deb -x libyang2-tools_*.deb extracted &&
+      cp extracted/usr/share/doc/libyang2-tools/examples/ietf-netconf-acm.yang "$ACM_SCHEMA_SOURCE"
+  ) || true
+fi
+if [[ ! -r "$ACM_SCHEMA_SOURCE" ]]; then
+  cat >"$ACM_SCHEMA_SOURCE" <<'YANG'
+module ietf-netconf-acm {
+  yang-version 1.1;
+  namespace "urn:ietf:params:xml:ns:yang:ietf-netconf-acm";
+  prefix nacm;
+
+  description
+    "Minimal NACM module stub used by the libnetconf2 interoperability
+     smoke test when the distribution package does not ship example YANG
+     modules. The test only needs the module to exist in the client context.";
+
+  extension default-deny-write {
+    description
+      "Placeholder for the NACM default-deny-write extension used by
+       ietf-netconf.";
+  }
+
+  extension default-deny-all {
+    description
+      "Placeholder for the NACM default-deny-all extension used by
+       ietf-netconf.";
+  }
+}
+YANG
 fi
 
 cat >"$SCHEMA_DIR/ietf-interfaces.yang" <<'YANG'

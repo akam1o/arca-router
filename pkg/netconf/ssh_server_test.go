@@ -245,6 +245,20 @@ func TestNewSSHServerDefaultsPartialConfig(t *testing.T) {
 	}
 }
 
+func TestDefaultSSHConfigCiphersIncludeClientInteropWithoutCBC(t *testing.T) {
+	ciphers := DefaultSSHConfig().SSHCiphers
+	for _, cipher := range []string{"aes256-ctr", "aes128-ctr"} {
+		if !slices.Contains(ciphers, cipher) {
+			t.Fatalf("default SSH ciphers = %v, want %s for NETCONF client interop", ciphers, cipher)
+		}
+	}
+	for _, cipher := range []string{"aes128-cbc", "aes192-cbc", "aes256-cbc", "3des-cbc"} {
+		if slices.Contains(ciphers, cipher) {
+			t.Fatalf("default SSH ciphers = %v, want legacy CBC/3DES cipher %s omitted", ciphers, cipher)
+		}
+	}
+}
+
 func TestMarshalErrorReplyFallsBackWithoutInvalidReplyAttrs(t *testing.T) {
 	data, err := marshalErrorReply("101", ErrOperationFailed("reply serialization failed"), []xml.Attr{
 		{Name: xml.Name{Local: ""}, Value: "bad"},
