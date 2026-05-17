@@ -98,9 +98,17 @@ Focus: mature management-plane correctness and operator safety.
   - Schema-based semantic validation
   - Namespace-aware model traversal
   - XPath and subtree filter maturity
-  - XPath filtering intentionally remains a safe absolute-path subset in v0.9:
-    supported expressions are model-rooted paths with simple equality
+  - Externally advertised XPath filtering remains a safe absolute-path subset
+    in v0.9: supported expressions are model-rooted paths with simple equality
     predicates, and the standard NETCONF `:xpath` capability is not advertised
+  - Introduce an internal XPath engine to move the implementation toward Full
+    XPath 1.0 behavior without advertising the standard capability yet
+    - Candidate Go packages: `github.com/antchfx/xmlquery` with
+      `github.com/antchfx/xpath`
+    - Build complete `<get-config>` and `<get>` XML first, then evaluate XPath
+      expressions against that XML and require a node-set result
+    - Keep the engine experimental in v0.9 until NETCONF response shaping,
+      safety limits, and client compatibility are proven
 - **NETCONF maturity**
   - Candidate/running semantics hardening
   - Capability advertisement accuracy
@@ -142,11 +150,10 @@ Focus: complete final pre-stable stabilization and compatibility work.
   - CLI and configuration compatibility policy
   - API versioning and deprecation policy
   - Supported VPP and FRR version matrix
-  - Full XPath 1.0 support, if required, should be introduced with a bounded
-    XPath engine, namespace-aware evaluation, expression size/depth limits,
-    evaluation timeouts, allowed-function controls, and external client
-    interoperability coverage before advertising the standard NETCONF `:xpath`
-    capability
+  - Formal standard NETCONF `:xpath` support should advertise
+    `urn:ietf:params:netconf:capability:xpath:1.0` in `<hello>` only after the
+    implementation satisfies RFC 6241 response rules, interoperability
+    expectations, DoS guardrails, and external client coverage
 - **Long-run soak and failure testing**
   - HA failover soak
   - FRR and VPP restart recovery
