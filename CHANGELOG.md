@@ -2,6 +2,7 @@
 
 ## v0.9.x - NETCONF/YANG and Operational Safety (current)
 
+- **NETCONF RPC zero-value operation safety**: RPC operation unmarshaling and namespace validation now return stable operation errors when called on zero-value RPCs
 - **NETCONF user list pagination normalization**: user listing pagination now clamps negative limits and offsets before issuing database queries
 - **NETCONF public key listing stability**: user public key listings now use fingerprint tie-break ordering when keys share the same creation timestamp
 - **NETCONF session lock listing stability**: session lock listings now return datastore names in sorted order for deterministic direct helper output

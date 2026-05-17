@@ -547,6 +547,27 @@ func TestRPCAccessorsNilReceiver(t *testing.T) {
 	}
 }
 
+func TestRPCZeroValueOperationAccessors(t *testing.T) {
+	rpc := &RPC{}
+
+	var req GetConfigRequest
+	err := rpc.UnmarshalOperation(&req)
+	if err == nil {
+		t.Fatal("UnmarshalOperation() error = nil, want rpc operation unavailable")
+	}
+	if rpcErr, ok := err.(*RPCError); !ok || rpcErr.ErrorTag != ErrorTagOperationFailed {
+		t.Fatalf("UnmarshalOperation() error = %#v, want operation-failed RPCError", err)
+	}
+
+	err = rpc.ValidateOperationNamespace()
+	if err == nil {
+		t.Fatal("ValidateOperationNamespace() error = nil, want rpc operation unavailable")
+	}
+	if rpcErr, ok := err.(*RPCError); !ok || rpcErr.ErrorTag != ErrorTagOperationFailed {
+		t.Fatalf("ValidateOperationNamespace() error = %#v, want operation-failed RPCError", err)
+	}
+}
+
 func TestSourceGetDatastore(t *testing.T) {
 	tests := []struct {
 		name     string
