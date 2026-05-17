@@ -430,7 +430,7 @@ func writeRoutingOptionsXML(buf *bytes.Buffer, ro *config.RoutingOptions, filter
 }
 
 func outputXPathFilter(filter *Filter) *XPathFilter {
-	if filter == nil || filter.Type != "xpath" {
+	if filter == nil || normalizedFilterType(filter) != "xpath" {
 		return nil
 	}
 	xpathFilter, err := ParseXPathFilter(strings.TrimSpace(filter.Select))
@@ -3297,8 +3297,7 @@ func ValidateFilterDepthAndSize(rpcName string, filter *Filter) error {
 	if filter == nil {
 		return nil
 	}
-	filterType := strings.TrimSpace(filter.Type)
-	if filterType == "xpath" {
+	if normalizedFilterType(filter) == "xpath" {
 		return validateXPathFilterDepthAndSize(rpcName, filter.Select)
 	}
 	if len(filter.Content) == 0 {

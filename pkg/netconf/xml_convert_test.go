@@ -113,6 +113,29 @@ func TestConfigToXMLWithXPathFilter(t *testing.T) {
 	}
 }
 
+func TestConfigToXMLWithWhitespaceXPathFilterType(t *testing.T) {
+	cfg := &config.Config{
+		System: &config.SystemConfig{HostName: "router1"},
+		Interfaces: map[string]*config.Interface{
+			"ge-0/0/0": {Description: "uplink"},
+			"ge-0/0/1": {Description: "peer"},
+		},
+	}
+	filter := &Filter{Type: "\n xpath \t", Select: "/interfaces/interface[name='ge-0/0/0']"}
+
+	xmlData, err := ConfigToXML(cfg, filter)
+	if err != nil {
+		t.Fatalf("ConfigToXML() error = %v", err)
+	}
+	xmlStr := string(xmlData)
+	if strings.Contains(xmlStr, "<system") {
+		t.Fatalf("ConfigToXML() included unrelated system section:\n%s", xmlStr)
+	}
+	if strings.Contains(xmlStr, "ge-0/0/1") || strings.Contains(xmlStr, "peer") {
+		t.Fatalf("ConfigToXML() included predicate-mismatched interface:\n%s", xmlStr)
+	}
+}
+
 func TestConfigToXMLWithXPathFilterFiltersStaticRoutePredicates(t *testing.T) {
 	cfg := &config.Config{
 		RoutingOptions: &config.RoutingOptions{

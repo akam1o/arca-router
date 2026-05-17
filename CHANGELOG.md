@@ -2,6 +2,7 @@
 
 ## v0.9.x - NETCONF/YANG and Operational Safety (current)
 
+- **NETCONF output filter type normalization**: configuration and operational output filtering now trims filter type values before selecting XPath behavior in direct helper calls
 - **NETCONF filter limit validation normalization**: direct filter depth and size validation now trims filter type values before applying XPath-specific checks
 - **NETCONF error reply copy safety**: error reply construction now copies RPC error payloads so caller-side error mutation cannot change queued replies
 - **NETCONF data reply copy safety**: data reply construction now copies response payload bytes so caller-side buffer mutation cannot change queued replies
