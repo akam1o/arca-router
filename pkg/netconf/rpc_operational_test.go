@@ -2,12 +2,38 @@ package netconf
 
 import (
 	"bytes"
+	"context"
+	"encoding/xml"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/akam1o/arca-router/pkg/config"
 )
+
+type testOperationalStateProvider struct {
+	routes []RouteOperationalState
+}
+
+func (p *testOperationalStateProvider) InterfaceStates(context.Context) (map[string]*InterfaceOperationalState, error) {
+	return nil, nil
+}
+
+func (p *testOperationalStateProvider) Routes(context.Context) ([]RouteOperationalState, error) {
+	return append([]RouteOperationalState(nil), p.routes...), nil
+}
+
+func (p *testOperationalStateProvider) BGPNeighbors(context.Context) ([]BGPNeighborOperationalState, error) {
+	return nil, nil
+}
+
+func (p *testOperationalStateProvider) OSPFNeighbors(context.Context, bool) ([]OSPFNeighborOperationalState, error) {
+	return nil, nil
+}
+
+func (p *testOperationalStateProvider) BFDStatus(context.Context) (*BFDOperationalState, error) {
+	return nil, nil
+}
 
 func TestBuildAllOperationalDataDoesNotReturnFabricatedCounters(t *testing.T) {
 	data := buildAllOperationalData()
@@ -54,6 +80,52 @@ func TestBuildOperationalDataUsesRunningConfig(t *testing.T) {
 	} {
 		if !bytes.Contains(data, []byte(want)) {
 			t.Fatalf("operational data missing %q:\n%s", want, data)
+		}
+	}
+}
+
+func TestGetOperationalDataExperimentalXPathFilterSupportsFunctions(t *testing.T) {
+	srv := NewServer(nil, nil)
+	srv.SetOperationalStateProvider(&testOperationalStateProvider{
+		routes: []RouteOperationalState{
+			{
+				Prefix:    "192.0.2.0/24",
+				NextHop:   "192.0.2.1",
+				Protocol:  "static",
+				Metric:    10,
+				Interface: "ge-0/0/0",
+				Active:    true,
+			},
+			{
+				Prefix:    "198.51.100.0/24",
+				NextHop:   "192.0.2.2",
+				Protocol:  "bgp",
+				Metric:    20,
+				Interface: "ge-0/0/1",
+				Active:    true,
+			},
+		},
+	})
+	filter := &Filter{
+		Type:   "xpath",
+		Select: "/arca:state/arca:routes/arca:route[contains(arca:prefix, '192.0.2')]",
+		Attrs: []xml.Attr{
+			{Name: xml.Name{Space: "xmlns", Local: "arca"}, Value: ArcaConfigNS},
+		},
+	}
+
+	data, err := srv.getOperationalData(context.Background(), filter)
+	if err != nil {
+		t.Fatalf("getOperationalData() error = %v", err)
+	}
+	for _, want := range []string{"<routes>", "<prefix>192.0.2.0/24</prefix>", "<protocol>static</protocol>"} {
+		if !bytes.Contains(data, []byte(want)) {
+			t.Fatalf("operational data missing experimental XPath value %q:\n%s", want, data)
+		}
+	}
+	for _, unexpected := range []string{"198.51.100.0/24", "192.0.2.2", "<protocol>bgp</protocol>"} {
+		if bytes.Contains(data, []byte(unexpected)) {
+			t.Fatalf("operational data included experimental XPath mismatch %q:\n%s", unexpected, data)
 		}
 	}
 }

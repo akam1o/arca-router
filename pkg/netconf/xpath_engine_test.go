@@ -69,12 +69,64 @@ func TestExperimentalXPathFilterRejectsAttributeSelection(t *testing.T) {
 	xmlData := []byte(`<interfaces xmlns="` + IETFInterfacesNS + `"><interface enabled="true"><name>ge-0/0/0</name></interface></interfaces>`)
 	filter := prefixedXPathFilter("/if:interfaces/if:interface/@enabled")
 
+	if err := filter.Validate("get-config"); err == nil {
+		t.Fatal("Validate() error = nil, want attribute selection error")
+	}
+
 	_, err := applyExperimentalXPathFilter("get-config", xmlData, filter)
 	if err == nil {
 		t.Fatal("applyExperimentalXPathFilter() error = nil, want attribute selection error")
 	}
 	if rpcErr, ok := err.(*RPCError); !ok || rpcErr.ErrorTag != ErrorTagInvalidValue {
 		t.Fatalf("applyExperimentalXPathFilter() error = %#v, want invalid-value RPCError", err)
+	}
+}
+
+func TestFilterValidateRejectsExperimentalXPathUnprefixedRoot(t *testing.T) {
+	filter := &Filter{Type: "xpath", Select: "/interfaces/interface[contains(name, 'ge-0/0/0')]"}
+
+	err := filter.Validate("get-config")
+	if err == nil {
+		t.Fatal("Validate() error = nil, want namespace prefix error")
+	}
+	if rpcErr, ok := err.(*RPCError); !ok || rpcErr.ErrorTag != ErrorTagInvalidValue {
+		t.Fatalf("Validate() error = %#v, want invalid-value RPCError", err)
+	}
+}
+
+func TestFilterValidateRejectsExperimentalXPathRootNamespaceMismatch(t *testing.T) {
+	filter := &Filter{
+		Type:   "xpath",
+		Select: "/rt:interfaces/rt:interface[contains(rt:name, 'ge-0/0/0')]",
+		Attrs: []xml.Attr{
+			{Name: xml.Name{Space: "xmlns", Local: "rt"}, Value: IETFRoutingNS},
+		},
+	}
+
+	err := filter.Validate("get-config")
+	if err == nil {
+		t.Fatal("Validate() error = nil, want namespace mismatch")
+	}
+	if rpcErr, ok := err.(*RPCError); !ok || rpcErr.ErrorTag != ErrorTagInvalidValue {
+		t.Fatalf("Validate() error = %#v, want invalid-value RPCError", err)
+	}
+}
+
+func TestFilterValidateRejectsExperimentalXPathUnknownRoot(t *testing.T) {
+	filter := &Filter{
+		Type:   "xpath",
+		Select: "/arca:unknown[contains(arca:name, 'x')]",
+		Attrs: []xml.Attr{
+			{Name: xml.Name{Space: "xmlns", Local: "arca"}, Value: ArcaConfigNS},
+		},
+	}
+
+	err := filter.Validate("get-config")
+	if err == nil {
+		t.Fatal("Validate() error = nil, want unsupported root error")
+	}
+	if rpcErr, ok := err.(*RPCError); !ok || rpcErr.ErrorTag != ErrorTagInvalidValue {
+		t.Fatalf("Validate() error = %#v, want invalid-value RPCError", err)
 	}
 }
 

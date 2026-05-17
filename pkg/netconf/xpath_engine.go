@@ -101,6 +101,13 @@ func validateExperimentalXPathSelect(rpcName string, filter *Filter) *RPCError {
 	if !strings.HasPrefix(selectExpr, "/") {
 		return ErrInvalidFilter(rpcName, fmt.Sprintf("invalid xpath filter: XPath must start with /: %s", selectExpr))
 	}
+	if experimentalXPathSelectsAttribute(selectExpr) {
+		return ErrInvalidFilter(rpcName, "xpath filter attribute selection is not supported by experimental response shaping")
+	}
+	namespaceCtx := experimentalXPathNamespaceContext(filter)
+	if rpcErr := validateExperimentalXPathRootStep(rpcName, selectExpr, namespaceCtx); rpcErr != nil {
+		return rpcErr
+	}
 	return nil
 }
 
@@ -127,6 +134,79 @@ func experimentalXPathNamespaceContext(filter *Filter) map[string]string {
 		namespaceCtx[attr.Name.Local] = attr.Value
 	}
 	return namespaceCtx
+}
+
+func experimentalXPathSelectsAttribute(selectExpr string) bool {
+	quote := byte(0)
+	for i := 0; i < len(selectExpr); i++ {
+		ch := selectExpr[i]
+		if quote != 0 {
+			if ch == quote {
+				quote = 0
+			}
+			continue
+		}
+		if ch == '\'' || ch == '"' {
+			quote = ch
+			continue
+		}
+		if ch == '@' || strings.HasPrefix(selectExpr[i:], "attribute::") {
+			return true
+		}
+	}
+	return false
+}
+
+func validateExperimentalXPathRootStep(rpcName, selectExpr string, namespaceCtx map[string]string) *RPCError {
+	prefix, local, ok := experimentalXPathFirstStepQName(selectExpr)
+	if !ok {
+		return nil
+	}
+	if prefix == "" {
+		return ErrInvalidFilter(rpcName, fmt.Sprintf("experimental xpath filter requires namespace-prefixed root element: %s", local))
+	}
+	namespace := namespaceCtx[prefix]
+	if namespace == "" {
+		return nil
+	}
+	if local == "data" {
+		if namespace != NetconfBaseNS {
+			return ErrInvalidFilter(rpcName, fmt.Sprintf("invalid xpath filter namespace: /data uses namespace %q, want %q", namespace, NetconfBaseNS))
+		}
+		return nil
+	}
+	if implementedYANGPathSchema.children[local] == nil {
+		return ErrInvalidFilter(rpcName, fmt.Sprintf("unsupported xpath filter path: unsupported root element /%s", local))
+	}
+	if expected := expectedXPathNamespace([]string{local}); namespace != expected {
+		return ErrInvalidFilter(rpcName, fmt.Sprintf("invalid xpath filter namespace: /%s uses namespace %q, want %q", local, namespace, expected))
+	}
+	return nil
+}
+
+func experimentalXPathFirstStepQName(selectExpr string) (string, string, bool) {
+	if !strings.HasPrefix(selectExpr, "/") || strings.HasPrefix(selectExpr, "//") {
+		return "", "", false
+	}
+	step := strings.TrimPrefix(selectExpr, "/")
+	end := len(step)
+	for idx, ch := range step {
+		if strings.ContainsRune("/[|+-=<>! \t\r\n)", ch) {
+			end = idx
+			break
+		}
+	}
+	step = step[:end]
+	if step == "" || step == "." || step == ".." || step == "*" || strings.HasPrefix(step, "@") || strings.Contains(step, "::") {
+		return "", "", false
+	}
+	if prefix, local, ok := strings.Cut(step, ":"); ok {
+		if prefix == "" || local == "" || strings.Contains(local, ":") {
+			return "", "", false
+		}
+		return prefix, local, true
+	}
+	return "", step, true
 }
 
 func experimentalXPathDataNamespacePrefix(namespaceCtx map[string]string) string {
