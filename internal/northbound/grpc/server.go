@@ -453,15 +453,31 @@ func (s *Server) ListHistory(ctx context.Context, limit, offset int) ([]CommitIn
 	}
 	entries := make([]CommitInfo, 0, len(records))
 	for _, r := range records {
+		configText, err := commitRecordConfigText(r)
+		if err != nil {
+			return nil, err
+		}
 		entries = append(entries, CommitInfo{
 			CommitID:   r.CommitID,
 			User:       r.Author,
 			Timestamp:  r.Timestamp,
 			Message:    r.Message,
 			IsRollback: r.IsRollback,
+			ConfigText: configText,
 		})
 	}
 	return entries, nil
+}
+
+func commitRecordConfigText(record *store.CommitRecord) (string, error) {
+	if record == nil || record.Config == nil {
+		return "", nil
+	}
+	text, err := pkgconfig.ToSetCommandsWithError(record.Config.ToLegacyConfig())
+	if err != nil {
+		return "", fmt.Errorf("serialize commit %s config: %w", record.CommitID, err)
+	}
+	return text, nil
 }
 
 // --- SessionService implementation ---

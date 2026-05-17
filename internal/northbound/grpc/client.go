@@ -673,6 +673,7 @@ func commitInfosFromProto(entries []*apiv1.CommitEntry) []CommitInfo {
 			Timestamp:  timestamp,
 			Message:    entry.GetMessage(),
 			IsRollback: entry.GetIsRollback(),
+			ConfigText: entry.GetConfigText(),
 		})
 	}
 	return infos
@@ -804,6 +805,7 @@ type CommitInfo struct {
 	Timestamp  time.Time
 	Message    string
 	IsRollback bool
+	ConfigText string
 }
 
 // InterfaceInfo represents interface operational state.

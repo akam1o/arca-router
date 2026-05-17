@@ -195,6 +195,7 @@ message CommitEntry {
   string timestamp = 3;
   string message = 4;
   bool is_rollback = 5;
+  string config_text = 6;
 }
 
 // --- Session messages ---
