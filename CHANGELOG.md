@@ -2,6 +2,10 @@
 
 ## v0.10.x - Stabilization and Compatibility (current)
 
+- **Web API token authentication**: `arca-routerd --web-api-token-file` enables Bearer token or `X-API-Key` authentication for Web/NMS automation, using the existing read-only/operator/admin RBAC checks
+- **CLI TLS gRPC connections**: `arca` can connect to remote TCP/TLS gRPC endpoints with CA verification, server-name override, and client certificate/key options for mTLS
+- **gRPC TLS listener**: `arca-routerd --grpc-listen` exposes the internal gRPC API over TCP/TLS, and `--grpc-client-ca` enables client certificate verification for mTLS deployments
+- **Shared TLS policy**: etcd and gRPC TLS paths now use a common TLS 1.2+ minimum policy
 - **Web audit export**: authenticated Web API now exposes admin-only `GET /api/audit` with schema `arca.audit.v1`, pagination, user/action/result filters, and RFC3339 time range filters
 - **Audit event listing**: SQLite and etcd datastores can list audit events in newest-first order for export workflows
 - **CLI upgrade compatibility policy**: `arca check upgrade` now reports supported v0.10 direct upgrade sources, API compatibility IDs, and SQLite schema guardrails

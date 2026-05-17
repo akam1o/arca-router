@@ -26,6 +26,13 @@ Keep a fresh running configuration backup and verify package release notes for s
 - NMS JSON schemas remain additive within their v1 schema IDs.
 - Removals require release-note documentation and at least one minor release with a deprecation warning or compatibility alias.
 
+## Management Transport Security
+
+- Local `arca` access continues to use the restricted Unix socket by default.
+- `arca-routerd --grpc-listen=<host:port> --grpc-tls-cert=<cert> --grpc-tls-key=<key>` enables TCP/TLS gRPC access. Add `--grpc-client-ca=<ca>` to require and verify client certificates.
+- `arca -grpc-address=<host:port>` uses TLS for remote gRPC access, with optional `-grpc-ca`, `-grpc-server-name`, `-grpc-client-cert`, and `-grpc-client-key`.
+- `arca-routerd --web-api-token-file=<path>` enables Web/NMS API automation tokens. The file format is one `name:role:token` entry per line, where `role` is `read-only`, `operator`, or `admin`. Requests may use `Authorization: Bearer <token>` or `X-API-Key: <token>`.
+
 ## Support Matrix
 
 | Component | Supported | Required | Notes |

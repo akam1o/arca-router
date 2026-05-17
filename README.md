@@ -27,7 +27,7 @@ Current capabilities:
 - v0.6-v0.8 config and observability foundations for clustering, VRRP, MPLS, routing instances, QoS, IPv6 parity, BFD, EVPN/VXLAN, streaming telemetry, and NMS APIs
 - Prometheus, health, SNMP, Web UI, Grafana observability, and authenticated Web config workflow
 - SQLite or etcd-backed candidate/running datastore with commit history and etcd config sync
-- v0.10 compatibility preflight, schema migration guardrails, support matrix reporting, and admin-only audit export
+- v0.10 compatibility preflight, schema migration guardrails, support matrix reporting, gRPC TLS/mTLS, Web API token auth, and admin-only audit export
 
 ---
 
@@ -213,6 +213,8 @@ set security rate-limit per-user 20
 ```
 
 > NETCONF is built into `arca-routerd`; no separate NETCONF daemon is needed. When `--netconf-listen` is omitted, the daemon listens on the configured NETCONF port and falls back to `:830`.
+
+For automation against the Web/NMS API, provide a token file with one `name:role:token` entry per line and start the daemon with `--web-api-token-file=/etc/arca-router/web-api-tokens`. Tokens can use `Authorization: Bearer <token>` or `X-API-Key: <token>` and reuse the `read-only`, `operator`, and `admin` RBAC roles.
 
 **Test NETCONF connection**:
 
