@@ -1359,6 +1359,8 @@ func upgradeReleaseReadinessLines() []string {
 		"  release readiness:",
 		"    complete docs/v0.10-operational-runbook.md or docs/v0.10-operational-runbook.ja.md before release sign-off",
 		"    attach docs/v0.10-release-readiness.md evidence for package build, tests, compatibility output, and accepted warnings",
+		fmt.Sprintf("    record lab-only HA/restart/churn gaps and NETCONF capability gaps in %s", compat.DeferredGateDocument),
+		"    release sign-off must list owner, date, commit/tag, accepted warnings, and deferred gates",
 	}
 }
 
@@ -3107,6 +3109,10 @@ func printCompatibilityPolicy() {
 		fmt.Printf("  %s: %s\n", item.Component, item.Supported)
 		fmt.Printf("    required: %s\n", item.Required)
 		fmt.Printf("    notes: %s\n", item.Notes)
+	}
+	fmt.Printf("deferred gates (%s):\n", compat.DeferredGateDocument)
+	for _, gate := range compat.DeferredCompatibilityGates() {
+		fmt.Printf("  - %s\n", gate)
 	}
 }
 

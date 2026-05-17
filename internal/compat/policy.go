@@ -12,6 +12,7 @@ const (
 	NMSTelemetrySnapshot      = "arca.nms.telemetry-snapshot.v1"
 	AuditSchema               = "arca.audit.v1"
 	GRPCAPIPackage            = "arca.router.v1"
+	DeferredGateDocument      = "docs/v0.11-deferred-gates.md"
 )
 
 // Policy describes the release compatibility guarantees for this build line.
@@ -53,13 +54,13 @@ func ComponentMatrix() []ComponentSupport {
 			Component: "VPP",
 			Supported: "24.10+",
 			Required:  "vpp, vpp-plugin-core, linux-cp plugin",
-			Notes:     "QoS scheduler, policer, and counter enforcement stay capability-gated by the detected binapi surface",
+			Notes:     "QoS scheduler, policer, and counter enforcement stay capability-gated; lab soak/restart evidence is deferred to v0.11",
 		},
 		{
 			Component: "FRR",
 			Supported: "8.0+",
 			Required:  "bgpd, ospfd, ospf6d, zebra, staticd, mgmtd, vrrpd, bfdd",
-			Notes:     "transactional mgmtd is the default apply path; file backend remains a recovery compatibility path",
+			Notes:     "transactional mgmtd is the default apply path; lab restart recovery evidence is deferred to v0.11",
 		},
 		{
 			Component: "SQLite datastore",
@@ -71,7 +72,17 @@ func ComponentMatrix() []ComponentSupport {
 			Component: "NETCONF",
 			Supported: "base:1.0 and base:1.1",
 			Required:  "candidate, validate, rollback-on-error",
-			Notes:     "standard :xpath and startup datastore capabilities remain unadvertised until full RFC behavior is implemented",
+			Notes:     "standard :xpath and startup datastore capabilities remain unadvertised in v0.10 and are tracked as v0.11 deferred gates",
 		},
+	}
+}
+
+// DeferredCompatibilityGates returns the release gates intentionally left out of
+// v0.10 compatibility guarantees.
+func DeferredCompatibilityGates() []string {
+	return []string{
+		"HA failover soak, FRR/VPP restart recovery, and 24-hour churn lab evidence",
+		"formal NETCONF startup datastore capability",
+		"standard NETCONF :xpath capability advertisement",
 	}
 }

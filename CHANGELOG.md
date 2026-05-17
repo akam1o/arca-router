@@ -2,6 +2,7 @@
 
 ## v0.10.x - Stabilization and Compatibility (current)
 
+- **Compatibility deferred gates**: `arca show compatibility` now lists v0.11-deferred lab, startup datastore, and standard XPath gates
 - **v0.10 sign-off and deferred gates**: release readiness now records v0.11-deferred lab evidence, startup datastore, standard XPath gates, and final sign-off fields
 - **Upgrade release-readiness guidance**: `arca check upgrade` now points operators at the v0.10 operational runbook and release-readiness evidence checklist
 - **v0.10 release readiness checklist**: documented docs-freeze criteria, support matrix release gates, release-candidate evidence, and deferred compatibility gates
