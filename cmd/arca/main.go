@@ -17,8 +17,10 @@ import (
 	"strings"
 	"time"
 
+	"github.com/akam1o/arca-router/internal/model"
 	grpcclient "github.com/akam1o/arca-router/internal/northbound/grpc"
 	configcli "github.com/akam1o/arca-router/pkg/cli"
+	pkgconfig "github.com/akam1o/arca-router/pkg/config"
 	"github.com/chzyer/readline"
 )
 
@@ -1146,6 +1148,11 @@ func upgradePreflightLines(ctx context.Context, client showClient) ([]string, er
 		lines, warnings = appendUpgradePreflightWarning(lines, warnings, "running configuration is empty")
 	} else {
 		lines = append(lines, fmt.Sprintf("  running config: version %d, %d bytes", runningVersion, len(runningText)))
+		if err := validateConfigurationText(runningText); err != nil {
+			lines, warnings = appendUpgradePreflightWarning(lines, warnings, "running configuration validation failed: "+err.Error())
+		} else {
+			lines = append(lines, "  running validation: ok")
+		}
 	}
 
 	history, err := client.ListHistory(ctx, 1, 0)
@@ -1157,6 +1164,11 @@ func upgradePreflightLines(ctx context.Context, client showClient) ([]string, er
 		lines, warnings = appendUpgradePreflightWarning(lines, warnings, "latest rollback archive has no config text")
 	} else {
 		lines = append(lines, fmt.Sprintf("  rollback archive: latest commit %s available", shortCommitID(history[0].CommitID)))
+		if err := validateConfigurationText(history[0].ConfigText); err != nil {
+			lines, warnings = appendUpgradePreflightWarning(lines, warnings, "latest rollback archive validation failed: "+err.Error())
+		} else {
+			lines = append(lines, "  rollback archive validation: ok")
+		}
 	}
 
 	catalog, err := client.GetTelemetryCatalog(ctx)
@@ -1239,7 +1251,11 @@ func (sh *interactiveShell) cmdRestore(ctx context.Context, args []string) error
 		if err != nil {
 			return fmt.Errorf("read configuration backup: %w", err)
 		}
-		if err := sh.client.ReplaceCandidate(ctx, sh.sessionID, string(data)); err != nil {
+		text := string(data)
+		if err := validateConfigurationText(text); err != nil {
+			return fmt.Errorf("validate configuration backup: %w", err)
+		}
+		if err := sh.client.ReplaceCandidate(ctx, sh.sessionID, text); err != nil {
 			return fmt.Errorf("restore configuration: %w", err)
 		}
 		fmt.Printf("configuration restored to candidate from %s\n", args[1])
@@ -1253,6 +1269,9 @@ func (sh *interactiveShell) cmdRestore(ctx context.Context, args []string) error
 		text, err := sh.archivedConfiguration(ctx, rollbackNum)
 		if err != nil {
 			return err
+		}
+		if err := validateConfigurationText(text); err != nil {
+			return fmt.Errorf("validate rollback configuration: %w", err)
 		}
 		if err := sh.client.ReplaceCandidate(ctx, sh.sessionID, text); err != nil {
 			return fmt.Errorf("restore configuration: %w", err)
@@ -1293,6 +1312,20 @@ func writeConfigBackupFile(path, text string) error {
 	}
 	if closeErr != nil {
 		return fmt.Errorf("close backup file: %w", closeErr)
+	}
+	return nil
+}
+
+func validateConfigurationText(text string) error {
+	cfg, err := pkgconfig.NewParser(strings.NewReader(text)).Parse()
+	if err != nil {
+		return fmt.Errorf("parse config: %w", err)
+	}
+	if err := cfg.Validate(); err != nil {
+		return fmt.Errorf("validate config: %w", err)
+	}
+	if err := model.FromLegacyConfig(cfg).Validate(); err != nil {
+		return fmt.Errorf("validate model: %w", err)
 	}
 	return nil
 }

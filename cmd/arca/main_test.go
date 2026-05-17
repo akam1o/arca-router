@@ -942,7 +942,9 @@ func TestUpgradePreflightLinesReportsReadyState(t *testing.T) {
 	for _, want := range []string{
 		"upgrade preflight:",
 		"running config: version 7",
+		"running validation: ok",
 		"rollback archive: latest commit 12345678 available",
+		"rollback archive validation: ok",
 		"telemetry catalog:",
 		"qos metadata binding: yes",
 		"status: ready for package-specific upgrade checks",
@@ -970,6 +972,39 @@ func TestUpgradePreflightLinesReportsWarnings(t *testing.T) {
 		"warning: no rollback archive entries available",
 		"warning: qos capability snapshot unavailable",
 		"status: 3 warning(s), review before upgrade",
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("upgradePreflightLines() = %q, want substring %q", got, want)
+		}
+	}
+}
+
+func TestUpgradePreflightLinesReportsConfigValidationWarnings(t *testing.T) {
+	client := &fakeInteractiveClient{
+		runningText:    "set system host-name bad_name\n",
+		runningVersion: 7,
+		history: []grpcclient.CommitInfo{
+			{CommitID: "1234567890abcdef", ConfigText: "set system host-name bad_name"},
+		},
+		cosInfo: &grpcclient.ClassOfServiceInfo{
+			Capabilities: &grpcclient.ClassOfServiceCapabilitiesInfo{
+				MetadataBindingSupported: true,
+				QueueSchedulerSupported:  true,
+				PolicerSupported:         true,
+				CountersSupported:        true,
+			},
+		},
+	}
+
+	lines, err := upgradePreflightLines(context.Background(), client)
+	if err != nil {
+		t.Fatalf("upgradePreflightLines() error = %v", err)
+	}
+	got := strings.Join(lines, "\n")
+	for _, want := range []string{
+		"warning: running configuration validation failed:",
+		"warning: latest rollback archive validation failed:",
+		"status: 2 warning(s), review before upgrade",
 	} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("upgradePreflightLines() = %q, want substring %q", got, want)
@@ -1236,6 +1271,29 @@ func TestRestoreConfigurationBackupReplacesCandidate(t *testing.T) {
 	}
 }
 
+func TestRestoreConfigurationBackupValidatesBeforeReplace(t *testing.T) {
+	ctx := context.Background()
+	backupPath := t.TempDir() + "/backup.conf"
+	if err := os.WriteFile(backupPath, []byte("set system host-name bad_name\n"), 0o600); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+	client := &fakeInteractiveClient{}
+	sh := &interactiveShell{
+		client:    client,
+		hostname:  "router",
+		mode:      modeConfiguration,
+		sessionID: "session-1",
+	}
+
+	err := sh.cmdRestore(ctx, []string{"configuration", backupPath})
+	if err == nil || !strings.Contains(err.Error(), "validate configuration backup") {
+		t.Fatalf("cmdRestore(configuration) error = %v, want validation failure", err)
+	}
+	if len(client.replaceTexts) != 0 {
+		t.Fatalf("ReplaceCandidate texts = %#v, want none for invalid backup", client.replaceTexts)
+	}
+}
+
 func TestRestoreConfigurationRollbackReplacesCandidate(t *testing.T) {
 	ctx := context.Background()
 	client := &fakeInteractiveClient{
@@ -1259,6 +1317,30 @@ func TestRestoreConfigurationRollbackReplacesCandidate(t *testing.T) {
 	}
 	if client.listHistoryCalls != 1 || client.listHistoryLimit != 2 {
 		t.Fatalf("ListHistory calls/limit = %d/%d, want 1/2", client.listHistoryCalls, client.listHistoryLimit)
+	}
+}
+
+func TestRestoreConfigurationRollbackValidatesBeforeReplace(t *testing.T) {
+	ctx := context.Background()
+	client := &fakeInteractiveClient{
+		history: []grpcclient.CommitInfo{
+			{CommitID: "commit-new", ConfigText: "set system host-name new"},
+			{CommitID: "commit-old", ConfigText: "set system host-name bad_name"},
+		},
+	}
+	sh := &interactiveShell{
+		client:    client,
+		hostname:  "router",
+		mode:      modeConfiguration,
+		sessionID: "session-1",
+	}
+
+	err := sh.cmdRestore(ctx, []string{"configuration", "rollback", "1"})
+	if err == nil || !strings.Contains(err.Error(), "validate rollback configuration") {
+		t.Fatalf("cmdRestore(configuration rollback 1) error = %v, want validation failure", err)
+	}
+	if len(client.replaceTexts) != 0 {
+		t.Fatalf("ReplaceCandidate texts = %#v, want none for invalid rollback archive", client.replaceTexts)
 	}
 }
 
