@@ -673,6 +673,18 @@ func TestApplySubtreeFilterRejectsInvalidModelPaths(t *testing.T) {
 	}
 }
 
+func TestApplySubtreeFilterRejectsElementAttributes(t *testing.T) {
+	filter := &Filter{Content: []byte(`<interfaces foo="bar"/>`)}
+
+	_, err := ApplySubtreeFilter([]byte(`<data><interfaces/></data>`), filter)
+	if err == nil {
+		t.Fatal("ApplySubtreeFilter() error = nil, want element attribute error")
+	}
+	if !strings.Contains(err.Error(), `subtree filter element attribute "foo" is not supported`) {
+		t.Fatalf("ApplySubtreeFilter() error = %v, want unsupported element attribute", err)
+	}
+}
+
 func TestApplySubtreeFilterRejectsMalformedData(t *testing.T) {
 	_, err := ApplySubtreeFilter([]byte(`<data><interfaces>`), &Filter{Content: []byte(`<interfaces/>`)})
 	if err == nil {

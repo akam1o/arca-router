@@ -943,6 +943,11 @@ func (f *Filter) validateSubtreeContent(rpcName string) error {
 		switch t := token.(type) {
 		case xml.StartElement:
 			depth++
+			if depth >= 2 {
+				if err := validateSubtreeFilterElementAttrs(t.Attr); err != nil {
+					return ErrInvalidFilter(rpcName, err.Error())
+				}
+			}
 			if depth == 2 {
 				topLevelElements++
 			}

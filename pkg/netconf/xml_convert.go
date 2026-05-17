@@ -3,6 +3,7 @@ package netconf
 import (
 	"bytes"
 	"encoding/xml"
+	"errors"
 	"fmt"
 	"io"
 	"sort"
@@ -3318,6 +3319,10 @@ func ValidateFilterDepthAndSize(rpcName string, filter *Filter) error {
 
 	depth, count, err := calculateSubtreeFilterStats(filter)
 	if err != nil {
+		var attrErr *subtreeFilterElementAttrError
+		if errors.As(err, &attrErr) {
+			return ErrInvalidFilter(rpcName, attrErr.Error())
+		}
 		return NewRPCError(ErrorTypeRPC, ErrorTagMalformedMessage,
 			fmt.Sprintf("invalid subtree filter XML: %v", err)).
 			WithPath(fmt.Sprintf("/rpc/%s/filter", rpcName)).

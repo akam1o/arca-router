@@ -1095,6 +1095,15 @@ func TestFilterValidate(t *testing.T) {
 			wantErr: false,
 		},
 		{
+			name: "subtree filter rejects element attribute",
+			filter: &Filter{
+				Type:    "subtree",
+				Content: []byte(`<interfaces foo="bar"/>`),
+			},
+			rpcName: "get-config",
+			wantErr: true,
+		},
+		{
 			name: "subtree filter rejects nested namespace prefix mismatch",
 			filter: &Filter{
 				Type:    "subtree",
@@ -1491,6 +1500,25 @@ func TestValidateFilterDepthAndSizeParsesSubtreeXML(t *testing.T) {
 	}
 	if rpcErr.ErrorTag != ErrorTagMalformedMessage {
 		t.Fatalf("ValidateFilterDepthAndSize() error tag = %s, want %s", rpcErr.ErrorTag, ErrorTagMalformedMessage)
+	}
+}
+
+func TestValidateFilterDepthAndSizeRejectsSubtreeElementAttributes(t *testing.T) {
+	filter := &Filter{Content: []byte(`<interfaces foo="bar"/>`)}
+
+	err := ValidateFilterDepthAndSize("get-config", filter)
+	if err == nil {
+		t.Fatal("ValidateFilterDepthAndSize() error = nil, want element attribute error")
+	}
+	rpcErr, ok := err.(*RPCError)
+	if !ok {
+		t.Fatalf("ValidateFilterDepthAndSize() error = %T, want *RPCError", err)
+	}
+	if rpcErr.ErrorTag != ErrorTagInvalidValue {
+		t.Fatalf("ValidateFilterDepthAndSize() error tag = %s, want %s", rpcErr.ErrorTag, ErrorTagInvalidValue)
+	}
+	if !strings.Contains(rpcErr.ErrorMessage, `subtree filter element attribute "foo" is not supported`) {
+		t.Fatalf("ValidateFilterDepthAndSize() message = %q, want unsupported attribute", rpcErr.ErrorMessage)
 	}
 }
 

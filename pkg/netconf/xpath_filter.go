@@ -29,6 +29,14 @@ type subtreeFilterElement struct {
 	Namespace string
 }
 
+type subtreeFilterElementAttrError struct {
+	message string
+}
+
+func (e *subtreeFilterElementAttrError) Error() string {
+	return e.message
+}
+
 func normalizedFilterType(filter *Filter) string {
 	if filter == nil {
 		return ""
@@ -493,6 +501,9 @@ func parseFilterElementPathsWithContext(filterXML []byte, namespaceAttrs []xml.A
 		case xml.StartElement:
 			depth++
 			if depth >= 2 {
+				if err := validateSubtreeFilterElementAttrs(t.Attr); err != nil {
+					return nil, err
+				}
 				stack = append(stack, subtreeFilterElement{
 					LocalName: t.Name.Local,
 					Namespace: t.Name.Space,
@@ -510,6 +521,26 @@ func parseFilterElementPathsWithContext(filterXML []byte, namespaceAttrs []xml.A
 	}
 
 	return paths, nil
+}
+
+func validateSubtreeFilterElementAttrs(attrs []xml.Attr) error {
+	for _, attr := range attrs {
+		if isNamespaceDeclarationAttribute(attr) {
+			if err := validateNamespaceDeclarationAttr(attr); err != nil {
+				return &subtreeFilterElementAttrError{message: err.Error()}
+			}
+			continue
+		}
+		name := attr.Name.Local
+		if attr.Name.Space != "" {
+			name = attr.Name.Space + ":" + attr.Name.Local
+		}
+		if name == "" {
+			return &subtreeFilterElementAttrError{message: "subtree filter element attribute name must not be empty"}
+		}
+		return &subtreeFilterElementAttrError{message: fmt.Sprintf("subtree filter element attribute %q is not supported", name)}
+	}
+	return nil
 }
 
 func extractMatchingSubtrees(xmlData []byte, element subtreeFilterElement) ([][]byte, error) {
