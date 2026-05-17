@@ -41,8 +41,9 @@ func TestComponentMatrixIncludesDataplaneAndSchemaGuards(t *testing.T) {
 		t.Fatalf("SQLite datastore notes = %q, want schema guardrail", byComponent["SQLite datastore"].Notes)
 	}
 	if !strings.Contains(byComponent["NETCONF"].Required+byComponent["NETCONF"].Notes, "standard :xpath") ||
-		!strings.Contains(byComponent["NETCONF"].Notes, "explicit opt-in") {
-		t.Fatalf("NETCONF notes = %q/%q, want standard :xpath opt-in policy",
+		!strings.Contains(byComponent["NETCONF"].Notes, "advertised by default") ||
+		!strings.Contains(byComponent["NETCONF"].Notes, "startup datastore is intentionally unsupported") {
+		t.Fatalf("NETCONF notes = %q/%q, want standard :xpath default and startup non-support policy",
 			byComponent["NETCONF"].Required, byComponent["NETCONF"].Notes)
 	}
 	if byComponent["VPP"].Supported != "24.10+" || byComponent["FRR"].Supported != "8.0+" {
@@ -55,11 +56,13 @@ func TestDeferredCompatibilityGates(t *testing.T) {
 	gates := strings.Join(DeferredCompatibilityGates(), "\n")
 	for _, want := range []string{
 		"HA failover soak",
-		"startup datastore",
 	} {
 		if !strings.Contains(gates, want) {
 			t.Fatalf("DeferredCompatibilityGates() = %q, want %q", gates, want)
 		}
+	}
+	if strings.Contains(gates, "startup datastore") {
+		t.Fatalf("DeferredCompatibilityGates() = %q, want startup datastore formalized as unsupported instead of deferred", gates)
 	}
 	if DeferredGateDocument != "docs/v0.11-deferred-gates.md" {
 		t.Fatalf("DeferredGateDocument = %q, want docs/v0.11-deferred-gates.md", DeferredGateDocument)

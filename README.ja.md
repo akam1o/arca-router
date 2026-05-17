@@ -215,10 +215,10 @@ set security rate-limit per-user 20
 
 > NETCONF は `arca-routerd` に統合されています。別プロセスの NETCONF デーモンは不要です。`--netconf-listen` を省略した場合、デーモンは設定された NETCONF ポートで待ち受け、未設定時は `:830` を使用します。
 
-Standard NETCONF `:xpath` capability advertisement は
-`arca-routerd --netconf-standard-xpath` で明示的に opt-in できます。
-standard XPath interop evidence を release sign-off に添付するまでは
-default off のままにしてください。
+Standard NETCONF `:xpath` capability advertisement は default で有効です。
+advertised XPath filter を扱えない client との互換性確認が必要な場合のみ、
+`arca-routerd --netconf-standard-xpath=false` で抑止してください。NETCONF
+`startup` datastore は意図的な非対応であり、advertise しません。
 
 **NETCONF 接続のテスト**:
 

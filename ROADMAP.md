@@ -142,17 +142,17 @@ Focus: complete final pre-stable stabilization and compatibility work.
   - Datastore schema migration guardrails
   - Package preflight checks (implemented for packaged install path detection in `arca check upgrade`)
   - Rollback guidance for failed upgrades (implemented in `arca check upgrade` output and compatibility docs)
-  - Formal NETCONF startup datastore support is deferred to v0.11 and must use
-    a separate startup config record instead of aliasing `startup` to the latest
-    running config
+  - NETCONF startup datastore support is intentionally out of scope; `:startup`
+    is not advertised and `<startup/>` RPC targets return
+    `operation-not-supported`
 - **Compatibility guarantees**
   - CLI and configuration compatibility policy
   - API versioning and deprecation policy
   - Supported VPP and FRR version matrix
-  - Standard NETCONF `:xpath` support is available as an explicit opt-in and
-    advertises `urn:ietf:params:netconf:capability:xpath:1.0` in `<hello>` only
-    when enabled after the implementation satisfies RFC 6241 response rules,
-    interoperability expectations, DoS guardrails, and external client coverage
+  - Standard NETCONF `:xpath` support advertises
+    `urn:ietf:params:netconf:capability:xpath:1.0` in `<hello>` by default
+    after ncclient/libnetconf2 evidence covers interoperability expectations,
+    DoS guardrails, and external client behavior
 - **Long-run soak and failure testing**
   - HA failover soak (manual runbook documented; lab execution deferred to v0.11)
   - FRR and VPP restart recovery (manual runbook documented; lab execution deferred to v0.11)
@@ -164,10 +164,10 @@ Focus: complete final pre-stable stabilization and compatibility work.
   - Support matrix (published through compatibility policy and release readiness docs)
   - Operational runbooks (v0.10 runbook documented)
 
-## v0.11.x - Deferred Lab and NETCONF Compatibility Gates
+## v0.11.x - Deferred Lab Compatibility Gates
 
 Focus: complete the gates intentionally deferred from v0.10 because they need a
-dedicated lab environment or additional NETCONF compatibility specification.
+dedicated lab environment.
 
 - **Lab execution**
   - Execute HA failover soak on clustered packages and attach convergence,
@@ -176,13 +176,9 @@ dedicated lab environment or additional NETCONF compatibility specification.
     protocol neighbors or traffic generation
   - Execute 24-hour resource churn and leak checks with CLI, NETCONF, Web/NMS,
     and telemetry traffic
-- **NETCONF startup datastore**
-  - Add opt-in `:startup` advertisement only after independent startup storage,
-    migrations, lock/validate/copy-config semantics, and compatibility tests are
-    implemented
-  - Preserve v0.10 behavior by leaving `<startup/>` targets
-    `operation-not-supported` when the feature is disabled
-- **NETCONF standard XPath default promotion**
-  - Keep the v0.10 opt-in standard `:xpath` path evidence-gated, and promote it
-    to default advertisement only after release-candidate operators accept the
-    interoperability and DoS evidence.
+- **NETCONF compatibility**
+  - Keep startup datastore intentionally unsupported unless a future design
+    reopens it with independent storage, migration, lock, validate, and
+    copy-config semantics.
+  - Re-run standard XPath evidence when client libraries or XPath DoS guardrails
+    change.

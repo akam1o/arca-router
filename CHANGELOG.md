@@ -2,6 +2,8 @@
 
 ## v0.10.x - Stabilization and Compatibility (current)
 
+- **NETCONF standard XPath default**: `arca-routerd` and NETCONF interop helpers now advertise standard `:xpath` by default, while `--netconf-standard-xpath=false` and `-standard-xpath=false` remain available for compatibility suppression tests
+- **NETCONF startup datastore policy**: startup datastore support is now formalized as intentionally unsupported and unadvertised instead of a v0.11 deferred gate
 - **Package architecture guard**: `make deb-package` and `make rpm-package` now reject non-Linux-amd64 binaries before packaging because v0.10 package metadata targets amd64/x86_64
 - **Local release evidence gate**: `make release-evidence-check` now reruns local release checks and verifies default plus standard XPath NETCONF evidence before sign-off
 - **NETCONF evidence CI verification**: NETCONF client interoperability workflow now downloads ncclient and libnetconf2 artifacts and runs `make netconf-evidence-verify` before sign-off
@@ -28,8 +30,8 @@
 - **v0.10 release process examples**: release guide and development quick reference now use v0.10 tag, artifact, and announcement examples
 - **Release readiness make target**: `make release-check` now runs package metadata lint, tests, vet, and whitespace checks for v0.10 sign-off evidence
 - **v0.10 sign-off template**: added English and Japanese release sign-off records for evidence links, accepted warnings, and v0.11 deferred gate approval
-- **Compatibility deferred gates**: `arca show compatibility` now lists v0.11-deferred lab, startup datastore, and standard XPath gates
-- **v0.10 sign-off and deferred gates**: release readiness now records v0.11-deferred lab evidence, startup datastore, standard XPath gates, and final sign-off fields
+- **Compatibility deferred gates**: `arca show compatibility` now lists v0.11-deferred lab gates and NETCONF capability scope
+- **v0.10 sign-off and deferred gates**: release readiness now records v0.11-deferred lab evidence, NETCONF startup non-support, standard XPath evidence, and final sign-off fields
 - **Upgrade release-readiness guidance**: `arca check upgrade` now points operators at the v0.10 operational runbook and release-readiness evidence checklist
 - **v0.10 release readiness checklist**: documented docs-freeze criteria, support matrix release gates, release-candidate evidence, and deferred compatibility gates
 - **v0.10 operational runbook**: documented release-candidate checks for management security, HA failover, FRR/VPP restart recovery, datastore lock recovery, resource churn, and upgrade rollback

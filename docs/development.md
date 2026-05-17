@@ -486,7 +486,7 @@ make security-audit
 make netconf-client-evidence
 make netconf-evidence-verify
 
-# Generate opt-in standard NETCONF :xpath evidence before enabling or claiming it
+# Generate dedicated standard NETCONF :xpath evidence for release sign-off
 make netconf-standard-xpath-evidence
 make netconf-standard-xpath-evidence-verify
 
@@ -499,8 +499,9 @@ make frr-mgmtd-smoke
 
 Attach the ncclient and libnetconf2 artifacts from either
 `artifacts/netconf-clients/` or the `NETCONF Client Interoperability` workflow
-to the v0.10 release sign-off record. Attach the standard XPath artifacts as
-well before enabling or claiming standard NETCONF `:xpath`.
+to the v0.10 release sign-off record. Default evidence must show standard
+NETCONF `:xpath` advertisement, passing XPath RPCs, and startup datastore
+rejection.
 
 `make release-evidence-check` validates the local checks plus the default and
 standard XPath NETCONF evidence directories. It does not replace installed-host

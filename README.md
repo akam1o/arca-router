@@ -215,9 +215,10 @@ set security rate-limit per-user 20
 
 > NETCONF is built into `arca-routerd`; no separate NETCONF daemon is needed. When `--netconf-listen` is omitted, the daemon listens on the configured NETCONF port and falls back to `:830`.
 
-Standard NETCONF `:xpath` capability advertisement is available as an explicit
-opt-in with `arca-routerd --netconf-standard-xpath`. Keep the default off until
-the standard XPath interop evidence is attached to release sign-off.
+Standard NETCONF `:xpath` capability advertisement is enabled by default. Use
+`arca-routerd --netconf-standard-xpath=false` only for compatibility testing
+against clients that cannot handle advertised XPath filters. The NETCONF
+`startup` datastore is intentionally unsupported and is not advertised.
 
 For automation against the Web/NMS API, provide a `0600` token file with one `name:role:token` entry per line and start the daemon with `--web-api-token-file=/etc/arca-router/web-api-tokens`. Tokens can use `Authorization: Bearer <token>` or `X-API-Key: <token>` and reuse the `read-only`, `operator`, and `admin` RBAC roles.
 

@@ -148,8 +148,9 @@ Detailed future scope is maintained in [`ROADMAP.md`](../ROADMAP.md).
   workflow passed and the `netconf-client-ncclient-evidence` and
   `netconf-client-libnetconf2-evidence` artifacts are linked from sign-off, or
   `make netconf-client-evidence` and `make netconf-evidence-verify` were run
-  locally and the artifacts are linked.
-  If standard NETCONF `:xpath` is enabled or claimed for v0.10, also link
+  locally and the artifacts are linked. The artifacts must show default
+  standard NETCONF `:xpath` advertisement, passing XPath RPCs, and startup
+  datastore rejection. Also link
   `netconf-client-ncclient-standard-xpath-evidence` and
   `netconf-client-libnetconf2-standard-xpath-evidence`, or run
   `make netconf-standard-xpath-evidence` and
