@@ -105,6 +105,9 @@ Focus: mature management-plane correctness and operator safety.
 - **Operational safety**
   - Config backup and restore
   - Startup config and rollback archive
+  - NETCONF startup datastore is intentionally not advertised in v0.9; daemon
+    startup continues to load the persisted running snapshot or config file, and
+    NETCONF `<startup/>` RPC targets remain `operation-not-supported`
   - Upgrade preflight checks
   - Failed commit diagnostics
   - QoS enforcement preflight, rollback, and post-commit diagnostics
@@ -127,6 +130,10 @@ Focus: complete final pre-stable stabilization and compatibility work.
   - Datastore schema migration guardrails
   - Package preflight checks
   - Rollback guidance for failed upgrades
+  - Formal NETCONF startup datastore support, if required, should use a separate
+    startup config record with SQLite/etcd migrations, lock/validate/copy-config
+    semantics, and explicit compatibility tests instead of aliasing `startup` to
+    the latest running config
 - **Compatibility guarantees**
   - CLI and configuration compatibility policy
   - API versioning and deprecation policy
