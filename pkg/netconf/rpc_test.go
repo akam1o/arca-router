@@ -531,6 +531,16 @@ func TestConfigElementXMLRejectsInvalidContent(t *testing.T) {
 			want:    "config XML exceeds maximum",
 		},
 		{
+			name:    "too many elements",
+			content: []byte(strings.Repeat("<i/>", MaxXMLElements+1)),
+			want:    "maximum element limit",
+		},
+		{
+			name:    "too deep",
+			content: []byte(strings.Repeat("<a>", MaxXMLDepth+1) + strings.Repeat("</a>", MaxXMLDepth+1)),
+			want:    "maximum depth limit",
+		},
+		{
 			name:    "reserved namespace declaration",
 			content: []byte(`<system xmlns:xml="urn:bad"/>`),
 			want:    "namespace prefix xml must be bound",

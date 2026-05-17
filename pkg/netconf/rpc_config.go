@@ -253,6 +253,7 @@ func validateConfigElementXML(xmlData []byte) *RPCError {
 	decoder.Entity = nil
 
 	depth := 0
+	elementCount := 0
 	for {
 		token, err := decoder.Token()
 		if err == io.EOF {
@@ -266,6 +267,22 @@ func validateConfigElementXML(xmlData []byte) *RPCError {
 
 		switch t := token.(type) {
 		case xml.StartElement:
+			depth++
+			if depth > 1 {
+				elementCount++
+				if elementCount > MaxXMLElements {
+					return NewRPCError(ErrorTypeProtocol, ErrorTagInvalidValue,
+						fmt.Sprintf("config XML exceeds maximum element limit (%d)", MaxXMLElements)).
+						WithPath("/rpc/edit-config/config").
+						WithAppTag("element-limit")
+				}
+				if depth-1 > MaxXMLDepth {
+					return NewRPCError(ErrorTypeProtocol, ErrorTagInvalidValue,
+						fmt.Sprintf("config XML exceeds maximum depth limit (%d)", MaxXMLDepth)).
+						WithPath("/rpc/edit-config/config").
+						WithAppTag("depth-limit")
+				}
+			}
 			if len(t.Attr) > MaxXMLAttributes {
 				return NewRPCError(ErrorTypeProtocol, ErrorTagInvalidValue,
 					fmt.Sprintf("config element %s exceeds maximum attribute limit (%d)", t.Name.Local, MaxXMLAttributes)).
@@ -278,7 +295,6 @@ func validateConfigElementXML(xmlData []byte) *RPCError {
 						WithPath("/rpc/edit-config/config")
 				}
 			}
-			depth++
 		case xml.EndElement:
 			if depth > 0 {
 				depth--
