@@ -1,6 +1,7 @@
 package netconf
 
 import (
+	"encoding/xml"
 	"fmt"
 	"os"
 	"sort"
@@ -243,6 +244,11 @@ func TestYANGValidator_ValidateElementPath(t *testing.T) {
 			wantErr: true,
 		},
 		{
+			name:    "invalid path - undeclared namespace prefix",
+			path:    "/if:interfaces",
+			wantErr: true,
+		},
+		{
 			name:    "empty path",
 			path:    "",
 			wantErr: true,
@@ -254,6 +260,68 @@ func TestYANGValidator_ValidateElementPath(t *testing.T) {
 			err := v.ValidateElementPath(tt.path)
 			if (err != nil) != tt.wantErr {
 				t.Errorf("ValidateElementPath() error = %v, wantErr %v", err, tt.wantErr)
+			}
+		})
+	}
+}
+
+func TestYANGValidatorValidateElementPathWithContext(t *testing.T) {
+	v, err := NewYANGValidator()
+	if err != nil {
+		t.Fatalf("NewYANGValidator() error = %v", err)
+	}
+
+	tests := []struct {
+		name    string
+		path    string
+		attrs   []xml.Attr
+		wantErr bool
+	}{
+		{
+			name: "valid interfaces namespace path",
+			path: "/if:interfaces/if:interface[if:name='ge-0/0/0']",
+			attrs: []xml.Attr{
+				{Name: xml.Name{Space: "xmlns", Local: "if"}, Value: IETFInterfacesNS},
+			},
+			wantErr: false,
+		},
+		{
+			name: "valid arca namespace path",
+			path: "/arca:protocols/arca:bgp/arca:group/arca:neighbor/arca:peer-as",
+			attrs: []xml.Attr{
+				{Name: xml.Name{Space: "xmlns", Local: "arca"}, Value: ArcaConfigNS},
+			},
+			wantErr: false,
+		},
+		{
+			name: "invalid namespace mismatch",
+			path: "/rt:interfaces",
+			attrs: []xml.Attr{
+				{Name: xml.Name{Space: "xmlns", Local: "rt"}, Value: IETFRoutingNS},
+			},
+			wantErr: true,
+		},
+		{
+			name: "invalid predicate namespace mismatch",
+			path: "/if:interfaces/if:interface[rt:name='ge-0/0/0']",
+			attrs: []xml.Attr{
+				{Name: xml.Name{Space: "xmlns", Local: "if"}, Value: IETFInterfacesNS},
+				{Name: xml.Name{Space: "xmlns", Local: "rt"}, Value: IETFRoutingNS},
+			},
+			wantErr: true,
+		},
+		{
+			name:    "invalid undeclared namespace prefix",
+			path:    "/if:interfaces",
+			wantErr: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := v.ValidateElementPathWithContext(tt.path, tt.attrs)
+			if (err != nil) != tt.wantErr {
+				t.Errorf("ValidateElementPathWithContext() error = %v, wantErr %v", err, tt.wantErr)
 			}
 		})
 	}
