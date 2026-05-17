@@ -226,6 +226,24 @@ func oneShotShow(ctx context.Context, client showClient, args []string, f *cliFl
 	subcmd := args[0]
 	switch subcmd {
 	case "configuration":
+		if len(args) > 1 {
+			if len(args) != 3 || args[1] != "rollback" {
+				fmt.Fprintln(os.Stderr, "Error: usage: show configuration rollback <N>")
+				return ExitUsageError
+			}
+			rollbackNum, err := parseRollbackNumber(args[2])
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+				return ExitUsageError
+			}
+			text, err := archivedConfigurationText(ctx, client, rollbackNum)
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+				return ExitOperationError
+			}
+			fmt.Println(text)
+			return ExitSuccess
+		}
 		debugLog(f, "Fetching running configuration via gRPC")
 		text, _, err := client.GetRunning(ctx)
 		if err != nil {
@@ -463,13 +481,13 @@ type interactiveClient interface {
 	Discard(context.Context, string) error
 	Rollback(context.Context, string, string, string, string) (string, uint64, error)
 	Diff(context.Context, string) (string, bool, error)
-	ListHistory(context.Context, int, int) ([]grpcclient.CommitInfo, error)
 	AcquireLock(context.Context, string, string) error
 	ReleaseLock(context.Context, string) error
 }
 
 type showClient interface {
 	GetRunning(context.Context) (string, uint64, error)
+	ListHistory(context.Context, int, int) ([]grpcclient.CommitInfo, error)
 	GetInterfaces(context.Context, string) ([]grpcclient.InterfaceInfo, error)
 	GetRoutingInstances(context.Context) ([]grpcclient.RoutingInstanceInfo, error)
 	GetRoutes(context.Context, string, string) ([]grpcclient.RouteInfo, error)
@@ -1001,13 +1019,17 @@ func (sh *interactiveShell) cmdShowArchivedConfiguration(ctx context.Context, ar
 }
 
 func (sh *interactiveShell) archivedConfiguration(ctx context.Context, rollbackNum int) (string, error) {
-	history, err := sh.client.ListHistory(ctx, rollbackNum+1, 0)
+	return archivedConfigurationText(ctx, sh.client, rollbackNum)
+}
+
+func archivedConfigurationText(ctx context.Context, client showClient, rollbackNum int) (string, error) {
+	history, err := client.ListHistory(ctx, rollbackNum+1, 0)
 	if err != nil {
 		return "", fmt.Errorf("failed to load commit history: %w", err)
 	}
 	if len(history) <= rollbackNum {
 		if rollbackNum == 0 {
-			text, _, err := sh.client.GetRunning(ctx)
+			text, _, err := client.GetRunning(ctx)
 			if err != nil {
 				return "", err
 			}
@@ -1023,7 +1045,7 @@ func (sh *interactiveShell) archivedConfiguration(ctx context.Context, rollbackN
 	entry := history[rollbackNum]
 	if entry.ConfigText == "" {
 		if rollbackNum == 0 {
-			text, _, err := sh.client.GetRunning(ctx)
+			text, _, err := client.GetRunning(ctx)
 			if err != nil {
 				return "", err
 			}

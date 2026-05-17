@@ -1363,6 +1363,39 @@ func TestRoutingInstancesNameFilter(t *testing.T) {
 	}
 }
 
+func TestOneShotShowConfigurationRollbackUsesArchivedConfig(t *testing.T) {
+	client := &fakeInteractiveClient{
+		history: []grpcclient.CommitInfo{
+			{CommitID: "commit-new", ConfigText: "set system host-name new"},
+			{CommitID: "commit-old", ConfigText: "set system host-name old"},
+		},
+	}
+
+	code := oneShotShow(context.Background(), client, []string{"configuration", "rollback", "1"}, &cliFlags{})
+	if code != ExitSuccess {
+		t.Fatalf("oneShotShow(configuration rollback 1) = %d, want %d", code, ExitSuccess)
+	}
+	if client.listHistoryCalls != 1 || client.listHistoryLimit != 2 || client.listHistoryOffset != 0 {
+		t.Fatalf("ListHistory calls/limit/offset = %d/%d/%d, want 1/2/0",
+			client.listHistoryCalls, client.listHistoryLimit, client.listHistoryOffset)
+	}
+	if client.getRunningCalls != 0 {
+		t.Fatalf("GetRunning calls = %d, want 0", client.getRunningCalls)
+	}
+}
+
+func TestOneShotShowConfigurationRollbackRejectsInvalidNumber(t *testing.T) {
+	client := &fakeInteractiveClient{}
+
+	code := oneShotShow(context.Background(), client, []string{"configuration", "rollback", "-1"}, &cliFlags{})
+	if code != ExitUsageError {
+		t.Fatalf("oneShotShow(configuration rollback -1) = %d, want %d", code, ExitUsageError)
+	}
+	if client.listHistoryCalls != 0 {
+		t.Fatalf("ListHistory calls = %d, want 0", client.listHistoryCalls)
+	}
+}
+
 func TestOneShotShowOSPFNeighborReturnsSuccess(t *testing.T) {
 	client := &fakeInteractiveClient{ospfNeighbors: []grpcclient.OSPFNeighborInfo{{RouterID: "10.0.0.2", State: "Full"}}}
 	code := oneShotShow(context.Background(), client, []string{"ospf", "neighbor"}, &cliFlags{})

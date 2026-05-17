@@ -2,6 +2,7 @@
 
 ## v0.9.x - NETCONF/YANG and Operational Safety (current)
 
+- **CLI one-shot rollback archive inspection**: one-shot `arca show configuration rollback <N>` can print archived configuration for shell-based backup workflows
 - **CLI configuration backups**: interactive CLI can write running, candidate, or archived rollback configuration to a new backup file without overwriting existing files
 - **CLI rollback archive inspection**: interactive CLI can show archived configuration for `show configuration rollback <N>` before operators perform a rollback
 - **Config rollback archive exposure**: internal gRPC commit history now includes archived set-command config text for rollback and backup tooling
