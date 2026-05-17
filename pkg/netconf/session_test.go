@@ -165,6 +165,98 @@ func TestSessionAddLockInitializesNilTrackingMap(t *testing.T) {
 	}
 }
 
+func TestSessionManagerNilReceiverMethods(t *testing.T) {
+	var sm *SessionManager
+
+	if session := sm.Create("alice", RoleOperator, nil, nil); session != nil {
+		t.Fatalf("Create() = %#v, want nil", session)
+	}
+	if got := sm.Count(); got != 0 {
+		t.Fatalf("Count() = %d, want 0", got)
+	}
+	if session, ok := sm.Get("missing"); ok || session != nil {
+		t.Fatalf("Get() = %#v, %t; want nil, false", session, ok)
+	}
+	if session, ok := sm.GetByNumericID(1); ok || session != nil {
+		t.Fatalf("GetByNumericID() = %#v, %t; want nil, false", session, ok)
+	}
+	sm.UpdateLastUsed("missing")
+	sm.CloseAll()
+	if err := sm.CloseSession("missing"); err != nil {
+		t.Fatalf("CloseSession() error = %v", err)
+	}
+	if err := sm.CloseSessionByNumericID(1); err == nil {
+		t.Fatal("CloseSessionByNumericID() error = nil, want not found")
+	}
+
+	var wg sync.WaitGroup
+	wg.Add(1)
+	sm.StartCleanup(context.Background(), &wg)
+	wg.Wait()
+}
+
+func TestSessionManagerZeroValueCreatesSession(t *testing.T) {
+	sm := &SessionManager{}
+
+	session := sm.Create("alice", RoleOperator, nil, nil)
+	if session == nil {
+		t.Fatal("Create() = nil, want session")
+	}
+	if session.IdleTimeout != 30*time.Minute {
+		t.Fatalf("IdleTimeout = %s, want 30m", session.IdleTimeout)
+	}
+	if session.AbsoluteTimeout != 24*time.Hour {
+		t.Fatalf("AbsoluteTimeout = %s, want 24h", session.AbsoluteTimeout)
+	}
+	if sm.log == nil {
+		t.Fatal("session manager logger = nil")
+	}
+	if got := sm.Count(); got != 1 {
+		t.Fatalf("Count() = %d, want 1", got)
+	}
+
+	sm.CloseAll()
+	if got := sm.Count(); got != 0 {
+		t.Fatalf("Count() after CloseAll() = %d, want 0", got)
+	}
+}
+
+func TestSessionManagerZeroValueDefaultsPartialConfig(t *testing.T) {
+	config := &SSHConfig{IdleTimeout: time.Hour}
+	sm := &SessionManager{config: config}
+
+	session := sm.Create("alice", RoleOperator, nil, nil)
+	if session == nil {
+		t.Fatal("Create() = nil, want session")
+	}
+	if session.IdleTimeout != time.Hour {
+		t.Fatalf("IdleTimeout = %s, want 1h", session.IdleTimeout)
+	}
+	if session.AbsoluteTimeout != 24*time.Hour {
+		t.Fatalf("AbsoluteTimeout = %s, want 24h", session.AbsoluteTimeout)
+	}
+	if sm.config.MaxSessions != 100 {
+		t.Fatalf("MaxSessions = %d, want 100", sm.config.MaxSessions)
+	}
+	if config.AbsoluteTimeout != 0 || config.MaxSessions != 0 {
+		t.Fatalf("caller config mutated = %#v, want zero optional fields preserved", config)
+	}
+}
+
+func TestNETCONFSessionNilReceiverMethods(t *testing.T) {
+	var session *NETCONFSession
+
+	session.AddLock("candidate")
+	session.RemoveLock("candidate")
+	if locks := session.GetLocks(); locks != nil {
+		t.Fatalf("GetLocks() = %#v, want nil", locks)
+	}
+	session.UpdateLastUsed()
+	if got := session.RemoteAddr(); got != "unknown" {
+		t.Fatalf("RemoteAddr() = %q, want unknown", got)
+	}
+}
+
 func newTestSessionManager(store DatastoreLockReleaser) *SessionManager {
 	cfg := DefaultSSHConfig()
 	cfg.IdleTimeout = time.Hour
