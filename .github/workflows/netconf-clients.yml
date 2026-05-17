@@ -41,6 +41,34 @@ jobs:
     - name: Run ncclient NETCONF interop
       run: bash tests/netconf_clients/run_interop.sh tests/netconf_clients/ncclient_interop.py
 
+  libnetconf2:
+    name: libnetconf2 interop
+    runs-on: ubuntu-24.04
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Set up Go
+      uses: actions/setup-go@v5
+      with:
+        go-version: '1.25.5'
+        cache: true
+
+    - name: Install libnetconf2 client dependencies
+      env:
+        DEBIAN_FRONTEND: noninteractive
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y software-properties-common
+        sudo add-apt-repository -y universe
+        sudo apt-get update
+        sudo apt-get install -y build-essential libnetconf2-dev libssh-dev libyang2-tools openssh-client pkg-config
+        pkg-config --modversion libnetconf2
+
+    - name: Run libnetconf2 NETCONF interop
+      run: bash tests/netconf_clients/libnetconf2_interop.sh
+
   junos-eznc:
     name: Junos PyEZ smoke
     runs-on: ubuntu-latest
