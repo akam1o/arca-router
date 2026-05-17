@@ -7,7 +7,10 @@ capability に昇格する前に、この runbook を実行する。目的は、
 
 ## Scope
 
-2 種類以上の independent client で以下を確認する。
+2 種類以上の independent client family で以下を確認する。
+
+- `ncclient-family` を 1 つ使う。baseline は `ncclient` とする。PyEZ は ncclient stack を使うため、supplementary evidence として記録できる。
+- `libnetconf2-family` を 1 つ使う。必須の 2 種類目として Netopeer2 `netopeer2-cli` またはその他の libnetconf2-based client を使う。
 
 - server `<hello>` が `urn:arca:router:netconf:capability:xpath-filter-subset:1.0` を advertise する。
 - v0.11 gate を明示的に close するまで、server `<hello>` は standard `:xpath` を advertise しない。
@@ -134,13 +137,25 @@ with manager.connect(
 - `node-set` は `ge-0/0/0` を含み、`xe-0/0/0` を含まない。
 - `scalar-rejected` と `attribute-rejected` は `invalid-value` の `rpc-error` を返す。
 
-## Second Client Check
+## Optional PyEZ Smoke
+
+PyEZ は Junos-style automation が Arca に接続する想定の smoke test として有用だが、`ncclient-family` に属する。baseline ncclient check の後に supplementary evidence としてのみ実行する。必須の libnetconf2-family check の代替にはならない。
+
+PyEZ を使う場合:
+
+- PyEZ と ncclient package version を記録する。
+- その PyEZ release が support する raw RPC path で、同等の node-set RPC と rejected RPC を送る。
+- exact script、server capability、RPC payload、reply、exception を添付する。
+- evidence は `supplementary ncclient-family / PyEZ` と label する。
+
+## Required libnetconf2-family Check
 
 同等の RPC を以下のいずれかでも実行する。
 
-- `netconf-console`
 - Netopeer2 `netopeer2-cli`
 - その他の libnetconf2-based client
+
+`netconf-console` は、導入されている tool が ncclient-backed ではないことを確認できる場合のみ acceptable とする。ncclient がすでに pass している場合、PyEZ は同じ client family を確認しているため、この必須 check には使えない。
 
 raw RPC payload と response を保存する。raw namespace-declared XPath filter を送れない client の場合は、standard `:xpath` を enable せず、interoperability deviation として記録する。
 
@@ -149,9 +164,10 @@ raw RPC payload と response を保存する。raw namespace-declared XPath filt
 v0.11 standard XPath gate を close する前に、以下を添付する。
 
 - Arca commit SHA と package version。
-- client name と version。
+- client family、client name、version。
 - server `<hello>` output。
 - RPC payload。
 - reply XML または exception output。
+- PyEZ evidence を収集した場合は、supplementary ncclient-family evidence として label する。
 - interoperability deviation の note。
 - standard `:xpath` は、すべての deviation が accept または fix されるまで advertise されていないことの確認。

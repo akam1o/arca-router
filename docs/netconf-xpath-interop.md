@@ -10,7 +10,12 @@ the results are attached to the release sign-off or v0.11 tracking issue.
 
 ## Scope
 
-Validate these outcomes with at least two independent clients:
+Validate these outcomes with at least two independent client families:
+
+- One `ncclient-family` client. Use `ncclient` as the baseline. PyEZ may be
+  recorded as supplementary evidence because it exercises the ncclient stack.
+- One `libnetconf2-family` client. Use Netopeer2 `netopeer2-cli` or another
+  libnetconf2-based client as the required second family.
 
 - The server `<hello>` advertises `urn:arca:router:netconf:capability:xpath-filter-subset:1.0`.
 - The server `<hello>` does not advertise standard `:xpath` until the v0.11 gate
@@ -143,13 +148,33 @@ Expected result:
 - `scalar-rejected` and `attribute-rejected` return `rpc-error` with
   `invalid-value`.
 
-## Second Client Check
+## Optional PyEZ Smoke
+
+PyEZ is useful when Junos-style automation is expected to reach Arca, but it
+belongs to the `ncclient-family`. Run it after the baseline ncclient check only
+as supplementary evidence. It does not replace the required libnetconf2-family
+check.
+
+If PyEZ is used:
+
+- Record the PyEZ and ncclient package versions.
+- Send equivalent node-set and rejected RPCs through the raw RPC path supported
+  by that PyEZ release.
+- Attach the exact script, server capabilities, RPC payloads, replies, and
+  exceptions.
+- Label the evidence as `supplementary ncclient-family / PyEZ`.
+
+## Required libnetconf2-family Check
 
 Repeat equivalent RPCs with one of:
 
-- `netconf-console`
 - Netopeer2 `netopeer2-cli`
 - another libnetconf2-based client
+
+`netconf-console` is acceptable only when the deployed tool is confirmed not to
+be backed by ncclient. PyEZ is not acceptable for this required check when
+ncclient has already passed, because both clients exercise the same client
+family.
 
 Save the raw RPC payloads and responses. If a client cannot send a raw
 namespace-declared XPath filter, record that limitation as an interoperability
@@ -160,10 +185,12 @@ deviation instead of enabling standard `:xpath`.
 Attach the following before closing the v0.11 standard XPath gate:
 
 - Arca commit SHA and package version.
-- Client names and versions.
+- Client family, client names, and versions.
 - Server `<hello>` output.
 - RPC payloads.
 - Reply XML or exception output.
+- PyEZ evidence, if collected, labeled as supplementary ncclient-family
+  evidence.
 - Notes for every interoperability deviation.
 - Confirmation that standard `:xpath` remains unadvertised until all deviations
   are accepted or fixed.
