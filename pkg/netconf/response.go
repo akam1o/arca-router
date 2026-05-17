@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/xml"
 	"fmt"
+	"io"
 )
 
 const (
@@ -150,7 +151,56 @@ func validateReplyPayload(reply *RPCReply) error {
 	if payloads > 1 {
 		return fmt.Errorf("RPC reply has multiple payloads")
 	}
+	if reply.Data != nil {
+		if err := validateDataReplyContent(reply.Data.Content); err != nil {
+			return err
+		}
+	}
 	return nil
+}
+
+func validateDataReplyContent(content []byte) error {
+	if len(content) > MaxXMLSize {
+		return fmt.Errorf("data reply content exceeds maximum (%d bytes)", MaxXMLSize)
+	}
+	if containsUnsafeXMLDirective(content) {
+		return fmt.Errorf("data reply content contains unsafe XML directives")
+	}
+
+	var wrapped bytes.Buffer
+	wrapped.WriteString("<data")
+	writeXMLAttribute(&wrapped, "xmlns", netconfNamespace)
+	wrapped.WriteByte('>')
+	wrapped.Write(content)
+	wrapped.WriteString("</data>")
+
+	decoder := xml.NewDecoder(bytes.NewReader(wrapped.Bytes()))
+	decoder.Strict = true
+	decoder.Entity = nil
+
+	depth := 0
+	for {
+		token, err := decoder.Token()
+		if err == io.EOF {
+			return nil
+		}
+		if err != nil {
+			return fmt.Errorf("data reply content is malformed: %w", err)
+		}
+
+		switch t := token.(type) {
+		case xml.StartElement:
+			depth++
+		case xml.EndElement:
+			if depth > 0 {
+				depth--
+			}
+		case xml.CharData:
+			if depth == 1 && len(bytes.TrimSpace(t)) > 0 {
+				return fmt.Errorf("data reply content contains text outside elements")
+			}
+		}
+	}
 }
 
 func writeReplyAttributes(buf *bytes.Buffer, attrs []xml.Attr) error {

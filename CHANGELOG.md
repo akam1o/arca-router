@@ -2,6 +2,7 @@
 
 ## v0.9.x - NETCONF/YANG and Operational Safety (current)
 
+- **NETCONF reply data XML validation**: RPC reply marshaling now rejects oversized, unsafe, malformed, or text-only data payloads before writing `<rpc-reply>` XML
 - **NETCONF RPC XML size guard ordering**: RPC parsing now rejects oversized payloads before directive scanning and normalizes directive checks for direct calls
 - **NETCONF hello XML size validation**: direct hello XML parsing now rejects oversized payloads before XML decoding
 - **NETCONF hello XML directive validation**: hello XML parsing now rejects DTD and ENTITY declarations before decoding client capabilities

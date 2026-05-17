@@ -282,6 +282,47 @@ func TestMarshalReplyRejectsInvalidPayloads(t *testing.T) {
 	}
 }
 
+func TestMarshalReplyRejectsInvalidDataContent(t *testing.T) {
+	tests := []struct {
+		name    string
+		content []byte
+		want    string
+	}{
+		{
+			name:    "malformed xml",
+			content: []byte("<interfaces>"),
+			want:    "data reply content is malformed",
+		},
+		{
+			name:    "unsafe directive",
+			content: []byte(`<!DOCTYPE data SYSTEM "evil.dtd"><interfaces/>`),
+			want:    "unsafe XML directives",
+		},
+		{
+			name:    "root text",
+			content: []byte("text"),
+			want:    "text outside elements",
+		},
+		{
+			name:    "oversized",
+			content: bytes.Repeat([]byte("x"), MaxXMLSize+1),
+			want:    "data reply content exceeds maximum",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := MarshalReply(NewDataReply("108", tt.content))
+			if err == nil {
+				t.Fatal("MarshalReply() error = nil, want data content error")
+			}
+			if !strings.Contains(err.Error(), tt.want) {
+				t.Fatalf("MarshalReply() error = %v, want %q", err, tt.want)
+			}
+		})
+	}
+}
+
 func TestMarshalReplyPreservesAttributes(t *testing.T) {
 	reply := NewOKReply("101").WithAttributes([]xml.Attr{
 		{Name: xml.Name{Space: "xmlns", Local: "ex"}, Value: "http://example.net/content/1.0"},
