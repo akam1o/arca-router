@@ -254,6 +254,7 @@ func validateConfigElementXML(xmlData []byte) *RPCError {
 
 	depth := 0
 	elementCount := 0
+	stack := []string{}
 	for {
 		token, err := decoder.Token()
 		if err == io.EOF {
@@ -295,7 +296,11 @@ func validateConfigElementXML(xmlData []byte) *RPCError {
 						WithPath("/rpc/edit-config/config")
 				}
 			}
+			stack = append(stack, t.Name.Local)
 		case xml.EndElement:
+			if len(stack) > 0 {
+				stack = stack[:len(stack)-1]
+			}
 			if depth > 0 {
 				depth--
 			}
@@ -303,6 +308,13 @@ func validateConfigElementXML(xmlData []byte) *RPCError {
 			if depth == 1 && len(bytes.TrimSpace(t)) > 0 {
 				return NewRPCError(ErrorTypeRPC, ErrorTagMalformedMessage,
 					"config XML contains text outside elements").
+					WithPath("/rpc/edit-config/config")
+			}
+			if err := validateConfigTextContent(stack, t); err != nil {
+				if rpcErr, ok := err.(*RPCError); ok {
+					return rpcErr
+				}
+				return NewRPCError(ErrorTypeRPC, ErrorTagMalformedMessage, err.Error()).
 					WithPath("/rpc/edit-config/config")
 			}
 		}

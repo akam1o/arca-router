@@ -526,6 +526,16 @@ func TestConfigElementXMLRejectsInvalidContent(t *testing.T) {
 			want:    "text outside elements",
 		},
 		{
+			name:    "container text",
+			content: []byte(`<system>junk</system>`),
+			want:    "unexpected text",
+		},
+		{
+			name:    "mixed container text",
+			content: []byte(`<system>junk<host-name>router1</host-name></system>`),
+			want:    "unexpected text",
+		},
+		{
 			name:    "oversized",
 			content: bytes.Repeat([]byte("x"), MaxXMLSize+1),
 			want:    "config XML exceeds maximum",
