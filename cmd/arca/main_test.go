@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"os"
 	"strings"
 	"testing"
 	"time"
@@ -19,6 +20,7 @@ type fakeInteractiveClient struct {
 	releaseLockErr   error
 	history          []grpcclient.CommitInfo
 	runningText      string
+	candidateText    string
 	routeText        string
 	routeProtocol    string
 	routeFamily      string
@@ -63,6 +65,7 @@ type fakeInteractiveClient struct {
 	listHistoryLimit              int
 	listHistoryOffset             int
 	getRunningCalls               int
+	getCandidateCalls             int
 	rollbackCalls                 int
 	telemetryCatalogCalls         int
 	filteredTelemetryCatalogCalls int
@@ -85,7 +88,8 @@ func (f *fakeInteractiveClient) GetRunning(ctx context.Context) (string, uint64,
 }
 
 func (f *fakeInteractiveClient) GetCandidate(ctx context.Context, sessionID string) (string, error) {
-	return "", nil
+	f.getCandidateCalls++
+	return f.candidateText, nil
 }
 
 func (f *fakeInteractiveClient) EditCandidate(ctx context.Context, sessionID, configText string) error {
@@ -920,6 +924,108 @@ func TestShowConfigurationRollbackRejectsMissingArchive(t *testing.T) {
 	err := sh.cmdShow(ctx, []string{"configuration", "rollback", "1"})
 	if err == nil || !strings.Contains(err.Error(), "archived config text unavailable") {
 		t.Fatalf("cmdShow(configuration rollback 1) error = %v, want archive unavailable", err)
+	}
+}
+
+func TestBackupConfigurationWritesRunningConfig(t *testing.T) {
+	ctx := context.Background()
+	backupPath := t.TempDir() + "/running.conf"
+	client := &fakeInteractiveClient{runningText: "set system host-name running"}
+	sh := &interactiveShell{
+		client:    client,
+		hostname:  "router",
+		mode:      modeOperational,
+		sessionID: "session-1",
+	}
+
+	if err := sh.cmdBackup(ctx, []string{"configuration", backupPath}); err != nil {
+		t.Fatalf("cmdBackup(configuration) error = %v", err)
+	}
+	data, err := os.ReadFile(backupPath)
+	if err != nil {
+		t.Fatalf("ReadFile() error = %v", err)
+	}
+	if string(data) != "set system host-name running\n" {
+		t.Fatalf("backup content = %q, want running config with trailing newline", string(data))
+	}
+	if client.getRunningCalls != 1 || client.getCandidateCalls != 0 {
+		t.Fatalf("running/candidate calls = %d/%d, want 1/0", client.getRunningCalls, client.getCandidateCalls)
+	}
+}
+
+func TestBackupConfigurationWritesCandidateConfig(t *testing.T) {
+	ctx := context.Background()
+	backupPath := t.TempDir() + "/candidate.conf"
+	client := &fakeInteractiveClient{candidateText: "set system host-name candidate"}
+	sh := &interactiveShell{
+		client:    client,
+		hostname:  "router",
+		mode:      modeConfiguration,
+		sessionID: "session-1",
+	}
+
+	if err := sh.cmdBackup(ctx, []string{"configuration", backupPath}); err != nil {
+		t.Fatalf("cmdBackup(configuration) error = %v", err)
+	}
+	data, err := os.ReadFile(backupPath)
+	if err != nil {
+		t.Fatalf("ReadFile() error = %v", err)
+	}
+	if string(data) != "set system host-name candidate\n" {
+		t.Fatalf("backup content = %q, want candidate config with trailing newline", string(data))
+	}
+	if client.getCandidateCalls != 1 || client.getRunningCalls != 0 {
+		t.Fatalf("candidate/running calls = %d/%d, want 1/0", client.getCandidateCalls, client.getRunningCalls)
+	}
+}
+
+func TestBackupConfigurationWritesArchivedRollbackConfig(t *testing.T) {
+	ctx := context.Background()
+	backupPath := t.TempDir() + "/rollback.conf"
+	client := &fakeInteractiveClient{
+		history: []grpcclient.CommitInfo{
+			{CommitID: "commit-new", ConfigText: "set system host-name new"},
+			{CommitID: "commit-old", ConfigText: "set system host-name old"},
+		},
+	}
+	sh := &interactiveShell{
+		client:    client,
+		hostname:  "router",
+		mode:      modeOperational,
+		sessionID: "session-1",
+	}
+
+	if err := sh.cmdBackup(ctx, []string{"configuration", "rollback", "1", backupPath}); err != nil {
+		t.Fatalf("cmdBackup(configuration rollback 1) error = %v", err)
+	}
+	data, err := os.ReadFile(backupPath)
+	if err != nil {
+		t.Fatalf("ReadFile() error = %v", err)
+	}
+	if string(data) != "set system host-name old\n" {
+		t.Fatalf("backup content = %q, want archived rollback config", string(data))
+	}
+	if client.listHistoryCalls != 1 || client.listHistoryLimit != 2 {
+		t.Fatalf("ListHistory calls/limit = %d/%d, want 1/2", client.listHistoryCalls, client.listHistoryLimit)
+	}
+}
+
+func TestBackupConfigurationRefusesOverwrite(t *testing.T) {
+	backupPath := t.TempDir() + "/running.conf"
+	if err := os.WriteFile(backupPath, []byte("existing\n"), 0o600); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+
+	err := writeConfigBackupFile(backupPath, "set system host-name running")
+	if err == nil || !strings.Contains(err.Error(), "create backup file") {
+		t.Fatalf("writeConfigBackupFile() error = %v, want create backup failure", err)
+	}
+	data, err := os.ReadFile(backupPath)
+	if err != nil {
+		t.Fatalf("ReadFile() error = %v", err)
+	}
+	if string(data) != "existing\n" {
+		t.Fatalf("backup content = %q, want existing content preserved", string(data))
 	}
 }
 
