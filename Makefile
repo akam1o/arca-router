@@ -1,4 +1,4 @@
-.PHONY: help build build-cli clean rpm rpm-package deb deb-package version test fmt vet check install-nfpm integration-test frr-mgmtd-smoke package-lint generate-binapi generate-proto
+.PHONY: help build build-cli clean rpm rpm-package deb deb-package version test fmt vet check release-check install-nfpm integration-test frr-mgmtd-smoke package-lint generate-binapi generate-proto
 
 # Binary names
 BINARY_NAME=arca-routerd
@@ -40,7 +40,7 @@ version: ## Display version information
 	@echo "Build Date: $(BUILD_DATE)"
 	@echo "EPOCH:      $(SOURCE_DATE_EPOCH)"
 
-build: ## Build current v0.6 binaries (unified arca-routerd and arca CLI)
+build: ## Build current binaries (unified arca-routerd and arca CLI)
 	@echo "Building $(BINARY_NAME) and $(CLI_BINARY_NAME)..."
 	@mkdir -p $(BUILD_DIR)
 	CGO_ENABLED=1 SOURCE_DATE_EPOCH=$(SOURCE_DATE_EPOCH) go build $(BUILD_FLAGS) -o $(BUILD_DIR)/$(BINARY_NAME) ./cmd/arca-routerd
@@ -74,6 +74,13 @@ vet: ## Run go vet
 
 check: fmt vet test ## Run all checks (fmt, vet, test)
 	@echo "All checks passed"
+
+release-check: package-lint ## Run local v0.10 release readiness checks
+	@echo "Running v0.10 release readiness checks..."
+	go test ./...
+	go vet ./...
+	git diff --check
+	@echo "v0.10 release readiness checks passed"
 
 clean: ## Clean build artifacts
 	@echo "Cleaning..."
@@ -187,7 +194,7 @@ frr-mgmtd-smoke: ## Run live FRR mgmtd transactional apply smoke test
 	@echo "Running live FRR mgmtd smoke test..."
 	ARCA_FRR_MGMTD_SMOKE=1 go test -v ./pkg/frr -run TestFRRMgmtdSmokeApplyAndCleanup -count=1
 
-package-lint: ## Validate package metadata and v0.6 service expectations
+package-lint: ## Validate package metadata and current service expectations
 	@echo "Linting package metadata..."
 	@for script in build/package/scripts/*.sh; do sh -n "$$script"; done
 	@grep -q 'SupplementaryGroups=vpp frrvty' build/systemd/arca-routerd.service
