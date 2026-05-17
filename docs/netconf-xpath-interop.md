@@ -206,6 +206,8 @@ Attach the following before closing the v0.11 standard XPath gate:
 - GitHub Actions `NETCONF Client Interoperability` artifacts named
   `netconf-client-ncclient-evidence`, `netconf-client-libnetconf2-evidence`,
   and, when scheduled or manually run, `netconf-client-junos-eznc-evidence`.
+  The workflow `verify interop evidence` job must pass for the required
+  ncclient and libnetconf2 artifacts.
 - Arca commit SHA and package version.
 - Client family, client names, and versions.
 - Server `<hello>` output.

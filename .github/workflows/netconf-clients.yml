@@ -85,6 +85,30 @@ jobs:
         path: artifacts/netconf-clients/libnetconf2
         if-no-files-found: ignore
 
+  evidence-verify:
+    name: verify interop evidence
+    runs-on: ubuntu-24.04
+    needs: [ ncclient, libnetconf2 ]
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Download ncclient evidence
+      uses: actions/download-artifact@v4
+      with:
+        name: netconf-client-ncclient-evidence
+        path: artifacts/netconf-clients/ncclient
+
+    - name: Download libnetconf2 evidence
+      uses: actions/download-artifact@v4
+      with:
+        name: netconf-client-libnetconf2-evidence
+        path: artifacts/netconf-clients/libnetconf2
+
+    - name: Verify NETCONF evidence
+      run: make netconf-evidence-verify
+
   junos-eznc:
     name: Junos PyEZ smoke
     runs-on: ubuntu-latest
