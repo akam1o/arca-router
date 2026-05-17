@@ -33,6 +33,90 @@ module ietf-interfaces {
       leaf enabled {
         type boolean;
       }
+      leaf admin-status {
+        type string;
+      }
+      leaf oper-status {
+        type string;
+      }
+      leaf phys-address {
+        type string;
+      }
+      leaf qos-profile {
+        type string;
+      }
+      leaf ipv4-table-id {
+        type uint32;
+      }
+      leaf ipv6-table-id {
+        type uint32;
+      }
+      container statistics {
+        leaf rx-packets {
+          type uint64;
+        }
+        leaf tx-packets {
+          type uint64;
+        }
+        leaf rx-bytes {
+          type uint64;
+        }
+        leaf tx-bytes {
+          type uint64;
+        }
+        leaf rx-errors {
+          type uint64;
+        }
+        leaf tx-errors {
+          type uint64;
+        }
+        leaf drops {
+          type uint64;
+        }
+      }
+      container queue-placements {
+        container rx-queues {
+          list rx-queue {
+            leaf queue-id {
+              type uint32;
+            }
+            leaf worker-id {
+              type uint32;
+            }
+            leaf mode {
+              type string;
+            }
+          }
+        }
+        container tx-queues {
+          list tx-queue {
+            leaf queue-id {
+              type uint32;
+            }
+            leaf shared {
+              type boolean;
+            }
+            container threads {
+              leaf-list thread {
+                type uint32;
+              }
+            }
+          }
+        }
+      }
+      container addresses {
+        list address {
+          leaf unit {
+            type uint32;
+          }
+          leaf family {
+            type string;
+          }
+          leaf ip {
+            type string;
+          }
+        }
+      }
     }
   }
 }
@@ -234,6 +318,37 @@ var routingOptionsYANGAliasPaths = []string{
 }
 
 var operationalStateYANGPaths = []string{
+	"interfaces/interface/admin-status",
+	"interfaces/interface/oper-status",
+	"interfaces/interface/phys-address",
+	"interfaces/interface/qos-profile",
+	"interfaces/interface/ipv4-table-id",
+	"interfaces/interface/ipv6-table-id",
+	"interfaces/interface/statistics",
+	"interfaces/interface/statistics/rx-packets",
+	"interfaces/interface/statistics/tx-packets",
+	"interfaces/interface/statistics/rx-bytes",
+	"interfaces/interface/statistics/tx-bytes",
+	"interfaces/interface/statistics/rx-errors",
+	"interfaces/interface/statistics/tx-errors",
+	"interfaces/interface/statistics/drops",
+	"interfaces/interface/queue-placements",
+	"interfaces/interface/queue-placements/rx-queues",
+	"interfaces/interface/queue-placements/rx-queues/rx-queue",
+	"interfaces/interface/queue-placements/rx-queues/rx-queue/queue-id",
+	"interfaces/interface/queue-placements/rx-queues/rx-queue/worker-id",
+	"interfaces/interface/queue-placements/rx-queues/rx-queue/mode",
+	"interfaces/interface/queue-placements/tx-queues",
+	"interfaces/interface/queue-placements/tx-queues/tx-queue",
+	"interfaces/interface/queue-placements/tx-queues/tx-queue/queue-id",
+	"interfaces/interface/queue-placements/tx-queues/tx-queue/shared",
+	"interfaces/interface/queue-placements/tx-queues/tx-queue/threads",
+	"interfaces/interface/queue-placements/tx-queues/tx-queue/threads/thread",
+	"interfaces/interface/addresses",
+	"interfaces/interface/addresses/address",
+	"interfaces/interface/addresses/address/unit",
+	"interfaces/interface/addresses/address/family",
+	"interfaces/interface/addresses/address/ip",
 	"state",
 	"state/interfaces",
 	"state/routes",

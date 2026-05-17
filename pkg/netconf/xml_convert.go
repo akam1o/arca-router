@@ -439,6 +439,14 @@ func outputXPathFilter(filter *Filter) *XPathFilter {
 }
 
 func interfaceMatchesXPathPredicates(xpathFilter *XPathFilter, name string, iface *config.Interface) bool {
+	return interfacePredicatesMatch(xpathFilter, name, iface, nil, false)
+}
+
+func interfaceStateMatchesXPathPredicates(xpathFilter *XPathFilter, name string, iface *config.Interface, state *InterfaceOperationalState) bool {
+	return interfacePredicatesMatch(xpathFilter, name, iface, state, true)
+}
+
+func interfacePredicatesMatch(xpathFilter *XPathFilter, name string, iface *config.Interface, state *InterfaceOperationalState, includeState bool) bool {
 	segmentIndex, ok := xpathListSegmentIndex(xpathFilter, []string{"interfaces", "interface"})
 	if !ok {
 		return true
@@ -451,6 +459,44 @@ func interfaceMatchesXPathPredicates(xpathFilter *XPathFilter, name string, ifac
 		case "description":
 			if iface != nil {
 				got = iface.Description
+			}
+		case "admin-status":
+			if !includeState {
+				return false
+			}
+			got = interfaceAdminStatus(state)
+		case "oper-status":
+			if !includeState {
+				return false
+			}
+			got = interfaceOperStatus(state)
+		case "phys-address":
+			if !includeState {
+				return false
+			}
+			if state != nil {
+				got = state.MAC
+			}
+		case "qos-profile":
+			if !includeState {
+				return false
+			}
+			if state != nil {
+				got = state.QoSProfile
+			}
+		case "ipv4-table-id":
+			if !includeState {
+				return false
+			}
+			if state != nil {
+				got = strconv.FormatUint(uint64(state.IPv4TableID), 10)
+			}
+		case "ipv6-table-id":
+			if !includeState {
+				return false
+			}
+			if state != nil {
+				got = strconv.FormatUint(uint64(state.IPv6TableID), 10)
 			}
 		default:
 			return false

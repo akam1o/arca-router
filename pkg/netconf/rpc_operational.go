@@ -625,7 +625,7 @@ func writeInterfaceStateXML(buf *bytes.Buffer, interfaces map[string]*config.Int
 		if iface == nil && state == nil {
 			continue
 		}
-		if !interfaceMatchesXPathPredicates(xpathFilter, name, iface) {
+		if !interfaceStateMatchesXPathPredicates(xpathFilter, name, iface, state) {
 			continue
 		}
 		buf.WriteString("    <interface>\n")

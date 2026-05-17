@@ -1147,6 +1147,18 @@ func TestFilterValidate(t *testing.T) {
 			wantErr: false,
 		},
 		{
+			name: "xpath filter interface operational state predicate",
+			filter: &Filter{
+				Type:   "xpath",
+				Select: "/if:interfaces/if:interface[if:admin-status='up']",
+				Attrs: []xml.Attr{
+					{Name: xml.Name{Space: "xmlns", Local: "if"}, Value: IETFInterfacesNS},
+				},
+			},
+			rpcName: "get",
+			wantErr: false,
+		},
+		{
 			name: "xpath filter namespace prefix inherited from rpc",
 			filter: &Filter{
 				Type:   "xpath",

@@ -212,6 +212,37 @@ func TestBuildOperationalDataUsesLiveInterfaceState(t *testing.T) {
 	}
 }
 
+func TestBuildOperationalDataFiltersInterfaceStateXPathPredicates(t *testing.T) {
+	cfg := config.NewConfig()
+	filter := &Filter{Type: "xpath", Select: "/interfaces/interface[admin-status='up']"}
+	data, err := buildOperationalData(cfg, filter, time.Date(2026, 5, 12, 4, 0, 0, 0, time.UTC), map[string]*InterfaceOperationalState{
+		"ge-0/0/0": {
+			Name:        "ge-0/0/0",
+			AdminStatus: "up",
+			OperStatus:  "up",
+		},
+		"xe-0/0/0": {
+			Name:        "xe-0/0/0",
+			AdminStatus: "down",
+			OperStatus:  "down",
+		},
+	}, nil, nil, nil, nil, nil)
+	if err != nil {
+		t.Fatalf("buildOperationalData() error = %v", err)
+	}
+
+	for _, want := range []string{"<interfaces", "<name>ge-0/0/0</name>", "<admin-status>up</admin-status>"} {
+		if !bytes.Contains(data, []byte(want)) {
+			t.Fatalf("operational data missing filtered interface value %q:\n%s", want, data)
+		}
+	}
+	for _, unexpected := range []string{"xe-0/0/0", "<admin-status>down</admin-status>"} {
+		if bytes.Contains(data, []byte(unexpected)) {
+			t.Fatalf("operational data included predicate-mismatched interface value %q:\n%s", unexpected, data)
+		}
+	}
+}
+
 func TestBuildOperationalDataWritesBFDState(t *testing.T) {
 	cfg := config.NewConfig()
 	data, err := buildOperationalData(cfg, nil, time.Date(2026, 5, 12, 4, 0, 0, 0, time.UTC), nil, nil, nil, nil, nil, &BFDOperationalState{

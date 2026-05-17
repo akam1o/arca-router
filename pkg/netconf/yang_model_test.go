@@ -142,6 +142,26 @@ func TestYANGValidator_ValidateElementPath(t *testing.T) {
 			wantErr: false,
 		},
 		{
+			name:    "valid interface operational status path",
+			path:    "/interfaces/interface/admin-status",
+			wantErr: false,
+		},
+		{
+			name:    "valid interface operational counter path",
+			path:    "/interfaces/interface/statistics/rx-packets",
+			wantErr: false,
+		},
+		{
+			name:    "valid interface operational queue path",
+			path:    "/interfaces/interface/queue-placements/rx-queues/rx-queue/worker-id",
+			wantErr: false,
+		},
+		{
+			name:    "valid interface operational address path",
+			path:    "/interfaces/interface/addresses/address/ip",
+			wantErr: false,
+		},
+		{
 			name:    "valid chassis path",
 			path:    "/chassis",
 			wantErr: false,
