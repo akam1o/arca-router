@@ -2,6 +2,7 @@
 
 ## v0.10.x - Stabilization and Compatibility (current)
 
+- **v0.10 operational runbook**: documented release-candidate checks for management security, HA failover, FRR/VPP restart recovery, datastore lock recovery, resource churn, and upgrade rollback
 - **Web API token file permissions**: `--web-api-token-file` now rejects token files that are not restricted to `0600`
 - **Upgrade package preflight guidance**: `arca check upgrade` now reports packaged install path checks when a packaged layout is detected and prints rollback guidance for package upgrade windows
 - **Web API token authentication**: `arca-routerd --web-api-token-file` enables Bearer token or `X-API-Key` authentication for Web/NMS automation, using the existing read-only/operator/admin RBAC checks
