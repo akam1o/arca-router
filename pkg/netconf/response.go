@@ -73,12 +73,14 @@ func normalizeRPCError(err *RPCError) *RPCError {
 	if err == nil {
 		return ErrOperationFailed("rpc error unavailable")
 	}
-	if err.ErrorType != "" && err.ErrorTag != "" && err.ErrorSeverity != "" {
+	if err.ErrorType != "" && err.ErrorTag != "" && err.ErrorSeverity != "" && !isEmptyErrorInfo(err.ErrorInfo) {
 		return err
 	}
 
 	normalized := *err
-	if err.ErrorInfo != nil {
+	if isEmptyErrorInfo(err.ErrorInfo) {
+		normalized.ErrorInfo = nil
+	} else {
 		info := *err.ErrorInfo
 		normalized.ErrorInfo = &info
 	}
@@ -92,6 +94,14 @@ func normalizeRPCError(err *RPCError) *RPCError {
 		normalized.ErrorSeverity = ErrorSeverityError
 	}
 	return &normalized
+}
+
+func isEmptyErrorInfo(info *ErrorInfo) bool {
+	return info != nil &&
+		info.BadElement == "" &&
+		info.BadAttribute == "" &&
+		info.BadNamespace == "" &&
+		info.LockOwnerSession == ""
 }
 
 func validateRPCErrorFields(err *RPCError) error {

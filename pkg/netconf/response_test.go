@@ -278,6 +278,30 @@ func TestMarshalReplyNormalizesIncompleteErrors(t *testing.T) {
 	}
 }
 
+func TestMarshalReplyOmitsEmptyErrorInfo(t *testing.T) {
+	err := &RPCError{
+		ErrorType:     ErrorTypeRPC,
+		ErrorTag:      ErrorTagOperationFailed,
+		ErrorSeverity: ErrorSeverityError,
+		ErrorMessage:  "hand-built error",
+		ErrorInfo:     &ErrorInfo{},
+	}
+	reply := NewErrorReply("105", err)
+
+	data, marshalErr := MarshalReply(reply)
+	if marshalErr != nil {
+		t.Fatalf("MarshalReply() error = %v", marshalErr)
+	}
+
+	xmlStr := string(data)
+	if strings.Contains(xmlStr, "<error-info") {
+		t.Fatalf("MarshalReply() = %s, want empty error-info omitted", xmlStr)
+	}
+	if err.ErrorInfo == nil {
+		t.Fatal("MarshalReply() mutated caller-owned error info")
+	}
+}
+
 func TestMarshalReplyRejectsInvalidErrorEnums(t *testing.T) {
 	tests := []struct {
 		name string
