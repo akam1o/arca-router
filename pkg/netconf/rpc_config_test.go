@@ -342,6 +342,36 @@ func TestGetConfigCandidateFallsBackToRunningWhenMissing(t *testing.T) {
 	}
 }
 
+func TestGetConfigExperimentalXPathFilterSupportsFunctions(t *testing.T) {
+	ds := &copyConfigDatastore{
+		running: &datastore.RunningConfig{ConfigText: strings.Join([]string{
+			`set interfaces ge-0/0/0 description "uplink"`,
+			`set interfaces xe-0/0/0 description "peer"`,
+			"",
+		}, "\n")},
+	}
+
+	reply := copyConfigParsedRPC(t, ds, `<rpc message-id="101" xmlns="urn:ietf:params:xml:ns:netconf:base:1.0">
+		<get-config>
+			<source><running/></source>
+			<filter type="xpath" xmlns:if="urn:ietf:params:xml:ns:yang:ietf-interfaces" select="/if:interfaces/if:interface[contains(if:name, 'ge-0/0/0')]"/>
+		</get-config>
+	</rpc>`)
+	if len(reply.Errors) != 0 {
+		t.Fatalf("get-config experimental xpath errors = %#v, want none", reply.Errors)
+	}
+	if reply.Data == nil {
+		t.Fatal("get-config experimental xpath data = nil, want data")
+	}
+	gotXML := string(reply.Data.Content)
+	if !strings.Contains(gotXML, "ge-0/0/0") {
+		t.Fatalf("get-config experimental xpath missing match:\n%s", gotXML)
+	}
+	if strings.Contains(gotXML, "xe-0/0/0") || strings.Contains(gotXML, "peer") {
+		t.Fatalf("get-config experimental xpath included mismatch:\n%s", gotXML)
+	}
+}
+
 func TestEditConfigStartupTargetRejectedAsUnsupported(t *testing.T) {
 	reply := copyConfigParsedRPC(t, &copyConfigDatastore{}, `<rpc message-id="101" xmlns="urn:ietf:params:xml:ns:netconf:base:1.0">
 		<edit-config>
