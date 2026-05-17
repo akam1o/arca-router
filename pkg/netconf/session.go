@@ -222,6 +222,7 @@ func (sm *SessionManager) closeSession(session *NETCONFSession, reason string) {
 	session.cancel()
 
 	// Release all held datastore locks
+	releasedLocks := 0
 	if sm.datastore != nil {
 		locks := session.GetLocks()
 		for _, target := range locks {
@@ -235,6 +236,8 @@ func (sm *SessionManager) closeSession(session *NETCONFSession, reason string) {
 					"target", target,
 					"error", err)
 			} else {
+				session.RemoveLock(target)
+				releasedLocks++
 				sm.log.Info("Lock released on session close",
 					"session_id", session.ID,
 					"target", target)
@@ -252,7 +255,7 @@ func (sm *SessionManager) closeSession(session *NETCONFSession, reason string) {
 		_ = session.channel.Close()
 	}
 
-	sm.log.Info("Session closed", "id", session.ID, "user", session.Username, "reason", reason, "locks_released", len(session.GetLocks()))
+	sm.log.Info("Session closed", "id", session.ID, "user", session.Username, "reason", reason, "locks_released", releasedLocks)
 }
 
 // UpdateLastUsed updates the last used timestamp for a session

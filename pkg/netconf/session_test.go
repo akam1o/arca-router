@@ -107,6 +107,9 @@ func TestSessionManagerCloseAllClearsScaledSessionsAndLocks(t *testing.T) {
 		if _, ok := sm.GetByNumericID(session.NumericID); ok {
 			t.Fatalf("GetByNumericID(%d) found session after CloseAll()", session.NumericID)
 		}
+		if locks := session.GetLocks(); len(locks) != 0 {
+			t.Fatalf("session %q locks after CloseAll() = %#v, want none", session.ID, locks)
+		}
 	}
 }
 

@@ -2,6 +2,7 @@
 
 ## v0.9.x - NETCONF/YANG and Operational Safety (current)
 
+- **NETCONF session close lock cleanup**: session shutdown now removes successfully released datastore locks from session bookkeeping and reports the actual release count
 - **NETCONF session lock tracking hardening**: session lock bookkeeping now initializes missing lock maps on demand so hand-built embedded sessions can acquire locks without panicking
 - **NETCONF session manager defaults**: direct `SessionManager` construction now fills default SSH timeouts and logger dependencies when embedded callers pass nil values
 - **NETCONF RPC entrypoint hardening**: `HandleRPC` now returns stable `operation-failed` replies for missing server, session, or RPC context instead of panicking in embedded callers
