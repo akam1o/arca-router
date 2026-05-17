@@ -266,6 +266,7 @@ func validateDataReplyContent(content []byte) error {
 	decoder.Entity = nil
 
 	depth := 0
+	elementCount := 0
 	for {
 		token, err := decoder.Token()
 		if err == io.EOF {
@@ -278,6 +279,23 @@ func validateDataReplyContent(content []byte) error {
 		switch t := token.(type) {
 		case xml.StartElement:
 			depth++
+			if depth > 1 {
+				elementCount++
+				if elementCount > MaxXMLElements {
+					return fmt.Errorf("data reply content exceeds maximum element limit (%d)", MaxXMLElements)
+				}
+				if depth-1 > MaxXMLDepth {
+					return fmt.Errorf("data reply content exceeds maximum depth limit (%d)", MaxXMLDepth)
+				}
+				if len(t.Attr) > MaxXMLAttributes {
+					return fmt.Errorf("data reply element %s exceeds maximum attribute limit (%d)", t.Name.Local, MaxXMLAttributes)
+				}
+			}
+			for _, attr := range t.Attr {
+				if err := validateNamespaceDeclarationAttr(attr); err != nil {
+					return err
+				}
+			}
 		case xml.EndElement:
 			if depth > 0 {
 				depth--

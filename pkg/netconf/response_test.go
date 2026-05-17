@@ -414,6 +414,22 @@ func TestMarshalReplyRejectsInvalidDataContent(t *testing.T) {
 			content: bytes.Repeat([]byte("x"), MaxXMLSize+1),
 			want:    "data reply content exceeds maximum",
 		},
+		{
+			name:    "too many elements",
+			content: []byte(strings.Repeat("<i/>", MaxXMLElements+1)),
+			want:    "maximum element limit",
+		},
+		{
+			name:    "too deep",
+			content: []byte(strings.Repeat("<a>", MaxXMLDepth+1) + strings.Repeat("</a>", MaxXMLDepth+1)),
+			want:    "maximum depth limit",
+		},
+		{
+			name: "too many attributes",
+			content: []byte(`<a a0="x" a1="x" a2="x" a3="x" a4="x" a5="x" a6="x" a7="x" a8="x" a9="x" ` +
+				`a10="x" a11="x" a12="x" a13="x" a14="x" a15="x" a16="x" a17="x" a18="x" a19="x" a20="x"/>`),
+			want: "maximum attribute limit",
+		},
 	}
 
 	for _, tt := range tests {

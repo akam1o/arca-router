@@ -2,6 +2,7 @@
 
 ## v0.9.x - NETCONF/YANG and Operational Safety (current)
 
+- **NETCONF reply data XML limit validation**: RPC reply marshaling now applies element, depth, and attribute limits to hand-built data payload XML
 - **NETCONF RPC namespace context validation**: direct RPC operation unmarshaling now rejects reserved namespace declarations before constructing operation XML
 - **NETCONF config helper XML validation**: direct config XML helper output now rejects oversized, unsafe, malformed, text-only, or reserved-namespace content before returning XML bytes
 - **NETCONF filter reserved namespace validation**: direct filter validation now rejects reserved namespace declarations on filter attributes and inherited namespace context
