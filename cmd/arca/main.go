@@ -13,6 +13,7 @@ import (
 	"io"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -36,6 +37,8 @@ const (
 	ExitUsageError     = 2
 
 	defaultSocket = "/run/arca-router/routerd.sock"
+
+	checkUpgradeUsage = "usage: check upgrade [backup <path>]"
 
 	maxChangeImpactInterfaceDetails = 5
 	maxChangeImpactRouteDetails     = 5
@@ -97,7 +100,8 @@ Commands:
   help              Show this help message
   version           Show version information
   show <subcommand> Show configuration or status
-  check upgrade     Run upgrade preflight checks
+  check upgrade [backup <path>]
+                    Run upgrade preflight checks
   backup configuration <path>
                     Save running configuration to a new file
   backup configuration rollback <N> <path>
@@ -215,11 +219,12 @@ func runOneShotCommand(ctx context.Context, f *cliFlags, args []string) int {
 }
 
 func oneShotCheck(ctx context.Context, client showClient, args []string) int {
-	if len(args) != 1 || args[0] != "upgrade" {
-		fmt.Fprintln(os.Stderr, "Error: usage: check upgrade")
+	options, err := parseUpgradePreflightOptions(args)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 		return ExitUsageError
 	}
-	lines, err := upgradePreflightLines(ctx, client)
+	lines, err := upgradePreflightLinesWithOptions(ctx, client, options)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 		return ExitOperationError
@@ -794,13 +799,14 @@ func (sh *interactiveShell) releaseConfigurationLock(ctx context.Context) error 
 }
 
 func (sh *interactiveShell) cmdCheck(ctx context.Context, args []string) error {
-	if len(args) != 1 || args[0] != "upgrade" {
-		return fmt.Errorf("usage: check upgrade")
+	options, err := parseUpgradePreflightOptions(args)
+	if err != nil {
+		return err
 	}
 	if sh.mode != modeOperational {
 		return fmt.Errorf("'check upgrade' only available in operational mode")
 	}
-	lines, err := upgradePreflightLines(ctx, sh.client)
+	lines, err := upgradePreflightLinesWithOptions(ctx, sh.client, options)
 	if err != nil {
 		return err
 	}
@@ -1137,6 +1143,24 @@ func archivedConfigurationText(ctx context.Context, client showClient, rollbackN
 }
 
 func upgradePreflightLines(ctx context.Context, client showClient) ([]string, error) {
+	return upgradePreflightLinesWithOptions(ctx, client, upgradePreflightOptions{})
+}
+
+type upgradePreflightOptions struct {
+	BackupPath string
+}
+
+func parseUpgradePreflightOptions(args []string) (upgradePreflightOptions, error) {
+	if len(args) == 1 && args[0] == "upgrade" {
+		return upgradePreflightOptions{}, nil
+	}
+	if len(args) == 3 && args[0] == "upgrade" && args[1] == "backup" {
+		return upgradePreflightOptions{BackupPath: args[2]}, nil
+	}
+	return upgradePreflightOptions{}, fmt.Errorf(checkUpgradeUsage)
+}
+
+func upgradePreflightLinesWithOptions(ctx context.Context, client showClient, options upgradePreflightOptions) ([]string, error) {
 	runningText, runningVersion, err := client.GetRunning(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("load running configuration: %w", err)
@@ -1199,6 +1223,10 @@ func upgradePreflightLines(ctx context.Context, client showClient) ([]string, er
 		}
 	}
 
+	if options.BackupPath != "" {
+		lines, warnings = appendUpgradeBackupPathCheck(lines, warnings, options.BackupPath)
+	}
+
 	if warnings == 0 {
 		lines = append(lines, "  status: ready for package-specific upgrade checks")
 	} else {
@@ -1210,6 +1238,40 @@ func upgradePreflightLines(ctx context.Context, client showClient) ([]string, er
 
 func appendUpgradePreflightWarning(lines []string, warnings int, message string) ([]string, int) {
 	return append(lines, "  warning: "+message), warnings + 1
+}
+
+func appendUpgradeBackupPathCheck(lines []string, warnings int, path string) ([]string, int) {
+	if strings.TrimSpace(path) == "" {
+		return appendUpgradePreflightWarning(lines, warnings, "backup path must not be empty")
+	}
+	if _, err := os.Stat(path); err == nil {
+		return appendUpgradePreflightWarning(lines, warnings, "backup path already exists: "+path)
+	} else if !errors.Is(err, os.ErrNotExist) {
+		return appendUpgradePreflightWarning(lines, warnings, "backup path cannot be checked: "+err.Error())
+	}
+
+	dir := filepath.Dir(path)
+	if info, err := os.Stat(dir); err != nil {
+		return appendUpgradePreflightWarning(lines, warnings, "backup directory unavailable: "+err.Error())
+	} else if !info.IsDir() {
+		return appendUpgradePreflightWarning(lines, warnings, "backup directory is not a directory: "+dir)
+	}
+
+	probePath := filepath.Join(dir, fmt.Sprintf(".arca-upgrade-preflight-%d-%d.tmp", os.Getpid(), time.Now().UnixNano()))
+	file, err := os.OpenFile(probePath, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
+	if err != nil {
+		return appendUpgradePreflightWarning(lines, warnings, "backup directory is not writable: "+err.Error())
+	}
+	closeErr := file.Close()
+	removeErr := os.Remove(probePath)
+	if closeErr != nil {
+		return appendUpgradePreflightWarning(lines, warnings, "backup path probe close failed: "+closeErr.Error())
+	}
+	if removeErr != nil && !errors.Is(removeErr, os.ErrNotExist) {
+		return appendUpgradePreflightWarning(lines, warnings, "backup path probe cleanup failed: "+removeErr.Error())
+	}
+
+	return append(lines, "  backup path: writable "+path), warnings
 }
 
 func (sh *interactiveShell) cmdBackup(ctx context.Context, args []string) error {
@@ -2120,7 +2182,7 @@ func (sh *interactiveShell) showHelp() {
 		fmt.Println("  help                          Show this help message")
 		fmt.Println("  backup configuration <path>   Save running configuration to a file")
 		fmt.Println("  backup configuration rollback <N> <path> Save archived config to a file")
-		fmt.Println("  check upgrade                 Run upgrade preflight checks")
+		fmt.Println("  check upgrade [backup <path>] Run upgrade preflight checks")
 		fmt.Println("  configure                     Enter configuration mode")
 		fmt.Println("  show configuration            Show running configuration")
 		fmt.Println("  show configuration rollback <N> Show archived config N commits back")
@@ -3520,7 +3582,9 @@ func createCompleter() *readline.PrefixCompleter {
 			readline.PcItem("comment"),
 		),
 		readline.PcItem("check",
-			readline.PcItem("upgrade"),
+			readline.PcItem("upgrade",
+				readline.PcItem("backup"),
+			),
 		),
 		readline.PcItem("backup",
 			readline.PcItem("configuration",
