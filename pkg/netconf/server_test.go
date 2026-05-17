@@ -190,3 +190,10 @@ func TestValidateInlineSourceWithoutDatastoreSucceeds(t *testing.T) {
 		t.Fatal("validate inline OK = nil, want ok")
 	}
 }
+
+func TestServerHookSettersNilReceiver(t *testing.T) {
+	var srv *Server
+
+	srv.SetCommitHook(nil)
+	srv.SetOperationalStateProvider(nil)
+}

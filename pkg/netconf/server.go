@@ -40,11 +40,17 @@ func NewServer(ds datastore.Datastore, sm *SessionManager) *Server {
 
 // SetCommitHook installs a commit coordinator for NETCONF commits.
 func (s *Server) SetCommitHook(h CommitHook) {
+	if s == nil {
+		return
+	}
 	s.commitHook = h
 }
 
 // SetOperationalStateProvider installs a live-state source for <get> replies.
 func (s *Server) SetOperationalStateProvider(provider OperationalStateProvider) {
+	if s == nil {
+		return
+	}
 	s.operationalProvider = provider
 }
 

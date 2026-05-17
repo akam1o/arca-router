@@ -188,14 +188,14 @@ func cleanupDatastoreEphemeralState(ctx context.Context, ds datastore.Datastore)
 
 // SetCommitHook installs a commit coordinator for NETCONF commits.
 func (s *SSHServer) SetCommitHook(h CommitHook) {
-	if s.netconfServer != nil {
+	if s != nil && s.netconfServer != nil {
 		s.netconfServer.SetCommitHook(h)
 	}
 }
 
 // SetOperationalStateProvider installs a live-state source for <get> replies.
 func (s *SSHServer) SetOperationalStateProvider(provider OperationalStateProvider) {
-	if s.netconfServer != nil {
+	if s != nil && s.netconfServer != nil {
 		s.netconfServer.SetOperationalStateProvider(provider)
 	}
 }

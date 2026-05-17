@@ -193,6 +193,13 @@ func TestNewSSHServerDefaultsPartialConfig(t *testing.T) {
 	}
 }
 
+func TestSSHServerHookSettersNilReceiver(t *testing.T) {
+	var server *SSHServer
+
+	server.SetCommitHook(nil)
+	server.SetOperationalStateProvider(nil)
+}
+
 func testSSHServerConfig(t *testing.T, listenAddr string) (*SSHConfig, string) {
 	t.Helper()
 
