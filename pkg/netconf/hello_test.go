@@ -530,3 +530,50 @@ func TestUnmarshalHelloRejectsTrailingContent(t *testing.T) {
 		})
 	}
 }
+
+func TestUnmarshalHelloRejectsUnsafeDirectives(t *testing.T) {
+	tests := []struct {
+		name string
+		xml  string
+	}{
+		{
+			name: "doctype",
+			xml: `<!DOCTYPE hello SYSTEM "evil.dtd">
+<hello xmlns="urn:ietf:params:xml:ns:netconf:base:1.0">
+  <capabilities>
+    <capability>urn:ietf:params:netconf:base:1.0</capability>
+  </capabilities>
+</hello>`,
+		},
+		{
+			name: "entity",
+			xml: `<!ENTITY xxe SYSTEM "file:///etc/passwd">
+<hello xmlns="urn:ietf:params:xml:ns:netconf:base:1.0">
+  <capabilities>
+    <capability>urn:ietf:params:netconf:base:1.0</capability>
+  </capabilities>
+</hello>`,
+		},
+		{
+			name: "lowercase doctype",
+			xml: `<!doctype hello SYSTEM "evil.dtd">
+<hello xmlns="urn:ietf:params:xml:ns:netconf:base:1.0">
+  <capabilities>
+    <capability>urn:ietf:params:netconf:base:1.0</capability>
+  </capabilities>
+</hello>`,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := UnmarshalHello([]byte(tt.xml))
+			if err == nil {
+				t.Fatal("UnmarshalHello() error = nil, want unsafe directive error")
+			}
+			if !strings.Contains(err.Error(), "DTD and ENTITY declarations are not allowed") {
+				t.Fatalf("UnmarshalHello() error = %v, want unsafe directive error", err)
+			}
+		})
+	}
+}

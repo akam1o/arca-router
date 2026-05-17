@@ -67,6 +67,11 @@ func MarshalHello(hello *Hello) ([]byte, error) {
 // UnmarshalHello unmarshals XML data into a Hello message
 func UnmarshalHello(data []byte) (*Hello, error) {
 	var hello Hello
+	upperData := bytes.ToUpper(data)
+	if bytes.Contains(upperData, []byte("<!DOCTYPE")) || bytes.Contains(upperData, []byte("<!ENTITY")) {
+		return nil, fmt.Errorf("unmarshal hello: DTD and ENTITY declarations are not allowed")
+	}
+
 	decoder := xml.NewDecoder(bytes.NewReader(data))
 	decoder.Strict = true
 	decoder.Entity = nil
