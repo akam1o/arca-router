@@ -16,7 +16,7 @@ capability に昇格する前に、この runbook を実行する。目的は、
 - v0.11 gate を明示的に close するまで、server `<hello>` は standard `:xpath` を advertise しない。
 - `get-config` と `get` の XPath filter が node-set result を返す。
 - scalar expression、attribute selection、invalid XPath、unsupported path、undeclared prefix、namespace mismatch が deterministic な `rpc-error` を返す。
-- expression size、input XML size、selected element count、output size、depth、attribute count、evaluation guardrail を確認する。
+- expression size、input XML size、selected element count、output size、depth、attribute count、evaluation timeout guardrail を確認する。
 
 ## Test Server Setup
 

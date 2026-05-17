@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestExperimentalXPathFilterSupportsFunctions(t *testing.T) {
@@ -149,6 +150,26 @@ func TestExperimentalXPathFilterRejectsInputAttributeLimit(t *testing.T) {
 	}
 	if rpcErr, ok := err.(*RPCError); !ok || rpcErr.ErrorTag != ErrorTagInvalidValue || rpcErr.ErrorAppTag != "attribute-limit" {
 		t.Fatalf("applyExperimentalXPathFilter() error = %#v, want invalid-value attribute-limit RPCError", err)
+	}
+}
+
+func TestExperimentalXPathEvaluationTimeout(t *testing.T) {
+	_, err := runExperimentalXPathEvaluation("get-config", time.Millisecond, func() (bool, error) {
+		time.Sleep(10 * time.Millisecond)
+		return true, nil
+	})
+	if err == nil {
+		t.Fatal("runExperimentalXPathEvaluation() error = nil, want timeout")
+	}
+	rpcErr, ok := err.(*RPCError)
+	if !ok {
+		t.Fatalf("runExperimentalXPathEvaluation() error = %#v, want RPCError", err)
+	}
+	if rpcErr.ErrorTag != ErrorTagOperationFailed || rpcErr.ErrorAppTag != "timeout" {
+		t.Fatalf("runExperimentalXPathEvaluation() error = %#v, want operation-failed timeout RPCError", err)
+	}
+	if rpcErr.ErrorPath != "/rpc/get-config/filter" {
+		t.Fatalf("runExperimentalXPathEvaluation() path = %q, want /rpc/get-config/filter", rpcErr.ErrorPath)
 	}
 }
 
