@@ -31,6 +31,7 @@ This directory contains user guides, design notes, and internal drafts for `arca
 - `docs/development.md`
 - `docs/release-process.md`
 - `docs/v0.10-operational-runbook.md`
+- `docs/v0.10-operational-runbook.ja.md`
 
 ## Security / Operations
 - `docs/security-model.md` (Japanese)
