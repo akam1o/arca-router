@@ -8,7 +8,13 @@ from jnpr.junos import Device
 CAP_BASE_10 = "urn:ietf:params:netconf:base:1.0"
 CAP_BASE_11 = "urn:ietf:params:netconf:base:1.1"
 CAP_CANDIDATE = "urn:ietf:params:netconf:capability:candidate:1.0"
+CAP_VALIDATE = "urn:ietf:params:netconf:capability:validate:1.1"
+CAP_ROLLBACK = "urn:ietf:params:netconf:capability:rollback-on-error:1.0"
 CAP_STARTUP = "urn:ietf:params:netconf:capability:startup:1.0"
+CAP_WRITABLE_RUNNING = "urn:ietf:params:netconf:capability:writable-running:1.0"
+CAP_CONFIRMED_COMMIT = "urn:ietf:params:netconf:capability:confirmed-commit:1.1"
+CAP_ARCA_ROUTER = "urn:arca:router:config:1.0?module=arca-router&revision=2025-12-27"
+CAP_ARCA_XPATH_FILTER_SUBSET = "urn:arca:router:netconf:capability:xpath-filter-subset:1.0"
 
 
 def parse_args():
@@ -44,11 +50,27 @@ def main():
             fail("Device.open() returned but device is not connected")
 
         caps = {str(cap) for cap in dev._conn.server_capabilities}
-        missing = sorted({CAP_BASE_10, CAP_BASE_11, CAP_CANDIDATE} - caps)
+        required = {
+            CAP_BASE_10,
+            CAP_BASE_11,
+            CAP_CANDIDATE,
+            CAP_VALIDATE,
+            CAP_ROLLBACK,
+            CAP_ARCA_ROUTER,
+            CAP_ARCA_XPATH_FILTER_SUBSET,
+        }
+        missing = sorted(required - caps)
         if missing:
             fail(f"missing server capabilities: {missing}")
-        if CAP_STARTUP in caps:
-            fail("startup capability should not be advertised")
+
+        forbidden = {
+            CAP_STARTUP,
+            CAP_WRITABLE_RUNNING,
+            CAP_CONFIRMED_COMMIT,
+        }
+        advertised = sorted(forbidden & caps)
+        if advertised:
+            fail(f"unsupported capabilities were advertised: {advertised}")
     finally:
         if dev.connected:
             dev.close()

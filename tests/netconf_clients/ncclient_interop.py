@@ -13,9 +13,12 @@ CAP_BASE_10 = "urn:ietf:params:netconf:base:1.0"
 CAP_BASE_11 = "urn:ietf:params:netconf:base:1.1"
 CAP_CANDIDATE = "urn:ietf:params:netconf:capability:candidate:1.0"
 CAP_VALIDATE = "urn:ietf:params:netconf:capability:validate:1.1"
+CAP_ROLLBACK = "urn:ietf:params:netconf:capability:rollback-on-error:1.0"
 CAP_STARTUP = "urn:ietf:params:netconf:capability:startup:1.0"
 CAP_WRITABLE_RUNNING = "urn:ietf:params:netconf:capability:writable-running:1.0"
 CAP_CONFIRMED_COMMIT = "urn:ietf:params:netconf:capability:confirmed-commit:1.1"
+CAP_ARCA_ROUTER = "urn:arca:router:config:1.0?module=arca-router&revision=2025-12-27"
+CAP_ARCA_XPATH_FILTER_SUBSET = "urn:arca:router:netconf:capability:xpath-filter-subset:1.0"
 
 
 def parse_args():
@@ -38,6 +41,9 @@ def assert_capabilities(caps):
         CAP_BASE_11,
         CAP_CANDIDATE,
         CAP_VALIDATE,
+        CAP_ROLLBACK,
+        CAP_ARCA_ROUTER,
+        CAP_ARCA_XPATH_FILTER_SUBSET,
     }
     missing = sorted(required - caps)
     if missing:
@@ -105,6 +111,23 @@ def main():
             "operation-not-supported",
         )
 
+        assert_rpc_error(
+            lambda: dispatch_xml(
+                session,
+                f"""
+                <edit-config xmlns="{NETCONF_NS}">
+                  <target><running/></target>
+                  <config>
+                    <system>
+                      <host-name>running-write-ci</host-name>
+                    </system>
+                  </config>
+                </edit-config>
+                """,
+            ),
+            "operation-not-supported",
+        )
+
         session.lock(target="candidate")
         locked = True
         try:
@@ -130,6 +153,39 @@ def main():
             updated = session.get_config(source="running").data_xml
             if "ncclient-ci" not in updated:
                 fail("committed hostname was not visible in running configuration")
+
+            session.lock(target="candidate")
+            locked = True
+            discard_config = """
+            <config>
+              <system>
+                <host-name>discarded-ci</host-name>
+              </system>
+            </config>
+            """
+            session.edit_config(
+                target="candidate",
+                config=discard_config,
+                default_operation="replace",
+                test_option="test-then-set",
+                error_option="rollback-on-error",
+            )
+            session.validate(source="candidate")
+
+            candidate = session.get_config(source="candidate").data_xml
+            if "discarded-ci" not in candidate:
+                fail("candidate did not include staged hostname before discard")
+
+            dispatch_xml(session, f'<discard-changes xmlns="{NETCONF_NS}"/>')
+
+            discarded = session.get_config(source="candidate").data_xml
+            if "discarded-ci" in discarded:
+                fail("discarded hostname was still visible in candidate configuration")
+            if "ncclient-ci" not in discarded:
+                fail("candidate fallback after discard did not reflect running configuration")
+
+            session.unlock(target="candidate")
+            locked = False
 
             assert_rpc_error(
                 lambda: dispatch_xml(
