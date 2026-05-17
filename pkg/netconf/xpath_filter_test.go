@@ -555,6 +555,10 @@ func TestApplySubtreeFilterCopiesUnfilteredData(t *testing.T) {
 			filter: &Filter{},
 		},
 		{
+			name:   "whitespace filter",
+			filter: &Filter{Content: []byte(" \n\t ")},
+		},
+		{
 			name:   "explicit subtree filter",
 			filter: &Filter{Type: "\n subtree \t"},
 		},
@@ -603,6 +607,67 @@ func TestApplySubtreeFilterRejectsUnsupportedFilterTypes(t *testing.T) {
 			}
 			if !strings.Contains(err.Error(), "unsupported subtree filter type") {
 				t.Fatalf("ApplySubtreeFilter() error = %v, want unsupported subtree filter type", err)
+			}
+		})
+	}
+}
+
+func TestApplySubtreeFilterRejectsEmptyNonElementFilters(t *testing.T) {
+	tests := []struct {
+		name   string
+		filter *Filter
+	}{
+		{
+			name:   "comment only",
+			filter: &Filter{Content: []byte(`<!-- no element -->`)},
+		},
+		{
+			name:   "text only",
+			filter: &Filter{Content: []byte(`junk`)},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := ApplySubtreeFilter([]byte(`<data><interfaces/></data>`), tt.filter)
+			if err == nil {
+				t.Fatal("ApplySubtreeFilter() error = nil, want empty subtree filter error")
+			}
+			if !strings.Contains(err.Error(), "subtree filter must contain at least one element") {
+				t.Fatalf("ApplySubtreeFilter() error = %v, want missing element error", err)
+			}
+		})
+	}
+}
+
+func TestApplySubtreeFilterRejectsInvalidModelPaths(t *testing.T) {
+	tests := []struct {
+		name   string
+		filter *Filter
+	}{
+		{
+			name:   "unknown top-level element",
+			filter: &Filter{Content: []byte(`<unknown/>`)},
+		},
+		{
+			name: "namespace mismatch",
+			filter: &Filter{
+				Content: []byte(`<rt:interfaces/>`),
+				Attrs: []xml.Attr{
+					{Name: xml.Name{Space: "xmlns", Local: "rt"}, Value: IETFRoutingNS},
+				},
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := ApplySubtreeFilter([]byte(`<data><interfaces/></data>`), tt.filter)
+			if err == nil {
+				t.Fatal("ApplySubtreeFilter() error = nil, want invalid path error")
+			}
+			if !strings.Contains(err.Error(), "invalid subtree filter path") {
+				t.Fatalf("ApplySubtreeFilter() error = %v, want invalid path error", err)
 			}
 		})
 	}

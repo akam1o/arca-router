@@ -373,19 +373,21 @@ func ApplySubtreeFilter(xmlData []byte, filter *Filter) ([]byte, error) {
 	default:
 		return nil, fmt.Errorf("unsupported subtree filter type: %s", filterType)
 	}
-	if len(filter.Content) == 0 {
+	if len(bytes.TrimSpace(filter.Content)) == 0 {
 		return append([]byte(nil), xmlData...), nil
 	}
 
-	// Parse filter as XML to extract element structure
-	filterElements, err := filter.parseTopLevelElementSpecs()
+	filterPaths, err := filter.parseElementPaths()
 	if err != nil {
 		return nil, fmt.Errorf("invalid subtree filter: %w", err)
 	}
-
-	if len(filterElements) == 0 {
-		return append([]byte(nil), xmlData...), nil // Empty filter matches all
+	if len(filterPaths) == 0 {
+		return nil, fmt.Errorf("subtree filter must contain at least one element")
 	}
+	if err := validateSubtreeFilterPaths(filterPaths); err != nil {
+		return nil, fmt.Errorf("invalid subtree filter path: %w", err)
+	}
+	filterElements := topLevelSubtreeFilterElements(filterPaths)
 
 	var result bytes.Buffer
 	result.WriteString(`<?xml version="1.0" encoding="UTF-8"?>` + "\n")
@@ -404,6 +406,16 @@ func ApplySubtreeFilter(xmlData []byte, filter *Filter) ([]byte, error) {
 
 	result.WriteString("</data>\n")
 	return result.Bytes(), nil
+}
+
+func topLevelSubtreeFilterElements(paths [][]subtreeFilterElement) []subtreeFilterElement {
+	elements := make([]subtreeFilterElement, 0, len(paths))
+	for _, path := range paths {
+		if len(path) == 1 {
+			elements = append(elements, path[0])
+		}
+	}
+	return elements
 }
 
 // parseFilterElements extracts top-level element names from filter XML
