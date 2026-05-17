@@ -187,6 +187,11 @@ func TestYANGValidator_ValidateElementPath(t *testing.T) {
 			wantErr: false,
 		},
 		{
+			name:    "valid NETCONF routing XML alias BFD source path",
+			path:    "/routing/static-routes/route/bfd-source",
+			wantErr: false,
+		},
+		{
 			name:    "valid NETCONF routing state route path",
 			path:    "/routing/routing-state/routes/route/destination-prefix",
 			wantErr: false,
