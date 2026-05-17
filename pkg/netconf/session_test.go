@@ -134,6 +134,26 @@ func TestNewSessionManagerDefaultsNilDependencies(t *testing.T) {
 	}
 }
 
+func TestNewSessionManagerDefaultsPartialConfig(t *testing.T) {
+	config := &SSHConfig{IdleTimeout: time.Hour}
+
+	sm := NewSessionManager(config, nil, nil)
+	session := sm.Create("alice", RoleOperator, nil, nil)
+
+	if session.IdleTimeout != time.Hour {
+		t.Fatalf("IdleTimeout = %s, want 1h", session.IdleTimeout)
+	}
+	if session.AbsoluteTimeout != 24*time.Hour {
+		t.Fatalf("AbsoluteTimeout = %s, want 24h", session.AbsoluteTimeout)
+	}
+	if sm.config.MaxSessions != 100 {
+		t.Fatalf("MaxSessions = %d, want 100", sm.config.MaxSessions)
+	}
+	if config.AbsoluteTimeout != 0 || config.MaxSessions != 0 {
+		t.Fatalf("caller config mutated = %#v, want zero optional fields preserved", config)
+	}
+}
+
 func TestSessionAddLockInitializesNilTrackingMap(t *testing.T) {
 	session := &Session{}
 
