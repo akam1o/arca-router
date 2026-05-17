@@ -2,6 +2,7 @@
 
 ## v0.10.x - Stabilization and Compatibility (current)
 
+- **NETCONF XPath evaluation timeout**: experimental XPath evaluation now fails deterministically with a timeout `rpc-error` when expression evaluation exceeds the guardrail
 - **NETCONF XPath client-family policy**: clarified that PyEZ is supplementary ncclient-family smoke and that standard `:xpath` promotion requires libnetconf2-family evidence
 - **NETCONF XPath interop runbook**: documented ncclient and second-client evidence collection before standard `:xpath` advertisement
 - **NETCONF experimental XPath guardrails**: XPath evaluation now enforces expression length, element count, depth, and attribute limits before response shaping

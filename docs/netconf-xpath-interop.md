@@ -25,7 +25,7 @@ Validate these outcomes with at least two independent client families:
   undeclared prefixes, and namespace mismatches return deterministic
   `rpc-error` responses.
 - Expression size, input XML size, selected element count, output size, depth,
-  attribute count, and evaluation guardrails are exercised.
+  attribute count, and evaluation timeout guardrails are exercised.
 
 ## Test Server Setup
 
