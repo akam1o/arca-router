@@ -54,9 +54,7 @@ type SSHServer struct {
 
 // NewSSHServer creates a new SSH server instance
 func NewSSHServer(config *SSHConfig) (*SSHServer, error) {
-	if config == nil {
-		config = DefaultSSHConfig()
-	}
+	config = sshConfigWithDefaults(config)
 
 	log := logger.New("netconf-ssh", logger.DefaultConfig())
 
