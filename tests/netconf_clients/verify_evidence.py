@@ -76,7 +76,14 @@ def parse_args():
     parser.add_argument(
         "--expect-standard-xpath",
         action="store_true",
-        help="require standard NETCONF :xpath capability instead of forbidding it",
+        default=True,
+        help="require standard NETCONF :xpath capability advertisement (default)",
+    )
+    parser.add_argument(
+        "--no-standard-xpath",
+        dest="expect_standard_xpath",
+        action="store_false",
+        help="forbid standard NETCONF :xpath capability advertisement",
     )
     return parser.parse_args()
 

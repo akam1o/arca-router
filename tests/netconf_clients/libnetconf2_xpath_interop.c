@@ -287,7 +287,7 @@ main(int argc, char **argv)
     if (!nc_session_cpblt(session, cap_arca_xpath_subset)) {
         fail("missing Arca XPath filter subset capability");
     }
-    if (expect_standard_xpath && !strcmp(expect_standard_xpath, "1")) {
+    if (!expect_standard_xpath || strcmp(expect_standard_xpath, "0")) {
         if (!nc_session_cpblt(session, cap_xpath)) {
             fail("missing standard XPath capability");
         }

@@ -23,6 +23,8 @@ PY
 
 cd "$ROOT"
 
+STANDARD_XPATH="${NETCONF_STANDARD_XPATH:-1}"
+
 EVIDENCE_DIR="${NETCONF_INTEROP_EVIDENCE_DIR:-}"
 if [[ -n "$EVIDENCE_DIR" ]]; then
   mkdir -p "$EVIDENCE_DIR"
@@ -61,7 +63,7 @@ CONFIG
 if [[ -n "$EVIDENCE_DIR" ]]; then
   {
     echo "script=$SCRIPT"
-    echo "standard_xpath=${NETCONF_STANDARD_XPATH:-0}"
+    echo "standard_xpath=$STANDARD_XPATH"
     echo "host=$HOST"
     echo "port=$PORT"
     go version
@@ -84,8 +86,8 @@ server_args=(
   --listen "$HOST:$PORT"
   --running-config "$TMPDIR/running.conf"
 )
-if [[ "${NETCONF_STANDARD_XPATH:-0}" == "1" ]]; then
-  server_args+=(--standard-xpath)
+if [[ "$STANDARD_XPATH" == "0" ]]; then
+  server_args+=(--standard-xpath=false)
 fi
 
 "$TMPDIR/netconf-interop-server" "${server_args[@]}" \
@@ -129,8 +131,10 @@ client_args=(
 if [[ -n "$EVIDENCE_DIR" ]]; then
   client_args+=(--evidence-dir "$EVIDENCE_DIR")
 fi
-if [[ "${NETCONF_STANDARD_XPATH:-0}" == "1" ]]; then
+if [[ "$STANDARD_XPATH" == "1" ]]; then
   client_args+=(--expect-standard-xpath)
+else
+  client_args+=(--no-standard-xpath)
 fi
 
 if ! "${PYTHON:-python3}" "$ROOT/$SCRIPT" "${client_args[@]}" \

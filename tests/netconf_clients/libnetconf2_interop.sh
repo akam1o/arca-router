@@ -17,6 +17,8 @@ PY
 
 cd "$ROOT"
 
+STANDARD_XPATH="${NETCONF_STANDARD_XPATH:-1}"
+
 EVIDENCE_DIR="${NETCONF_INTEROP_EVIDENCE_DIR:-}"
 if [[ -n "$EVIDENCE_DIR" ]]; then
   mkdir -p "$EVIDENCE_DIR/rpc" "$EVIDENCE_DIR/reply"
@@ -60,7 +62,7 @@ CONFIG
 if [[ -n "$EVIDENCE_DIR" ]]; then
   {
     echo "client=libnetconf2"
-    echo "standard_xpath=${NETCONF_STANDARD_XPATH:-0}"
+    echo "standard_xpath=$STANDARD_XPATH"
     echo "host=$HOST"
     echo "port=$PORT"
     go version
@@ -154,8 +156,8 @@ server_args=(
   --listen "$HOST:$PORT"
   --running-config "$TMPDIR/running.conf"
 )
-if [[ "${NETCONF_STANDARD_XPATH:-0}" == "1" ]]; then
-  server_args+=(--standard-xpath)
+if [[ "$STANDARD_XPATH" == "0" ]]; then
+  server_args+=(--standard-xpath=false)
 fi
 
 "$TMPDIR/netconf-interop-server" "${server_args[@]}" \

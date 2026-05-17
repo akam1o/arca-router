@@ -239,13 +239,13 @@ netconf-evidence-verify: ## Verify required NETCONF client evidence files for si
 	@echo "Verifying NETCONF client evidence..."
 	$(PYTHON) tests/netconf_clients/verify_evidence.py "$(NETCONF_EVIDENCE_DIR)"
 
-netconf-standard-xpath-evidence: ## Run opt-in standard :xpath interop checks and write evidence
+netconf-standard-xpath-evidence: ## Run dedicated standard :xpath interop checks and write evidence
 	@echo "Running standard NETCONF :xpath evidence..."
 	NETCONF_STANDARD_XPATH=1 NETCONF_INTEROP_EVIDENCE_DIR="$(NETCONF_EVIDENCE_DIR)/standard-xpath/ncclient" PYTHON="$(PYTHON)" bash tests/netconf_clients/run_interop.sh tests/netconf_clients/ncclient_interop.py
 	NETCONF_STANDARD_XPATH=1 NETCONF_INTEROP_EVIDENCE_DIR="$(NETCONF_EVIDENCE_DIR)/standard-xpath/libnetconf2" bash tests/netconf_clients/libnetconf2_interop.sh
 	@echo "Standard NETCONF :xpath evidence complete: $(NETCONF_EVIDENCE_DIR)/standard-xpath"
 
-netconf-standard-xpath-evidence-verify: ## Verify opt-in standard :xpath evidence files
+netconf-standard-xpath-evidence-verify: ## Verify dedicated standard :xpath evidence files
 	@echo "Verifying standard NETCONF :xpath evidence..."
 	$(PYTHON) tests/netconf_clients/verify_evidence.py "$(NETCONF_EVIDENCE_DIR)/standard-xpath" --expect-standard-xpath
 
