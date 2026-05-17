@@ -206,6 +206,41 @@ func TestMarshalReplyNormalizesNilErrors(t *testing.T) {
 	}
 }
 
+func TestMarshalReplyRejectsInvalidPayloads(t *testing.T) {
+	tests := []struct {
+		name  string
+		reply *RPCReply
+		want  string
+	}{
+		{
+			name:  "empty payload",
+			reply: &RPCReply{MessageID: "106"},
+			want:  "no payload",
+		},
+		{
+			name: "multiple payloads",
+			reply: &RPCReply{
+				MessageID: "107",
+				OK:        &struct{}{},
+				Errors:    []*RPCError{ErrOperationFailed("failed")},
+			},
+			want: "multiple payloads",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			data, err := MarshalReply(tt.reply)
+			if err == nil {
+				t.Fatalf("MarshalReply() error = nil, want %q; data=%s", tt.want, string(data))
+			}
+			if !strings.Contains(err.Error(), tt.want) {
+				t.Fatalf("MarshalReply() error = %v, want %q", err, tt.want)
+			}
+		})
+	}
+}
+
 func TestMarshalReplyPreservesAttributes(t *testing.T) {
 	reply := NewOKReply("101").WithAttributes([]xml.Attr{
 		{Name: xml.Name{Space: "xmlns", Local: "ex"}, Value: "http://example.net/content/1.0"},

@@ -2,6 +2,7 @@
 
 ## v0.9.x - NETCONF/YANG and Operational Safety (current)
 
+- **NETCONF reply payload validation**: RPC reply marshaling now rejects hand-built replies with no payload or conflicting payload types instead of emitting invalid reply envelopes
 - **NETCONF reply marshal safety**: RPC reply marshaling now normalizes nil error entries from hand-built replies into operation-failed errors instead of emitting empty error payloads
 - **NETCONF multi-error reply safety**: multi-error reply construction now emits a default operation-failed RPC error for empty error lists instead of producing incomplete replies
 - **NETCONF hello marshal safety**: hello marshaling now rejects nil hello messages with an explicit error instead of producing incomplete output
