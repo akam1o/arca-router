@@ -160,6 +160,6 @@ Focus: complete final pre-stable stabilization and compatibility work.
   - Datastore lock recovery (startup cleanup covered in tests; release runbook documented)
   - Resource leak and churn testing (manual runbook documented; release execution still required)
 - **Release readiness**
-  - Documentation freeze
-  - Support matrix
+  - Documentation freeze (checklist documented; final release sign-off still required)
+  - Support matrix (published through compatibility policy and release readiness docs)
   - Operational runbooks (v0.10 runbook documented)
