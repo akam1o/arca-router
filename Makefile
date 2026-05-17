@@ -1,4 +1,4 @@
-.PHONY: help build build-cli clean rpm rpm-package deb deb-package version test fmt vet check release-check install-nfpm integration-test script-lint netconf-client-lint netconf-client-evidence netconf-ncclient-evidence netconf-libnetconf2-evidence netconf-evidence-verify netconf-pyez-evidence frr-mgmtd-smoke security-audit package-lint generate-binapi generate-proto
+.PHONY: help build build-cli clean rpm rpm-package deb deb-package version test fmt vet check release-check install-nfpm integration-test script-lint netconf-client-lint netconf-client-evidence netconf-ncclient-evidence netconf-libnetconf2-evidence netconf-evidence-verify netconf-standard-xpath-evidence netconf-standard-xpath-evidence-verify netconf-pyez-evidence frr-mgmtd-smoke security-audit package-lint generate-binapi generate-proto
 
 # Binary names
 BINARY_NAME=arca-routerd
@@ -220,6 +220,16 @@ netconf-libnetconf2-evidence: ## Run libnetconf2 NETCONF interop and write sign-
 netconf-evidence-verify: ## Verify required NETCONF client evidence files for sign-off
 	@echo "Verifying NETCONF client evidence..."
 	$(PYTHON) tests/netconf_clients/verify_evidence.py "$(NETCONF_EVIDENCE_DIR)"
+
+netconf-standard-xpath-evidence: ## Run opt-in standard :xpath interop checks and write evidence
+	@echo "Running standard NETCONF :xpath evidence..."
+	NETCONF_STANDARD_XPATH=1 NETCONF_INTEROP_EVIDENCE_DIR="$(NETCONF_EVIDENCE_DIR)/standard-xpath/ncclient" PYTHON="$(PYTHON)" bash tests/netconf_clients/run_interop.sh tests/netconf_clients/ncclient_interop.py
+	NETCONF_STANDARD_XPATH=1 NETCONF_INTEROP_EVIDENCE_DIR="$(NETCONF_EVIDENCE_DIR)/standard-xpath/libnetconf2" bash tests/netconf_clients/libnetconf2_interop.sh
+	@echo "Standard NETCONF :xpath evidence complete: $(NETCONF_EVIDENCE_DIR)/standard-xpath"
+
+netconf-standard-xpath-evidence-verify: ## Verify opt-in standard :xpath evidence files
+	@echo "Verifying standard NETCONF :xpath evidence..."
+	$(PYTHON) tests/netconf_clients/verify_evidence.py "$(NETCONF_EVIDENCE_DIR)/standard-xpath" --expect-standard-xpath
 
 netconf-pyez-evidence: ## Run supplementary PyEZ NETCONF smoke and write sign-off evidence
 	@echo "Running supplementary Junos PyEZ NETCONF evidence..."

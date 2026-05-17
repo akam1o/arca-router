@@ -60,6 +60,7 @@ CONFIG
 if [[ -n "$EVIDENCE_DIR" ]]; then
   {
     echo "client=libnetconf2"
+    echo "standard_xpath=${NETCONF_STANDARD_XPATH:-0}"
     echo "host=$HOST"
     echo "port=$PORT"
     go version
@@ -120,12 +121,18 @@ YANG
 
 export LIBNETCONF2_SCHEMA_SEARCHPATH="${LIBNETCONF2_SCHEMA_SEARCHPATH:-$SCHEMA_DIR}"
 
-"$TMPDIR/netconf-interop-server" \
-  --datastore "$TMPDIR/config.db" \
-  --host-key "$TMPDIR/ssh_host_ed25519_key" \
-  --user-db "$TMPDIR/users.db" \
-  --listen "$HOST:$PORT" \
-  --running-config "$TMPDIR/running.conf" \
+server_args=(
+  --datastore "$TMPDIR/config.db"
+  --host-key "$TMPDIR/ssh_host_ed25519_key"
+  --user-db "$TMPDIR/users.db"
+  --listen "$HOST:$PORT"
+  --running-config "$TMPDIR/running.conf"
+)
+if [[ "${NETCONF_STANDARD_XPATH:-0}" == "1" ]]; then
+  server_args+=(--standard-xpath)
+fi
+
+"$TMPDIR/netconf-interop-server" "${server_args[@]}" \
   >"$TMPDIR/netconf-interop-server.log" 2>&1 &
 DAEMON_PID=$!
 

@@ -32,6 +32,7 @@ def parse_args():
     parser.add_argument("--username", required=True)
     parser.add_argument("--password", required=True)
     parser.add_argument("--evidence-dir")
+    parser.add_argument("--expect-standard-xpath", action="store_true")
     return parser.parse_args()
 
 
@@ -40,7 +41,7 @@ def fail(message):
     sys.exit(1)
 
 
-def assert_capabilities(caps):
+def assert_capabilities(caps, expect_standard_xpath):
     required = {
         CAP_BASE_10,
         CAP_BASE_11,
@@ -50,16 +51,19 @@ def assert_capabilities(caps):
         CAP_ARCA_ROUTER,
         CAP_ARCA_XPATH_FILTER_SUBSET,
     }
+    if expect_standard_xpath:
+        required.add(CAP_XPATH)
     missing = sorted(required - caps)
     if missing:
         fail(f"missing server capabilities: {missing}")
 
     forbidden = {
-        CAP_XPATH,
         CAP_STARTUP,
         CAP_WRITABLE_RUNNING,
         CAP_CONFIRMED_COMMIT,
     }
+    if not expect_standard_xpath:
+        forbidden.add(CAP_XPATH)
     advertised = sorted(forbidden & caps)
     if advertised:
         fail(f"unsupported capabilities were advertised: {advertised}")
@@ -160,7 +164,7 @@ def main():
                 "client_versions.txt",
                 f"ncclient={getattr(ncclient, '__version__', 'unknown')}",
             )
-        assert_capabilities(caps)
+        assert_capabilities(caps, args.expect_standard_xpath)
 
         running = session.get_config(source="running").data_xml
         if "arca-ci" not in running:
