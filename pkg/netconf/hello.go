@@ -14,6 +14,7 @@ const (
 	CapabilityCandidate  = "urn:ietf:params:netconf:capability:candidate:1.0"
 	CapabilityValidate   = "urn:ietf:params:netconf:capability:validate:1.1"
 	CapabilityRollback   = "urn:ietf:params:netconf:capability:rollback-on-error:1.0"
+	CapabilityXPath      = "urn:ietf:params:netconf:capability:xpath:1.0"
 	CapabilityArcaRouter = "urn:arca:router:config:1.0?module=arca-router&revision=2025-12-27"
 	// Arca-specific capability for the safe absolute XPath subset accepted by filters.
 	CapabilityArcaXPathFilterSubset = "urn:arca:router:netconf:capability:xpath-filter-subset:1.0"
@@ -31,8 +32,18 @@ type Hello struct {
 	SessionID uint32 `xml:"session-id,omitempty"` // RFC 6241: session-id is an integer (uint32)
 }
 
+// HelloOptions controls optional NETCONF capability advertisement.
+type HelloOptions struct {
+	AdvertiseStandardXPath bool
+}
+
 // ServerHello creates a server <hello> message with the given session ID
 func ServerHello(sessionID uint32) *Hello {
+	return ServerHelloWithOptions(sessionID, HelloOptions{})
+}
+
+// ServerHelloWithOptions creates a server <hello> with optional capabilities.
+func ServerHelloWithOptions(sessionID uint32, options HelloOptions) *Hello {
 	hello := &Hello{
 		SessionID: sessionID,
 	}
@@ -44,6 +55,9 @@ func ServerHello(sessionID uint32) *Hello {
 		CapabilityRollback,
 		CapabilityArcaRouter,
 		CapabilityArcaXPathFilterSubset,
+	}
+	if options.AdvertiseStandardXPath {
+		hello.Capabilities.Capability = append(hello.Capabilities.Capability, CapabilityXPath)
 	}
 	return hello
 }

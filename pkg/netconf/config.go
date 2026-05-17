@@ -14,6 +14,7 @@ type SSHConfig struct {
 	DatastorePath               string // Default: "/var/lib/arca-router/config.db"
 	DatastoreConfig             *datastore.Config
 	SkipDatastoreStartupCleanup bool          // For embedded servers whose parent owns datastore startup
+	AdvertiseStandardXPath      bool          // Default: false; opt-in standard :xpath capability advertisement
 	IdleTimeout                 time.Duration // Default: 30m (idle timeout)
 	AbsoluteTimeout             time.Duration // Default: 24h (max session lifetime)
 	MaxSessions                 int           // Default: 100

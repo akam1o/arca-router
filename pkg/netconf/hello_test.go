@@ -54,6 +54,17 @@ func TestServerHelloDoesNotAdvertiseUnsupportedCapabilities(t *testing.T) {
 	}
 }
 
+func TestServerHelloCanAdvertiseStandardXPath(t *testing.T) {
+	hello := ServerHelloWithOptions(12345, HelloOptions{AdvertiseStandardXPath: true})
+
+	if !hello.HasCapability(CapabilityXPath) {
+		t.Fatalf("ServerHelloWithOptions() did not advertise %q", CapabilityXPath)
+	}
+	if hello.HasCapability("urn:ietf:params:netconf:capability:startup:1.0") {
+		t.Fatal("ServerHelloWithOptions() advertised startup capability")
+	}
+}
+
 func TestMarshalHello(t *testing.T) {
 	hello := ServerHello(12345)
 	data, err := MarshalHello(hello)

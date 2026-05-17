@@ -178,7 +178,7 @@ func validateExperimentalXPathRootStep(rpcName, selectExpr string, namespaceCtx 
 		return nil
 	}
 	if prefix == "" {
-		return ErrInvalidFilter(rpcName, fmt.Sprintf("experimental xpath filter requires namespace-prefixed root element: %s", local))
+		return ErrInvalidFilter(rpcName, fmt.Sprintf("xpath filter requires namespace-prefixed root element: %s", local))
 	}
 	namespace := namespaceCtx[prefix]
 	if namespace == "" {
@@ -415,7 +415,7 @@ func renderExperimentalXPathNodes(dataRoot *xmlquery.Node, nodes []*xmlquery.Nod
 		}
 		switch node.Type {
 		case xmlquery.AttributeNode:
-			return nil, fmt.Errorf("xpath filter selected attributes, which are not supported by experimental response shaping")
+			return nil, fmt.Errorf("xpath filter selected attributes, which are not supported by response shaping")
 		case xmlquery.ElementNode:
 			if !markExperimentalXPathAncestors(dataRoot, node, include) {
 				return nil, fmt.Errorf("xpath filter selected a node outside NETCONF data")
