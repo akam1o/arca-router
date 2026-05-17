@@ -443,14 +443,6 @@ func parseFilterElementsWithContext(filterXML []byte, namespaceAttrs []xml.Attr)
 	return elements, nil
 }
 
-func (f *Filter) parseTopLevelElementSpecs() ([]subtreeFilterElement, error) {
-	if f == nil {
-		return nil, nil
-	}
-	namespaceAttrs := collectNamespaceAttrs(f.InheritedAttrs, f.Attrs)
-	return parseFilterElementSpecsWithContext(f.Content, namespaceAttrs)
-}
-
 func parseFilterElementSpecsWithContext(filterXML []byte, namespaceAttrs []xml.Attr) ([]subtreeFilterElement, error) {
 	paths, err := parseFilterElementPathsWithContext(filterXML, namespaceAttrs)
 	if err != nil {
