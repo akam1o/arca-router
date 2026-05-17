@@ -130,6 +130,48 @@ func TestGetOperationalDataExperimentalXPathFilterSupportsFunctions(t *testing.T
 	}
 }
 
+func TestGetExperimentalXPathFilterReturnsEmptyData(t *testing.T) {
+	srv := NewServer(nil, nil)
+	srv.SetOperationalStateProvider(&testOperationalStateProvider{
+		routes: []RouteOperationalState{
+			{
+				Prefix:    "192.0.2.0/24",
+				NextHop:   "192.0.2.1",
+				Protocol:  "static",
+				Metric:    10,
+				Interface: "ge-0/0/0",
+				Active:    true,
+			},
+		},
+	})
+
+	reply := getParsedRPC(t, srv, `<rpc message-id="101" xmlns="urn:ietf:params:xml:ns:netconf:base:1.0">
+		<get>
+			<filter type="xpath" xmlns:arca="`+ArcaConfigNS+`" select="/arca:state/arca:routes/arca:route[contains(arca:prefix, '198.51.100')]"/>
+		</get>
+	</rpc>`)
+	if len(reply.Errors) != 0 {
+		t.Fatalf("get empty experimental xpath errors = %#v, want none", reply.Errors)
+	}
+	if reply.Data == nil {
+		t.Fatal("get empty experimental xpath data = nil, want empty data")
+	}
+	if len(reply.Data.Content) != 0 {
+		t.Fatalf("get empty experimental xpath data = %q, want empty", reply.Data.Content)
+	}
+}
+
+func TestGetExperimentalXPathFilterRejectsScalarAsInvalidValue(t *testing.T) {
+	srv := NewServer(nil, nil)
+
+	reply := getParsedRPC(t, srv, `<rpc message-id="101" xmlns="urn:ietf:params:xml:ns:netconf:base:1.0">
+		<get>
+			<filter type="xpath" xmlns:arca="`+ArcaConfigNS+`" select="/arca:state/arca:routes/arca:route = '192.0.2.0/24'"/>
+		</get>
+	</rpc>`)
+	assertXPathInvalidValue(t, reply, "/rpc/get/filter")
+}
+
 func TestBuildOperationalDataFiltersIETFRoutingStateRouteXPathPredicates(t *testing.T) {
 	cfg := config.NewConfig()
 	cfg.RoutingOptions = &config.RoutingOptions{
@@ -664,4 +706,22 @@ func TestBuildOperationalDataWritesOSPFNeighborState(t *testing.T) {
 	if bytes.Index(data, []byte("<router-id>10.0.0.2</router-id>")) > bytes.Index(data, []byte("<router-id>10.0.0.3</router-id>")) {
 		t.Fatalf("OSPF neighbors are not sorted:\n%s", data)
 	}
+}
+
+func getParsedRPC(t *testing.T, srv *Server, rpcXML string) *RPCReply {
+	t.Helper()
+
+	sess := &Session{
+		ID:             "session-1",
+		NumericID:      1,
+		Username:       "alice",
+		Role:           RoleOperator,
+		LastUsed:       time.Now(),
+		datastoreLocks: map[string]struct{}{},
+	}
+	rpc, err := ParseRPC([]byte(rpcXML))
+	if err != nil {
+		t.Fatalf("ParseRPC() error = %v", err)
+	}
+	return srv.HandleRPC(context.Background(), sess, rpc)
 }
