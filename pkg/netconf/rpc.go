@@ -858,10 +858,6 @@ func (f *Filter) Validate(rpcName string) error {
 
 	// Validate subtree filter content (basic check)
 	if len(f.Content) > 0 {
-		// Check for predicates ([ ]) which are not supported
-		if bytes.Contains(f.Content, []byte("[")) {
-			return ErrInvalidFilter(rpcName, "filter contains unsupported predicates")
-		}
 		if err := f.validateSubtreeContent(rpcName); err != nil {
 			return err
 		}
