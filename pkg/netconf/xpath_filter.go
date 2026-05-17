@@ -29,6 +29,13 @@ type subtreeFilterElement struct {
 	Namespace string
 }
 
+func normalizedFilterType(filter *Filter) string {
+	if filter == nil {
+		return ""
+	}
+	return strings.TrimSpace(filter.Type)
+}
+
 // ParseXPathFilter parses a simplified XPath expression
 // Supported formats (Phase 3):
 // - /interfaces
@@ -579,7 +586,7 @@ func filterMatchesEnhanced(filter *Filter, elementPath []string) bool {
 		return true
 	}
 
-	if filter.Type == "xpath" {
+	if normalizedFilterType(filter) == "xpath" {
 		xpathFilter, err := ParseXPathFilter(strings.TrimSpace(filter.Select))
 		if err != nil {
 			return false

@@ -354,6 +354,12 @@ func TestFilterMatches(t *testing.T) {
 			want:    true,
 		},
 		{
+			name:    "xpath filter trims type",
+			filter:  &Filter{Type: "\n xpath \t", Select: "/interfaces/interface[name='ge-0/0/0']"},
+			element: "interfaces",
+			want:    true,
+		},
+		{
 			name:    "xpath filter no match",
 			filter:  &Filter{Type: "xpath", Select: "/protocols/bgp"},
 			element: "interfaces",
