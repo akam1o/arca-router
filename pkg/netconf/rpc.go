@@ -142,6 +142,9 @@ func (r *RPC) UnmarshalOperation(v interface{}) error {
 	if r == nil {
 		return ErrOperationFailed("rpc unavailable")
 	}
+	if r.Operation.Local == "" {
+		return ErrOperationFailed("rpc operation unavailable")
+	}
 
 	// Wrap content in operation tag for proper unmarshaling
 	wrapped := r.operationXML()
@@ -712,6 +715,9 @@ func missingRPCElement(path []string, element string) *RPCError {
 func (r *RPC) ValidateOperationNamespace() error {
 	if r == nil {
 		return ErrOperationFailed("rpc unavailable")
+	}
+	if r.Operation.Local == "" {
+		return ErrOperationFailed("rpc operation unavailable")
 	}
 	return ValidateProtocolNamespace(r.Operation)
 }
