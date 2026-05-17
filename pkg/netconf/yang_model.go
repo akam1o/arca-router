@@ -2,6 +2,7 @@ package netconf
 
 import (
 	_ "embed"
+	"encoding/xml"
 	"fmt"
 	"sort"
 	"strings"
@@ -152,16 +153,25 @@ func (v *YANGValidator) ListModules() []string {
 // ValidateElementPath validates that an XPath-like element path is valid
 // according to the YANG schema (Phase 3: basic implementation)
 func (v *YANGValidator) ValidateElementPath(path string) error {
+	return v.ValidateElementPathWithContext(path, nil)
+}
+
+// ValidateElementPathWithContext validates an XPath-like element path using
+// explicit namespace declarations for prefixed path and predicate names.
+func (v *YANGValidator) ValidateElementPathWithContext(path string, namespaceAttrs []xml.Attr) error {
 	if v == nil || v.modules == nil {
 		return fmt.Errorf("YANG validator not initialized")
 	}
 
-	xpathFilter, err := ParseXPathFilter(path)
+	xpathFilter, err := ParseXPathFilterWithContext(path, collectNamespaceAttrs(namespaceAttrs))
 	if err != nil {
 		return err
 	}
 	if xpathFilter == nil {
 		return fmt.Errorf("path must include at least one element")
+	}
+	if err := validateXPathFilterNamespaces(xpathFilter); err != nil {
+		return err
 	}
 
 	return v.validateXPathFilterPath(xpathFilter)
