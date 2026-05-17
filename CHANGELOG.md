@@ -2,6 +2,7 @@
 
 ## v0.10.x - Stabilization and Compatibility (current)
 
+- **NETCONF experimental XPath guardrails**: XPath evaluation now enforces expression length, element count, depth, and attribute limits before response shaping
 - **v0.10 release process examples**: release guide and development quick reference now use v0.10 tag, artifact, and announcement examples
 - **Release readiness make target**: `make release-check` now runs package metadata lint, tests, vet, and whitespace checks for v0.10 sign-off evidence
 - **v0.10 sign-off template**: added English and Japanese release sign-off records for evidence links, accepted warnings, and v0.11 deferred gate approval
