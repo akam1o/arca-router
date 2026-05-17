@@ -6,6 +6,7 @@ import (
 	"encoding/xml"
 	"errors"
 	"fmt"
+	"io"
 	"log"
 	"strings"
 
@@ -215,7 +216,11 @@ func (c ConfigElement) XML() ([]byte, error) {
 	buf.WriteByte('>')
 	buf.Write(c.Content)
 	buf.WriteString("</config>")
-	return buf.Bytes(), nil
+	xmlData := buf.Bytes()
+	if err := validateConfigElementXML(xmlData); err != nil {
+		return nil, err
+	}
+	return xmlData, nil
 }
 
 func validateConfigNamespaceDeclarationAttrs(attrGroups ...[]xml.Attr) *RPCError {
@@ -228,6 +233,64 @@ func validateConfigNamespaceDeclarationAttrs(attrGroups ...[]xml.Attr) *RPCError
 		}
 	}
 	return nil
+}
+
+func validateConfigElementXML(xmlData []byte) *RPCError {
+	if len(xmlData) > MaxXMLSize {
+		return NewRPCError(ErrorTypeRPC, ErrorTagInvalidValue,
+			fmt.Sprintf("config XML exceeds maximum (%d bytes)", MaxXMLSize)).
+			WithPath("/rpc/edit-config/config").
+			WithAppTag("size-limit")
+	}
+	if containsUnsafeXMLDirective(xmlData) {
+		return NewRPCError(ErrorTypeRPC, ErrorTagMalformedMessage,
+			"config XML contains unsafe XML directives").
+			WithPath("/rpc/edit-config/config")
+	}
+
+	decoder := xml.NewDecoder(bytes.NewReader(xmlData))
+	decoder.Strict = true
+	decoder.Entity = nil
+
+	depth := 0
+	for {
+		token, err := decoder.Token()
+		if err == io.EOF {
+			return nil
+		}
+		if err != nil {
+			return NewRPCError(ErrorTypeRPC, ErrorTagMalformedMessage,
+				fmt.Sprintf("config XML is malformed: %v", err)).
+				WithPath("/rpc/edit-config/config")
+		}
+
+		switch t := token.(type) {
+		case xml.StartElement:
+			if len(t.Attr) > MaxXMLAttributes {
+				return NewRPCError(ErrorTypeProtocol, ErrorTagInvalidValue,
+					fmt.Sprintf("config element %s exceeds maximum attribute limit (%d)", t.Name.Local, MaxXMLAttributes)).
+					WithPath("/rpc/edit-config/config").
+					WithAppTag("attribute-limit")
+			}
+			for _, attr := range t.Attr {
+				if err := validateNamespaceDeclarationAttr(attr); err != nil {
+					return NewRPCError(ErrorTypeRPC, ErrorTagInvalidValue, err.Error()).
+						WithPath("/rpc/edit-config/config")
+				}
+			}
+			depth++
+		case xml.EndElement:
+			if depth > 0 {
+				depth--
+			}
+		case xml.CharData:
+			if depth == 1 && len(bytes.TrimSpace(t)) > 0 {
+				return NewRPCError(ErrorTypeRPC, ErrorTagMalformedMessage,
+					"config XML contains text outside elements").
+					WithPath("/rpc/edit-config/config")
+			}
+		}
+	}
 }
 
 func writeXMLAttribute(buf *bytes.Buffer, name, value string) {
