@@ -5,6 +5,7 @@ import (
 	"encoding/xml"
 	"fmt"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 
@@ -226,6 +227,7 @@ module ietf-system {
 type YANGValidator struct {
 	modules          *yang.Modules
 	schemaPathSchema *yangPathNode
+	schemaLeafTypes  map[string]string
 	mu               sync.RWMutex
 }
 
@@ -285,10 +287,18 @@ func NewYANGValidator() (*YANGValidator, error) {
 		return nil, fmt.Errorf("failed to build YANG path schema: %w", err)
 	}
 	schemaPaths = append(schemaPaths, netconfXMLCompatibilityYANGPaths...)
+	schemaLeafTypes, err := yangModuleLeafTypes(ms, "arca-router", "ietf-interfaces", "ietf-routing", "ietf-system")
+	if err != nil {
+		return nil, fmt.Errorf("failed to build YANG leaf type schema: %w", err)
+	}
+	for path, leafType := range netconfXMLCompatibilityYANGLeafTypes {
+		schemaLeafTypes[path] = leafType
+	}
 
 	return &YANGValidator{
 		modules:          ms,
 		schemaPathSchema: newYANGPathSchema(schemaPaths),
+		schemaLeafTypes:  schemaLeafTypes,
 	}, nil
 }
 
@@ -391,6 +401,9 @@ func (v *YANGValidator) validateXPathFilterPath(xpathFilter *XPathFilter) error 
 	if err := v.schemaPathSchema.validate(xpathFilter); err != nil {
 		return fmt.Errorf("implemented path is not backed by loaded YANG schema: %w", err)
 	}
+	if err := validateYANGPredicateLeafTypes(xpathFilter, v.schemaLeafTypes); err != nil {
+		return err
+	}
 	return nil
 }
 
@@ -402,6 +415,14 @@ var netconfXMLCompatibilityYANGPaths = []string{
 	"interfaces/interface/unit/family/address",
 	"protocols/ospf/area/name",
 	"protocols/ospf3/area/name",
+}
+
+var netconfXMLCompatibilityYANGLeafTypes = map[string]string{
+	"interfaces/interface/unit/name":           "uint32",
+	"interfaces/interface/unit/family/name":    "string",
+	"interfaces/interface/unit/family/address": "string",
+	"protocols/ospf/area/name":                 "string",
+	"protocols/ospf3/area/name":                "string",
 }
 
 func yangModuleElementPaths(ms *yang.Modules, moduleNames ...string) ([]string, error) {
@@ -425,6 +446,24 @@ func yangModuleElementPaths(ms *yang.Modules, moduleNames ...string) ([]string, 
 	}
 	sort.Strings(paths)
 	return paths, nil
+}
+
+func yangModuleLeafTypes(ms *yang.Modules, moduleNames ...string) (map[string]string, error) {
+	if ms == nil {
+		return nil, fmt.Errorf("YANG modules are nil")
+	}
+	leafTypes := map[string]string{}
+	for _, moduleName := range moduleNames {
+		entry, errs := ms.GetModule(moduleName)
+		if len(errs) > 0 {
+			return nil, errs[0]
+		}
+		if entry == nil {
+			return nil, fmt.Errorf("module %q returned nil schema entry", moduleName)
+		}
+		collectYANGChildLeafTypes(entry, nil, leafTypes)
+	}
+	return leafTypes, nil
 }
 
 func collectYANGChildPaths(entry *yang.Entry, prefix []string, seen map[string]struct{}) {
@@ -453,6 +492,36 @@ func collectYANGEntryPaths(entry *yang.Entry, prefix []string, seen map[string]s
 		}
 	}
 	collectYANGChildPaths(entry, current, seen)
+}
+
+func collectYANGChildLeafTypes(entry *yang.Entry, prefix []string, leafTypes map[string]string) {
+	if entry == nil || len(entry.Dir) == 0 {
+		return
+	}
+	names := make([]string, 0, len(entry.Dir))
+	for name := range entry.Dir {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	for _, name := range names {
+		collectYANGEntryLeafTypes(entry.Dir[name], prefix, leafTypes)
+	}
+}
+
+func collectYANGEntryLeafTypes(entry *yang.Entry, prefix []string, leafTypes map[string]string) {
+	if entry == nil {
+		return
+	}
+	current := prefix
+	if !entry.IsChoice() && !entry.IsCase() {
+		current = append(append([]string{}, prefix...), entry.Name)
+		if (entry.IsLeaf() || entry.IsLeafList()) && entry.Type != nil {
+			if path := strings.Join(current, "/"); path != "" {
+				leafTypes[path] = entry.Type.Kind.String()
+			}
+		}
+	}
+	collectYANGChildLeafTypes(entry, current, leafTypes)
 }
 
 func implementedYANGElementPaths() []string {
@@ -666,6 +735,71 @@ func validateYANGPredicates(node *yangPathNode, predicates map[string]string, tr
 		if node.children[key] == nil {
 			return fmt.Errorf("unsupported predicate %q for /%s", key, strings.Join(traversed, "/"))
 		}
+	}
+	return nil
+}
+
+func validateYANGPredicateLeafTypes(filter *XPathFilter, leafTypes map[string]string) error {
+	if filter == nil || len(leafTypes) == 0 {
+		return nil
+	}
+	for index, predicates := range filter.Predicates {
+		if index < 0 || index >= len(filter.Segments) {
+			continue
+		}
+		path := filter.Segments[:index+1]
+		for key, value := range predicates {
+			predicatePath := append(append([]string{}, path...), key)
+			leafType, ok := leafTypes[strings.Join(predicatePath, "/")]
+			if !ok {
+				continue
+			}
+			if err := validateYANGLeafLiteral(value, leafType); err != nil {
+				return fmt.Errorf("invalid predicate %q for /%s: %w", key, strings.Join(path, "/"), err)
+			}
+		}
+	}
+	return nil
+}
+
+func validateYANGLeafLiteral(value, leafType string) error {
+	switch leafType {
+	case "boolean":
+		if value != "true" && value != "false" {
+			return fmt.Errorf("value %q is not a boolean literal", value)
+		}
+	case "uint8":
+		return validateYANGUnsignedLiteral(value, 8, leafType)
+	case "uint16":
+		return validateYANGUnsignedLiteral(value, 16, leafType)
+	case "uint32":
+		return validateYANGUnsignedLiteral(value, 32, leafType)
+	case "uint64":
+		return validateYANGUnsignedLiteral(value, 64, leafType)
+	case "int8":
+		return validateYANGSignedLiteral(value, 8, leafType)
+	case "int16":
+		return validateYANGSignedLiteral(value, 16, leafType)
+	case "int32":
+		return validateYANGSignedLiteral(value, 32, leafType)
+	case "int64":
+		return validateYANGSignedLiteral(value, 64, leafType)
+	default:
+		return nil
+	}
+	return nil
+}
+
+func validateYANGUnsignedLiteral(value string, bitSize int, leafType string) error {
+	if _, err := strconv.ParseUint(value, 10, bitSize); err != nil {
+		return fmt.Errorf("value %q is not a %s literal", value, leafType)
+	}
+	return nil
+}
+
+func validateYANGSignedLiteral(value string, bitSize int, leafType string) error {
+	if _, err := strconv.ParseInt(value, 10, bitSize); err != nil {
+		return fmt.Errorf("value %q is not an %s literal", value, leafType)
 	}
 	return nil
 }

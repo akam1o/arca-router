@@ -142,6 +142,16 @@ func TestYANGValidator_ValidateElementPath(t *testing.T) {
 			wantErr: false,
 		},
 		{
+			name:    "valid boolean predicate",
+			path:    "/system/services/web-ui[enabled='true']",
+			wantErr: false,
+		},
+		{
+			name:    "valid uint predicate",
+			path:    "/system/services/web-ui[port='8443']",
+			wantErr: false,
+		},
+		{
 			name:    "valid interface nested leaf path",
 			path:    "/interfaces/interface/unit/family/address",
 			wantErr: false,
@@ -179,6 +189,11 @@ func TestYANGValidator_ValidateElementPath(t *testing.T) {
 		{
 			name:    "valid routing-options static route predicate",
 			path:    "/routing-options/static/route[prefix='10.0.0.0/24']",
+			wantErr: false,
+		},
+		{
+			name:    "valid routing-options uint predicate",
+			path:    "/routing-options/static/route[distance='10']",
 			wantErr: false,
 		},
 		{
@@ -247,6 +262,11 @@ func TestYANGValidator_ValidateElementPath(t *testing.T) {
 			wantErr: false,
 		},
 		{
+			name:    "valid route state boolean predicate",
+			path:    "/state/routes/route[active='false']",
+			wantErr: false,
+		},
+		{
 			name:    "valid BFD peer state path",
 			path:    "/state/protocols/bfd/peer/status",
 			wantErr: false,
@@ -279,6 +299,21 @@ func TestYANGValidator_ValidateElementPath(t *testing.T) {
 		{
 			name:    "invalid path - unknown predicate key",
 			path:    "/interfaces/interface[foo='bar']",
+			wantErr: true,
+		},
+		{
+			name:    "invalid path - boolean predicate literal",
+			path:    "/system/services/web-ui[enabled='yes']",
+			wantErr: true,
+		},
+		{
+			name:    "invalid path - uint predicate literal",
+			path:    "/system/services/web-ui[port='https']",
+			wantErr: true,
+		},
+		{
+			name:    "invalid path - uint predicate range",
+			path:    "/routing-options/static/route[distance='300']",
 			wantErr: true,
 		},
 		{
