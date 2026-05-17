@@ -16,7 +16,9 @@ arca check upgrade
 arca check upgrade backup /var/backups/arca-router/running.conf
 ```
 
-Keep a fresh running configuration backup and verify package release notes for service restart, VPP, FRR, and datastore requirements.
+`arca check upgrade` validates the running configuration, rollback archive, schema compatibility, telemetry catalog metadata, QoS capability snapshot, optional backup destination, and packaged install paths when the command is running on an installed package layout. Keep a fresh running configuration backup and verify package release notes for service restart, VPP, FRR, and datastore requirements.
+
+If an upgrade fails after package replacement, reinstall the previous package artifact or restore the previous repository pin, then use `arca show configuration rollback <N>` or `arca backup configuration rollback <N> <path>` output to recover a known-good configuration.
 
 ## Compatibility Guarantees
 

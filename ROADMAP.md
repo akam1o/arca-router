@@ -140,8 +140,8 @@ Focus: complete final pre-stable stabilization and compatibility work.
 - **Upgrade path**
   - Supported upgrades from previous minor releases
   - Datastore schema migration guardrails
-  - Package preflight checks
-  - Rollback guidance for failed upgrades
+  - Package preflight checks (implemented for packaged install path detection in `arca check upgrade`)
+  - Rollback guidance for failed upgrades (implemented in `arca check upgrade` output and compatibility docs)
   - Formal NETCONF startup datastore support, if required, should use a separate
     startup config record with SQLite/etcd migrations, lock/validate/copy-config
     semantics, and explicit compatibility tests instead of aliasing `startup` to

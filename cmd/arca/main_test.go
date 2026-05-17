@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -1036,6 +1037,8 @@ func TestUpgradePreflightLinesReportsReadyState(t *testing.T) {
 		"rollback archive validation: ok",
 		"telemetry catalog:",
 		"qos metadata binding: yes",
+		"package preflight:",
+		"rollback guidance:",
 		"status: ready for package-specific upgrade checks",
 	} {
 		if !strings.Contains(got, want) {
@@ -1059,6 +1062,56 @@ func TestUpgradeCompatibilityPreflightLines(t *testing.T) {
 	} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("upgradeCompatibilityPreflightLines() = %q, want substring %q", got, want)
+		}
+	}
+}
+
+func TestUpgradePackagePreflightSkipsSourceCheckout(t *testing.T) {
+	lines, warnings := upgradePackagePreflightLinesWithRoot(t.TempDir())
+	got := strings.Join(lines, "\n")
+	if warnings != 0 {
+		t.Fatalf("warnings = %d, want 0", warnings)
+	}
+	if !strings.Contains(got, "packaged install paths: not detected") {
+		t.Fatalf("upgradePackagePreflightLinesWithRoot() = %q, want skipped packaged install paths", got)
+	}
+}
+
+func TestUpgradePackagePreflightWarnsMissingPackagedPaths(t *testing.T) {
+	root := t.TempDir()
+	cliPath := filepath.Join(root, "usr/bin/arca")
+	if err := os.MkdirAll(filepath.Dir(cliPath), 0755); err != nil {
+		t.Fatalf("MkdirAll() error = %v", err)
+	}
+	if err := os.WriteFile(cliPath, []byte("arca"), 0755); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+
+	lines, warnings := upgradePackagePreflightLinesWithRoot(root)
+	got := strings.Join(lines, "\n")
+	if warnings == 0 {
+		t.Fatal("warnings = 0, want missing packaged path warnings")
+	}
+	for _, want := range []string{
+		"CLI binary: file present",
+		"warning: daemon binary missing at /usr/sbin/arca-routerd",
+		"warning: systemd unit missing at /usr/lib/systemd/system/arca-routerd.service",
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("upgradePackagePreflightLinesWithRoot() = %q, want substring %q", got, want)
+		}
+	}
+}
+
+func TestUpgradeRollbackGuidanceLines(t *testing.T) {
+	got := strings.Join(upgradeRollbackGuidanceLines(), "\n")
+	for _, want := range []string{
+		"rollback guidance:",
+		"previous package",
+		"configuration backup",
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("upgradeRollbackGuidanceLines() = %q, want substring %q", got, want)
 		}
 	}
 }

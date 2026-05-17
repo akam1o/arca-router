@@ -1274,6 +1274,10 @@ func upgradePreflightLinesWithOptions(ctx context.Context, client showClient, op
 	if options.BackupPath != "" {
 		lines, warnings = appendUpgradeBackupPathCheck(lines, warnings, options.BackupPath)
 	}
+	packageLines, packageWarnings := upgradePackagePreflightLines()
+	lines = append(lines, packageLines...)
+	warnings += packageWarnings
+	lines = append(lines, upgradeRollbackGuidanceLines()...)
 
 	if warnings == 0 {
 		lines = append(lines, "  status: ready for package-specific upgrade checks")
@@ -1282,6 +1286,71 @@ func upgradePreflightLinesWithOptions(ctx context.Context, client showClient, op
 	}
 	lines = append(lines, "  next step: keep a fresh configuration backup and verify release-specific package notes")
 	return lines, nil
+}
+
+type upgradePackageCheck struct {
+	Path        string
+	Description string
+}
+
+func upgradePackagePreflightLines() ([]string, int) {
+	return upgradePackagePreflightLinesWithRoot("")
+}
+
+func upgradePackagePreflightLinesWithRoot(root string) ([]string, int) {
+	checks := []upgradePackageCheck{
+		{Path: "/usr/sbin/arca-routerd", Description: "daemon binary"},
+		{Path: "/usr/bin/arca", Description: "CLI binary"},
+		{Path: "/usr/lib/systemd/system/arca-routerd.service", Description: "systemd unit"},
+		{Path: "/etc/arca-router", Description: "configuration directory"},
+		{Path: "/var/lib/arca-router", Description: "state directory"},
+	}
+
+	lines := []string{"  package preflight:"}
+	if !packagedInstallDetected(root, checks) {
+		return append(lines, "    packaged install paths: not detected; run package manager dry-run checks before deployment"), 0
+	}
+
+	warnings := 0
+	for _, check := range checks {
+		fullPath := rootedPackagePath(root, check.Path)
+		info, err := os.Stat(fullPath)
+		if err != nil {
+			lines, warnings = appendUpgradePreflightWarning(lines, warnings, fmt.Sprintf("%s missing at %s", check.Description, check.Path))
+			continue
+		}
+		kind := "file"
+		if info.IsDir() {
+			kind = "directory"
+		}
+		lines = append(lines, fmt.Sprintf("    %s: %s present", check.Description, kind))
+	}
+	return lines, warnings
+}
+
+func packagedInstallDetected(root string, checks []upgradePackageCheck) bool {
+	for _, check := range checks {
+		if _, err := os.Stat(rootedPackagePath(root, check.Path)); err == nil {
+			return true
+		}
+	}
+	return false
+}
+
+func rootedPackagePath(root, path string) string {
+	if strings.TrimSpace(root) == "" {
+		return path
+	}
+	return filepath.Join(root, strings.TrimPrefix(path, string(os.PathSeparator)))
+}
+
+func upgradeRollbackGuidanceLines() []string {
+	return []string{
+		"  rollback guidance:",
+		"    keep the pre-upgrade package artifact or repository pin available until post-upgrade validation passes",
+		"    keep a fresh configuration backup and verify at least one rollback archive entry before replacing packages",
+		"    if daemon startup fails after upgrade, restore the previous package, then use arca backup/show configuration rollback output to recover config",
+	}
 }
 
 func upgradeCompatibilityPreflightLines() []string {

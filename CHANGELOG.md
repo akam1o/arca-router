@@ -2,6 +2,7 @@
 
 ## v0.10.x - Stabilization and Compatibility (current)
 
+- **Upgrade package preflight guidance**: `arca check upgrade` now reports packaged install path checks when a packaged layout is detected and prints rollback guidance for package upgrade windows
 - **Web API token authentication**: `arca-routerd --web-api-token-file` enables Bearer token or `X-API-Key` authentication for Web/NMS automation, using the existing read-only/operator/admin RBAC checks
 - **CLI TLS gRPC connections**: `arca` can connect to remote TCP/TLS gRPC endpoints with CA verification, server-name override, and client certificate/key options for mTLS
 - **gRPC TLS listener**: `arca-routerd --grpc-listen` exposes the internal gRPC API over TCP/TLS, and `--grpc-client-ca` enables client certificate verification for mTLS deployments
