@@ -1153,6 +1153,7 @@ Endpoints:
 - `GET /`
 - `GET /api/config`
 - `GET /api/config/history`
+- `GET /api/audit`
 - `GET /api/status`
 - `GET /api/nms/v1/status`
 - `GET /api/nms/v1/telemetry/paths`
@@ -1168,6 +1169,7 @@ Endpoints:
 `/api/nms/v1/telemetry/snapshot` は one-shot structured telemetry event を HTTP-only collector 用の `arca.nms.telemetry-snapshot.v1` schema envelope で包み、configurable な timeout、payload byte、event count guardrail を強制します。
 `/api/config` は running configuration を set-command text と running config version として返します。dashboard でも同じ running configuration を browser editor に表示します。
 `/api/config/history` は recent configuration commits を返し、dashboard の commit history panel で使用します。
+`/api/audit` は newest-first audit events を `arca.audit.v1` schema envelope で返します。`limit`、`offset`、`user`、`action`、`result`、`since`、`until` で filter できます。Audit export には password-backed `admin` authentication が必要です。
 
 running configuration に password 付きの `security users` が存在する場合、Web UI は HTTP Basic authentication を要求します。built-in の `read-only`、`operator`、`admin` role は read-only dashboard と API endpoints へのアクセスを許可されます。
 configuration write には `operator` または `admin` が必要です。dashboard editor は `/api/config/validate` と `/api/config/commit` を呼び出します。`/api/config/validate` は `{ "config_text": "set ..." }` を受け取り、validation status と diff text を返します。`/api/config/commit` は `{ "config_text": "set ...", "message": "..." }` を受け取り、CLI と同じ internal gRPC candidate workflow で commit します。

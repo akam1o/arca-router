@@ -21,6 +21,9 @@ func TestCurrentPolicyAdvertisesV010Compatibility(t *testing.T) {
 			t.Fatalf("policy = %#v, want compatibility text containing %q", policy, want)
 		}
 	}
+	if AuditSchema != "arca.audit.v1" {
+		t.Fatalf("AuditSchema = %q, want arca.audit.v1", AuditSchema)
+	}
 }
 
 func TestComponentMatrixIncludesDataplaneAndSchemaGuards(t *testing.T) {

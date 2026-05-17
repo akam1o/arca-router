@@ -14,6 +14,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/akam1o/arca-router/internal/compat"
 	"github.com/akam1o/arca-router/internal/model"
 	nbgrpc "github.com/akam1o/arca-router/internal/northbound/grpc"
 	sbfrr "github.com/akam1o/arca-router/internal/southbound/frr"
@@ -35,7 +36,7 @@ const nmsOperationalStatusSchemaVersion = "arca.nms.operational.v1"
 const nmsTelemetryCatalogSchemaVersion = "arca.nms.telemetry-catalog.v1"
 const nmsTelemetrySchemasSchemaVersion = "arca.nms.telemetry-schemas.v1"
 const nmsTelemetrySnapshotSchemaVersion = "arca.nms.telemetry-snapshot.v1"
-const webAuditSchemaVersion = "arca.audit.v1"
+const webAuditSchemaVersion = compat.AuditSchema
 
 const (
 	defaultNMSTelemetrySnapshotTimeout         = 5 * time.Second

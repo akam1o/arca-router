@@ -1,6 +1,14 @@
 # Changelog
 
-## v0.9.x - NETCONF/YANG and Operational Safety (current)
+## v0.10.x - Stabilization and Compatibility (current)
+
+- **Web audit export**: authenticated Web API now exposes admin-only `GET /api/audit` with schema `arca.audit.v1`, pagination, user/action/result filters, and RFC3339 time range filters
+- **Audit event listing**: SQLite and etcd datastores can list audit events in newest-first order for export workflows
+- **CLI upgrade compatibility policy**: `arca check upgrade` now reports supported v0.10 direct upgrade sources, API compatibility IDs, and SQLite schema guardrails
+- **CLI compatibility report**: `arca show compatibility` prints the v0.10 compatibility policy, schema IDs, and VPP/FRR/NETCONF/datastore support matrix without requiring a daemon connection
+- **SQLite schema downgrade guard**: SQLite datastore startup now rejects schema versions newer than the binary supports instead of silently opening a future datastore
+
+## v0.9.x - NETCONF/YANG and Operational Safety
 
 - **CLI route-policy dry-run preview**: `commit check` now reports route-policy dry-run details for prefix-list, route-map, and BGP policy binding changes
 - **CLI upgrade preflight checks**: `arca check upgrade` verifies running config availability, rollback archive coverage, telemetry catalog metadata, and QoS capability snapshots before maintenance

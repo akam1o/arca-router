@@ -2993,6 +2993,7 @@ func printCompatibilityPolicy() {
 	fmt.Printf("  NMS telemetry catalog: %s\n", compat.NMSTelemetryCatalogSchema)
 	fmt.Printf("  NMS telemetry schemas: %s\n", compat.NMSTelemetrySchemaCatalog)
 	fmt.Printf("  NMS telemetry snapshot: %s\n", compat.NMSTelemetrySnapshot)
+	fmt.Printf("  audit export: %s\n", compat.AuditSchema)
 	fmt.Println("support matrix:")
 	for _, item := range compat.ComponentMatrix() {
 		fmt.Printf("  %s: %s\n", item.Component, item.Supported)
