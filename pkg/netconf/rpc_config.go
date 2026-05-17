@@ -190,6 +190,10 @@ func (c ConfigElement) XML() ([]byte, error) {
 		switch {
 		case isNamespaceDeclarationAttribute(attr):
 			continue
+		case attr.Name.Local == "":
+			return nil, NewRPCError(ErrorTypeRPC, ErrorTagInvalidValue,
+				"config attribute name must not be empty").
+				WithPath("/rpc/edit-config/config")
 		case attr.Name.Space == "":
 			writeXMLAttribute(&buf, attr.Name.Local, attr.Value)
 		default:

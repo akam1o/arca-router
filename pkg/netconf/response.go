@@ -186,6 +186,9 @@ func writeReplyAttributes(buf *bytes.Buffer, attrs []xml.Attr) error {
 		if isNamespaceDeclarationAttribute(attr) || isMessageIDAttribute(attr) {
 			continue
 		}
+		if attr.Name.Local == "" {
+			return fmt.Errorf("reply attribute name must not be empty")
+		}
 
 		name := attr.Name.Local
 		if attr.Name.Space != "" {
