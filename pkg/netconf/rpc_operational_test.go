@@ -58,6 +58,20 @@ func TestBuildOperationalDataUsesRunningConfig(t *testing.T) {
 	}
 }
 
+func TestBuildOperationalDataRejectsUnsupportedFilterType(t *testing.T) {
+	cfg := config.NewConfig()
+	cfg.System = &config.SystemConfig{HostName: "router1"}
+	filter := &Filter{Type: "unsupported"}
+
+	data, err := buildOperationalData(cfg, filter, time.Date(2026, 5, 12, 4, 0, 0, 0, time.UTC), nil, nil, nil, nil, nil, nil)
+	if err != nil {
+		t.Fatalf("buildOperationalData() error = %v", err)
+	}
+	if len(bytes.TrimSpace(data)) != 0 {
+		t.Fatalf("buildOperationalData() = %q, want empty output for unsupported filter type", data)
+	}
+}
+
 func TestBuildOperationalDataUsesLiveInterfaceState(t *testing.T) {
 	cfg := config.NewConfig()
 	iface := cfg.GetOrCreateInterface("ge-0/0/0")

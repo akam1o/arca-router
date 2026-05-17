@@ -529,12 +529,17 @@ func includeOperationalSectionPaths(filter *Filter, paths ...[]string) bool {
 	if filter == nil {
 		return true
 	}
-	if normalizedFilterType(filter) == "xpath" {
+	filterType := normalizedFilterType(filter)
+	switch filterType {
+	case "xpath":
 		for _, path := range paths {
 			if filterMatchesEnhanced(filter, path) {
 				return true
 			}
 		}
+		return false
+	case "", "subtree":
+	default:
 		return false
 	}
 	if len(bytes.TrimSpace(filter.Content)) == 0 {

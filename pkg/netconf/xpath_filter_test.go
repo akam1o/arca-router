@@ -478,6 +478,14 @@ func TestIncludeOperationalSectionXPath(t *testing.T) {
 	}
 }
 
+func TestIncludeOperationalSectionRejectsUnsupportedFilterType(t *testing.T) {
+	filter := &Filter{Type: "unsupported"}
+
+	if includeOperationalSection(filter, "interfaces") {
+		t.Fatal("includeOperationalSection() = true, want false for unsupported filter type")
+	}
+}
+
 func TestApplySubtreeFilterUsesXMLTokenExtraction(t *testing.T) {
 	xmlData := []byte(`<data xmlns="urn:ietf:params:xml:ns:netconf:base:1.0">
   <interfaces xmlns="urn:ietf:params:xml:ns:yang:ietf-interfaces">

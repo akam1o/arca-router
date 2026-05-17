@@ -2,6 +2,7 @@
 
 ## v0.9.x - NETCONF/YANG and Operational Safety (current)
 
+- **NETCONF operational filter type validation**: operational section selection now rejects unsupported filter types instead of treating empty content as match-all output
 - **NETCONF unsupported filter type validation**: direct output filtering and filter limit checks now reject unsupported filter types instead of treating empty content as a match-all subtree filter
 - **NETCONF empty XPath filter validation**: direct output filtering and filter limit checks now reject `type=xpath` filters without a select expression instead of treating them as match-all filters
 - **NETCONF XPath limit namespace validation**: filter depth and size validation now parses XPath selectors with declared namespace context before applying limits
