@@ -347,7 +347,7 @@ func (r *Reloader) ApplyConfig(ctx context.Context, configContent string) error 
 - [x] VPP socket権限確認ロジック実装（`pkg/vpp/govpp_client.go`）
 - [x] FRR設定適用権限確認（`pkg/frr/transactional.go`, `pkg/frr/reloader.go`）
 - [x] 設定ファイル権限設定（`pkg/config/writer.go`）
-- [ ] 統合テストで権限エラーハンドリング検証
+- [x] 統合テストで権限エラーハンドリング検証
 
 ---
 
