@@ -21,6 +21,7 @@ type fakeInteractiveClient struct {
 	replaceErr       error
 	history          []grpcclient.CommitInfo
 	runningText      string
+	runningVersion   uint64
 	candidateText    string
 	routeText        string
 	routeProtocol    string
@@ -86,7 +87,7 @@ type fakeInteractiveClient struct {
 
 func (f *fakeInteractiveClient) GetRunning(ctx context.Context) (string, uint64, error) {
 	f.getRunningCalls++
-	return f.runningText, 0, nil
+	return f.runningText, f.runningVersion, nil
 }
 
 func (f *fakeInteractiveClient) GetCandidate(ctx context.Context, sessionID string) (string, error) {
@@ -906,6 +907,88 @@ func TestFormatClassOfServicePostCommitSummarizesStatus(t *testing.T) {
 		if !strings.Contains(got, want) {
 			t.Fatalf("formatClassOfServicePostCommit() = %q, want substring %q", got, want)
 		}
+	}
+}
+
+func TestUpgradePreflightLinesReportsReadyState(t *testing.T) {
+	client := &fakeInteractiveClient{
+		runningText:    "set system host-name router\n",
+		runningVersion: 7,
+		history: []grpcclient.CommitInfo{
+			{CommitID: "1234567890abcdef", ConfigText: "set system host-name router"},
+		},
+		cosInfo: &grpcclient.ClassOfServiceInfo{
+			Capabilities: &grpcclient.ClassOfServiceCapabilitiesInfo{
+				MetadataBindingSupported: true,
+				QueueSchedulerSupported:  true,
+				PolicerSupported:         true,
+				CountersSupported:        true,
+			},
+		},
+	}
+
+	lines, err := upgradePreflightLines(context.Background(), client)
+	if err != nil {
+		t.Fatalf("upgradePreflightLines() error = %v", err)
+	}
+	got := strings.Join(lines, "\n")
+	for _, want := range []string{
+		"upgrade preflight:",
+		"running config: version 7",
+		"rollback archive: latest commit 12345678 available",
+		"telemetry catalog:",
+		"qos metadata binding: yes",
+		"status: ready for package-specific upgrade checks",
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("upgradePreflightLines() = %q, want substring %q", got, want)
+		}
+	}
+	if client.getRunningCalls != 1 || client.listHistoryCalls != 1 || client.telemetryCatalogCalls != 1 || client.cosCalls != 1 {
+		t.Fatalf("running/history/telemetry/cos calls = %d/%d/%d/%d, want 1/1/1/1",
+			client.getRunningCalls, client.listHistoryCalls, client.telemetryCatalogCalls, client.cosCalls)
+	}
+}
+
+func TestUpgradePreflightLinesReportsWarnings(t *testing.T) {
+	client := &fakeInteractiveClient{}
+
+	lines, err := upgradePreflightLines(context.Background(), client)
+	if err != nil {
+		t.Fatalf("upgradePreflightLines() error = %v", err)
+	}
+	got := strings.Join(lines, "\n")
+	for _, want := range []string{
+		"warning: running configuration is empty",
+		"warning: no rollback archive entries available",
+		"warning: qos capability snapshot unavailable",
+		"status: 3 warning(s), review before upgrade",
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("upgradePreflightLines() = %q, want substring %q", got, want)
+		}
+	}
+}
+
+func TestCmdCheckUpgradeRequiresOperationalMode(t *testing.T) {
+	sh := &interactiveShell{
+		client:    &fakeInteractiveClient{},
+		hostname:  "router",
+		mode:      modeConfiguration,
+		sessionID: "session-1",
+		hasLock:   true,
+	}
+
+	err := sh.cmdCheck(context.Background(), []string{"upgrade"})
+	if err == nil || !strings.Contains(err.Error(), "operational mode") {
+		t.Fatalf("cmdCheck(upgrade) error = %v, want operational mode error", err)
+	}
+}
+
+func TestOneShotCheckUpgradeRejectsInvalidUsage(t *testing.T) {
+	code := oneShotCheck(context.Background(), &fakeInteractiveClient{}, []string{"configuration"})
+	if code != ExitUsageError {
+		t.Fatalf("oneShotCheck(configuration) = %d, want %d", code, ExitUsageError)
 	}
 }
 

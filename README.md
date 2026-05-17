@@ -231,6 +231,7 @@ arca show configuration
 arca show configuration rollback 1
 
 # Save configuration backups before maintenance
+arca check upgrade
 arca backup configuration /var/backups/arca-router/running.conf
 arca backup configuration rollback 1 /var/backups/arca-router/rollback-1.conf
 

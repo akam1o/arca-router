@@ -95,6 +95,7 @@ Commands:
   help              Show this help message
   version           Show version information
   show <subcommand> Show configuration or status
+  check upgrade     Run upgrade preflight checks
   backup configuration <path>
                     Save running configuration to a new file
   backup configuration rollback <N> <path>
@@ -194,6 +195,8 @@ func runOneShotCommand(ctx context.Context, f *cliFlags, args []string) int {
 			return ExitUsageError
 		}
 		return oneShotShow(ctx, client, args[1:], f)
+	case "check":
+		return oneShotCheck(ctx, client, args[1:])
 	case "backup":
 		return oneShotBackup(ctx, client, args[1:])
 	case "version":
@@ -207,6 +210,22 @@ func runOneShotCommand(ctx context.Context, f *cliFlags, args []string) int {
 		showUsage()
 		return ExitUsageError
 	}
+}
+
+func oneShotCheck(ctx context.Context, client showClient, args []string) int {
+	if len(args) != 1 || args[0] != "upgrade" {
+		fmt.Fprintln(os.Stderr, "Error: usage: check upgrade")
+		return ExitUsageError
+	}
+	lines, err := upgradePreflightLines(ctx, client)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+		return ExitOperationError
+	}
+	for _, line := range lines {
+		fmt.Println(line)
+	}
+	return ExitSuccess
 }
 
 func oneShotBackup(ctx context.Context, client showClient, args []string) int {
@@ -698,6 +717,8 @@ func (sh *interactiveShell) processCommand(ctx context.Context, line string) err
 		return sh.cmdConfigure(ctx)
 	case "show":
 		return sh.cmdShow(ctx, args)
+	case "check":
+		return sh.cmdCheck(ctx, args)
 	case "set":
 		return sh.cmdSet(ctx, args)
 	case "delete":
@@ -767,6 +788,23 @@ func (sh *interactiveShell) releaseConfigurationLock(ctx context.Context) error 
 	sh.mode = modeOperational
 	sh.editPath = nil
 	sh.hasLock = false
+	return nil
+}
+
+func (sh *interactiveShell) cmdCheck(ctx context.Context, args []string) error {
+	if len(args) != 1 || args[0] != "upgrade" {
+		return fmt.Errorf("usage: check upgrade")
+	}
+	if sh.mode != modeOperational {
+		return fmt.Errorf("'check upgrade' only available in operational mode")
+	}
+	lines, err := upgradePreflightLines(ctx, sh.client)
+	if err != nil {
+		return err
+	}
+	for _, line := range lines {
+		fmt.Println(line)
+	}
 	return nil
 }
 
@@ -1094,6 +1132,72 @@ func archivedConfigurationText(ctx context.Context, client showClient, rollbackN
 		return "", fmt.Errorf("archived config text unavailable for rollback %d", rollbackNum)
 	}
 	return entry.ConfigText, nil
+}
+
+func upgradePreflightLines(ctx context.Context, client showClient) ([]string, error) {
+	runningText, runningVersion, err := client.GetRunning(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("load running configuration: %w", err)
+	}
+
+	lines := []string{"upgrade preflight:"}
+	warnings := 0
+	if strings.TrimSpace(runningText) == "" {
+		lines, warnings = appendUpgradePreflightWarning(lines, warnings, "running configuration is empty")
+	} else {
+		lines = append(lines, fmt.Sprintf("  running config: version %d, %d bytes", runningVersion, len(runningText)))
+	}
+
+	history, err := client.ListHistory(ctx, 1, 0)
+	if err != nil {
+		lines, warnings = appendUpgradePreflightWarning(lines, warnings, "rollback archive check failed: "+err.Error())
+	} else if len(history) == 0 {
+		lines, warnings = appendUpgradePreflightWarning(lines, warnings, "no rollback archive entries available")
+	} else if strings.TrimSpace(history[0].ConfigText) == "" {
+		lines, warnings = appendUpgradePreflightWarning(lines, warnings, "latest rollback archive has no config text")
+	} else {
+		lines = append(lines, fmt.Sprintf("  rollback archive: latest commit %s available", shortCommitID(history[0].CommitID)))
+	}
+
+	catalog, err := client.GetTelemetryCatalog(ctx)
+	if err != nil {
+		lines, warnings = appendUpgradePreflightWarning(lines, warnings, "telemetry catalog check failed: "+err.Error())
+	} else if catalog.EventSchemaVersion == "" || catalog.Encoding == "" || len(catalog.Paths) == 0 {
+		lines, warnings = appendUpgradePreflightWarning(lines, warnings, "telemetry catalog is incomplete")
+	} else {
+		lines = append(lines, fmt.Sprintf("  telemetry catalog: %d paths, schema %s, encoding %s",
+			len(catalog.Paths), catalog.EventSchemaVersion, catalog.Encoding))
+	}
+
+	cosInfo, err := client.GetClassOfService(ctx)
+	if err != nil {
+		lines, warnings = appendUpgradePreflightWarning(lines, warnings, "qos capability check failed: "+err.Error())
+	} else if cosInfo == nil || cosInfo.Capabilities == nil {
+		lines, warnings = appendUpgradePreflightWarning(lines, warnings, "qos capability snapshot unavailable")
+	} else {
+		capabilities := cosInfo.Capabilities
+		lines = append(lines,
+			fmt.Sprintf("  qos metadata binding: %s", yesNo(capabilities.MetadataBindingSupported)),
+			fmt.Sprintf("  qos scheduler: %s", yesNo(capabilities.QueueSchedulerSupported)),
+			fmt.Sprintf("  qos policer: %s", yesNo(capabilities.PolicerSupported)),
+			fmt.Sprintf("  qos counters: %s", yesNo(capabilities.CountersSupported)),
+		)
+		if capabilities.LastError != "" {
+			lines, warnings = appendUpgradePreflightWarning(lines, warnings, "qos capability detector reported: "+capabilities.LastError)
+		}
+	}
+
+	if warnings == 0 {
+		lines = append(lines, "  status: ready for package-specific upgrade checks")
+	} else {
+		lines = append(lines, fmt.Sprintf("  status: %d warning(s), review before upgrade", warnings))
+	}
+	lines = append(lines, "  next step: keep a fresh configuration backup and verify release-specific package notes")
+	return lines, nil
+}
+
+func appendUpgradePreflightWarning(lines []string, warnings int, message string) ([]string, int) {
+	return append(lines, "  warning: "+message), warnings + 1
 }
 
 func (sh *interactiveShell) cmdBackup(ctx context.Context, args []string) error {
@@ -1954,6 +2058,7 @@ func (sh *interactiveShell) showHelp() {
 		fmt.Println("  help                          Show this help message")
 		fmt.Println("  backup configuration <path>   Save running configuration to a file")
 		fmt.Println("  backup configuration rollback <N> <path> Save archived config to a file")
+		fmt.Println("  check upgrade                 Run upgrade preflight checks")
 		fmt.Println("  configure                     Enter configuration mode")
 		fmt.Println("  show configuration            Show running configuration")
 		fmt.Println("  show configuration rollback <N> Show archived config N commits back")
@@ -3351,6 +3456,9 @@ func createCompleter() *readline.PrefixCompleter {
 			readline.PcItem("check"),
 			readline.PcItem("and-quit"),
 			readline.PcItem("comment"),
+		),
+		readline.PcItem("check",
+			readline.PcItem("upgrade"),
 		),
 		readline.PcItem("backup",
 			readline.PcItem("configuration",
