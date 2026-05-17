@@ -1,4 +1,4 @@
-.PHONY: help build build-cli clean rpm rpm-package deb deb-package version test fmt vet check release-check install-nfpm integration-test netconf-client-evidence netconf-ncclient-evidence netconf-libnetconf2-evidence netconf-pyez-evidence frr-mgmtd-smoke package-lint generate-binapi generate-proto
+.PHONY: help build build-cli clean rpm rpm-package deb deb-package version test fmt vet check release-check install-nfpm integration-test netconf-client-evidence netconf-ncclient-evidence netconf-libnetconf2-evidence netconf-evidence-verify netconf-pyez-evidence frr-mgmtd-smoke package-lint generate-binapi generate-proto
 
 # Binary names
 BINARY_NAME=arca-routerd
@@ -202,6 +202,10 @@ netconf-ncclient-evidence: ## Run ncclient NETCONF interop and write sign-off ev
 netconf-libnetconf2-evidence: ## Run libnetconf2 NETCONF interop and write sign-off evidence
 	@echo "Running libnetconf2 NETCONF interop evidence..."
 	NETCONF_INTEROP_EVIDENCE_DIR="$(NETCONF_EVIDENCE_DIR)/libnetconf2" bash tests/netconf_clients/libnetconf2_interop.sh
+
+netconf-evidence-verify: ## Verify required NETCONF client evidence files for sign-off
+	@echo "Verifying NETCONF client evidence..."
+	$(PYTHON) tests/netconf_clients/verify_evidence.py "$(NETCONF_EVIDENCE_DIR)"
 
 netconf-pyez-evidence: ## Run supplementary PyEZ NETCONF smoke and write sign-off evidence
 	@echo "Running supplementary Junos PyEZ NETCONF evidence..."

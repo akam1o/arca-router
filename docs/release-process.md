@@ -135,7 +135,8 @@ Detailed future scope is maintained in [`ROADMAP.md`](../ROADMAP.md).
 - [ ] **NETCONF client interoperability**: `NETCONF Client Interoperability`
   workflow passed and the `netconf-client-ncclient-evidence` and
   `netconf-client-libnetconf2-evidence` artifacts are linked from sign-off, or
-  `make netconf-client-evidence` was run locally and its artifacts are linked.
+  `make netconf-client-evidence` and `make netconf-evidence-verify` were run
+  locally and the artifacts are linked.
 
 - [ ] **FRR mgmtd smoke**: Transactional FRR apply works on a live FRR host
   ```bash

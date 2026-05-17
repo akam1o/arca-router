@@ -161,6 +161,7 @@ GitHub Actions 外で必須 evidence を収集する場合は、ncclient の Pyt
 
 ```bash
 make netconf-client-evidence
+make netconf-evidence-verify
 ```
 
 この target は ncclient と libnetconf2 の evidence を `artifacts/netconf-clients/` に出力する。Supplementary PyEZ evidence が必要な場合のみ `make netconf-pyez-evidence` を実行する。

@@ -183,6 +183,7 @@ ncclient Python dependencies and libnetconf2 development packages, then run:
 
 ```bash
 make netconf-client-evidence
+make netconf-evidence-verify
 ```
 
 The target writes ncclient and libnetconf2 evidence under

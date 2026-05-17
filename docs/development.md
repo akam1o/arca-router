@@ -476,6 +476,7 @@ make package-lint
 
 # Generate local NETCONF client evidence for release sign-off
 make netconf-client-evidence
+make netconf-evidence-verify
 
 # Run the live FRR mgmtd transactional apply smoke test
 make frr-mgmtd-smoke
