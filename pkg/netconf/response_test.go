@@ -496,6 +496,47 @@ func TestMarshalReplyRejectsEmptyNamespacePrefixDeclaration(t *testing.T) {
 	}
 }
 
+func TestMarshalReplyRejectsReservedNamespaceDeclarations(t *testing.T) {
+	tests := []struct {
+		name string
+		attr xml.Attr
+		want string
+	}{
+		{
+			name: "xml prefix rebound",
+			attr: xml.Attr{Name: xml.Name{Space: "xmlns", Local: "xml"}, Value: "urn:bad"},
+			want: "namespace prefix xml must be bound",
+		},
+		{
+			name: "xmlns prefix declared",
+			attr: xml.Attr{Name: xml.Name{Space: "xmlns", Local: "xmlns"}, Value: "urn:bad"},
+			want: "namespace prefix xmlns must not be declared",
+		},
+		{
+			name: "xml namespace default",
+			attr: xml.Attr{Name: xml.Name{Local: "xmlns"}, Value: xmlNamespace},
+			want: "xml namespace must use xml prefix",
+		},
+		{
+			name: "xmlns namespace value",
+			attr: xml.Attr{Name: xml.Name{Space: "xmlns", Local: "bad"}, Value: xmlnsNamespace},
+			want: "xmlns namespace must not be declared",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := MarshalReply(NewOKReply("101").WithAttributes([]xml.Attr{tt.attr}))
+			if err == nil {
+				t.Fatalf("MarshalReply() error = nil, want %q", tt.want)
+			}
+			if !strings.Contains(err.Error(), tt.want) {
+				t.Fatalf("MarshalReply() error = %v, want %q", err, tt.want)
+			}
+		})
+	}
+}
+
 func TestMarshalReplyOmitsEmptyMessageID(t *testing.T) {
 	reply := NewErrorReply("", ErrMissingAttribute("rpc", "message-id"))
 

@@ -460,6 +460,50 @@ func TestConfigElementXMLRejectsEmptyNamespacePrefixDeclaration(t *testing.T) {
 	}
 }
 
+func TestConfigElementXMLRejectsReservedNamespaceDeclarations(t *testing.T) {
+	tests := []struct {
+		name string
+		attr xml.Attr
+		want string
+	}{
+		{
+			name: "xml prefix rebound",
+			attr: xml.Attr{Name: xml.Name{Space: "xmlns", Local: "xml"}, Value: "urn:bad"},
+			want: "namespace prefix xml must be bound",
+		},
+		{
+			name: "xmlns prefix declared",
+			attr: xml.Attr{Name: xml.Name{Space: "xmlns", Local: "xmlns"}, Value: "urn:bad"},
+			want: "namespace prefix xmlns must not be declared",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			config := ConfigElement{
+				XMLName: xml.Name{Local: "config"},
+				Attrs:   []xml.Attr{tt.attr},
+				Content: []byte(`<system><host-name>router1</host-name></system>`),
+			}
+
+			_, err := config.XML()
+			if err == nil {
+				t.Fatalf("Config.XML() error = nil, want %q", tt.want)
+			}
+			rpcErr, ok := err.(*RPCError)
+			if !ok {
+				t.Fatalf("Config.XML() error = %T, want *RPCError", err)
+			}
+			if rpcErr.ErrorTag != ErrorTagInvalidValue {
+				t.Fatalf("Config.XML() error tag = %s, want %s", rpcErr.ErrorTag, ErrorTagInvalidValue)
+			}
+			if !strings.Contains(rpcErr.ErrorMessage, tt.want) {
+				t.Fatalf("Config.XML() error = %v, want %q", rpcErr, tt.want)
+			}
+		})
+	}
+}
+
 func TestInheritedNamespaceReceiversNilSafe(t *testing.T) {
 	attrs := []xml.Attr{
 		{Name: xml.Name{Space: "xmlns", Local: "arca"}, Value: ArcaConfigNS},

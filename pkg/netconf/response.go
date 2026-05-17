@@ -10,6 +10,7 @@ import (
 const (
 	netconfNamespace = "urn:ietf:params:xml:ns:netconf:base:1.0"
 	xmlNamespace     = "http://www.w3.org/XML/1998/namespace"
+	xmlnsNamespace   = "http://www.w3.org/2000/xmlns/"
 )
 
 // RPCReply represents a NETCONF <rpc-reply> envelope
@@ -298,6 +299,9 @@ func writeReplyAttributes(buf *bytes.Buffer, attrs []xml.Attr) error {
 	}
 
 	for _, attr := range attrs {
+		if err := validateNamespaceDeclarationAttr(attr); err != nil {
+			return err
+		}
 		name, ok := namespaceDeclarationAttrName(attr)
 		if !ok {
 			continue
@@ -338,4 +342,23 @@ func writeReplyAttributes(buf *bytes.Buffer, attrs []xml.Attr) error {
 	}
 
 	return nil
+}
+
+func validateNamespaceDeclarationAttr(attr xml.Attr) error {
+	name, ok := namespaceDeclarationAttrName(attr)
+	if !ok {
+		return nil
+	}
+	switch {
+	case name == "xmlns:xmlns":
+		return fmt.Errorf("namespace prefix xmlns must not be declared")
+	case name == "xmlns:xml" && attr.Value != xmlNamespace:
+		return fmt.Errorf("namespace prefix xml must be bound to %s", xmlNamespace)
+	case name != "xmlns:xml" && attr.Value == xmlNamespace:
+		return fmt.Errorf("xml namespace must use xml prefix")
+	case attr.Value == xmlnsNamespace:
+		return fmt.Errorf("xmlns namespace must not be declared")
+	default:
+		return nil
+	}
 }
