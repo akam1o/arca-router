@@ -8,9 +8,9 @@ import (
 	"strings"
 )
 
-// XPathFilter represents a basic XPath-like filter for NETCONF
-// Phase 3: Implements simplified subtree filtering with path matching
-// Phase 4: Full XPath 1.0 support with predicates and functions
+// XPathFilter represents the safe XPath-like NETCONF filter subset advertised
+// by arca-router. It supports model-rooted paths and simple equality
+// predicates, not full XPath 1.0.
 type XPathFilter struct {
 	// Path segments (e.g., ["interfaces", "interface", "name"])
 	Segments []string
@@ -44,8 +44,8 @@ func normalizedFilterType(filter *Filter) string {
 	return strings.TrimSpace(filter.Type)
 }
 
-// ParseXPathFilter parses a simplified XPath expression
-// Supported formats (Phase 3):
+// ParseXPathFilter parses the safe absolute-path XPath subset.
+// Supported formats:
 // - /interfaces
 // - /interfaces/interface
 // - /interfaces/interface[name='ge-0/0/0']
@@ -53,7 +53,7 @@ func normalizedFilterType(filter *Filter) string {
 // - /routing-options/static/route[prefix='10.0.0.0/24']
 // - /if:interfaces/if:interface[if:name='ge-0/0/0']
 //
-// Not supported (Phase 4):
+// Not supported by the advertised subset:
 // - Functions (count(), contains(), etc.)
 // - Complex boolean expressions
 func ParseXPathFilter(path string) (*XPathFilter, error) {
@@ -367,10 +367,8 @@ func (f *XPathFilter) MatchesSection(elementPath []string) bool {
 	return true
 }
 
-// ApplySubtreeFilter applies subtree filtering to XML data
-// This implements RFC 6241 Section 6 subtree filtering
-// Phase 3: Element name matching with basic predicates
-// Phase 4: Full namespace-aware filtering
+// ApplySubtreeFilter applies the supported RFC 6241 subtree filtering subset
+// using namespace-aware element path matching.
 func ApplySubtreeFilter(xmlData []byte, filter *Filter) ([]byte, error) {
 	if filter == nil {
 		return append([]byte(nil), xmlData...), nil
@@ -625,8 +623,8 @@ func (e subtreeFilterElement) matches(name xml.Name) bool {
 	return name.Space == e.Namespace
 }
 
-// filterMatches checks if a top-level element matches the filter
-// Enhanced version with XPath-like support (Phase 3)
+// filterMatchesEnhanced checks whether an element path matches the supported
+// subtree or XPath-like filter subset.
 func filterMatchesEnhanced(filter *Filter, elementPath []string) bool {
 	if filter == nil {
 		return true
@@ -666,8 +664,8 @@ func filterMatchesEnhanced(filter *Filter, elementPath []string) bool {
 	return false
 }
 
-// filterMatches is the legacy function for backward compatibility
-// Phase 3: Keep for existing code, use filterMatchesEnhanced for new code
+// filterMatches checks whether a top-level element matches the supported filter
+// subset.
 func filterMatches(filter *Filter, element string) bool {
 	return filterMatchesEnhanced(filter, []string{element})
 }

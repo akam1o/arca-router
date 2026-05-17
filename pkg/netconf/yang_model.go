@@ -169,7 +169,7 @@ func (v *YANGValidator) ListModules() []string {
 }
 
 // ValidateElementPath validates that an XPath-like element path is valid
-// according to the YANG schema (Phase 3: basic implementation)
+// according to the implemented YANG path schema.
 func (v *YANGValidator) ValidateElementPath(path string) error {
 	return v.ValidateElementPathWithContext(path, nil)
 }
