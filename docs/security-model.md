@@ -450,28 +450,19 @@ sudo systemctl restart arca-routerd
 - [ ] 不要なCapabilitiesが付与されていないことを確認
 - [ ] SELinux/AppArmorポリシーの確認（Phase 3）
 
-### 監査スクリプト例
+### 監査スクリプト
+
+実機または release-candidate package を入れた lab では、以下を実行して
+systemd unit、daemon user、capabilities、config file、VPP socket、FRR file
+backend permission を確認する。
 
 ```bash
-#!/bin/bash
-# scripts/security-audit.sh
-
-echo "=== arca-router Security Audit ==="
-
-# Check user
-echo "User: $(systemctl show -p User arca-routerd | cut -d= -f2)"
-
-# Check capabilities
-echo "Capabilities: $(systemctl show -p AmbientCapabilities arca-routerd | cut -d= -f2)"
-
-# Check file permissions
-echo "Config: $(ls -l /etc/arca-router/arca-router.conf)"
-echo "FRR file backend: $(ls -l /etc/frr/frr.conf)"
-echo "VPP socket: $(ls -l /run/vpp/api.sock)"
-
-# Check groups
-echo "Groups: $(id arca-router)"
+make security-audit
 ```
+
+実体は [`scripts/security-audit.sh`](../scripts/security-audit.sh)。
+必要に応じて `ARCA_SECURITY_UNIT`、`ARCA_SECURITY_USER`、
+`ARCA_VPP_SOCKET` で確認対象を上書きできる。
 
 ---
 

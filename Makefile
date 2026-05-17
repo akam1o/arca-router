@@ -1,4 +1,4 @@
-.PHONY: help build build-cli clean rpm rpm-package deb deb-package version test fmt vet check release-check install-nfpm integration-test netconf-client-lint netconf-client-evidence netconf-ncclient-evidence netconf-libnetconf2-evidence netconf-evidence-verify netconf-pyez-evidence frr-mgmtd-smoke package-lint generate-binapi generate-proto
+.PHONY: help build build-cli clean rpm rpm-package deb deb-package version test fmt vet check release-check install-nfpm integration-test netconf-client-lint netconf-client-evidence netconf-ncclient-evidence netconf-libnetconf2-evidence netconf-evidence-verify netconf-pyez-evidence frr-mgmtd-smoke security-audit package-lint generate-binapi generate-proto
 
 # Binary names
 BINARY_NAME=arca-routerd
@@ -218,6 +218,9 @@ netconf-pyez-evidence: ## Run supplementary PyEZ NETCONF smoke and write sign-of
 frr-mgmtd-smoke: ## Run live FRR mgmtd transactional apply smoke test
 	@echo "Running live FRR mgmtd smoke test..."
 	ARCA_FRR_MGMTD_SMOKE=1 go test -v ./pkg/frr -run TestFRRMgmtdSmokeApplyAndCleanup -count=1
+
+security-audit: ## Audit installed service users, capabilities, and file/socket permissions
+	@bash scripts/security-audit.sh
 
 package-lint: ## Validate package metadata and current service expectations
 	@echo "Linting package metadata..."
