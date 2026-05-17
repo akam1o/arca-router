@@ -73,9 +73,21 @@ func rateLimiterConfigWithDefaults(config *SSHConfig) *SSHConfig {
 	return &merged
 }
 
+func (rl *RateLimiter) effectiveConfig() *SSHConfig {
+	if rl == nil || rl.config == nil {
+		return DefaultSSHConfig()
+	}
+	return rl.config
+}
+
 // CheckIP checks if an IP address is currently locked out
 // Returns true if allowed, false if locked out
 func (rl *RateLimiter) CheckIP(ip string) (bool, time.Time) {
+	if rl == nil {
+		return true, time.Time{}
+	}
+	config := rl.effectiveConfig()
+
 	rl.ipMu.RLock()
 	defer rl.ipMu.RUnlock()
 
@@ -86,9 +98,9 @@ func (rl *RateLimiter) CheckIP(ip string) (bool, time.Time) {
 
 	// Check if lockout has expired
 	if tracker.lockedOut {
-		if time.Since(tracker.lockoutAt) < rl.config.LockoutDuration {
+		if time.Since(tracker.lockoutAt) < config.LockoutDuration {
 			// Still locked out
-			unlockAt := tracker.lockoutAt.Add(rl.config.LockoutDuration)
+			unlockAt := tracker.lockoutAt.Add(config.LockoutDuration)
 			return false, unlockAt
 		}
 		// Lockout expired - will be cleaned up in next iteration
@@ -100,6 +112,11 @@ func (rl *RateLimiter) CheckIP(ip string) (bool, time.Time) {
 // CheckUser checks if a user is currently locked out
 // Returns true if allowed, false if locked out
 func (rl *RateLimiter) CheckUser(username string) (bool, time.Time) {
+	if rl == nil {
+		return true, time.Time{}
+	}
+	config := rl.effectiveConfig()
+
 	rl.userMu.RLock()
 	defer rl.userMu.RUnlock()
 
@@ -110,9 +127,9 @@ func (rl *RateLimiter) CheckUser(username string) (bool, time.Time) {
 
 	// Check if lockout has expired
 	if tracker.lockedOut {
-		if time.Since(tracker.lockoutAt) < rl.config.LockoutDuration {
+		if time.Since(tracker.lockoutAt) < config.LockoutDuration {
 			// Still locked out
-			unlockAt := tracker.lockoutAt.Add(rl.config.LockoutDuration)
+			unlockAt := tracker.lockoutAt.Add(config.LockoutDuration)
 			return false, unlockAt
 		}
 		// Lockout expired - will be cleaned up in next iteration
@@ -124,15 +141,22 @@ func (rl *RateLimiter) CheckUser(username string) (bool, time.Time) {
 // RecordFailure records an authentication failure for an IP and user
 // Returns true if the IP or user should be locked out
 func (rl *RateLimiter) RecordFailure(ip, username string) (ipLocked, userLocked bool) {
+	if rl == nil {
+		return false, false
+	}
+	config := rl.effectiveConfig()
 	now := time.Now()
 
 	// Record IP failure
 	rl.ipMu.Lock()
+	if rl.ipFailures == nil {
+		rl.ipFailures = make(map[string]*failureTracker)
+	}
 	ipTracker := rl.getOrCreateTracker(rl.ipFailures, ip)
 	ipTracker.failures = append(ipTracker.failures, now)
-	ipTracker.failures = rl.removeExpiredFailures(ipTracker.failures, rl.config.IPLockoutWindow)
+	ipTracker.failures = rl.removeExpiredFailures(ipTracker.failures, config.IPLockoutWindow)
 
-	if len(ipTracker.failures) >= rl.config.IPFailureLimit && !ipTracker.lockedOut {
+	if len(ipTracker.failures) >= config.IPFailureLimit && !ipTracker.lockedOut {
 		ipTracker.lockedOut = true
 		ipTracker.lockoutAt = now
 		ipLocked = true
@@ -141,11 +165,14 @@ func (rl *RateLimiter) RecordFailure(ip, username string) (ipLocked, userLocked 
 
 	// Record user failure
 	rl.userMu.Lock()
+	if rl.userFailures == nil {
+		rl.userFailures = make(map[string]*failureTracker)
+	}
 	userTracker := rl.getOrCreateTracker(rl.userFailures, username)
 	userTracker.failures = append(userTracker.failures, now)
-	userTracker.failures = rl.removeExpiredFailures(userTracker.failures, rl.config.UserLockoutWindow)
+	userTracker.failures = rl.removeExpiredFailures(userTracker.failures, config.UserLockoutWindow)
 
-	if len(userTracker.failures) >= rl.config.UserFailureLimit && !userTracker.lockedOut {
+	if len(userTracker.failures) >= config.UserFailureLimit && !userTracker.lockedOut {
 		userTracker.lockedOut = true
 		userTracker.lockoutAt = now
 		userLocked = true
@@ -157,6 +184,10 @@ func (rl *RateLimiter) RecordFailure(ip, username string) (ipLocked, userLocked 
 
 // RecordSuccess records a successful authentication (clears failure history)
 func (rl *RateLimiter) RecordSuccess(ip, username string) {
+	if rl == nil {
+		return
+	}
+
 	rl.ipMu.Lock()
 	delete(rl.ipFailures, ip)
 	rl.ipMu.Unlock()
@@ -212,17 +243,22 @@ func (rl *RateLimiter) cleanupLoop() {
 
 // cleanup removes expired lockouts and old failure records
 func (rl *RateLimiter) cleanup() {
+	if rl == nil {
+		return
+	}
+	config := rl.effectiveConfig()
+
 	// Cleanup IP lockouts
 	rl.ipMu.Lock()
 	for ip, tracker := range rl.ipFailures {
 		// Remove expired lockouts
-		if tracker.lockedOut && time.Since(tracker.lockoutAt) >= rl.config.LockoutDuration {
+		if tracker.lockedOut && time.Since(tracker.lockoutAt) >= config.LockoutDuration {
 			delete(rl.ipFailures, ip)
 			continue
 		}
 
 		// Remove old failure records
-		tracker.failures = rl.removeExpiredFailures(tracker.failures, rl.config.IPLockoutWindow)
+		tracker.failures = rl.removeExpiredFailures(tracker.failures, config.IPLockoutWindow)
 		if len(tracker.failures) == 0 && !tracker.lockedOut {
 			delete(rl.ipFailures, ip)
 		}
@@ -233,13 +269,13 @@ func (rl *RateLimiter) cleanup() {
 	rl.userMu.Lock()
 	for username, tracker := range rl.userFailures {
 		// Remove expired lockouts
-		if tracker.lockedOut && time.Since(tracker.lockoutAt) >= rl.config.LockoutDuration {
+		if tracker.lockedOut && time.Since(tracker.lockoutAt) >= config.LockoutDuration {
 			delete(rl.userFailures, username)
 			continue
 		}
 
 		// Remove old failure records
-		tracker.failures = rl.removeExpiredFailures(tracker.failures, rl.config.UserLockoutWindow)
+		tracker.failures = rl.removeExpiredFailures(tracker.failures, config.UserLockoutWindow)
 		if len(tracker.failures) == 0 && !tracker.lockedOut {
 			delete(rl.userFailures, username)
 		}
@@ -249,13 +285,23 @@ func (rl *RateLimiter) cleanup() {
 
 // Stop stops the rate limiter cleanup goroutine
 func (rl *RateLimiter) Stop() {
+	if rl == nil {
+		return
+	}
 	rl.stopOnce.Do(func() {
-		close(rl.done)
+		if rl.done != nil {
+			close(rl.done)
+		}
 	})
 }
 
 // GetStats returns current rate limiter statistics
 func (rl *RateLimiter) GetStats() RateLimiterStats {
+	if rl == nil {
+		return RateLimiterStats{}
+	}
+	config := rl.effectiveConfig()
+
 	rl.ipMu.RLock()
 	ipLockedCount := 0
 	ipTrackedCount := len(rl.ipFailures)
@@ -281,7 +327,7 @@ func (rl *RateLimiter) GetStats() RateLimiterStats {
 		IPsLocked:     ipLockedCount,
 		UsersTracked:  userTrackedCount,
 		UsersLocked:   userLockedCount,
-		LockoutWindow: rl.config.LockoutDuration,
+		LockoutWindow: config.LockoutDuration,
 	}
 }
 

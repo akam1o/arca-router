@@ -2,6 +2,7 @@
 
 ## v0.9.x - NETCONF/YANG and Operational Safety (current)
 
+- **NETCONF rate limiter receiver safety**: rate limiter checks, stats, and cleanup methods now tolerate nil or zero-value receivers without panicking
 - **NETCONF hook setter safety**: server and SSH server hook setters now no-op on nil receivers so embedded lifecycle cleanup paths do not panic
 - **NETCONF YANG validator zero-value safety**: uninitialized validators now return stable errors or empty module lists instead of dereferencing nil module state
 - **NETCONF user database defaults**: direct user database construction now installs a default logger when callers pass nil so schema initialization and auth audit logging stay stable
