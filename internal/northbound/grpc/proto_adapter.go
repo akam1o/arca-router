@@ -89,6 +89,7 @@ func (a *configServiceAdapter) ListHistory(ctx context.Context, req *apiv1.ListH
 			Timestamp:  entry.Timestamp.Format(time.RFC3339Nano),
 			Message:    entry.Message,
 			IsRollback: entry.IsRollback,
+			ConfigText: entry.ConfigText,
 		})
 	}
 	return resp, nil

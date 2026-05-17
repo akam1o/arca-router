@@ -2,6 +2,7 @@
 
 ## v0.9.x - NETCONF/YANG and Operational Safety (current)
 
+- **Config rollback archive exposure**: internal gRPC commit history now includes archived set-command config text for rollback and backup tooling
 - **NETCONF error reply fallback handling**: SSH NETCONF sessions now retry error reply marshaling without inherited reply attributes instead of writing empty fallback messages
 - **NETCONF config helper text validation**: direct config XML helper output now rejects unexpected text in generated config containers before returning XML bytes
 - **NETCONF config helper XML limit validation**: direct config XML helper output now applies element and depth limits before returning XML bytes

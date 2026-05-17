@@ -13,6 +13,7 @@ import (
 	"testing"
 	"time"
 
+	apiv1 "github.com/akam1o/arca-router/api/v1"
 	"github.com/akam1o/arca-router/internal/engine"
 	"github.com/akam1o/arca-router/internal/model"
 	sbfrr "github.com/akam1o/arca-router/internal/southbound/frr"
@@ -31,14 +32,15 @@ func listenUnix(path string) (net.Listener, error) {
 }
 
 type fakeStore struct {
-	commitID   string
-	prepareErr error
-	prepareFn  func()
-	commitErr  error
-	saved      *model.ConfigSnapshot
-	aborted    bool
-	commits    map[string]*store.CommitRecord
-	listCalls  int
+	commitID    string
+	prepareErr  error
+	prepareFn   func()
+	commitErr   error
+	saved       *model.ConfigSnapshot
+	aborted     bool
+	commits     map[string]*store.CommitRecord
+	listRecords []*store.CommitRecord
+	listCalls   int
 }
 
 type fakeInterfaceStateCollector struct {
@@ -116,7 +118,7 @@ func (f *fakeStore) GetCommit(ctx context.Context, commitID string) (*store.Comm
 
 func (f *fakeStore) ListCommits(ctx context.Context, opts *store.ListOptions) ([]*store.CommitRecord, error) {
 	f.listCalls++
-	return nil, nil
+	return f.listRecords, nil
 }
 
 func (f *fakeStore) AuditLog(ctx context.Context, event *store.AuditEvent) error {
@@ -1680,6 +1682,54 @@ func TestListHistoryRejectsNegativePagination(t *testing.T) {
 				t.Fatalf("ListCommits calls = %d, want 0", st.listCalls)
 			}
 		})
+	}
+}
+
+func TestListHistoryIncludesConfigText(t *testing.T) {
+	eng := engine.NewEngine(nil, testLogger())
+	st := &fakeStore{
+		listRecords: []*store.CommitRecord{
+			{
+				CommitID:  "commit-1",
+				Author:    "alice",
+				Message:   "initial",
+				Timestamp: time.Date(2026, 5, 17, 12, 0, 0, 0, time.UTC),
+				Config: &model.RouterConfig{
+					System: &model.SystemConfig{HostName: "router1"},
+				},
+			},
+		},
+	}
+	srv := NewServer(eng, st, testLogger())
+
+	entries, err := srv.ListHistory(context.Background(), 10, 0)
+	if err != nil {
+		t.Fatalf("ListHistory() error = %v", err)
+	}
+	if len(entries) != 1 {
+		t.Fatalf("ListHistory() entries = %d, want 1", len(entries))
+	}
+	if !strings.Contains(entries[0].ConfigText, "set system host-name router1") {
+		t.Fatalf("ListHistory() config text = %q, want archived set commands", entries[0].ConfigText)
+	}
+}
+
+func TestCommitInfosFromProtoIncludesConfigText(t *testing.T) {
+	infos := commitInfosFromProto([]*apiv1.CommitEntry{
+		{
+			CommitId:   "commit-1",
+			User:       "alice",
+			Timestamp:  time.Date(2026, 5, 17, 12, 0, 0, 0, time.UTC).Format(time.RFC3339Nano),
+			Message:    "initial",
+			ConfigText: "set system host-name router1",
+		},
+	})
+
+	if len(infos) != 1 {
+		t.Fatalf("commitInfosFromProto() entries = %d, want 1", len(infos))
+	}
+	if infos[0].ConfigText != "set system host-name router1" {
+		t.Fatalf("commitInfosFromProto() config text = %q, want archived set commands", infos[0].ConfigText)
 	}
 }
 
