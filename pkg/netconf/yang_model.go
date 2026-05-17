@@ -3,6 +3,7 @@ package netconf
 import (
 	_ "embed"
 	"fmt"
+	"sort"
 	"strings"
 	"sync"
 
@@ -144,6 +145,7 @@ func (v *YANGValidator) ListModules() []string {
 	for name := range v.modules.Modules {
 		names = append(names, name)
 	}
+	sort.Strings(names)
 	return names
 }
 

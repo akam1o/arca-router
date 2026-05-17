@@ -3,6 +3,7 @@ package netconf
 import (
 	"fmt"
 	"os"
+	"sort"
 	"strings"
 	"testing"
 )
@@ -99,6 +100,9 @@ func TestYANGValidator_ListModules(t *testing.T) {
 
 	if !found {
 		t.Errorf("ListModules() doesn't include arca-router, got: %v", modules)
+	}
+	if !sort.StringsAreSorted(modules) {
+		t.Errorf("ListModules() = %v, want sorted module names", modules)
 	}
 }
 
