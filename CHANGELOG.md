@@ -2,6 +2,7 @@
 
 ## v0.9.x - NETCONF/YANG and Operational Safety (current)
 
+- **NETCONF session receiver safety**: session manager and session helper methods now tolerate nil or zero-value receivers, lazily initializing defaults where direct embedded callers create managers by hand
 - **NETCONF SSH server lifecycle safety**: SSH server start, stop, metrics, and health-check methods now handle nil or partially initialized receivers and skipped startup cleanup without panics
 - **NETCONF rate limiter receiver safety**: rate limiter checks, stats, and cleanup methods now tolerate nil or zero-value receivers without panicking
 - **NETCONF hook setter safety**: server and SSH server hook setters now no-op on nil receivers so embedded lifecycle cleanup paths do not panic
