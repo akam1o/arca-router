@@ -34,6 +34,8 @@ This directory contains user guides, design notes, and internal drafts for `arca
 - `docs/v0.10-release-readiness.ja.md`
 - `docs/v0.10-operational-runbook.md`
 - `docs/v0.10-operational-runbook.ja.md`
+- `docs/v0.11-deferred-gates.md`
+- `docs/v0.11-deferred-gates.ja.md`
 
 ## Security / Operations
 - `docs/security-model.md` (Japanese)
