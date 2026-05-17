@@ -13,12 +13,15 @@ import (
 	"io"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
 
+	"github.com/akam1o/arca-router/internal/model"
 	grpcclient "github.com/akam1o/arca-router/internal/northbound/grpc"
 	configcli "github.com/akam1o/arca-router/pkg/cli"
+	pkgconfig "github.com/akam1o/arca-router/pkg/config"
 	"github.com/chzyer/readline"
 )
 
@@ -34,6 +37,12 @@ const (
 	ExitUsageError     = 2
 
 	defaultSocket = "/run/arca-router/routerd.sock"
+
+	checkUpgradeUsage = "usage: check upgrade [backup <path>]"
+
+	maxChangeImpactInterfaceDetails = 5
+	maxChangeImpactRouteDetails     = 5
+	maxChangeImpactPolicyDetails    = 5
 )
 
 var errTelemetryUsage = errors.New("telemetry usage error")
@@ -91,9 +100,16 @@ Commands:
   help              Show this help message
   version           Show version information
   show <subcommand> Show configuration or status
+  check upgrade [backup <path>]
+                    Run upgrade preflight checks
+  backup configuration <path>
+                    Save running configuration to a new file
+  backup configuration rollback <N> <path>
+                    Save archived configuration to a new file
 
 Show subcommands:
   configuration               Show full configuration
+  configuration rollback <N>  Show archived configuration N commits back
   configuration interfaces    Show interface configuration
   configuration protocols     Show routing protocol configuration
   interfaces                  Show interface status
@@ -185,6 +201,10 @@ func runOneShotCommand(ctx context.Context, f *cliFlags, args []string) int {
 			return ExitUsageError
 		}
 		return oneShotShow(ctx, client, args[1:], f)
+	case "check":
+		return oneShotCheck(ctx, client, args[1:])
+	case "backup":
+		return oneShotBackup(ctx, client, args[1:])
 	case "version":
 		fmt.Printf("arca %s (commit %s, built %s)\n", Version, Commit, BuildDate)
 		return ExitSuccess
@@ -196,6 +216,53 @@ func runOneShotCommand(ctx context.Context, f *cliFlags, args []string) int {
 		showUsage()
 		return ExitUsageError
 	}
+}
+
+func oneShotCheck(ctx context.Context, client showClient, args []string) int {
+	options, err := parseUpgradePreflightOptions(args)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+		return ExitUsageError
+	}
+	lines, err := upgradePreflightLinesWithOptions(ctx, client, options)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+		return ExitOperationError
+	}
+	for _, line := range lines {
+		fmt.Println(line)
+	}
+	return ExitSuccess
+}
+
+func oneShotBackup(ctx context.Context, client showClient, args []string) int {
+	var text, path string
+	var err error
+	if len(args) == 2 && args[0] == "configuration" {
+		text, _, err = client.GetRunning(ctx)
+		path = args[1]
+	} else if len(args) == 4 && args[0] == "configuration" && args[1] == "rollback" {
+		rollbackNum, parseErr := parseRollbackNumber(args[2])
+		if parseErr != nil {
+			fmt.Fprintf(os.Stderr, "Error: %v\n", parseErr)
+			return ExitUsageError
+		}
+		text, err = archivedConfigurationText(ctx, client, rollbackNum)
+		path = args[3]
+	} else {
+		fmt.Fprintln(os.Stderr, "Error: usage: backup configuration [rollback <N>] <path>")
+		return ExitUsageError
+	}
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+		return ExitOperationError
+	}
+	if err := writeConfigBackupFile(path, text); err != nil {
+		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+		return ExitOperationError
+	}
+	fmt.Printf("configuration backup written to %s\n", path)
+	return ExitSuccess
 }
 
 func runLocalOneShotCommand(args []string) (bool, int) {
@@ -222,6 +289,24 @@ func oneShotShow(ctx context.Context, client showClient, args []string, f *cliFl
 	subcmd := args[0]
 	switch subcmd {
 	case "configuration":
+		if len(args) > 1 {
+			if len(args) != 3 || args[1] != "rollback" {
+				fmt.Fprintln(os.Stderr, "Error: usage: show configuration rollback <N>")
+				return ExitUsageError
+			}
+			rollbackNum, err := parseRollbackNumber(args[2])
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+				return ExitUsageError
+			}
+			text, err := archivedConfigurationText(ctx, client, rollbackNum)
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+				return ExitOperationError
+			}
+			fmt.Println(text)
+			return ExitSuccess
+		}
 		debugLog(f, "Fetching running configuration via gRPC")
 		text, _, err := client.GetRunning(ctx)
 		if err != nil {
@@ -454,18 +539,19 @@ type interactiveClient interface {
 	showClient
 	GetCandidate(context.Context, string) (string, error)
 	EditCandidate(context.Context, string, string) error
+	ReplaceCandidate(context.Context, string, string) error
 	Commit(context.Context, string, string, string) (string, uint64, error)
 	ValidateCandidate(context.Context, string) error
 	Discard(context.Context, string) error
 	Rollback(context.Context, string, string, string, string) (string, uint64, error)
 	Diff(context.Context, string) (string, bool, error)
-	ListHistory(context.Context, int, int) ([]grpcclient.CommitInfo, error)
 	AcquireLock(context.Context, string, string) error
 	ReleaseLock(context.Context, string) error
 }
 
 type showClient interface {
 	GetRunning(context.Context) (string, uint64, error)
+	ListHistory(context.Context, int, int) ([]grpcclient.CommitInfo, error)
 	GetInterfaces(context.Context, string) ([]grpcclient.InterfaceInfo, error)
 	GetRoutingInstances(context.Context) ([]grpcclient.RoutingInstanceInfo, error)
 	GetRoutes(context.Context, string, string) ([]grpcclient.RouteInfo, error)
@@ -638,6 +724,8 @@ func (sh *interactiveShell) processCommand(ctx context.Context, line string) err
 		return sh.cmdConfigure(ctx)
 	case "show":
 		return sh.cmdShow(ctx, args)
+	case "check":
+		return sh.cmdCheck(ctx, args)
 	case "set":
 		return sh.cmdSet(ctx, args)
 	case "delete":
@@ -646,6 +734,10 @@ func (sh *interactiveShell) processCommand(ctx context.Context, line string) err
 		return sh.cmdCommit(ctx, args)
 	case "rollback":
 		return sh.cmdRollback(ctx, args)
+	case "backup":
+		return sh.cmdBackup(ctx, args)
+	case "restore":
+		return sh.cmdRestore(ctx, args)
 	case "compare":
 		return sh.cmdCompare(ctx)
 	case "discard-changes":
@@ -706,6 +798,24 @@ func (sh *interactiveShell) releaseConfigurationLock(ctx context.Context) error 
 	return nil
 }
 
+func (sh *interactiveShell) cmdCheck(ctx context.Context, args []string) error {
+	options, err := parseUpgradePreflightOptions(args)
+	if err != nil {
+		return err
+	}
+	if sh.mode != modeOperational {
+		return fmt.Errorf("'check upgrade' only available in operational mode")
+	}
+	lines, err := upgradePreflightLinesWithOptions(ctx, sh.client, options)
+	if err != nil {
+		return err
+	}
+	for _, line := range lines {
+		fmt.Println(line)
+	}
+	return nil
+}
+
 func (sh *interactiveShell) cmdShow(ctx context.Context, args []string) error {
 	if len(args) == 0 {
 		if sh.mode == modeConfiguration {
@@ -729,6 +839,9 @@ func (sh *interactiveShell) cmdShow(ctx context.Context, args []string) error {
 	subcmd := args[0]
 	switch subcmd {
 	case "configuration":
+		if len(args) > 1 {
+			return sh.cmdShowArchivedConfiguration(ctx, args[1:])
+		}
 		var text string
 		var err error
 		if sh.mode == modeConfiguration {
@@ -975,6 +1088,327 @@ func (sh *interactiveShell) cmdShow(ctx context.Context, args []string) error {
 	}
 }
 
+func (sh *interactiveShell) cmdShowArchivedConfiguration(ctx context.Context, args []string) error {
+	if len(args) != 2 || args[0] != "rollback" {
+		return fmt.Errorf("usage: show configuration rollback <N>")
+	}
+	rollbackNum, err := parseRollbackNumber(args[1])
+	if err != nil {
+		return err
+	}
+	text, err := sh.archivedConfiguration(ctx, rollbackNum)
+	if err != nil {
+		return err
+	}
+	fmt.Println(text)
+	return nil
+}
+
+func (sh *interactiveShell) archivedConfiguration(ctx context.Context, rollbackNum int) (string, error) {
+	return archivedConfigurationText(ctx, sh.client, rollbackNum)
+}
+
+func archivedConfigurationText(ctx context.Context, client showClient, rollbackNum int) (string, error) {
+	history, err := client.ListHistory(ctx, rollbackNum+1, 0)
+	if err != nil {
+		return "", fmt.Errorf("failed to load commit history: %w", err)
+	}
+	if len(history) <= rollbackNum {
+		if rollbackNum == 0 {
+			text, _, err := client.GetRunning(ctx)
+			if err != nil {
+				return "", err
+			}
+			return text, nil
+		}
+		availableCommits := len(history) - 1
+		if availableCommits < 0 {
+			availableCommits = 0
+		}
+		return "", fmt.Errorf("not enough history for rollback %d (only %d commits available)", rollbackNum, availableCommits)
+	}
+
+	entry := history[rollbackNum]
+	if entry.ConfigText == "" {
+		if rollbackNum == 0 {
+			text, _, err := client.GetRunning(ctx)
+			if err != nil {
+				return "", err
+			}
+			return text, nil
+		}
+		return "", fmt.Errorf("archived config text unavailable for rollback %d", rollbackNum)
+	}
+	return entry.ConfigText, nil
+}
+
+func upgradePreflightLines(ctx context.Context, client showClient) ([]string, error) {
+	return upgradePreflightLinesWithOptions(ctx, client, upgradePreflightOptions{})
+}
+
+type upgradePreflightOptions struct {
+	BackupPath string
+}
+
+func parseUpgradePreflightOptions(args []string) (upgradePreflightOptions, error) {
+	if len(args) == 1 && args[0] == "upgrade" {
+		return upgradePreflightOptions{}, nil
+	}
+	if len(args) == 3 && args[0] == "upgrade" && args[1] == "backup" {
+		return upgradePreflightOptions{BackupPath: args[2]}, nil
+	}
+	return upgradePreflightOptions{}, errors.New(checkUpgradeUsage)
+}
+
+func upgradePreflightLinesWithOptions(ctx context.Context, client showClient, options upgradePreflightOptions) ([]string, error) {
+	runningText, runningVersion, err := client.GetRunning(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("load running configuration: %w", err)
+	}
+
+	lines := []string{"upgrade preflight:"}
+	warnings := 0
+	if strings.TrimSpace(runningText) == "" {
+		lines, warnings = appendUpgradePreflightWarning(lines, warnings, "running configuration is empty")
+	} else {
+		lines = append(lines, fmt.Sprintf("  running config: version %d, %d bytes", runningVersion, len(runningText)))
+		if err := validateConfigurationText(runningText); err != nil {
+			lines, warnings = appendUpgradePreflightWarning(lines, warnings, "running configuration validation failed: "+err.Error())
+		} else {
+			lines = append(lines, "  running validation: ok")
+		}
+	}
+
+	history, err := client.ListHistory(ctx, 1, 0)
+	if err != nil {
+		lines, warnings = appendUpgradePreflightWarning(lines, warnings, "rollback archive check failed: "+err.Error())
+	} else if len(history) == 0 {
+		lines, warnings = appendUpgradePreflightWarning(lines, warnings, "no rollback archive entries available")
+	} else if strings.TrimSpace(history[0].ConfigText) == "" {
+		lines, warnings = appendUpgradePreflightWarning(lines, warnings, "latest rollback archive has no config text")
+	} else {
+		lines = append(lines, fmt.Sprintf("  rollback archive: latest commit %s available", shortCommitID(history[0].CommitID)))
+		if err := validateConfigurationText(history[0].ConfigText); err != nil {
+			lines, warnings = appendUpgradePreflightWarning(lines, warnings, "latest rollback archive validation failed: "+err.Error())
+		} else {
+			lines = append(lines, "  rollback archive validation: ok")
+		}
+	}
+
+	catalog, err := client.GetTelemetryCatalog(ctx)
+	if err != nil {
+		lines, warnings = appendUpgradePreflightWarning(lines, warnings, "telemetry catalog check failed: "+err.Error())
+	} else if catalog.EventSchemaVersion == "" || catalog.Encoding == "" || len(catalog.Paths) == 0 {
+		lines, warnings = appendUpgradePreflightWarning(lines, warnings, "telemetry catalog is incomplete")
+	} else {
+		lines = append(lines, fmt.Sprintf("  telemetry catalog: %d paths, schema %s, encoding %s",
+			len(catalog.Paths), catalog.EventSchemaVersion, catalog.Encoding))
+	}
+
+	cosInfo, err := client.GetClassOfService(ctx)
+	if err != nil {
+		lines, warnings = appendUpgradePreflightWarning(lines, warnings, "qos capability check failed: "+err.Error())
+	} else if cosInfo == nil || cosInfo.Capabilities == nil {
+		lines, warnings = appendUpgradePreflightWarning(lines, warnings, "qos capability snapshot unavailable")
+	} else {
+		capabilities := cosInfo.Capabilities
+		lines = append(lines,
+			fmt.Sprintf("  qos metadata binding: %s", yesNo(capabilities.MetadataBindingSupported)),
+			fmt.Sprintf("  qos scheduler: %s", yesNo(capabilities.QueueSchedulerSupported)),
+			fmt.Sprintf("  qos policer: %s", yesNo(capabilities.PolicerSupported)),
+			fmt.Sprintf("  qos counters: %s", yesNo(capabilities.CountersSupported)),
+		)
+		if capabilities.LastError != "" {
+			lines, warnings = appendUpgradePreflightWarning(lines, warnings, "qos capability detector reported: "+capabilities.LastError)
+		}
+	}
+
+	if options.BackupPath != "" {
+		lines, warnings = appendUpgradeBackupPathCheck(lines, warnings, options.BackupPath)
+	}
+
+	if warnings == 0 {
+		lines = append(lines, "  status: ready for package-specific upgrade checks")
+	} else {
+		lines = append(lines, fmt.Sprintf("  status: %d warning(s), review before upgrade", warnings))
+	}
+	lines = append(lines, "  next step: keep a fresh configuration backup and verify release-specific package notes")
+	return lines, nil
+}
+
+func appendUpgradePreflightWarning(lines []string, warnings int, message string) ([]string, int) {
+	return append(lines, "  warning: "+message), warnings + 1
+}
+
+func appendUpgradeBackupPathCheck(lines []string, warnings int, path string) ([]string, int) {
+	if strings.TrimSpace(path) == "" {
+		return appendUpgradePreflightWarning(lines, warnings, "backup path must not be empty")
+	}
+	if _, err := os.Stat(path); err == nil {
+		return appendUpgradePreflightWarning(lines, warnings, "backup path already exists: "+path)
+	} else if !errors.Is(err, os.ErrNotExist) {
+		return appendUpgradePreflightWarning(lines, warnings, "backup path cannot be checked: "+err.Error())
+	}
+
+	dir := filepath.Dir(path)
+	if info, err := os.Stat(dir); err != nil {
+		return appendUpgradePreflightWarning(lines, warnings, "backup directory unavailable: "+err.Error())
+	} else if !info.IsDir() {
+		return appendUpgradePreflightWarning(lines, warnings, "backup directory is not a directory: "+dir)
+	}
+
+	probePath := filepath.Join(dir, fmt.Sprintf(".arca-upgrade-preflight-%d-%d.tmp", os.Getpid(), time.Now().UnixNano()))
+	file, err := os.OpenFile(probePath, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
+	if err != nil {
+		return appendUpgradePreflightWarning(lines, warnings, "backup directory is not writable: "+err.Error())
+	}
+	closeErr := file.Close()
+	removeErr := os.Remove(probePath)
+	if closeErr != nil {
+		return appendUpgradePreflightWarning(lines, warnings, "backup path probe close failed: "+closeErr.Error())
+	}
+	if removeErr != nil && !errors.Is(removeErr, os.ErrNotExist) {
+		return appendUpgradePreflightWarning(lines, warnings, "backup path probe cleanup failed: "+removeErr.Error())
+	}
+
+	return append(lines, "  backup path: writable "+path), warnings
+}
+
+func commitRollbackArchiveWarnings(ctx context.Context, client showClient) []string {
+	history, err := client.ListHistory(ctx, 1, 0)
+	if err != nil {
+		return []string{"commit safety warning: rollback archive check failed: " + err.Error()}
+	}
+	if len(history) == 0 {
+		return []string{"commit safety warning: no rollback archive entry is available before commit"}
+	}
+	if strings.TrimSpace(history[0].ConfigText) == "" {
+		return []string{"commit safety warning: latest rollback archive has no config text"}
+	}
+	if err := validateConfigurationText(history[0].ConfigText); err != nil {
+		return []string{"commit safety warning: latest rollback archive validation failed: " + err.Error()}
+	}
+	return nil
+}
+
+func (sh *interactiveShell) cmdBackup(ctx context.Context, args []string) error {
+	if len(args) == 2 && args[0] == "configuration" {
+		var text string
+		var err error
+		if sh.mode == modeConfiguration {
+			text, err = sh.client.GetCandidate(ctx, sh.sessionID)
+		} else {
+			text, _, err = sh.client.GetRunning(ctx)
+		}
+		if err != nil {
+			return err
+		}
+		return sh.writeConfigurationBackup(args[1], text)
+	}
+
+	if len(args) == 4 && args[0] == "configuration" && args[1] == "rollback" {
+		rollbackNum, err := parseRollbackNumber(args[2])
+		if err != nil {
+			return err
+		}
+		text, err := sh.archivedConfiguration(ctx, rollbackNum)
+		if err != nil {
+			return err
+		}
+		return sh.writeConfigurationBackup(args[3], text)
+	}
+
+	return fmt.Errorf("usage: backup configuration [rollback <N>] <path>")
+}
+
+func (sh *interactiveShell) cmdRestore(ctx context.Context, args []string) error {
+	if sh.mode != modeConfiguration {
+		return fmt.Errorf("'restore' command only available in configuration mode")
+	}
+	if len(args) == 2 && args[0] == "configuration" {
+		data, err := os.ReadFile(args[1])
+		if err != nil {
+			return fmt.Errorf("read configuration backup: %w", err)
+		}
+		text := string(data)
+		if err := validateConfigurationText(text); err != nil {
+			return fmt.Errorf("validate configuration backup: %w", err)
+		}
+		if err := sh.client.ReplaceCandidate(ctx, sh.sessionID, text); err != nil {
+			return fmt.Errorf("restore configuration: %w", err)
+		}
+		fmt.Printf("configuration restored to candidate from %s\n", args[1])
+		return nil
+	}
+	if len(args) == 3 && args[0] == "configuration" && args[1] == "rollback" {
+		rollbackNum, err := parseRollbackNumber(args[2])
+		if err != nil {
+			return err
+		}
+		text, err := sh.archivedConfiguration(ctx, rollbackNum)
+		if err != nil {
+			return err
+		}
+		if err := validateConfigurationText(text); err != nil {
+			return fmt.Errorf("validate rollback configuration: %w", err)
+		}
+		if err := sh.client.ReplaceCandidate(ctx, sh.sessionID, text); err != nil {
+			return fmt.Errorf("restore configuration: %w", err)
+		}
+		fmt.Printf("configuration restored to candidate from rollback %d\n", rollbackNum)
+		return nil
+	}
+	return fmt.Errorf("usage: restore configuration <path> | restore configuration rollback <N>")
+}
+
+func (sh *interactiveShell) writeConfigurationBackup(path, text string) error {
+	if err := writeConfigBackupFile(path, text); err != nil {
+		return err
+	}
+	fmt.Printf("configuration backup written to %s\n", path)
+	return nil
+}
+
+func writeConfigBackupFile(path, text string) error {
+	if strings.TrimSpace(path) == "" {
+		return fmt.Errorf("backup path must not be empty")
+	}
+	data := []byte(text)
+	if len(data) == 0 || data[len(data)-1] != '\n' {
+		data = append(data, '\n')
+	}
+	file, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
+	if err != nil {
+		return fmt.Errorf("create backup file: %w", err)
+	}
+	var writeErr error
+	if _, err := file.Write(data); err != nil {
+		writeErr = err
+	}
+	closeErr := file.Close()
+	if writeErr != nil {
+		return fmt.Errorf("write backup file: %w", writeErr)
+	}
+	if closeErr != nil {
+		return fmt.Errorf("close backup file: %w", closeErr)
+	}
+	return nil
+}
+
+func validateConfigurationText(text string) error {
+	cfg, err := pkgconfig.NewParser(strings.NewReader(text)).Parse()
+	if err != nil {
+		return fmt.Errorf("parse config: %w", err)
+	}
+	if err := cfg.Validate(); err != nil {
+		return fmt.Errorf("validate config: %w", err)
+	}
+	if err := model.FromLegacyConfig(cfg).Validate(); err != nil {
+		return fmt.Errorf("validate model: %w", err)
+	}
+	return nil
+}
+
 func (sh *interactiveShell) cmdSet(ctx context.Context, args []string) error {
 	if sh.mode != modeConfiguration {
 		return fmt.Errorf("'set' command only available in configuration mode")
@@ -1041,16 +1475,29 @@ func (sh *interactiveShell) cmdCommit(ctx context.Context, args []string) error 
 			return fmt.Errorf("configuration check failed: %w", err)
 		}
 		fmt.Println("configuration check succeeds")
+		if err := sh.printChangeImpactPreview(ctx); err != nil {
+			return fmt.Errorf("change impact preview failed: %w", err)
+		}
 		return nil
 	}
 
+	diffText, hasChanges, diffErr := sh.client.Diff(ctx, sh.sessionID)
+	for _, warning := range commitRollbackArchiveWarnings(ctx, sh.client) {
+		fmt.Println(warning)
+	}
 	user := currentUsername()
 
 	commitID, version, err := sh.client.Commit(ctx, sh.sessionID, user, message)
 	if err != nil {
+		if diagErr := sh.printCommitFailureDiagnostics(ctx, diffText, hasChanges, diffErr); diagErr != nil {
+			return fmt.Errorf("commit failed: %w (diagnostics unavailable: %v)", err, diagErr)
+		}
 		return fmt.Errorf("commit failed: %w", err)
 	}
 	fmt.Printf("commit complete (id: %s, version: %d)\n", shortCommitID(commitID), version)
+	if diagErr := sh.printPostCommitDiagnostics(ctx, diffText, hasChanges, diffErr); diagErr != nil {
+		fmt.Printf("post-commit diagnostics unavailable: %v\n", diagErr)
+	}
 
 	if andQuit {
 		if err := sh.releaseConfigurationLock(ctx); err != nil {
@@ -1124,6 +1571,593 @@ func (sh *interactiveShell) cmdCompare(ctx context.Context) error {
 	return nil
 }
 
+func (sh *interactiveShell) printChangeImpactPreview(ctx context.Context) error {
+	diffText, hasChanges, err := sh.client.Diff(ctx, sh.sessionID)
+	if err != nil {
+		return err
+	}
+	for _, line := range formatChangeImpactPreview(diffText, hasChanges) {
+		fmt.Println(line)
+	}
+	for _, line := range sh.classOfServicePreflightLines(ctx, diffText, hasChanges) {
+		fmt.Println(line)
+	}
+	return nil
+}
+
+func (sh *interactiveShell) printCommitFailureDiagnostics(ctx context.Context, diffText string, hasChanges bool, diffErr error) error {
+	if diffErr != nil {
+		return diffErr
+	}
+	fmt.Println("commit failure diagnostics:")
+	for _, line := range formatChangeImpactPreview(diffText, hasChanges) {
+		fmt.Printf("  %s\n", line)
+	}
+	for _, line := range sh.classOfServicePreflightLines(ctx, diffText, hasChanges) {
+		fmt.Printf("  %s\n", line)
+	}
+	fmt.Println("  next step: resolve the error and run 'commit check'")
+	return nil
+}
+
+func (sh *interactiveShell) printPostCommitDiagnostics(ctx context.Context, diffText string, hasChanges bool, diffErr error) error {
+	if diffErr != nil || !hasChanges || !analyzeChangeImpact(diffText).classOfService.hasChanges() {
+		return diffErr
+	}
+	info, err := sh.client.GetClassOfService(ctx)
+	if err != nil {
+		return err
+	}
+	for _, line := range formatClassOfServicePostCommit(info) {
+		fmt.Println(line)
+	}
+	return nil
+}
+
+func (sh *interactiveShell) classOfServicePreflightLines(ctx context.Context, diffText string, hasChanges bool) []string {
+	if !hasChanges || !analyzeChangeImpact(diffText).classOfService.hasChanges() {
+		return nil
+	}
+	info, err := sh.client.GetClassOfService(ctx)
+	if err != nil {
+		return []string{"qos preflight: capability check unavailable: " + err.Error()}
+	}
+	return formatClassOfServicePreflight(info)
+}
+
+type changeImpactPreview struct {
+	addedLines             int
+	removedLines           int
+	interfaces             changeImpactLineCount
+	interfaceChanges       []changeImpactInterfaceChange
+	staticRoutes           changeImpactLineCount
+	staticRouteChanges     []changeImpactRouteChange
+	policyOptions          changeImpactLineCount
+	policyChanges          []changeImpactPolicyChange
+	bgpPolicyBindings      []changeImpactBGPPolicyBinding
+	bgp                    changeImpactLineCount
+	ospf                   changeImpactLineCount
+	bfd                    changeImpactLineCount
+	evpn                   changeImpactLineCount
+	routingInstances       changeImpactLineCount
+	classOfService         changeImpactLineCount
+	interfaceAddressChange bool
+	defaultRouteChange     bool
+}
+
+type changeImpactLineCount struct {
+	added   int
+	removed int
+}
+
+type changeImpactInterfaceChange struct {
+	sign      byte
+	name      string
+	operation string
+	value     string
+}
+
+type changeImpactRouteChange struct {
+	sign            byte
+	prefix          string
+	nextHop         string
+	routingInstance string
+}
+
+type changeImpactPolicyChange struct {
+	sign   byte
+	kind   string
+	name   string
+	term   string
+	prefix string
+}
+
+type changeImpactBGPPolicyBinding struct {
+	sign      byte
+	groupName string
+	direction string
+	policy    string
+}
+
+func formatChangeImpactPreview(diffText string, hasChanges bool) []string {
+	if !hasChanges || strings.TrimSpace(diffText) == "" {
+		return []string{"change impact preview: no candidate changes"}
+	}
+
+	preview := analyzeChangeImpact(diffText)
+	lines := []string{
+		"change impact preview:",
+		fmt.Sprintf("  changed lines: +%d -%d", preview.addedLines, preview.removedLines),
+	}
+	lines = appendChangeImpactLine(lines, "interfaces", preview.interfaces)
+	lines = appendInterfaceImpactLines(lines, preview.interfaceChanges)
+	lines = appendChangeImpactLine(lines, "static routes", preview.staticRoutes)
+	lines = appendStaticRouteImpactLines(lines, preview.staticRouteChanges)
+	lines = appendChangeImpactLine(lines, "policy-options", preview.policyOptions)
+	lines = appendPolicyImpactLines(lines, preview.policyChanges, preview.bgpPolicyBindings)
+	lines = appendRoutePolicyDryRunLines(lines, preview.policyChanges, preview.bgpPolicyBindings)
+	lines = appendChangeImpactLine(lines, "bgp", preview.bgp)
+	lines = appendChangeImpactLine(lines, "ospf", preview.ospf)
+	lines = appendChangeImpactLine(lines, "bfd", preview.bfd)
+	lines = appendChangeImpactLine(lines, "evpn", preview.evpn)
+	lines = appendChangeImpactLine(lines, "routing-instances", preview.routingInstances)
+	lines = appendChangeImpactLine(lines, "class-of-service", preview.classOfService)
+	if preview.defaultRouteChange {
+		lines = append(lines, "  warning: default route changes can affect all unmatched traffic")
+	}
+	if preview.interfaces.hasChanges() {
+		lines = append(lines, "  warning: interface changes can affect link state or attached services")
+	}
+	if preview.interfaceAddressChange {
+		lines = append(lines, "  warning: interface address changes can alter connected route reachability")
+	}
+	if preview.staticRoutes.removed > 0 {
+		lines = append(lines, "  warning: static route removals can withdraw forwarding entries")
+	}
+	if preview.policyOptions.hasChanges() {
+		lines = append(lines, "  warning: policy-options changes can regenerate FRR route-maps")
+	}
+	if preview.bgp.hasChanges() {
+		lines = append(lines, "  warning: BGP changes can reset sessions or change route advertisements")
+	}
+	if preview.ospf.hasChanges() {
+		lines = append(lines, "  warning: OSPF changes can trigger adjacency updates or SPF recalculation")
+	}
+	if preview.bfd.hasChanges() {
+		lines = append(lines, "  warning: BFD changes can affect fast failure detection")
+	}
+	if preview.evpn.hasChanges() {
+		lines = append(lines, "  warning: EVPN changes can alter overlay VNI reachability")
+	}
+	if preview.routingInstances.hasChanges() {
+		lines = append(lines, "  warning: routing-instance changes can move interfaces or VRF routing state")
+	}
+	if preview.classOfService.hasChanges() {
+		lines = append(lines, "  warning: class-of-service changes can alter traffic treatment")
+	}
+	return lines
+}
+
+func appendRoutePolicyDryRunLines(lines []string, policyChanges []changeImpactPolicyChange, bgpBindings []changeImpactBGPPolicyBinding) []string {
+	if len(policyChanges) == 0 && len(bgpBindings) == 0 {
+		return lines
+	}
+	prefixLists := 0
+	routeMaps := 0
+	for _, change := range policyChanges {
+		switch change.kind {
+		case "prefix-list":
+			prefixLists++
+		case "route-map":
+			routeMaps++
+		}
+	}
+	lines = append(lines, "  route-policy dry-run:")
+	if prefixLists > 0 {
+		lines = append(lines, fmt.Sprintf("    prefix-list updates: %d", prefixLists))
+	}
+	if routeMaps > 0 {
+		lines = append(lines, fmt.Sprintf("    route-map regeneration planned: %d policy statement changes", routeMaps))
+	}
+	if len(bgpBindings) > 0 {
+		lines = append(lines, fmt.Sprintf("    bgp policy bindings updated: %d", len(bgpBindings)))
+	}
+	lines = append(lines, "    validation scope: candidate policy syntax and referenced BGP bindings")
+	return lines
+}
+
+func appendInterfaceImpactLines(lines []string, changes []changeImpactInterfaceChange) []string {
+	if len(changes) == 0 {
+		return lines
+	}
+	lines = append(lines, "  interface diff:")
+	limit := len(changes)
+	if limit > maxChangeImpactInterfaceDetails {
+		limit = maxChangeImpactInterfaceDetails
+	}
+	for _, change := range changes[:limit] {
+		lines = append(lines, "    "+change.summary())
+	}
+	if remaining := len(changes) - limit; remaining > 0 {
+		lines = append(lines, fmt.Sprintf("    ... %d more interface changes", remaining))
+	}
+	return lines
+}
+
+func appendPolicyImpactLines(lines []string, policyChanges []changeImpactPolicyChange, bgpBindings []changeImpactBGPPolicyBinding) []string {
+	if len(policyChanges) == 0 && len(bgpBindings) == 0 {
+		return lines
+	}
+	lines = append(lines, "  policy diff:")
+	remainingSlots := maxChangeImpactPolicyDetails
+	for _, change := range policyChanges {
+		if remainingSlots == 0 {
+			break
+		}
+		lines = append(lines, "    "+change.summary())
+		remainingSlots--
+	}
+	for _, binding := range bgpBindings {
+		if remainingSlots == 0 {
+			break
+		}
+		lines = append(lines, "    "+binding.summary())
+		remainingSlots--
+	}
+	if remaining := len(policyChanges) + len(bgpBindings) - maxChangeImpactPolicyDetails; remaining > 0 {
+		lines = append(lines, fmt.Sprintf("    ... %d more policy changes", remaining))
+	}
+	return lines
+}
+
+func appendStaticRouteImpactLines(lines []string, changes []changeImpactRouteChange) []string {
+	if len(changes) == 0 {
+		return lines
+	}
+	lines = append(lines, "  route diff:")
+	limit := len(changes)
+	if limit > maxChangeImpactRouteDetails {
+		limit = maxChangeImpactRouteDetails
+	}
+	for _, change := range changes[:limit] {
+		lines = append(lines, "    "+change.summary())
+	}
+	if remaining := len(changes) - limit; remaining > 0 {
+		lines = append(lines, fmt.Sprintf("    ... %d more static route changes", remaining))
+	}
+	return lines
+}
+
+func appendChangeImpactLine(lines []string, label string, count changeImpactLineCount) []string {
+	if !count.hasChanges() {
+		return lines
+	}
+	return append(lines, fmt.Sprintf("  %s: +%d -%d", label, count.added, count.removed))
+}
+
+func (c changeImpactLineCount) hasChanges() bool {
+	return c.added > 0 || c.removed > 0
+}
+
+func (c *changeImpactLineCount) add(sign byte) {
+	if sign == '+' {
+		c.added++
+	} else {
+		c.removed++
+	}
+}
+
+func (c changeImpactInterfaceChange) summary() string {
+	action := "add"
+	if c.sign == '-' {
+		action = "remove"
+	}
+	if c.value == "" {
+		return fmt.Sprintf("%s interface %s %s", action, c.name, c.operation)
+	}
+	return fmt.Sprintf("%s interface %s %s %s", action, c.name, c.operation, c.value)
+}
+
+func (c changeImpactRouteChange) summary() string {
+	action := "add"
+	if c.sign == '-' {
+		action = "remove"
+	}
+	target := c.prefix
+	if c.routingInstance != "" {
+		target = fmt.Sprintf("routing-instance %s %s", c.routingInstance, target)
+	}
+	if c.nextHop == "" {
+		return fmt.Sprintf("%s %s", action, target)
+	}
+	return fmt.Sprintf("%s %s via %s", action, target, c.nextHop)
+}
+
+func (c changeImpactPolicyChange) summary() string {
+	action := "add"
+	if c.sign == '-' {
+		action = "remove"
+	}
+	switch c.kind {
+	case "prefix-list":
+		if c.prefix != "" {
+			return fmt.Sprintf("%s prefix-list %s %s", action, c.name, c.prefix)
+		}
+		return fmt.Sprintf("%s prefix-list %s", action, c.name)
+	case "route-map":
+		if c.term != "" {
+			return fmt.Sprintf("%s route-map %s term %s", action, c.name, c.term)
+		}
+		return fmt.Sprintf("%s route-map %s", action, c.name)
+	default:
+		return fmt.Sprintf("%s policy %s", action, c.name)
+	}
+}
+
+func (c changeImpactBGPPolicyBinding) summary() string {
+	action := "add"
+	if c.sign == '-' {
+		action = "remove"
+	}
+	return fmt.Sprintf("%s bgp group %s %s route-map %s", action, c.groupName, c.direction, c.policy)
+}
+
+func formatClassOfServicePreflight(info *grpcclient.ClassOfServiceInfo) []string {
+	if info == nil || info.Capabilities == nil {
+		return []string{"qos preflight: capability snapshot unavailable"}
+	}
+	capabilities := info.Capabilities
+	lines := []string{
+		"qos preflight:",
+		fmt.Sprintf("  metadata binding: %s", yesNo(capabilities.MetadataBindingSupported)),
+		fmt.Sprintf("  queue scheduler: %s", yesNo(capabilities.QueueSchedulerSupported)),
+		fmt.Sprintf("  policer: %s", yesNo(capabilities.PolicerSupported)),
+		fmt.Sprintf("  counters: %s", yesNo(capabilities.CountersSupported)),
+	}
+	if capabilities.LastError != "" {
+		lines = append(lines, "  warning: capability detection error: "+capabilities.LastError)
+	}
+	if !capabilities.MetadataBindingSupported {
+		lines = append(lines, "  warning: metadata binding is unavailable; QoS intent may not persist on VPP interfaces")
+	}
+	if !capabilities.QueueSchedulerSupported {
+		lines = append(lines, "  warning: queue scheduler is unavailable; output QoS remains intent-only")
+	}
+	if !capabilities.PolicerSupported {
+		lines = append(lines, "  warning: policer is unavailable; traffic policing remains intent-only")
+	}
+	for _, diagnostic := range capabilities.Diagnostics {
+		if diagnostic == "" {
+			continue
+		}
+		lines = append(lines, "  diagnostic: "+diagnostic)
+	}
+	return lines
+}
+
+func formatClassOfServicePostCommit(info *grpcclient.ClassOfServiceInfo) []string {
+	if info == nil {
+		return []string{"qos post-commit diagnostics: class-of-service status unavailable"}
+	}
+	lines := []string{
+		"qos post-commit diagnostics:",
+		fmt.Sprintf("  enforcement status: %s", displayValue(info.EnforcementStatus, "unknown")),
+		fmt.Sprintf("  bound interfaces: %d", len(info.Interfaces)),
+	}
+	if info.Capabilities == nil {
+		return append(lines, "  warning: capability snapshot unavailable")
+	}
+	capabilities := info.Capabilities
+	lines = append(lines,
+		fmt.Sprintf("  metadata binding: %s", yesNo(capabilities.MetadataBindingSupported)),
+		fmt.Sprintf("  queue scheduler: %s", yesNo(capabilities.QueueSchedulerSupported)),
+		fmt.Sprintf("  policer: %s", yesNo(capabilities.PolicerSupported)),
+		fmt.Sprintf("  counters: %s", yesNo(capabilities.CountersSupported)),
+	)
+	if capabilities.LastError != "" {
+		lines = append(lines, "  warning: capability detection error: "+capabilities.LastError)
+	}
+	for _, diagnostic := range capabilities.Diagnostics {
+		if diagnostic == "" {
+			continue
+		}
+		lines = append(lines, "  diagnostic: "+diagnostic)
+	}
+	return lines
+}
+
+func displayValue(value, fallback string) string {
+	if strings.TrimSpace(value) == "" {
+		return fallback
+	}
+	return value
+}
+
+func analyzeChangeImpact(diffText string) changeImpactPreview {
+	var preview changeImpactPreview
+	for _, rawLine := range strings.Split(diffText, "\n") {
+		line := strings.TrimSpace(rawLine)
+		if len(line) < 3 {
+			continue
+		}
+		sign := line[0]
+		if sign != '+' && sign != '-' {
+			continue
+		}
+		configLine := strings.TrimSpace(line[1:])
+		if configLine == "" {
+			continue
+		}
+		if sign == '+' {
+			preview.addedLines++
+		} else {
+			preview.removedLines++
+		}
+		if strings.HasPrefix(configLine, "set interfaces ") {
+			preview.interfaces.add(sign)
+			if change, ok := parseInterfaceImpactChange(sign, configLine); ok {
+				preview.interfaceChanges = append(preview.interfaceChanges, change)
+				if change.operation == "address" {
+					preview.interfaceAddressChange = true
+				}
+			}
+		}
+		if isStaticRouteConfigLine(configLine) {
+			preview.staticRoutes.add(sign)
+			if change, ok := parseStaticRouteImpactChange(sign, configLine); ok {
+				preview.staticRouteChanges = append(preview.staticRouteChanges, change)
+			}
+			if isDefaultRouteConfigLine(configLine) {
+				preview.defaultRouteChange = true
+			}
+		}
+		if strings.HasPrefix(configLine, "set policy-options ") {
+			preview.policyOptions.add(sign)
+			if change, ok := parsePolicyImpactChange(sign, configLine); ok {
+				preview.policyChanges = append(preview.policyChanges, change)
+			}
+		}
+		if strings.HasPrefix(configLine, "set protocols bgp ") {
+			preview.bgp.add(sign)
+			if binding, ok := parseBGPPolicyImpactBinding(sign, configLine); ok {
+				preview.bgpPolicyBindings = append(preview.bgpPolicyBindings, binding)
+			}
+		}
+		if strings.HasPrefix(configLine, "set protocols ospf ") || strings.HasPrefix(configLine, "set protocols ospf3 ") {
+			preview.ospf.add(sign)
+		}
+		if strings.HasPrefix(configLine, "set protocols bfd ") {
+			preview.bfd.add(sign)
+		}
+		if strings.HasPrefix(configLine, "set protocols evpn ") {
+			preview.evpn.add(sign)
+		}
+		if strings.HasPrefix(configLine, "set routing-instances ") {
+			preview.routingInstances.add(sign)
+		}
+		if strings.HasPrefix(configLine, "set class-of-service ") {
+			preview.classOfService.add(sign)
+		}
+	}
+	return preview
+}
+
+func isStaticRouteConfigLine(line string) bool {
+	return strings.HasPrefix(line, "set routing-options static route ") ||
+		(strings.HasPrefix(line, "set routing-instances ") && strings.Contains(line, " routing-options static route "))
+}
+
+func isDefaultRouteConfigLine(line string) bool {
+	return strings.Contains(line, " static route 0.0.0.0/0 ") ||
+		strings.Contains(line, " static route ::/0 ")
+}
+
+func parseStaticRouteImpactChange(sign byte, line string) (changeImpactRouteChange, bool) {
+	tokens := tokenize(line)
+	if len(tokens) == 0 || tokens[0] != "set" {
+		return changeImpactRouteChange{}, false
+	}
+
+	change := changeImpactRouteChange{sign: sign}
+	if len(tokens) > 2 && tokens[1] == "routing-instances" {
+		change.routingInstance = tokens[2]
+	}
+
+	for i := 1; i+3 < len(tokens); i++ {
+		if tokens[i] != "static" || tokens[i+1] != "route" {
+			continue
+		}
+		change.prefix = tokens[i+2]
+		for j := i + 3; j+1 < len(tokens); j++ {
+			if tokens[j] == "next-hop" {
+				change.nextHop = tokens[j+1]
+				break
+			}
+		}
+		return change, change.prefix != ""
+	}
+	return changeImpactRouteChange{}, false
+}
+
+func parseInterfaceImpactChange(sign byte, line string) (changeImpactInterfaceChange, bool) {
+	tokens := tokenize(line)
+	if len(tokens) < 3 || tokens[0] != "set" || tokens[1] != "interfaces" {
+		return changeImpactInterfaceChange{}, false
+	}
+	change := changeImpactInterfaceChange{
+		sign:      sign,
+		name:      tokens[2],
+		operation: "configuration",
+	}
+	for i := 3; i < len(tokens); i++ {
+		switch tokens[i] {
+		case "address":
+			change.operation = "address"
+			if i+1 < len(tokens) {
+				change.value = tokens[i+1]
+			}
+			return change, change.name != ""
+		case "description", "mtu", "speed":
+			change.operation = tokens[i]
+			if i+1 < len(tokens) {
+				change.value = tokens[i+1]
+			}
+			return change, change.name != ""
+		case "disable":
+			change.operation = "disable"
+			return change, change.name != ""
+		}
+	}
+	if len(tokens) > 3 {
+		change.operation = strings.Join(tokens[3:], " ")
+	}
+	return change, change.name != ""
+}
+
+func parsePolicyImpactChange(sign byte, line string) (changeImpactPolicyChange, bool) {
+	tokens := tokenize(line)
+	if len(tokens) < 4 || tokens[0] != "set" || tokens[1] != "policy-options" {
+		return changeImpactPolicyChange{}, false
+	}
+	switch tokens[2] {
+	case "prefix-list":
+		change := changeImpactPolicyChange{sign: sign, kind: "prefix-list", name: tokens[3]}
+		if len(tokens) > 4 {
+			change.prefix = tokens[4]
+		}
+		return change, change.name != ""
+	case "policy-statement":
+		change := changeImpactPolicyChange{sign: sign, kind: "route-map", name: tokens[3]}
+		for i := 4; i+1 < len(tokens); i++ {
+			if tokens[i] == "term" {
+				change.term = tokens[i+1]
+				break
+			}
+		}
+		return change, change.name != ""
+	default:
+		return changeImpactPolicyChange{}, false
+	}
+}
+
+func parseBGPPolicyImpactBinding(sign byte, line string) (changeImpactBGPPolicyBinding, bool) {
+	tokens := tokenize(line)
+	if len(tokens) < 7 || tokens[0] != "set" || tokens[1] != "protocols" || tokens[2] != "bgp" || tokens[3] != "group" {
+		return changeImpactBGPPolicyBinding{}, false
+	}
+	direction := tokens[5]
+	if direction != "import" && direction != "export" {
+		return changeImpactBGPPolicyBinding{}, false
+	}
+	binding := changeImpactBGPPolicyBinding{
+		sign:      sign,
+		groupName: tokens[4],
+		direction: direction,
+		policy:    tokens[6],
+	}
+	return binding, binding.groupName != "" && binding.policy != ""
+}
+
 func (sh *interactiveShell) cmdEdit(args []string) error {
 	if sh.mode != modeConfiguration {
 		return fmt.Errorf("'edit' command only available in configuration mode")
@@ -1166,8 +2200,12 @@ func (sh *interactiveShell) showHelp() {
 	if sh.mode == modeOperational {
 		fmt.Println("Operational mode commands:")
 		fmt.Println("  help                          Show this help message")
+		fmt.Println("  backup configuration <path>   Save running configuration to a file")
+		fmt.Println("  backup configuration rollback <N> <path> Save archived config to a file")
+		fmt.Println("  check upgrade [backup <path>] Run upgrade preflight checks")
 		fmt.Println("  configure                     Enter configuration mode")
 		fmt.Println("  show configuration            Show running configuration")
+		fmt.Println("  show configuration rollback <N> Show archived config N commits back")
 		fmt.Println("  show interfaces [<name>]      Show interface status")
 		fmt.Println("  show routing-instances [name] Show routing-instance table mapping")
 		fmt.Println("  show routes [prefix <cidr>] [protocol <proto>] Show route status")
@@ -1192,12 +2230,17 @@ func (sh *interactiveShell) showHelp() {
 	} else {
 		fmt.Println("Configuration mode commands:")
 		fmt.Println("  help                      Show this help message")
+		fmt.Println("  backup configuration <path> Save candidate configuration to a file")
+		fmt.Println("  backup configuration rollback <N> <path> Save archived config to a file")
 		fmt.Println("  set <config>              Add or modify configuration")
 		fmt.Println("  delete <config>           Delete configuration")
+		fmt.Println("  restore configuration <path> Replace candidate from a backup file")
+		fmt.Println("  restore configuration rollback <N> Replace candidate from archived config")
 		fmt.Println("  show                      Show candidate configuration")
+		fmt.Println("  show configuration rollback <N> Show archived config N commits back")
 		fmt.Println("  show | compare            Show differences from running config")
 		fmt.Println("  commit                    Commit candidate configuration")
-		fmt.Println("  commit check              Validate without committing")
+		fmt.Println("  commit check              Validate and preview impact without committing")
 		fmt.Println("  commit and-quit           Commit and exit configuration mode")
 		fmt.Println("  commit comment <msg>      Commit with custom message")
 		fmt.Println("  rollback <N>              Roll back N commits")
@@ -2497,7 +3540,9 @@ func createCompleter() *readline.PrefixCompleter {
 		readline.PcItem("exit"),
 		readline.PcItem("quit"),
 		readline.PcItem("show",
-			readline.PcItem("configuration"),
+			readline.PcItem("configuration",
+				readline.PcItem("rollback"),
+			),
 			readline.PcItem("interfaces"),
 			readline.PcItem("bgp",
 				readline.PcItem("summary"),
@@ -2555,6 +3600,21 @@ func createCompleter() *readline.PrefixCompleter {
 			readline.PcItem("check"),
 			readline.PcItem("and-quit"),
 			readline.PcItem("comment"),
+		),
+		readline.PcItem("check",
+			readline.PcItem("upgrade",
+				readline.PcItem("backup"),
+			),
+		),
+		readline.PcItem("backup",
+			readline.PcItem("configuration",
+				readline.PcItem("rollback"),
+			),
+		),
+		readline.PcItem("restore",
+			readline.PcItem("configuration",
+				readline.PcItem("rollback"),
+			),
 		),
 		readline.PcItem("rollback"),
 		readline.PcItem("discard-changes"),

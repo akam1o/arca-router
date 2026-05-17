@@ -1,8 +1,10 @@
 package netconf
 
 import (
+	"encoding/xml"
 	"fmt"
 	"os"
+	"sort"
 	"strings"
 	"testing"
 )
@@ -62,16 +64,14 @@ func TestYANGValidator_GetArcaRouterModel(t *testing.T) {
 	}
 
 	module, err := v.GetArcaRouterModel()
-
-	// Note: This will fail because ietf-interfaces/ietf-routing modules are not available
-	// But we should at least test that the function doesn't panic
 	if err != nil {
-		// Expected in Phase 3 (IETF modules not available)
-		t.Logf("GetArcaRouterModel() error (expected in Phase 3): %v", err)
+		t.Fatalf("GetArcaRouterModel() error = %v", err)
 	}
-
-	if module != nil {
-		t.Logf("GetArcaRouterModel() returned module: %s", module.Name)
+	if module == nil {
+		t.Fatal("GetArcaRouterModel() returned nil module")
+	}
+	if module.Name != "arca-router" {
+		t.Fatalf("GetArcaRouterModel() module name = %s, want arca-router", module.Name)
 	}
 }
 
@@ -88,17 +88,20 @@ func TestYANGValidator_ListModules(t *testing.T) {
 		t.Error("ListModules() returned empty list")
 	}
 
-	// Check if arca-router is in the list
-	found := false
-	for _, name := range modules {
-		if name == "arca-router" {
-			found = true
-			break
+	for _, want := range []string{"arca-router", "ietf-interfaces", "ietf-routing", "ietf-system"} {
+		found := false
+		for _, name := range modules {
+			if name == want {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Errorf("ListModules() doesn't include %s, got: %v", want, modules)
 		}
 	}
-
-	if !found {
-		t.Errorf("ListModules() doesn't include arca-router, got: %v", modules)
+	if !sort.StringsAreSorted(modules) {
+		t.Errorf("ListModules() = %v, want sorted module names", modules)
 	}
 }
 
@@ -119,8 +122,58 @@ func TestYANGValidator_ValidateElementPath(t *testing.T) {
 			wantErr: false,
 		},
 		{
+			name:    "valid system leaf path",
+			path:    "/system/host-name",
+			wantErr: false,
+		},
+		{
+			name:    "valid system operational clock path",
+			path:    "/system/system-state/clock/current-datetime",
+			wantErr: false,
+		},
+		{
 			name:    "valid interfaces path",
 			path:    "/interfaces",
+			wantErr: false,
+		},
+		{
+			name:    "valid interface list key predicate",
+			path:    "/interfaces/interface[name='ge-0/0/0']",
+			wantErr: false,
+		},
+		{
+			name:    "valid boolean predicate",
+			path:    "/system/services/web-ui[enabled='true']",
+			wantErr: false,
+		},
+		{
+			name:    "valid uint predicate",
+			path:    "/system/services/web-ui[port='8443']",
+			wantErr: false,
+		},
+		{
+			name:    "valid interface nested leaf path",
+			path:    "/interfaces/interface/unit/family/address",
+			wantErr: false,
+		},
+		{
+			name:    "valid interface operational status path",
+			path:    "/interfaces/interface/admin-status",
+			wantErr: false,
+		},
+		{
+			name:    "valid interface operational counter path",
+			path:    "/interfaces/interface/statistics/rx-packets",
+			wantErr: false,
+		},
+		{
+			name:    "valid interface operational queue path",
+			path:    "/interfaces/interface/queue-placements/rx-queues/rx-queue/worker-id",
+			wantErr: false,
+		},
+		{
+			name:    "valid interface operational address path",
+			path:    "/interfaces/interface/addresses/address/ip",
 			wantErr: false,
 		},
 		{
@@ -134,6 +187,36 @@ func TestYANGValidator_ValidateElementPath(t *testing.T) {
 			wantErr: false,
 		},
 		{
+			name:    "valid routing-options static route predicate",
+			path:    "/routing-options/static/route[prefix='10.0.0.0/24']",
+			wantErr: false,
+		},
+		{
+			name:    "valid routing-options uint predicate",
+			path:    "/routing-options/static/route[distance='10']",
+			wantErr: false,
+		},
+		{
+			name:    "valid NETCONF routing XML alias path",
+			path:    "/routing/static-routes/route/prefix",
+			wantErr: false,
+		},
+		{
+			name:    "valid NETCONF routing XML alias BFD source path",
+			path:    "/routing/static-routes/route/bfd-source",
+			wantErr: false,
+		},
+		{
+			name:    "valid NETCONF routing state route path",
+			path:    "/routing/routing-state/routes/route/destination-prefix",
+			wantErr: false,
+		},
+		{
+			name:    "valid NETCONF routing state protocol path",
+			path:    "/routing/routing-state/routing-protocols/routing-protocol/admin-status",
+			wantErr: false,
+		},
+		{
 			name:    "valid routing-instances path",
 			path:    "/routing-instances",
 			wantErr: false,
@@ -141,6 +224,16 @@ func TestYANGValidator_ValidateElementPath(t *testing.T) {
 		{
 			name:    "valid protocols path",
 			path:    "/protocols",
+			wantErr: false,
+		},
+		{
+			name:    "valid BGP neighbor leaf path",
+			path:    "/protocols/bgp/group/neighbor/peer-as",
+			wantErr: false,
+		},
+		{
+			name:    "valid EVPN VNI leaf path",
+			path:    "/protocols/evpn/vni/remote-vtep",
 			wantErr: false,
 		},
 		{
@@ -159,6 +252,26 @@ func TestYANGValidator_ValidateElementPath(t *testing.T) {
 			wantErr: false,
 		},
 		{
+			name:    "valid route state predicate",
+			path:    "/state/routes/route[prefix='192.0.2.0/24']",
+			wantErr: false,
+		},
+		{
+			name:    "valid route state multiple predicates",
+			path:    "/state/routes/route[prefix='192.0.2.0/24'][protocol='static']",
+			wantErr: false,
+		},
+		{
+			name:    "valid route state boolean predicate",
+			path:    "/state/routes/route[active='false']",
+			wantErr: false,
+		},
+		{
+			name:    "valid BFD peer state path",
+			path:    "/state/protocols/bfd/peer/status",
+			wantErr: false,
+		},
+		{
 			name:    "invalid path - no leading slash",
 			path:    "system",
 			wantErr: true,
@@ -166,6 +279,46 @@ func TestYANGValidator_ValidateElementPath(t *testing.T) {
 		{
 			name:    "invalid path - unknown element",
 			path:    "/unknown",
+			wantErr: true,
+		},
+		{
+			name:    "invalid path - unknown nested element",
+			path:    "/system/unknown",
+			wantErr: true,
+		},
+		{
+			name:    "invalid path - missing BGP group segment",
+			path:    "/protocols/bgp/neighbor",
+			wantErr: true,
+		},
+		{
+			name:    "invalid path - unknown operational state leaf",
+			path:    "/state/routes/route/unknown",
+			wantErr: true,
+		},
+		{
+			name:    "invalid path - unknown predicate key",
+			path:    "/interfaces/interface[foo='bar']",
+			wantErr: true,
+		},
+		{
+			name:    "invalid path - boolean predicate literal",
+			path:    "/system/services/web-ui[enabled='yes']",
+			wantErr: true,
+		},
+		{
+			name:    "invalid path - uint predicate literal",
+			path:    "/system/services/web-ui[port='https']",
+			wantErr: true,
+		},
+		{
+			name:    "invalid path - uint predicate range",
+			path:    "/routing-options/static/route[distance='300']",
+			wantErr: true,
+		},
+		{
+			name:    "invalid path - undeclared namespace prefix",
+			path:    "/if:interfaces",
 			wantErr: true,
 		},
 		{
@@ -185,19 +338,157 @@ func TestYANGValidator_ValidateElementPath(t *testing.T) {
 	}
 }
 
+func TestImplementedYANGElementPathsValidate(t *testing.T) {
+	v, err := NewYANGValidator()
+	if err != nil {
+		t.Fatalf("NewYANGValidator() error = %v", err)
+	}
+
+	seen := map[string]struct{}{}
+	for _, path := range implementedYANGElementPaths() {
+		if strings.TrimSpace(path) == "" {
+			t.Fatal("implementedYANGElementPaths() included empty path")
+		}
+		if strings.HasPrefix(path, "/") || strings.HasPrefix(path, "config/") {
+			t.Fatalf("implementedYANGElementPaths() included unnormalized path %q", path)
+		}
+		if _, ok := seen[path]; ok {
+			t.Fatalf("implementedYANGElementPaths() included duplicate path %q", path)
+		}
+		seen[path] = struct{}{}
+
+		if err := v.ValidateElementPath("/" + path); err != nil {
+			t.Fatalf("ValidateElementPath(%q) error = %v", "/"+path, err)
+		}
+	}
+}
+
+func TestYANGValidatorValidateElementPathWithContext(t *testing.T) {
+	v, err := NewYANGValidator()
+	if err != nil {
+		t.Fatalf("NewYANGValidator() error = %v", err)
+	}
+
+	tests := []struct {
+		name    string
+		path    string
+		attrs   []xml.Attr
+		wantErr bool
+	}{
+		{
+			name: "valid interfaces namespace path",
+			path: "/if:interfaces/if:interface[if:name='ge-0/0/0']",
+			attrs: []xml.Attr{
+				{Name: xml.Name{Space: "xmlns", Local: "if"}, Value: IETFInterfacesNS},
+			},
+			wantErr: false,
+		},
+		{
+			name: "valid arca namespace path",
+			path: "/arca:protocols/arca:bgp/arca:group/arca:neighbor/arca:peer-as",
+			attrs: []xml.Attr{
+				{Name: xml.Name{Space: "xmlns", Local: "arca"}, Value: ArcaConfigNS},
+			},
+			wantErr: false,
+		},
+		{
+			name: "valid ietf-system operational path",
+			path: "/sys:system/sys:system-state/sys:clock/sys:current-datetime",
+			attrs: []xml.Attr{
+				{Name: xml.Name{Space: "xmlns", Local: "sys"}, Value: IETFSystemNS},
+			},
+			wantErr: false,
+		},
+		{
+			name: "valid ietf-routing operational path",
+			path: "/rt:routing/rt:routing-state/rt:routes/rt:route/rt:destination-prefix",
+			attrs: []xml.Attr{
+				{Name: xml.Name{Space: "xmlns", Local: "rt"}, Value: IETFRoutingNS},
+			},
+			wantErr: false,
+		},
+		{
+			name: "invalid ietf-system namespace on config leaf",
+			path: "/sys:system/sys:host-name",
+			attrs: []xml.Attr{
+				{Name: xml.Name{Space: "xmlns", Local: "sys"}, Value: IETFSystemNS},
+			},
+			wantErr: true,
+		},
+		{
+			name: "invalid namespace mismatch",
+			path: "/rt:interfaces",
+			attrs: []xml.Attr{
+				{Name: xml.Name{Space: "xmlns", Local: "rt"}, Value: IETFRoutingNS},
+			},
+			wantErr: true,
+		},
+		{
+			name: "invalid predicate namespace mismatch",
+			path: "/if:interfaces/if:interface[rt:name='ge-0/0/0']",
+			attrs: []xml.Attr{
+				{Name: xml.Name{Space: "xmlns", Local: "if"}, Value: IETFInterfacesNS},
+				{Name: xml.Name{Space: "xmlns", Local: "rt"}, Value: IETFRoutingNS},
+			},
+			wantErr: true,
+		},
+		{
+			name:    "invalid undeclared namespace prefix",
+			path:    "/if:interfaces",
+			wantErr: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := v.ValidateElementPathWithContext(tt.path, tt.attrs)
+			if (err != nil) != tt.wantErr {
+				t.Errorf("ValidateElementPathWithContext() error = %v, wantErr %v", err, tt.wantErr)
+			}
+		})
+	}
+}
+
 func TestYANGValidator_ValidateConfig(t *testing.T) {
 	v, err := NewYANGValidator()
 	if err != nil {
 		t.Fatalf("NewYANGValidator() error = %v", err)
 	}
 
-	// Test basic validation (Phase 3: minimal implementation)
-	xmlData := []byte(`<config><system><host-name>test</host-name></system></config>`)
+	tests := []struct {
+		name    string
+		xmlData []byte
+		wantErr bool
+	}{
+		{
+			name:    "valid system config",
+			xmlData: []byte(`<config><system><host-name>test</host-name></system></config>`),
+			wantErr: false,
+		},
+		{
+			name:    "unknown element rejected",
+			xmlData: []byte(`<config><unknown/></config>`),
+			wantErr: true,
+		},
+		{
+			name:    "semantic hostname validation rejected",
+			xmlData: []byte(`<config><system><host-name>bad_name</host-name></system></config>`),
+			wantErr: true,
+		},
+		{
+			name:    "semantic interface validation rejected",
+			xmlData: []byte(`<config><interfaces><interface><name>bad0</name></interface></interfaces></config>`),
+			wantErr: true,
+		},
+	}
 
-	err = v.ValidateConfig(xmlData)
-	// Phase 3: This is a stub implementation, should not error
-	if err != nil {
-		t.Errorf("ValidateConfig() error = %v, want nil", err)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := v.ValidateConfig(tt.xmlData)
+			if (err != nil) != tt.wantErr {
+				t.Errorf("ValidateConfig() error = %v, wantErr %v", err, tt.wantErr)
+			}
+		})
 	}
 }
 
@@ -210,14 +501,13 @@ func TestYANGValidator_GetModel(t *testing.T) {
 	// Try to get arca-router module
 	module, err := v.GetModel("arca-router")
 	if err != nil {
-		// May fail in Phase 3 due to missing IETF modules
-		t.Logf("GetModel(arca-router) error (may be expected): %v", err)
+		t.Fatalf("GetModel(arca-router) error = %v", err)
 	}
-
-	if module != nil {
-		if module.Name != "arca-router" {
-			t.Errorf("GetModel() name = %s, want arca-router", module.Name)
-		}
+	if module == nil {
+		t.Fatal("GetModel(arca-router) returned nil module")
+	}
+	if module.Name != "arca-router" {
+		t.Errorf("GetModel() name = %s, want arca-router", module.Name)
 	}
 
 	// Try to get non-existent module
@@ -249,6 +539,26 @@ func TestYANGValidator_NilReceiver(t *testing.T) {
 	_, err = v.GetModel("test")
 	if err == nil {
 		t.Error("GetModel() on nil receiver should return error")
+	}
+}
+
+func TestYANGValidatorZeroValue(t *testing.T) {
+	v := &YANGValidator{}
+
+	if modules := v.ListModules(); modules != nil {
+		t.Errorf("ListModules() on zero value = %v, want nil", modules)
+	}
+
+	if err := v.ValidateConfig([]byte("<config/>")); err == nil {
+		t.Error("ValidateConfig() on zero value should return error")
+	}
+
+	if err := v.ValidateElementPath("/system"); err == nil {
+		t.Error("ValidateElementPath() on zero value should return error")
+	}
+
+	if _, err := v.GetModel("arca-router"); err == nil {
+		t.Error("GetModel() on zero value should return error")
 	}
 }
 

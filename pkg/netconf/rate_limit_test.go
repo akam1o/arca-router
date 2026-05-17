@@ -5,6 +5,97 @@ import (
 	"time"
 )
 
+func TestNewRateLimiterDefaultsNilConfig(t *testing.T) {
+	rl := NewRateLimiter(nil)
+	defer rl.Stop()
+
+	if rl.config.IPFailureLimit != 3 {
+		t.Fatalf("IPFailureLimit = %d, want 3", rl.config.IPFailureLimit)
+	}
+	if rl.config.UserFailureLimit != 5 {
+		t.Fatalf("UserFailureLimit = %d, want 5", rl.config.UserFailureLimit)
+	}
+	if rl.config.LockoutDuration != 15*time.Minute {
+		t.Fatalf("LockoutDuration = %s, want 15m", rl.config.LockoutDuration)
+	}
+}
+
+func TestNewRateLimiterDefaultsPartialConfig(t *testing.T) {
+	config := &SSHConfig{IPFailureLimit: 7}
+
+	rl := NewRateLimiter(config)
+	defer rl.Stop()
+
+	if rl.config.IPFailureLimit != 7 {
+		t.Fatalf("IPFailureLimit = %d, want 7", rl.config.IPFailureLimit)
+	}
+	if rl.config.UserFailureLimit != 5 {
+		t.Fatalf("UserFailureLimit = %d, want 5", rl.config.UserFailureLimit)
+	}
+	if rl.config.IPLockoutWindow != 5*time.Minute {
+		t.Fatalf("IPLockoutWindow = %s, want 5m", rl.config.IPLockoutWindow)
+	}
+	if config.UserFailureLimit != 0 || config.IPLockoutWindow != 0 {
+		t.Fatalf("caller config mutated = %#v, want zero optional fields preserved", config)
+	}
+}
+
+func TestRateLimiterStopIsIdempotent(t *testing.T) {
+	rl := NewRateLimiter(nil)
+
+	rl.Stop()
+	rl.Stop()
+}
+
+func TestRateLimiterNilReceiverAllowsAndNoops(t *testing.T) {
+	var rl *RateLimiter
+
+	if allowed, unlockAt := rl.CheckIP("192.0.2.1"); !allowed || !unlockAt.IsZero() {
+		t.Fatalf("CheckIP() = %t, %s; want allowed with zero unlock", allowed, unlockAt)
+	}
+	if allowed, unlockAt := rl.CheckUser("alice"); !allowed || !unlockAt.IsZero() {
+		t.Fatalf("CheckUser() = %t, %s; want allowed with zero unlock", allowed, unlockAt)
+	}
+	if ipLocked, userLocked := rl.RecordFailure("192.0.2.1", "alice"); ipLocked || userLocked {
+		t.Fatalf("RecordFailure() = %t, %t; want no lockouts", ipLocked, userLocked)
+	}
+	rl.RecordSuccess("192.0.2.1", "alice")
+	rl.Stop()
+	if stats := rl.GetStats(); stats != (RateLimiterStats{}) {
+		t.Fatalf("GetStats() = %+v, want zero stats", stats)
+	}
+}
+
+func TestRateLimiterZeroValueUsesDefaults(t *testing.T) {
+	rl := &RateLimiter{}
+
+	for i := 0; i < 2; i++ {
+		ipLocked, userLocked := rl.RecordFailure("192.0.2.1", "alice")
+		if ipLocked || userLocked {
+			t.Fatalf("RecordFailure(%d) = %t, %t; want no lockouts", i+1, ipLocked, userLocked)
+		}
+	}
+	ipLocked, userLocked := rl.RecordFailure("192.0.2.1", "alice")
+	if !ipLocked || userLocked {
+		t.Fatalf("third RecordFailure() = %t, %t; want IP lockout only", ipLocked, userLocked)
+	}
+	if allowed, unlockAt := rl.CheckIP("192.0.2.1"); allowed || unlockAt.IsZero() {
+		t.Fatalf("CheckIP() = %t, %s; want locked with unlock time", allowed, unlockAt)
+	}
+	stats := rl.GetStats()
+	if stats.IPsTracked != 1 || stats.IPsLocked != 1 || stats.UsersTracked != 1 || stats.UsersLocked != 0 {
+		t.Fatalf("GetStats() = %+v, want tracked IP and user with locked IP", stats)
+	}
+	if stats.LockoutWindow != 15*time.Minute {
+		t.Fatalf("LockoutWindow = %s, want 15m", stats.LockoutWindow)
+	}
+	rl.RecordSuccess("192.0.2.1", "alice")
+	if allowed, _ := rl.CheckIP("192.0.2.1"); !allowed {
+		t.Fatal("CheckIP() after RecordSuccess() = false, want true")
+	}
+	rl.Stop()
+}
+
 func TestRateLimiterIPLockout(t *testing.T) {
 	config := &SSHConfig{
 		IPFailureLimit:  3,

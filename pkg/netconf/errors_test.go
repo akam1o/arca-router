@@ -67,6 +67,29 @@ func TestRPCErrorChaining(t *testing.T) {
 	}
 }
 
+func TestRPCErrorChainHelpersNilReceiver(t *testing.T) {
+	var err *RPCError
+
+	if got := err.WithPath("/rpc"); got != nil {
+		t.Fatalf("WithPath() = %#v, want nil", got)
+	}
+	if got := err.WithBadElement("rpc"); got != nil {
+		t.Fatalf("WithBadElement() = %#v, want nil", got)
+	}
+	if got := err.WithBadAttribute("message-id"); got != nil {
+		t.Fatalf("WithBadAttribute() = %#v, want nil", got)
+	}
+	if got := err.WithBadNamespace(netconfNamespace); got != nil {
+		t.Fatalf("WithBadNamespace() = %#v, want nil", got)
+	}
+	if got := err.WithLockOwner("1"); got != nil {
+		t.Fatalf("WithLockOwner() = %#v, want nil", got)
+	}
+	if got := err.WithAppTag("custom"); got != nil {
+		t.Fatalf("WithAppTag() = %#v, want nil", got)
+	}
+}
+
 func TestErrMalformedMessage(t *testing.T) {
 	err := ErrMalformedMessage("invalid XML")
 
@@ -259,16 +282,9 @@ func TestRPCErrorXMLSerialization(t *testing.T) {
 }
 
 func TestErrUnsupportedFilterType(t *testing.T) {
-	// Test xpath rejection
-	err := ErrUnsupportedFilterType("get", "xpath")
-	if err.ErrorTag != ErrorTagOperationNotSupported {
-		t.Errorf("Expected operation-not-supported for xpath, got %s", err.ErrorTag)
-	}
-
-	// Test other unsupported types
-	err2 := ErrUnsupportedFilterType("get", "invalid")
-	if err2.ErrorTag != ErrorTagInvalidValue {
-		t.Errorf("Expected invalid-value for other types, got %s", err2.ErrorTag)
+	err := ErrUnsupportedFilterType("get", "invalid")
+	if err.ErrorTag != ErrorTagInvalidValue {
+		t.Errorf("Expected invalid-value for unsupported type, got %s", err.ErrorTag)
 	}
 }
 

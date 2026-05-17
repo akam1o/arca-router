@@ -3,9 +3,11 @@ package netconf
 import (
 	"bytes"
 	"encoding/xml"
+	"errors"
 	"fmt"
 	"io"
 	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/akam1o/arca-router/pkg/config"
@@ -16,6 +18,7 @@ const (
 	NetconfBaseNS    = "urn:ietf:params:xml:ns:netconf:base:1.0"
 	IETFInterfacesNS = "urn:ietf:params:xml:ns:yang:ietf-interfaces"
 	IETFRoutingNS    = "urn:ietf:params:xml:ns:yang:ietf-routing"
+	IETFSystemNS     = "urn:ietf:params:xml:ns:yang:ietf-system"
 	ArcaConfigNS     = "urn:arca:router:config:1.0"
 	ArcaStateNS      = "urn:arca:router:state:1.0"
 )
@@ -53,7 +56,7 @@ func ConfigToXML(cfg *config.Config, filter *Filter) ([]byte, error) {
 
 	// Interfaces configuration - use IETF interfaces namespace
 	if len(cfg.Interfaces) > 0 && (filter == nil || filterMatches(filter, "interfaces")) {
-		if err := writeInterfacesXML(&buf, cfg.Interfaces); err != nil {
+		if err := writeInterfacesXML(&buf, cfg.Interfaces, filter); err != nil {
 			return nil, fmt.Errorf("failed to serialize interfaces: %w", err)
 		}
 	}
@@ -61,7 +64,7 @@ func ConfigToXML(cfg *config.Config, filter *Filter) ([]byte, error) {
 	// Routing options - use IETF routing namespace
 	// Note: XML element is "routing" but internal name is "routing-options"
 	if cfg.RoutingOptions != nil && (filter == nil || filterMatches(filter, "routing") || filterMatches(filter, "routing-options")) {
-		if err := writeRoutingOptionsXML(&buf, cfg.RoutingOptions); err != nil {
+		if err := writeRoutingOptionsXML(&buf, cfg.RoutingOptions, filter); err != nil {
 			return nil, fmt.Errorf("failed to serialize routing options: %w", err)
 		}
 	}
@@ -252,13 +255,18 @@ func writeChassisXML(buf *bytes.Buffer, chassis *config.ChassisConfig) error {
 	return nil
 }
 
-// writeInterfacesXML writes interfaces configuration to XML with IETF namespace
-func writeInterfacesXML(buf *bytes.Buffer, interfaces map[string]*config.Interface) error {
+// writeInterfacesXML writes interfaces configuration to XML with IETF namespace.
+func writeInterfacesXML(buf *bytes.Buffer, interfaces map[string]*config.Interface, filter *Filter) error {
+	xpathFilter := outputXPathFilter(filter)
 	buf.WriteString(`  <interfaces xmlns="` + IETFInterfacesNS + `">`)
 	buf.WriteString("\n")
 
 	for _, name := range sortedStringKeys(interfaces) {
 		iface := interfaces[name]
+		if !interfaceMatchesXPathPredicates(xpathFilter, name, iface) {
+			continue
+		}
+
 		buf.WriteString(`    <interface>`)
 		buf.WriteString("\n")
 
@@ -332,8 +340,9 @@ func writeInterfacesXML(buf *bytes.Buffer, interfaces map[string]*config.Interfa
 	return nil
 }
 
-// writeRoutingOptionsXML writes routing options to XML with IETF routing namespace
-func writeRoutingOptionsXML(buf *bytes.Buffer, ro *config.RoutingOptions) error {
+// writeRoutingOptionsXML writes routing options to XML with IETF routing namespace.
+func writeRoutingOptionsXML(buf *bytes.Buffer, ro *config.RoutingOptions, filter *Filter) error {
+	xpathFilter := outputXPathFilter(filter)
 	buf.WriteString(`  <routing xmlns="` + IETFRoutingNS + `">`)
 	buf.WriteString("\n")
 
@@ -356,6 +365,10 @@ func writeRoutingOptionsXML(buf *bytes.Buffer, ro *config.RoutingOptions) error 
 		buf.WriteString("\n")
 
 		for _, route := range ro.StaticRoutes {
+			if !staticRouteMatchesXPathPredicates(xpathFilter, route) {
+				continue
+			}
+
 			buf.WriteString(`      <route>`)
 			buf.WriteString("\n")
 
@@ -416,6 +429,151 @@ func writeRoutingOptionsXML(buf *bytes.Buffer, ro *config.RoutingOptions) error 
 	buf.WriteString(`  </routing>`)
 	buf.WriteString("\n")
 	return nil
+}
+
+func outputXPathFilter(filter *Filter) *XPathFilter {
+	xpathFilter, err := parseFilterXPathWithNamespaces(filter)
+	if err != nil {
+		return nil
+	}
+	return xpathFilter
+}
+
+func interfaceMatchesXPathPredicates(xpathFilter *XPathFilter, name string, iface *config.Interface) bool {
+	return interfacePredicatesMatch(xpathFilter, name, iface, nil, false)
+}
+
+func interfaceStateMatchesXPathPredicates(xpathFilter *XPathFilter, name string, iface *config.Interface, state *InterfaceOperationalState) bool {
+	return interfacePredicatesMatch(xpathFilter, name, iface, state, true)
+}
+
+func interfacePredicatesMatch(xpathFilter *XPathFilter, name string, iface *config.Interface, state *InterfaceOperationalState, includeState bool) bool {
+	segmentIndex, ok := xpathListSegmentIndex(xpathFilter, []string{"interfaces", "interface"})
+	if !ok {
+		return true
+	}
+	for key, want := range xpathFilter.Predicates[segmentIndex] {
+		var got string
+		switch key {
+		case "name":
+			got = name
+		case "description":
+			if iface != nil {
+				got = iface.Description
+			}
+		case "admin-status":
+			if !includeState {
+				return false
+			}
+			got = interfaceAdminStatus(state)
+		case "oper-status":
+			if !includeState {
+				return false
+			}
+			got = interfaceOperStatus(state)
+		case "phys-address":
+			if !includeState {
+				return false
+			}
+			if state != nil {
+				got = state.MAC
+			}
+		case "qos-profile":
+			if !includeState {
+				return false
+			}
+			if state != nil {
+				got = state.QoSProfile
+			}
+		case "ipv4-table-id":
+			if !includeState {
+				return false
+			}
+			if state != nil {
+				got = strconv.FormatUint(uint64(state.IPv4TableID), 10)
+			}
+		case "ipv6-table-id":
+			if !includeState {
+				return false
+			}
+			if state != nil {
+				got = strconv.FormatUint(uint64(state.IPv6TableID), 10)
+			}
+		default:
+			return false
+		}
+		if got != want {
+			return false
+		}
+	}
+	return true
+}
+
+func staticRouteMatchesXPathPredicates(xpathFilter *XPathFilter, route *config.StaticRoute) bool {
+	segmentIndex, ok := xpathStaticRouteSegmentIndex(xpathFilter)
+	if !ok {
+		return true
+	}
+	if route == nil {
+		return false
+	}
+	for key, want := range xpathFilter.Predicates[segmentIndex] {
+		var got string
+		switch key {
+		case "prefix":
+			got = route.Prefix
+		case "next-hop":
+			got = route.NextHop
+		case "distance":
+			if route.Distance == 0 {
+				return false
+			}
+			got = strconv.Itoa(route.Distance)
+		case "bfd":
+			if !route.BFD && route.BFDProfile == "" && route.BFDSource == "" && !route.BFDMultihop {
+				return false
+			}
+			got = "true"
+		case "bfd-profile":
+			got = route.BFDProfile
+		case "bfd-source":
+			got = route.BFDSource
+		case "bfd-multihop":
+			if !route.BFDMultihop {
+				return false
+			}
+			got = "true"
+		default:
+			return false
+		}
+		if got != want {
+			return false
+		}
+	}
+	return true
+}
+
+func xpathStaticRouteSegmentIndex(xpathFilter *XPathFilter) (int, bool) {
+	if index, ok := xpathListSegmentIndex(xpathFilter, []string{"routing", "static-routes", "route"}); ok {
+		return index, true
+	}
+	return xpathListSegmentIndex(xpathFilter, []string{"routing-options", "static", "route"})
+}
+
+func xpathListSegmentIndex(xpathFilter *XPathFilter, path []string) (int, bool) {
+	if xpathFilter == nil || len(xpathFilter.Segments) < len(path) {
+		return 0, false
+	}
+	for i, segment := range path {
+		if xpathFilter.Segments[i] != segment {
+			return 0, false
+		}
+	}
+	index := len(path) - 1
+	if len(xpathFilter.Predicates[index]) == 0 {
+		return 0, false
+	}
+	return index, true
 }
 
 func writeRoutingInstancesXML(buf *bytes.Buffer, instances map[string]*config.RoutingInstance) error {
@@ -2129,6 +2287,7 @@ func validateConfigXMLAllowlist(xmlData []byte) error {
 	decoder.Entity = nil
 	stack := []string{}
 	elementCount := 0
+	rootSeen := false
 
 	for {
 		token, err := decoder.Token()
@@ -2143,6 +2302,14 @@ func validateConfigXMLAllowlist(xmlData []byte) error {
 
 		switch t := token.(type) {
 		case xml.StartElement:
+			if len(stack) == 0 {
+				if rootSeen {
+					return NewRPCError(ErrorTypeRPC, ErrorTagMalformedMessage,
+						"trailing content after config element").
+						WithPath("/rpc/edit-config/config")
+				}
+				rootSeen = true
+			}
 			elementCount++
 			if elementCount > MaxXMLElements {
 				return NewRPCError(ErrorTypeProtocol, ErrorTagInvalidValue,
@@ -2217,7 +2384,8 @@ func validateConfigAttributes(start xml.StartElement, path []string) error {
 }
 
 func isNamespaceDeclarationAttribute(attr xml.Attr) bool {
-	return attr.Name.Space == "xmlns" || (attr.Name.Space == "" && attr.Name.Local == "xmlns")
+	_, ok := namespaceDeclarationAttrName(attr)
+	return ok
 }
 
 func isAllowedConfigNamespaceDeclaration(namespace string) bool {
@@ -2268,8 +2436,7 @@ func configElementRPCPath(path []string) string {
 	return "/rpc/edit-config/config/" + strings.Join(path[1:], "/")
 }
 
-// ApplyConfigEdit applies edit-config changes to existing config based on default-operation
-// This implements Phase 2 Step 3 with merge/replace/create/delete operations
+// ApplyConfigEdit applies edit-config changes to existing config based on default-operation.
 func ApplyConfigEdit(existing, edit *config.Config, defaultOp DefaultOperation) (*config.Config, error) {
 	if existing == nil {
 		return edit, nil
@@ -2296,7 +2463,8 @@ func ApplyConfigEdit(existing, edit *config.Config, defaultOp DefaultOperation) 
 		return replaceConfigs(&merged, edit)
 
 	case DefaultOpNone:
-		// None: Only explicit operations allowed (not implemented in Phase 2)
+		// None: only explicit per-element operations apply. They are rejected
+		// during XML parsing, so implicit edit payloads leave the config unchanged.
 		return &merged, nil
 
 	default:
@@ -3181,12 +3349,32 @@ func ValidateXMLSecurity(data []byte) error {
 
 // ValidateFilterDepthAndSize validates filter depth and size per Phase 2 Step 3
 func ValidateFilterDepthAndSize(rpcName string, filter *Filter) error {
-	if filter == nil || len(filter.Content) == 0 {
+	if filter == nil {
+		return nil
+	}
+	filterType := normalizedFilterType(filter)
+	switch filterType {
+	case "xpath":
+		return validateXPathFilterDepthAndSize(rpcName, filter)
+	case "", "subtree":
+	default:
+		return ErrUnsupportedFilterType(rpcName, filterType)
+	}
+	if len(filter.Content) == 0 {
 		return nil
 	}
 
-	// Calculate depth by counting nested elements
-	depth := calculateFilterDepth(filter.Content)
+	depth, count, err := calculateSubtreeFilterStats(filter)
+	if err != nil {
+		var attrErr *subtreeFilterElementAttrError
+		if errors.As(err, &attrErr) {
+			return ErrInvalidFilter(rpcName, attrErr.Error())
+		}
+		return NewRPCError(ErrorTypeRPC, ErrorTagMalformedMessage,
+			fmt.Sprintf("invalid subtree filter XML: %v", err)).
+			WithPath(fmt.Sprintf("/rpc/%s/filter", rpcName)).
+			WithBadElement("filter")
+	}
 	if depth > MaxXMLDepth {
 		return NewRPCError(ErrorTypeProtocol, ErrorTagInvalidValue,
 			fmt.Sprintf("filter exceeds maximum depth limit (%d)", MaxXMLDepth)).
@@ -3194,8 +3382,6 @@ func ValidateFilterDepthAndSize(rpcName string, filter *Filter) error {
 			WithAppTag("depth-limit")
 	}
 
-	// Count elements
-	count := countFilterElements(filter.Content)
 	if count > MaxXMLElements {
 		return NewRPCError(ErrorTypeProtocol, ErrorTagInvalidValue,
 			fmt.Sprintf("filter exceeds maximum element limit (%d)", MaxXMLElements)).
@@ -3206,40 +3392,53 @@ func ValidateFilterDepthAndSize(rpcName string, filter *Filter) error {
 	return nil
 }
 
-// calculateFilterDepth calculates nesting depth of filter XML
-func calculateFilterDepth(content []byte) int {
-	depth := 0
-	maxDepth := 0
-
-	for i := 0; i < len(content); i++ {
-		if content[i] == '<' {
-			if i+1 < len(content) && content[i+1] != '/' && content[i+1] != '?' && content[i+1] != '!' {
-				depth++
-				if depth > maxDepth {
-					maxDepth = depth
-				}
-			} else if i+1 < len(content) && content[i+1] == '/' {
-				depth--
-			}
-		}
+func validateXPathFilterDepthAndSize(rpcName string, filter *Filter) error {
+	selectExpr := ""
+	if filter != nil {
+		selectExpr = filter.Select
+	}
+	selectExpr = strings.TrimSpace(selectExpr)
+	if len(selectExpr) > MaxXMLSize {
+		return NewRPCError(ErrorTypeProtocol, ErrorTagInvalidValue,
+			fmt.Sprintf("xpath filter exceeds maximum size limit (%d bytes)", MaxXMLSize)).
+			WithPath(fmt.Sprintf("/rpc/%s/filter", rpcName)).
+			WithAppTag("size-limit")
 	}
 
-	return maxDepth
+	xpathFilter, err := parseFilterXPathWithNamespaces(filter)
+	if err != nil {
+		if rpcErr := validateExperimentalXPathFilter(rpcName, filter); rpcErr != nil {
+			return rpcErr
+		}
+		return nil
+	}
+	if xpathFilter == nil {
+		return nil
+	}
+	if len(xpathFilter.Segments) > MaxXMLDepth {
+		return NewRPCError(ErrorTypeProtocol, ErrorTagInvalidValue,
+			fmt.Sprintf("xpath filter exceeds maximum depth limit (%d)", MaxXMLDepth)).
+			WithPath(fmt.Sprintf("/rpc/%s/filter", rpcName)).
+			WithAppTag("depth-limit")
+	}
+	return nil
 }
 
-// countFilterElements counts XML elements in filter
-func countFilterElements(content []byte) int {
-	count := 0
-
-	for i := 0; i < len(content); i++ {
-		if content[i] == '<' {
-			if i+1 < len(content) && content[i+1] != '/' && content[i+1] != '?' && content[i+1] != '!' {
-				count++
-			}
+func calculateSubtreeFilterStats(filter *Filter) (int, int, error) {
+	if filter == nil {
+		return 0, 0, nil
+	}
+	paths, err := filter.parseElementPaths()
+	if err != nil {
+		return 0, 0, err
+	}
+	maxDepth := 0
+	for _, path := range paths {
+		if len(path) > maxDepth {
+			maxDepth = len(path)
 		}
 	}
-
-	return count
+	return maxDepth, len(paths), nil
 }
 
 // max returns the maximum of two integers

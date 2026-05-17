@@ -3,7 +3,9 @@ package main
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io"
+	"os"
 	"strings"
 	"testing"
 	"time"
@@ -13,9 +15,15 @@ import (
 
 type fakeInteractiveClient struct {
 	acquireLockErr   error
+	commitErr        error
 	discardErr       error
 	releaseLockErr   error
+	replaceErr       error
 	history          []grpcclient.CommitInfo
+	listHistoryErr   error
+	runningText      string
+	runningVersion   uint64
+	candidateText    string
 	routeText        string
 	routeProtocol    string
 	routeFamily      string
@@ -38,25 +46,36 @@ type fakeInteractiveClient struct {
 	lcpInfo          *grpcclient.LCPReconciliationInfo
 	haInfo           *grpcclient.HAStatusInfo
 	cosInfo          *grpcclient.ClassOfServiceInfo
+	cosErr           error
 	telemetryCatalog grpcclient.TelemetryCatalog
 	telemetryEvents  []*grpcclient.TelemetryEvent
+	diffText         string
+	diffHasChanges   bool
+	diffErr          error
 
 	acquireLockCalls              int
 	discardCalls                  int
 	releaseLockCalls              int
 	commitCalls                   int
+	diffCalls                     int
 	routeCalls                    int
 	bfdStatusCalls                int
+	cosCalls                      int
 	routingCalls                  int
 	bgpNeighborCalls              int
 	ospfNeighborCalls             int
 	listHistoryCalls              int
+	listHistoryLimit              int
+	listHistoryOffset             int
+	getRunningCalls               int
+	getCandidateCalls             int
 	rollbackCalls                 int
 	telemetryCatalogCalls         int
 	filteredTelemetryCatalogCalls int
 	telemetryCalls                int
 	validateCalls                 int
 	editTexts                     []string
+	replaceTexts                  []string
 	telemetryCatalogPaths         []string
 	telemetryCatalogCardinalities []string
 	telemetryCatalogSchemas       []string
@@ -68,11 +87,13 @@ type fakeInteractiveClient struct {
 }
 
 func (f *fakeInteractiveClient) GetRunning(ctx context.Context) (string, uint64, error) {
-	return "", 0, nil
+	f.getRunningCalls++
+	return f.runningText, f.runningVersion, nil
 }
 
 func (f *fakeInteractiveClient) GetCandidate(ctx context.Context, sessionID string) (string, error) {
-	return "", nil
+	f.getCandidateCalls++
+	return f.candidateText, nil
 }
 
 func (f *fakeInteractiveClient) EditCandidate(ctx context.Context, sessionID, configText string) error {
@@ -80,8 +101,16 @@ func (f *fakeInteractiveClient) EditCandidate(ctx context.Context, sessionID, co
 	return nil
 }
 
+func (f *fakeInteractiveClient) ReplaceCandidate(ctx context.Context, sessionID, configText string) error {
+	f.replaceTexts = append(f.replaceTexts, configText)
+	return f.replaceErr
+}
+
 func (f *fakeInteractiveClient) Commit(ctx context.Context, sessionID, user, message string) (string, uint64, error) {
 	f.commitCalls++
+	if f.commitErr != nil {
+		return "", 0, f.commitErr
+	}
 	return "commit-1234567890", 2, nil
 }
 
@@ -101,11 +130,17 @@ func (f *fakeInteractiveClient) Rollback(ctx context.Context, sessionID, commitI
 }
 
 func (f *fakeInteractiveClient) Diff(ctx context.Context, sessionID string) (string, bool, error) {
-	return "", false, nil
+	f.diffCalls++
+	return f.diffText, f.diffHasChanges, f.diffErr
 }
 
 func (f *fakeInteractiveClient) ListHistory(ctx context.Context, limit, offset int) ([]grpcclient.CommitInfo, error) {
 	f.listHistoryCalls++
+	f.listHistoryLimit = limit
+	f.listHistoryOffset = offset
+	if f.listHistoryErr != nil {
+		return nil, f.listHistoryErr
+	}
 	return f.history, nil
 }
 
@@ -217,6 +252,10 @@ func (f *fakeInteractiveClient) GetHAStatus(ctx context.Context) (*grpcclient.HA
 }
 
 func (f *fakeInteractiveClient) GetClassOfService(ctx context.Context) (*grpcclient.ClassOfServiceInfo, error) {
+	f.cosCalls++
+	if f.cosErr != nil {
+		return nil, f.cosErr
+	}
 	if f.cosInfo != nil {
 		return f.cosInfo, nil
 	}
@@ -417,6 +456,180 @@ func TestCommitAndQuitKeepsConfigurationModeOnReleaseFailure(t *testing.T) {
 	}
 }
 
+func TestCommitFailureCollectsDiagnostics(t *testing.T) {
+	ctx := context.Background()
+	client := &fakeInteractiveClient{
+		commitErr:      errors.New("apply failed"),
+		diffText:       "- set protocols bgp group external neighbor 198.51.100.2 peer-as 65001",
+		diffHasChanges: true,
+	}
+	sh := &interactiveShell{
+		client:    client,
+		hostname:  "router",
+		mode:      modeConfiguration,
+		sessionID: "session-1",
+		hasLock:   true,
+	}
+
+	err := sh.cmdCommit(ctx, nil)
+	if err == nil || !strings.Contains(err.Error(), "commit failed: apply failed") {
+		t.Fatalf("cmdCommit() error = %v, want commit failure", err)
+	}
+	if client.commitCalls != 1 || client.diffCalls != 1 {
+		t.Fatalf("commit/diff calls = %d/%d, want 1/1", client.commitCalls, client.diffCalls)
+	}
+}
+
+func TestCommitFailureReportsDiagnosticCollectionError(t *testing.T) {
+	ctx := context.Background()
+	client := &fakeInteractiveClient{
+		commitErr: errors.New("apply failed"),
+		diffErr:   errors.New("diff unavailable"),
+	}
+	sh := &interactiveShell{
+		client:    client,
+		hostname:  "router",
+		mode:      modeConfiguration,
+		sessionID: "session-1",
+		hasLock:   true,
+	}
+
+	err := sh.cmdCommit(ctx, nil)
+	if err == nil || !strings.Contains(err.Error(), "diagnostics unavailable: diff unavailable") {
+		t.Fatalf("cmdCommit() error = %v, want diagnostics unavailable detail", err)
+	}
+	if client.commitCalls != 1 || client.diffCalls != 1 {
+		t.Fatalf("commit/diff calls = %d/%d, want 1/1", client.commitCalls, client.diffCalls)
+	}
+}
+
+func TestCommitRunsClassOfServicePostCommitDiagnostics(t *testing.T) {
+	ctx := context.Background()
+	client := &fakeInteractiveClient{
+		diffText:       "+ set class-of-service interfaces ge-0/0/0 output-traffic-control-profile WAN",
+		diffHasChanges: true,
+		history: []grpcclient.CommitInfo{
+			{CommitID: "1234567890abcdef", ConfigText: "set system host-name router"},
+		},
+		cosInfo: &grpcclient.ClassOfServiceInfo{
+			EnforcementStatus: "intent-only",
+			Interfaces: []grpcclient.ClassOfServiceInterfaceInfo{
+				{Name: "ge-0/0/0", OutputTrafficControlProfile: "WAN"},
+			},
+			Capabilities: &grpcclient.ClassOfServiceCapabilitiesInfo{
+				MetadataBindingSupported: true,
+				Diagnostics:              []string{"scheduler unavailable"},
+			},
+		},
+	}
+	sh := &interactiveShell{
+		client:    client,
+		hostname:  "router",
+		mode:      modeConfiguration,
+		sessionID: "session-1",
+		hasLock:   true,
+	}
+
+	if err := sh.cmdCommit(ctx, nil); err != nil {
+		t.Fatalf("cmdCommit() error = %v", err)
+	}
+	if client.commitCalls != 1 || client.diffCalls != 1 || client.listHistoryCalls != 1 || client.cosCalls != 1 {
+		t.Fatalf("commit/diff/history/cos calls = %d/%d/%d/%d, want 1/1/1/1",
+			client.commitCalls, client.diffCalls, client.listHistoryCalls, client.cosCalls)
+	}
+}
+
+func TestCommitSkipsClassOfServicePostCommitDiagnosticsWithoutCosDiff(t *testing.T) {
+	ctx := context.Background()
+	client := &fakeInteractiveClient{
+		diffText:       "+ set routing-options static route 198.51.100.0/24 next-hop 192.0.2.1",
+		diffHasChanges: true,
+		history: []grpcclient.CommitInfo{
+			{CommitID: "1234567890abcdef", ConfigText: "set system host-name router"},
+		},
+	}
+	sh := &interactiveShell{
+		client:    client,
+		hostname:  "router",
+		mode:      modeConfiguration,
+		sessionID: "session-1",
+		hasLock:   true,
+	}
+
+	if err := sh.cmdCommit(ctx, nil); err != nil {
+		t.Fatalf("cmdCommit() error = %v", err)
+	}
+	if client.commitCalls != 1 || client.diffCalls != 1 || client.listHistoryCalls != 1 || client.cosCalls != 0 {
+		t.Fatalf("commit/diff/history/cos calls = %d/%d/%d/%d, want 1/1/1/0",
+			client.commitCalls, client.diffCalls, client.listHistoryCalls, client.cosCalls)
+	}
+}
+
+func TestCommitRollbackArchiveWarnings(t *testing.T) {
+	tests := []struct {
+		name   string
+		client *fakeInteractiveClient
+		want   string
+	}{
+		{
+			name: "valid archive",
+			client: &fakeInteractiveClient{
+				history: []grpcclient.CommitInfo{
+					{CommitID: "1234567890abcdef", ConfigText: "set system host-name router"},
+				},
+			},
+			want: "",
+		},
+		{
+			name:   "missing archive",
+			client: &fakeInteractiveClient{},
+			want:   "no rollback archive entry is available",
+		},
+		{
+			name: "empty config text",
+			client: &fakeInteractiveClient{
+				history: []grpcclient.CommitInfo{{CommitID: "1234567890abcdef"}},
+			},
+			want: "latest rollback archive has no config text",
+		},
+		{
+			name: "invalid config text",
+			client: &fakeInteractiveClient{
+				history: []grpcclient.CommitInfo{
+					{CommitID: "1234567890abcdef", ConfigText: "set system host-name bad_name"},
+				},
+			},
+			want: "latest rollback archive validation failed",
+		},
+		{
+			name: "history unavailable",
+			client: &fakeInteractiveClient{
+				listHistoryErr: errors.New("history unavailable"),
+			},
+			want: "rollback archive check failed: history unavailable",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			warnings := commitRollbackArchiveWarnings(context.Background(), tt.client)
+			if tt.want == "" {
+				if len(warnings) != 0 {
+					t.Fatalf("commitRollbackArchiveWarnings() = %#v, want none", warnings)
+				}
+				return
+			}
+			got := strings.Join(warnings, "\n")
+			if !strings.Contains(got, tt.want) {
+				t.Fatalf("commitRollbackArchiveWarnings() = %#v, want substring %q", warnings, tt.want)
+			}
+			if tt.client.listHistoryCalls != 1 || tt.client.listHistoryLimit != 1 {
+				t.Fatalf("ListHistory calls/limit = %d/%d, want 1/1", tt.client.listHistoryCalls, tt.client.listHistoryLimit)
+			}
+		})
+	}
+}
+
 func TestCmdSetQuotesValuesWithSpaces(t *testing.T) {
 	ctx := context.Background()
 	client := &fakeInteractiveClient{}
@@ -457,6 +670,516 @@ func TestCommitCheckRejectsComment(t *testing.T) {
 	}
 	if client.validateCalls != 0 || client.commitCalls != 0 {
 		t.Fatalf("validate/commit calls = %d/%d, want 0/0", client.validateCalls, client.commitCalls)
+	}
+}
+
+func TestCommitCheckBuildsChangeImpactPreview(t *testing.T) {
+	ctx := context.Background()
+	client := &fakeInteractiveClient{
+		diffText:       "+ set routing-options static route 0.0.0.0/0 next-hop 198.51.100.2",
+		diffHasChanges: true,
+	}
+	sh := &interactiveShell{
+		client:    client,
+		hostname:  "router",
+		mode:      modeConfiguration,
+		sessionID: "session-1",
+		hasLock:   true,
+	}
+
+	if err := sh.cmdCommit(ctx, []string{"check"}); err != nil {
+		t.Fatalf("cmdCommit(check) error = %v", err)
+	}
+	if client.validateCalls != 1 || client.diffCalls != 1 || client.commitCalls != 0 {
+		t.Fatalf("validate/diff/commit calls = %d/%d/%d, want 1/1/0", client.validateCalls, client.diffCalls, client.commitCalls)
+	}
+}
+
+func TestCommitCheckRunsClassOfServicePreflight(t *testing.T) {
+	ctx := context.Background()
+	client := &fakeInteractiveClient{
+		diffText:       "+ set class-of-service interfaces ge-0/0/0 output-traffic-control-profile WAN",
+		diffHasChanges: true,
+		cosInfo: &grpcclient.ClassOfServiceInfo{
+			Capabilities: &grpcclient.ClassOfServiceCapabilitiesInfo{
+				MetadataBindingSupported: true,
+				Diagnostics:              []string{"scheduler unavailable"},
+			},
+		},
+	}
+	sh := &interactiveShell{
+		client:    client,
+		hostname:  "router",
+		mode:      modeConfiguration,
+		sessionID: "session-1",
+		hasLock:   true,
+	}
+
+	if err := sh.cmdCommit(ctx, []string{"check"}); err != nil {
+		t.Fatalf("cmdCommit(check) error = %v", err)
+	}
+	if client.validateCalls != 1 || client.diffCalls != 1 || client.cosCalls != 1 || client.commitCalls != 0 {
+		t.Fatalf("validate/diff/cos/commit calls = %d/%d/%d/%d, want 1/1/1/0", client.validateCalls, client.diffCalls, client.cosCalls, client.commitCalls)
+	}
+}
+
+func TestCommitCheckSkipsClassOfServicePreflightWithoutCosDiff(t *testing.T) {
+	ctx := context.Background()
+	client := &fakeInteractiveClient{
+		diffText:       "+ set routing-options static route 198.51.100.0/24 next-hop 192.0.2.1",
+		diffHasChanges: true,
+	}
+	sh := &interactiveShell{
+		client:    client,
+		hostname:  "router",
+		mode:      modeConfiguration,
+		sessionID: "session-1",
+		hasLock:   true,
+	}
+
+	if err := sh.cmdCommit(ctx, []string{"check"}); err != nil {
+		t.Fatalf("cmdCommit(check) error = %v", err)
+	}
+	if client.cosCalls != 0 {
+		t.Fatalf("GetClassOfService calls = %d, want 0", client.cosCalls)
+	}
+}
+
+func TestFormatChangeImpactPreviewSummarizesRouteAndPolicyDiff(t *testing.T) {
+	lines := formatChangeImpactPreview(strings.Join([]string{
+		"+ set routing-options static route 0.0.0.0/0 next-hop 198.51.100.2",
+		"- set routing-options static route 203.0.113.0/24 next-hop 198.51.100.3",
+		"+ set policy-options policy-statement EXPORT term ALLOW then accept",
+	}, "\n"), true)
+	got := strings.Join(lines, "\n")
+	for _, want := range []string{
+		"change impact preview:",
+		"changed lines: +2 -1",
+		"static routes: +1 -1",
+		"route diff:",
+		"add 0.0.0.0/0 via 198.51.100.2",
+		"remove 203.0.113.0/24 via 198.51.100.3",
+		"policy-options: +1 -0",
+		"policy diff:",
+		"add route-map EXPORT term ALLOW",
+		"route-policy dry-run:",
+		"route-map regeneration planned: 1 policy statement changes",
+		"warning: default route changes can affect all unmatched traffic",
+		"warning: static route removals can withdraw forwarding entries",
+		"warning: policy-options changes can regenerate FRR route-maps",
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("formatChangeImpactPreview() = %q, want substring %q", got, want)
+		}
+	}
+}
+
+func TestFormatChangeImpactPreviewSummarizesInterfaceDiff(t *testing.T) {
+	lines := formatChangeImpactPreview(strings.Join([]string{
+		"+ set interfaces ge-0/0/0 unit 0 family inet address 198.51.100.1/30",
+		"- set interfaces ge-0/0/1 disable",
+		"+ set interfaces ge-0/0/2 description \"LAN Interface\"",
+	}, "\n"), true)
+	got := strings.Join(lines, "\n")
+	for _, want := range []string{
+		"interfaces: +2 -1",
+		"interface diff:",
+		"add interface ge-0/0/0 address 198.51.100.1/30",
+		"remove interface ge-0/0/1 disable",
+		"add interface ge-0/0/2 description LAN Interface",
+		"warning: interface changes can affect link state or attached services",
+		"warning: interface address changes can alter connected route reachability",
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("formatChangeImpactPreview() = %q, want substring %q", got, want)
+		}
+	}
+}
+
+func TestFormatChangeImpactPreviewLimitsInterfaceDiffDetails(t *testing.T) {
+	var diff []string
+	for i := 0; i < maxChangeImpactInterfaceDetails+2; i++ {
+		diff = append(diff, fmt.Sprintf("+ set interfaces ge-0/0/%d description uplink-%d", i, i))
+	}
+	lines := formatChangeImpactPreview(strings.Join(diff, "\n"), true)
+	got := strings.Join(lines, "\n")
+	if !strings.Contains(got, "interfaces: +7 -0") {
+		t.Fatalf("formatChangeImpactPreview() = %q, want interface count", got)
+	}
+	if !strings.Contains(got, "... 2 more interface changes") {
+		t.Fatalf("formatChangeImpactPreview() = %q, want capped interface details", got)
+	}
+	if strings.Contains(got, "ge-0/0/6") {
+		t.Fatalf("formatChangeImpactPreview() = %q, want details capped before final interface", got)
+	}
+}
+
+func TestFormatChangeImpactPreviewSummarizesPolicyAndBGPRouteMapDiff(t *testing.T) {
+	lines := formatChangeImpactPreview(strings.Join([]string{
+		"+ set policy-options prefix-list CUSTOMER 10.100.0.0/16",
+		"+ set policy-options policy-statement EXPORT term ALLOW then accept",
+		"+ set protocols bgp group external export EXPORT",
+	}, "\n"), true)
+	got := strings.Join(lines, "\n")
+	for _, want := range []string{
+		"policy-options: +2 -0",
+		"bgp: +1 -0",
+		"policy diff:",
+		"add prefix-list CUSTOMER 10.100.0.0/16",
+		"add route-map EXPORT term ALLOW",
+		"add bgp group external export route-map EXPORT",
+		"route-policy dry-run:",
+		"prefix-list updates: 1",
+		"route-map regeneration planned: 1 policy statement changes",
+		"bgp policy bindings updated: 1",
+		"validation scope: candidate policy syntax and referenced BGP bindings",
+		"warning: policy-options changes can regenerate FRR route-maps",
+		"warning: BGP changes can reset sessions or change route advertisements",
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("formatChangeImpactPreview() = %q, want substring %q", got, want)
+		}
+	}
+}
+
+func TestFormatChangeImpactPreviewLimitsPolicyDiffDetails(t *testing.T) {
+	var diff []string
+	for i := 0; i < maxChangeImpactPolicyDetails+2; i++ {
+		diff = append(diff, fmt.Sprintf("+ set policy-options policy-statement EXPORT-%d term ALLOW then accept", i))
+	}
+	lines := formatChangeImpactPreview(strings.Join(diff, "\n"), true)
+	got := strings.Join(lines, "\n")
+	if !strings.Contains(got, "policy-options: +7 -0") {
+		t.Fatalf("formatChangeImpactPreview() = %q, want policy count", got)
+	}
+	if !strings.Contains(got, "... 2 more policy changes") {
+		t.Fatalf("formatChangeImpactPreview() = %q, want capped policy details", got)
+	}
+	if strings.Contains(got, "EXPORT-6") {
+		t.Fatalf("formatChangeImpactPreview() = %q, want details capped before final policy", got)
+	}
+}
+
+func TestFormatChangeImpactPreviewSummarizesRoutingInstanceRouteDiff(t *testing.T) {
+	lines := formatChangeImpactPreview("- set routing-instances BLUE routing-options static route 0.0.0.0/0 next-hop 10.1.1.1", true)
+	got := strings.Join(lines, "\n")
+	for _, want := range []string{
+		"static routes: +0 -1",
+		"routing-instances: +0 -1",
+		"remove routing-instance BLUE 0.0.0.0/0 via 10.1.1.1",
+		"warning: default route changes can affect all unmatched traffic",
+		"warning: routing-instance changes can move interfaces or VRF routing state",
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("formatChangeImpactPreview() = %q, want substring %q", got, want)
+		}
+	}
+}
+
+func TestFormatChangeImpactPreviewLimitsRouteDiffDetails(t *testing.T) {
+	var diff []string
+	for i := 0; i < maxChangeImpactRouteDetails+2; i++ {
+		diff = append(diff, fmt.Sprintf("+ set routing-options static route 198.51.%d.0/24 next-hop 192.0.2.%d", i, i+1))
+	}
+	lines := formatChangeImpactPreview(strings.Join(diff, "\n"), true)
+	got := strings.Join(lines, "\n")
+	if !strings.Contains(got, "static routes: +7 -0") {
+		t.Fatalf("formatChangeImpactPreview() = %q, want static route count", got)
+	}
+	if !strings.Contains(got, "... 2 more static route changes") {
+		t.Fatalf("formatChangeImpactPreview() = %q, want capped route details", got)
+	}
+	if strings.Contains(got, "198.51.6.0/24") {
+		t.Fatalf("formatChangeImpactPreview() = %q, want details capped before final route", got)
+	}
+}
+
+func TestFormatChangeImpactPreviewWarnsOnDisruptiveProtocolDiff(t *testing.T) {
+	lines := formatChangeImpactPreview(strings.Join([]string{
+		"- set protocols bgp group external neighbor 198.51.100.2 peer-as 65001",
+		"+ set protocols ospf area 0.0.0.0 interface ge-0/0/1 metric 50",
+		"- set protocols bfd peer 192.0.2.2 profile fast",
+		"+ set protocols evpn vni 10010 remote-vtep 198.51.100.20",
+		"- set routing-instances BLUE interface ge-0/0/0",
+		"+ set class-of-service interfaces ge-0/0/0 output-traffic-control-profile WAN",
+	}, "\n"), true)
+	got := strings.Join(lines, "\n")
+	for _, want := range []string{
+		"bgp: +0 -1",
+		"ospf: +1 -0",
+		"bfd: +0 -1",
+		"evpn: +1 -0",
+		"routing-instances: +0 -1",
+		"class-of-service: +1 -0",
+		"warning: BGP changes can reset sessions or change route advertisements",
+		"warning: OSPF changes can trigger adjacency updates or SPF recalculation",
+		"warning: BFD changes can affect fast failure detection",
+		"warning: EVPN changes can alter overlay VNI reachability",
+		"warning: routing-instance changes can move interfaces or VRF routing state",
+		"warning: class-of-service changes can alter traffic treatment",
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("formatChangeImpactPreview() = %q, want substring %q", got, want)
+		}
+	}
+}
+
+func TestFormatChangeImpactPreviewNoChanges(t *testing.T) {
+	lines := formatChangeImpactPreview("", false)
+	if got, want := strings.Join(lines, "\n"), "change impact preview: no candidate changes"; got != want {
+		t.Fatalf("formatChangeImpactPreview(no changes) = %q, want %q", got, want)
+	}
+}
+
+func TestFormatClassOfServicePreflightWarnsOnCapabilityGaps(t *testing.T) {
+	lines := formatClassOfServicePreflight(&grpcclient.ClassOfServiceInfo{
+		Capabilities: &grpcclient.ClassOfServiceCapabilitiesInfo{
+			MetadataBindingSupported: true,
+			QueueSchedulerSupported:  false,
+			PolicerSupported:         false,
+			CountersSupported:        true,
+			LastError:                "capability probe failed",
+			Diagnostics:              []string{"scheduler unsupported"},
+		},
+	})
+	got := strings.Join(lines, "\n")
+	for _, want := range []string{
+		"qos preflight:",
+		"metadata binding: yes",
+		"queue scheduler: no",
+		"policer: no",
+		"counters: yes",
+		"warning: capability detection error: capability probe failed",
+		"warning: queue scheduler is unavailable; output QoS remains intent-only",
+		"warning: policer is unavailable; traffic policing remains intent-only",
+		"diagnostic: scheduler unsupported",
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("formatClassOfServicePreflight() = %q, want substring %q", got, want)
+		}
+	}
+}
+
+func TestFormatClassOfServicePostCommitSummarizesStatus(t *testing.T) {
+	lines := formatClassOfServicePostCommit(&grpcclient.ClassOfServiceInfo{
+		EnforcementStatus: "intent-only",
+		Interfaces: []grpcclient.ClassOfServiceInterfaceInfo{
+			{Name: "ge-0/0/0", OutputTrafficControlProfile: "WAN"},
+			{Name: "ge-0/0/1", OutputTrafficControlProfile: "LAN"},
+		},
+		Capabilities: &grpcclient.ClassOfServiceCapabilitiesInfo{
+			MetadataBindingSupported: true,
+			QueueSchedulerSupported:  false,
+			PolicerSupported:         false,
+			CountersSupported:        true,
+			LastError:                "capability probe failed",
+			Diagnostics:              []string{"scheduler unsupported"},
+		},
+	})
+	got := strings.Join(lines, "\n")
+	for _, want := range []string{
+		"qos post-commit diagnostics:",
+		"enforcement status: intent-only",
+		"bound interfaces: 2",
+		"metadata binding: yes",
+		"queue scheduler: no",
+		"policer: no",
+		"counters: yes",
+		"warning: capability detection error: capability probe failed",
+		"diagnostic: scheduler unsupported",
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("formatClassOfServicePostCommit() = %q, want substring %q", got, want)
+		}
+	}
+}
+
+func TestUpgradePreflightLinesReportsReadyState(t *testing.T) {
+	client := &fakeInteractiveClient{
+		runningText:    "set system host-name router\n",
+		runningVersion: 7,
+		history: []grpcclient.CommitInfo{
+			{CommitID: "1234567890abcdef", ConfigText: "set system host-name router"},
+		},
+		cosInfo: &grpcclient.ClassOfServiceInfo{
+			Capabilities: &grpcclient.ClassOfServiceCapabilitiesInfo{
+				MetadataBindingSupported: true,
+				QueueSchedulerSupported:  true,
+				PolicerSupported:         true,
+				CountersSupported:        true,
+			},
+		},
+	}
+
+	lines, err := upgradePreflightLines(context.Background(), client)
+	if err != nil {
+		t.Fatalf("upgradePreflightLines() error = %v", err)
+	}
+	got := strings.Join(lines, "\n")
+	for _, want := range []string{
+		"upgrade preflight:",
+		"running config: version 7",
+		"running validation: ok",
+		"rollback archive: latest commit 12345678 available",
+		"rollback archive validation: ok",
+		"telemetry catalog:",
+		"qos metadata binding: yes",
+		"status: ready for package-specific upgrade checks",
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("upgradePreflightLines() = %q, want substring %q", got, want)
+		}
+	}
+	if client.getRunningCalls != 1 || client.listHistoryCalls != 1 || client.telemetryCatalogCalls != 1 || client.cosCalls != 1 {
+		t.Fatalf("running/history/telemetry/cos calls = %d/%d/%d/%d, want 1/1/1/1",
+			client.getRunningCalls, client.listHistoryCalls, client.telemetryCatalogCalls, client.cosCalls)
+	}
+}
+
+func TestUpgradePreflightLinesReportsWarnings(t *testing.T) {
+	client := &fakeInteractiveClient{}
+
+	lines, err := upgradePreflightLines(context.Background(), client)
+	if err != nil {
+		t.Fatalf("upgradePreflightLines() error = %v", err)
+	}
+	got := strings.Join(lines, "\n")
+	for _, want := range []string{
+		"warning: running configuration is empty",
+		"warning: no rollback archive entries available",
+		"warning: qos capability snapshot unavailable",
+		"status: 3 warning(s), review before upgrade",
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("upgradePreflightLines() = %q, want substring %q", got, want)
+		}
+	}
+}
+
+func TestUpgradePreflightLinesReportsConfigValidationWarnings(t *testing.T) {
+	client := &fakeInteractiveClient{
+		runningText:    "set system host-name bad_name\n",
+		runningVersion: 7,
+		history: []grpcclient.CommitInfo{
+			{CommitID: "1234567890abcdef", ConfigText: "set system host-name bad_name"},
+		},
+		cosInfo: &grpcclient.ClassOfServiceInfo{
+			Capabilities: &grpcclient.ClassOfServiceCapabilitiesInfo{
+				MetadataBindingSupported: true,
+				QueueSchedulerSupported:  true,
+				PolicerSupported:         true,
+				CountersSupported:        true,
+			},
+		},
+	}
+
+	lines, err := upgradePreflightLines(context.Background(), client)
+	if err != nil {
+		t.Fatalf("upgradePreflightLines() error = %v", err)
+	}
+	got := strings.Join(lines, "\n")
+	for _, want := range []string{
+		"warning: running configuration validation failed:",
+		"warning: latest rollback archive validation failed:",
+		"status: 2 warning(s), review before upgrade",
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("upgradePreflightLines() = %q, want substring %q", got, want)
+		}
+	}
+}
+
+func TestUpgradePreflightLinesChecksBackupPath(t *testing.T) {
+	backupPath := t.TempDir() + "/running.conf"
+	client := &fakeInteractiveClient{
+		runningText:    "set system host-name router\n",
+		runningVersion: 7,
+		history: []grpcclient.CommitInfo{
+			{CommitID: "1234567890abcdef", ConfigText: "set system host-name router"},
+		},
+		cosInfo: &grpcclient.ClassOfServiceInfo{
+			Capabilities: &grpcclient.ClassOfServiceCapabilitiesInfo{
+				MetadataBindingSupported: true,
+				QueueSchedulerSupported:  true,
+				PolicerSupported:         true,
+				CountersSupported:        true,
+			},
+		},
+	}
+
+	lines, err := upgradePreflightLinesWithOptions(context.Background(), client, upgradePreflightOptions{BackupPath: backupPath})
+	if err != nil {
+		t.Fatalf("upgradePreflightLinesWithOptions() error = %v", err)
+	}
+	got := strings.Join(lines, "\n")
+	for _, want := range []string{
+		"backup path: writable " + backupPath,
+		"status: ready for package-specific upgrade checks",
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("upgradePreflightLinesWithOptions() = %q, want substring %q", got, want)
+		}
+	}
+	if _, err := os.Stat(backupPath); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("backup path stat error = %v, want not created", err)
+	}
+}
+
+func TestUpgradePreflightLinesWarnsExistingBackupPath(t *testing.T) {
+	backupPath := t.TempDir() + "/running.conf"
+	if err := os.WriteFile(backupPath, []byte("existing\n"), 0o600); err != nil {
+		t.Fatalf("WriteFile(%s) error = %v", backupPath, err)
+	}
+	client := &fakeInteractiveClient{
+		runningText:    "set system host-name router\n",
+		runningVersion: 7,
+		history: []grpcclient.CommitInfo{
+			{CommitID: "1234567890abcdef", ConfigText: "set system host-name router"},
+		},
+		cosInfo: &grpcclient.ClassOfServiceInfo{
+			Capabilities: &grpcclient.ClassOfServiceCapabilitiesInfo{
+				MetadataBindingSupported: true,
+				QueueSchedulerSupported:  true,
+				PolicerSupported:         true,
+				CountersSupported:        true,
+			},
+		},
+	}
+
+	lines, err := upgradePreflightLinesWithOptions(context.Background(), client, upgradePreflightOptions{BackupPath: backupPath})
+	if err != nil {
+		t.Fatalf("upgradePreflightLinesWithOptions() error = %v", err)
+	}
+	got := strings.Join(lines, "\n")
+	for _, want := range []string{
+		"warning: backup path already exists: " + backupPath,
+		"status: 1 warning(s), review before upgrade",
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("upgradePreflightLinesWithOptions() = %q, want substring %q", got, want)
+		}
+	}
+}
+
+func TestCmdCheckUpgradeRequiresOperationalMode(t *testing.T) {
+	sh := &interactiveShell{
+		client:    &fakeInteractiveClient{},
+		hostname:  "router",
+		mode:      modeConfiguration,
+		sessionID: "session-1",
+		hasLock:   true,
+	}
+
+	err := sh.cmdCheck(context.Background(), []string{"upgrade"})
+	if err == nil || !strings.Contains(err.Error(), "operational mode") {
+		t.Fatalf("cmdCheck(upgrade) error = %v, want operational mode error", err)
+	}
+}
+
+func TestOneShotCheckUpgradeRejectsInvalidUsage(t *testing.T) {
+	code := oneShotCheck(context.Background(), &fakeInteractiveClient{}, []string{"configuration"})
+	if code != ExitUsageError {
+		t.Fatalf("oneShotCheck(configuration) = %d, want %d", code, ExitUsageError)
 	}
 }
 
@@ -501,6 +1224,366 @@ func TestShowHistoryRejectsInvalidLimit(t *testing.T) {
 		if client.listHistoryCalls != 0 {
 			t.Fatalf("ListHistory calls for %q = %d, want 0", arg, client.listHistoryCalls)
 		}
+	}
+}
+
+func TestShowConfigurationRollbackUsesArchivedConfig(t *testing.T) {
+	ctx := context.Background()
+	client := &fakeInteractiveClient{
+		history: []grpcclient.CommitInfo{
+			{CommitID: "commit-new", ConfigText: "set system host-name new"},
+			{CommitID: "commit-old", ConfigText: "set system host-name old"},
+		},
+	}
+	sh := &interactiveShell{
+		client:    client,
+		hostname:  "router",
+		mode:      modeOperational,
+		sessionID: "session-1",
+	}
+
+	if err := sh.cmdShow(ctx, []string{"configuration", "rollback", "1"}); err != nil {
+		t.Fatalf("cmdShow(configuration rollback 1) error = %v", err)
+	}
+	if client.listHistoryCalls != 1 || client.listHistoryLimit != 2 || client.listHistoryOffset != 0 {
+		t.Fatalf("ListHistory calls/limit/offset = %d/%d/%d, want 1/2/0",
+			client.listHistoryCalls, client.listHistoryLimit, client.listHistoryOffset)
+	}
+	if client.getRunningCalls != 0 {
+		t.Fatalf("GetRunning calls = %d, want 0 when archived config is available", client.getRunningCalls)
+	}
+}
+
+func TestShowConfigurationRollbackZeroFallsBackToRunning(t *testing.T) {
+	ctx := context.Background()
+	client := &fakeInteractiveClient{runningText: "set system host-name running"}
+	sh := &interactiveShell{
+		client:    client,
+		hostname:  "router",
+		mode:      modeOperational,
+		sessionID: "session-1",
+	}
+
+	if err := sh.cmdShow(ctx, []string{"configuration", "rollback", "0"}); err != nil {
+		t.Fatalf("cmdShow(configuration rollback 0) error = %v", err)
+	}
+	if client.listHistoryCalls != 1 || client.listHistoryLimit != 1 {
+		t.Fatalf("ListHistory calls/limit = %d/%d, want 1/1", client.listHistoryCalls, client.listHistoryLimit)
+	}
+	if client.getRunningCalls != 1 {
+		t.Fatalf("GetRunning calls = %d, want 1 fallback", client.getRunningCalls)
+	}
+}
+
+func TestShowConfigurationRollbackRejectsMissingArchive(t *testing.T) {
+	ctx := context.Background()
+	client := &fakeInteractiveClient{
+		history: []grpcclient.CommitInfo{
+			{CommitID: "commit-new", ConfigText: "set system host-name new"},
+			{CommitID: "commit-old"},
+		},
+	}
+	sh := &interactiveShell{
+		client:    client,
+		hostname:  "router",
+		mode:      modeOperational,
+		sessionID: "session-1",
+	}
+
+	err := sh.cmdShow(ctx, []string{"configuration", "rollback", "1"})
+	if err == nil || !strings.Contains(err.Error(), "archived config text unavailable") {
+		t.Fatalf("cmdShow(configuration rollback 1) error = %v, want archive unavailable", err)
+	}
+}
+
+func TestBackupConfigurationWritesRunningConfig(t *testing.T) {
+	ctx := context.Background()
+	backupPath := t.TempDir() + "/running.conf"
+	client := &fakeInteractiveClient{runningText: "set system host-name running"}
+	sh := &interactiveShell{
+		client:    client,
+		hostname:  "router",
+		mode:      modeOperational,
+		sessionID: "session-1",
+	}
+
+	if err := sh.cmdBackup(ctx, []string{"configuration", backupPath}); err != nil {
+		t.Fatalf("cmdBackup(configuration) error = %v", err)
+	}
+	data, err := os.ReadFile(backupPath)
+	if err != nil {
+		t.Fatalf("ReadFile() error = %v", err)
+	}
+	if string(data) != "set system host-name running\n" {
+		t.Fatalf("backup content = %q, want running config with trailing newline", string(data))
+	}
+	if client.getRunningCalls != 1 || client.getCandidateCalls != 0 {
+		t.Fatalf("running/candidate calls = %d/%d, want 1/0", client.getRunningCalls, client.getCandidateCalls)
+	}
+}
+
+func TestBackupConfigurationWritesCandidateConfig(t *testing.T) {
+	ctx := context.Background()
+	backupPath := t.TempDir() + "/candidate.conf"
+	client := &fakeInteractiveClient{candidateText: "set system host-name candidate"}
+	sh := &interactiveShell{
+		client:    client,
+		hostname:  "router",
+		mode:      modeConfiguration,
+		sessionID: "session-1",
+	}
+
+	if err := sh.cmdBackup(ctx, []string{"configuration", backupPath}); err != nil {
+		t.Fatalf("cmdBackup(configuration) error = %v", err)
+	}
+	data, err := os.ReadFile(backupPath)
+	if err != nil {
+		t.Fatalf("ReadFile() error = %v", err)
+	}
+	if string(data) != "set system host-name candidate\n" {
+		t.Fatalf("backup content = %q, want candidate config with trailing newline", string(data))
+	}
+	if client.getCandidateCalls != 1 || client.getRunningCalls != 0 {
+		t.Fatalf("candidate/running calls = %d/%d, want 1/0", client.getCandidateCalls, client.getRunningCalls)
+	}
+}
+
+func TestBackupConfigurationWritesArchivedRollbackConfig(t *testing.T) {
+	ctx := context.Background()
+	backupPath := t.TempDir() + "/rollback.conf"
+	client := &fakeInteractiveClient{
+		history: []grpcclient.CommitInfo{
+			{CommitID: "commit-new", ConfigText: "set system host-name new"},
+			{CommitID: "commit-old", ConfigText: "set system host-name old"},
+		},
+	}
+	sh := &interactiveShell{
+		client:    client,
+		hostname:  "router",
+		mode:      modeOperational,
+		sessionID: "session-1",
+	}
+
+	if err := sh.cmdBackup(ctx, []string{"configuration", "rollback", "1", backupPath}); err != nil {
+		t.Fatalf("cmdBackup(configuration rollback 1) error = %v", err)
+	}
+	data, err := os.ReadFile(backupPath)
+	if err != nil {
+		t.Fatalf("ReadFile() error = %v", err)
+	}
+	if string(data) != "set system host-name old\n" {
+		t.Fatalf("backup content = %q, want archived rollback config", string(data))
+	}
+	if client.listHistoryCalls != 1 || client.listHistoryLimit != 2 {
+		t.Fatalf("ListHistory calls/limit = %d/%d, want 1/2", client.listHistoryCalls, client.listHistoryLimit)
+	}
+}
+
+func TestBackupConfigurationRefusesOverwrite(t *testing.T) {
+	backupPath := t.TempDir() + "/running.conf"
+	if err := os.WriteFile(backupPath, []byte("existing\n"), 0o600); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+
+	err := writeConfigBackupFile(backupPath, "set system host-name running")
+	if err == nil || !strings.Contains(err.Error(), "create backup file") {
+		t.Fatalf("writeConfigBackupFile() error = %v, want create backup failure", err)
+	}
+	data, err := os.ReadFile(backupPath)
+	if err != nil {
+		t.Fatalf("ReadFile() error = %v", err)
+	}
+	if string(data) != "existing\n" {
+		t.Fatalf("backup content = %q, want existing content preserved", string(data))
+	}
+}
+
+func TestRestoreConfigurationBackupReplacesCandidate(t *testing.T) {
+	ctx := context.Background()
+	backupPath := t.TempDir() + "/backup.conf"
+	if err := os.WriteFile(backupPath, []byte("set system host-name restored\n"), 0o600); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+	client := &fakeInteractiveClient{}
+	sh := &interactiveShell{
+		client:    client,
+		hostname:  "router",
+		mode:      modeConfiguration,
+		sessionID: "session-1",
+	}
+
+	if err := sh.cmdRestore(ctx, []string{"configuration", backupPath}); err != nil {
+		t.Fatalf("cmdRestore(configuration) error = %v", err)
+	}
+	if len(client.replaceTexts) != 1 || client.replaceTexts[0] != "set system host-name restored\n" {
+		t.Fatalf("ReplaceCandidate texts = %#v, want backup content", client.replaceTexts)
+	}
+}
+
+func TestRestoreConfigurationBackupValidatesBeforeReplace(t *testing.T) {
+	ctx := context.Background()
+	backupPath := t.TempDir() + "/backup.conf"
+	if err := os.WriteFile(backupPath, []byte("set system host-name bad_name\n"), 0o600); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+	client := &fakeInteractiveClient{}
+	sh := &interactiveShell{
+		client:    client,
+		hostname:  "router",
+		mode:      modeConfiguration,
+		sessionID: "session-1",
+	}
+
+	err := sh.cmdRestore(ctx, []string{"configuration", backupPath})
+	if err == nil || !strings.Contains(err.Error(), "validate configuration backup") {
+		t.Fatalf("cmdRestore(configuration) error = %v, want validation failure", err)
+	}
+	if len(client.replaceTexts) != 0 {
+		t.Fatalf("ReplaceCandidate texts = %#v, want none for invalid backup", client.replaceTexts)
+	}
+}
+
+func TestRestoreConfigurationRollbackReplacesCandidate(t *testing.T) {
+	ctx := context.Background()
+	client := &fakeInteractiveClient{
+		history: []grpcclient.CommitInfo{
+			{CommitID: "commit-new", ConfigText: "set system host-name new"},
+			{CommitID: "commit-old", ConfigText: "set system host-name old"},
+		},
+	}
+	sh := &interactiveShell{
+		client:    client,
+		hostname:  "router",
+		mode:      modeConfiguration,
+		sessionID: "session-1",
+	}
+
+	if err := sh.cmdRestore(ctx, []string{"configuration", "rollback", "1"}); err != nil {
+		t.Fatalf("cmdRestore(configuration rollback 1) error = %v", err)
+	}
+	if len(client.replaceTexts) != 1 || client.replaceTexts[0] != "set system host-name old" {
+		t.Fatalf("ReplaceCandidate texts = %#v, want archived config", client.replaceTexts)
+	}
+	if client.listHistoryCalls != 1 || client.listHistoryLimit != 2 {
+		t.Fatalf("ListHistory calls/limit = %d/%d, want 1/2", client.listHistoryCalls, client.listHistoryLimit)
+	}
+}
+
+func TestRestoreConfigurationRollbackValidatesBeforeReplace(t *testing.T) {
+	ctx := context.Background()
+	client := &fakeInteractiveClient{
+		history: []grpcclient.CommitInfo{
+			{CommitID: "commit-new", ConfigText: "set system host-name new"},
+			{CommitID: "commit-old", ConfigText: "set system host-name bad_name"},
+		},
+	}
+	sh := &interactiveShell{
+		client:    client,
+		hostname:  "router",
+		mode:      modeConfiguration,
+		sessionID: "session-1",
+	}
+
+	err := sh.cmdRestore(ctx, []string{"configuration", "rollback", "1"})
+	if err == nil || !strings.Contains(err.Error(), "validate rollback configuration") {
+		t.Fatalf("cmdRestore(configuration rollback 1) error = %v, want validation failure", err)
+	}
+	if len(client.replaceTexts) != 0 {
+		t.Fatalf("ReplaceCandidate texts = %#v, want none for invalid rollback archive", client.replaceTexts)
+	}
+}
+
+func TestRestoreConfigurationRequiresConfigurationMode(t *testing.T) {
+	ctx := context.Background()
+	backupPath := t.TempDir() + "/backup.conf"
+	if err := os.WriteFile(backupPath, []byte("set system host-name restored\n"), 0o600); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+	client := &fakeInteractiveClient{}
+	sh := &interactiveShell{
+		client:    client,
+		hostname:  "router",
+		mode:      modeOperational,
+		sessionID: "session-1",
+	}
+
+	err := sh.cmdRestore(ctx, []string{"configuration", backupPath})
+	if err == nil || !strings.Contains(err.Error(), "configuration mode") {
+		t.Fatalf("cmdRestore(configuration) error = %v, want configuration mode error", err)
+	}
+	if len(client.replaceTexts) != 0 {
+		t.Fatalf("ReplaceCandidate texts = %#v, want none outside configuration mode", client.replaceTexts)
+	}
+}
+
+func TestRestoreConfigurationRejectsInvalidUsage(t *testing.T) {
+	sh := &interactiveShell{
+		client:    &fakeInteractiveClient{},
+		hostname:  "router",
+		mode:      modeConfiguration,
+		sessionID: "session-1",
+	}
+
+	err := sh.cmdRestore(context.Background(), []string{"configuration"})
+	if err == nil || !strings.Contains(err.Error(), "usage: restore configuration") {
+		t.Fatalf("cmdRestore(configuration) error = %v, want usage error", err)
+	}
+}
+
+func TestOneShotBackupConfigurationWritesRunningConfig(t *testing.T) {
+	backupPath := t.TempDir() + "/running.conf"
+	client := &fakeInteractiveClient{runningText: "set system host-name running"}
+
+	code := oneShotBackup(context.Background(), client, []string{"configuration", backupPath})
+	if code != ExitSuccess {
+		t.Fatalf("oneShotBackup(configuration) = %d, want %d", code, ExitSuccess)
+	}
+	data, err := os.ReadFile(backupPath)
+	if err != nil {
+		t.Fatalf("ReadFile() error = %v", err)
+	}
+	if string(data) != "set system host-name running\n" {
+		t.Fatalf("backup content = %q, want running config", string(data))
+	}
+	if client.getRunningCalls != 1 {
+		t.Fatalf("GetRunning calls = %d, want 1", client.getRunningCalls)
+	}
+}
+
+func TestOneShotBackupConfigurationWritesArchivedRollbackConfig(t *testing.T) {
+	backupPath := t.TempDir() + "/rollback.conf"
+	client := &fakeInteractiveClient{
+		history: []grpcclient.CommitInfo{
+			{CommitID: "commit-new", ConfigText: "set system host-name new"},
+			{CommitID: "commit-old", ConfigText: "set system host-name old"},
+		},
+	}
+
+	code := oneShotBackup(context.Background(), client, []string{"configuration", "rollback", "1", backupPath})
+	if code != ExitSuccess {
+		t.Fatalf("oneShotBackup(configuration rollback 1) = %d, want %d", code, ExitSuccess)
+	}
+	data, err := os.ReadFile(backupPath)
+	if err != nil {
+		t.Fatalf("ReadFile() error = %v", err)
+	}
+	if string(data) != "set system host-name old\n" {
+		t.Fatalf("backup content = %q, want archived rollback config", string(data))
+	}
+	if client.listHistoryCalls != 1 || client.listHistoryLimit != 2 {
+		t.Fatalf("ListHistory calls/limit = %d/%d, want 1/2", client.listHistoryCalls, client.listHistoryLimit)
+	}
+}
+
+func TestOneShotBackupConfigurationRejectsInvalidRollbackNumber(t *testing.T) {
+	client := &fakeInteractiveClient{}
+
+	code := oneShotBackup(context.Background(), client, []string{"configuration", "rollback", "-1", "backup.conf"})
+	if code != ExitUsageError {
+		t.Fatalf("oneShotBackup(configuration rollback -1) = %d, want %d", code, ExitUsageError)
+	}
+	if client.listHistoryCalls != 0 {
+		t.Fatalf("ListHistory calls = %d, want 0", client.listHistoryCalls)
 	}
 }
 
@@ -835,6 +1918,39 @@ func TestRoutingInstancesNameFilter(t *testing.T) {
 	filtered := filterRoutingInstances(instances, "RED")
 	if len(filtered) != 1 || filtered[0].Name != "RED" {
 		t.Fatalf("filterRoutingInstances() = %#v, want RED", filtered)
+	}
+}
+
+func TestOneShotShowConfigurationRollbackUsesArchivedConfig(t *testing.T) {
+	client := &fakeInteractiveClient{
+		history: []grpcclient.CommitInfo{
+			{CommitID: "commit-new", ConfigText: "set system host-name new"},
+			{CommitID: "commit-old", ConfigText: "set system host-name old"},
+		},
+	}
+
+	code := oneShotShow(context.Background(), client, []string{"configuration", "rollback", "1"}, &cliFlags{})
+	if code != ExitSuccess {
+		t.Fatalf("oneShotShow(configuration rollback 1) = %d, want %d", code, ExitSuccess)
+	}
+	if client.listHistoryCalls != 1 || client.listHistoryLimit != 2 || client.listHistoryOffset != 0 {
+		t.Fatalf("ListHistory calls/limit/offset = %d/%d/%d, want 1/2/0",
+			client.listHistoryCalls, client.listHistoryLimit, client.listHistoryOffset)
+	}
+	if client.getRunningCalls != 0 {
+		t.Fatalf("GetRunning calls = %d, want 0", client.getRunningCalls)
+	}
+}
+
+func TestOneShotShowConfigurationRollbackRejectsInvalidNumber(t *testing.T) {
+	client := &fakeInteractiveClient{}
+
+	code := oneShotShow(context.Background(), client, []string{"configuration", "rollback", "-1"}, &cliFlags{})
+	if code != ExitUsageError {
+		t.Fatalf("oneShotShow(configuration rollback -1) = %d, want %d", code, ExitUsageError)
+	}
+	if client.listHistoryCalls != 0 {
+		t.Fatalf("ListHistory calls = %d, want 0", client.listHistoryCalls)
 	}
 }
 

@@ -4,8 +4,14 @@ import (
 	"bytes"
 	"context"
 	"encoding/xml"
+	"errors"
 	"fmt"
+	"io"
 	"log"
+	"strings"
+
+	"github.com/akam1o/arca-router/pkg/config"
+	dsstore "github.com/akam1o/arca-router/pkg/datastore"
 )
 
 // GetConfigRequest represents <get-config> RPC
@@ -16,6 +22,9 @@ type GetConfigRequest struct {
 }
 
 func (r *GetConfigRequest) SetInheritedNamespaceAttrs(attrs []xml.Attr) {
+	if r == nil {
+		return
+	}
 	if r.Filter != nil {
 		r.Filter.InheritedAttrs = cloneXMLAttrs(attrs)
 	}
@@ -33,6 +42,10 @@ func (r *GetConfigRequest) SetInheritedNamespaceAttrs(attrs []xml.Attr) {
 // - /rpc/{rpcName}/target for operations with explicit target element
 // - /rpc/{rpcName} for operations without target element (commit, discard-changes)
 func (s *Server) checkLockOwnership(ctx context.Context, sess *Session, target, rpcName string) *RPCError {
+	if s == nil || s.datastore == nil {
+		return ErrOperationFailed("datastore unavailable")
+	}
+
 	lockInfo, err := s.datastore.GetLockInfo(ctx, target)
 	if err != nil {
 		log.Printf("[NETCONF] Failed to get lock info for %s: %v", target, err)
@@ -43,7 +56,7 @@ func (s *Server) checkLockOwnership(ctx context.Context, sess *Session, target, 
 	hasTargetElement := (rpcName == "edit-config" || rpcName == "copy-config" || rpcName == "delete-config")
 
 	// Check if lock is acquired
-	if !lockInfo.IsLocked {
+	if lockInfo == nil || !lockInfo.IsLocked {
 		// Lock not acquired - deny operation
 		return ErrLockDenied(target, rpcName, hasTargetElement)
 	}
@@ -66,7 +79,7 @@ func (s *Server) handleGetConfig(ctx context.Context, sess *Session, rpc *RPC) *
 	}
 
 	// Get datastore name
-	datastore, err := req.Source.GetDatastore()
+	source, err := req.Source.GetDatastore()
 	if err != nil {
 		return NewErrorReply(rpc.MessageID, err.(*RPCError))
 	}
@@ -83,40 +96,59 @@ func (s *Server) handleGetConfig(ctx context.Context, sess *Session, rpc *RPC) *
 
 	// Get configuration text from datastore
 	var textCfg string
-	switch datastore {
+	switch source {
 	case DatastoreRunning:
-		runningCfg, err := s.datastore.GetRunning(ctx)
-		if err != nil {
-			log.Printf("[NETCONF] GetConfig error for %s: %v", datastore, err)
-			return NewErrorReply(rpc.MessageID, ErrDatastoreError(fmt.Sprintf("failed to retrieve %s config: %v", datastore, err)))
+		runningText, rpcErr := s.readRunningConfigText(ctx, false, "no running configuration to retrieve", "failed to retrieve running config")
+		if rpcErr != nil {
+			log.Printf("[NETCONF] GetConfig error for %s: %v", source, rpcErr)
+			return NewErrorReply(rpc.MessageID, rpcErr)
 		}
-		textCfg = runningCfg.ConfigText
+		textCfg = runningText
 	case DatastoreCandidate:
-		candidateCfg, err := s.datastore.GetCandidate(ctx, sess.ID)
-		if err != nil {
-			log.Printf("[NETCONF] GetConfig error for %s: %v", datastore, err)
-			return NewErrorReply(rpc.MessageID, ErrDatastoreError(fmt.Sprintf("failed to retrieve %s config: %v", datastore, err)))
+		candidateText, rpcErr := s.readCandidateOrRunningConfigText(
+			ctx,
+			sess.ID,
+			"failed to retrieve candidate config",
+			"failed to retrieve running config for candidate fallback",
+		)
+		if rpcErr != nil {
+			log.Printf("[NETCONF] GetConfig error for %s: %v", source, rpcErr)
+			return NewErrorReply(rpc.MessageID, rpcErr)
 		}
-		textCfg = candidateCfg.ConfigText
+		textCfg = candidateText
 	case DatastoreStartup:
-		// Startup datastore not implemented (reads from /etc/arca-router/arca-router.conf at boot)
-		return NewErrorReply(rpc.MessageID, ErrInvalidTarget("get-config", "startup"))
+		return NewErrorReply(rpc.MessageID, ErrStartupNotSupported("get-config", "source"))
 	default:
-		return NewErrorReply(rpc.MessageID, ErrInvalidTarget("get-config", datastore))
+		return NewErrorReply(rpc.MessageID, ErrInvalidTarget("get-config", source))
 	}
 
 	// Convert text to config.Config structure
 	cfg, err := TextToConfig(textCfg)
 	if err != nil {
 		log.Printf("[NETCONF] Text to config conversion error: %v", err)
-		return NewErrorReply(rpc.MessageID, ErrDatastoreError(fmt.Sprintf("failed to parse %s config: %v", datastore, err)))
+		return NewErrorReply(rpc.MessageID, ErrDatastoreError(fmt.Sprintf("failed to parse %s config: %v", source, err)))
 	}
 
-	// Convert config to XML
-	xmlData, err := ConfigToXML(cfg, req.Filter)
+	// Convert config to XML. Experimental XPath filters are evaluated after
+	// building the full response tree so XPath functions can inspect siblings.
+	outputFilter := req.Filter
+	if usesExperimentalXPathEngine(req.Filter) {
+		outputFilter = nil
+	}
+	xmlData, err := ConfigToXML(cfg, outputFilter)
 	if err != nil {
 		log.Printf("[NETCONF] Config to XML conversion error: %v", err)
 		return NewErrorReply(rpc.MessageID, ErrOperationFailed(fmt.Sprintf("config serialization failed: %v", err)))
+	}
+	if usesExperimentalXPathEngine(req.Filter) {
+		xmlData, err = applyExperimentalXPathFilter("get-config", xmlData, req.Filter)
+		if err != nil {
+			log.Printf("[NETCONF] XPath filter error: %v", err)
+			if rpcErr, ok := err.(*RPCError); ok {
+				return NewErrorReply(rpc.MessageID, rpcErr)
+			}
+			return NewErrorReply(rpc.MessageID, ErrOperationFailed(fmt.Sprintf("xpath filter failed: %v", err)))
+		}
 	}
 
 	return NewDataReply(rpc.MessageID, xmlData)
@@ -133,6 +165,9 @@ type EditConfigRequest struct {
 }
 
 func (r *EditConfigRequest) SetInheritedNamespaceAttrs(attrs []xml.Attr) {
+	if r == nil {
+		return
+	}
 	r.Config.InheritedAttrs = cloneXMLAttrs(attrs)
 }
 
@@ -147,6 +182,9 @@ type ConfigElement struct {
 func (c ConfigElement) XML() ([]byte, error) {
 	if c.XMLName.Local == "" {
 		return nil, ErrMissingElement("edit-config", "config")
+	}
+	if err := validateConfigNamespaceDeclarationAttrs(c.InheritedAttrs, c.Attrs); err != nil {
+		return nil, err
 	}
 
 	var buf bytes.Buffer
@@ -171,13 +209,21 @@ func (c ConfigElement) XML() ([]byte, error) {
 		switch {
 		case isNamespaceDeclarationAttribute(attr):
 			continue
+		case attr.Name.Local == "":
+			return nil, NewRPCError(ErrorTypeRPC, ErrorTagInvalidValue,
+				"config attribute name must not be empty").
+				WithPath("/rpc/edit-config/config")
 		case attr.Name.Space == "":
 			writeXMLAttribute(&buf, attr.Name.Local, attr.Value)
 		default:
-			attrName := attr.Name.Local
-			if prefix := namespacePrefixes[attr.Name.Space]; prefix != "" {
-				attrName = prefix + ":" + attrName
+			prefix := namespacePrefixes[attr.Name.Space]
+			if prefix == "" {
+				return nil, NewRPCError(ErrorTypeRPC, ErrorTagUnknownNamespace,
+					fmt.Sprintf("missing namespace declaration for config attribute %s", attr.Name.Local)).
+					WithPath("/rpc/edit-config/config").
+					WithBadNamespace(attr.Name.Space)
 			}
+			attrName := prefix + ":" + attr.Name.Local
 			writeXMLAttribute(&buf, attrName, attr.Value)
 		}
 	}
@@ -185,7 +231,109 @@ func (c ConfigElement) XML() ([]byte, error) {
 	buf.WriteByte('>')
 	buf.Write(c.Content)
 	buf.WriteString("</config>")
-	return buf.Bytes(), nil
+	xmlData := buf.Bytes()
+	if err := validateConfigElementXML(xmlData); err != nil {
+		return nil, err
+	}
+	return xmlData, nil
+}
+
+func validateConfigNamespaceDeclarationAttrs(attrGroups ...[]xml.Attr) *RPCError {
+	for _, attrs := range attrGroups {
+		for _, attr := range attrs {
+			if err := validateNamespaceDeclarationAttr(attr); err != nil {
+				return NewRPCError(ErrorTypeRPC, ErrorTagInvalidValue, err.Error()).
+					WithPath("/rpc/edit-config/config")
+			}
+		}
+	}
+	return nil
+}
+
+func validateConfigElementXML(xmlData []byte) *RPCError {
+	if len(xmlData) > MaxXMLSize {
+		return NewRPCError(ErrorTypeRPC, ErrorTagInvalidValue,
+			fmt.Sprintf("config XML exceeds maximum (%d bytes)", MaxXMLSize)).
+			WithPath("/rpc/edit-config/config").
+			WithAppTag("size-limit")
+	}
+	if containsUnsafeXMLDirective(xmlData) {
+		return NewRPCError(ErrorTypeRPC, ErrorTagMalformedMessage,
+			"config XML contains unsafe XML directives").
+			WithPath("/rpc/edit-config/config")
+	}
+
+	decoder := xml.NewDecoder(bytes.NewReader(xmlData))
+	decoder.Strict = true
+	decoder.Entity = nil
+
+	depth := 0
+	elementCount := 0
+	stack := []string{}
+	for {
+		token, err := decoder.Token()
+		if err == io.EOF {
+			return nil
+		}
+		if err != nil {
+			return NewRPCError(ErrorTypeRPC, ErrorTagMalformedMessage,
+				fmt.Sprintf("config XML is malformed: %v", err)).
+				WithPath("/rpc/edit-config/config")
+		}
+
+		switch t := token.(type) {
+		case xml.StartElement:
+			depth++
+			if depth > 1 {
+				elementCount++
+				if elementCount > MaxXMLElements {
+					return NewRPCError(ErrorTypeProtocol, ErrorTagInvalidValue,
+						fmt.Sprintf("config XML exceeds maximum element limit (%d)", MaxXMLElements)).
+						WithPath("/rpc/edit-config/config").
+						WithAppTag("element-limit")
+				}
+				if depth-1 > MaxXMLDepth {
+					return NewRPCError(ErrorTypeProtocol, ErrorTagInvalidValue,
+						fmt.Sprintf("config XML exceeds maximum depth limit (%d)", MaxXMLDepth)).
+						WithPath("/rpc/edit-config/config").
+						WithAppTag("depth-limit")
+				}
+			}
+			if len(t.Attr) > MaxXMLAttributes {
+				return NewRPCError(ErrorTypeProtocol, ErrorTagInvalidValue,
+					fmt.Sprintf("config element %s exceeds maximum attribute limit (%d)", t.Name.Local, MaxXMLAttributes)).
+					WithPath("/rpc/edit-config/config").
+					WithAppTag("attribute-limit")
+			}
+			for _, attr := range t.Attr {
+				if err := validateNamespaceDeclarationAttr(attr); err != nil {
+					return NewRPCError(ErrorTypeRPC, ErrorTagInvalidValue, err.Error()).
+						WithPath("/rpc/edit-config/config")
+				}
+			}
+			stack = append(stack, t.Name.Local)
+		case xml.EndElement:
+			if len(stack) > 0 {
+				stack = stack[:len(stack)-1]
+			}
+			if depth > 0 {
+				depth--
+			}
+		case xml.CharData:
+			if depth == 1 && len(bytes.TrimSpace(t)) > 0 {
+				return NewRPCError(ErrorTypeRPC, ErrorTagMalformedMessage,
+					"config XML contains text outside elements").
+					WithPath("/rpc/edit-config/config")
+			}
+			if err := validateConfigTextContent(stack, t); err != nil {
+				if rpcErr, ok := err.(*RPCError); ok {
+					return rpcErr
+				}
+				return NewRPCError(ErrorTypeRPC, ErrorTagMalformedMessage, err.Error()).
+					WithPath("/rpc/edit-config/config")
+			}
+		}
+	}
 }
 
 func writeXMLAttribute(buf *bytes.Buffer, name, value string) {
@@ -212,7 +360,10 @@ func (s *Server) handleEditConfig(ctx context.Context, sess *Session, rpc *RPC) 
 	// Only candidate is writable (writable-running not supported)
 	if target != DatastoreCandidate {
 		if target == DatastoreRunning {
-			return NewErrorReply(rpc.MessageID, ErrWritableRunningNotSupported())
+			return NewErrorReply(rpc.MessageID, ErrWritableRunningNotSupported("edit-config", "target"))
+		}
+		if target == DatastoreStartup {
+			return NewErrorReply(rpc.MessageID, ErrStartupNotSupported("edit-config", "target"))
 		}
 		return NewErrorReply(rpc.MessageID, ErrInvalidTarget("edit-config", target))
 	}
@@ -222,28 +373,41 @@ func (s *Server) handleEditConfig(ctx context.Context, sess *Session, rpc *RPC) 
 		return NewErrorReply(rpc.MessageID, lockErr)
 	}
 
-	// Validate test-option and error-option (Phase 2: not supported)
-	if req.TestOption != nil && *req.TestOption != TestSet {
-		return NewErrorReply(rpc.MessageID,
-			NewRPCError(ErrorTypeProtocol, ErrorTagOperationNotSupported,
-				fmt.Sprintf("unsupported test-option: %s", *req.TestOption)).
-				WithPath("/rpc/edit-config/test-option").
-				WithBadElement(string(*req.TestOption)))
-	}
-	if req.ErrorOption != nil && *req.ErrorOption != ErrorStop {
-		return NewErrorReply(rpc.MessageID,
-			NewRPCError(ErrorTypeProtocol, ErrorTagOperationNotSupported,
-				fmt.Sprintf("unsupported error-option: %s", *req.ErrorOption)).
-				WithPath("/rpc/edit-config/error-option").
-				WithBadElement(string(*req.ErrorOption)))
+	testOption := TestTestThenSet
+	if req.TestOption != nil {
+		testOption = TestOption(strings.TrimSpace(string(*req.TestOption)))
+		switch testOption {
+		case TestSet, TestTestThenSet, TestTestOnly:
+		default:
+			return NewErrorReply(rpc.MessageID,
+				NewRPCError(ErrorTypeProtocol, ErrorTagOperationNotSupported,
+					fmt.Sprintf("unsupported test-option: %s", testOption)).
+					WithPath("/rpc/edit-config/test-option").
+					WithBadElement(string(testOption)))
+		}
 	}
 
-	// Set default operation (Phase 2: only merge supported)
+	if req.ErrorOption != nil {
+		errorOption := ErrorOption(strings.TrimSpace(string(*req.ErrorOption)))
+		switch errorOption {
+		case ErrorStop, ErrorContinue, ErrorRollbackOnError:
+		default:
+			return NewErrorReply(rpc.MessageID,
+				NewRPCError(ErrorTypeProtocol, ErrorTagOperationNotSupported,
+					fmt.Sprintf("unsupported error-option: %s", errorOption)).
+					WithPath("/rpc/edit-config/error-option").
+					WithBadElement(string(errorOption)))
+		}
+	}
+
+	// Set default operation. Per-element operation attributes remain unsupported,
+	// but default-operation=none is valid and applies no implicit changes.
 	defaultOp := DefaultOpMerge
 	if req.DefaultOperation != nil {
-		defaultOp = *req.DefaultOperation
-		// Validate: Phase 2 only supports merge
-		if defaultOp != DefaultOpMerge {
+		defaultOp = DefaultOperation(strings.TrimSpace(string(*req.DefaultOperation)))
+		switch defaultOp {
+		case DefaultOpMerge, DefaultOpReplace, DefaultOpNone:
+		default:
 			return NewErrorReply(rpc.MessageID,
 				NewRPCError(ErrorTypeProtocol, ErrorTagOperationNotSupported,
 					fmt.Sprintf("unsupported default-operation: %s", defaultOp)).
@@ -266,19 +430,16 @@ func (s *Server) handleEditConfig(ctx context.Context, sess *Session, rpc *RPC) 
 		return NewErrorReply(rpc.MessageID, ErrOperationFailed(fmt.Sprintf("config parsing failed: %v", err)))
 	}
 
-	// Get existing candidate text or create new from running
-	var existingTextCfg string
-	candidateCfg, err := s.datastore.GetCandidate(ctx, sess.ID)
-	if err != nil {
-		// Candidate doesn't exist, copy from running
-		runningCfg, err := s.datastore.GetRunning(ctx)
-		if err != nil {
-			log.Printf("[NETCONF] Failed to get running config: %v", err)
-			return NewErrorReply(rpc.MessageID, ErrDatastoreError("failed to initialize candidate"))
-		}
-		existingTextCfg = runningCfg.ConfigText
-	} else {
-		existingTextCfg = candidateCfg.ConfigText
+	// Get existing candidate text or initialize from running.
+	existingTextCfg, rpcErr := s.readCandidateOrRunningConfigText(
+		ctx,
+		sess.ID,
+		"failed to read candidate config",
+		"failed to initialize candidate from running config",
+	)
+	if rpcErr != nil {
+		log.Printf("[NETCONF] Failed to load candidate base config: %v", rpcErr)
+		return NewErrorReply(rpc.MessageID, rpcErr)
 	}
 
 	// Convert existing text to config struct
@@ -296,6 +457,14 @@ func (s *Server) handleEditConfig(ctx context.Context, sess *Session, rpc *RPC) 
 			return NewErrorReply(rpc.MessageID, rpcErr)
 		}
 		return NewErrorReply(rpc.MessageID, ErrOperationFailed(fmt.Sprintf("config merge failed: %v", err)))
+	}
+
+	if rpcErr := validateConfigSemantics("edit-config", mergedCfg); rpcErr != nil {
+		log.Printf("[NETCONF] Config validation error: %v", rpcErr)
+		return NewErrorReply(rpc.MessageID, rpcErr)
+	}
+	if testOption == TestTestOnly {
+		return NewOKReply(rpc.MessageID)
 	}
 
 	// Convert merged config back to text
@@ -321,6 +490,15 @@ type CopyConfigRequest struct {
 	Source  Source   `xml:"source"`
 }
 
+func (r *CopyConfigRequest) SetInheritedNamespaceAttrs(attrs []xml.Attr) {
+	if r == nil {
+		return
+	}
+	if r.Source.Config != nil {
+		r.Source.Config.InheritedAttrs = cloneXMLAttrs(attrs)
+	}
+}
+
 // handleCopyConfig handles <copy-config> RPC
 func (s *Server) handleCopyConfig(ctx context.Context, sess *Session, rpc *RPC) *RPCReply {
 	var req CopyConfigRequest
@@ -328,13 +506,8 @@ func (s *Server) handleCopyConfig(ctx context.Context, sess *Session, rpc *RPC) 
 		return NewErrorReply(rpc.MessageID, err.(*RPCError))
 	}
 
-	// Get target and source datastores
+	// Get target datastore
 	target, err := req.Target.GetDatastore()
-	if err != nil {
-		return NewErrorReply(rpc.MessageID, err.(*RPCError))
-	}
-
-	source, err := req.Source.GetDatastore()
 	if err != nil {
 		return NewErrorReply(rpc.MessageID, err.(*RPCError))
 	}
@@ -342,7 +515,10 @@ func (s *Server) handleCopyConfig(ctx context.Context, sess *Session, rpc *RPC) 
 	// Only candidate is writable as target
 	if target != DatastoreCandidate {
 		if target == DatastoreRunning {
-			return NewErrorReply(rpc.MessageID, ErrWritableRunningNotSupported())
+			return NewErrorReply(rpc.MessageID, ErrWritableRunningNotSupported("copy-config", "target"))
+		}
+		if target == DatastoreStartup {
+			return NewErrorReply(rpc.MessageID, ErrStartupNotSupported("copy-config", "target"))
 		}
 		return NewErrorReply(rpc.MessageID, ErrInvalidTarget("copy-config", target))
 	}
@@ -354,23 +530,65 @@ func (s *Server) handleCopyConfig(ctx context.Context, sess *Session, rpc *RPC) 
 
 	// Get source config text
 	var srcTextCfg string
-	switch source {
-	case DatastoreRunning:
-		runningCfg, err := s.datastore.GetRunning(ctx)
+	var srcCfg *config.Config
+	if req.Source.Config != nil {
+		configXML, err := req.Source.Config.XML()
 		if err != nil {
-			log.Printf("[NETCONF] CopyConfig source read error: %v", err)
-			return NewErrorReply(rpc.MessageID, ErrDatastoreError(fmt.Sprintf("failed to read source %s: %v", source, err)))
+			return NewErrorReply(rpc.MessageID, err.(*RPCError))
 		}
-		srcTextCfg = runningCfg.ConfigText
-	case DatastoreCandidate:
-		candidateCfg, err := s.datastore.GetCandidate(ctx, sess.ID)
+		srcCfg, err = XMLToConfig(configXML, DefaultOpMerge)
 		if err != nil {
-			log.Printf("[NETCONF] CopyConfig source read error: %v", err)
-			return NewErrorReply(rpc.MessageID, ErrDatastoreError(fmt.Sprintf("failed to read source %s: %v", source, err)))
+			log.Printf("[NETCONF] CopyConfig inline source parse error: %v", err)
+			if rpcErr, ok := err.(*RPCError); ok {
+				return NewErrorReply(rpc.MessageID, rpcErr.WithPath("/rpc/copy-config/source"))
+			}
+			return NewErrorReply(rpc.MessageID, ErrConfigValidationFailed("copy-config", fmt.Sprintf("config parsing failed: %v", err)))
 		}
-		srcTextCfg = candidateCfg.ConfigText
-	default:
-		return NewErrorReply(rpc.MessageID, ErrInvalidTarget("copy-config", source))
+		srcTextCfg, err = ConfigToText(srcCfg)
+		if err != nil {
+			log.Printf("[NETCONF] CopyConfig inline source serialization error: %v", err)
+			return NewErrorReply(rpc.MessageID, ErrDatastoreError("failed to serialize inline source config"))
+		}
+	} else {
+		source, err := req.Source.GetDatastore()
+		if err != nil {
+			return NewErrorReply(rpc.MessageID, err.(*RPCError))
+		}
+		switch source {
+		case DatastoreRunning:
+			runningText, rpcErr := s.readRunningConfigText(ctx, false, "no running configuration to copy", "failed to read source running")
+			if rpcErr != nil {
+				log.Printf("[NETCONF] CopyConfig source read error: %v", rpcErr)
+				return NewErrorReply(rpc.MessageID, rpcErr)
+			}
+			srcTextCfg = runningText
+		case DatastoreCandidate:
+			candidateText, rpcErr := s.readCandidateOrRunningConfigText(
+				ctx,
+				sess.ID,
+				"failed to read source candidate",
+				"failed to read running config for candidate source fallback",
+			)
+			if rpcErr != nil {
+				log.Printf("[NETCONF] CopyConfig source read error: %v", rpcErr)
+				return NewErrorReply(rpc.MessageID, rpcErr)
+			}
+			srcTextCfg = candidateText
+		case DatastoreStartup:
+			return NewErrorReply(rpc.MessageID, ErrStartupNotSupported("copy-config", "source"))
+		default:
+			return NewErrorReply(rpc.MessageID, ErrInvalidTarget("copy-config", source))
+		}
+
+		srcCfg, err = TextToConfig(srcTextCfg)
+		if err != nil {
+			log.Printf("[NETCONF] CopyConfig source parse error: %v", err)
+			return NewErrorReply(rpc.MessageID, ErrConfigValidationFailed("copy-config", fmt.Sprintf("config parsing failed: %v", err)))
+		}
+	}
+	if rpcErr := validateConfigSemantics("copy-config", srcCfg); rpcErr != nil {
+		log.Printf("[NETCONF] CopyConfig source validation error: %v", rpcErr)
+		return NewErrorReply(rpc.MessageID, rpcErr)
 	}
 
 	// Save to candidate
@@ -380,6 +598,64 @@ func (s *Server) handleCopyConfig(ctx context.Context, sess *Session, rpc *RPC) 
 	}
 
 	return NewOKReply(rpc.MessageID)
+}
+
+func (s *Server) readCandidateOrRunningConfigText(ctx context.Context, sessionID, candidateFailure, runningFailure string) (string, *RPCError) {
+	candidateText, ok, rpcErr := s.readCandidateConfigText(ctx, sessionID, candidateFailure)
+	if rpcErr != nil {
+		return "", rpcErr
+	}
+	if ok {
+		return candidateText, nil
+	}
+	return s.readRunningConfigText(ctx, true, "no running configuration found", runningFailure)
+}
+
+func (s *Server) readCandidateConfigText(ctx context.Context, sessionID, failureMessage string) (string, bool, *RPCError) {
+	if s == nil || s.datastore == nil {
+		return "", false, ErrOperationFailed("datastore unavailable")
+	}
+
+	candidate, err := s.datastore.GetCandidate(ctx, sessionID)
+	if err != nil {
+		if isDatastoreNotFound(err) {
+			return "", false, nil
+		}
+		return "", false, ErrDatastoreError(fmt.Sprintf("%s: %v", failureMessage, err))
+	}
+	if candidate == nil {
+		return "", false, nil
+	}
+	return candidate.ConfigText, true, nil
+}
+
+func (s *Server) readRunningConfigText(ctx context.Context, emptyOnMissing bool, missingMessage, failureMessage string) (string, *RPCError) {
+	if s == nil || s.datastore == nil {
+		return "", ErrOperationFailed("datastore unavailable")
+	}
+
+	running, err := s.datastore.GetRunning(ctx)
+	if err != nil {
+		if isDatastoreNotFound(err) {
+			if emptyOnMissing {
+				return "", nil
+			}
+			return "", ErrOperationFailed(missingMessage)
+		}
+		return "", ErrDatastoreError(fmt.Sprintf("%s: %v", failureMessage, err))
+	}
+	if running == nil {
+		if emptyOnMissing {
+			return "", nil
+		}
+		return "", ErrOperationFailed(missingMessage)
+	}
+	return running.ConfigText, nil
+}
+
+func isDatastoreNotFound(err error) bool {
+	var dsErr *dsstore.Error
+	return errors.As(err, &dsErr) && dsErr.Code == dsstore.ErrCodeNotFound
 }
 
 // DeleteConfigRequest represents <delete-config> RPC
@@ -404,7 +680,10 @@ func (s *Server) handleDeleteConfig(ctx context.Context, sess *Session, rpc *RPC
 	// Only candidate can be deleted
 	if target != DatastoreCandidate {
 		if target == DatastoreRunning {
-			return NewErrorReply(rpc.MessageID, NewRPCError(ErrorTypeProtocol, ErrorTagOperationNotSupported, "cannot delete running datastore"))
+			return NewErrorReply(rpc.MessageID, ErrWritableRunningNotSupported("delete-config", "target"))
+		}
+		if target == DatastoreStartup {
+			return NewErrorReply(rpc.MessageID, ErrStartupNotSupported("delete-config", "target"))
 		}
 		return NewErrorReply(rpc.MessageID, ErrInvalidTarget("delete-config", target))
 	}

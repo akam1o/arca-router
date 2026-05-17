@@ -73,12 +73,18 @@ func NewRPCError(errType ErrorType, errTag ErrorTag, message string) *RPCError {
 
 // WithPath adds error-path to the error
 func (e *RPCError) WithPath(path string) *RPCError {
+	if e == nil {
+		return nil
+	}
 	e.ErrorPath = path
 	return e
 }
 
 // WithBadElement adds bad-element to error-info
 func (e *RPCError) WithBadElement(element string) *RPCError {
+	if e == nil {
+		return nil
+	}
 	if e.ErrorInfo == nil {
 		e.ErrorInfo = &ErrorInfo{}
 	}
@@ -88,6 +94,9 @@ func (e *RPCError) WithBadElement(element string) *RPCError {
 
 // WithBadAttribute adds bad-attribute to error-info
 func (e *RPCError) WithBadAttribute(attribute string) *RPCError {
+	if e == nil {
+		return nil
+	}
 	if e.ErrorInfo == nil {
 		e.ErrorInfo = &ErrorInfo{}
 	}
@@ -97,6 +106,9 @@ func (e *RPCError) WithBadAttribute(attribute string) *RPCError {
 
 // WithBadNamespace adds bad-namespace to error-info
 func (e *RPCError) WithBadNamespace(namespace string) *RPCError {
+	if e == nil {
+		return nil
+	}
 	if e.ErrorInfo == nil {
 		e.ErrorInfo = &ErrorInfo{}
 	}
@@ -106,6 +118,9 @@ func (e *RPCError) WithBadNamespace(namespace string) *RPCError {
 
 // WithLockOwner adds lock-owner-session to error-info
 func (e *RPCError) WithLockOwner(sessionID string) *RPCError {
+	if e == nil {
+		return nil
+	}
 	if e.ErrorInfo == nil {
 		e.ErrorInfo = &ErrorInfo{}
 	}
@@ -115,6 +130,9 @@ func (e *RPCError) WithLockOwner(sessionID string) *RPCError {
 
 // WithAppTag adds error-app-tag as direct child of rpc-error (RFC 6241)
 func (e *RPCError) WithAppTag(tag string) *RPCError {
+	if e == nil {
+		return nil
+	}
 	e.ErrorAppTag = tag
 	return e
 }
@@ -161,13 +179,24 @@ func ErrInvalidTarget(rpcName, target string) *RPCError {
 		WithBadElement(target)
 }
 
+// ErrStartupNotSupported returns error for startup datastore operations when
+// the startup capability is not advertised.
+func ErrStartupNotSupported(rpcName, container string) *RPCError {
+	return NewRPCError(ErrorTypeProtocol, ErrorTagOperationNotSupported, "startup datastore capability not supported").
+		WithPath(fmt.Sprintf("/rpc/%s/%s", rpcName, container)).
+		WithBadElement(DatastoreStartup)
+}
+
+// ErrConfirmedCommitNotSupported returns an error for confirmed-commit options
+// when the capability is not advertised.
+func ErrConfirmedCommitNotSupported(element string) *RPCError {
+	return NewRPCError(ErrorTypeProtocol, ErrorTagOperationNotSupported, "confirmed-commit capability not supported").
+		WithPath("/rpc/commit/" + element).
+		WithBadElement(element)
+}
+
 // ErrUnsupportedFilterType returns error for unsupported filter type
 func ErrUnsupportedFilterType(rpcName, filterType string) *RPCError {
-	if filterType == "xpath" {
-		return NewRPCError(ErrorTypeProtocol, ErrorTagOperationNotSupported, "XPath filters are not supported").
-			WithPath(fmt.Sprintf("/rpc/%s/filter", rpcName)).
-			WithBadAttribute("type")
-	}
 	return NewRPCError(ErrorTypeProtocol, ErrorTagInvalidValue, fmt.Sprintf("unsupported filter type: %s", filterType)).
 		WithPath(fmt.Sprintf("/rpc/%s/filter", rpcName)).
 		WithBadAttribute("type")
@@ -295,8 +324,13 @@ func ErrLockTimeout(target string) *RPCError {
 
 // ErrValidationFailed returns error for validation failure
 func ErrValidationFailed(message string) *RPCError {
+	return ErrConfigValidationFailed("validate", message)
+}
+
+// ErrConfigValidationFailed returns error for config validation failure.
+func ErrConfigValidationFailed(rpcName, message string) *RPCError {
 	return NewRPCError(ErrorTypeApplication, ErrorTagInvalidValue, message).
-		WithPath("/rpc/validate/source").
+		WithPath(configValidationErrorPath(rpcName)).
 		WithAppTag("validation-failed")
 }
 
@@ -324,11 +358,12 @@ func ErrTransportClosed() *RPCError {
 	return NewRPCError(ErrorTypeTransport, ErrorTagOperationFailed, "transport connection closed")
 }
 
-// ErrWritableRunningNotSupported returns error for writable-running capability not advertised
-func ErrWritableRunningNotSupported() *RPCError {
+// ErrWritableRunningNotSupported returns error for running datastore write
+// operations when writable-running is not advertised.
+func ErrWritableRunningNotSupported(rpcName, container string) *RPCError {
 	return NewRPCError(ErrorTypeProtocol, ErrorTagOperationNotSupported, "writable-running capability not supported").
-		WithPath("/rpc/edit-config/target").
-		WithBadElement("running")
+		WithPath(fmt.Sprintf("/rpc/%s/%s", rpcName, container)).
+		WithBadElement(DatastoreRunning)
 }
 
 // ErrBackendValidationFailed returns error for backend (VPP/FRR) validation failure

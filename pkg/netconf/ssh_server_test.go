@@ -2,8 +2,11 @@ package netconf
 
 import (
 	"context"
+	"encoding/xml"
 	"net"
 	"path/filepath"
+	"slices"
+	"strings"
 	"testing"
 	"time"
 
@@ -98,6 +101,175 @@ func TestSSHServerStartAfterStopRejected(t *testing.T) {
 		_ = server.Stop()
 		t.Fatal("Start() error = nil after Stop, want rejection")
 	}
+}
+
+func TestSSHServerStopWithStartupCleanupSkipped(t *testing.T) {
+	cfg, _ := testSSHServerConfig(t, "127.0.0.1:0")
+	cfg.SkipDatastoreStartupCleanup = true
+	server, err := NewSSHServer(cfg)
+	if err != nil {
+		t.Fatalf("NewSSHServer() error = %v", err)
+	}
+	if server.processLock != nil {
+		t.Fatal("processLock = non-nil, want nil when startup cleanup is skipped")
+	}
+
+	if err := server.Stop(); err != nil {
+		t.Fatalf("Stop() error = %v", err)
+	}
+}
+
+func TestSSHServerLifecycleMethodsNilReceiver(t *testing.T) {
+	var server *SSHServer
+
+	if err := server.Stop(); err != nil {
+		t.Fatalf("Stop() error = %v", err)
+	}
+	if err := server.Start(context.Background()); err == nil {
+		t.Fatal("Start() error = nil, want uninitialized server error")
+	}
+	if metrics := server.GetMetrics(); metrics != (ServerMetrics{}) {
+		t.Fatalf("GetMetrics() = %+v, want zero metrics", metrics)
+	}
+	if err := server.HealthCheck(); err == nil {
+		t.Fatal("HealthCheck() error = nil, want unavailable server error")
+	}
+}
+
+func TestSSHServerLifecycleMethodsZeroValue(t *testing.T) {
+	server := &SSHServer{}
+
+	if err := server.Start(context.Background()); err == nil {
+		t.Fatal("Start() error = nil, want uninitialized server error")
+	}
+	if err := server.Stop(); err != nil {
+		t.Fatalf("Stop() error = %v", err)
+	}
+	if metrics := server.GetMetrics(); metrics != (ServerMetrics{}) {
+		t.Fatalf("GetMetrics() = %+v, want zero metrics", metrics)
+	}
+	if err := server.HealthCheck(); err == nil {
+		t.Fatal("HealthCheck() error = nil, want not accepting error")
+	}
+}
+
+func TestNewSSHServerDefaultsPartialConfig(t *testing.T) {
+	dir := t.TempDir()
+	cfg := &SSHConfig{
+		ListenAddr:    "127.0.0.1:0",
+		HostKeyPath:   filepath.Join(dir, "ssh_host_ed25519_key"),
+		UserDBPath:    filepath.Join(dir, "users.db"),
+		DatastorePath: filepath.Join(dir, "config.db"),
+	}
+
+	server, err := NewSSHServer(cfg)
+	if err != nil {
+		t.Fatalf("NewSSHServer() error = %v", err)
+	}
+	t.Cleanup(func() {
+		if err := server.Stop(); err != nil {
+			t.Errorf("Stop() error = %v", err)
+		}
+	})
+
+	defaults := DefaultSSHConfig()
+	if server.config == cfg {
+		t.Fatal("NewSSHServer reused caller config, want defensive copy")
+	}
+	if server.config.ListenAddr != cfg.ListenAddr {
+		t.Fatalf("ListenAddr = %q, want %q", server.config.ListenAddr, cfg.ListenAddr)
+	}
+	if server.config.HostKeyPath != cfg.HostKeyPath {
+		t.Fatalf("HostKeyPath = %q, want %q", server.config.HostKeyPath, cfg.HostKeyPath)
+	}
+	if server.config.UserDBPath != cfg.UserDBPath {
+		t.Fatalf("UserDBPath = %q, want %q", server.config.UserDBPath, cfg.UserDBPath)
+	}
+	if server.config.DatastorePath != cfg.DatastorePath {
+		t.Fatalf("DatastorePath = %q, want %q", server.config.DatastorePath, cfg.DatastorePath)
+	}
+	if server.config.IdleTimeout != defaults.IdleTimeout {
+		t.Fatalf("IdleTimeout = %s, want %s", server.config.IdleTimeout, defaults.IdleTimeout)
+	}
+	if server.config.AbsoluteTimeout != defaults.AbsoluteTimeout {
+		t.Fatalf("AbsoluteTimeout = %s, want %s", server.config.AbsoluteTimeout, defaults.AbsoluteTimeout)
+	}
+	if server.config.MaxSessions != defaults.MaxSessions {
+		t.Fatalf("MaxSessions = %d, want %d", server.config.MaxSessions, defaults.MaxSessions)
+	}
+	if server.config.IPFailureLimit != defaults.IPFailureLimit {
+		t.Fatalf("IPFailureLimit = %d, want %d", server.config.IPFailureLimit, defaults.IPFailureLimit)
+	}
+	if server.config.UserFailureLimit != defaults.UserFailureLimit {
+		t.Fatalf("UserFailureLimit = %d, want %d", server.config.UserFailureLimit, defaults.UserFailureLimit)
+	}
+	if server.config.IPLockoutWindow != defaults.IPLockoutWindow {
+		t.Fatalf("IPLockoutWindow = %s, want %s", server.config.IPLockoutWindow, defaults.IPLockoutWindow)
+	}
+	if server.config.UserLockoutWindow != defaults.UserLockoutWindow {
+		t.Fatalf("UserLockoutWindow = %s, want %s", server.config.UserLockoutWindow, defaults.UserLockoutWindow)
+	}
+	if server.config.LockoutDuration != defaults.LockoutDuration {
+		t.Fatalf("LockoutDuration = %s, want %s", server.config.LockoutDuration, defaults.LockoutDuration)
+	}
+	if !slices.Equal(server.config.SSHCiphers, defaults.SSHCiphers) {
+		t.Fatalf("SSHCiphers = %v, want %v", server.config.SSHCiphers, defaults.SSHCiphers)
+	}
+	if !slices.Equal(server.config.SSHKeyExchanges, defaults.SSHKeyExchanges) {
+		t.Fatalf("SSHKeyExchanges = %v, want %v", server.config.SSHKeyExchanges, defaults.SSHKeyExchanges)
+	}
+	if !slices.Equal(server.config.SSHMACs, defaults.SSHMACs) {
+		t.Fatalf("SSHMACs = %v, want %v", server.config.SSHMACs, defaults.SSHMACs)
+	}
+	if !slices.Equal(server.sshConfig.Ciphers, defaults.SSHCiphers) {
+		t.Fatalf("ssh ciphers = %v, want %v", server.sshConfig.Ciphers, defaults.SSHCiphers)
+	}
+	if !slices.Equal(server.sshConfig.KeyExchanges, defaults.SSHKeyExchanges) {
+		t.Fatalf("ssh key exchanges = %v, want %v", server.sshConfig.KeyExchanges, defaults.SSHKeyExchanges)
+	}
+	if !slices.Equal(server.sshConfig.MACs, defaults.SSHMACs) {
+		t.Fatalf("ssh MACs = %v, want %v", server.sshConfig.MACs, defaults.SSHMACs)
+	}
+	if cfg.IdleTimeout != 0 ||
+		cfg.AbsoluteTimeout != 0 ||
+		cfg.MaxSessions != 0 ||
+		cfg.IPFailureLimit != 0 ||
+		cfg.UserFailureLimit != 0 ||
+		cfg.IPLockoutWindow != 0 ||
+		cfg.UserLockoutWindow != 0 ||
+		cfg.LockoutDuration != 0 ||
+		len(cfg.SSHCiphers) != 0 ||
+		len(cfg.SSHKeyExchanges) != 0 ||
+		len(cfg.SSHMACs) != 0 {
+		t.Fatalf("caller config was mutated: %+v", cfg)
+	}
+}
+
+func TestMarshalErrorReplyFallsBackWithoutInvalidReplyAttrs(t *testing.T) {
+	data, err := marshalErrorReply("101", ErrOperationFailed("reply serialization failed"), []xml.Attr{
+		{Name: xml.Name{Local: ""}, Value: "bad"},
+	})
+	if err != nil {
+		t.Fatalf("marshalErrorReply() error = %v", err)
+	}
+
+	xmlData := string(data)
+	if !strings.Contains(xmlData, `<rpc-reply xmlns="urn:ietf:params:xml:ns:netconf:base:1.0" message-id="101"`) {
+		t.Fatalf("marshalErrorReply() = %s, want rpc-reply message-id", xmlData)
+	}
+	if strings.Contains(xmlData, "bad") {
+		t.Fatalf("marshalErrorReply() = %s, want invalid reply attributes omitted", xmlData)
+	}
+	if !strings.Contains(xmlData, "reply serialization failed") {
+		t.Fatalf("marshalErrorReply() = %s, want original RPC error", xmlData)
+	}
+}
+
+func TestSSHServerHookSettersNilReceiver(t *testing.T) {
+	var server *SSHServer
+
+	server.SetCommitHook(nil)
+	server.SetOperationalStateProvider(nil)
 }
 
 func testSSHServerConfig(t *testing.T, listenAddr string) (*SSHConfig, string) {

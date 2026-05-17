@@ -13,6 +13,7 @@ import (
 	"testing"
 	"time"
 
+	apiv1 "github.com/akam1o/arca-router/api/v1"
 	"github.com/akam1o/arca-router/internal/engine"
 	"github.com/akam1o/arca-router/internal/model"
 	sbfrr "github.com/akam1o/arca-router/internal/southbound/frr"
@@ -31,14 +32,15 @@ func listenUnix(path string) (net.Listener, error) {
 }
 
 type fakeStore struct {
-	commitID   string
-	prepareErr error
-	prepareFn  func()
-	commitErr  error
-	saved      *model.ConfigSnapshot
-	aborted    bool
-	commits    map[string]*store.CommitRecord
-	listCalls  int
+	commitID    string
+	prepareErr  error
+	prepareFn   func()
+	commitErr   error
+	saved       *model.ConfigSnapshot
+	aborted     bool
+	commits     map[string]*store.CommitRecord
+	listRecords []*store.CommitRecord
+	listCalls   int
 }
 
 type fakeInterfaceStateCollector struct {
@@ -116,7 +118,7 @@ func (f *fakeStore) GetCommit(ctx context.Context, commitID string) (*store.Comm
 
 func (f *fakeStore) ListCommits(ctx context.Context, opts *store.ListOptions) ([]*store.CommitRecord, error) {
 	f.listCalls++
-	return nil, nil
+	return f.listRecords, nil
 }
 
 func (f *fakeStore) AuditLog(ctx context.Context, event *store.AuditEvent) error {
@@ -221,6 +223,16 @@ func TestClientServerConfigFlow(t *testing.T) {
 	}
 	if strings.Contains(candidate, "set system host-name router1") || !strings.Contains(candidate, "set system host-name router2") {
 		t.Fatalf("candidate did not replace scalar hostname: %q", candidate)
+	}
+	if err := client.ReplaceCandidate(ctx, sessionID, "set system host-name router3"); err != nil {
+		t.Fatalf("ReplaceCandidate() error = %v", err)
+	}
+	candidate, err = client.GetCandidate(ctx, sessionID)
+	if err != nil {
+		t.Fatalf("GetCandidate() after ReplaceCandidate error = %v", err)
+	}
+	if strings.Contains(candidate, "set system host-name router2") || !strings.Contains(candidate, "set system host-name router3") {
+		t.Fatalf("candidate replacement did not replace previous edit: %q", candidate)
 	}
 	if err := client.ValidateCandidate(ctx, sessionID); err != nil {
 		t.Fatalf("ValidateCandidate() error = %v", err)
@@ -329,8 +341,8 @@ func TestClientServerConfigFlow(t *testing.T) {
 	if err := json.Unmarshal([]byte(event.JSONPayload), &payload); err != nil {
 		t.Fatalf("telemetry JSON payload is invalid: %v", err)
 	}
-	if payload["version"] != float64(2) || !strings.Contains(event.JSONPayload, "router2") {
-		t.Fatalf("telemetry payload = %s, want running config version 2", event.JSONPayload)
+	if payload["version"] != float64(2) || !strings.Contains(event.JSONPayload, "router3") {
+		t.Fatalf("telemetry payload = %s, want running config version 2 with router3", event.JSONPayload)
 	}
 	if event.PayloadBytes != len(event.JSONPayload) {
 		t.Fatalf("telemetry payload bytes = %d, want %d", event.PayloadBytes, len(event.JSONPayload))
@@ -1683,6 +1695,54 @@ func TestListHistoryRejectsNegativePagination(t *testing.T) {
 	}
 }
 
+func TestListHistoryIncludesConfigText(t *testing.T) {
+	eng := engine.NewEngine(nil, testLogger())
+	st := &fakeStore{
+		listRecords: []*store.CommitRecord{
+			{
+				CommitID:  "commit-1",
+				Author:    "alice",
+				Message:   "initial",
+				Timestamp: time.Date(2026, 5, 17, 12, 0, 0, 0, time.UTC),
+				Config: &model.RouterConfig{
+					System: &model.SystemConfig{HostName: "router1"},
+				},
+			},
+		},
+	}
+	srv := NewServer(eng, st, testLogger())
+
+	entries, err := srv.ListHistory(context.Background(), 10, 0)
+	if err != nil {
+		t.Fatalf("ListHistory() error = %v", err)
+	}
+	if len(entries) != 1 {
+		t.Fatalf("ListHistory() entries = %d, want 1", len(entries))
+	}
+	if !strings.Contains(entries[0].ConfigText, "set system host-name router1") {
+		t.Fatalf("ListHistory() config text = %q, want archived set commands", entries[0].ConfigText)
+	}
+}
+
+func TestCommitInfosFromProtoIncludesConfigText(t *testing.T) {
+	infos := commitInfosFromProto([]*apiv1.CommitEntry{
+		{
+			CommitId:   "commit-1",
+			User:       "alice",
+			Timestamp:  time.Date(2026, 5, 17, 12, 0, 0, 0, time.UTC).Format(time.RFC3339Nano),
+			Message:    "initial",
+			ConfigText: "set system host-name router1",
+		},
+	})
+
+	if len(infos) != 1 {
+		t.Fatalf("commitInfosFromProto() entries = %d, want 1", len(infos))
+	}
+	if infos[0].ConfigText != "set system host-name router1" {
+		t.Fatalf("commitInfosFromProto() config text = %q, want archived set commands", infos[0].ConfigText)
+	}
+}
+
 func TestValidateCandidateRejectsInvalidConfig(t *testing.T) {
 	oldParser := ConfigTextParser
 	ConfigTextParser = func(text string) (*model.RouterConfig, error) {
@@ -1713,6 +1773,104 @@ func TestValidateCandidateRejectsInvalidConfig(t *testing.T) {
 	}
 	if err := srv.ValidateCandidate(ctx, sessionID); err == nil {
 		t.Fatal("ValidateCandidate() expected error")
+	}
+}
+
+func TestReplaceCandidateReplacesExistingCandidate(t *testing.T) {
+	oldParser := ConfigTextParser
+	ConfigTextParser = func(text string) (*model.RouterConfig, error) {
+		cfg, err := pkgconfig.NewParser(strings.NewReader(text)).Parse()
+		if err != nil {
+			return nil, err
+		}
+		return model.FromLegacyConfig(cfg), nil
+	}
+	t.Cleanup(func() { ConfigTextParser = oldParser })
+
+	eng := engine.NewEngine(nil, testLogger())
+	eng.InitializeRunning(&model.RouterConfig{
+		System:     &model.SystemConfig{HostName: "running"},
+		Interfaces: map[string]*model.InterfaceConfig{},
+	}, 1)
+	srv := NewServer(eng, &fakeStore{commitID: "commit-1"}, testLogger())
+	ctx := context.Background()
+	sessionID, err := srv.CreateSession(ctx, "alice")
+	if err != nil {
+		t.Fatalf("CreateSession() error = %v", err)
+	}
+	if err := srv.AcquireLock(ctx, sessionID, "alice"); err != nil {
+		t.Fatalf("AcquireLock() error = %v", err)
+	}
+	if err := srv.EditCandidate(ctx, sessionID, "set system host-name dirty"); err != nil {
+		t.Fatalf("EditCandidate() error = %v", err)
+	}
+	if err := srv.ReplaceCandidate(ctx, sessionID, "set system host-name restored"); err != nil {
+		t.Fatalf("ReplaceCandidate() error = %v", err)
+	}
+	got, err := srv.GetCandidate(ctx, sessionID)
+	if err != nil {
+		t.Fatalf("GetCandidate() error = %v", err)
+	}
+	if !strings.Contains(got, "set system host-name restored") || strings.Contains(got, "dirty") {
+		t.Fatalf("candidate text = %q, want restored replacement without stale edits", got)
+	}
+}
+
+func TestReplaceCandidateRejectsInvalidConfig(t *testing.T) {
+	oldParser := ConfigTextParser
+	ConfigTextParser = func(text string) (*model.RouterConfig, error) {
+		cfg, err := pkgconfig.NewParser(strings.NewReader(text)).Parse()
+		if err != nil {
+			return nil, err
+		}
+		return model.FromLegacyConfig(cfg), nil
+	}
+	t.Cleanup(func() { ConfigTextParser = oldParser })
+
+	eng := engine.NewEngine(nil, testLogger())
+	eng.InitializeRunning(&model.RouterConfig{
+		System:     &model.SystemConfig{HostName: "running"},
+		Interfaces: map[string]*model.InterfaceConfig{},
+	}, 1)
+	srv := NewServer(eng, &fakeStore{commitID: "commit-1"}, testLogger())
+	ctx := context.Background()
+	sessionID, err := srv.CreateSession(ctx, "alice")
+	if err != nil {
+		t.Fatalf("CreateSession() error = %v", err)
+	}
+	if err := srv.AcquireLock(ctx, sessionID, "alice"); err != nil {
+		t.Fatalf("AcquireLock() error = %v", err)
+	}
+	before, err := srv.GetCandidate(ctx, sessionID)
+	if err != nil {
+		t.Fatalf("GetCandidate() error = %v", err)
+	}
+	if err := srv.ReplaceCandidate(ctx, sessionID, "set unsupported path value"); err == nil {
+		t.Fatal("ReplaceCandidate() error = nil, want parse failure")
+	}
+	after, err := srv.GetCandidate(ctx, sessionID)
+	if err != nil {
+		t.Fatalf("GetCandidate() error = %v", err)
+	}
+	if after != before {
+		t.Fatalf("candidate changed after failed replacement: before=%q after=%q", before, after)
+	}
+}
+
+func TestReplaceCandidateRequiresLock(t *testing.T) {
+	eng := engine.NewEngine(nil, testLogger())
+	eng.InitializeRunning(&model.RouterConfig{
+		System:     &model.SystemConfig{HostName: "running"},
+		Interfaces: map[string]*model.InterfaceConfig{},
+	}, 1)
+	srv := NewServer(eng, &fakeStore{commitID: "commit-1"}, testLogger())
+	ctx := context.Background()
+	sessionID, err := srv.CreateSession(ctx, "alice")
+	if err != nil {
+		t.Fatalf("CreateSession() error = %v", err)
+	}
+	if err := srv.ReplaceCandidate(ctx, sessionID, "set system host-name restored"); err == nil {
+		t.Fatal("ReplaceCandidate() error = nil, want lock failure")
 	}
 }
 

@@ -1,6 +1,8 @@
 package netconf
 
 import (
+	"bytes"
+	"encoding/xml"
 	"strings"
 	"testing"
 
@@ -83,6 +85,176 @@ func TestConfigToXMLWritesBFD(t *testing.T) {
 	for _, want := range []string{"<bfd>", "<profile>", "<name>fast</name>", "<peer>", "<address>192.0.2.2</address>", "<interface>ge-0/0/0</interface>"} {
 		if !strings.Contains(xmlStr, want) {
 			t.Fatalf("ConfigToXML() missing %q:\n%s", want, xmlStr)
+		}
+	}
+}
+
+func TestConfigToXMLWithXPathFilter(t *testing.T) {
+	cfg := &config.Config{
+		System: &config.SystemConfig{HostName: "router1"},
+		Interfaces: map[string]*config.Interface{
+			"ge-0/0/0": {Description: "uplink"},
+			"ge-0/0/1": {Description: "peer"},
+		},
+	}
+	filter := &Filter{Type: "xpath", Select: "/interfaces/interface[name='ge-0/0/0']"}
+
+	xmlData, err := ConfigToXML(cfg, filter)
+	if err != nil {
+		t.Fatalf("ConfigToXML() error = %v", err)
+	}
+	xmlStr := string(xmlData)
+	if !strings.Contains(xmlStr, "<interfaces") {
+		t.Fatalf("ConfigToXML() missing interfaces for XPath filter:\n%s", xmlStr)
+	}
+	if strings.Contains(xmlStr, "<system") {
+		t.Fatalf("ConfigToXML() included unrelated system section:\n%s", xmlStr)
+	}
+	if strings.Contains(xmlStr, "ge-0/0/1") || strings.Contains(xmlStr, "peer") {
+		t.Fatalf("ConfigToXML() included predicate-mismatched interface:\n%s", xmlStr)
+	}
+}
+
+func TestConfigToXMLWithWhitespaceXPathFilterType(t *testing.T) {
+	cfg := &config.Config{
+		System: &config.SystemConfig{HostName: "router1"},
+		Interfaces: map[string]*config.Interface{
+			"ge-0/0/0": {Description: "uplink"},
+			"ge-0/0/1": {Description: "peer"},
+		},
+	}
+	filter := &Filter{Type: "\n xpath \t", Select: "/interfaces/interface[name='ge-0/0/0']"}
+
+	xmlData, err := ConfigToXML(cfg, filter)
+	if err != nil {
+		t.Fatalf("ConfigToXML() error = %v", err)
+	}
+	xmlStr := string(xmlData)
+	if strings.Contains(xmlStr, "<system") {
+		t.Fatalf("ConfigToXML() included unrelated system section:\n%s", xmlStr)
+	}
+	if strings.Contains(xmlStr, "ge-0/0/1") || strings.Contains(xmlStr, "peer") {
+		t.Fatalf("ConfigToXML() included predicate-mismatched interface:\n%s", xmlStr)
+	}
+}
+
+func TestConfigToXMLWithPrefixedXPathFilter(t *testing.T) {
+	cfg := &config.Config{
+		System: &config.SystemConfig{HostName: "router1"},
+		Interfaces: map[string]*config.Interface{
+			"ge-0/0/0": {},
+			"ge-0/0/1": {},
+		},
+	}
+	filter := &Filter{
+		Type:   "xpath",
+		Select: "/if:interfaces/if:interface[if:name='ge-0/0/0']",
+		Attrs: []xml.Attr{
+			{Name: xml.Name{Space: "xmlns", Local: "if"}, Value: IETFInterfacesNS},
+		},
+	}
+
+	xmlData, err := ConfigToXML(cfg, filter)
+	if err != nil {
+		t.Fatalf("ConfigToXML() error = %v", err)
+	}
+	xmlStr := string(xmlData)
+	if strings.Contains(xmlStr, "<system") {
+		t.Fatalf("ConfigToXML() included unrelated system section:\n%s", xmlStr)
+	}
+	if !strings.Contains(xmlStr, "ge-0/0/0") {
+		t.Fatalf("ConfigToXML() missing prefixed XPath interface match:\n%s", xmlStr)
+	}
+	if strings.Contains(xmlStr, "ge-0/0/1") {
+		t.Fatalf("ConfigToXML() included predicate-mismatched interface:\n%s", xmlStr)
+	}
+}
+
+func TestConfigToXMLRejectsMismatchedPrefixedXPathFilter(t *testing.T) {
+	cfg := &config.Config{
+		System: &config.SystemConfig{HostName: "router1"},
+		Interfaces: map[string]*config.Interface{
+			"ge-0/0/0": {},
+		},
+	}
+	filter := &Filter{
+		Type:   "xpath",
+		Select: "/rt:interfaces",
+		Attrs: []xml.Attr{
+			{Name: xml.Name{Space: "xmlns", Local: "rt"}, Value: IETFRoutingNS},
+		},
+	}
+
+	xmlData, err := ConfigToXML(cfg, filter)
+	if err != nil {
+		t.Fatalf("ConfigToXML() error = %v", err)
+	}
+	if len(bytes.TrimSpace(xmlData)) != 0 {
+		t.Fatalf("ConfigToXML() = %q, want empty output for mismatched namespace", xmlData)
+	}
+}
+
+func TestConfigToXMLRejectsEmptyXPathFilterSelect(t *testing.T) {
+	cfg := &config.Config{
+		System: &config.SystemConfig{HostName: "router1"},
+		Interfaces: map[string]*config.Interface{
+			"ge-0/0/0": {},
+		},
+	}
+	filter := &Filter{Type: "xpath"}
+
+	xmlData, err := ConfigToXML(cfg, filter)
+	if err != nil {
+		t.Fatalf("ConfigToXML() error = %v", err)
+	}
+	if len(bytes.TrimSpace(xmlData)) != 0 {
+		t.Fatalf("ConfigToXML() = %q, want empty output for empty xpath select", xmlData)
+	}
+}
+
+func TestConfigToXMLRejectsUnsupportedFilterType(t *testing.T) {
+	cfg := &config.Config{
+		System: &config.SystemConfig{HostName: "router1"},
+		Interfaces: map[string]*config.Interface{
+			"ge-0/0/0": {},
+		},
+	}
+	filter := &Filter{Type: "unsupported"}
+
+	xmlData, err := ConfigToXML(cfg, filter)
+	if err != nil {
+		t.Fatalf("ConfigToXML() error = %v", err)
+	}
+	if len(bytes.TrimSpace(xmlData)) != 0 {
+		t.Fatalf("ConfigToXML() = %q, want empty output for unsupported filter type", xmlData)
+	}
+}
+
+func TestConfigToXMLWithXPathFilterFiltersStaticRoutePredicates(t *testing.T) {
+	cfg := &config.Config{
+		RoutingOptions: &config.RoutingOptions{
+			RouterID: "203.0.113.254",
+			StaticRoutes: []*config.StaticRoute{
+				{Prefix: "10.0.0.0/24", NextHop: "192.0.2.1", Distance: 10},
+				{Prefix: "10.0.1.0/24", NextHop: "192.0.2.2", Distance: 20},
+			},
+		},
+	}
+	filter := &Filter{Type: "xpath", Select: "/routing/static-routes/route[prefix='10.0.0.0/24'][next-hop='192.0.2.1']"}
+
+	xmlData, err := ConfigToXML(cfg, filter)
+	if err != nil {
+		t.Fatalf("ConfigToXML() error = %v", err)
+	}
+	xmlStr := string(xmlData)
+	for _, want := range []string{"<routing", "10.0.0.0/24", "192.0.2.1"} {
+		if !strings.Contains(xmlStr, want) {
+			t.Fatalf("ConfigToXML() missing %q for XPath route predicate:\n%s", want, xmlStr)
+		}
+	}
+	for _, unwanted := range []string{"10.0.1.0/24", "192.0.2.2"} {
+		if strings.Contains(xmlStr, unwanted) {
+			t.Fatalf("ConfigToXML() included predicate-mismatched static route %q:\n%s", unwanted, xmlStr)
 		}
 	}
 }
@@ -493,6 +665,22 @@ func TestApplyConfigEditMergesV06AdvancedConfig(t *testing.T) {
 	}
 }
 
+func TestApplyConfigEditDefaultOperationNoneIgnoresImplicitEdit(t *testing.T) {
+	existing := config.NewConfig()
+	existing.System = &config.SystemConfig{HostName: "old-router"}
+
+	edit := config.NewConfig()
+	edit.System = &config.SystemConfig{HostName: "new-router"}
+
+	merged, err := ApplyConfigEdit(existing, edit, DefaultOpNone)
+	if err != nil {
+		t.Fatalf("ApplyConfigEdit() error = %v", err)
+	}
+	if merged.System.HostName != "old-router" {
+		t.Fatalf("merged hostname = %q, want unchanged old-router", merged.System.HostName)
+	}
+}
+
 func TestV08EVPNConfigXMLRoundTrip(t *testing.T) {
 	cfg := &config.Config{
 		Protocols: &config.ProtocolConfig{
@@ -665,6 +853,22 @@ func TestXMLToConfigRejectsUnknownElement(t *testing.T) {
 	}
 	if rpcErr.ErrorTag != ErrorTagInvalidValue || rpcErr.ErrorInfo == nil || rpcErr.ErrorInfo.BadElement != "unknown" {
 		t.Fatalf("XMLToConfig() error = %#v, want invalid-value for unknown", rpcErr)
+	}
+}
+
+func TestXMLToConfigRejectsTrailingConfigContent(t *testing.T) {
+	xmlData := []byte(`<config><system><host-name>router1</host-name></system></config><config><system><host-name>router2</host-name></system></config>`)
+
+	_, err := XMLToConfig(xmlData, DefaultOpMerge)
+	if err == nil {
+		t.Fatal("XMLToConfig() error = nil, want trailing content error")
+	}
+	rpcErr, ok := err.(*RPCError)
+	if !ok {
+		t.Fatalf("XMLToConfig() error = %T, want *RPCError", err)
+	}
+	if rpcErr.ErrorTag != ErrorTagMalformedMessage {
+		t.Fatalf("XMLToConfig() error tag = %s, want %s", rpcErr.ErrorTag, ErrorTagMalformedMessage)
 	}
 }
 

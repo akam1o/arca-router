@@ -38,6 +38,13 @@ func (a *configServiceAdapter) EditCandidate(ctx context.Context, req *apiv1.Edi
 	return &apiv1.EditCandidateResponse{}, nil
 }
 
+func (a *configServiceAdapter) ReplaceCandidate(ctx context.Context, req *apiv1.ReplaceCandidateRequest) (*apiv1.ReplaceCandidateResponse, error) {
+	if err := a.server.ReplaceCandidate(ctx, req.GetSessionId(), req.GetConfigText()); err != nil {
+		return nil, err
+	}
+	return &apiv1.ReplaceCandidateResponse{}, nil
+}
+
 func (a *configServiceAdapter) Commit(ctx context.Context, req *apiv1.CommitRequest) (*apiv1.CommitResponse, error) {
 	commitID, version, err := a.server.Commit(ctx, req.GetSessionId(), req.GetUser(), req.GetMessage())
 	if err != nil {
@@ -89,6 +96,7 @@ func (a *configServiceAdapter) ListHistory(ctx context.Context, req *apiv1.ListH
 			Timestamp:  entry.Timestamp.Format(time.RFC3339Nano),
 			Message:    entry.Message,
 			IsRollback: entry.IsRollback,
+			ConfigText: entry.ConfigText,
 		})
 	}
 	return resp, nil

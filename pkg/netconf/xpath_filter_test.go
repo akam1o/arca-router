@@ -1,7 +1,9 @@
 package netconf
 
 import (
+	"bytes"
 	"encoding/xml"
+	"strings"
 	"testing"
 )
 
@@ -54,6 +56,13 @@ func TestParseXPathFilter(t *testing.T) {
 			wantPredicates: map[int]map[string]string{1: {"name": "ge-0/0/0"}},
 		},
 		{
+			name:           "path trims whitespace",
+			path:           "\n /interfaces/interface[name='ge-0/0/0'] \t",
+			wantErr:        false,
+			wantSegments:   []string{"interfaces", "interface"},
+			wantPredicates: map[int]map[string]string{1: {"name": "ge-0/0/0"}},
+		},
+		{
 			name:           "routing-options with predicate",
 			path:           "/routing-options/static/route[prefix='10.0.0.0/24']",
 			wantErr:        false,
@@ -61,8 +70,37 @@ func TestParseXPathFilter(t *testing.T) {
 			wantPredicates: map[int]map[string]string{2: {"prefix": "10.0.0.0/24"}},
 		},
 		{
+			name:           "path with multiple predicates",
+			path:           "/interfaces/interface[name='ge-0/0/0'][unit='0']",
+			wantErr:        false,
+			wantSegments:   []string{"interfaces", "interface"},
+			wantPredicates: map[int]map[string]string{1: {"name": "ge-0/0/0", "unit": "0"}},
+		},
+		{
 			name:    "invalid: no leading slash",
 			path:    "interfaces",
+			wantErr: true,
+		},
+		{
+			name:    "invalid: empty segment",
+			path:    "/interfaces//interface",
+			wantErr: true,
+		},
+		{
+			name:    "invalid: function segment",
+			path:    "/interfaces/count()",
+			wantErr: true,
+		},
+		{
+			name:           "namespace prefix is normalized",
+			path:           "/if:interfaces/if:interface[if:name='ge-0/0/0']",
+			wantErr:        false,
+			wantSegments:   []string{"interfaces", "interface"},
+			wantPredicates: map[int]map[string]string{1: {"name": "ge-0/0/0"}},
+		},
+		{
+			name:    "invalid: multiple namespace separators",
+			path:    "/if:interfaces/foo:bar:baz",
 			wantErr: true,
 		},
 		{
@@ -71,13 +109,33 @@ func TestParseXPathFilter(t *testing.T) {
 			wantErr: true,
 		},
 		{
+			name:    "invalid: predicate function not supported",
+			path:    "/interfaces/interface[contains(name,'ge-0/0/0')]",
+			wantErr: true,
+		},
+		{
 			name:    "invalid: predicate without quotes",
 			path:    "/interfaces/interface[name=value]",
 			wantErr: true,
 		},
 		{
-			name:    "invalid: multiple predicates not supported in Phase 3",
-			path:    "/interfaces/interface[name='ge-0/0/0'][foo='bar']",
+			name:    "invalid: predicate key with axis",
+			path:    "/interfaces/interface[@name='ge-0/0/0']",
+			wantErr: true,
+		},
+		{
+			name:    "invalid: predicate trailing text",
+			path:    "/interfaces/interface[name='ge-0/0/0']junk",
+			wantErr: true,
+		},
+		{
+			name:    "invalid: duplicate predicate key",
+			path:    "/interfaces/interface[name='ge-0/0/0'][name='ge-0/0/1']",
+			wantErr: true,
+		},
+		{
+			name:    "invalid: complex predicate expression",
+			path:    "/interfaces/interface[name='ge-0/0/0' and unit='0']",
 			wantErr: true,
 		},
 	}
@@ -195,6 +253,60 @@ func TestXPathFilter_MatchesElement(t *testing.T) {
 	}
 }
 
+func TestXPathFilterMatchesSection(t *testing.T) {
+	tests := []struct {
+		name        string
+		filterPath  string
+		elementPath []string
+		want        bool
+	}{
+		{
+			name:        "exact top-level match",
+			filterPath:  "/interfaces",
+			elementPath: []string{"interfaces"},
+			want:        true,
+		},
+		{
+			name:        "child selection includes parent section",
+			filterPath:  "/interfaces/interface[name='ge-0/0/0']",
+			elementPath: []string{"interfaces"},
+			want:        true,
+		},
+		{
+			name:        "parent selection includes child section",
+			filterPath:  "/state",
+			elementPath: []string{"state", "routes"},
+			want:        true,
+		},
+		{
+			name:        "different branch does not match",
+			filterPath:  "/state/routes",
+			elementPath: []string{"state", "protocols", "bgp"},
+			want:        false,
+		},
+		{
+			name:        "different top-level does not match",
+			filterPath:  "/protocols/bgp",
+			elementPath: []string{"interfaces"},
+			want:        false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			filter, err := ParseXPathFilter(tt.filterPath)
+			if err != nil {
+				t.Fatalf("ParseXPathFilter() error = %v", err)
+			}
+
+			got := filter.MatchesSection(tt.elementPath)
+			if got != tt.want {
+				t.Errorf("XPathFilter.MatchesSection() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
 func TestFilterMatches(t *testing.T) {
 	tests := []struct {
 		name    string
@@ -238,6 +350,42 @@ func TestFilterMatches(t *testing.T) {
 			want:    false,
 		},
 		{
+			name:    "xpath filter top-level match",
+			filter:  &Filter{Type: "xpath", Select: "/interfaces"},
+			element: "interfaces",
+			want:    true,
+		},
+		{
+			name:    "xpath filter child selection includes top-level element",
+			filter:  &Filter{Type: "xpath", Select: "/interfaces/interface[name='ge-0/0/0']"},
+			element: "interfaces",
+			want:    true,
+		},
+		{
+			name:    "xpath filter trims type",
+			filter:  &Filter{Type: "\n xpath \t", Select: "/interfaces/interface[name='ge-0/0/0']"},
+			element: "interfaces",
+			want:    true,
+		},
+		{
+			name:    "xpath filter no match",
+			filter:  &Filter{Type: "xpath", Select: "/protocols/bgp"},
+			element: "interfaces",
+			want:    false,
+		},
+		{
+			name:    "xpath filter missing select does not match",
+			filter:  &Filter{Type: "xpath"},
+			element: "interfaces",
+			want:    false,
+		},
+		{
+			name:    "unsupported filter type does not match all",
+			filter:  &Filter{Type: "unsupported"},
+			element: "interfaces",
+			want:    false,
+		},
+		{
 			name:    "text filter does not match all",
 			filter:  &Filter{Content: []byte("junk")},
 			element: "interfaces",
@@ -258,6 +406,289 @@ func TestFilterMatches(t *testing.T) {
 				t.Errorf("filterMatches() = %v, want %v", got, tt.want)
 			}
 		})
+	}
+}
+
+func TestFilterMatchesEnhancedXPathPath(t *testing.T) {
+	filter := &Filter{Type: "xpath", Select: "/state/routes/route[prefix='192.0.2.0/24']"}
+
+	if !filterMatchesEnhanced(filter, []string{"state", "routes"}) {
+		t.Fatal("filterMatchesEnhanced() = false, want true for selected state routes branch")
+	}
+	if filterMatchesEnhanced(filter, []string{"state", "protocols", "bgp"}) {
+		t.Fatal("filterMatchesEnhanced() = true, want false for sibling protocol state branch")
+	}
+}
+
+func TestFilterMatchesEnhancedPrefixedXPathPath(t *testing.T) {
+	filter := &Filter{
+		Type:   "xpath",
+		Select: "/if:interfaces/if:interface[if:name='ge-0/0/0']",
+		Attrs: []xml.Attr{
+			{Name: xml.Name{Space: "xmlns", Local: "if"}, Value: IETFInterfacesNS},
+		},
+	}
+
+	if !filterMatchesEnhanced(filter, []string{"interfaces"}) {
+		t.Fatal("filterMatchesEnhanced() = false, want true for selected prefixed interfaces branch")
+	}
+	if filterMatchesEnhanced(filter, []string{"protocols"}) {
+		t.Fatal("filterMatchesEnhanced() = true, want false for unrelated branch")
+	}
+}
+
+func TestFilterMatchesEnhancedRejectsInvalidXPathNamespace(t *testing.T) {
+	tests := []struct {
+		name   string
+		filter *Filter
+	}{
+		{
+			name:   "undeclared namespace prefix",
+			filter: &Filter{Type: "xpath", Select: "/if:interfaces"},
+		},
+		{
+			name: "namespace mismatch",
+			filter: &Filter{
+				Type:   "xpath",
+				Select: "/rt:interfaces",
+				Attrs: []xml.Attr{
+					{Name: xml.Name{Space: "xmlns", Local: "rt"}, Value: IETFRoutingNS},
+				},
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if filterMatchesEnhanced(tt.filter, []string{"interfaces"}) {
+				t.Fatal("filterMatchesEnhanced() = true, want false for invalid XPath namespace")
+			}
+		})
+	}
+}
+
+func TestIncludeOperationalSectionXPath(t *testing.T) {
+	filter := &Filter{Type: "xpath", Select: "/state/routes/route[prefix='192.0.2.0/24']"}
+
+	if !includeOperationalSection(filter, "state", "routes") {
+		t.Fatal("includeOperationalSection() = false, want true for selected state routes branch")
+	}
+	if includeOperationalSection(filter, "state", "protocols", "bgp") {
+		t.Fatal("includeOperationalSection() = true, want false for sibling protocol state branch")
+	}
+}
+
+func TestIncludeOperationalSectionRejectsUnsupportedFilterType(t *testing.T) {
+	filter := &Filter{Type: "unsupported"}
+
+	if includeOperationalSection(filter, "interfaces") {
+		t.Fatal("includeOperationalSection() = true, want false for unsupported filter type")
+	}
+}
+
+func TestApplySubtreeFilterUsesXMLTokenExtraction(t *testing.T) {
+	xmlData := []byte(`<data xmlns="urn:ietf:params:xml:ns:netconf:base:1.0">
+  <interfaces xmlns="urn:ietf:params:xml:ns:yang:ietf-interfaces">
+    <interface><name>ge-0/0/0</name></interface>
+  </interfaces>
+  <interfaces xmlns="urn:arca:router:config:1.0">
+    <interface><name>arca-local</name></interface>
+  </interfaces>
+  <protocols xmlns="urn:arca:router:config:1.0">
+    <bgp/>
+  </protocols>
+</data>`)
+	filter := &Filter{
+		Content: []byte(`<if:interfaces/>`),
+		InheritedAttrs: []xml.Attr{
+			{Name: xml.Name{Space: "xmlns", Local: "if"}, Value: IETFInterfacesNS},
+		},
+	}
+
+	got, err := ApplySubtreeFilter(xmlData, filter)
+	if err != nil {
+		t.Fatalf("ApplySubtreeFilter() error = %v", err)
+	}
+	gotText := string(got)
+	if !strings.Contains(gotText, "<interfaces") || !strings.Contains(gotText, "ge-0/0/0") {
+		t.Fatalf("ApplySubtreeFilter() missing interfaces subtree:\n%s", gotText)
+	}
+	if strings.Contains(gotText, "<protocols") {
+		t.Fatalf("ApplySubtreeFilter() included unmatched protocols subtree:\n%s", gotText)
+	}
+	if strings.Contains(gotText, "arca-local") {
+		t.Fatalf("ApplySubtreeFilter() included namespace-mismatched interfaces subtree:\n%s", gotText)
+	}
+}
+
+func TestApplySubtreeFilterMatchesOnlyDataChildren(t *testing.T) {
+	xmlData := []byte(`<data>
+  <wrapper><interfaces><interface><name>nested</name></interface></interfaces></wrapper>
+  <interfaces><interface><name>top-level</name></interface></interfaces>
+</data>`)
+	filter := &Filter{Content: []byte(`<interfaces/>`)}
+
+	got, err := ApplySubtreeFilter(xmlData, filter)
+	if err != nil {
+		t.Fatalf("ApplySubtreeFilter() error = %v", err)
+	}
+	gotText := string(got)
+	if !strings.Contains(gotText, "top-level") {
+		t.Fatalf("ApplySubtreeFilter() missing direct data child:\n%s", gotText)
+	}
+	if strings.Contains(gotText, "nested") || strings.Contains(gotText, "<wrapper") {
+		t.Fatalf("ApplySubtreeFilter() included nested non-child subtree:\n%s", gotText)
+	}
+}
+
+func TestApplySubtreeFilterCopiesUnfilteredData(t *testing.T) {
+	tests := []struct {
+		name   string
+		filter *Filter
+	}{
+		{
+			name:   "nil filter",
+			filter: nil,
+		},
+		{
+			name:   "empty filter",
+			filter: &Filter{},
+		},
+		{
+			name:   "whitespace filter",
+			filter: &Filter{Content: []byte(" \n\t ")},
+		},
+		{
+			name:   "explicit subtree filter",
+			filter: &Filter{Type: "\n subtree \t"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			xmlData := []byte(`<data><interfaces/></data>`)
+
+			got, err := ApplySubtreeFilter(xmlData, tt.filter)
+			if err != nil {
+				t.Fatalf("ApplySubtreeFilter() error = %v", err)
+			}
+			if !bytes.Equal(got, xmlData) {
+				t.Fatalf("ApplySubtreeFilter() = %s, want %s", got, xmlData)
+			}
+
+			got[0] = 'X'
+			if xmlData[0] == 'X' {
+				t.Fatal("ApplySubtreeFilter() returned data sharing caller buffer")
+			}
+		})
+	}
+}
+
+func TestApplySubtreeFilterRejectsUnsupportedFilterTypes(t *testing.T) {
+	tests := []struct {
+		name   string
+		filter *Filter
+	}{
+		{
+			name:   "xpath",
+			filter: &Filter{Type: "xpath", Select: "/interfaces"},
+		},
+		{
+			name:   "unsupported",
+			filter: &Filter{Type: "unsupported"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := ApplySubtreeFilter([]byte(`<data><interfaces/></data>`), tt.filter)
+			if err == nil {
+				t.Fatal("ApplySubtreeFilter() error = nil, want unsupported filter type error")
+			}
+			if !strings.Contains(err.Error(), "unsupported subtree filter type") {
+				t.Fatalf("ApplySubtreeFilter() error = %v, want unsupported subtree filter type", err)
+			}
+		})
+	}
+}
+
+func TestApplySubtreeFilterRejectsEmptyNonElementFilters(t *testing.T) {
+	tests := []struct {
+		name   string
+		filter *Filter
+	}{
+		{
+			name:   "comment only",
+			filter: &Filter{Content: []byte(`<!-- no element -->`)},
+		},
+		{
+			name:   "text only",
+			filter: &Filter{Content: []byte(`junk`)},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := ApplySubtreeFilter([]byte(`<data><interfaces/></data>`), tt.filter)
+			if err == nil {
+				t.Fatal("ApplySubtreeFilter() error = nil, want empty subtree filter error")
+			}
+			if !strings.Contains(err.Error(), "subtree filter must contain at least one element") {
+				t.Fatalf("ApplySubtreeFilter() error = %v, want missing element error", err)
+			}
+		})
+	}
+}
+
+func TestApplySubtreeFilterRejectsInvalidModelPaths(t *testing.T) {
+	tests := []struct {
+		name   string
+		filter *Filter
+	}{
+		{
+			name:   "unknown top-level element",
+			filter: &Filter{Content: []byte(`<unknown/>`)},
+		},
+		{
+			name: "namespace mismatch",
+			filter: &Filter{
+				Content: []byte(`<rt:interfaces/>`),
+				Attrs: []xml.Attr{
+					{Name: xml.Name{Space: "xmlns", Local: "rt"}, Value: IETFRoutingNS},
+				},
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := ApplySubtreeFilter([]byte(`<data><interfaces/></data>`), tt.filter)
+			if err == nil {
+				t.Fatal("ApplySubtreeFilter() error = nil, want invalid path error")
+			}
+			if !strings.Contains(err.Error(), "invalid subtree filter path") {
+				t.Fatalf("ApplySubtreeFilter() error = %v, want invalid path error", err)
+			}
+		})
+	}
+}
+
+func TestApplySubtreeFilterRejectsElementAttributes(t *testing.T) {
+	filter := &Filter{Content: []byte(`<interfaces foo="bar"/>`)}
+
+	_, err := ApplySubtreeFilter([]byte(`<data><interfaces/></data>`), filter)
+	if err == nil {
+		t.Fatal("ApplySubtreeFilter() error = nil, want element attribute error")
+	}
+	if !strings.Contains(err.Error(), `subtree filter element attribute "foo" is not supported`) {
+		t.Fatalf("ApplySubtreeFilter() error = %v, want unsupported element attribute", err)
+	}
+}
+
+func TestApplySubtreeFilterRejectsMalformedData(t *testing.T) {
+	_, err := ApplySubtreeFilter([]byte(`<data><interfaces>`), &Filter{Content: []byte(`<interfaces/>`)})
+	if err == nil {
+		t.Fatal("ApplySubtreeFilter() error = nil, want malformed data error")
 	}
 }
 
@@ -323,5 +754,33 @@ func TestParseFilterElements(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestParseFilterElementPaths(t *testing.T) {
+	paths, err := parseFilterElementPathsWithContext(
+		[]byte(`<if:interfaces><if:interface><if:name/></if:interface></if:interfaces>`),
+		[]xml.Attr{{Name: xml.Name{Space: "xmlns", Local: "if"}, Value: IETFInterfacesNS}},
+	)
+	if err != nil {
+		t.Fatalf("parseFilterElementPathsWithContext() error = %v", err)
+	}
+	want := [][]subtreeFilterElement{
+		{{LocalName: "interfaces", Namespace: IETFInterfacesNS}},
+		{{LocalName: "interfaces", Namespace: IETFInterfacesNS}, {LocalName: "interface", Namespace: IETFInterfacesNS}},
+		{{LocalName: "interfaces", Namespace: IETFInterfacesNS}, {LocalName: "interface", Namespace: IETFInterfacesNS}, {LocalName: "name", Namespace: IETFInterfacesNS}},
+	}
+	if len(paths) != len(want) {
+		t.Fatalf("paths length = %d, want %d: %#v", len(paths), len(want), paths)
+	}
+	for i := range want {
+		if len(paths[i]) != len(want[i]) {
+			t.Fatalf("paths[%d] length = %d, want %d", i, len(paths[i]), len(want[i]))
+		}
+		for j := range want[i] {
+			if paths[i][j] != want[i][j] {
+				t.Fatalf("paths[%d][%d] = %#v, want %#v", i, j, paths[i][j], want[i][j])
+			}
+		}
 	}
 }

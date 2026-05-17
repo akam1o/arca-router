@@ -10,6 +10,7 @@ import (
 	"os"
 	"runtime"
 	"sort"
+	"strconv"
 	"time"
 
 	"github.com/akam1o/arca-router/internal/model"
@@ -24,6 +25,9 @@ type GetRequest struct {
 }
 
 func (r *GetRequest) SetInheritedNamespaceAttrs(attrs []xml.Attr) {
+	if r == nil {
+		return
+	}
 	if r.Filter != nil {
 		r.Filter.InheritedAttrs = cloneXMLAttrs(attrs)
 	}
@@ -75,20 +79,42 @@ func (s *Server) getOperationalData(ctx context.Context, filter *Filter) ([]byte
 		}
 	}
 
-	interfaceStates := s.collectInterfaceOperationalState(ctx, filter)
-	routes := s.collectRouteOperationalState(ctx, filter)
-	bgpNeighbors := s.collectBGPOperationalState(ctx, filter)
-	ospfNeighbors := s.collectOSPFOperationalState(ctx, filter, false)
-	ospf3Neighbors := s.collectOSPFOperationalState(ctx, filter, true)
-	bfdStatus := s.collectBFDOperationalState(ctx, filter)
-	return buildOperationalData(cfg, filter, time.Now().UTC(), interfaceStates, routes, bgpNeighbors, ospfNeighbors, ospf3Neighbors, bfdStatus)
+	collectionFilter := filter
+	if usesExperimentalXPathEngine(filter) {
+		collectionFilter = nil
+	}
+	interfaceStates := s.collectInterfaceOperationalState(ctx, collectionFilter)
+	routes := s.collectRouteOperationalState(ctx, collectionFilter)
+	bgpNeighbors := s.collectBGPOperationalState(ctx, collectionFilter)
+	ospfNeighbors := s.collectOSPFOperationalState(ctx, collectionFilter, false)
+	ospf3Neighbors := s.collectOSPFOperationalState(ctx, collectionFilter, true)
+	bfdStatus := s.collectBFDOperationalState(ctx, collectionFilter)
+	data, err := buildOperationalData(cfg, collectionFilter, time.Now().UTC(), interfaceStates, routes, bgpNeighbors, ospfNeighbors, ospf3Neighbors, bfdStatus)
+	if err != nil {
+		return nil, err
+	}
+	if usesExperimentalXPathEngine(filter) {
+		return applyExperimentalXPathFilter("get", data, filter)
+	}
+	return data, nil
 }
 
 // GetOperationalData builds operational state without a datastore-backed
 // server. It is kept for tests and callers that only need local system state.
 func GetOperationalData(ctx context.Context, filter *Filter) ([]byte, error) {
 	_ = ctx
-	return buildOperationalData(config.NewConfig(), filter, time.Now().UTC(), nil, nil, nil, nil, nil, nil)
+	outputFilter := filter
+	if usesExperimentalXPathEngine(filter) {
+		outputFilter = nil
+	}
+	data, err := buildOperationalData(config.NewConfig(), outputFilter, time.Now().UTC(), nil, nil, nil, nil, nil, nil)
+	if err != nil {
+		return nil, err
+	}
+	if usesExperimentalXPathEngine(filter) {
+		return applyExperimentalXPathFilter("get", data, filter)
+	}
+	return data, nil
 }
 
 // buildAllOperationalData builds operational data XML for the inside of <data>.
@@ -173,6 +199,7 @@ func buildOperationalData(cfg *config.Config, filter *Filter, now time.Time, int
 	if cfg == nil {
 		cfg = config.NewConfig()
 	}
+	xpathFilter := outputXPathFilter(filter)
 
 	var buf bytes.Buffer
 	if includeOperationalSection(filter, "system") {
@@ -181,12 +208,17 @@ func buildOperationalData(cfg *config.Config, filter *Filter, now time.Time, int
 		}
 	}
 	if includeOperationalSection(filter, "interfaces") && (len(cfg.Interfaces) > 0 || len(interfaceStates) > 0) {
-		if err := writeInterfaceStateXML(&buf, cfg.Interfaces, interfaceStates); err != nil {
+		if err := writeInterfaceStateXML(&buf, cfg.Interfaces, interfaceStates, xpathFilter); err != nil {
 			return nil, err
 		}
 	}
-	if includeOperationalSection(filter, "routing", "routing-state", "routing-protocols", "routes") && hasRoutingState(cfg) {
-		if err := writeRoutingStateXML(&buf, cfg); err != nil {
+	if includeOperationalSectionPaths(filter,
+		[]string{"routing"},
+		[]string{"routing", "routing-state"},
+		[]string{"routing", "routing-state", "routes"},
+		[]string{"routing", "routing-state", "routing-protocols"},
+	) && hasRoutingState(cfg) {
+		if err := writeRoutingStateXML(&buf, cfg, xpathFilter); err != nil {
 			return nil, err
 		}
 	}
@@ -205,10 +237,16 @@ func buildOperationalData(cfg *config.Config, filter *Filter, now time.Time, int
 	if !includeOperationalSection(filter, "state", "protocols", "bfd") {
 		bfdStatus = nil
 	}
+	routes = filterRouteOperationalStates(routes, xpathFilter)
+	bgpNeighbors = filterBGPOperationalNeighbors(bgpNeighbors, xpathFilter)
+	ospfNeighbors = filterOSPFOperationalNeighbors(ospfNeighbors, xpathFilter, "ospf")
+	ospf3Neighbors = filterOSPFOperationalNeighbors(ospf3Neighbors, xpathFilter, "ospf3")
+	bfdStatus = filterBFDOperationalState(bfdStatus, xpathFilter)
 	routingInstances, err := collectRoutingInstanceOperationalState(cfg, filter)
 	if err != nil {
 		return nil, err
 	}
+	routingInstances = filterRoutingInstanceOperationalStates(routingInstances, xpathFilter)
 	if hasArcaOperationalState(routes, routingInstances, bgpNeighbors, ospfNeighbors, ospf3Neighbors, bfdStatus) {
 		if err := writeArcaStateXML(&buf, routes, routingInstances, bgpNeighbors, ospfNeighbors, ospf3Neighbors, bfdStatus); err != nil {
 			return nil, err
@@ -327,13 +365,214 @@ func hasBFDOperationalState(status *BFDOperationalState) bool {
 		status.LastError != ""
 }
 
+func filterRouteOperationalStates(routes []RouteOperationalState, xpathFilter *XPathFilter) []RouteOperationalState {
+	return filterOperationalList(routes, xpathFilter, []string{"state", "routes", "route"}, func(route RouteOperationalState, key string) []string {
+		switch key {
+		case "prefix":
+			return nonEmptyValues(route.Prefix)
+		case "next-hop":
+			return nonEmptyValues(route.NextHop)
+		case "protocol":
+			return nonEmptyValues(route.Protocol)
+		case "metric":
+			return []string{fmt.Sprintf("%d", route.Metric)}
+		case "interface":
+			return nonEmptyValues(route.Interface)
+		case "active":
+			return []string{fmt.Sprintf("%t", route.Active)}
+		default:
+			return nil
+		}
+	})
+}
+
+func filterRoutingInstanceOperationalStates(instances []RoutingInstanceOperationalState, xpathFilter *XPathFilter) []RoutingInstanceOperationalState {
+	return filterOperationalList(instances, xpathFilter, []string{"state", "routing-instances", "instance"}, func(instance RoutingInstanceOperationalState, key string) []string {
+		switch key {
+		case "name":
+			return nonEmptyValues(instance.Name)
+		case "instance-type":
+			return nonEmptyValues(instance.InstanceType)
+		case "route-distinguisher":
+			return nonEmptyValues(instance.RouteDistinguisher)
+		case "ipv4-table-id":
+			return []string{fmt.Sprintf("%d", instance.IPv4TableID)}
+		case "ipv6-table-id":
+			return []string{fmt.Sprintf("%d", instance.IPv6TableID)}
+		case "import-target":
+			return instance.ImportTargets
+		case "export-target":
+			return instance.ExportTargets
+		case "import-policy":
+			return instance.ImportPolicies
+		case "export-policy":
+			return instance.ExportPolicies
+		case "interface":
+			return instance.Interfaces
+		default:
+			return nil
+		}
+	})
+}
+
+func filterBGPOperationalNeighbors(neighbors []BGPNeighborOperationalState, xpathFilter *XPathFilter) []BGPNeighborOperationalState {
+	return filterOperationalList(neighbors, xpathFilter, []string{"state", "protocols", "bgp", "neighbor"}, func(neighbor BGPNeighborOperationalState, key string) []string {
+		switch key {
+		case "peer-address":
+			return nonEmptyValues(neighbor.PeerAddress)
+		case "peer-as":
+			return []string{fmt.Sprintf("%d", neighbor.PeerAS)}
+		case "state":
+			return nonEmptyValues(neighbor.State)
+		case "uptime-seconds":
+			return []string{fmt.Sprintf("%d", neighbor.UptimeSecs)}
+		case "prefix-received":
+			return []string{fmt.Sprintf("%d", neighbor.PrefixReceived)}
+		case "prefix-sent":
+			return []string{fmt.Sprintf("%d", neighbor.PrefixSent)}
+		default:
+			return nil
+		}
+	})
+}
+
+func filterOSPFOperationalNeighbors(neighbors []OSPFNeighborOperationalState, xpathFilter *XPathFilter, protocol string) []OSPFNeighborOperationalState {
+	return filterOperationalList(neighbors, xpathFilter, []string{"state", "protocols", protocol, "neighbor"}, func(neighbor OSPFNeighborOperationalState, key string) []string {
+		switch key {
+		case "router-id":
+			return nonEmptyValues(neighbor.RouterID)
+		case "address":
+			return nonEmptyValues(neighbor.Address)
+		case "interface":
+			return nonEmptyValues(neighbor.Interface)
+		case "state":
+			return nonEmptyValues(neighbor.State)
+		case "role":
+			return nonEmptyValues(neighbor.Role)
+		case "priority":
+			return []string{fmt.Sprintf("%d", neighbor.Priority)}
+		case "dead-time-seconds":
+			return []string{fmt.Sprintf("%d", neighbor.DeadTimeSecs)}
+		case "uptime-seconds":
+			return []string{fmt.Sprintf("%d", neighbor.UptimeSecs)}
+		default:
+			return nil
+		}
+	})
+}
+
+func filterBFDOperationalState(status *BFDOperationalState, xpathFilter *XPathFilter) *BFDOperationalState {
+	if status == nil {
+		return nil
+	}
+	filteredPeers := filterOperationalList(status.Peers, xpathFilter, []string{"state", "protocols", "bfd", "peer"}, func(peer BFDPeerOperationalState, key string) []string {
+		switch key {
+		case "address":
+			return nonEmptyValues(peer.Peer)
+		case "local-address":
+			return nonEmptyValues(peer.LocalAddress)
+		case "interface":
+			return nonEmptyValues(peer.Interface)
+		case "vrf":
+			return nonEmptyValues(peer.VRF)
+		case "status":
+			return nonEmptyValues(peer.Status)
+		case "diagnostic":
+			return nonEmptyValues(peer.Diagnostic)
+		case "remote-diagnostic":
+			return nonEmptyValues(peer.RemoteDiagnostic)
+		case "observed":
+			return []string{fmt.Sprintf("%t", peer.Observed)}
+		case "up":
+			return []string{fmt.Sprintf("%t", peer.Up)}
+		case "session-down-events":
+			return []string{fmt.Sprintf("%d", peer.SessionDownEvents)}
+		case "rx-fail-packets":
+			return []string{fmt.Sprintf("%d", peer.RxFailPackets)}
+		default:
+			return nil
+		}
+	})
+	if len(filteredPeers) == len(status.Peers) {
+		return status
+	}
+	filtered := *status
+	filtered.Peers = filteredPeers
+	return &filtered
+}
+
+func filterOperationalList[T any](items []T, xpathFilter *XPathFilter, path []string, values func(T, string) []string) []T {
+	segmentIndex, ok := xpathListSegmentIndex(xpathFilter, path)
+	if !ok {
+		return items
+	}
+	predicates := xpathFilter.Predicates[segmentIndex]
+	filtered := make([]T, 0, len(items))
+	for _, item := range items {
+		if operationalItemMatchesPredicates(item, predicates, values) {
+			filtered = append(filtered, item)
+		}
+	}
+	return filtered
+}
+
+func operationalItemMatchesPredicates[T any](item T, predicates map[string]string, values func(T, string) []string) bool {
+	for key, want := range predicates {
+		if !stringSliceContains(values(item, key), want) {
+			return false
+		}
+	}
+	return true
+}
+
+func nonEmptyValues(values ...string) []string {
+	out := make([]string, 0, len(values))
+	for _, value := range values {
+		if value != "" {
+			out = append(out, value)
+		}
+	}
+	return out
+}
+
+func stringSliceContains(values []string, want string) bool {
+	for _, value := range values {
+		if value == want {
+			return true
+		}
+	}
+	return false
+}
+
 func includeOperationalSection(filter *Filter, names ...string) bool {
-	if filter == nil || len(bytes.TrimSpace(filter.Content)) == 0 {
+	return includeOperationalSectionPaths(filter, names)
+}
+
+func includeOperationalSectionPaths(filter *Filter, paths ...[]string) bool {
+	if filter == nil {
 		return true
 	}
-	for _, name := range names {
-		if filterMatches(filter, name) {
-			return true
+	filterType := normalizedFilterType(filter)
+	switch filterType {
+	case "xpath":
+		for _, path := range paths {
+			if filterMatchesEnhanced(filter, path) {
+				return true
+			}
+		}
+		return false
+	case "", "subtree":
+	default:
+		return false
+	}
+	if len(bytes.TrimSpace(filter.Content)) == 0 {
+		return true
+	}
+	for _, path := range paths {
+		for _, name := range path {
+			if filterMatches(filter, name) {
+				return true
+			}
 		}
 	}
 	return false
@@ -354,7 +593,7 @@ func writeSystemStateXML(buf *bytes.Buffer, cfg *config.Config, now time.Time) e
 		}
 	}
 
-	buf.WriteString(`  <system xmlns="urn:ietf:params:xml:ns:yang:ietf-system">` + "\n")
+	buf.WriteString(`  <system xmlns="` + IETFSystemNS + `">` + "\n")
 	buf.WriteString("    <system-state>\n")
 	if hostname != "" {
 		if err := writeEscapedElement(buf, "      ", "hostname", hostname); err != nil {
@@ -379,12 +618,15 @@ func writeSystemStateXML(buf *bytes.Buffer, cfg *config.Config, now time.Time) e
 	return nil
 }
 
-func writeInterfaceStateXML(buf *bytes.Buffer, interfaces map[string]*config.Interface, states map[string]*InterfaceOperationalState) error {
+func writeInterfaceStateXML(buf *bytes.Buffer, interfaces map[string]*config.Interface, states map[string]*InterfaceOperationalState, xpathFilter *XPathFilter) error {
 	buf.WriteString(`  <interfaces xmlns="` + IETFInterfacesNS + `">` + "\n")
 	for _, name := range sortedInterfaceStateNames(interfaces, states) {
 		iface := interfaces[name]
 		state := states[name]
 		if iface == nil && state == nil {
+			continue
+		}
+		if !interfaceStateMatchesXPathPredicates(xpathFilter, name, iface, state) {
 			continue
 		}
 		buf.WriteString("    <interface>\n")
@@ -536,13 +778,16 @@ func writeInterfaceQueuesXML(buf *bytes.Buffer, queues *InterfaceOperationalQueu
 	return nil
 }
 
-func writeRoutingStateXML(buf *bytes.Buffer, cfg *config.Config) error {
+func writeRoutingStateXML(buf *bytes.Buffer, cfg *config.Config, xpathFilter *XPathFilter) error {
 	buf.WriteString(`  <routing xmlns="` + IETFRoutingNS + `">` + "\n")
 	buf.WriteString("    <routing-state>\n")
 	if cfg.RoutingOptions != nil && len(cfg.RoutingOptions.StaticRoutes) > 0 {
 		buf.WriteString("      <routes>\n")
 		for _, route := range cfg.RoutingOptions.StaticRoutes {
 			if route == nil {
+				continue
+			}
+			if !routingStateRouteMatchesXPathPredicates(xpathFilter, route) {
 				continue
 			}
 			buf.WriteString("        <route>\n")
@@ -569,12 +814,12 @@ func writeRoutingStateXML(buf *bytes.Buffer, cfg *config.Config) error {
 			if cfg.RoutingOptions != nil && cfg.RoutingOptions.AutonomousSystem != 0 {
 				name = fmt.Sprintf("BGP-%d", cfg.RoutingOptions.AutonomousSystem)
 			}
-			if err := writeRoutingProtocolXML(buf, "bgp", name); err != nil {
+			if err := writeRoutingProtocolXML(buf, xpathFilter, "bgp", name); err != nil {
 				return err
 			}
 		}
 		if cfg.Protocols.OSPF != nil {
-			if err := writeRoutingProtocolXML(buf, "ospf", "OSPF"); err != nil {
+			if err := writeRoutingProtocolXML(buf, xpathFilter, "ospf", "OSPF"); err != nil {
 				return err
 			}
 		}
@@ -585,7 +830,40 @@ func writeRoutingStateXML(buf *bytes.Buffer, cfg *config.Config) error {
 	return nil
 }
 
-func writeRoutingProtocolXML(buf *bytes.Buffer, protocolType, name string) error {
+func routingStateRouteMatchesXPathPredicates(xpathFilter *XPathFilter, route *config.StaticRoute) bool {
+	segmentIndex, ok := xpathListSegmentIndex(xpathFilter, []string{"routing", "routing-state", "routes", "route"})
+	if !ok {
+		return true
+	}
+	for key, want := range xpathFilter.Predicates[segmentIndex] {
+		var got string
+		switch key {
+		case "destination-prefix":
+			got = route.Prefix
+		case "next-hop":
+			got = route.NextHop
+		case "source-protocol":
+			got = "static"
+		case "metric":
+			if route.Distance == 0 {
+				return false
+			}
+			got = strconv.Itoa(route.Distance)
+		default:
+			return false
+		}
+		if got != want {
+			return false
+		}
+	}
+	return true
+}
+
+func writeRoutingProtocolXML(buf *bytes.Buffer, xpathFilter *XPathFilter, protocolType, name string) error {
+	const adminStatus = "configured"
+	if !routingProtocolMatchesXPathPredicates(xpathFilter, protocolType, name, adminStatus) {
+		return nil
+	}
 	buf.WriteString("        <routing-protocol>\n")
 	if err := writeEscapedElement(buf, "          ", "type", protocolType); err != nil {
 		return err
@@ -593,11 +871,35 @@ func writeRoutingProtocolXML(buf *bytes.Buffer, protocolType, name string) error
 	if err := writeEscapedElement(buf, "          ", "name", name); err != nil {
 		return err
 	}
-	if err := writeEscapedElement(buf, "          ", "admin-status", "configured"); err != nil {
+	if err := writeEscapedElement(buf, "          ", "admin-status", adminStatus); err != nil {
 		return err
 	}
 	buf.WriteString("        </routing-protocol>\n")
 	return nil
+}
+
+func routingProtocolMatchesXPathPredicates(xpathFilter *XPathFilter, protocolType, name, adminStatus string) bool {
+	segmentIndex, ok := xpathListSegmentIndex(xpathFilter, []string{"routing", "routing-state", "routing-protocols", "routing-protocol"})
+	if !ok {
+		return true
+	}
+	for key, want := range xpathFilter.Predicates[segmentIndex] {
+		var got string
+		switch key {
+		case "type":
+			got = protocolType
+		case "name":
+			got = name
+		case "admin-status":
+			got = adminStatus
+		default:
+			return false
+		}
+		if got != want {
+			return false
+		}
+	}
+	return true
 }
 
 func writeArcaStateXML(buf *bytes.Buffer, routes []RouteOperationalState, routingInstances []RoutingInstanceOperationalState, bgpNeighbors []BGPNeighborOperationalState, ospfNeighbors []OSPFNeighborOperationalState, ospf3Neighbors []OSPFNeighborOperationalState, bfdStatus *BFDOperationalState) error {

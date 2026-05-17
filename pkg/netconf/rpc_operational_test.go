@@ -2,12 +2,38 @@ package netconf
 
 import (
 	"bytes"
+	"context"
+	"encoding/xml"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/akam1o/arca-router/pkg/config"
 )
+
+type testOperationalStateProvider struct {
+	routes []RouteOperationalState
+}
+
+func (p *testOperationalStateProvider) InterfaceStates(context.Context) (map[string]*InterfaceOperationalState, error) {
+	return nil, nil
+}
+
+func (p *testOperationalStateProvider) Routes(context.Context) ([]RouteOperationalState, error) {
+	return append([]RouteOperationalState(nil), p.routes...), nil
+}
+
+func (p *testOperationalStateProvider) BGPNeighbors(context.Context) ([]BGPNeighborOperationalState, error) {
+	return nil, nil
+}
+
+func (p *testOperationalStateProvider) OSPFNeighbors(context.Context, bool) ([]OSPFNeighborOperationalState, error) {
+	return nil, nil
+}
+
+func (p *testOperationalStateProvider) BFDStatus(context.Context) (*BFDOperationalState, error) {
+	return nil, nil
+}
 
 func TestBuildAllOperationalDataDoesNotReturnFabricatedCounters(t *testing.T) {
 	data := buildAllOperationalData()
@@ -55,6 +81,132 @@ func TestBuildOperationalDataUsesRunningConfig(t *testing.T) {
 		if !bytes.Contains(data, []byte(want)) {
 			t.Fatalf("operational data missing %q:\n%s", want, data)
 		}
+	}
+}
+
+func TestGetOperationalDataExperimentalXPathFilterSupportsFunctions(t *testing.T) {
+	srv := NewServer(nil, nil)
+	srv.SetOperationalStateProvider(&testOperationalStateProvider{
+		routes: []RouteOperationalState{
+			{
+				Prefix:    "192.0.2.0/24",
+				NextHop:   "192.0.2.1",
+				Protocol:  "static",
+				Metric:    10,
+				Interface: "ge-0/0/0",
+				Active:    true,
+			},
+			{
+				Prefix:    "198.51.100.0/24",
+				NextHop:   "192.0.2.2",
+				Protocol:  "bgp",
+				Metric:    20,
+				Interface: "ge-0/0/1",
+				Active:    true,
+			},
+		},
+	})
+	filter := &Filter{
+		Type:   "xpath",
+		Select: "/arca:state/arca:routes/arca:route[contains(arca:prefix, '192.0.2')]",
+		Attrs: []xml.Attr{
+			{Name: xml.Name{Space: "xmlns", Local: "arca"}, Value: ArcaConfigNS},
+		},
+	}
+
+	data, err := srv.getOperationalData(context.Background(), filter)
+	if err != nil {
+		t.Fatalf("getOperationalData() error = %v", err)
+	}
+	for _, want := range []string{"<routes>", "<prefix>192.0.2.0/24</prefix>", "<protocol>static</protocol>"} {
+		if !bytes.Contains(data, []byte(want)) {
+			t.Fatalf("operational data missing experimental XPath value %q:\n%s", want, data)
+		}
+	}
+	for _, unexpected := range []string{"198.51.100.0/24", "192.0.2.2", "<protocol>bgp</protocol>"} {
+		if bytes.Contains(data, []byte(unexpected)) {
+			t.Fatalf("operational data included experimental XPath mismatch %q:\n%s", unexpected, data)
+		}
+	}
+}
+
+func TestBuildOperationalDataFiltersIETFRoutingStateRouteXPathPredicates(t *testing.T) {
+	cfg := config.NewConfig()
+	cfg.RoutingOptions = &config.RoutingOptions{
+		StaticRoutes: []*config.StaticRoute{
+			{Prefix: "0.0.0.0/0", NextHop: "192.0.2.254", Distance: 5},
+			{Prefix: "198.51.100.0/24", NextHop: "192.0.2.253", Distance: 20},
+		},
+	}
+	filter := &Filter{Type: "xpath", Select: "/routing/routing-state/routes/route[destination-prefix='0.0.0.0/0'][metric='5']"}
+
+	data, err := buildOperationalData(cfg, filter, time.Date(2026, 5, 12, 4, 0, 0, 0, time.UTC), nil, nil, nil, nil, nil, nil)
+	if err != nil {
+		t.Fatalf("buildOperationalData() error = %v", err)
+	}
+
+	for _, want := range []string{
+		`<routing xmlns="urn:ietf:params:xml:ns:yang:ietf-routing">`,
+		"<routing-state>",
+		"<destination-prefix>0.0.0.0/0</destination-prefix>",
+		"<next-hop>192.0.2.254</next-hop>",
+		"<source-protocol>static</source-protocol>",
+		"<metric>5</metric>",
+	} {
+		if !bytes.Contains(data, []byte(want)) {
+			t.Fatalf("operational data missing filtered routing-state route value %q:\n%s", want, data)
+		}
+	}
+	for _, unexpected := range []string{"198.51.100.0/24", "192.0.2.253", "<metric>20</metric>"} {
+		if bytes.Contains(data, []byte(unexpected)) {
+			t.Fatalf("operational data included predicate-mismatched routing-state route value %q:\n%s", unexpected, data)
+		}
+	}
+}
+
+func TestBuildOperationalDataFiltersIETFRoutingStateProtocolXPathPredicates(t *testing.T) {
+	cfg := config.NewConfig()
+	cfg.RoutingOptions = &config.RoutingOptions{AutonomousSystem: 65000}
+	cfg.Protocols = &config.ProtocolConfig{
+		BGP:  &config.BGPConfig{},
+		OSPF: &config.OSPFConfig{},
+	}
+	filter := &Filter{Type: "xpath", Select: "/routing/routing-state/routing-protocols/routing-protocol[type='bgp']"}
+
+	data, err := buildOperationalData(cfg, filter, time.Date(2026, 5, 12, 4, 0, 0, 0, time.UTC), nil, nil, nil, nil, nil, nil)
+	if err != nil {
+		t.Fatalf("buildOperationalData() error = %v", err)
+	}
+
+	for _, want := range []string{
+		`<routing xmlns="urn:ietf:params:xml:ns:yang:ietf-routing">`,
+		"<routing-protocols>",
+		"<type>bgp</type>",
+		"<name>BGP-65000</name>",
+		"<admin-status>configured</admin-status>",
+	} {
+		if !bytes.Contains(data, []byte(want)) {
+			t.Fatalf("operational data missing filtered routing protocol value %q:\n%s", want, data)
+		}
+	}
+	for _, unexpected := range []string{"<type>ospf</type>", "<name>OSPF</name>"} {
+		if bytes.Contains(data, []byte(unexpected)) {
+			t.Fatalf("operational data included predicate-mismatched routing protocol value %q:\n%s", unexpected, data)
+		}
+	}
+}
+
+func TestBuildOperationalDataRejectsUnsupportedFilterType(t *testing.T) {
+	cfg := config.NewConfig()
+	cfg.System = &config.SystemConfig{HostName: "router1"}
+	filter := &Filter{Type: "unsupported"}
+
+	data, err := buildOperationalData(cfg, filter, time.Date(2026, 5, 12, 4, 0, 0, 0, time.UTC), nil, nil, nil, nil, nil, nil)
+	if err != nil {
+		t.Fatalf("buildOperationalData() error = %v", err)
+	}
+	if len(bytes.TrimSpace(data)) != 0 {
+		t.Fatalf("buildOperationalData() = %q, want empty output for unsupported filter type", data)
 	}
 }
 
@@ -122,6 +274,37 @@ func TestBuildOperationalDataUsesLiveInterfaceState(t *testing.T) {
 	} {
 		if !bytes.Contains(data, []byte(want)) {
 			t.Fatalf("operational data missing %q:\n%s", want, data)
+		}
+	}
+}
+
+func TestBuildOperationalDataFiltersInterfaceStateXPathPredicates(t *testing.T) {
+	cfg := config.NewConfig()
+	filter := &Filter{Type: "xpath", Select: "/interfaces/interface[admin-status='up']"}
+	data, err := buildOperationalData(cfg, filter, time.Date(2026, 5, 12, 4, 0, 0, 0, time.UTC), map[string]*InterfaceOperationalState{
+		"ge-0/0/0": {
+			Name:        "ge-0/0/0",
+			AdminStatus: "up",
+			OperStatus:  "up",
+		},
+		"xe-0/0/0": {
+			Name:        "xe-0/0/0",
+			AdminStatus: "down",
+			OperStatus:  "down",
+		},
+	}, nil, nil, nil, nil, nil)
+	if err != nil {
+		t.Fatalf("buildOperationalData() error = %v", err)
+	}
+
+	for _, want := range []string{"<interfaces", "<name>ge-0/0/0</name>", "<admin-status>up</admin-status>"} {
+		if !bytes.Contains(data, []byte(want)) {
+			t.Fatalf("operational data missing filtered interface value %q:\n%s", want, data)
+		}
+	}
+	for _, unexpected := range []string{"xe-0/0/0", "<admin-status>down</admin-status>"} {
+		if bytes.Contains(data, []byte(unexpected)) {
+			t.Fatalf("operational data included predicate-mismatched interface value %q:\n%s", unexpected, data)
 		}
 	}
 }
@@ -194,6 +377,45 @@ func TestBuildOperationalDataWritesBFDState(t *testing.T) {
 	}
 	if bytes.Index(data, []byte("<address>192.0.2.2</address>")) > bytes.Index(data, []byte("<address>192.0.2.3</address>")) {
 		t.Fatalf("BFD peers are not sorted:\n%s", data)
+	}
+}
+
+func TestBuildOperationalDataFiltersBFDPeerXPathPredicates(t *testing.T) {
+	cfg := config.NewConfig()
+	filter := &Filter{Type: "xpath", Select: "/state/protocols/bfd/peer[address='192.0.2.3'][status='down']"}
+	data, err := buildOperationalData(cfg, filter, time.Date(2026, 5, 12, 4, 0, 0, 0, time.UTC), nil, nil, nil, nil, nil, &BFDOperationalState{
+		ConfiguredPeers: 2,
+		ObservedPeers:   2,
+		Peers: []BFDPeerOperationalState{
+			{
+				Peer:      "192.0.2.2",
+				Interface: "ge-0/0/0",
+				Status:    "up",
+				Observed:  true,
+				Up:        true,
+			},
+			{
+				Peer:      "192.0.2.3",
+				Interface: "ge-0/0/1",
+				Status:    "down",
+				Observed:  true,
+				Up:        false,
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("buildOperationalData() error = %v", err)
+	}
+
+	for _, want := range []string{"<bfd>", "<configured-peers>2</configured-peers>", "<address>192.0.2.3</address>", "<status>down</status>"} {
+		if !bytes.Contains(data, []byte(want)) {
+			t.Fatalf("operational data missing filtered BFD value %q:\n%s", want, data)
+		}
+	}
+	for _, unexpected := range []string{"192.0.2.2", "ge-0/0/0", "<status>up</status>"} {
+		if bytes.Contains(data, []byte(unexpected)) {
+			t.Fatalf("operational data included predicate-mismatched BFD peer value %q:\n%s", unexpected, data)
+		}
 	}
 }
 
@@ -279,6 +501,43 @@ func TestBuildOperationalDataWritesRouteState(t *testing.T) {
 	}
 }
 
+func TestBuildOperationalDataFiltersRouteXPathPredicates(t *testing.T) {
+	cfg := config.NewConfig()
+	filter := &Filter{Type: "xpath", Select: "/state/routes/route[prefix='192.0.2.0/24'][protocol='static']"}
+	data, err := buildOperationalData(cfg, filter, time.Date(2026, 5, 12, 4, 0, 0, 0, time.UTC), nil, []RouteOperationalState{
+		{
+			Prefix:    "192.0.2.0/24",
+			NextHop:   "192.0.2.1",
+			Protocol:  "static",
+			Metric:    10,
+			Interface: "ge-0/0/0",
+			Active:    true,
+		},
+		{
+			Prefix:    "198.51.100.0/24",
+			NextHop:   "192.0.2.2",
+			Protocol:  "bgp",
+			Metric:    20,
+			Interface: "ge-0/0/1",
+			Active:    true,
+		},
+	}, nil, nil, nil, nil)
+	if err != nil {
+		t.Fatalf("buildOperationalData() error = %v", err)
+	}
+
+	for _, want := range []string{"<routes>", "<prefix>192.0.2.0/24</prefix>", "<protocol>static</protocol>"} {
+		if !bytes.Contains(data, []byte(want)) {
+			t.Fatalf("operational data missing filtered route value %q:\n%s", want, data)
+		}
+	}
+	for _, unexpected := range []string{"198.51.100.0/24", "192.0.2.2", "<protocol>bgp</protocol>"} {
+		if bytes.Contains(data, []byte(unexpected)) {
+			t.Fatalf("operational data included predicate-mismatched route value %q:\n%s", unexpected, data)
+		}
+	}
+}
+
 func TestBuildOperationalDataWritesBGPNeighborState(t *testing.T) {
 	cfg := config.NewConfig()
 	data, err := buildOperationalData(cfg, nil, time.Date(2026, 5, 12, 4, 0, 0, 0, time.UTC), nil, nil, []BGPNeighborOperationalState{
@@ -309,6 +568,35 @@ func TestBuildOperationalDataWritesBGPNeighborState(t *testing.T) {
 	} {
 		if !bytes.Contains(data, []byte(want)) {
 			t.Fatalf("operational data missing %q:\n%s", want, data)
+		}
+	}
+}
+
+func TestBuildOperationalDataFiltersBGPNeighborXPathPredicates(t *testing.T) {
+	cfg := config.NewConfig()
+	filter := &Filter{Type: "xpath", Select: "/state/protocols/bgp/neighbor[peer-address='2001:db8::2'][state='Established']"}
+	data, err := buildOperationalData(cfg, filter, time.Date(2026, 5, 12, 4, 0, 0, 0, time.UTC), nil, nil, []BGPNeighborOperationalState{
+		{
+			PeerAddress: "2001:db8::2",
+			PeerAS:      65001,
+			State:       "Established",
+		},
+		{
+			PeerAddress: "2001:db8::3",
+			PeerAS:      65002,
+			State:       "Idle",
+		},
+	}, nil, nil, nil)
+	if err != nil {
+		t.Fatalf("buildOperationalData() error = %v", err)
+	}
+
+	if !bytes.Contains(data, []byte("<peer-address>2001:db8::2</peer-address>")) {
+		t.Fatalf("operational data missing filtered BGP neighbor:\n%s", data)
+	}
+	for _, unexpected := range []string{"2001:db8::3", "<peer-as>65002</peer-as>", "<state>Idle</state>"} {
+		if bytes.Contains(data, []byte(unexpected)) {
+			t.Fatalf("operational data included predicate-mismatched BGP neighbor value %q:\n%s", unexpected, data)
 		}
 	}
 }

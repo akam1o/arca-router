@@ -197,6 +197,40 @@ func (s *Server) EditCandidate(ctx context.Context, sessionID, configText string
 	return nil
 }
 
+// ReplaceCandidate replaces a session's candidate config with validated set-command text.
+func (s *Server) ReplaceCandidate(ctx context.Context, sessionID, configText string) error {
+	session, err := s.sessions.Get(sessionID)
+	if err != nil {
+		return err
+	}
+
+	session.mu.Lock()
+	defer session.mu.Unlock()
+	if !session.HasLock {
+		return fmt.Errorf("session %s does not hold the candidate lock", sessionID)
+	}
+	if err := s.ensureCandidateBaseCurrentLocked(session); err != nil {
+		return err
+	}
+
+	cfg, err := parseConfigText(configText)
+	if err != nil {
+		return fmt.Errorf("parse replacement config: %w", err)
+	}
+	if err := s.engine.Validate(ctx, cfg); err != nil {
+		return err
+	}
+	text, err := pkgconfig.ToSetCommandsWithError(cfg.ToLegacyConfig())
+	if err != nil {
+		return fmt.Errorf("serialize replacement config: %w", err)
+	}
+	if !session.CandidateBaseSet {
+		s.setSessionCandidateBaseLocked(session, s.engine.RunningSnapshot())
+	}
+	session.CandidateText = text
+	return nil
+}
+
 // Commit promotes the candidate configuration to running.
 func (s *Server) Commit(ctx context.Context, sessionID, user, message string) (string, uint64, error) {
 	session, err := s.sessions.Get(sessionID)
@@ -453,15 +487,31 @@ func (s *Server) ListHistory(ctx context.Context, limit, offset int) ([]CommitIn
 	}
 	entries := make([]CommitInfo, 0, len(records))
 	for _, r := range records {
+		configText, err := commitRecordConfigText(r)
+		if err != nil {
+			return nil, err
+		}
 		entries = append(entries, CommitInfo{
 			CommitID:   r.CommitID,
 			User:       r.Author,
 			Timestamp:  r.Timestamp,
 			Message:    r.Message,
 			IsRollback: r.IsRollback,
+			ConfigText: configText,
 		})
 	}
 	return entries, nil
+}
+
+func commitRecordConfigText(record *store.CommitRecord) (string, error) {
+	if record == nil || record.Config == nil {
+		return "", nil
+	}
+	text, err := pkgconfig.ToSetCommandsWithError(record.Config.ToLegacyConfig())
+	if err != nil {
+		return "", fmt.Errorf("serialize commit %s config: %w", record.CommitID, err)
+	}
+	return text, nil
 }
 
 // --- SessionService implementation ---
@@ -1275,6 +1325,12 @@ func (s *Server) resetSessionCandidateLocked(session *Session) error {
 			return fmt.Errorf("serialize running config: %w", err)
 		}
 	}
+	s.setSessionCandidateBaseLocked(session, snap)
+	session.CandidateText = text
+	return nil
+}
+
+func (s *Server) setSessionCandidateBaseLocked(session *Session, snap *model.ConfigSnapshot) {
 	session.CandidateBaseSet = true
 	if snap == nil {
 		session.CandidateBaseVersion = 0
@@ -1283,8 +1339,6 @@ func (s *Server) resetSessionCandidateLocked(session *Session) error {
 		session.CandidateBaseVersion = snap.Version
 		session.CandidateBaseHash = snap.Hash
 	}
-	session.CandidateText = text
-	return nil
 }
 
 func (s *Server) ensureCandidateBaseCurrentLocked(session *Session) error {

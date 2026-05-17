@@ -7,6 +7,7 @@ import (
 	"encoding/base64"
 	"encoding/binary"
 	"encoding/pem"
+	"encoding/xml"
 	"fmt"
 	"net"
 	"os"
@@ -54,9 +55,7 @@ type SSHServer struct {
 
 // NewSSHServer creates a new SSH server instance
 func NewSSHServer(config *SSHConfig) (*SSHServer, error) {
-	if config == nil {
-		config = DefaultSSHConfig()
-	}
+	config = sshConfigWithDefaults(config)
 
 	log := logger.New("netconf-ssh", logger.DefaultConfig())
 
@@ -190,20 +189,24 @@ func cleanupDatastoreEphemeralState(ctx context.Context, ds datastore.Datastore)
 
 // SetCommitHook installs a commit coordinator for NETCONF commits.
 func (s *SSHServer) SetCommitHook(h CommitHook) {
-	if s.netconfServer != nil {
+	if s != nil && s.netconfServer != nil {
 		s.netconfServer.SetCommitHook(h)
 	}
 }
 
 // SetOperationalStateProvider installs a live-state source for <get> replies.
 func (s *SSHServer) SetOperationalStateProvider(provider OperationalStateProvider) {
-	if s.netconfServer != nil {
+	if s != nil && s.netconfServer != nil {
 		s.netconfServer.SetOperationalStateProvider(provider)
 	}
 }
 
 // Start starts the SSH server
 func (s *SSHServer) Start(ctx context.Context) error {
+	if s == nil || s.config == nil || s.sessionMgr == nil || s.activeConns == nil || s.done == nil || s.log == nil {
+		return fmt.Errorf("server not initialized")
+	}
+
 	s.mu.Lock()
 	if s.stopped {
 		s.mu.Unlock()
@@ -237,6 +240,10 @@ func (s *SSHServer) Start(ctx context.Context) error {
 
 // Stop stops the SSH server gracefully
 func (s *SSHServer) Stop() error {
+	if s == nil {
+		return nil
+	}
+
 	s.stopOnce.Do(func() {
 		// Mark as not listening
 		atomic.StoreInt32(&s.isListening, 0)
@@ -252,11 +259,15 @@ func (s *SSHServer) Stop() error {
 		s.mu.Unlock()
 
 		// Signal shutdown even if Start failed before creating a listener.
-		close(s.done)
+		if s.done != nil {
+			close(s.done)
+		}
 
 		if listener != nil {
 			if err := listener.Close(); err != nil {
-				s.log.Error("Failed to close listener", "error", err)
+				if s.log != nil {
+					s.log.Error("Failed to close listener", "error", err)
+				}
 			}
 		}
 		for _, conn := range activeConns {
@@ -266,7 +277,9 @@ func (s *SSHServer) Stop() error {
 		}
 
 		// Close all sessions (this will trigger cleanup goroutine to stop)
-		s.sessionMgr.CloseAll()
+		if s.sessionMgr != nil {
+			s.sessionMgr.CloseAll()
+		}
 
 		// Stop rate limiter
 		s.rateLimiter.Stop()
@@ -275,19 +288,27 @@ func (s *SSHServer) Stop() error {
 		s.wg.Wait()
 
 		// Close datastore
-		if err := s.datastore.Close(); err != nil {
-			s.log.Error("Failed to close datastore", "error", err)
+		if s.datastore != nil {
+			if err := s.datastore.Close(); err != nil && s.log != nil {
+				s.log.Error("Failed to close datastore", "error", err)
+			}
 		}
-		if err := s.processLock.Close(); err != nil {
-			s.log.Error("Failed to release datastore process lock", "error", err)
+		if s.processLock != nil {
+			if err := s.processLock.Close(); err != nil && s.log != nil {
+				s.log.Error("Failed to release datastore process lock", "error", err)
+			}
 		}
 
 		// Close user database
-		if err := s.userDB.Close(); err != nil {
-			s.log.Error("Failed to close user database", "error", err)
+		if s.userDB != nil {
+			if err := s.userDB.Close(); err != nil && s.log != nil {
+				s.log.Error("Failed to close user database", "error", err)
+			}
 		}
 
-		s.log.Info("SSH server stopped")
+		if s.log != nil {
+			s.log.Info("SSH server stopped")
+		}
 	})
 	return nil
 }
@@ -695,15 +716,24 @@ type ServerMetrics struct {
 // GetMetrics returns current server metrics
 // All metrics are thread-safe and can be called concurrently
 func (s *SSHServer) GetMetrics() ServerMetrics {
-	return ServerMetrics{
+	if s == nil {
+		return ServerMetrics{}
+	}
+
+	metrics := ServerMetrics{
 		TotalConnections:     atomic.LoadUint64(&s.totalConnections),
 		SuccessfulHandshakes: atomic.LoadUint64(&s.successfulHandshakes),
 		FailedHandshakes:     atomic.LoadUint64(&s.failedHandshakes),
 		ActiveConnections:    atomic.LoadInt32(&s.activeConnections),
-		ActiveSessions:       s.sessionMgr.Count(),
-		ListenAddr:           s.config.ListenAddr,
 		IsListening:          atomic.LoadInt32(&s.isListening) == 1,
 	}
+	if s.sessionMgr != nil {
+		metrics.ActiveSessions = s.sessionMgr.Count()
+	}
+	if s.config != nil {
+		metrics.ListenAddr = s.config.ListenAddr
+	}
+	return metrics
 }
 
 // HealthCheck verifies the server is healthy and operational
@@ -712,6 +742,10 @@ func (s *SSHServer) GetMetrics() ServerMetrics {
 // 2. User database is accessible and healthy
 // 3. Session count is within configured limits
 func (s *SSHServer) HealthCheck() error {
+	if s == nil {
+		return fmt.Errorf("server unavailable")
+	}
+
 	// Check if server is actively accepting connections
 	// Uses atomic flag set by Start/Stop to avoid race conditions
 	if atomic.LoadInt32(&s.isListening) != 1 {
@@ -727,11 +761,17 @@ func (s *SSHServer) HealthCheck() error {
 	s.mu.Unlock()
 
 	// Check user database health
+	if s.userDB == nil {
+		return fmt.Errorf("user database unavailable")
+	}
 	if err := s.userDB.HealthCheck(); err != nil {
 		return fmt.Errorf("user database unhealthy: %w", err)
 	}
 
 	// Check session manager is operational
+	if s.config == nil {
+		return fmt.Errorf("server config unavailable")
+	}
 	metrics := s.GetMetrics()
 	if metrics.ActiveSessions > s.config.MaxSessions {
 		return fmt.Errorf("session count (%d) exceeds max sessions (%d)",
@@ -835,8 +875,11 @@ func (s *SSHServer) handleNETCONF(ctx context.Context, sess *Session, channel ss
 				rpcErr = ErrOperationFailed(fmt.Sprintf("RPC parsing failed: %v", err))
 			}
 			messageID, replyAttrs := extractRPCReplyContext(rpcXML)
-			errorReply := NewErrorReply(messageID, rpcErr).WithAttributes(replyAttrs)
-			errorXML, _ := MarshalReply(errorReply)
+			errorXML, err := marshalErrorReply(messageID, rpcErr, replyAttrs)
+			if err != nil {
+				s.log.Error("Failed to serialize error reply", "error", err)
+				return
+			}
 			if err := writer.WriteMessage(errorXML); err != nil {
 				s.log.Error("Failed to send error reply", "error", err)
 				return
@@ -870,8 +913,11 @@ func (s *SSHServer) handleNETCONF(ctx context.Context, sess *Session, channel ss
 		if err != nil {
 			s.log.Error("Failed to serialize reply", "error", err)
 			// Send generic error
-			errorReply := NewErrorReply(rpc.MessageID, ErrOperationFailed("reply serialization failed")).WithAttributes(rpc.ReplyAttrs)
-			errorXML, _ := MarshalReply(errorReply)
+			errorXML, err := marshalErrorReply(rpc.MessageID, ErrOperationFailed("reply serialization failed"), rpc.ReplyAttrs)
+			if err != nil {
+				s.log.Error("Failed to serialize error reply", "error", err)
+				return
+			}
 			if err := writer.WriteMessage(errorXML); err != nil {
 				s.log.Error("Failed to send error reply", "error", err)
 				return
@@ -886,4 +932,18 @@ func (s *SSHServer) handleNETCONF(ctx context.Context, sess *Session, channel ss
 
 		s.log.Debug("RPC reply sent", "session", sess.ID, "message_id", rpc.MessageID)
 	}
+}
+
+func marshalErrorReply(messageID string, rpcErr *RPCError, attrs []xml.Attr) ([]byte, error) {
+	errorReply := NewErrorReply(messageID, rpcErr).WithAttributes(attrs)
+	errorXML, err := MarshalReply(errorReply)
+	if err == nil {
+		return errorXML, nil
+	}
+
+	fallbackXML, fallbackErr := MarshalReply(NewErrorReply(messageID, rpcErr))
+	if fallbackErr != nil {
+		return nil, fmt.Errorf("marshal error reply: %w; marshal fallback error reply: %v", err, fallbackErr)
+	}
+	return fallbackXML, nil
 }

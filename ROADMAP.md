@@ -98,13 +98,28 @@ Focus: mature management-plane correctness and operator safety.
   - Schema-based semantic validation
   - Namespace-aware model traversal
   - XPath and subtree filter maturity
+  - Externally advertised XPath filtering remains a safe absolute-path subset
+    in v0.9: supported expressions are model-rooted paths with simple equality
+    predicates, and the standard NETCONF `:xpath` capability is not advertised
+  - Introduce an internal XPath engine to move the implementation toward Full
+    XPath 1.0 behavior without advertising the standard capability yet
+    - Candidate Go packages: `github.com/antchfx/xmlquery` with
+      `github.com/antchfx/xpath`
+    - Build complete `<get-config>` and `<get>` XML first, then evaluate XPath
+      expressions against that XML and require a node-set result
+    - Keep the engine experimental in v0.9 until NETCONF response shaping,
+      safety limits, and client compatibility are proven
 - **NETCONF maturity**
   - Candidate/running semantics hardening
   - Capability advertisement accuracy
-  - Interoperability tests with external NETCONF clients
+  - Interoperability tests with external NETCONF clients: required `ncclient`
+    PR CI plus scheduled/manual Junos PyEZ (`junos-eznc`) smoke coverage
 - **Operational safety**
   - Config backup and restore
   - Startup config and rollback archive
+  - NETCONF startup datastore is intentionally not advertised in v0.9; daemon
+    startup continues to load the persisted running snapshot or config file, and
+    NETCONF `<startup/>` RPC targets remain `operation-not-supported`
   - Upgrade preflight checks
   - Failed commit diagnostics
   - QoS enforcement preflight, rollback, and post-commit diagnostics
@@ -127,10 +142,18 @@ Focus: complete final pre-stable stabilization and compatibility work.
   - Datastore schema migration guardrails
   - Package preflight checks
   - Rollback guidance for failed upgrades
+  - Formal NETCONF startup datastore support, if required, should use a separate
+    startup config record with SQLite/etcd migrations, lock/validate/copy-config
+    semantics, and explicit compatibility tests instead of aliasing `startup` to
+    the latest running config
 - **Compatibility guarantees**
   - CLI and configuration compatibility policy
   - API versioning and deprecation policy
   - Supported VPP and FRR version matrix
+  - Formal standard NETCONF `:xpath` support should advertise
+    `urn:ietf:params:netconf:capability:xpath:1.0` in `<hello>` only after the
+    implementation satisfies RFC 6241 response rules, interoperability
+    expectations, DoS guardrails, and external client coverage
 - **Long-run soak and failure testing**
   - HA failover soak
   - FRR and VPP restart recovery

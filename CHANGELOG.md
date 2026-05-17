@@ -1,6 +1,128 @@
 # Changelog
 
-## v0.8.x - Overlay and Streaming Telemetry (current)
+## v0.9.x - NETCONF/YANG and Operational Safety (current)
+
+- **CLI route-policy dry-run preview**: `commit check` now reports route-policy dry-run details for prefix-list, route-map, and BGP policy binding changes
+- **CLI upgrade preflight checks**: `arca check upgrade` verifies running config availability, rollback archive coverage, telemetry catalog metadata, and QoS capability snapshots before maintenance
+- **CLI QoS post-commit diagnostics**: successful commits that change class-of-service intent now print post-commit QoS enforcement and capability diagnostics
+- **CLI configuration restore**: interactive configuration mode can replace the candidate from a backup file or rollback archive without committing automatically
+- **Config restore candidate replacement**: internal gRPC can replace a locked candidate with validated set-command text so restore workflows do not merge backups into existing edits
+- **CLI one-shot configuration backups**: one-shot `arca backup configuration [rollback <N>] <path>` writes running or archived configuration backups without overwriting existing files
+- **CLI one-shot rollback archive inspection**: one-shot `arca show configuration rollback <N>` can print archived configuration for shell-based backup workflows
+- **CLI configuration backups**: interactive CLI can write running, candidate, or archived rollback configuration to a new backup file without overwriting existing files
+- **CLI rollback archive inspection**: interactive CLI can show archived configuration for `show configuration rollback <N>` before operators perform a rollback
+- **Config rollback archive exposure**: internal gRPC commit history now includes archived set-command config text for rollback and backup tooling
+- **NETCONF error reply fallback handling**: SSH NETCONF sessions now retry error reply marshaling without inherited reply attributes instead of writing empty fallback messages
+- **NETCONF config helper text validation**: direct config XML helper output now rejects unexpected text in generated config containers before returning XML bytes
+- **NETCONF config helper XML limit validation**: direct config XML helper output now applies element and depth limits before returning XML bytes
+- **NETCONF reply data XML limit validation**: RPC reply marshaling now applies element, depth, and attribute limits to hand-built data payload XML
+- **NETCONF RPC namespace context validation**: direct RPC operation unmarshaling now rejects reserved namespace declarations before constructing operation XML
+- **NETCONF config helper XML validation**: direct config XML helper output now rejects oversized, unsafe, malformed, text-only, or reserved-namespace content before returning XML bytes
+- **NETCONF filter reserved namespace validation**: direct filter validation now rejects reserved namespace declarations on filter attributes and inherited namespace context
+- **NETCONF reserved namespace declaration validation**: reply and config XML helpers now reject hand-built declarations that rebind `xml`, declare `xmlns`, or use reserved XML namespace URIs incorrectly
+- **NETCONF RPC error-info normalization**: RPC reply marshaling now omits empty hand-built error-info blocks without mutating caller-owned errors
+- **NETCONF RPC error enum validation**: RPC reply marshaling now rejects hand-built errors with unsupported error type, tag, or severity values
+- **NETCONF RPC error field normalization**: RPC reply marshaling now fills missing required error fields on hand-built errors without mutating caller-owned values
+- **NETCONF reply marshal size validation**: RPC reply marshaling now rejects oversized generated envelopes before returning XML bytes
+- **NETCONF hello marshal size validation**: hello XML marshaling now rejects oversized generated payloads from hand-built capability sets
+- **NETCONF reply data XML validation**: RPC reply marshaling now rejects oversized, unsafe, malformed, or text-only data payloads before writing `<rpc-reply>` XML
+- **NETCONF RPC XML size guard ordering**: RPC parsing now rejects oversized payloads before directive scanning and normalizes directive checks for direct calls
+- **NETCONF hello XML size validation**: direct hello XML parsing now rejects oversized payloads before XML decoding
+- **NETCONF hello XML directive validation**: hello XML parsing now rejects DTD and ENTITY declarations before decoding client capabilities
+- **NETCONF hello XML trailing content validation**: hello XML parsing now rejects content after the first `<hello>` payload instead of accepting only the first root
+- **NETCONF config XML trailing content validation**: config XML parsing now rejects additional root elements after an explicit `<config>` payload instead of decoding only the first root
+- **NETCONF subtree filter helper path validation**: direct subtree filter application now rejects non-element filters and invalid model paths before filtering data
+- **NETCONF subtree filter helper type validation**: direct subtree filter application now rejects XPath and unsupported filter types instead of returning unfiltered data
+- **NETCONF subtree filter limit parsing**: direct subtree filter depth and element limit checks now use XML token parsing so malformed filters fail and comments or CDATA do not count as elements
+- **NETCONF operational filter type validation**: operational section selection now rejects unsupported filter types instead of treating empty content as match-all output
+- **NETCONF unsupported filter type validation**: direct output filtering and filter limit checks now reject unsupported filter types instead of treating empty content as a match-all subtree filter
+- **NETCONF empty XPath filter validation**: direct output filtering and filter limit checks now reject `type=xpath` filters without a select expression instead of treating them as match-all filters
+- **NETCONF XPath limit namespace validation**: filter depth and size validation now parses XPath selectors with declared namespace context before applying limits
+- **NETCONF output XPath namespace validation**: config and operational output filtering now parses XPath filters with declared namespace context instead of silently accepting undeclared or mismatched prefixes
+- **NETCONF YANG path namespace validation**: direct YANG element path validation now rejects undeclared or mismatched XPath namespace prefixes and accepts explicit namespace declaration context
+- **NETCONF filter attribute validation**: filter validation now rejects empty direct attribute names before reporting unknown attributes
+- **NETCONF namespace declaration validation**: XML helpers now reject empty-prefix namespace declarations from direct attribute construction before malformed `xmlns:` output can be produced
+- **NETCONF client hello validation clarity**: client hello validation now reports nil and empty capability inputs before base capability negotiation checks
+- **NETCONF XML attribute name validation**: reply and config XML helpers now reject empty direct attribute names before writing malformed XML
+- **NETCONF hello capability normalization**: hello capability helpers now trim surrounding whitespace before matching base versions or reporting client capability names
+- **NETCONF config attribute namespace validation**: config payload helper XML generation now rejects namespaced attributes without matching namespace declarations instead of emitting unqualified attributes
+- **NETCONF RPC dispatch zero-value safety**: RPC dispatch now returns a stable operation error when called with a zero-value RPC operation
+- **NETCONF RPC zero-value operation safety**: RPC operation unmarshaling and namespace validation now return stable operation errors when called on zero-value RPCs
+- **NETCONF user list pagination normalization**: user listing pagination now clamps negative limits and offsets before issuing database queries
+- **NETCONF public key listing stability**: user public key listings now use fingerprint tie-break ordering when keys share the same creation timestamp
+- **NETCONF session lock listing stability**: session lock listings now return datastore names in sorted order for deterministic direct helper output
+- **NETCONF YANG module listing stability**: YANG module listing now returns module names in sorted order for deterministic direct helper output
+- **NETCONF filter validation immutability**: filter validation now normalizes type and XPath select values without rewriting caller-owned filter fields
+- **NETCONF subtree filter copy safety**: unfiltered subtree filter helper paths now copy returned XML bytes so caller-side buffer mutation cannot alter the source data
+- **NETCONF XPath parser input normalization**: direct XPath filter parsing now trims surrounding whitespace before validating absolute paths
+- **NETCONF output filter type normalization**: configuration and operational output filtering now trims filter type values before selecting XPath behavior in direct helper calls
+- **NETCONF filter limit validation normalization**: direct filter depth and size validation now trims filter type values before applying XPath-specific checks
+- **NETCONF error reply copy safety**: error reply construction now copies RPC error payloads so caller-side error mutation cannot change queued replies
+- **NETCONF data reply copy safety**: data reply construction now copies response payload bytes so caller-side buffer mutation cannot change queued replies
+- **NETCONF reply payload validation**: RPC reply marshaling now rejects hand-built replies with no payload or conflicting payload types instead of emitting invalid reply envelopes
+- **NETCONF reply marshal safety**: RPC reply marshaling now normalizes nil error entries from hand-built replies into operation-failed errors instead of emitting empty error payloads
+- **NETCONF multi-error reply safety**: multi-error reply construction now emits a default operation-failed RPC error for empty error lists instead of producing incomplete replies
+- **NETCONF hello marshal safety**: hello marshaling now rejects nil hello messages with an explicit error instead of producing incomplete output
+- **NETCONF user database operation safety**: user and public-key database operations now return stable initialization errors or authentication failures on nil or zero-value receivers instead of panicking
+- **NETCONF hello helper safety**: hello capability helpers now tolerate nil inputs and return conservative fallback results instead of panicking
+- **NETCONF namespace attribute setter safety**: RPC request namespace propagation setters now no-op on nil receivers instead of panicking in direct embedded callers
+- **NETCONF framing receiver safety**: framing reader and writer setters and I/O methods now tolerate nil or zero-value receivers and return initialization errors instead of panicking
+- **NETCONF RPC error helper safety**: RPC error chain helpers and error reply constructors now tolerate nil errors and still produce marshalable operation-failed replies
+- **NETCONF RPC accessor safety**: RPC operation accessors and source/target datastore selectors now return stable empty values or RPC errors when called on nil receivers
+- **NETCONF user database lifecycle safety**: user database close, health-check, audit logger, and auth logging helpers now tolerate nil or zero-value receivers without panics
+- **NETCONF session receiver safety**: session manager and session helper methods now tolerate nil or zero-value receivers, lazily initializing defaults where direct embedded callers create managers by hand
+- **NETCONF SSH server lifecycle safety**: SSH server start, stop, metrics, and health-check methods now handle nil or partially initialized receivers and skipped startup cleanup without panics
+- **NETCONF rate limiter receiver safety**: rate limiter checks, stats, and cleanup methods now tolerate nil or zero-value receivers without panicking
+- **NETCONF hook setter safety**: server and SSH server hook setters now no-op on nil receivers so embedded lifecycle cleanup paths do not panic
+- **NETCONF YANG validator zero-value safety**: uninitialized validators now return stable errors or empty module lists instead of dereferencing nil module state
+- **NETCONF user database defaults**: direct user database construction now installs a default logger when callers pass nil so schema initialization and auth audit logging stay stable
+- **NETCONF SSH server config defaults**: `NewSSHServer` now fills default listen, timeout, session-limit, rate-limit, and SSH algorithm settings for partial embedded configs without mutating caller values
+- **NETCONF rate limiter shutdown**: rate limiter cleanup shutdown is now idempotent so repeated embedded `Stop` calls do not panic
+- **NETCONF rate limiter defaults**: direct rate limiter construction now fills default lockout thresholds and windows for nil or partial SSH config values without mutating caller config
+- **NETCONF session close lock cleanup**: session shutdown now removes successfully released datastore locks from session bookkeeping and reports the actual release count
+- **NETCONF session lock tracking hardening**: session lock bookkeeping now initializes missing lock maps on demand so hand-built embedded sessions can acquire locks without panicking
+- **NETCONF session manager defaults**: direct `SessionManager` construction now fills default SSH timeouts, max-session limits, and logger dependencies when embedded callers pass nil or partial config values
+- **NETCONF RPC entrypoint hardening**: `HandleRPC` now returns stable `operation-failed` replies for missing server, session, or RPC context instead of panicking in embedded callers
+- **NETCONF commit failure mapping**: datastore commit failures now surface as `datastore-error` RPC replies instead of being reported as backend validation failures
+- **NETCONF commit candidate read diagnostics**: `commit` now distinguishes datastore read failures from missing candidate configuration instead of reporting backend errors as an empty candidate
+- **NETCONF datastore availability guards**: datastore-backed RPC paths now return stable `operation-failed` replies when a server is embedded without a datastore while inline `validate` remains usable
+- **NETCONF nil lock state handling**: write RPC lock checks now return `lock-denied` when an embedded datastore reports no lock state instead of panicking on nil lock metadata
+- **NETCONF session manager hardening**: `kill-session` and lock-owner reporting now return stable RPC errors when a server is embedded without a session manager instead of dereferencing nil session state
+- **NETCONF option value normalization**: `edit-config` operation options and filter `type` attributes now trim surrounding whitespace before capability and enum validation for better client interoperability
+- **NETCONF candidate read fallback**: `get-config`, `copy-config`, `validate`, and first candidate edits now treat a missing session candidate as the current running baseline instead of failing or depending on nil datastore values
+- **NETCONF confirmed-commit rejection**: `commit` confirmed-commit options now parse and return `operation-not-supported` with precise error paths when confirmed-commit capability is not advertised
+- **NETCONF continue-on-error support**: `edit-config` now accepts `error-option=continue-on-error` while preserving atomic validation and candidate writes for the current edit engine
+- **NETCONF operational XPath predicate filtering**: `<get>` operational state output now applies XPath list predicates to route, neighbor, routing-instance, interface, and BFD peer entries
+- **NETCONF XPath predicate output filtering**: `get-config` XML output now applies XPath list predicates to interface and static route entries instead of only pruning top-level sections
+- **NETCONF XPath multiple predicates**: XPath filters now accept multiple simple key-value predicates on the same path segment while still rejecting duplicate keys and complex predicate expressions
+- **NETCONF edit-config none default-operation**: `edit-config` now accepts `default-operation=none` and treats implicit config payloads as no-op edits while continuing to reject unsupported per-element operations
+- **NETCONF writable-running rejection**: running datastore write RPCs now consistently return `operation-not-supported` with operation-specific target paths when writable-running is not advertised
+- **NETCONF startup datastore rejection**: startup datastore RPC requests now consistently return `operation-not-supported` with source/target error paths when startup capability is not advertised
+- **NETCONF rollback-on-error support**: server hello now advertises rollback-on-error and `edit-config` accepts `error-option=rollback-on-error` while preserving atomic candidate writes
+- **NETCONF edit-config replace default-operation**: `edit-config` now accepts `default-operation=replace` and replaces edited top-level configuration subtrees while preserving unrelated candidate state
+- **NETCONF edit-config test-option coverage**: `edit-config` now supports `test-only` validation without candidate writes and `test-then-set` validation before saving
+- **NETCONF validate inline source**: `<validate>` now accepts inline `<source><config>` payloads and validates them with the same YANG/XML and semantic checks as datastore-backed sources
+- **NETCONF copy-config inline source**: `copy-config` now accepts inline `<source><config>` payloads, validates them, and converts them to candidate configuration safely
+- **NETCONF copy-config semantic validation**: `copy-config` now parses and semantically validates source datastore content before saving candidate state
+- **NETCONF subtree filter model validation**: subtree filters now validate nested element paths and namespaces against the implemented NETCONF/YANG path schema before request handling
+- **NETCONF subtree filter namespace matching**: subtree filters now honor explicit model namespaces when selecting data so same-name elements from other namespaces are not returned
+- **NETCONF subtree filter extraction**: subtree filters now use XML token-based extraction so namespace-qualified data and nested same-name elements are handled without string matching
+- **NETCONF namespace-aware XPath filters**: XPath filters now accept declared namespace prefixes for implemented IETF and Arca model paths while rejecting undeclared or mismatched prefixes
+- **NETCONF XPath model validation**: XPath filters now validate nested element paths and predicate keys against the implemented NETCONF/YANG path schema before request handling
+- **NETCONF capability URI compliance**: hello negotiation now uses RFC 6241 capability URIs and accepts base:1.1-only clients while preserving the XML namespace separately
+- **NETCONF capability accuracy**: server hello now advertises the Arca XPath filter subset separately while avoiding unsupported standard XPath, startup, and writable-running capabilities
+- **NETCONF validate source coverage**: `<validate>` now checks both running and candidate datastore sources while continuing to reject unsupported startup validation
+- **NETCONF semantic candidate validation**: `edit-config`, `commit`, `validate`, and YANG XML validation now enforce the internal config semantic rules before accepting candidate state
+- **NETCONF XPath filter subset**: `get` and `get-config` now accept simple absolute XPath filters and use them for configuration and operational section pruning
+- **CLI interface impact summaries**: commit impact previews now list representative interface changes and warn when address changes can affect connected route reachability
+- **CLI QoS preflight diagnostics**: `commit check` and failed commit diagnostics now include VPP class-of-service capability gaps when class-of-service changes are pending
+- **CLI policy impact summaries**: commit impact previews now list representative prefix-list, route-map, and BGP import/export route-map binding changes before commit
+- **CLI route impact summaries**: commit impact previews now list representative static route prefixes and next-hops, including routing-instance scoped routes, before commit
+- **CLI failed commit diagnostics**: failed `commit` operations now print the candidate impact summary and keep the original failure while reporting diagnostics collection errors separately
+- **CLI disruptive change warnings**: commit impact previews now flag BGP, OSPF, BFD, EVPN, routing-instance, and class-of-service changes before commit
+- **CLI change impact preview**: `commit check` now validates the candidate and prints a pre-commit impact summary for changed lines, static routes, policy-options updates, and disruptive routing warnings
+
+## v0.8.x - Overlay and Streaming Telemetry (complete)
 
 - **NMS collector QoS capability validation**: the example HTTP collector now validates class-of-service capability diagnostics and last-check relationships before using status responses
 - **NMS collector schema field type validation**: the example HTTP collector now rejects unsupported telemetry payload field type hints before using schema registry responses

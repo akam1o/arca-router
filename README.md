@@ -13,7 +13,7 @@ arca-router is a software router with Junos-compatible configuration syntax, pow
 
 ## Status
 
-arca-router has completed the v0.8.x overlay and streaming telemetry implementation. This README
+arca-router is currently in the v0.9.x NETCONF/YANG and operational safety phase after completing the v0.8.x overlay and streaming telemetry implementation. This README
 describes the current unified daemon path; detailed release history is kept in
 [`CHANGELOG.md`](CHANGELOG.md), and future scope is tracked in
 [`ROADMAP.md`](ROADMAP.md).
@@ -228,6 +228,21 @@ sudo journalctl -u arca-routerd -n 50
 
 # View running configuration with arca
 arca show configuration
+arca show configuration rollback 1
+
+# Save configuration backups before maintenance
+arca check upgrade
+arca check upgrade backup /var/backups/arca-router/running.conf
+arca backup configuration /var/backups/arca-router/running.conf
+arca backup configuration rollback 1 /var/backups/arca-router/rollback-1.conf
+
+# Restore a backup into candidate configuration for review before commit
+arca
+configure
+restore configuration /var/backups/arca-router/running.conf
+show | compare
+commit check
+commit comment "Restore configuration backup"
 
 # Check managed interface state, counters, QoS profile, queue placement, and QoS capabilities through arca-routerd
 arca show interfaces

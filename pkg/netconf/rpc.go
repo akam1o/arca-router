@@ -35,15 +35,14 @@ type rpcOperation struct {
 
 // ParseRPC parses NETCONF RPC from XML bytes with security checks
 func ParseRPC(data []byte) (*RPC, error) {
-	// Security check: reject DTD/DOCTYPE
-	if bytes.Contains(data, []byte("<!DOCTYPE")) || bytes.Contains(data, []byte("<!ENTITY")) {
-		return nil, ErrDTDNotAllowed()
+	// Size limit check (10MB)
+	if len(data) > MaxXMLSize {
+		return nil, ErrMalformedMessage(fmt.Sprintf("RPC size exceeds maximum (%d bytes)", MaxXMLSize))
 	}
 
-	// Size limit check (10MB)
-	const maxRPCSize = 10 * 1024 * 1024
-	if len(data) > maxRPCSize {
-		return nil, ErrMalformedMessage(fmt.Sprintf("RPC size exceeds maximum (%d bytes)", maxRPCSize))
+	// Security check: reject DTD/DOCTYPE
+	if containsUnsafeXMLDirective(data) {
+		return nil, ErrDTDNotAllowed()
 	}
 
 	// Parse XML with strict settings
@@ -55,7 +54,7 @@ func ParseRPC(data []byte) (*RPC, error) {
 	if err := decoder.Decode(&envelope); err != nil {
 		return nil, ErrMalformedMessage(fmt.Sprintf("XML parse error: %v", err))
 	}
-	if err := ensureNoTrailingXML(decoder); err != nil {
+	if err := ensureNoTrailingXML(decoder, "rpc"); err != nil {
 		return nil, err
 	}
 
@@ -105,7 +104,12 @@ func ParseRPC(data []byte) (*RPC, error) {
 	return rpc, nil
 }
 
-func ensureNoTrailingXML(decoder *xml.Decoder) error {
+func containsUnsafeXMLDirective(data []byte) bool {
+	upperData := bytes.ToUpper(data)
+	return bytes.Contains(upperData, []byte("<!DOCTYPE")) || bytes.Contains(upperData, []byte("<!ENTITY"))
+}
+
+func ensureNoTrailingXML(decoder *xml.Decoder, rootElement string) error {
 	for {
 		token, err := decoder.Token()
 		if err == io.EOF {
@@ -117,22 +121,38 @@ func ensureNoTrailingXML(decoder *xml.Decoder) error {
 		if charData, ok := token.(xml.CharData); ok && len(bytes.TrimSpace(charData)) == 0 {
 			continue
 		}
-		return ErrMalformedMessage("trailing content after rpc element")
+		return ErrMalformedMessage(fmt.Sprintf("trailing content after %s element", rootElement))
 	}
 }
 
 // GetOperationName returns the RPC operation name (e.g., "get-config", "edit-config")
 func (r *RPC) GetOperationName() string {
+	if r == nil {
+		return ""
+	}
 	return r.Operation.Local
 }
 
 // GetOperationNamespace returns the RPC operation namespace
 func (r *RPC) GetOperationNamespace() string {
+	if r == nil {
+		return ""
+	}
 	return r.Operation.Space
 }
 
 // UnmarshalOperation unmarshals the RPC operation content into a specific struct
 func (r *RPC) UnmarshalOperation(v interface{}) error {
+	if r == nil {
+		return ErrOperationFailed("rpc unavailable")
+	}
+	if r.Operation.Local == "" {
+		return ErrOperationFailed("rpc operation unavailable")
+	}
+	if err := validateRPCNamespaceDeclarationAttrs(r.Operation.Local, r.NamespaceAttrs); err != nil {
+		return err
+	}
+
 	// Wrap content in operation tag for proper unmarshaling
 	wrapped := r.operationXML()
 
@@ -289,6 +309,9 @@ func (r *RPC) validateOperationPayload() error {
 	if _, ok := rpcOperationElementPaths[r.Operation.Local]; !ok {
 		return nil
 	}
+	if err := validateRPCNamespaceDeclarationAttrs(r.Operation.Local, r.NamespaceAttrs); err != nil {
+		return err
+	}
 
 	decoder := xml.NewDecoder(bytes.NewReader(r.operationXML()))
 	decoder.Strict = true
@@ -397,13 +420,28 @@ func (r *RPC) validateOperationCardinality(counts map[string]int) error {
 		for _, datastore := range rpcDatastoreElements {
 			count += counts[choicePath+"/"+datastore]
 		}
+		choiceName := "datastore"
+		if allowsConfigSourceChoice(choicePath) {
+			count += counts[choicePath+"/config"]
+			choiceName = "source choice"
+		}
 		path := rpcPathFromKey(choicePath)
 		switch {
 		case count == 0:
 			return missingRPCElement(path, "datastore")
 		case count > 1:
-			return ErrMalformedMessage(fmt.Sprintf("%s must contain exactly one datastore", choicePath)).
+			return ErrMalformedMessage(fmt.Sprintf("%s must contain exactly one %s", choicePath, choiceName)).
 				WithPath(rpcElementRPCPath(path))
+		}
+	}
+	return nil
+}
+
+func validateRPCNamespaceDeclarationAttrs(operation string, attrs []xml.Attr) *RPCError {
+	for _, attr := range attrs {
+		if err := validateNamespaceDeclarationAttr(attr); err != nil {
+			return NewRPCError(ErrorTypeRPC, ErrorTagInvalidValue, err.Error()).
+				WithPath("/rpc/" + operation)
 		}
 	}
 	return nil
@@ -463,6 +501,9 @@ func namespaceDeclarationAttrName(attr xml.Attr) (string, bool) {
 		return "xmlns", true
 	}
 	if attr.Name.Space == "xmlns" {
+		if attr.Name.Local == "" {
+			return "", false
+		}
 		return "xmlns:" + attr.Name.Local, true
 	}
 	return "", false
@@ -501,6 +542,7 @@ var rpcOperationElementPaths = map[string]map[string]struct{}{
 		"copy-config/target/candidate": {},
 		"copy-config/target/startup":   {},
 		"copy-config/source":           {},
+		"copy-config/source/config":    {},
 		"copy-config/source/running":   {},
 		"copy-config/source/candidate": {},
 		"copy-config/source/startup":   {},
@@ -527,7 +569,11 @@ var rpcOperationElementPaths = map[string]map[string]struct{}{
 		"unlock/target/startup":   {},
 	},
 	"commit": {
-		"commit": {},
+		"commit":                 {},
+		"commit/confirmed":       {},
+		"commit/confirm-timeout": {},
+		"commit/persist":         {},
+		"commit/persist-id":      {},
 	},
 	"discard-changes": {
 		"discard-changes": {},
@@ -535,6 +581,7 @@ var rpcOperationElementPaths = map[string]map[string]struct{}{
 	"validate": {
 		"validate":                  {},
 		"validate/source":           {},
+		"validate/source/config":    {},
 		"validate/source/running":   {},
 		"validate/source/candidate": {},
 		"validate/source/startup":   {},
@@ -586,6 +633,12 @@ var rpcOperationCardinalityRules = map[string][]rpcCardinalityRule{
 	"kill-session": {
 		{path: "kill-session/session-id", min: 1, max: 1},
 	},
+	"commit": {
+		{path: "commit/confirmed", min: 0, max: 1},
+		{path: "commit/confirm-timeout", min: 0, max: 1},
+		{path: "commit/persist", min: 0, max: 1},
+		{path: "commit/persist-id", min: 0, max: 1},
+	},
 }
 
 var rpcDatastoreChoicePaths = map[string][]string{
@@ -619,6 +672,8 @@ func rpcElementAllowedAttrs(path string) map[string]bool {
 func isOpenRPCContentPath(path []string) bool {
 	key := rpcPathKey(path)
 	return key == "edit-config/config" ||
+		key == "copy-config/source/config" ||
+		key == "validate/source/config" ||
 		key == "get-config/filter" ||
 		key == "get/filter"
 }
@@ -636,7 +691,15 @@ var rpcTextContentPaths = map[string]struct{}{
 	"edit-config/default-operation": {},
 	"edit-config/test-option":       {},
 	"edit-config/error-option":      {},
+	"commit/confirm-timeout":        {},
+	"commit/persist":                {},
+	"commit/persist-id":             {},
 	"kill-session/session-id":       {},
+}
+
+func allowsConfigSourceChoice(path string) bool {
+	return path == "copy-config/source" ||
+		path == "validate/source"
 }
 
 func rpcPathKey(path []string) string {
@@ -673,6 +736,12 @@ func missingRPCElement(path []string, element string) *RPCError {
 
 // ValidateOperationNamespace checks if operation is in NETCONF namespace
 func (r *RPC) ValidateOperationNamespace() error {
+	if r == nil {
+		return ErrOperationFailed("rpc unavailable")
+	}
+	if r.Operation.Local == "" {
+		return ErrOperationFailed("rpc operation unavailable")
+	}
 	return ValidateProtocolNamespace(r.Operation)
 }
 
@@ -683,15 +752,19 @@ const (
 	DatastoreStartup   = "startup"
 )
 
-// Source represents <source> element in get-config
+// Source represents <source> element in get-config, copy-config, and validate.
 type Source struct {
-	Running   *struct{} `xml:"running"`
-	Candidate *struct{} `xml:"candidate"`
-	Startup   *struct{} `xml:"startup"`
+	Running   *struct{}      `xml:"running"`
+	Candidate *struct{}      `xml:"candidate"`
+	Startup   *struct{}      `xml:"startup"`
+	Config    *ConfigElement `xml:"config"`
 }
 
 // GetDatastore returns the datastore name from Source
 func (s *Source) GetDatastore() (string, error) {
+	if s == nil {
+		return "", ErrMissingElement("source", "datastore")
+	}
 	return selectDatastore("source", s.Running != nil, s.Candidate != nil, s.Startup != nil)
 }
 
@@ -704,6 +777,9 @@ type Target struct {
 
 // GetDatastore returns the datastore name from Target
 func (t *Target) GetDatastore() (string, error) {
+	if t == nil {
+		return "", ErrMissingElement("target", "datastore")
+	}
 	return selectDatastore("target", t.Running != nil, t.Candidate != nil, t.Startup != nil)
 }
 
@@ -735,7 +811,7 @@ func selectDatastore(container string, running, candidate, startup bool) (string
 // Filter represents optional <filter> element in get-config/get
 type Filter struct {
 	Type           string     `xml:"type,attr,omitempty"`
-	Select         string     `xml:"select,attr,omitempty"` // For xpath (not supported)
+	Select         string     `xml:"select,attr,omitempty"` // For xpath filters
 	Attrs          []xml.Attr `xml:",any,attr"`
 	InheritedAttrs []xml.Attr `xml:"-"`
 	Content        []byte     `xml:",innerxml"`
@@ -746,9 +822,17 @@ func (f *Filter) Validate(rpcName string) error {
 	if f == nil {
 		return nil // Filter is optional
 	}
+	if err := validateFilterNamespaceDeclarationAttrs(rpcName, f.InheritedAttrs, f.Attrs); err != nil {
+		return err
+	}
 	for _, attr := range f.Attrs {
 		if isNamespaceDeclarationAttribute(attr) {
 			continue
+		}
+		if attr.Name.Local == "" {
+			return NewRPCError(ErrorTypeRPC, ErrorTagInvalidValue,
+				"filter attribute name must not be empty").
+				WithPath("/rpc/" + rpcName + "/filter")
 		}
 		rpcErr := ErrUnknownAttribute("/rpc/"+rpcName+"/filter", attr.Name.Local)
 		if attr.Name.Space != "" {
@@ -758,32 +842,70 @@ func (f *Filter) Validate(rpcName string) error {
 	}
 
 	// Check filter type
-	if f.Type == "" {
+	filterType := normalizedFilterType(f)
+	if filterType == "" {
 		// Default to subtree if not specified
-		f.Type = "subtree"
+		filterType = "subtree"
 	}
 
-	// Reject xpath type
-	if f.Type == "xpath" {
-		return ErrUnsupportedFilterType(rpcName, "xpath")
-	}
-
-	// Only subtree is supported
-	if f.Type != "subtree" {
-		return ErrUnsupportedFilterType(rpcName, f.Type)
+	switch filterType {
+	case "xpath":
+		return f.validateXPathFilter(rpcName)
+	case "subtree":
+	default:
+		return ErrUnsupportedFilterType(rpcName, filterType)
 	}
 
 	// Validate subtree filter content (basic check)
 	if len(f.Content) > 0 {
-		// Check for predicates ([ ]) which are not supported
-		if bytes.Contains(f.Content, []byte("[")) {
-			return ErrInvalidFilter(rpcName, "filter contains unsupported predicates")
-		}
 		if err := f.validateSubtreeContent(rpcName); err != nil {
 			return err
 		}
 	}
 
+	return nil
+}
+
+func validateFilterNamespaceDeclarationAttrs(rpcName string, attrGroups ...[]xml.Attr) *RPCError {
+	for _, attrs := range attrGroups {
+		for _, attr := range attrs {
+			if err := validateNamespaceDeclarationAttr(attr); err != nil {
+				return NewRPCError(ErrorTypeRPC, ErrorTagInvalidValue, err.Error()).
+					WithPath("/rpc/" + rpcName + "/filter")
+			}
+		}
+	}
+	return nil
+}
+
+func (f *Filter) validateXPathFilter(rpcName string) error {
+	selectExpr := strings.TrimSpace(f.Select)
+	if selectExpr == "" {
+		return ErrInvalidFilter(rpcName, "xpath filter requires select attribute")
+	}
+	if len(bytes.TrimSpace(f.Content)) > 0 {
+		return ErrInvalidFilter(rpcName, "xpath filter must not contain subtree content")
+	}
+	namespaceAttrs := collectNamespaceAttrs(f.InheritedAttrs, f.Attrs)
+	xpathFilter, err := ParseXPathFilterWithContext(selectExpr, namespaceAttrs)
+	if err != nil {
+		if rpcErr := validateExperimentalXPathFilter(rpcName, f); rpcErr != nil {
+			return rpcErr
+		}
+		return nil
+	}
+	if xpathFilter != nil {
+		if err := validateXPathFilterNamespaces(xpathFilter); err != nil {
+			return ErrInvalidFilter(rpcName, fmt.Sprintf("invalid xpath filter namespace: %v", err))
+		}
+		validator, err := GetGlobalValidator()
+		if err != nil {
+			return ErrInvalidFilter(rpcName, fmt.Sprintf("failed to initialize YANG validator: %v", err))
+		}
+		if err := validator.validateXPathFilterPath(xpathFilter); err != nil {
+			return ErrInvalidFilter(rpcName, fmt.Sprintf("unsupported xpath filter path: %v", err))
+		}
+	}
 	return nil
 }
 
@@ -824,6 +946,11 @@ func (f *Filter) validateSubtreeContent(rpcName string) error {
 		switch t := token.(type) {
 		case xml.StartElement:
 			depth++
+			if depth >= 2 {
+				if err := validateSubtreeFilterElementAttrs(t.Attr); err != nil {
+					return ErrInvalidFilter(rpcName, err.Error())
+				}
+			}
 			if depth == 2 {
 				topLevelElements++
 			}
@@ -839,6 +966,16 @@ func (f *Filter) validateSubtreeContent(rpcName string) error {
 	}
 	if topLevelElements == 0 {
 		return ErrInvalidFilter(rpcName, "subtree filter must contain at least one element")
+	}
+	filterPaths, err := f.parseElementPaths()
+	if err != nil {
+		return NewRPCError(ErrorTypeRPC, ErrorTagMalformedMessage,
+			fmt.Sprintf("invalid subtree filter XML: %v", err)).
+			WithPath(fmt.Sprintf("/rpc/%s/filter", rpcName)).
+			WithBadElement("filter")
+	}
+	if err := validateSubtreeFilterPaths(filterPaths); err != nil {
+		return ErrInvalidFilter(rpcName, fmt.Sprintf("invalid subtree filter path: %v", err))
 	}
 	return nil
 }

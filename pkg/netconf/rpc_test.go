@@ -2,6 +2,7 @@ package netconf
 
 import (
 	"bytes"
+	"encoding/xml"
 	"fmt"
 	"strings"
 	"testing"
@@ -212,6 +213,39 @@ func TestParseRPC(t *testing.T) {
 	}
 }
 
+func TestParseRPCRejectsOversizedXMLBeforeDirectiveScan(t *testing.T) {
+	data := append([]byte(`<!DOCTYPE rpc SYSTEM "evil.dtd">`), bytes.Repeat([]byte("x"), MaxXMLSize+1)...)
+
+	_, err := ParseRPC(data)
+	if err == nil {
+		t.Fatal("ParseRPC() error = nil, want size limit error")
+	}
+	rpcErr, ok := err.(*RPCError)
+	if !ok {
+		t.Fatalf("ParseRPC() error = %T, want *RPCError", err)
+	}
+	if !strings.Contains(rpcErr.ErrorMessage, "RPC size exceeds maximum") {
+		t.Fatalf("ParseRPC() error message = %q, want size limit", rpcErr.ErrorMessage)
+	}
+	if rpcErr.ErrorInfo != nil && rpcErr.ErrorInfo.BadElement == "DOCTYPE" {
+		t.Fatalf("ParseRPC() error info = %#v, want size limit before directive scan", rpcErr.ErrorInfo)
+	}
+}
+
+func TestParseRPCRejectsUnsafeDirectivesCaseInsensitive(t *testing.T) {
+	_, err := ParseRPC([]byte(`<!dOcTyPe rpc SYSTEM "evil.dtd"><rpc message-id="101" xmlns="urn:ietf:params:xml:ns:netconf:base:1.0"><get/></rpc>`))
+	if err == nil {
+		t.Fatal("ParseRPC() error = nil, want DTD error")
+	}
+	rpcErr, ok := err.(*RPCError)
+	if !ok {
+		t.Fatalf("ParseRPC() error = %T, want *RPCError", err)
+	}
+	if rpcErr.ErrorInfo == nil || rpcErr.ErrorInfo.BadElement != "DOCTYPE" {
+		t.Fatalf("ParseRPC() error info = %#v, want DOCTYPE", rpcErr.ErrorInfo)
+	}
+}
+
 func TestParseRPCContentIsOperationInnerXML(t *testing.T) {
 	xmlData := `<rpc message-id="101" xmlns="urn:ietf:params:xml:ns:netconf:base:1.0">
 		<get-config>
@@ -357,6 +391,259 @@ func TestUnmarshalOperationPreservesAncestorNamespaceDeclarations(t *testing.T) 
 	}
 }
 
+func TestConfigElementXMLRejectsUndeclaredAttributeNamespace(t *testing.T) {
+	config := ConfigElement{
+		XMLName: xml.Name{Local: "config"},
+		Attrs: []xml.Attr{
+			{Name: xml.Name{Space: "urn:example:attrs", Local: "mode"}, Value: "replace"},
+		},
+		Content: []byte(`<system><host-name>router1</host-name></system>`),
+	}
+
+	_, err := config.XML()
+	if err == nil {
+		t.Fatal("Config.XML() error = nil, want undeclared namespace error")
+	}
+	rpcErr, ok := err.(*RPCError)
+	if !ok {
+		t.Fatalf("Config.XML() error = %T, want *RPCError", err)
+	}
+	if rpcErr.ErrorTag != ErrorTagUnknownNamespace {
+		t.Fatalf("Config.XML() error tag = %s, want %s", rpcErr.ErrorTag, ErrorTagUnknownNamespace)
+	}
+	if rpcErr.ErrorInfo == nil || rpcErr.ErrorInfo.BadNamespace != "urn:example:attrs" {
+		t.Fatalf("Config.XML() error info = %#v, want bad namespace", rpcErr.ErrorInfo)
+	}
+}
+
+func TestConfigElementXMLRejectsEmptyAttributeName(t *testing.T) {
+	config := ConfigElement{
+		XMLName: xml.Name{Local: "config"},
+		Attrs: []xml.Attr{
+			{Name: xml.Name{Local: ""}, Value: "bad"},
+		},
+		Content: []byte(`<system><host-name>router1</host-name></system>`),
+	}
+
+	_, err := config.XML()
+	if err == nil {
+		t.Fatal("Config.XML() error = nil, want empty attribute name error")
+	}
+	rpcErr, ok := err.(*RPCError)
+	if !ok {
+		t.Fatalf("Config.XML() error = %T, want *RPCError", err)
+	}
+	if rpcErr.ErrorTag != ErrorTagInvalidValue {
+		t.Fatalf("Config.XML() error tag = %s, want %s", rpcErr.ErrorTag, ErrorTagInvalidValue)
+	}
+}
+
+func TestConfigElementXMLRejectsEmptyNamespacePrefixDeclaration(t *testing.T) {
+	config := ConfigElement{
+		XMLName: xml.Name{Local: "config"},
+		Attrs: []xml.Attr{
+			{Name: xml.Name{Space: "xmlns"}, Value: "urn:bad"},
+		},
+		Content: []byte(`<system><host-name>router1</host-name></system>`),
+	}
+
+	_, err := config.XML()
+	if err == nil {
+		t.Fatal("Config.XML() error = nil, want empty namespace prefix error")
+	}
+	rpcErr, ok := err.(*RPCError)
+	if !ok {
+		t.Fatalf("Config.XML() error = %T, want *RPCError", err)
+	}
+	if rpcErr.ErrorTag != ErrorTagInvalidValue {
+		t.Fatalf("Config.XML() error tag = %s, want %s", rpcErr.ErrorTag, ErrorTagInvalidValue)
+	}
+}
+
+func TestConfigElementXMLRejectsReservedNamespaceDeclarations(t *testing.T) {
+	tests := []struct {
+		name string
+		attr xml.Attr
+		want string
+	}{
+		{
+			name: "xml prefix rebound",
+			attr: xml.Attr{Name: xml.Name{Space: "xmlns", Local: "xml"}, Value: "urn:bad"},
+			want: "namespace prefix xml must be bound",
+		},
+		{
+			name: "xmlns prefix declared",
+			attr: xml.Attr{Name: xml.Name{Space: "xmlns", Local: "xmlns"}, Value: "urn:bad"},
+			want: "namespace prefix xmlns must not be declared",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			config := ConfigElement{
+				XMLName: xml.Name{Local: "config"},
+				Attrs:   []xml.Attr{tt.attr},
+				Content: []byte(`<system><host-name>router1</host-name></system>`),
+			}
+
+			_, err := config.XML()
+			if err == nil {
+				t.Fatalf("Config.XML() error = nil, want %q", tt.want)
+			}
+			rpcErr, ok := err.(*RPCError)
+			if !ok {
+				t.Fatalf("Config.XML() error = %T, want *RPCError", err)
+			}
+			if rpcErr.ErrorTag != ErrorTagInvalidValue {
+				t.Fatalf("Config.XML() error tag = %s, want %s", rpcErr.ErrorTag, ErrorTagInvalidValue)
+			}
+			if !strings.Contains(rpcErr.ErrorMessage, tt.want) {
+				t.Fatalf("Config.XML() error = %v, want %q", rpcErr, tt.want)
+			}
+		})
+	}
+}
+
+func TestConfigElementXMLRejectsInvalidContent(t *testing.T) {
+	tests := []struct {
+		name    string
+		content []byte
+		want    string
+	}{
+		{
+			name:    "malformed xml",
+			content: []byte(`<system>`),
+			want:    "config XML is malformed",
+		},
+		{
+			name:    "unsafe directive",
+			content: []byte(`<!DOCTYPE config SYSTEM "evil.dtd"><system/>`),
+			want:    "unsafe XML directives",
+		},
+		{
+			name:    "root text",
+			content: []byte(`junk`),
+			want:    "text outside elements",
+		},
+		{
+			name:    "container text",
+			content: []byte(`<system>junk</system>`),
+			want:    "unexpected text",
+		},
+		{
+			name:    "mixed container text",
+			content: []byte(`<system>junk<host-name>router1</host-name></system>`),
+			want:    "unexpected text",
+		},
+		{
+			name:    "oversized",
+			content: bytes.Repeat([]byte("x"), MaxXMLSize+1),
+			want:    "config XML exceeds maximum",
+		},
+		{
+			name:    "too many elements",
+			content: []byte(strings.Repeat("<i/>", MaxXMLElements+1)),
+			want:    "maximum element limit",
+		},
+		{
+			name:    "too deep",
+			content: []byte(strings.Repeat("<a>", MaxXMLDepth+1) + strings.Repeat("</a>", MaxXMLDepth+1)),
+			want:    "maximum depth limit",
+		},
+		{
+			name:    "reserved namespace declaration",
+			content: []byte(`<system xmlns:xml="urn:bad"/>`),
+			want:    "namespace prefix xml must be bound",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			config := ConfigElement{
+				XMLName: xml.Name{Local: "config"},
+				Content: tt.content,
+			}
+
+			_, err := config.XML()
+			if err == nil {
+				t.Fatalf("Config.XML() error = nil, want %q", tt.want)
+			}
+			rpcErr, ok := err.(*RPCError)
+			if !ok {
+				t.Fatalf("Config.XML() error = %T, want *RPCError", err)
+			}
+			if !strings.Contains(rpcErr.ErrorMessage, tt.want) {
+				t.Fatalf("Config.XML() error = %v, want %q", rpcErr, tt.want)
+			}
+		})
+	}
+}
+
+func TestConfigElementXMLAllowsEmptyContent(t *testing.T) {
+	config := ConfigElement{XMLName: xml.Name{Local: "config"}}
+
+	data, err := config.XML()
+	if err != nil {
+		t.Fatalf("Config.XML() error = %v", err)
+	}
+	if string(data) != "<config></config>" {
+		t.Fatalf("Config.XML() = %s, want empty config wrapper", data)
+	}
+}
+
+func TestInheritedNamespaceReceiversNilSafe(t *testing.T) {
+	attrs := []xml.Attr{
+		{Name: xml.Name{Space: "xmlns", Local: "arca"}, Value: ArcaConfigNS},
+	}
+
+	tests := []struct {
+		name string
+		set  func()
+	}{
+		{
+			name: "get",
+			set: func() {
+				var req *GetRequest
+				req.SetInheritedNamespaceAttrs(attrs)
+			},
+		},
+		{
+			name: "get-config",
+			set: func() {
+				var req *GetConfigRequest
+				req.SetInheritedNamespaceAttrs(attrs)
+			},
+		},
+		{
+			name: "edit-config",
+			set: func() {
+				var req *EditConfigRequest
+				req.SetInheritedNamespaceAttrs(attrs)
+			},
+		},
+		{
+			name: "copy-config",
+			set: func() {
+				var req *CopyConfigRequest
+				req.SetInheritedNamespaceAttrs(attrs)
+			},
+		},
+		{
+			name: "validate",
+			set: func() {
+				var req *ValidateRequest
+				req.SetInheritedNamespaceAttrs(attrs)
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			tt.set()
+		})
+	}
+}
+
 func TestUnmarshalOperationPreservesFilterNamespaceDeclarations(t *testing.T) {
 	tests := []struct {
 		name string
@@ -403,6 +690,52 @@ func TestUnmarshalOperationPreservesFilterNamespaceDeclarations(t *testing.T) {
 	}
 }
 
+func TestUnmarshalOperationPreservesXPathFilterNamespaceDeclarations(t *testing.T) {
+	tests := []struct {
+		name string
+		xml  string
+	}{
+		{
+			name: "rpc namespace declaration",
+			xml: `<rpc message-id="101" xmlns="urn:ietf:params:xml:ns:netconf:base:1.0" xmlns:if="urn:ietf:params:xml:ns:yang:ietf-interfaces">
+				<get-config>
+					<source><running/></source>
+					<filter type="xpath" select="/if:interfaces/if:interface[if:name='ge-0/0/0']"/>
+				</get-config>
+			</rpc>`,
+		},
+		{
+			name: "filter namespace declaration",
+			xml: `<rpc message-id="101" xmlns="urn:ietf:params:xml:ns:netconf:base:1.0">
+				<get-config>
+					<source><running/></source>
+					<filter type="xpath" select="/if:interfaces/if:interface[if:name='ge-0/0/0']" xmlns:if="urn:ietf:params:xml:ns:yang:ietf-interfaces"/>
+				</get-config>
+			</rpc>`,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			rpc, err := ParseRPC([]byte(tt.xml))
+			if err != nil {
+				t.Fatalf("ParseRPC() error = %v", err)
+			}
+
+			var req GetConfigRequest
+			if err := rpc.UnmarshalOperation(&req); err != nil {
+				t.Fatalf("UnmarshalOperation() error = %v", err)
+			}
+			if err := req.Filter.Validate("get-config"); err != nil {
+				t.Fatalf("Filter.Validate() error = %v", err)
+			}
+			if !filterMatches(req.Filter, "interfaces") {
+				t.Fatalf("filterMatches() = false, want true for namespace-prefixed xpath filter")
+			}
+		})
+	}
+}
+
 func TestRPCGetOperationName(t *testing.T) {
 	xml := `<rpc message-id="101" xmlns="urn:ietf:params:xml:ns:netconf:base:1.0">
 		<get-config>
@@ -418,6 +751,101 @@ func TestRPCGetOperationName(t *testing.T) {
 	opName := rpc.GetOperationName()
 	if opName != "get-config" {
 		t.Errorf("Expected operation name 'get-config', got %s", opName)
+	}
+}
+
+func TestRPCAccessorsNilReceiver(t *testing.T) {
+	var rpc *RPC
+
+	if got := rpc.GetOperationName(); got != "" {
+		t.Fatalf("GetOperationName() = %q, want empty", got)
+	}
+	if got := rpc.GetOperationNamespace(); got != "" {
+		t.Fatalf("GetOperationNamespace() = %q, want empty", got)
+	}
+	var req GetConfigRequest
+	err := rpc.UnmarshalOperation(&req)
+	if err == nil {
+		t.Fatal("UnmarshalOperation() error = nil, want rpc unavailable")
+	}
+	if rpcErr, ok := err.(*RPCError); !ok || rpcErr.ErrorTag != ErrorTagOperationFailed {
+		t.Fatalf("UnmarshalOperation() error = %#v, want operation-failed RPCError", err)
+	}
+	err = rpc.ValidateOperationNamespace()
+	if err == nil {
+		t.Fatal("ValidateOperationNamespace() error = nil, want rpc unavailable")
+	}
+	if rpcErr, ok := err.(*RPCError); !ok || rpcErr.ErrorTag != ErrorTagOperationFailed {
+		t.Fatalf("ValidateOperationNamespace() error = %#v, want operation-failed RPCError", err)
+	}
+}
+
+func TestRPCZeroValueOperationAccessors(t *testing.T) {
+	rpc := &RPC{}
+
+	var req GetConfigRequest
+	err := rpc.UnmarshalOperation(&req)
+	if err == nil {
+		t.Fatal("UnmarshalOperation() error = nil, want rpc operation unavailable")
+	}
+	if rpcErr, ok := err.(*RPCError); !ok || rpcErr.ErrorTag != ErrorTagOperationFailed {
+		t.Fatalf("UnmarshalOperation() error = %#v, want operation-failed RPCError", err)
+	}
+
+	err = rpc.ValidateOperationNamespace()
+	if err == nil {
+		t.Fatal("ValidateOperationNamespace() error = nil, want rpc operation unavailable")
+	}
+	if rpcErr, ok := err.(*RPCError); !ok || rpcErr.ErrorTag != ErrorTagOperationFailed {
+		t.Fatalf("ValidateOperationNamespace() error = %#v, want operation-failed RPCError", err)
+	}
+}
+
+func TestRPCUnmarshalOperationRejectsReservedNamespaceDeclarations(t *testing.T) {
+	tests := []struct {
+		name string
+		attr xml.Attr
+		want string
+	}{
+		{
+			name: "xml prefix rebound",
+			attr: xml.Attr{Name: xml.Name{Space: "xmlns", Local: "xml"}, Value: "urn:bad"},
+			want: "namespace prefix xml must be bound",
+		},
+		{
+			name: "xmlns prefix declared",
+			attr: xml.Attr{Name: xml.Name{Space: "xmlns", Local: "xmlns"}, Value: "urn:bad"},
+			want: "namespace prefix xmlns must not be declared",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			rpc := &RPC{
+				Operation:      xml.Name{Space: netconfNamespace, Local: "get-config"},
+				Content:        []byte(`<source><running/></source>`),
+				NamespaceAttrs: []xml.Attr{tt.attr},
+			}
+
+			var req GetConfigRequest
+			err := rpc.UnmarshalOperation(&req)
+			if err == nil {
+				t.Fatalf("UnmarshalOperation() error = nil, want %q", tt.want)
+			}
+			rpcErr, ok := err.(*RPCError)
+			if !ok {
+				t.Fatalf("UnmarshalOperation() error = %T, want *RPCError", err)
+			}
+			if rpcErr.ErrorTag != ErrorTagInvalidValue {
+				t.Fatalf("UnmarshalOperation() error tag = %s, want %s", rpcErr.ErrorTag, ErrorTagInvalidValue)
+			}
+			if rpcErr.ErrorPath != "/rpc/get-config" {
+				t.Fatalf("UnmarshalOperation() error path = %q, want /rpc/get-config", rpcErr.ErrorPath)
+			}
+			if !strings.Contains(rpcErr.ErrorMessage, tt.want) {
+				t.Fatalf("UnmarshalOperation() error = %v, want %q", rpcErr, tt.want)
+			}
+		})
 	}
 }
 
@@ -474,6 +902,21 @@ func TestSourceGetDatastore(t *testing.T) {
 	}
 }
 
+func TestSourceGetDatastoreNilReceiver(t *testing.T) {
+	var source *Source
+
+	ds, err := source.GetDatastore()
+	if err == nil {
+		t.Fatal("GetDatastore() error = nil, want missing datastore")
+	}
+	if ds != "" {
+		t.Fatalf("GetDatastore() datastore = %q, want empty", ds)
+	}
+	if rpcErr, ok := err.(*RPCError); !ok || rpcErr.ErrorTag != ErrorTagMissingElement {
+		t.Fatalf("GetDatastore() error = %#v, want missing-element RPCError", err)
+	}
+}
+
 func TestTargetGetDatastore(t *testing.T) {
 	tests := []struct {
 		name     string
@@ -521,6 +964,21 @@ func TestTargetGetDatastore(t *testing.T) {
 	}
 }
 
+func TestTargetGetDatastoreNilReceiver(t *testing.T) {
+	var target *Target
+
+	ds, err := target.GetDatastore()
+	if err == nil {
+		t.Fatal("GetDatastore() error = nil, want missing datastore")
+	}
+	if ds != "" {
+		t.Fatalf("GetDatastore() datastore = %q, want empty", ds)
+	}
+	if rpcErr, ok := err.(*RPCError); !ok || rpcErr.ErrorTag != ErrorTagMissingElement {
+		t.Fatalf("GetDatastore() error = %#v, want missing-element RPCError", err)
+	}
+}
+
 func TestFilterValidate(t *testing.T) {
 	tests := []struct {
 		name    string
@@ -541,8 +999,276 @@ func TestFilterValidate(t *testing.T) {
 			wantErr: false,
 		},
 		{
-			name:    "xpath filter rejected",
+			name: "subtree filter namespace prefix on filter",
+			filter: &Filter{
+				Type:    "subtree",
+				Content: []byte(`<if:interfaces/>`),
+				Attrs: []xml.Attr{
+					{Name: xml.Name{Space: "xmlns", Local: "if"}, Value: IETFInterfacesNS},
+				},
+			},
+			rpcName: "get-config",
+			wantErr: false,
+		},
+		{
+			name: "subtree filter nested model path",
+			filter: &Filter{
+				Type:    "subtree",
+				Content: []byte(`<interfaces><interface><name/></interface></interfaces>`),
+			},
+			rpcName: "get-config",
+			wantErr: false,
+		},
+		{
+			name: "subtree filter nested namespace prefix",
+			filter: &Filter{
+				Type:    "subtree",
+				Content: []byte(`<if:interfaces><if:interface><if:name/></if:interface></if:interfaces>`),
+				Attrs: []xml.Attr{
+					{Name: xml.Name{Space: "xmlns", Local: "if"}, Value: IETFInterfacesNS},
+				},
+			},
+			rpcName: "get-config",
+			wantErr: false,
+		},
+		{
+			name: "subtree filter rejects empty direct attribute name",
+			filter: &Filter{
+				Type:    "subtree",
+				Content: []byte(`<interfaces/>`),
+				Attrs: []xml.Attr{
+					{Name: xml.Name{}, Value: "bad"},
+				},
+			},
+			rpcName: "get-config",
+			wantErr: true,
+		},
+		{
+			name: "subtree filter rejects empty namespace prefix declaration",
+			filter: &Filter{
+				Type:    "subtree",
+				Content: []byte(`<interfaces/>`),
+				Attrs: []xml.Attr{
+					{Name: xml.Name{Space: "xmlns"}, Value: "urn:bad"},
+				},
+			},
+			rpcName: "get-config",
+			wantErr: true,
+		},
+		{
+			name: "subtree filter namespace prefix mismatch",
+			filter: &Filter{
+				Type:    "subtree",
+				Content: []byte(`<rt:interfaces/>`),
+				Attrs: []xml.Attr{
+					{Name: xml.Name{Space: "xmlns", Local: "rt"}, Value: IETFRoutingNS},
+				},
+			},
+			rpcName: "get-config",
+			wantErr: true,
+		},
+		{
+			name: "subtree filter rejects unknown top-level element",
+			filter: &Filter{
+				Type:    "subtree",
+				Content: []byte(`<unknown/>`),
+			},
+			rpcName: "get-config",
+			wantErr: true,
+		},
+		{
+			name: "subtree filter rejects unknown nested element",
+			filter: &Filter{
+				Type:    "subtree",
+				Content: []byte(`<interfaces><interface><unknown/></interface></interfaces>`),
+			},
+			rpcName: "get-config",
+			wantErr: true,
+		},
+		{
+			name: "subtree filter allows bracket text content",
+			filter: &Filter{
+				Type:    "subtree",
+				Content: []byte(`<system><host-name>edge[blue]</host-name></system>`),
+			},
+			rpcName: "get-config",
+			wantErr: false,
+		},
+		{
+			name: "subtree filter rejects element attribute",
+			filter: &Filter{
+				Type:    "subtree",
+				Content: []byte(`<interfaces foo="bar"/>`),
+			},
+			rpcName: "get-config",
+			wantErr: true,
+		},
+		{
+			name: "subtree filter rejects nested namespace prefix mismatch",
+			filter: &Filter{
+				Type:    "subtree",
+				Content: []byte(`<if:interfaces><rt:interface/></if:interfaces>`),
+				Attrs: []xml.Attr{
+					{Name: xml.Name{Space: "xmlns", Local: "if"}, Value: IETFInterfacesNS},
+					{Name: xml.Name{Space: "xmlns", Local: "rt"}, Value: IETFRoutingNS},
+				},
+			},
+			rpcName: "get-config",
+			wantErr: true,
+		},
+		{
+			name:    "xpath filter",
 			filter:  &Filter{Type: "xpath", Select: "/interfaces"},
+			rpcName: "get-config",
+			wantErr: false,
+		},
+		{
+			name:    "xpath filter trims type",
+			filter:  &Filter{Type: "\n xpath \t", Select: "/interfaces"},
+			rpcName: "get-config",
+			wantErr: false,
+		},
+		{
+			name:    "xpath filter nested model path",
+			filter:  &Filter{Type: "xpath", Select: "/protocols/bgp/group/neighbor/peer-as"},
+			rpcName: "get-config",
+			wantErr: false,
+		},
+		{
+			name: "xpath filter namespace prefix on filter",
+			filter: &Filter{
+				Type:   "xpath",
+				Select: "/if:interfaces/if:interface[if:name='ge-0/0/0']",
+				Attrs: []xml.Attr{
+					{Name: xml.Name{Space: "xmlns", Local: "if"}, Value: IETFInterfacesNS},
+				},
+			},
+			rpcName: "get-config",
+			wantErr: false,
+		},
+		{
+			name: "xpath filter interface operational state predicate",
+			filter: &Filter{
+				Type:   "xpath",
+				Select: "/if:interfaces/if:interface[if:admin-status='up']",
+				Attrs: []xml.Attr{
+					{Name: xml.Name{Space: "xmlns", Local: "if"}, Value: IETFInterfacesNS},
+				},
+			},
+			rpcName: "get",
+			wantErr: false,
+		},
+		{
+			name: "xpath filter system operational state path",
+			filter: &Filter{
+				Type:   "xpath",
+				Select: "/sys:system/sys:system-state/sys:clock/sys:current-datetime",
+				Attrs: []xml.Attr{
+					{Name: xml.Name{Space: "xmlns", Local: "sys"}, Value: IETFSystemNS},
+				},
+			},
+			rpcName: "get",
+			wantErr: false,
+		},
+		{
+			name: "xpath filter namespace prefix inherited from rpc",
+			filter: &Filter{
+				Type:   "xpath",
+				Select: "/arca:protocols/arca:bgp/arca:group/arca:neighbor",
+				InheritedAttrs: []xml.Attr{
+					{Name: xml.Name{Space: "xmlns", Local: "arca"}, Value: ArcaConfigNS},
+				},
+			},
+			rpcName: "get-config",
+			wantErr: false,
+		},
+		{
+			name: "xpath filter routing namespace prefix",
+			filter: &Filter{
+				Type:   "xpath",
+				Select: "/rt:routing/rt:static-routes/rt:route[rt:prefix='10.0.0.0/24']",
+				Attrs: []xml.Attr{
+					{Name: xml.Name{Space: "xmlns", Local: "rt"}, Value: IETFRoutingNS},
+				},
+			},
+			rpcName: "get-config",
+			wantErr: false,
+		},
+		{
+			name: "xpath filter routing operational state route namespace prefix",
+			filter: &Filter{
+				Type:   "xpath",
+				Select: "/rt:routing/rt:routing-state/rt:routes/rt:route[rt:destination-prefix='0.0.0.0/0']",
+				Attrs: []xml.Attr{
+					{Name: xml.Name{Space: "xmlns", Local: "rt"}, Value: IETFRoutingNS},
+				},
+			},
+			rpcName: "get",
+			wantErr: false,
+		},
+		{
+			name:    "xpath filter accepts multiple predicates",
+			filter:  &Filter{Type: "xpath", Select: "/state/routes/route[prefix='192.0.2.0/24'][protocol='static']"},
+			rpcName: "get",
+			wantErr: false,
+		},
+		{
+			name:    "xpath filter requires select",
+			filter:  &Filter{Type: "xpath"},
+			rpcName: "get-config",
+			wantErr: true,
+		},
+		{
+			name:    "xpath filter rejects relative select",
+			filter:  &Filter{Type: "xpath", Select: "interfaces"},
+			rpcName: "get-config",
+			wantErr: true,
+		},
+		{
+			name:    "xpath filter rejects unknown model path",
+			filter:  &Filter{Type: "xpath", Select: "/interfaces/interface/unknown"},
+			rpcName: "get-config",
+			wantErr: true,
+		},
+		{
+			name:    "xpath filter rejects unknown predicate key",
+			filter:  &Filter{Type: "xpath", Select: "/interfaces/interface[foo='bar']"},
+			rpcName: "get-config",
+			wantErr: true,
+		},
+		{
+			name:    "xpath filter rejects invalid boolean predicate literal",
+			filter:  &Filter{Type: "xpath", Select: "/system/services/web-ui[enabled='yes']"},
+			rpcName: "get-config",
+			wantErr: true,
+		},
+		{
+			name:    "xpath filter rejects invalid uint predicate literal",
+			filter:  &Filter{Type: "xpath", Select: "/system/services/web-ui[port='https']"},
+			rpcName: "get-config",
+			wantErr: true,
+		},
+		{
+			name:    "xpath filter rejects undeclared namespace prefix",
+			filter:  &Filter{Type: "xpath", Select: "/if:interfaces"},
+			rpcName: "get-config",
+			wantErr: true,
+		},
+		{
+			name: "xpath filter rejects namespace prefix mismatch",
+			filter: &Filter{
+				Type:   "xpath",
+				Select: "/rt:interfaces",
+				Attrs: []xml.Attr{
+					{Name: xml.Name{Space: "xmlns", Local: "rt"}, Value: IETFRoutingNS},
+				},
+			},
+			rpcName: "get-config",
+			wantErr: true,
+		},
+		{
+			name:    "xpath filter rejects subtree content",
+			filter:  &Filter{Type: "xpath", Select: "/interfaces", Content: []byte("<interfaces/>")},
 			rpcName: "get-config",
 			wantErr: true,
 		},
@@ -555,6 +1281,12 @@ func TestFilterValidate(t *testing.T) {
 		{
 			name:    "default to subtree",
 			filter:  &Filter{Content: []byte("<interfaces/>")},
+			rpcName: "get-config",
+			wantErr: false,
+		},
+		{
+			name:    "subtree filter trims type",
+			filter:  &Filter{Type: "\n subtree \t", Content: []byte("<interfaces/>")},
 			rpcName: "get-config",
 			wantErr: false,
 		},
@@ -592,6 +1324,257 @@ func TestFilterValidate(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestFilterValidateRejectsEmptyAttributeName(t *testing.T) {
+	tests := []struct {
+		name  string
+		attrs []xml.Attr
+	}{
+		{
+			name: "empty direct attribute",
+			attrs: []xml.Attr{
+				{Name: xml.Name{}, Value: "bad"},
+			},
+		},
+		{
+			name: "empty namespace prefix declaration",
+			attrs: []xml.Attr{
+				{Name: xml.Name{Space: "xmlns"}, Value: "urn:bad"},
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			filter := &Filter{
+				Type:    "subtree",
+				Content: []byte(`<interfaces/>`),
+				Attrs:   tt.attrs,
+			}
+
+			err := filter.Validate("get-config")
+			if err == nil {
+				t.Fatal("Validate() error = nil, want empty attribute name error")
+			}
+			rpcErr, ok := err.(*RPCError)
+			if !ok {
+				t.Fatalf("Validate() error = %T, want *RPCError", err)
+			}
+			if rpcErr.ErrorTag != ErrorTagInvalidValue {
+				t.Fatalf("Validate() error tag = %s, want %s", rpcErr.ErrorTag, ErrorTagInvalidValue)
+			}
+			if rpcErr.ErrorPath != "/rpc/get-config/filter" {
+				t.Fatalf("Validate() error path = %q, want /rpc/get-config/filter", rpcErr.ErrorPath)
+			}
+		})
+	}
+}
+
+func TestFilterValidateRejectsReservedNamespaceDeclarations(t *testing.T) {
+	tests := []struct {
+		name           string
+		attrs          []xml.Attr
+		inheritedAttrs []xml.Attr
+		want           string
+	}{
+		{
+			name: "direct xml prefix rebound",
+			attrs: []xml.Attr{
+				{Name: xml.Name{Space: "xmlns", Local: "xml"}, Value: "urn:bad"},
+			},
+			want: "namespace prefix xml must be bound",
+		},
+		{
+			name: "inherited xmlns prefix declared",
+			inheritedAttrs: []xml.Attr{
+				{Name: xml.Name{Space: "xmlns", Local: "xmlns"}, Value: "urn:bad"},
+			},
+			want: "namespace prefix xmlns must not be declared",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			filter := &Filter{
+				Type:           "subtree",
+				Content:        []byte(`<interfaces/>`),
+				Attrs:          tt.attrs,
+				InheritedAttrs: tt.inheritedAttrs,
+			}
+
+			err := filter.Validate("get-config")
+			if err == nil {
+				t.Fatalf("Validate() error = nil, want %q", tt.want)
+			}
+			rpcErr, ok := err.(*RPCError)
+			if !ok {
+				t.Fatalf("Validate() error = %T, want *RPCError", err)
+			}
+			if rpcErr.ErrorTag != ErrorTagInvalidValue {
+				t.Fatalf("Validate() error tag = %s, want %s", rpcErr.ErrorTag, ErrorTagInvalidValue)
+			}
+			if rpcErr.ErrorPath != "/rpc/get-config/filter" {
+				t.Fatalf("Validate() error path = %q, want /rpc/get-config/filter", rpcErr.ErrorPath)
+			}
+			if !strings.Contains(rpcErr.ErrorMessage, tt.want) {
+				t.Fatalf("Validate() error = %v, want %q", rpcErr, tt.want)
+			}
+		})
+	}
+}
+
+func TestFilterValidateDoesNotMutateFilter(t *testing.T) {
+	tests := []struct {
+		name   string
+		filter *Filter
+	}{
+		{
+			name:   "default subtree keeps empty type",
+			filter: &Filter{Content: []byte("<interfaces/>")},
+		},
+		{
+			name:   "xpath keeps raw type and select",
+			filter: &Filter{Type: "\n xpath \t", Select: "\n /interfaces \t"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			originalType := tt.filter.Type
+			originalSelect := tt.filter.Select
+
+			if err := tt.filter.Validate("get-config"); err != nil {
+				t.Fatalf("Validate() error = %v", err)
+			}
+			if tt.filter.Type != originalType {
+				t.Fatalf("Validate() Type = %q, want %q", tt.filter.Type, originalType)
+			}
+			if tt.filter.Select != originalSelect {
+				t.Fatalf("Validate() Select = %q, want %q", tt.filter.Select, originalSelect)
+			}
+		})
+	}
+}
+
+func TestValidateFilterDepthAndSizeTrimsFilterType(t *testing.T) {
+	filter := &Filter{Type: "\n xpath \t", Select: "interfaces"}
+
+	err := ValidateFilterDepthAndSize("get-config", filter)
+	if err == nil {
+		t.Fatal("ValidateFilterDepthAndSize() error = nil, want invalid xpath filter")
+	}
+	rpcErr, ok := err.(*RPCError)
+	if !ok {
+		t.Fatalf("ValidateFilterDepthAndSize() error = %T, want *RPCError", err)
+	}
+	if rpcErr.ErrorTag != ErrorTagInvalidValue {
+		t.Fatalf("ValidateFilterDepthAndSize() error tag = %s, want %s", rpcErr.ErrorTag, ErrorTagInvalidValue)
+	}
+}
+
+func TestValidateFilterDepthAndSizeUsesXPathNamespaceContext(t *testing.T) {
+	valid := &Filter{
+		Type:   "xpath",
+		Select: "/if:interfaces",
+		Attrs: []xml.Attr{
+			{Name: xml.Name{Space: "xmlns", Local: "if"}, Value: IETFInterfacesNS},
+		},
+	}
+	if err := ValidateFilterDepthAndSize("get-config", valid); err != nil {
+		t.Fatalf("ValidateFilterDepthAndSize() valid prefix error = %v", err)
+	}
+
+	invalid := &Filter{Type: "xpath", Select: "/if:interfaces"}
+	err := ValidateFilterDepthAndSize("get-config", invalid)
+	if err == nil {
+		t.Fatal("ValidateFilterDepthAndSize() error = nil, want undeclared namespace error")
+	}
+	rpcErr, ok := err.(*RPCError)
+	if !ok {
+		t.Fatalf("ValidateFilterDepthAndSize() error = %T, want *RPCError", err)
+	}
+	if rpcErr.ErrorTag != ErrorTagInvalidValue {
+		t.Fatalf("ValidateFilterDepthAndSize() error tag = %s, want %s", rpcErr.ErrorTag, ErrorTagInvalidValue)
+	}
+}
+
+func TestValidateFilterDepthAndSizeRejectsEmptyXPathSelect(t *testing.T) {
+	filter := &Filter{Type: "xpath"}
+
+	err := ValidateFilterDepthAndSize("get-config", filter)
+	if err == nil {
+		t.Fatal("ValidateFilterDepthAndSize() error = nil, want missing select error")
+	}
+	rpcErr, ok := err.(*RPCError)
+	if !ok {
+		t.Fatalf("ValidateFilterDepthAndSize() error = %T, want *RPCError", err)
+	}
+	if rpcErr.ErrorTag != ErrorTagInvalidValue {
+		t.Fatalf("ValidateFilterDepthAndSize() error tag = %s, want %s", rpcErr.ErrorTag, ErrorTagInvalidValue)
+	}
+}
+
+func TestValidateFilterDepthAndSizeRejectsUnsupportedFilterType(t *testing.T) {
+	filter := &Filter{Type: "unsupported"}
+
+	err := ValidateFilterDepthAndSize("get-config", filter)
+	if err == nil {
+		t.Fatal("ValidateFilterDepthAndSize() error = nil, want unsupported filter type error")
+	}
+	rpcErr, ok := err.(*RPCError)
+	if !ok {
+		t.Fatalf("ValidateFilterDepthAndSize() error = %T, want *RPCError", err)
+	}
+	if rpcErr.ErrorTag != ErrorTagInvalidValue {
+		t.Fatalf("ValidateFilterDepthAndSize() error tag = %s, want %s", rpcErr.ErrorTag, ErrorTagInvalidValue)
+	}
+	if rpcErr.ErrorInfo == nil || rpcErr.ErrorInfo.BadAttribute != "type" {
+		t.Fatalf("ValidateFilterDepthAndSize() error info = %#v, want bad type attribute", rpcErr.ErrorInfo)
+	}
+}
+
+func TestValidateFilterDepthAndSizeParsesSubtreeXML(t *testing.T) {
+	filter := &Filter{Content: []byte(`<interfaces>`)}
+
+	err := ValidateFilterDepthAndSize("get-config", filter)
+	if err == nil {
+		t.Fatal("ValidateFilterDepthAndSize() error = nil, want malformed subtree XML")
+	}
+	rpcErr, ok := err.(*RPCError)
+	if !ok {
+		t.Fatalf("ValidateFilterDepthAndSize() error = %T, want *RPCError", err)
+	}
+	if rpcErr.ErrorTag != ErrorTagMalformedMessage {
+		t.Fatalf("ValidateFilterDepthAndSize() error tag = %s, want %s", rpcErr.ErrorTag, ErrorTagMalformedMessage)
+	}
+}
+
+func TestValidateFilterDepthAndSizeRejectsSubtreeElementAttributes(t *testing.T) {
+	filter := &Filter{Content: []byte(`<interfaces foo="bar"/>`)}
+
+	err := ValidateFilterDepthAndSize("get-config", filter)
+	if err == nil {
+		t.Fatal("ValidateFilterDepthAndSize() error = nil, want element attribute error")
+	}
+	rpcErr, ok := err.(*RPCError)
+	if !ok {
+		t.Fatalf("ValidateFilterDepthAndSize() error = %T, want *RPCError", err)
+	}
+	if rpcErr.ErrorTag != ErrorTagInvalidValue {
+		t.Fatalf("ValidateFilterDepthAndSize() error tag = %s, want %s", rpcErr.ErrorTag, ErrorTagInvalidValue)
+	}
+	if !strings.Contains(rpcErr.ErrorMessage, `subtree filter element attribute "foo" is not supported`) {
+		t.Fatalf("ValidateFilterDepthAndSize() message = %q, want unsupported attribute", rpcErr.ErrorMessage)
+	}
+}
+
+func TestValidateFilterDepthAndSizeIgnoresNonElementMarkup(t *testing.T) {
+	filter := &Filter{Content: []byte(`<!-- ` + strings.Repeat("<fake/>", MaxXMLElements+1) + ` --><interfaces><![CDATA[` + strings.Repeat("<fake/>", MaxXMLDepth+1) + `]]></interfaces>`)}
+
+	if err := ValidateFilterDepthAndSize("get-config", filter); err != nil {
+		t.Fatalf("ValidateFilterDepthAndSize() error = %v, want nil for comment and CDATA pseudo-elements", err)
 	}
 }
 

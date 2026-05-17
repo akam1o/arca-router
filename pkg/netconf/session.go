@@ -3,6 +3,7 @@ package netconf
 import (
 	"context"
 	"fmt"
+	"sort"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -58,6 +59,11 @@ type DatastoreLockReleaser interface {
 
 // NewSessionManager creates a new session manager
 func NewSessionManager(config *SSHConfig, ds DatastoreLockReleaser, log *logger.Logger) *SessionManager {
+	config = sessionManagerConfigWithDefaults(config)
+	if log == nil {
+		log = logger.New("netconf-session", logger.DefaultConfig())
+	}
+
 	return &SessionManager{
 		sessions:       make(map[string]*NETCONFSession),
 		numericIDIndex: make(map[uint32]*NETCONFSession),
@@ -68,10 +74,33 @@ func NewSessionManager(config *SSHConfig, ds DatastoreLockReleaser, log *logger.
 	}
 }
 
+func sessionManagerConfigWithDefaults(config *SSHConfig) *SSHConfig {
+	defaults := DefaultSSHConfig()
+	if config == nil {
+		return defaults
+	}
+	merged := *config
+	if merged.IdleTimeout <= 0 {
+		merged.IdleTimeout = defaults.IdleTimeout
+	}
+	if merged.AbsoluteTimeout <= 0 {
+		merged.AbsoluteTimeout = defaults.AbsoluteTimeout
+	}
+	if merged.MaxSessions <= 0 {
+		merged.MaxSessions = defaults.MaxSessions
+	}
+	return &merged
+}
+
 // Create creates a new NETCONF session
 func (sm *SessionManager) Create(username, role string, conn ssh.Conn, channel ssh.Channel) *NETCONFSession {
+	if sm == nil {
+		return nil
+	}
+
 	sm.mu.Lock()
 	defer sm.mu.Unlock()
+	sm.ensureRuntimeStateLocked()
 
 	ctx, cancel := context.WithCancel(context.Background())
 
@@ -99,8 +128,25 @@ func (sm *SessionManager) Create(username, role string, conn ssh.Conn, channel s
 	return session
 }
 
+func (sm *SessionManager) ensureRuntimeStateLocked() {
+	if sm.sessions == nil {
+		sm.sessions = make(map[string]*NETCONFSession)
+	}
+	if sm.numericIDIndex == nil {
+		sm.numericIDIndex = make(map[uint32]*NETCONFSession)
+	}
+	sm.config = sessionManagerConfigWithDefaults(sm.config)
+	if sm.log == nil {
+		sm.log = logger.New("netconf-session", logger.DefaultConfig())
+	}
+}
+
 // Get retrieves a session by UUID
 func (sm *SessionManager) Get(id string) (*NETCONFSession, bool) {
+	if sm == nil {
+		return nil, false
+	}
+
 	sm.mu.RLock()
 	defer sm.mu.RUnlock()
 	session, ok := sm.sessions[id]
@@ -109,6 +155,10 @@ func (sm *SessionManager) Get(id string) (*NETCONFSession, bool) {
 
 // GetByNumericID retrieves a session by numeric ID (RFC 6241 session-id)
 func (sm *SessionManager) GetByNumericID(numericID uint32) (*NETCONFSession, bool) {
+	if sm == nil {
+		return nil, false
+	}
+
 	sm.mu.RLock()
 	defer sm.mu.RUnlock()
 	session, ok := sm.numericIDIndex[numericID]
@@ -117,6 +167,10 @@ func (sm *SessionManager) GetByNumericID(numericID uint32) (*NETCONFSession, boo
 
 // Count returns the number of active sessions
 func (sm *SessionManager) Count() int {
+	if sm == nil {
+		return 0
+	}
+
 	sm.mu.RLock()
 	defer sm.mu.RUnlock()
 	return len(sm.sessions)
@@ -124,6 +178,10 @@ func (sm *SessionManager) Count() int {
 
 // CloseAll closes all active sessions and stops cleanup
 func (sm *SessionManager) CloseAll() {
+	if sm == nil {
+		return
+	}
+
 	// Stop cleanup goroutine if running (only once)
 	sm.cleanupStopped.Do(func() {
 		if sm.cleanupDone != nil {
@@ -153,7 +211,15 @@ func (sm *SessionManager) CloseAll() {
 
 // StartCleanup starts the session cleanup goroutine
 func (sm *SessionManager) StartCleanup(ctx context.Context, wg *sync.WaitGroup) {
-	defer wg.Done()
+	if wg != nil {
+		defer wg.Done()
+	}
+	if sm == nil {
+		return
+	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
 
 	ticker := time.NewTicker(1 * time.Minute)
 	sm.cleanupMu.Lock()
@@ -161,11 +227,18 @@ func (sm *SessionManager) StartCleanup(ctx context.Context, wg *sync.WaitGroup) 
 	sm.cleanupMu.Unlock()
 	defer ticker.Stop()
 
+	sm.mu.Lock()
+	if sm.cleanupDone == nil {
+		sm.cleanupDone = make(chan struct{})
+	}
+	cleanupDone := sm.cleanupDone
+	sm.mu.Unlock()
+
 	for {
 		select {
 		case <-ctx.Done():
 			return
-		case <-sm.cleanupDone:
+		case <-cleanupDone:
 			return
 		case <-ticker.C:
 			sm.cleanupExpiredSessions(ctx)
@@ -175,6 +248,10 @@ func (sm *SessionManager) StartCleanup(ctx context.Context, wg *sync.WaitGroup) 
 
 // cleanupExpiredSessions removes expired sessions
 func (sm *SessionManager) cleanupExpiredSessions(ctx context.Context) {
+	if sm == nil {
+		return
+	}
+
 	now := time.Now()
 	var toClose []*NETCONFSession
 
@@ -190,7 +267,9 @@ func (sm *SessionManager) cleanupExpiredSessions(ctx context.Context) {
 			toClose = append(toClose, session)
 			delete(sm.sessions, id)
 			delete(sm.numericIDIndex, session.NumericID)
-			sm.log.Info("Session expired (absolute timeout)", "id", id, "user", session.Username)
+			if sm.log != nil {
+				sm.log.Info("Session expired (absolute timeout)", "id", id, "user", session.Username)
+			}
 			continue
 		}
 
@@ -199,7 +278,9 @@ func (sm *SessionManager) cleanupExpiredSessions(ctx context.Context) {
 			toClose = append(toClose, session)
 			delete(sm.sessions, id)
 			delete(sm.numericIDIndex, session.NumericID)
-			sm.log.Info("Session expired (idle timeout)", "id", id, "user", session.Username)
+			if sm.log != nil {
+				sm.log.Info("Session expired (idle timeout)", "id", id, "user", session.Username)
+			}
 		}
 	}
 	sm.mu.Unlock()
@@ -212,9 +293,15 @@ func (sm *SessionManager) cleanupExpiredSessions(ctx context.Context) {
 
 // closeSession closes a session and releases resources
 func (sm *SessionManager) closeSession(session *NETCONFSession, reason string) {
-	session.cancel()
+	if sm == nil || session == nil {
+		return
+	}
+	if session.cancel != nil {
+		session.cancel()
+	}
 
 	// Release all held datastore locks
+	releasedLocks := 0
 	if sm.datastore != nil {
 		locks := session.GetLocks()
 		for _, target := range locks {
@@ -223,14 +310,20 @@ func (sm *SessionManager) closeSession(session *NETCONFSession, reason string) {
 
 			// Release lock using datastore interface
 			if err := sm.datastore.ReleaseLock(ctx, target, session.ID); err != nil {
-				sm.log.Warn("Failed to release lock on session close",
-					"session_id", session.ID,
-					"target", target,
-					"error", err)
+				if sm.log != nil {
+					sm.log.Warn("Failed to release lock on session close",
+						"session_id", session.ID,
+						"target", target,
+						"error", err)
+				}
 			} else {
-				sm.log.Info("Lock released on session close",
-					"session_id", session.ID,
-					"target", target)
+				session.RemoveLock(target)
+				releasedLocks++
+				if sm.log != nil {
+					sm.log.Info("Lock released on session close",
+						"session_id", session.ID,
+						"target", target)
+				}
 			}
 		}
 	}
@@ -245,11 +338,17 @@ func (sm *SessionManager) closeSession(session *NETCONFSession, reason string) {
 		_ = session.channel.Close()
 	}
 
-	sm.log.Info("Session closed", "id", session.ID, "user", session.Username, "reason", reason, "locks_released", len(session.GetLocks()))
+	if sm.log != nil {
+		sm.log.Info("Session closed", "id", session.ID, "user", session.Username, "reason", reason, "locks_released", releasedLocks)
+	}
 }
 
 // UpdateLastUsed updates the last used timestamp for a session
 func (sm *SessionManager) UpdateLastUsed(id string) {
+	if sm == nil {
+		return
+	}
+
 	sm.mu.RLock()
 	session, ok := sm.sessions[id]
 	sm.mu.RUnlock()
@@ -263,6 +362,10 @@ func (sm *SessionManager) UpdateLastUsed(id string) {
 
 // CloseSession closes a specific session by UUID
 func (sm *SessionManager) CloseSession(id string) error {
+	if sm == nil {
+		return nil
+	}
+
 	sm.mu.Lock()
 	session, ok := sm.sessions[id]
 	if !ok {
@@ -280,6 +383,10 @@ func (sm *SessionManager) CloseSession(id string) error {
 // CloseSessionByNumericID closes a specific session by numeric ID (RFC 6241)
 // Returns error if session not found (for RFC 6241 invalid-value error)
 func (sm *SessionManager) CloseSessionByNumericID(numericID uint32) error {
+	if sm == nil {
+		return fmt.Errorf("session not found: %d", numericID)
+	}
+
 	sm.mu.Lock()
 	session, ok := sm.numericIDIndex[numericID]
 	if !ok {
@@ -301,13 +408,24 @@ type Session = NETCONFSession
 
 // AddLock adds a datastore lock to session tracking
 func (s *NETCONFSession) AddLock(target string) {
+	if s == nil {
+		return
+	}
+
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if s.datastoreLocks == nil {
+		s.datastoreLocks = make(map[string]struct{})
+	}
 	s.datastoreLocks[target] = struct{}{}
 }
 
 // RemoveLock removes a datastore lock from session tracking
 func (s *NETCONFSession) RemoveLock(target string) {
+	if s == nil {
+		return
+	}
+
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	delete(s.datastoreLocks, target)
@@ -315,17 +433,26 @@ func (s *NETCONFSession) RemoveLock(target string) {
 
 // GetLocks returns the list of locked datastores
 func (s *NETCONFSession) GetLocks() []string {
+	if s == nil {
+		return nil
+	}
+
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	locks := make([]string, 0, len(s.datastoreLocks))
 	for target := range s.datastoreLocks {
 		locks = append(locks, target)
 	}
+	sort.Strings(locks)
 	return locks
 }
 
 // UpdateLastUsed updates the last used timestamp (called on each RPC)
 func (s *NETCONFSession) UpdateLastUsed() {
+	if s == nil {
+		return
+	}
+
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.LastUsed = time.Now()
@@ -333,6 +460,9 @@ func (s *NETCONFSession) UpdateLastUsed() {
 
 // RemoteAddr returns the remote address (for logging)
 func (s *NETCONFSession) RemoteAddr() string {
+	if s == nil {
+		return "unknown"
+	}
 	if s.conn != nil {
 		return s.conn.RemoteAddr().String()
 	}

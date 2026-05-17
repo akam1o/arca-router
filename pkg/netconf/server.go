@@ -40,17 +40,36 @@ func NewServer(ds datastore.Datastore, sm *SessionManager) *Server {
 
 // SetCommitHook installs a commit coordinator for NETCONF commits.
 func (s *Server) SetCommitHook(h CommitHook) {
+	if s == nil {
+		return
+	}
 	s.commitHook = h
 }
 
 // SetOperationalStateProvider installs a live-state source for <get> replies.
 func (s *Server) SetOperationalStateProvider(provider OperationalStateProvider) {
+	if s == nil {
+		return
+	}
 	s.operationalProvider = provider
 }
 
 // HandleRPC dispatches RPC to appropriate handler with RBAC enforcement
 func (s *Server) HandleRPC(ctx context.Context, sess *Session, rpc *RPC) *RPCReply {
+	if rpc == nil {
+		return NewErrorReply("", ErrOperationFailed("rpc unavailable"))
+	}
+	if s == nil {
+		return NewErrorReply(rpc.MessageID, ErrOperationFailed("server unavailable")).WithAttributes(rpc.ReplyAttrs)
+	}
+	if sess == nil {
+		return NewErrorReply(rpc.MessageID, ErrOperationFailed("session unavailable")).WithAttributes(rpc.ReplyAttrs)
+	}
+
 	opName := rpc.GetOperationName()
+	if opName == "" {
+		return NewErrorReply(rpc.MessageID, ErrOperationFailed("rpc operation unavailable")).WithAttributes(rpc.ReplyAttrs)
+	}
 
 	// Update session last used timestamp
 	sess.UpdateLastUsed()
@@ -184,6 +203,10 @@ func (s *Server) handleKillSession(ctx context.Context, sess *Session, rpc *RPC)
 		return NewErrorReply(rpc.MessageID, NewRPCError(ErrorTypeProtocol, ErrorTagInvalidValue, "cannot kill own session"))
 	}
 
+	if s.sessions == nil {
+		return NewErrorReply(rpc.MessageID, ErrOperationFailed("session manager unavailable"))
+	}
+
 	// Kill the target session by numeric ID
 	if err := s.sessions.CloseSessionByNumericID(req.SessionID); err != nil {
 		log.Printf("[NETCONF] Failed to kill session %d: %v", req.SessionID, err)
@@ -201,6 +224,9 @@ func ErrOperationFailed(message string) *RPCError {
 // sessionIDToNumeric converts UUID session ID to numeric ID for RFC 6241 compliance
 // Returns 0 if session not found (caller should handle as unknown session)
 func (s *Server) sessionIDToNumeric(sessionID string) uint32 {
+	if s == nil || s.sessions == nil {
+		return 0
+	}
 	if sess, ok := s.sessions.Get(sessionID); ok {
 		return sess.NumericID
 	}

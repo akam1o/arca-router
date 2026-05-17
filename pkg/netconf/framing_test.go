@@ -64,6 +64,62 @@ func TestChunkedFramingWritesRFC6242Markers(t *testing.T) {
 	}
 }
 
+func TestFramingReaderNilReceiver(t *testing.T) {
+	var reader *FramingReader
+	reader.SetBaseVersion("1.1")
+
+	_, err := reader.ReadMessage()
+	requireFramingNotInitializedError(t, err)
+}
+
+func TestFramingReaderZeroValue(t *testing.T) {
+	var reader FramingReader
+	reader.SetBaseVersion("1.1")
+
+	_, err := reader.ReadMessage()
+	requireFramingNotInitializedError(t, err)
+}
+
+func TestFramingReaderNilInput(t *testing.T) {
+	reader := NewFramingReader(nil, "1.0")
+
+	_, err := reader.ReadMessage()
+	requireFramingNotInitializedError(t, err)
+}
+
+func TestFramingWriterNilReceiver(t *testing.T) {
+	var writer *FramingWriter
+	writer.SetBaseVersion("1.1")
+
+	err := writer.WriteMessage([]byte("hello"))
+	requireFramingNotInitializedError(t, err)
+}
+
+func TestFramingWriterZeroValue(t *testing.T) {
+	var writer FramingWriter
+	writer.SetBaseVersion("1.0")
+
+	err := writer.WriteMessage([]byte("hello"))
+	requireFramingNotInitializedError(t, err)
+}
+
+func TestFramingWriterNilInput(t *testing.T) {
+	writer := NewFramingWriter(nil, "1.0")
+
+	err := writer.WriteMessage([]byte("hello"))
+	requireFramingNotInitializedError(t, err)
+}
+
+func requireFramingNotInitializedError(t *testing.T, err error) {
+	t.Helper()
+	if err == nil {
+		t.Fatal("Expected framing initialization error, but got nil")
+	}
+	if !strings.Contains(err.Error(), "not initialized") {
+		t.Fatalf("Expected framing initialization error, got: %v", err)
+	}
+}
+
 func TestEOMFramingRoundtrip(t *testing.T) {
 	tests := []struct {
 		name    string

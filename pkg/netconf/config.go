@@ -61,3 +61,68 @@ func DefaultSSHConfig() *SSHConfig {
 		},
 	}
 }
+
+func sshConfigWithDefaults(config *SSHConfig) *SSHConfig {
+	defaults := DefaultSSHConfig()
+	if config == nil {
+		return defaults
+	}
+
+	merged := *config
+	if merged.ListenAddr == "" {
+		merged.ListenAddr = defaults.ListenAddr
+	}
+	if merged.HostKeyPath == "" {
+		merged.HostKeyPath = defaults.HostKeyPath
+	}
+	if merged.UserDBPath == "" {
+		merged.UserDBPath = defaults.UserDBPath
+	}
+	if merged.DatastorePath == "" {
+		merged.DatastorePath = defaults.DatastorePath
+	}
+	if merged.DatastoreConfig != nil {
+		datastoreConfig := *merged.DatastoreConfig
+		merged.DatastoreConfig = &datastoreConfig
+	}
+	if merged.IdleTimeout <= 0 {
+		merged.IdleTimeout = defaults.IdleTimeout
+	}
+	if merged.AbsoluteTimeout <= 0 {
+		merged.AbsoluteTimeout = defaults.AbsoluteTimeout
+	}
+	if merged.MaxSessions <= 0 {
+		merged.MaxSessions = defaults.MaxSessions
+	}
+	if merged.IPFailureLimit <= 0 {
+		merged.IPFailureLimit = defaults.IPFailureLimit
+	}
+	if merged.UserFailureLimit <= 0 {
+		merged.UserFailureLimit = defaults.UserFailureLimit
+	}
+	if merged.IPLockoutWindow <= 0 {
+		merged.IPLockoutWindow = defaults.IPLockoutWindow
+	}
+	if merged.UserLockoutWindow <= 0 {
+		merged.UserLockoutWindow = defaults.UserLockoutWindow
+	}
+	if merged.LockoutDuration <= 0 {
+		merged.LockoutDuration = defaults.LockoutDuration
+	}
+	if len(merged.SSHCiphers) == 0 {
+		merged.SSHCiphers = append([]string(nil), defaults.SSHCiphers...)
+	} else {
+		merged.SSHCiphers = append([]string(nil), merged.SSHCiphers...)
+	}
+	if len(merged.SSHKeyExchanges) == 0 {
+		merged.SSHKeyExchanges = append([]string(nil), defaults.SSHKeyExchanges...)
+	} else {
+		merged.SSHKeyExchanges = append([]string(nil), merged.SSHKeyExchanges...)
+	}
+	if len(merged.SSHMACs) == 0 {
+		merged.SSHMACs = append([]string(nil), defaults.SSHMACs...)
+	} else {
+		merged.SSHMACs = append([]string(nil), merged.SSHMACs...)
+	}
+	return &merged
+}
