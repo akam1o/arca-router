@@ -49,10 +49,15 @@ const (
 var errTelemetryUsage = errors.New("telemetry usage error")
 
 type cliFlags struct {
-	grpcSocket  string
-	debug       bool
-	showHelp    bool
-	showVersion bool
+	grpcSocket     string
+	grpcAddress    string
+	grpcCAFile     string
+	grpcServerName string
+	grpcClientCert string
+	grpcClientKey  string
+	debug          bool
+	showHelp       bool
+	showVersion    bool
 }
 
 func main() {
@@ -81,6 +86,11 @@ func main() {
 func parseFlags() *cliFlags {
 	f := &cliFlags{}
 	flag.StringVar(&f.grpcSocket, "socket", defaultSocket, "Path to arca-routerd gRPC Unix socket")
+	flag.StringVar(&f.grpcAddress, "grpc-address", "", "arca-routerd TCP/TLS gRPC address (host:port; overrides -socket)")
+	flag.StringVar(&f.grpcCAFile, "grpc-ca", "", "CA certificate path for verifying arca-routerd gRPC TLS")
+	flag.StringVar(&f.grpcServerName, "grpc-server-name", "", "Expected gRPC TLS server name")
+	flag.StringVar(&f.grpcClientCert, "grpc-client-cert", "", "Client certificate path for gRPC mTLS")
+	flag.StringVar(&f.grpcClientKey, "grpc-client-key", "", "Client private key path for gRPC mTLS")
 	flag.BoolVar(&f.debug, "debug", false, "Enable debug output")
 	flag.BoolVar(&f.showHelp, "help", false, "Show help")
 	flag.BoolVar(&f.showHelp, "h", false, "Show help (shorthand)")
@@ -136,10 +146,15 @@ Show subcommands:
   route [inet|inet6] protocol <proto> Show routes by protocol
 
 Options:
-  -socket <path>     arca-routerd gRPC socket (default: %s)
-  -debug             Enable debug output
-  -help, -h          Show this help message
-  -version, -v       Show version information
+  -socket <path>             arca-routerd gRPC socket (default: %s)
+  -grpc-address <host:port>  arca-routerd TCP/TLS gRPC address (overrides -socket)
+  -grpc-ca <path>            CA certificate for gRPC TLS verification
+  -grpc-server-name <name>   Expected gRPC TLS server name
+  -grpc-client-cert <path>   Client certificate for gRPC mTLS
+  -grpc-client-key <path>    Client private key for gRPC mTLS
+  -debug                     Enable debug output
+  -help, -h                  Show this help message
+  -version, -v               Show version information
 
 `, defaultSocket)
 }
@@ -148,6 +163,21 @@ func debugLog(f *cliFlags, format string, args ...interface{}) {
 	if f.debug {
 		fmt.Fprintf(os.Stderr, "[DEBUG] "+format+"\n", args...)
 	}
+}
+
+func dialGRPC(f *cliFlags) (*grpcclient.Client, error) {
+	if address := strings.TrimSpace(f.grpcAddress); address != "" {
+		return grpcclient.DialTCP(address, grpcclient.TLSClientOptions{
+			CAFile:         f.grpcCAFile,
+			ServerName:     f.grpcServerName,
+			ClientCertFile: f.grpcClientCert,
+			ClientKeyFile:  f.grpcClientKey,
+		})
+	}
+	if f.grpcCAFile != "" || f.grpcServerName != "" || f.grpcClientCert != "" || f.grpcClientKey != "" {
+		return nil, fmt.Errorf("gRPC TLS flags require -grpc-address")
+	}
+	return grpcclient.Dial(f.grpcSocket)
 }
 
 func currentUsername() string {
@@ -187,7 +217,7 @@ func runOneShotCommand(ctx context.Context, f *cliFlags, args []string) int {
 	if handled, code := runLocalOneShotCommand(args); handled {
 		return code
 	}
-	client, err := grpcclient.Dial(f.grpcSocket)
+	client, err := dialGRPC(f)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 		return ExitOperationError
@@ -592,7 +622,7 @@ const (
 )
 
 func runInteractive(ctx context.Context, f *cliFlags) int {
-	client, err := grpcclient.Dial(f.grpcSocket)
+	client, err := dialGRPC(f)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error: failed to connect to arca-routerd: %v\n", err)
 		return ExitOperationError
