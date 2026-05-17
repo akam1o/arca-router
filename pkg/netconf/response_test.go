@@ -182,7 +182,7 @@ func TestNewMultiErrorReplyDefaultsNilErrors(t *testing.T) {
 }
 
 func TestNewMultiErrorReplyDefaultsEmptyErrors(t *testing.T) {
-	for _, errors := range [][]*RPCError{nil, []*RPCError{}} {
+	for _, errors := range [][]*RPCError{nil, {}} {
 		reply := NewMultiErrorReply("104", errors)
 
 		if len(reply.Errors) != 1 {
