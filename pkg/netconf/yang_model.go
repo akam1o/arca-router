@@ -128,6 +128,37 @@ module ietf-routing {
   prefix rt;
 
   container routing {
+    leaf router-id {
+      type string;
+    }
+    leaf autonomous-system {
+      type uint32;
+    }
+    container static-routes {
+      list route {
+        leaf prefix {
+          type string;
+        }
+        leaf next-hop {
+          type string;
+        }
+        leaf distance {
+          type uint8;
+        }
+        leaf bfd {
+          type boolean;
+        }
+        leaf bfd-profile {
+          type string;
+        }
+        leaf bfd-source {
+          type string;
+        }
+        leaf bfd-multihop {
+          type boolean;
+        }
+      }
+    }
     container routing-state {
       container routes {
         list route {
@@ -193,8 +224,9 @@ module ietf-system {
 
 // YANGValidator provides YANG model validation capabilities
 type YANGValidator struct {
-	modules *yang.Modules
-	mu      sync.RWMutex
+	modules          *yang.Modules
+	schemaPathSchema *yangPathNode
+	mu               sync.RWMutex
 }
 
 type yangPathNode struct {
@@ -248,8 +280,15 @@ func NewYANGValidator() (*YANGValidator, error) {
 		return nil, fmt.Errorf("YANG schema error: %v", errs[0])
 	}
 
+	schemaPaths, err := yangModuleElementPaths(ms, "arca-router", "ietf-interfaces", "ietf-routing", "ietf-system")
+	if err != nil {
+		return nil, fmt.Errorf("failed to build YANG path schema: %w", err)
+	}
+	schemaPaths = append(schemaPaths, netconfXMLCompatibilityYANGPaths...)
+
 	return &YANGValidator{
-		modules: ms,
+		modules:          ms,
+		schemaPathSchema: newYANGPathSchema(schemaPaths),
 	}, nil
 }
 
@@ -343,10 +382,78 @@ func (v *YANGValidator) validateXPathFilterPath(xpathFilter *XPathFilter) error 
 	v.mu.RLock()
 	defer v.mu.RUnlock()
 
-	return implementedYANGPathSchema.validate(xpathFilter)
+	if err := implementedYANGPathSchema.validate(xpathFilter); err != nil {
+		return err
+	}
+	if v.schemaPathSchema == nil {
+		return nil
+	}
+	if err := v.schemaPathSchema.validate(xpathFilter); err != nil {
+		return fmt.Errorf("implemented path is not backed by loaded YANG schema: %w", err)
+	}
+	return nil
 }
 
 var implementedYANGPathSchema = newYANGPathSchema(implementedYANGElementPaths())
+
+var netconfXMLCompatibilityYANGPaths = []string{
+	"interfaces/interface/unit/name",
+	"interfaces/interface/unit/family/name",
+	"interfaces/interface/unit/family/address",
+	"protocols/ospf/area/name",
+	"protocols/ospf3/area/name",
+}
+
+func yangModuleElementPaths(ms *yang.Modules, moduleNames ...string) ([]string, error) {
+	if ms == nil {
+		return nil, fmt.Errorf("YANG modules are nil")
+	}
+	seen := map[string]struct{}{}
+	for _, moduleName := range moduleNames {
+		entry, errs := ms.GetModule(moduleName)
+		if len(errs) > 0 {
+			return nil, errs[0]
+		}
+		if entry == nil {
+			return nil, fmt.Errorf("module %q returned nil schema entry", moduleName)
+		}
+		collectYANGChildPaths(entry, nil, seen)
+	}
+	paths := make([]string, 0, len(seen))
+	for path := range seen {
+		paths = append(paths, path)
+	}
+	sort.Strings(paths)
+	return paths, nil
+}
+
+func collectYANGChildPaths(entry *yang.Entry, prefix []string, seen map[string]struct{}) {
+	if entry == nil || len(entry.Dir) == 0 {
+		return
+	}
+	names := make([]string, 0, len(entry.Dir))
+	for name := range entry.Dir {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	for _, name := range names {
+		collectYANGEntryPaths(entry.Dir[name], prefix, seen)
+	}
+}
+
+func collectYANGEntryPaths(entry *yang.Entry, prefix []string, seen map[string]struct{}) {
+	if entry == nil {
+		return
+	}
+	current := prefix
+	if !entry.IsChoice() && !entry.IsCase() {
+		current = append(append([]string{}, prefix...), entry.Name)
+		if path := strings.Join(current, "/"); path != "" {
+			seen[path] = struct{}{}
+		}
+	}
+	collectYANGChildPaths(entry, current, seen)
+}
 
 func implementedYANGElementPaths() []string {
 	paths := make([]string, 0, len(allowedConfigElementPaths)+len(routingOptionsYANGAliasPaths)+len(operationalStateYANGPaths))
