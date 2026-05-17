@@ -2,6 +2,7 @@
 
 ## v0.9.x - NETCONF/YANG and Operational Safety (current)
 
+- **NETCONF framing receiver safety**: framing reader and writer setters and I/O methods now tolerate nil or zero-value receivers and return initialization errors instead of panicking
 - **NETCONF RPC error helper safety**: RPC error chain helpers and error reply constructors now tolerate nil errors and still produce marshalable operation-failed replies
 - **NETCONF RPC accessor safety**: RPC operation accessors and source/target datastore selectors now return stable empty values or RPC errors when called on nil receivers
 - **NETCONF user database lifecycle safety**: user database close, health-check, audit logger, and auth logging helpers now tolerate nil or zero-value receivers without panics
