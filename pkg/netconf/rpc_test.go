@@ -1204,6 +1204,30 @@ func TestValidateFilterDepthAndSizeRejectsUnsupportedFilterType(t *testing.T) {
 	}
 }
 
+func TestValidateFilterDepthAndSizeParsesSubtreeXML(t *testing.T) {
+	filter := &Filter{Content: []byte(`<interfaces>`)}
+
+	err := ValidateFilterDepthAndSize("get-config", filter)
+	if err == nil {
+		t.Fatal("ValidateFilterDepthAndSize() error = nil, want malformed subtree XML")
+	}
+	rpcErr, ok := err.(*RPCError)
+	if !ok {
+		t.Fatalf("ValidateFilterDepthAndSize() error = %T, want *RPCError", err)
+	}
+	if rpcErr.ErrorTag != ErrorTagMalformedMessage {
+		t.Fatalf("ValidateFilterDepthAndSize() error tag = %s, want %s", rpcErr.ErrorTag, ErrorTagMalformedMessage)
+	}
+}
+
+func TestValidateFilterDepthAndSizeIgnoresNonElementMarkup(t *testing.T) {
+	filter := &Filter{Content: []byte(`<!-- ` + strings.Repeat("<fake/>", MaxXMLElements+1) + ` --><interfaces><![CDATA[` + strings.Repeat("<fake/>", MaxXMLDepth+1) + `]]></interfaces>`)}
+
+	if err := ValidateFilterDepthAndSize("get-config", filter); err != nil {
+		t.Fatalf("ValidateFilterDepthAndSize() error = %v, want nil for comment and CDATA pseudo-elements", err)
+	}
+}
+
 func TestParseSizeLimit(t *testing.T) {
 	// Create a large XML (> 10MB)
 	largeXML := `<rpc message-id="101" xmlns="urn:ietf:params:xml:ns:netconf:base:1.0"><get-config>`

@@ -3307,8 +3307,13 @@ func ValidateFilterDepthAndSize(rpcName string, filter *Filter) error {
 		return nil
 	}
 
-	// Calculate depth by counting nested elements
-	depth := calculateFilterDepth(filter.Content)
+	depth, count, err := calculateSubtreeFilterStats(filter)
+	if err != nil {
+		return NewRPCError(ErrorTypeRPC, ErrorTagMalformedMessage,
+			fmt.Sprintf("invalid subtree filter XML: %v", err)).
+			WithPath(fmt.Sprintf("/rpc/%s/filter", rpcName)).
+			WithBadElement("filter")
+	}
 	if depth > MaxXMLDepth {
 		return NewRPCError(ErrorTypeProtocol, ErrorTagInvalidValue,
 			fmt.Sprintf("filter exceeds maximum depth limit (%d)", MaxXMLDepth)).
@@ -3316,8 +3321,6 @@ func ValidateFilterDepthAndSize(rpcName string, filter *Filter) error {
 			WithAppTag("depth-limit")
 	}
 
-	// Count elements
-	count := countFilterElements(filter.Content)
 	if count > MaxXMLElements {
 		return NewRPCError(ErrorTypeProtocol, ErrorTagInvalidValue,
 			fmt.Sprintf("filter exceeds maximum element limit (%d)", MaxXMLElements)).
@@ -3357,40 +3360,21 @@ func validateXPathFilterDepthAndSize(rpcName string, filter *Filter) error {
 	return nil
 }
 
-// calculateFilterDepth calculates nesting depth of filter XML
-func calculateFilterDepth(content []byte) int {
-	depth := 0
+func calculateSubtreeFilterStats(filter *Filter) (int, int, error) {
+	if filter == nil {
+		return 0, 0, nil
+	}
+	paths, err := filter.parseElementPaths()
+	if err != nil {
+		return 0, 0, err
+	}
 	maxDepth := 0
-
-	for i := 0; i < len(content); i++ {
-		if content[i] == '<' {
-			if i+1 < len(content) && content[i+1] != '/' && content[i+1] != '?' && content[i+1] != '!' {
-				depth++
-				if depth > maxDepth {
-					maxDepth = depth
-				}
-			} else if i+1 < len(content) && content[i+1] == '/' {
-				depth--
-			}
+	for _, path := range paths {
+		if len(path) > maxDepth {
+			maxDepth = len(path)
 		}
 	}
-
-	return maxDepth
-}
-
-// countFilterElements counts XML elements in filter
-func countFilterElements(content []byte) int {
-	count := 0
-
-	for i := 0; i < len(content); i++ {
-		if content[i] == '<' {
-			if i+1 < len(content) && content[i+1] != '/' && content[i+1] != '?' && content[i+1] != '!' {
-				count++
-			}
-		}
-	}
-
-	return count
+	return maxDepth, len(paths), nil
 }
 
 // max returns the maximum of two integers

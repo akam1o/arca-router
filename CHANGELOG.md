@@ -2,6 +2,7 @@
 
 ## v0.9.x - NETCONF/YANG and Operational Safety (current)
 
+- **NETCONF subtree filter limit parsing**: direct subtree filter depth and element limit checks now use XML token parsing so malformed filters fail and comments or CDATA do not count as elements
 - **NETCONF operational filter type validation**: operational section selection now rejects unsupported filter types instead of treating empty content as match-all output
 - **NETCONF unsupported filter type validation**: direct output filtering and filter limit checks now reject unsupported filter types instead of treating empty content as a match-all subtree filter
 - **NETCONF empty XPath filter validation**: direct output filtering and filter limit checks now reject `type=xpath` filters without a select expression instead of treating them as match-all filters
