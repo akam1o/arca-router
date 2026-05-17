@@ -1086,6 +1086,15 @@ func TestFilterValidate(t *testing.T) {
 			wantErr: true,
 		},
 		{
+			name: "subtree filter allows bracket text content",
+			filter: &Filter{
+				Type:    "subtree",
+				Content: []byte(`<system><host-name>edge[blue]</host-name></system>`),
+			},
+			rpcName: "get-config",
+			wantErr: false,
+		},
+		{
 			name: "subtree filter rejects nested namespace prefix mismatch",
 			filter: &Filter{
 				Type:    "subtree",
