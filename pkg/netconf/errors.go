@@ -73,12 +73,18 @@ func NewRPCError(errType ErrorType, errTag ErrorTag, message string) *RPCError {
 
 // WithPath adds error-path to the error
 func (e *RPCError) WithPath(path string) *RPCError {
+	if e == nil {
+		return nil
+	}
 	e.ErrorPath = path
 	return e
 }
 
 // WithBadElement adds bad-element to error-info
 func (e *RPCError) WithBadElement(element string) *RPCError {
+	if e == nil {
+		return nil
+	}
 	if e.ErrorInfo == nil {
 		e.ErrorInfo = &ErrorInfo{}
 	}
@@ -88,6 +94,9 @@ func (e *RPCError) WithBadElement(element string) *RPCError {
 
 // WithBadAttribute adds bad-attribute to error-info
 func (e *RPCError) WithBadAttribute(attribute string) *RPCError {
+	if e == nil {
+		return nil
+	}
 	if e.ErrorInfo == nil {
 		e.ErrorInfo = &ErrorInfo{}
 	}
@@ -97,6 +106,9 @@ func (e *RPCError) WithBadAttribute(attribute string) *RPCError {
 
 // WithBadNamespace adds bad-namespace to error-info
 func (e *RPCError) WithBadNamespace(namespace string) *RPCError {
+	if e == nil {
+		return nil
+	}
 	if e.ErrorInfo == nil {
 		e.ErrorInfo = &ErrorInfo{}
 	}
@@ -106,6 +118,9 @@ func (e *RPCError) WithBadNamespace(namespace string) *RPCError {
 
 // WithLockOwner adds lock-owner-session to error-info
 func (e *RPCError) WithLockOwner(sessionID string) *RPCError {
+	if e == nil {
+		return nil
+	}
 	if e.ErrorInfo == nil {
 		e.ErrorInfo = &ErrorInfo{}
 	}
@@ -115,6 +130,9 @@ func (e *RPCError) WithLockOwner(sessionID string) *RPCError {
 
 // WithAppTag adds error-app-tag as direct child of rpc-error (RFC 6241)
 func (e *RPCError) WithAppTag(tag string) *RPCError {
+	if e == nil {
+		return nil
+	}
 	e.ErrorAppTag = tag
 	return e
 }

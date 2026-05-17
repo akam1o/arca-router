@@ -80,6 +80,23 @@ func TestNewErrorReply(t *testing.T) {
 	}
 }
 
+func TestNewErrorReplyDefaultsNilError(t *testing.T) {
+	reply := NewErrorReply("103", nil)
+
+	if len(reply.Errors) != 1 {
+		t.Fatalf("errors = %d, want 1", len(reply.Errors))
+	}
+	if reply.Errors[0] == nil {
+		t.Fatal("error = nil, want default RPC error")
+	}
+	if reply.Errors[0].ErrorTag != ErrorTagOperationFailed {
+		t.Fatalf("error tag = %s, want %s", reply.Errors[0].ErrorTag, ErrorTagOperationFailed)
+	}
+	if _, err := MarshalReply(reply); err != nil {
+		t.Fatalf("MarshalReply() error = %v", err)
+	}
+}
+
 func TestNewMultiErrorReply(t *testing.T) {
 	errors := []*RPCError{
 		NewRPCError(ErrorTypeProtocol, ErrorTagInvalidValue, "error 1"),
@@ -103,6 +120,23 @@ func TestNewMultiErrorReply(t *testing.T) {
 
 	if reply.Errors[1].ErrorMessage != "error 2" {
 		t.Errorf("Expected second error message 'error 2'")
+	}
+}
+
+func TestNewMultiErrorReplyDefaultsNilErrors(t *testing.T) {
+	reply := NewMultiErrorReply("104", []*RPCError{nil})
+
+	if len(reply.Errors) != 1 {
+		t.Fatalf("errors = %d, want 1", len(reply.Errors))
+	}
+	if reply.Errors[0] == nil {
+		t.Fatal("error = nil, want default RPC error")
+	}
+	if reply.Errors[0].ErrorTag != ErrorTagOperationFailed {
+		t.Fatalf("error tag = %s, want %s", reply.Errors[0].ErrorTag, ErrorTagOperationFailed)
+	}
+	if _, err := MarshalReply(reply); err != nil {
+		t.Fatalf("MarshalReply() error = %v", err)
 	}
 }
 
