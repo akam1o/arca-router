@@ -191,6 +191,9 @@ deviation instead of enabling standard `:xpath`.
 
 Attach the following before closing the v0.11 standard XPath gate:
 
+- GitHub Actions `NETCONF Client Interoperability` artifacts named
+  `netconf-client-ncclient-evidence`, `netconf-client-libnetconf2-evidence`,
+  and, when scheduled or manually run, `netconf-client-junos-eznc-evidence`.
 - Arca commit SHA and package version.
 - Client family, client names, and versions.
 - Server `<hello>` output.

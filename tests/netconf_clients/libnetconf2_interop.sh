@@ -17,11 +17,27 @@ PY
 
 cd "$ROOT"
 
+EVIDENCE_DIR="${NETCONF_INTEROP_EVIDENCE_DIR:-}"
+if [[ -n "$EVIDENCE_DIR" ]]; then
+  mkdir -p "$EVIDENCE_DIR/rpc" "$EVIDENCE_DIR/reply"
+  EVIDENCE_DIR="$(cd "$EVIDENCE_DIR" && pwd)"
+  export NETCONF_INTEROP_EVIDENCE_DIR="$EVIDENCE_DIR"
+fi
+
+collect_evidence() {
+  if [[ -z "$EVIDENCE_DIR" ]]; then
+    return
+  fi
+  cp -f "$TMPDIR/running.conf" "$EVIDENCE_DIR/running.conf" 2>/dev/null || true
+  cp -f "$TMPDIR/netconf-interop-server.log" "$EVIDENCE_DIR/server.log" 2>/dev/null || true
+}
+
 cleanup() {
   if [[ -n "${DAEMON_PID:-}" ]] && kill -0 "$DAEMON_PID" 2>/dev/null; then
     kill "$DAEMON_PID" 2>/dev/null || true
     wait "$DAEMON_PID" 2>/dev/null || true
   fi
+  collect_evidence
   if [[ "${KEEP_LIBNETCONF2_INTEROP_TMP:-0}" != "1" ]]; then
     rm -rf "$TMPDIR"
   else
@@ -40,6 +56,18 @@ set system host-name arca-ci
 set interfaces ge-0/0/0 description "interop-uplink"
 set interfaces xe-0/0/0 description "interop-peer"
 CONFIG
+
+if [[ -n "$EVIDENCE_DIR" ]]; then
+  {
+    echo "client=libnetconf2"
+    echo "host=$HOST"
+    echo "port=$PORT"
+    go version
+    pkg-config --modversion libnetconf2 | sed 's/^/libnetconf2=/'
+    pkg-config --modversion libyang | sed 's/^/libyang=/'
+    cc --version | head -n 1
+  } >"$EVIDENCE_DIR/metadata.txt"
+fi
 
 go run -buildvcs=false ./tools/netconf-userdb \
   -path "$TMPDIR/users.db" \

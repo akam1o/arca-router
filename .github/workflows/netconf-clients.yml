@@ -39,7 +39,15 @@ jobs:
         python -m pip install -r tests/netconf_clients/requirements-ncclient.txt
 
     - name: Run ncclient NETCONF interop
-      run: bash tests/netconf_clients/run_interop.sh tests/netconf_clients/ncclient_interop.py
+      run: NETCONF_INTEROP_EVIDENCE_DIR=artifacts/netconf-clients/ncclient bash tests/netconf_clients/run_interop.sh tests/netconf_clients/ncclient_interop.py
+
+    - name: Upload ncclient evidence
+      if: always()
+      uses: actions/upload-artifact@v4
+      with:
+        name: netconf-client-ncclient-evidence
+        path: artifacts/netconf-clients/ncclient
+        if-no-files-found: ignore
 
   libnetconf2:
     name: libnetconf2 interop
@@ -67,7 +75,15 @@ jobs:
         pkg-config --modversion libnetconf2
 
     - name: Run libnetconf2 NETCONF interop
-      run: bash tests/netconf_clients/libnetconf2_interop.sh
+      run: NETCONF_INTEROP_EVIDENCE_DIR=artifacts/netconf-clients/libnetconf2 bash tests/netconf_clients/libnetconf2_interop.sh
+
+    - name: Upload libnetconf2 evidence
+      if: always()
+      uses: actions/upload-artifact@v4
+      with:
+        name: netconf-client-libnetconf2-evidence
+        path: artifacts/netconf-clients/libnetconf2
+        if-no-files-found: ignore
 
   junos-eznc:
     name: Junos PyEZ smoke
@@ -97,4 +113,12 @@ jobs:
         python -m pip install -r tests/netconf_clients/requirements-junos-eznc.txt
 
     - name: Run Junos PyEZ NETCONF smoke
-      run: bash tests/netconf_clients/run_interop.sh tests/netconf_clients/junos_eznc_smoke.py
+      run: NETCONF_INTEROP_EVIDENCE_DIR=artifacts/netconf-clients/junos-eznc bash tests/netconf_clients/run_interop.sh tests/netconf_clients/junos_eznc_smoke.py
+
+    - name: Upload Junos PyEZ evidence
+      if: always()
+      uses: actions/upload-artifact@v4
+      with:
+        name: netconf-client-junos-eznc-evidence
+        path: artifacts/netconf-clients/junos-eznc
+        if-no-files-found: ignore

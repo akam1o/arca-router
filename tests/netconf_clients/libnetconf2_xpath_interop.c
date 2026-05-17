@@ -26,10 +26,83 @@ fail(const char *message)
     exit(1);
 }
 
+static char *
+evidence_path(const char *relative_path)
+{
+    const char *dir = getenv("NETCONF_INTEROP_EVIDENCE_DIR");
+    size_t dir_len = 0;
+    size_t relative_len = 0;
+    char *path = NULL;
+
+    if (!dir || !dir[0]) {
+        return NULL;
+    }
+
+    dir_len = strlen(dir);
+    relative_len = strlen(relative_path);
+    path = malloc(dir_len + relative_len + 2);
+    if (!path) {
+        fail("failed to allocate evidence path");
+    }
+    memcpy(path, dir, dir_len);
+    path[dir_len] = '/';
+    memcpy(path + dir_len + 1, relative_path, relative_len);
+    path[dir_len + relative_len + 1] = '\0';
+    return path;
+}
+
+static void
+write_evidence_file(const char *relative_path, const char *content)
+{
+    char *path = evidence_path(relative_path);
+    FILE *file = NULL;
+
+    if (!path) {
+        return;
+    }
+
+    file = fopen(path, "w");
+    if (!file) {
+        free(path);
+        fail("failed to open evidence file");
+    }
+    if (content && fputs(content, file) == EOF) {
+        fclose(file);
+        free(path);
+        fail("failed to write evidence file");
+    }
+    if (!content || !content[0] || content[strlen(content) - 1] != '\n') {
+        if (fputc('\n', file) == EOF) {
+            fclose(file);
+            free(path);
+            fail("failed to finish evidence file");
+        }
+    }
+    if (fclose(file)) {
+        free(path);
+        fail("failed to close evidence file");
+    }
+    free(path);
+}
+
+static void
+write_rpc_evidence(const char *kind, const char *name, const char *content)
+{
+    char relative_path[256];
+    int written = snprintf(relative_path, sizeof(relative_path), "%s/%s.xml", kind, name);
+
+    if (written < 0 || (size_t)written >= sizeof(relative_path)) {
+        fail("evidence path is too long");
+    }
+    write_evidence_file(relative_path, content);
+}
+
 static void
 print_capabilities(const struct nc_session *session)
 {
     const char * const *capabilities = nc_session_get_cpblts(session);
+    char *content = NULL;
+    size_t content_len = 0;
 
     puts("SERVER_CAPABILITIES");
     if (!capabilities) {
@@ -37,7 +110,19 @@ print_capabilities(const struct nc_session *session)
     }
     for (size_t i = 0; capabilities[i]; i++) {
         puts(capabilities[i]);
+        content_len += strlen(capabilities[i]) + 1;
     }
+
+    content = calloc(1, content_len + 1);
+    if (!content) {
+        fail("failed to allocate capabilities evidence");
+    }
+    for (size_t i = 0; capabilities[i]; i++) {
+        strcat(content, capabilities[i]);
+        strcat(content, "\n");
+    }
+    write_evidence_file("server_capabilities.txt", content);
+    free(content);
 }
 
 static char *
@@ -96,6 +181,7 @@ send_rpc(struct nc_session *session, const char *name, const char *xml)
     char *reply = NULL;
 
     printf("\nRPC %s\n", name);
+    write_rpc_evidence("rpc", name, xml);
     rpc = nc_rpc_act_generic_xml(xml, NC_PARAMTYPE_CONST);
     if (!rpc) {
         fail("failed to build generic RPC");
@@ -114,6 +200,7 @@ send_rpc(struct nc_session *session, const char *name, const char *xml)
     }
 
     reply = print_reply_tree(envp, op);
+    write_rpc_evidence("reply", name, reply);
     lyd_free_all(envp);
     lyd_free_all(op);
     nc_rpc_free(rpc);

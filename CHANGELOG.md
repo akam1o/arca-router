@@ -2,6 +2,7 @@
 
 ## v0.10.x - Stabilization and Compatibility (current)
 
+- **NETCONF client evidence artifacts**: ncclient, libnetconf2, and scheduled PyEZ interop jobs now upload capabilities, RPC payloads, replies, logs, and client version evidence for release sign-off
 - **libnetconf2 interop CI**: NETCONF client workflow now runs a Ubuntu 24.04 apt-installed libnetconf2 smoke against the Arca interop server for second-family XPath evidence
 - **NETCONF XPath evaluation timeout**: experimental XPath evaluation now fails deterministically with a timeout `rpc-error` when expression evaluation exceeds the guardrail
 - **NETCONF XPath client-family policy**: clarified that PyEZ is supplementary ncclient-family smoke and that standard `:xpath` promotion requires libnetconf2-family evidence
