@@ -32,6 +32,8 @@ type failureTracker struct {
 
 // NewRateLimiter creates a new rate limiter with the given configuration
 func NewRateLimiter(config *SSHConfig) *RateLimiter {
+	config = rateLimiterConfigWithDefaults(config)
+
 	rl := &RateLimiter{
 		config:       config,
 		ipFailures:   make(map[string]*failureTracker),
@@ -44,6 +46,30 @@ func NewRateLimiter(config *SSHConfig) *RateLimiter {
 	go rl.cleanupLoop()
 
 	return rl
+}
+
+func rateLimiterConfigWithDefaults(config *SSHConfig) *SSHConfig {
+	defaults := DefaultSSHConfig()
+	if config == nil {
+		return defaults
+	}
+	merged := *config
+	if merged.IPFailureLimit <= 0 {
+		merged.IPFailureLimit = defaults.IPFailureLimit
+	}
+	if merged.UserFailureLimit <= 0 {
+		merged.UserFailureLimit = defaults.UserFailureLimit
+	}
+	if merged.IPLockoutWindow <= 0 {
+		merged.IPLockoutWindow = defaults.IPLockoutWindow
+	}
+	if merged.UserLockoutWindow <= 0 {
+		merged.UserLockoutWindow = defaults.UserLockoutWindow
+	}
+	if merged.LockoutDuration <= 0 {
+		merged.LockoutDuration = defaults.LockoutDuration
+	}
+	return &merged
 }
 
 // CheckIP checks if an IP address is currently locked out
