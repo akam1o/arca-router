@@ -592,7 +592,7 @@ git push origin v0.5.0
 - [ ] Security review done
 - [ ] `make package-lint` passing
 - [ ] Live FRR mgmtd smoke checked, or explicitly recorded as a v0.11 deferred lab gate
-- [ ] v0.10 release sign-off recorded with owner, date, commit/tag, accepted warnings, and deferred gates
+- [ ] v0.10 release sign-off recorded with `docs/v0.10-release-signoff.md`
 - [ ] Packages tested on all distros
 
 **Release:**

@@ -2,6 +2,7 @@
 
 ## v0.10.x - Stabilization and Compatibility (current)
 
+- **v0.10 sign-off template**: added English and Japanese release sign-off records for evidence links, accepted warnings, and v0.11 deferred gate approval
 - **Compatibility deferred gates**: `arca show compatibility` now lists v0.11-deferred lab, startup datastore, and standard XPath gates
 - **v0.10 sign-off and deferred gates**: release readiness now records v0.11-deferred lab evidence, startup datastore, standard XPath gates, and final sign-off fields
 - **Upgrade release-readiness guidance**: `arca check upgrade` now points operators at the v0.10 operational runbook and release-readiness evidence checklist
