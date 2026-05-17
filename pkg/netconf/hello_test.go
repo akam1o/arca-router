@@ -288,6 +288,48 @@ func TestValidateClientHello(t *testing.T) {
 	}
 }
 
+func TestValidateClientHelloReportsSpecificDirectInputErrors(t *testing.T) {
+	tests := []struct {
+		name    string
+		hello   *Hello
+		wantErr string
+	}{
+		{
+			name:    "nil hello",
+			hello:   nil,
+			wantErr: "nil hello",
+		},
+		{
+			name:    "empty capabilities",
+			hello:   &Hello{},
+			wantErr: "client hello must include capabilities",
+		},
+		{
+			name: "missing base capability",
+			hello: &Hello{
+				Capabilities: struct {
+					Capability []string `xml:"capability"`
+				}{
+					Capability: []string{"custom:capability"},
+				},
+			},
+			wantErr: "client must support base:1.0 or base:1.1",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := ValidateClientHello(tt.hello)
+			if err == nil {
+				t.Fatal("ValidateClientHello() error = nil, want error")
+			}
+			if !strings.Contains(err.Error(), tt.wantErr) {
+				t.Fatalf("ValidateClientHello() error = %v, want %q", err, tt.wantErr)
+			}
+		})
+	}
+}
+
 func TestHasCapability(t *testing.T) {
 	hello := &Hello{}
 	hello.Capabilities.Capability = []string{

@@ -106,6 +106,12 @@ func NegotiateBaseVersion(clientHello *Hello) string {
 
 // ValidateClientHello validates a client <hello> message
 func ValidateClientHello(clientHello *Hello) error {
+	if clientHello == nil {
+		return fmt.Errorf("nil hello")
+	}
+	if len(clientHello.Capabilities.Capability) == 0 {
+		return fmt.Errorf("client hello must include capabilities")
+	}
 	if !clientHello.hasBaseCapability(CapabilityBase10) && !clientHello.hasBaseCapability(CapabilityBase11) {
 		return fmt.Errorf("client must support base:1.0 or base:1.1")
 	}
@@ -113,11 +119,6 @@ func ValidateClientHello(clientHello *Hello) error {
 	// Client hello must not include session-id
 	if clientHello.SessionID != 0 {
 		return fmt.Errorf("client hello must not include session-id")
-	}
-
-	// Must have at least one capability
-	if len(clientHello.Capabilities.Capability) == 0 {
-		return fmt.Errorf("client hello must include capabilities")
 	}
 
 	return nil
