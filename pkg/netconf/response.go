@@ -88,6 +88,9 @@ func MarshalReply(reply *RPCReply) ([]byte, error) {
 	if reply == nil {
 		return nil, fmt.Errorf("nil RPC reply")
 	}
+	if err := validateReplyPayload(reply); err != nil {
+		return nil, err
+	}
 
 	var buf bytes.Buffer
 	buf.WriteString("<rpc-reply")
@@ -118,6 +121,26 @@ func MarshalReply(reply *RPCReply) ([]byte, error) {
 
 	buf.WriteString("</rpc-reply>")
 	return buf.Bytes(), nil
+}
+
+func validateReplyPayload(reply *RPCReply) error {
+	payloads := 0
+	if reply.OK != nil {
+		payloads++
+	}
+	if reply.Data != nil {
+		payloads++
+	}
+	if len(reply.Errors) > 0 {
+		payloads++
+	}
+	if payloads == 0 {
+		return fmt.Errorf("RPC reply has no payload")
+	}
+	if payloads > 1 {
+		return fmt.Errorf("RPC reply has multiple payloads")
+	}
+	return nil
 }
 
 func writeReplyAttributes(buf *bytes.Buffer, attrs []xml.Attr) error {
