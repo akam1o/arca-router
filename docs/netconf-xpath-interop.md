@@ -178,6 +178,17 @@ small external client, and runs raw RPC checks against
 `netopeer2` apt package, so this CI path uses the packaged libnetconf2 client
 library directly.
 
+To collect the required local evidence outside GitHub Actions, install the
+ncclient Python dependencies and libnetconf2 development packages, then run:
+
+```bash
+make netconf-client-evidence
+```
+
+The target writes ncclient and libnetconf2 evidence under
+`artifacts/netconf-clients/`. Run `make netconf-pyez-evidence` only when
+supplementary PyEZ evidence is useful.
+
 `netconf-console` is acceptable only when the deployed tool is confirmed not to
 be backed by ncclient. PyEZ is not acceptable for this required check when
 ncclient has already passed, because both clients exercise the same client

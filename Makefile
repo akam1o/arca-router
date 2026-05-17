@@ -1,10 +1,12 @@
-.PHONY: help build build-cli clean rpm rpm-package deb deb-package version test fmt vet check release-check install-nfpm integration-test frr-mgmtd-smoke package-lint generate-binapi generate-proto
+.PHONY: help build build-cli clean rpm rpm-package deb deb-package version test fmt vet check release-check install-nfpm integration-test netconf-client-evidence netconf-ncclient-evidence netconf-libnetconf2-evidence netconf-pyez-evidence frr-mgmtd-smoke package-lint generate-binapi generate-proto
 
 # Binary names
 BINARY_NAME=arca-routerd
 CLI_BINARY_NAME=arca
 BUILD_DIR=build/bin
 DIST_DIR=dist
+NETCONF_EVIDENCE_DIR ?= artifacts/netconf-clients
+PYTHON ?= python3
 
 # Version information
 VERSION ?= $(shell git describe --tags --abbrev=0 2>/dev/null || echo "0.1.0")
@@ -28,7 +30,7 @@ NFPM_VERSION=v2.35.0
 help: ## Display this help message
 	@echo "ARCA Router - Makefile targets:"
 	@echo ""
-	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | sort | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-20s\033[0m %s\n", $$1, $$2}'
+	@grep -E '^[a-zA-Z0-9_-]+:.*?## .*$$' $(MAKEFILE_LIST) | sort | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-20s\033[0m %s\n", $$1, $$2}'
 	@echo ""
 	@echo "Environment variables:"
 	@echo "  VERSION            Override version (default: from git tag)"
@@ -189,6 +191,21 @@ deb-verify: ## Verify DEB package reproducibility (requires clean dist/)
 integration-test: build ## Run integration tests
 	@echo "Running integration tests..."
 	@bash test/integration_test.sh
+
+netconf-client-evidence: netconf-ncclient-evidence netconf-libnetconf2-evidence ## Run required NETCONF client interop checks and write sign-off evidence
+	@echo "NETCONF client evidence complete: $(NETCONF_EVIDENCE_DIR)"
+
+netconf-ncclient-evidence: ## Run ncclient NETCONF interop and write sign-off evidence
+	@echo "Running ncclient NETCONF interop evidence..."
+	NETCONF_INTEROP_EVIDENCE_DIR="$(NETCONF_EVIDENCE_DIR)/ncclient" PYTHON="$(PYTHON)" bash tests/netconf_clients/run_interop.sh tests/netconf_clients/ncclient_interop.py
+
+netconf-libnetconf2-evidence: ## Run libnetconf2 NETCONF interop and write sign-off evidence
+	@echo "Running libnetconf2 NETCONF interop evidence..."
+	NETCONF_INTEROP_EVIDENCE_DIR="$(NETCONF_EVIDENCE_DIR)/libnetconf2" bash tests/netconf_clients/libnetconf2_interop.sh
+
+netconf-pyez-evidence: ## Run supplementary PyEZ NETCONF smoke and write sign-off evidence
+	@echo "Running supplementary Junos PyEZ NETCONF evidence..."
+	NETCONF_INTEROP_EVIDENCE_DIR="$(NETCONF_EVIDENCE_DIR)/junos-eznc" PYTHON="$(PYTHON)" bash tests/netconf_clients/run_interop.sh tests/netconf_clients/junos_eznc_smoke.py
 
 frr-mgmtd-smoke: ## Run live FRR mgmtd transactional apply smoke test
 	@echo "Running live FRR mgmtd smoke test..."

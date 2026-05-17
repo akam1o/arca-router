@@ -474,12 +474,16 @@ make release-check
 # Validate local package metadata without building artifacts
 make package-lint
 
+# Generate local NETCONF client evidence for release sign-off
+make netconf-client-evidence
+
 # Run the live FRR mgmtd transactional apply smoke test
 make frr-mgmtd-smoke
 ```
 
-Attach the ncclient and libnetconf2 artifacts from the
-`NETCONF Client Interoperability` workflow to the v0.10 release sign-off record.
+Attach the ncclient and libnetconf2 artifacts from either
+`artifacts/netconf-clients/` or the `NETCONF Client Interoperability` workflow
+to the v0.10 release sign-off record.
 
 The FRR smoke test requires a host with FRR running, the standard daemon set enabled
 in `/etc/frr/daemons`, and `vtysh` access for the current user.
