@@ -155,6 +155,8 @@ PyEZ を使う場合:
 - Netopeer2 `netopeer2-cli`
 - その他の libnetconf2-based client
 
+GitHub Actions の `NETCONF Client Interoperability` workflow には、Ubuntu 24.04 で apt install した `libnetconf2-dev` を使って小さな外部 client を build し、`tools/netconf-interop-server` に raw RPC check を実行する job が含まれる。Ubuntu 24.04 は現時点で `netopeer2` apt package を提供していないため、この CI path は packaged libnetconf2 client library を直接使う。
+
 `netconf-console` は、導入されている tool が ncclient-backed ではないことを確認できる場合のみ acceptable とする。ncclient がすでに pass している場合、PyEZ は同じ client family を確認しているため、この必須 check には使えない。
 
 raw RPC payload と response を保存する。raw namespace-declared XPath filter を送れない client の場合は、standard `:xpath` を enable せず、interoperability deviation として記録する。

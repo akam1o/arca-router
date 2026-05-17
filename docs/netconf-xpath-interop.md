@@ -171,6 +171,13 @@ Repeat equivalent RPCs with one of:
 - Netopeer2 `netopeer2-cli`
 - another libnetconf2-based client
 
+The GitHub Actions `NETCONF Client Interoperability` workflow includes a
+Ubuntu 24.04 libnetconf2 job that installs `libnetconf2-dev` with apt, builds a
+small external client, and runs raw RPC checks against
+`tools/netconf-interop-server`. Ubuntu 24.04 does not currently provide a
+`netopeer2` apt package, so this CI path uses the packaged libnetconf2 client
+library directly.
+
 `netconf-console` is acceptable only when the deployed tool is confirmed not to
 be backed by ncclient. PyEZ is not acceptable for this required check when
 ncclient has already passed, because both clients exercise the same client
