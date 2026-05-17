@@ -13,6 +13,16 @@ import (
 	grpcclient "github.com/akam1o/arca-router/internal/northbound/grpc"
 )
 
+func TestDialGRPCRejectsTLSFlagsWithoutAddress(t *testing.T) {
+	_, err := dialGRPC(&cliFlags{grpcCAFile: "/ca.crt"})
+	if err == nil {
+		t.Fatal("dialGRPC() error = nil, want TLS flag usage error")
+	}
+	if !strings.Contains(err.Error(), "-grpc-address") {
+		t.Fatalf("dialGRPC() error = %v, want -grpc-address", err)
+	}
+}
+
 type fakeInteractiveClient struct {
 	acquireLockErr   error
 	commitErr        error
