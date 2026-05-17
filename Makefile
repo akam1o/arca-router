@@ -1,4 +1,4 @@
-.PHONY: help build build-cli clean rpm rpm-package rpm-test rpm-verify deb deb-package deb-test deb-verify version test fmt vet check release-check release-evidence-check install-nfpm integration-test script-lint netconf-client-lint netconf-client-evidence netconf-ncclient-evidence netconf-libnetconf2-evidence netconf-evidence-verify netconf-standard-xpath-evidence netconf-standard-xpath-evidence-verify netconf-pyez-evidence frr-mgmtd-smoke security-audit package-lint generate-binapi generate-proto all packages
+.PHONY: help build build-cli clean rpm rpm-package rpm-test rpm-verify deb deb-package deb-test deb-verify version test fmt vet check release-check release-evidence-check install-nfpm integration-test script-lint netconf-client-lint netconf-client-evidence netconf-ncclient-evidence netconf-libnetconf2-evidence netconf-evidence-verify netconf-standard-xpath-evidence netconf-standard-xpath-evidence-verify netconf-pyez-evidence frr-mgmtd-smoke security-audit package-lint package-binary-arch-check generate-binapi generate-proto all packages
 
 # Binary names
 BINARY_NAME=arca-routerd
@@ -102,7 +102,21 @@ install-nfpm: ## Install NFPM tool
 
 rpm: build rpm-package ## Build RPM package
 
-rpm-package: package-lint ## Build RPM package (assumes binaries already built)
+package-binary-arch-check: ## Verify package binaries match amd64/x86_64 package metadata
+	@for bin in "$(BUILD_DIR)/$(BINARY_NAME)" "$(BUILD_DIR)/$(CLI_BINARY_NAME)"; do \
+		if [ ! -f "$$bin" ]; then \
+			echo "Error: $$bin not found. Run make build in a Linux amd64 environment before packaging."; \
+			exit 1; \
+		fi; \
+		if ! file "$$bin" | grep -Eq 'ELF 64-bit.*(x86-64|x86_64|AMD x86-64)'; then \
+			echo "Error: $$bin must be a Linux amd64 ELF binary for package arch amd64/x86_64."; \
+			file "$$bin"; \
+			exit 1; \
+		fi; \
+	done
+	@echo "Package binary architecture OK"
+
+rpm-package: package-lint package-binary-arch-check ## Build RPM package (assumes binaries already built)
 	@echo "Building RPM package..."
 	@mkdir -p $(DIST_DIR)
 	@if ! command -v nfpm >/dev/null 2>&1; then \
@@ -121,7 +135,7 @@ rpm-package: package-lint ## Build RPM package (assumes binaries already built)
 
 deb: build deb-package ## Build DEB package (for Debian Bookworm)
 
-deb-package: package-lint ## Build DEB package (assumes binaries already built)
+deb-package: package-lint package-binary-arch-check ## Build DEB package (assumes binaries already built)
 	@echo "Building DEB package..."
 	@mkdir -p $(DIST_DIR)
 	@if ! command -v nfpm >/dev/null 2>&1; then \
