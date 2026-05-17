@@ -177,6 +177,8 @@ v0.11 standard XPath gate を close する前に、以下を添付する。
 - GitHub Actions `NETCONF Client Interoperability` の artifact
   `netconf-client-ncclient-evidence`、`netconf-client-libnetconf2-evidence`、
   および schedule / manual run 時の `netconf-client-junos-eznc-evidence`。
+  必須の ncclient / libnetconf2 artifact については workflow の
+  `verify interop evidence` job が pass していること。
 - Arca commit SHA と package version。
 - client family、client name、version。
 - server `<hello>` output。

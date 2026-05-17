@@ -2,6 +2,7 @@
 
 ## v0.10.x - Stabilization and Compatibility (current)
 
+- **NETCONF evidence CI verification**: NETCONF client interoperability workflow now downloads ncclient and libnetconf2 artifacts and runs `make netconf-evidence-verify` before sign-off
 - **Local NETCONF evidence target**: `make netconf-client-evidence` now collects ncclient and libnetconf2 interop artifacts for release sign-off, with `make netconf-pyez-evidence` available for supplementary PyEZ smoke
 - **NETCONF evidence verification**: `make netconf-evidence-verify` now checks required ncclient and libnetconf2 artifact files, required capabilities, and unsupported capability absence before sign-off
 - **NETCONF client evidence artifacts**: ncclient, libnetconf2, and scheduled PyEZ interop jobs now upload capabilities, RPC payloads, replies, logs, and client version evidence for release sign-off
