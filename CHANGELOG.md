@@ -2,6 +2,7 @@
 
 ## v0.9.x - NETCONF/YANG and Operational Safety (current)
 
+- **NETCONF hello capability normalization**: hello capability helpers now trim surrounding whitespace before matching base versions or reporting client capability names
 - **NETCONF config attribute namespace validation**: config payload helper XML generation now rejects namespaced attributes without matching namespace declarations instead of emitting unqualified attributes
 - **NETCONF RPC dispatch zero-value safety**: RPC dispatch now returns a stable operation error when called with a zero-value RPC operation
 - **NETCONF RPC zero-value operation safety**: RPC operation unmarshaling and namespace validation now return stable operation errors when called on zero-value RPCs
