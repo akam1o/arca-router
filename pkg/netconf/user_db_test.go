@@ -190,6 +190,41 @@ func TestUserDatabaseListPublicKeysUsesStableTieBreak(t *testing.T) {
 	}
 }
 
+func TestUserDatabaseListUsersPaginatedNormalizesNegativeInputs(t *testing.T) {
+	userDB := newTestUserDatabase(t)
+	passwordHash, err := auth.HashPassword("password")
+	if err != nil {
+		t.Fatalf("HashPassword() error = %v", err)
+	}
+	for _, username := range []string{"carol", "alice", "bob"} {
+		if err := userDB.CreateUser(username, passwordHash, RoleOperator); err != nil {
+			t.Fatalf("CreateUser(%s) error = %v", username, err)
+		}
+	}
+
+	users, err := userDB.ListUsersPaginated(2, -10)
+	if err != nil {
+		t.Fatalf("ListUsersPaginated() error = %v", err)
+	}
+	want := []string{"alice", "bob"}
+	if len(users) != len(want) {
+		t.Fatalf("ListUsersPaginated() returned %d users, want %d", len(users), len(want))
+	}
+	for i := range want {
+		if users[i].Username != want[i] {
+			t.Fatalf("ListUsersPaginated()[%d].Username = %q, want %q (all users: %#v)", i, users[i].Username, want[i], users)
+		}
+	}
+
+	allUsers, err := userDB.ListUsersPaginated(-1, 2)
+	if err != nil {
+		t.Fatalf("ListUsersPaginated() with negative limit error = %v", err)
+	}
+	if len(allUsers) != 3 {
+		t.Fatalf("ListUsersPaginated() with negative limit returned %d users, want 3", len(allUsers))
+	}
+}
+
 func newTestUserDatabase(t *testing.T) *UserDatabase {
 	t.Helper()
 
