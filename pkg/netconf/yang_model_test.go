@@ -64,16 +64,14 @@ func TestYANGValidator_GetArcaRouterModel(t *testing.T) {
 	}
 
 	module, err := v.GetArcaRouterModel()
-
-	// Note: This will fail because ietf-interfaces/ietf-routing modules are not available
-	// But we should at least test that the function doesn't panic
 	if err != nil {
-		// Expected in Phase 3 (IETF modules not available)
-		t.Logf("GetArcaRouterModel() error (expected in Phase 3): %v", err)
+		t.Fatalf("GetArcaRouterModel() error = %v", err)
 	}
-
-	if module != nil {
-		t.Logf("GetArcaRouterModel() returned module: %s", module.Name)
+	if module == nil {
+		t.Fatal("GetArcaRouterModel() returned nil module")
+	}
+	if module.Name != "arca-router" {
+		t.Fatalf("GetArcaRouterModel() module name = %s, want arca-router", module.Name)
 	}
 }
 
@@ -90,17 +88,17 @@ func TestYANGValidator_ListModules(t *testing.T) {
 		t.Error("ListModules() returned empty list")
 	}
 
-	// Check if arca-router is in the list
-	found := false
-	for _, name := range modules {
-		if name == "arca-router" {
-			found = true
-			break
+	for _, want := range []string{"arca-router", "ietf-interfaces", "ietf-routing"} {
+		found := false
+		for _, name := range modules {
+			if name == want {
+				found = true
+				break
+			}
 		}
-	}
-
-	if !found {
-		t.Errorf("ListModules() doesn't include arca-router, got: %v", modules)
+		if !found {
+			t.Errorf("ListModules() doesn't include %s, got: %v", want, modules)
+		}
 	}
 	if !sort.StringsAreSorted(modules) {
 		t.Errorf("ListModules() = %v, want sorted module names", modules)
@@ -379,14 +377,13 @@ func TestYANGValidator_GetModel(t *testing.T) {
 	// Try to get arca-router module
 	module, err := v.GetModel("arca-router")
 	if err != nil {
-		// May fail in Phase 3 due to missing IETF modules
-		t.Logf("GetModel(arca-router) error (may be expected): %v", err)
+		t.Fatalf("GetModel(arca-router) error = %v", err)
 	}
-
-	if module != nil {
-		if module.Name != "arca-router" {
-			t.Errorf("GetModel() name = %s, want arca-router", module.Name)
-		}
+	if module == nil {
+		t.Fatal("GetModel(arca-router) returned nil module")
+	}
+	if module.Name != "arca-router" {
+		t.Errorf("GetModel() name = %s, want arca-router", module.Name)
 	}
 
 	// Try to get non-existent module
