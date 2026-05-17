@@ -18,6 +18,7 @@ type fakeInteractiveClient struct {
 	discardErr       error
 	releaseLockErr   error
 	history          []grpcclient.CommitInfo
+	runningText      string
 	routeText        string
 	routeProtocol    string
 	routeFamily      string
@@ -59,6 +60,9 @@ type fakeInteractiveClient struct {
 	bgpNeighborCalls              int
 	ospfNeighborCalls             int
 	listHistoryCalls              int
+	listHistoryLimit              int
+	listHistoryOffset             int
+	getRunningCalls               int
 	rollbackCalls                 int
 	telemetryCatalogCalls         int
 	filteredTelemetryCatalogCalls int
@@ -76,7 +80,8 @@ type fakeInteractiveClient struct {
 }
 
 func (f *fakeInteractiveClient) GetRunning(ctx context.Context) (string, uint64, error) {
-	return "", 0, nil
+	f.getRunningCalls++
+	return f.runningText, 0, nil
 }
 
 func (f *fakeInteractiveClient) GetCandidate(ctx context.Context, sessionID string) (string, error) {
@@ -118,6 +123,8 @@ func (f *fakeInteractiveClient) Diff(ctx context.Context, sessionID string) (str
 
 func (f *fakeInteractiveClient) ListHistory(ctx context.Context, limit, offset int) ([]grpcclient.CommitInfo, error) {
 	f.listHistoryCalls++
+	f.listHistoryLimit = limit
+	f.listHistoryOffset = offset
 	return f.history, nil
 }
 
@@ -844,6 +851,75 @@ func TestShowHistoryRejectsInvalidLimit(t *testing.T) {
 		if client.listHistoryCalls != 0 {
 			t.Fatalf("ListHistory calls for %q = %d, want 0", arg, client.listHistoryCalls)
 		}
+	}
+}
+
+func TestShowConfigurationRollbackUsesArchivedConfig(t *testing.T) {
+	ctx := context.Background()
+	client := &fakeInteractiveClient{
+		history: []grpcclient.CommitInfo{
+			{CommitID: "commit-new", ConfigText: "set system host-name new"},
+			{CommitID: "commit-old", ConfigText: "set system host-name old"},
+		},
+	}
+	sh := &interactiveShell{
+		client:    client,
+		hostname:  "router",
+		mode:      modeOperational,
+		sessionID: "session-1",
+	}
+
+	if err := sh.cmdShow(ctx, []string{"configuration", "rollback", "1"}); err != nil {
+		t.Fatalf("cmdShow(configuration rollback 1) error = %v", err)
+	}
+	if client.listHistoryCalls != 1 || client.listHistoryLimit != 2 || client.listHistoryOffset != 0 {
+		t.Fatalf("ListHistory calls/limit/offset = %d/%d/%d, want 1/2/0",
+			client.listHistoryCalls, client.listHistoryLimit, client.listHistoryOffset)
+	}
+	if client.getRunningCalls != 0 {
+		t.Fatalf("GetRunning calls = %d, want 0 when archived config is available", client.getRunningCalls)
+	}
+}
+
+func TestShowConfigurationRollbackZeroFallsBackToRunning(t *testing.T) {
+	ctx := context.Background()
+	client := &fakeInteractiveClient{runningText: "set system host-name running"}
+	sh := &interactiveShell{
+		client:    client,
+		hostname:  "router",
+		mode:      modeOperational,
+		sessionID: "session-1",
+	}
+
+	if err := sh.cmdShow(ctx, []string{"configuration", "rollback", "0"}); err != nil {
+		t.Fatalf("cmdShow(configuration rollback 0) error = %v", err)
+	}
+	if client.listHistoryCalls != 1 || client.listHistoryLimit != 1 {
+		t.Fatalf("ListHistory calls/limit = %d/%d, want 1/1", client.listHistoryCalls, client.listHistoryLimit)
+	}
+	if client.getRunningCalls != 1 {
+		t.Fatalf("GetRunning calls = %d, want 1 fallback", client.getRunningCalls)
+	}
+}
+
+func TestShowConfigurationRollbackRejectsMissingArchive(t *testing.T) {
+	ctx := context.Background()
+	client := &fakeInteractiveClient{
+		history: []grpcclient.CommitInfo{
+			{CommitID: "commit-new", ConfigText: "set system host-name new"},
+			{CommitID: "commit-old"},
+		},
+	}
+	sh := &interactiveShell{
+		client:    client,
+		hostname:  "router",
+		mode:      modeOperational,
+		sessionID: "session-1",
+	}
+
+	err := sh.cmdShow(ctx, []string{"configuration", "rollback", "1"})
+	if err == nil || !strings.Contains(err.Error(), "archived config text unavailable") {
+		t.Fatalf("cmdShow(configuration rollback 1) error = %v, want archive unavailable", err)
 	}
 }
 

@@ -733,6 +733,9 @@ func (sh *interactiveShell) cmdShow(ctx context.Context, args []string) error {
 	subcmd := args[0]
 	switch subcmd {
 	case "configuration":
+		if len(args) > 1 {
+			return sh.cmdShowArchivedConfiguration(ctx, args[1:])
+		}
 		var text string
 		var err error
 		if sh.mode == modeConfiguration {
@@ -977,6 +980,51 @@ func (sh *interactiveShell) cmdShow(ctx context.Context, args []string) error {
 	default:
 		return fmt.Errorf("unknown show subcommand '%s'", subcmd)
 	}
+}
+
+func (sh *interactiveShell) cmdShowArchivedConfiguration(ctx context.Context, args []string) error {
+	if len(args) != 2 || args[0] != "rollback" {
+		return fmt.Errorf("usage: show configuration rollback <N>")
+	}
+	rollbackNum, err := parseRollbackNumber(args[1])
+	if err != nil {
+		return err
+	}
+
+	history, err := sh.client.ListHistory(ctx, rollbackNum+1, 0)
+	if err != nil {
+		return fmt.Errorf("failed to load commit history: %w", err)
+	}
+	if len(history) <= rollbackNum {
+		if rollbackNum == 0 {
+			text, _, err := sh.client.GetRunning(ctx)
+			if err != nil {
+				return err
+			}
+			fmt.Println(text)
+			return nil
+		}
+		availableCommits := len(history) - 1
+		if availableCommits < 0 {
+			availableCommits = 0
+		}
+		return fmt.Errorf("not enough history for rollback %d (only %d commits available)", rollbackNum, availableCommits)
+	}
+
+	entry := history[rollbackNum]
+	if entry.ConfigText == "" {
+		if rollbackNum == 0 {
+			text, _, err := sh.client.GetRunning(ctx)
+			if err != nil {
+				return err
+			}
+			fmt.Println(text)
+			return nil
+		}
+		return fmt.Errorf("archived config text unavailable for rollback %d", rollbackNum)
+	}
+	fmt.Println(entry.ConfigText)
+	return nil
 }
 
 func (sh *interactiveShell) cmdSet(ctx context.Context, args []string) error {
@@ -1685,6 +1733,7 @@ func (sh *interactiveShell) showHelp() {
 		fmt.Println("  help                          Show this help message")
 		fmt.Println("  configure                     Enter configuration mode")
 		fmt.Println("  show configuration            Show running configuration")
+		fmt.Println("  show configuration rollback <N> Show archived config N commits back")
 		fmt.Println("  show interfaces [<name>]      Show interface status")
 		fmt.Println("  show routing-instances [name] Show routing-instance table mapping")
 		fmt.Println("  show routes [prefix <cidr>] [protocol <proto>] Show route status")
@@ -1712,6 +1761,7 @@ func (sh *interactiveShell) showHelp() {
 		fmt.Println("  set <config>              Add or modify configuration")
 		fmt.Println("  delete <config>           Delete configuration")
 		fmt.Println("  show                      Show candidate configuration")
+		fmt.Println("  show configuration rollback <N> Show archived config N commits back")
 		fmt.Println("  show | compare            Show differences from running config")
 		fmt.Println("  commit                    Commit candidate configuration")
 		fmt.Println("  commit check              Validate and preview impact without committing")
@@ -3014,7 +3064,9 @@ func createCompleter() *readline.PrefixCompleter {
 		readline.PcItem("exit"),
 		readline.PcItem("quit"),
 		readline.PcItem("show",
-			readline.PcItem("configuration"),
+			readline.PcItem("configuration",
+				readline.PcItem("rollback"),
+			),
 			readline.PcItem("interfaces"),
 			readline.PcItem("bgp",
 				readline.PcItem("summary"),
