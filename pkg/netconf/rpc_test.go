@@ -820,6 +820,30 @@ func TestFilterValidate(t *testing.T) {
 			wantErr: false,
 		},
 		{
+			name: "subtree filter rejects empty direct attribute name",
+			filter: &Filter{
+				Type:    "subtree",
+				Content: []byte(`<interfaces/>`),
+				Attrs: []xml.Attr{
+					{Name: xml.Name{}, Value: "bad"},
+				},
+			},
+			rpcName: "get-config",
+			wantErr: true,
+		},
+		{
+			name: "subtree filter rejects empty namespace prefix declaration",
+			filter: &Filter{
+				Type:    "subtree",
+				Content: []byte(`<interfaces/>`),
+				Attrs: []xml.Attr{
+					{Name: xml.Name{Space: "xmlns"}, Value: "urn:bad"},
+				},
+			},
+			rpcName: "get-config",
+			wantErr: true,
+		},
+		{
 			name: "subtree filter namespace prefix mismatch",
 			filter: &Filter{
 				Type:    "subtree",
@@ -1020,6 +1044,51 @@ func TestFilterValidate(t *testing.T) {
 				if err != nil {
 					t.Errorf("Expected no error, got %v", err)
 				}
+			}
+		})
+	}
+}
+
+func TestFilterValidateRejectsEmptyAttributeName(t *testing.T) {
+	tests := []struct {
+		name  string
+		attrs []xml.Attr
+	}{
+		{
+			name: "empty direct attribute",
+			attrs: []xml.Attr{
+				{Name: xml.Name{}, Value: "bad"},
+			},
+		},
+		{
+			name: "empty namespace prefix declaration",
+			attrs: []xml.Attr{
+				{Name: xml.Name{Space: "xmlns"}, Value: "urn:bad"},
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			filter := &Filter{
+				Type:    "subtree",
+				Content: []byte(`<interfaces/>`),
+				Attrs:   tt.attrs,
+			}
+
+			err := filter.Validate("get-config")
+			if err == nil {
+				t.Fatal("Validate() error = nil, want empty attribute name error")
+			}
+			rpcErr, ok := err.(*RPCError)
+			if !ok {
+				t.Fatalf("Validate() error = %T, want *RPCError", err)
+			}
+			if rpcErr.ErrorTag != ErrorTagInvalidValue {
+				t.Fatalf("Validate() error tag = %s, want %s", rpcErr.ErrorTag, ErrorTagInvalidValue)
+			}
+			if rpcErr.ErrorPath != "/rpc/get-config/filter" {
+				t.Fatalf("Validate() error path = %q, want /rpc/get-config/filter", rpcErr.ErrorPath)
 			}
 		})
 	}

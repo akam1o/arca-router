@@ -806,6 +806,11 @@ func (f *Filter) Validate(rpcName string) error {
 		if isNamespaceDeclarationAttribute(attr) {
 			continue
 		}
+		if attr.Name.Local == "" {
+			return NewRPCError(ErrorTypeRPC, ErrorTagInvalidValue,
+				"filter attribute name must not be empty").
+				WithPath("/rpc/" + rpcName + "/filter")
+		}
 		rpcErr := ErrUnknownAttribute("/rpc/"+rpcName+"/filter", attr.Name.Local)
 		if attr.Name.Space != "" {
 			rpcErr = rpcErr.WithBadNamespace(attr.Name.Space)
