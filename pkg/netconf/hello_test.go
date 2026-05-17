@@ -1,6 +1,7 @@
 package netconf
 
 import (
+	"bytes"
 	"encoding/xml"
 	"strings"
 	"testing"
@@ -488,6 +489,16 @@ func TestUnmarshalHelloMalformedXML(t *testing.T) {
 	_, err := UnmarshalHello([]byte(malformedXML))
 	if err == nil {
 		t.Errorf("Expected error for malformed XML, but got nil")
+	}
+}
+
+func TestUnmarshalHelloRejectsOversizedXML(t *testing.T) {
+	_, err := UnmarshalHello(bytes.Repeat([]byte("x"), MaxXMLSize+1))
+	if err == nil {
+		t.Fatal("UnmarshalHello() error = nil, want size limit error")
+	}
+	if !strings.Contains(err.Error(), "XML size exceeds maximum") {
+		t.Fatalf("UnmarshalHello() error = %v, want size limit error", err)
 	}
 }
 
