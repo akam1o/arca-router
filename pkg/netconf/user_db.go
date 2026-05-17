@@ -380,6 +380,12 @@ func (udb *UserDatabase) ListUsersPaginated(limit, offset int) ([]User, error) {
 	if err != nil {
 		return nil, err
 	}
+	if limit < 0 {
+		limit = 0
+	}
+	if offset < 0 {
+		offset = 0
+	}
 
 	query := `SELECT username, role, created_at, updated_at, enabled
 	          FROM users ORDER BY username`
