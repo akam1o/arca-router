@@ -794,6 +794,7 @@ func (s *SSHServer) handleNETCONF(ctx context.Context, sess *Session, channel ss
 	// Phase 1: Send server hello
 	serverHello := ServerHelloWithOptions(sess.NumericID, HelloOptions{
 		AdvertiseStandardXPath: s.config.AdvertiseStandardXPath,
+		DisableStandardXPath:   !s.config.AdvertiseStandardXPath,
 	})
 	serverHelloXML, err := MarshalHello(serverHello)
 	if err != nil {

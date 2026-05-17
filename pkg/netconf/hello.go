@@ -35,6 +35,7 @@ type Hello struct {
 // HelloOptions controls optional NETCONF capability advertisement.
 type HelloOptions struct {
 	AdvertiseStandardXPath bool
+	DisableStandardXPath   bool
 }
 
 // ServerHello creates a server <hello> message with the given session ID
@@ -56,7 +57,11 @@ func ServerHelloWithOptions(sessionID uint32, options HelloOptions) *Hello {
 		CapabilityArcaRouter,
 		CapabilityArcaXPathFilterSubset,
 	}
+	advertiseStandardXPath := !options.DisableStandardXPath
 	if options.AdvertiseStandardXPath {
+		advertiseStandardXPath = true
+	}
+	if advertiseStandardXPath {
 		hello.Capabilities.Capability = append(hello.Capabilities.Capability, CapabilityXPath)
 	}
 	return hello

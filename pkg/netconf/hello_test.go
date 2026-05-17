@@ -23,6 +23,7 @@ func TestServerHello(t *testing.T) {
 		CapabilityRollback,
 		CapabilityArcaRouter,
 		CapabilityArcaXPathFilterSubset,
+		CapabilityXPath,
 	}
 
 	for _, cap := range requiredCaps {
@@ -42,7 +43,6 @@ func TestServerHelloDoesNotAdvertiseUnsupportedCapabilities(t *testing.T) {
 		"urn:ietf:params:xml:ns:netconf:base:1.0",
 		"urn:ietf:params:xml:ns:netconf:base:1.1",
 		"urn:ietf:params:xml:ns:netconf:capability:candidate:1.0",
-		"urn:ietf:params:netconf:capability:xpath:1.0",
 		"urn:ietf:params:netconf:capability:startup:1.0",
 		"urn:ietf:params:netconf:capability:writable-running:1.0",
 	}
@@ -54,11 +54,11 @@ func TestServerHelloDoesNotAdvertiseUnsupportedCapabilities(t *testing.T) {
 	}
 }
 
-func TestServerHelloCanAdvertiseStandardXPath(t *testing.T) {
-	hello := ServerHelloWithOptions(12345, HelloOptions{AdvertiseStandardXPath: true})
+func TestServerHelloCanSuppressStandardXPath(t *testing.T) {
+	hello := ServerHelloWithOptions(12345, HelloOptions{DisableStandardXPath: true})
 
-	if !hello.HasCapability(CapabilityXPath) {
-		t.Fatalf("ServerHelloWithOptions() did not advertise %q", CapabilityXPath)
+	if hello.HasCapability(CapabilityXPath) {
+		t.Fatalf("ServerHelloWithOptions() advertised %q", CapabilityXPath)
 	}
 	if hello.HasCapability("urn:ietf:params:netconf:capability:startup:1.0") {
 		t.Fatal("ServerHelloWithOptions() advertised startup capability")

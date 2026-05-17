@@ -28,7 +28,7 @@ func main() {
 	flag.StringVar(&userDBPath, "user-db", "", "path to NETCONF user database")
 	flag.StringVar(&datastorePath, "datastore", "", "path to NETCONF SQLite datastore")
 	flag.StringVar(&runningConfigPath, "running-config", "", "path to initial running set-command config")
-	flag.BoolVar(&standardXPath, "standard-xpath", false, "advertise the standard NETCONF :xpath capability")
+	flag.BoolVar(&standardXPath, "standard-xpath", true, "advertise the standard NETCONF :xpath capability (enabled by default; set false to suppress)")
 	flag.Parse()
 
 	if hostKeyPath == "" || userDBPath == "" || datastorePath == "" || runningConfigPath == "" {
@@ -58,6 +58,7 @@ func main() {
 	cfg.IdleTimeout = 5 * time.Minute
 	cfg.AbsoluteTimeout = 10 * time.Minute
 	cfg.AdvertiseStandardXPath = standardXPath
+	cfg.DisableStandardXPath = !standardXPath
 
 	server, err := netconf.NewSSHServer(cfg)
 	if err != nil {

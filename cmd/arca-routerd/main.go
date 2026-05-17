@@ -163,8 +163,8 @@ func parseFlags() *daemonFlags {
 	// NETCONF flags
 	flag.StringVar(&f.netconfListen, "netconf-listen", "",
 		"NETCONF/SSH listen address (overrides security netconf ssh port; default: :830)")
-	flag.BoolVar(&f.netconfXPath, "netconf-standard-xpath", false,
-		"Advertise the standard NETCONF :xpath capability (disabled by default)")
+	flag.BoolVar(&f.netconfXPath, "netconf-standard-xpath", true,
+		"Advertise the standard NETCONF :xpath capability (enabled by default; set false to suppress)")
 	flag.StringVar(&f.hostKeyPath, "host-key", "/var/lib/arca-router/ssh_host_ed25519_key",
 		"Path to SSH host key")
 	flag.StringVar(&f.userDBPath, "user-db", "/var/lib/arca-router/users.db",
@@ -567,6 +567,7 @@ func startNETCONFServer(
 	ncConfig.DatastoreConfig = datastoreConfig
 	ncConfig.SkipDatastoreStartupCleanup = true
 	ncConfig.AdvertiseStandardXPath = f.netconfXPath
+	ncConfig.DisableStandardXPath = !f.netconfXPath
 
 	server, err := netconf.NewSSHServer(ncConfig)
 	if err != nil {

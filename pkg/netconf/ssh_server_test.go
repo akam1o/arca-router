@@ -212,6 +212,9 @@ func TestNewSSHServerDefaultsPartialConfig(t *testing.T) {
 	if server.config.LockoutDuration != defaults.LockoutDuration {
 		t.Fatalf("LockoutDuration = %s, want %s", server.config.LockoutDuration, defaults.LockoutDuration)
 	}
+	if !server.config.AdvertiseStandardXPath {
+		t.Fatal("AdvertiseStandardXPath = false, want default standard :xpath advertisement")
+	}
 	if !slices.Equal(server.config.SSHCiphers, defaults.SSHCiphers) {
 		t.Fatalf("SSHCiphers = %v, want %v", server.config.SSHCiphers, defaults.SSHCiphers)
 	}
@@ -242,6 +245,25 @@ func TestNewSSHServerDefaultsPartialConfig(t *testing.T) {
 		len(cfg.SSHKeyExchanges) != 0 ||
 		len(cfg.SSHMACs) != 0 {
 		t.Fatalf("caller config was mutated: %+v", cfg)
+	}
+}
+
+func TestNewSSHServerCanDisableStandardXPath(t *testing.T) {
+	cfg, _ := testSSHServerConfig(t, "127.0.0.1:0")
+	cfg.DisableStandardXPath = true
+
+	server, err := NewSSHServer(cfg)
+	if err != nil {
+		t.Fatalf("NewSSHServer() error = %v", err)
+	}
+	t.Cleanup(func() {
+		if err := server.Stop(); err != nil {
+			t.Errorf("Stop() error = %v", err)
+		}
+	})
+
+	if server.config.AdvertiseStandardXPath {
+		t.Fatal("AdvertiseStandardXPath = true, want explicit standard :xpath suppression")
 	}
 }
 
