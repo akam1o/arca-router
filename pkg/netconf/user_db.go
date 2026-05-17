@@ -706,7 +706,7 @@ func (udb *UserDatabase) ListPublicKeys(username string) ([]PublicKeyRecord, err
 	}
 
 	query := `SELECT id, username, algorithm, key_data, fingerprint, comment, enabled, created_at
-	          FROM user_public_keys WHERE username = ? ORDER BY created_at DESC`
+	          FROM user_public_keys WHERE username = ? ORDER BY created_at DESC, fingerprint ASC`
 
 	rows, err := db.Query(query, username)
 	if err != nil {

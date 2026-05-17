@@ -2,6 +2,7 @@
 
 ## v0.9.x - NETCONF/YANG and Operational Safety (current)
 
+- **NETCONF public key listing stability**: user public key listings now use fingerprint tie-break ordering when keys share the same creation timestamp
 - **NETCONF session lock listing stability**: session lock listings now return datastore names in sorted order for deterministic direct helper output
 - **NETCONF YANG module listing stability**: YANG module listing now returns module names in sorted order for deterministic direct helper output
 - **NETCONF filter validation immutability**: filter validation now normalizes type and XPath select values without rewriting caller-owned filter fields

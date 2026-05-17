@@ -145,6 +145,51 @@ func TestUserDatabaseOperationsZeroValue(t *testing.T) {
 	requireUserDatabaseOperationsUnavailable(t, userDB)
 }
 
+func TestUserDatabaseListPublicKeysUsesStableTieBreak(t *testing.T) {
+	userDB := newTestUserDatabase(t)
+	passwordHash, err := auth.HashPassword("password")
+	if err != nil {
+		t.Fatalf("HashPassword() error = %v", err)
+	}
+	if err := userDB.CreateUser("alice", passwordHash, RoleAdmin); err != nil {
+		t.Fatalf("CreateUser() error = %v", err)
+	}
+
+	db, err := userDB.database()
+	if err != nil {
+		t.Fatalf("database() error = %v", err)
+	}
+	for _, fingerprint := range []string{"SHA256:z-key", "SHA256:a-key", "SHA256:m-key"} {
+		_, err := db.Exec(
+			`INSERT INTO user_public_keys (username, algorithm, key_data, fingerprint, comment, enabled, created_at)
+			 VALUES (?, ?, ?, ?, ?, 1, ?)`,
+			"alice",
+			"ssh-ed25519",
+			"key-data-"+fingerprint,
+			fingerprint,
+			"test key",
+			int64(1000),
+		)
+		if err != nil {
+			t.Fatalf("insert public key %s error = %v", fingerprint, err)
+		}
+	}
+
+	keys, err := userDB.ListPublicKeys("alice")
+	if err != nil {
+		t.Fatalf("ListPublicKeys() error = %v", err)
+	}
+	want := []string{"SHA256:a-key", "SHA256:m-key", "SHA256:z-key"}
+	if len(keys) != len(want) {
+		t.Fatalf("ListPublicKeys() returned %d keys, want %d", len(keys), len(want))
+	}
+	for i := range want {
+		if keys[i].Fingerprint != want[i] {
+			t.Fatalf("ListPublicKeys()[%d].Fingerprint = %q, want %q (all keys: %#v)", i, keys[i].Fingerprint, want[i], keys)
+		}
+	}
+}
+
 func newTestUserDatabase(t *testing.T) *UserDatabase {
 	t.Helper()
 
