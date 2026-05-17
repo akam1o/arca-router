@@ -36,6 +36,8 @@ chmod 700 "$TMPDIR"
 
 cat >"$TMPDIR/running.conf" <<'CONFIG'
 set system host-name arca-ci
+set interfaces ge-0/0/0 description "interop-uplink"
+set interfaces xe-0/0/0 description "interop-peer"
 CONFIG
 
 go run ./tools/netconf-userdb \

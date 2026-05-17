@@ -9,6 +9,7 @@ from ncclient.operations.rpc import RPCError, RaiseMode
 
 
 NETCONF_NS = "urn:ietf:params:xml:ns:netconf:base:1.0"
+IETF_INTERFACES_NS = "urn:ietf:params:xml:ns:yang:ietf-interfaces"
 CAP_BASE_10 = "urn:ietf:params:netconf:base:1.0"
 CAP_BASE_11 = "urn:ietf:params:netconf:base:1.1"
 CAP_CANDIDATE = "urn:ietf:params:netconf:capability:candidate:1.0"
@@ -100,6 +101,24 @@ def main():
         running = session.get_config(source="running").data_xml
         if "arca-ci" not in running:
             fail("initial running configuration did not include arca-ci hostname")
+
+        xpath_reply = dispatch_xml(
+            session,
+            f"""
+            <get-config xmlns="{NETCONF_NS}">
+              <source><running/></source>
+              <filter
+                type="xpath"
+                xmlns:if="{IETF_INTERFACES_NS}"
+                select="/if:interfaces/if:interface[contains(if:name, 'ge-0/0/0')]"/>
+            </get-config>
+            """,
+        )
+        xpath_xml = str(xpath_reply.xml)
+        if "ge-0/0/0" not in xpath_xml or "interop-uplink" not in xpath_xml:
+            fail("experimental XPath filter did not return expected interface")
+        if "xe-0/0/0" in xpath_xml or "interop-peer" in xpath_xml:
+            fail("experimental XPath filter returned predicate-mismatched interface")
 
         assert_rpc_error(
             lambda: dispatch_xml(
