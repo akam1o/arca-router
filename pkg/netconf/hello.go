@@ -79,6 +79,9 @@ func UnmarshalHello(data []byte) (*Hello, error) {
 
 // HasCapability checks if the hello message contains a specific capability
 func (h *Hello) HasCapability(capability string) bool {
+	if h == nil {
+		return false
+	}
 	for _, cap := range h.Capabilities.Capability {
 		if cap == capability {
 			return true
@@ -117,6 +120,9 @@ func ValidateClientHello(clientHello *Hello) error {
 
 // GetClientCapabilities returns a human-readable list of client capabilities
 func GetClientCapabilities(clientHello *Hello) []string {
+	if clientHello == nil {
+		return nil
+	}
 	capabilities := make([]string, 0, len(clientHello.Capabilities.Capability))
 	for _, cap := range clientHello.Capabilities.Capability {
 		// Extract short name for common capabilities
