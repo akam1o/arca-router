@@ -81,6 +81,19 @@ func TestMarshalHello(t *testing.T) {
 	}
 }
 
+func TestMarshalHelloNil(t *testing.T) {
+	data, err := MarshalHello(nil)
+	if err == nil {
+		t.Fatal("MarshalHello(nil) error = nil, want nil hello error")
+	}
+	if data != nil {
+		t.Fatalf("MarshalHello(nil) data = %q, want nil", string(data))
+	}
+	if !strings.Contains(err.Error(), "nil hello") {
+		t.Fatalf("MarshalHello(nil) error = %v, want nil hello", err)
+	}
+}
+
 func TestUnmarshalClientHello(t *testing.T) {
 	clientHelloXML := `<?xml version="1.0" encoding="UTF-8"?>
 <hello xmlns="urn:ietf:params:xml:ns:netconf:base:1.0">

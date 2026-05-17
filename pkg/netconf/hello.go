@@ -49,6 +49,10 @@ func ServerHello(sessionID uint32) *Hello {
 
 // MarshalHello marshals a Hello message to XML
 func MarshalHello(hello *Hello) ([]byte, error) {
+	if hello == nil {
+		return nil, fmt.Errorf("nil hello")
+	}
+
 	data, err := xml.MarshalIndent(hello, "", "  ")
 	if err != nil {
 		return nil, fmt.Errorf("marshal hello: %w", err)
