@@ -33,7 +33,7 @@ If an upgrade fails after package replacement, reinstall the previous package ar
 - Local `arca` access continues to use the restricted Unix socket by default.
 - `arca-routerd --grpc-listen=<host:port> --grpc-tls-cert=<cert> --grpc-tls-key=<key>` enables TCP/TLS gRPC access. Add `--grpc-client-ca=<ca>` to require and verify client certificates.
 - `arca -grpc-address=<host:port>` uses TLS for remote gRPC access, with optional `-grpc-ca`, `-grpc-server-name`, `-grpc-client-cert`, and `-grpc-client-key`.
-- `arca-routerd --web-api-token-file=<path>` enables Web/NMS API automation tokens. The file format is one `name:role:token` entry per line, where `role` is `read-only`, `operator`, or `admin`. Requests may use `Authorization: Bearer <token>` or `X-API-Key: <token>`.
+- `arca-routerd --web-api-token-file=<path>` enables Web/NMS API automation tokens. The token file must be restricted to `0600`. The file format is one `name:role:token` entry per line, where `role` is `read-only`, `operator`, or `admin`. Requests may use `Authorization: Bearer <token>` or `X-API-Key: <token>`.
 
 ## Support Matrix
 

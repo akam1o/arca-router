@@ -179,7 +179,7 @@ An HTTP-only collector example is included in `examples/nms`. It decodes catalog
 
 HA convergence is evaluated when chassis clustering is enabled and at least one VRRP group is configured. The status is converged only when there are at least two cluster nodes, etcd cluster sync is configured and aligned with the daemon datastore, the etcd config synchronizer is healthy, FRR VRRP operational state reports every configured group as active, and VPP LCP reconciliation has run without errors or inconsistencies.
 
-When the running configuration contains password-backed `security users`, the Web UI requires HTTP Basic authentication. Automation can also use `arca-routerd --web-api-token-file=<path>` with one `name:role:token` entry per line. Web API tokens are accepted as `Authorization: Bearer <token>` or `X-API-Key: <token>`. The `read-only`, `operator`, and `admin` roles can access the read-only dashboard and API endpoints.
+When the running configuration contains password-backed `security users`, the Web UI requires HTTP Basic authentication. Automation can also use `arca-routerd --web-api-token-file=<path>` with a `0600` file containing one `name:role:token` entry per line. Web API tokens are accepted as `Authorization: Bearer <token>` or `X-API-Key: <token>`. The `read-only`, `operator`, and `admin` roles can access the read-only dashboard and API endpoints.
 
 ```bash
 curl -u monitor:ReadOnly789 http://127.0.0.1:8080/api/status

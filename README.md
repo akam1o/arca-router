@@ -214,7 +214,7 @@ set security rate-limit per-user 20
 
 > NETCONF is built into `arca-routerd`; no separate NETCONF daemon is needed. When `--netconf-listen` is omitted, the daemon listens on the configured NETCONF port and falls back to `:830`.
 
-For automation against the Web/NMS API, provide a token file with one `name:role:token` entry per line and start the daemon with `--web-api-token-file=/etc/arca-router/web-api-tokens`. Tokens can use `Authorization: Bearer <token>` or `X-API-Key: <token>` and reuse the `read-only`, `operator`, and `admin` RBAC roles.
+For automation against the Web/NMS API, provide a `0600` token file with one `name:role:token` entry per line and start the daemon with `--web-api-token-file=/etc/arca-router/web-api-tokens`. Tokens can use `Authorization: Bearer <token>` or `X-API-Key: <token>` and reuse the `read-only`, `operator`, and `admin` RBAC roles.
 
 **Test NETCONF connection**:
 
