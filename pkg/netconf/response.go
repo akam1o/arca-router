@@ -109,7 +109,7 @@ func MarshalReply(reply *RPCReply) ([]byte, error) {
 		buf.WriteString("</data>")
 	}
 	for _, rpcErr := range reply.Errors {
-		data, err := xml.Marshal(rpcErr)
+		data, err := xml.Marshal(normalizeRPCError(rpcErr))
 		if err != nil {
 			return nil, err
 		}
