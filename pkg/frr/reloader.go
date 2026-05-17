@@ -2,6 +2,7 @@ package frr
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -69,6 +70,9 @@ func (r *Reloader) ValidateConfig(ctx context.Context, configPath string) error 
 	// Check if vtysh exists and get its path
 	vtyshPath, err := exec.LookPath("vtysh")
 	if err != nil {
+		if errors.Is(err, os.ErrPermission) {
+			return NewPermissionDeniedError("find vtysh", err)
+		}
 		return NewToolNotFoundError("vtysh")
 	}
 
@@ -76,9 +80,13 @@ func (r *Reloader) ValidateConfig(ctx context.Context, configPath string) error 
 	cmd := exec.CommandContext(ctx, vtyshPath, "--check", configPath)
 	output, err := cmd.CombinedOutput()
 	if err != nil {
+		commandErr := commandFailureError(output, err)
+		if commandFailureLooksPermissionDenied(output, err) {
+			return NewPermissionDeniedError("validate FRR config with vtysh", commandErr)
+		}
 		return NewValidateError(
 			fmt.Sprintf("FRR configuration validation failed: %s", string(output)),
-			err,
+			commandErr,
 		)
 	}
 
@@ -91,6 +99,15 @@ func (r *Reloader) BackupConfig() (string, error) {
 	if _, err := os.Stat(r.ConfigPath); os.IsNotExist(err) {
 		// No config to backup (first time setup)
 		return "", nil
+	} else if err != nil {
+		if errors.Is(err, os.ErrPermission) {
+			return "", NewPermissionDeniedError("stat FRR config for backup", err)
+		}
+		return "", NewBackupError("failed to stat current config", err)
+	}
+
+	if err := r.checkConfigDirectoryWriteAccess("write FRR config backup"); err != nil {
+		return "", err
 	}
 
 	// Create backup path with timestamp
@@ -100,11 +117,17 @@ func (r *Reloader) BackupConfig() (string, error) {
 	// Read current config
 	data, err := os.ReadFile(r.ConfigPath)
 	if err != nil {
+		if errors.Is(err, os.ErrPermission) {
+			return "", NewPermissionDeniedError("read FRR config for backup", err)
+		}
 		return "", NewBackupError("failed to read current config", err)
 	}
 
 	// Write backup file
 	if err := os.WriteFile(backupPath, data, DefaultConfigMode); err != nil {
+		if errors.Is(err, os.ErrPermission) {
+			return "", NewPermissionDeniedError("write FRR config backup", err)
+		}
 		return "", NewBackupError("failed to write backup file", err)
 	}
 
@@ -149,6 +172,10 @@ func (r *Reloader) WriteConfig(configContent string) error {
 // writeConfigAtomic writes config file atomically using temp file + rename.
 // Preserves existing file ownership, group, and permissions if the file exists.
 func (r *Reloader) writeConfigAtomic(data []byte) error {
+	if err := r.checkConfigWriteAccess(); err != nil {
+		return err
+	}
+
 	// Get existing file info to preserve ownership and permissions
 	var existingStat *os.FileInfo
 	if stat, err := os.Stat(r.ConfigPath); err == nil {
@@ -159,6 +186,9 @@ func (r *Reloader) writeConfigAtomic(data []byte) error {
 	dir := filepath.Dir(r.ConfigPath)
 	tmpFile, err := os.CreateTemp(dir, "frr.conf.tmp.*")
 	if err != nil {
+		if errors.Is(err, os.ErrPermission) {
+			return NewPermissionDeniedError("create temporary FRR config", err)
+		}
 		return NewApplyError("failed to create temp file", err)
 	}
 	tmpPath := tmpFile.Name()
@@ -177,6 +207,9 @@ func (r *Reloader) writeConfigAtomic(data []byte) error {
 
 	// Write data to temp file
 	if _, err := tmpFile.Write(data); err != nil {
+		if errors.Is(err, os.ErrPermission) {
+			return NewPermissionDeniedError("write temporary FRR config", err)
+		}
 		return NewApplyError("failed to write temp file", err)
 	}
 
@@ -213,6 +246,9 @@ func (r *Reloader) writeConfigAtomic(data []byte) error {
 
 	// Atomic rename
 	if err := os.Rename(tmpPath, r.ConfigPath); err != nil {
+		if errors.Is(err, os.ErrPermission) {
+			return NewPermissionDeniedError("replace FRR config file", err)
+		}
 		return NewApplyError("failed to rename config file", err)
 	}
 
@@ -223,6 +259,38 @@ func (r *Reloader) writeConfigAtomic(data []byte) error {
 		_ = err
 	}
 
+	return nil
+}
+
+func (r *Reloader) checkConfigWriteAccess() error {
+	if err := r.checkConfigDirectoryWriteAccess("write FRR config directory"); err != nil {
+		return err
+	}
+
+	info, err := os.Stat(r.ConfigPath)
+	if err == nil {
+		if info.IsDir() {
+			return NewApplyError(fmt.Sprintf("FRR config path is a directory: %s", r.ConfigPath), nil)
+		}
+		return nil
+	}
+	if errors.Is(err, os.ErrNotExist) {
+		return nil
+	}
+	if errors.Is(err, os.ErrPermission) {
+		return NewPermissionDeniedError("stat FRR config file", err)
+	}
+	return NewApplyError("stat FRR config file", err)
+}
+
+func (r *Reloader) checkConfigDirectoryWriteAccess(operation string) error {
+	dir := filepath.Dir(r.ConfigPath)
+	if err := checkPathAccess(dir, processAccessWrite|processAccessExecute); err != nil {
+		if IsPermissionDenied(err) {
+			return NewPermissionDeniedError(operation, err)
+		}
+		return NewApplyError("check FRR config directory", err)
+	}
 	return nil
 }
 
@@ -328,17 +396,27 @@ func (r *Reloader) applyConfigInternal(ctx context.Context) error {
 // applyWithFRRReload applies config using frr-reload.py script.
 func (r *Reloader) applyWithFRRReload(ctx context.Context) error {
 	// Check if frr-reload.py exists
-	if _, err := os.Stat(FRRReloadScript); os.IsNotExist(err) {
-		return NewToolNotFoundError("frr-reload.py")
+	if _, err := os.Stat(FRRReloadScript); err != nil {
+		if os.IsNotExist(err) {
+			return NewToolNotFoundError("frr-reload.py")
+		}
+		if errors.Is(err, os.ErrPermission) {
+			return NewPermissionDeniedError("stat frr-reload.py", err)
+		}
+		return NewApplyError("stat frr-reload.py", err)
 	}
 
 	// Run frr-reload.py --reload <config>
 	cmd := exec.CommandContext(ctx, FRRReloadScript, "--reload", r.ConfigPath)
 	output, err := cmd.CombinedOutput()
 	if err != nil {
+		commandErr := commandFailureError(output, err)
+		if commandFailureLooksPermissionDenied(output, err) {
+			return NewPermissionDeniedError("run frr-reload.py", commandErr)
+		}
 		return NewApplyError(
 			fmt.Sprintf("frr-reload.py failed: %s", string(output)),
-			err,
+			commandErr,
 		)
 	}
 
@@ -350,6 +428,9 @@ func (r *Reloader) applyWithVtysh(ctx context.Context) error {
 	// Check if vtysh exists and get its path
 	vtyshPath, err := exec.LookPath("vtysh")
 	if err != nil {
+		if errors.Is(err, os.ErrPermission) {
+			return NewPermissionDeniedError("find vtysh", err)
+		}
 		return NewToolNotFoundError("vtysh")
 	}
 
@@ -357,9 +438,13 @@ func (r *Reloader) applyWithVtysh(ctx context.Context) error {
 	cmd := exec.CommandContext(ctx, vtyshPath, "-f", r.ConfigPath)
 	output, err := cmd.CombinedOutput()
 	if err != nil {
+		commandErr := commandFailureError(output, err)
+		if commandFailureLooksPermissionDenied(output, err) {
+			return NewPermissionDeniedError("apply FRR config with vtysh", commandErr)
+		}
 		return NewApplyError(
 			fmt.Sprintf("vtysh -f failed: %s", string(output)),
-			err,
+			commandErr,
 		)
 	}
 
@@ -367,9 +452,13 @@ func (r *Reloader) applyWithVtysh(ctx context.Context) error {
 	cmd = exec.CommandContext(ctx, vtyshPath, "-c", "write memory")
 	output, err = cmd.CombinedOutput()
 	if err != nil {
+		commandErr := commandFailureError(output, err)
+		if commandFailureLooksPermissionDenied(output, err) {
+			return NewPermissionDeniedError("persist FRR config with vtysh", commandErr)
+		}
 		return NewApplyError(
 			fmt.Sprintf("vtysh -c 'write memory' failed: %s", string(output)),
-			err,
+			commandErr,
 		)
 	}
 
