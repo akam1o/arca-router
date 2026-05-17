@@ -1012,6 +1012,78 @@ func TestUpgradePreflightLinesReportsConfigValidationWarnings(t *testing.T) {
 	}
 }
 
+func TestUpgradePreflightLinesChecksBackupPath(t *testing.T) {
+	backupPath := t.TempDir() + "/running.conf"
+	client := &fakeInteractiveClient{
+		runningText:    "set system host-name router\n",
+		runningVersion: 7,
+		history: []grpcclient.CommitInfo{
+			{CommitID: "1234567890abcdef", ConfigText: "set system host-name router"},
+		},
+		cosInfo: &grpcclient.ClassOfServiceInfo{
+			Capabilities: &grpcclient.ClassOfServiceCapabilitiesInfo{
+				MetadataBindingSupported: true,
+				QueueSchedulerSupported:  true,
+				PolicerSupported:         true,
+				CountersSupported:        true,
+			},
+		},
+	}
+
+	lines, err := upgradePreflightLinesWithOptions(context.Background(), client, upgradePreflightOptions{BackupPath: backupPath})
+	if err != nil {
+		t.Fatalf("upgradePreflightLinesWithOptions() error = %v", err)
+	}
+	got := strings.Join(lines, "\n")
+	for _, want := range []string{
+		"backup path: writable " + backupPath,
+		"status: ready for package-specific upgrade checks",
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("upgradePreflightLinesWithOptions() = %q, want substring %q", got, want)
+		}
+	}
+	if _, err := os.Stat(backupPath); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("backup path stat error = %v, want not created", err)
+	}
+}
+
+func TestUpgradePreflightLinesWarnsExistingBackupPath(t *testing.T) {
+	backupPath := t.TempDir() + "/running.conf"
+	if err := os.WriteFile(backupPath, []byte("existing\n"), 0o600); err != nil {
+		t.Fatalf("WriteFile(%s) error = %v", backupPath, err)
+	}
+	client := &fakeInteractiveClient{
+		runningText:    "set system host-name router\n",
+		runningVersion: 7,
+		history: []grpcclient.CommitInfo{
+			{CommitID: "1234567890abcdef", ConfigText: "set system host-name router"},
+		},
+		cosInfo: &grpcclient.ClassOfServiceInfo{
+			Capabilities: &grpcclient.ClassOfServiceCapabilitiesInfo{
+				MetadataBindingSupported: true,
+				QueueSchedulerSupported:  true,
+				PolicerSupported:         true,
+				CountersSupported:        true,
+			},
+		},
+	}
+
+	lines, err := upgradePreflightLinesWithOptions(context.Background(), client, upgradePreflightOptions{BackupPath: backupPath})
+	if err != nil {
+		t.Fatalf("upgradePreflightLinesWithOptions() error = %v", err)
+	}
+	got := strings.Join(lines, "\n")
+	for _, want := range []string{
+		"warning: backup path already exists: " + backupPath,
+		"status: 1 warning(s), review before upgrade",
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("upgradePreflightLinesWithOptions() = %q, want substring %q", got, want)
+		}
+	}
+}
+
 func TestCmdCheckUpgradeRequiresOperationalMode(t *testing.T) {
 	sh := &interactiveShell{
 		client:    &fakeInteractiveClient{},
