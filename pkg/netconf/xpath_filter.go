@@ -58,6 +58,8 @@ func ParseXPathFilterWithContext(path string, namespaceAttrs []xml.Attr) (*XPath
 }
 
 func parseXPathFilter(path string, namespaceCtx map[string]string) (*XPathFilter, error) {
+	path = strings.TrimSpace(path)
+
 	if path == "" || path == "/" {
 		return nil, nil // Empty filter matches all
 	}

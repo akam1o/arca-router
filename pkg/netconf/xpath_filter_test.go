@@ -55,6 +55,13 @@ func TestParseXPathFilter(t *testing.T) {
 			wantPredicates: map[int]map[string]string{1: {"name": "ge-0/0/0"}},
 		},
 		{
+			name:           "path trims whitespace",
+			path:           "\n /interfaces/interface[name='ge-0/0/0'] \t",
+			wantErr:        false,
+			wantSegments:   []string{"interfaces", "interface"},
+			wantPredicates: map[int]map[string]string{1: {"name": "ge-0/0/0"}},
+		},
+		{
 			name:           "routing-options with predicate",
 			path:           "/routing-options/static/route[prefix='10.0.0.0/24']",
 			wantErr:        false,
