@@ -224,6 +224,16 @@ func TestClientServerConfigFlow(t *testing.T) {
 	if strings.Contains(candidate, "set system host-name router1") || !strings.Contains(candidate, "set system host-name router2") {
 		t.Fatalf("candidate did not replace scalar hostname: %q", candidate)
 	}
+	if err := client.ReplaceCandidate(ctx, sessionID, "set system host-name router3"); err != nil {
+		t.Fatalf("ReplaceCandidate() error = %v", err)
+	}
+	candidate, err = client.GetCandidate(ctx, sessionID)
+	if err != nil {
+		t.Fatalf("GetCandidate() after ReplaceCandidate error = %v", err)
+	}
+	if strings.Contains(candidate, "set system host-name router2") || !strings.Contains(candidate, "set system host-name router3") {
+		t.Fatalf("candidate replacement did not replace previous edit: %q", candidate)
+	}
 	if err := client.ValidateCandidate(ctx, sessionID); err != nil {
 		t.Fatalf("ValidateCandidate() error = %v", err)
 	}
@@ -331,8 +341,8 @@ func TestClientServerConfigFlow(t *testing.T) {
 	if err := json.Unmarshal([]byte(event.JSONPayload), &payload); err != nil {
 		t.Fatalf("telemetry JSON payload is invalid: %v", err)
 	}
-	if payload["version"] != float64(2) || !strings.Contains(event.JSONPayload, "router2") {
-		t.Fatalf("telemetry payload = %s, want running config version 2", event.JSONPayload)
+	if payload["version"] != float64(2) || !strings.Contains(event.JSONPayload, "router3") {
+		t.Fatalf("telemetry payload = %s, want running config version 2 with router3", event.JSONPayload)
 	}
 	if event.PayloadBytes != len(event.JSONPayload) {
 		t.Fatalf("telemetry payload bytes = %d, want %d", event.PayloadBytes, len(event.JSONPayload))
