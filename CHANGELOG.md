@@ -5,6 +5,7 @@
 - **NETCONF evidence CI verification**: NETCONF client interoperability workflow now downloads ncclient and libnetconf2 artifacts and runs `make netconf-evidence-verify` before sign-off
 - **NETCONF client helper lint**: `make release-check` now syntax-checks NETCONF client helper scripts without importing external client packages
 - **Ubuntu 24.04 package target**: Release packaging now builds and verifies Ubuntu DEB artifacts on Ubuntu 24.04 only, dropping the older Ubuntu 22.04 target from the v0.10 matrix
+- **VPP socket permission preflight**: govpp startup checks now reject VPP API sockets that are not writable by the daemon user or its groups before attempting to connect
 - **Local NETCONF evidence target**: `make netconf-client-evidence` now collects ncclient and libnetconf2 interop artifacts for release sign-off, with `make netconf-pyez-evidence` available for supplementary PyEZ smoke
 - **NETCONF evidence verification**: `make netconf-evidence-verify` now checks required ncclient and libnetconf2 artifact files, required capabilities, and unsupported capability absence before sign-off
 - **NETCONF client evidence artifacts**: ncclient, libnetconf2, and scheduled PyEZ interop jobs now upload capabilities, RPC payloads, replies, logs, and client version evidence for release sign-off

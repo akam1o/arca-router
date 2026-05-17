@@ -278,6 +278,36 @@ func TestCheckSocketAccess(t *testing.T) {
 	if err == nil {
 		t.Error("checkSocketAccess() expected error for non-socket file, got nil")
 	}
+
+	if os.Geteuid() == 0 {
+		t.Skip("skipping restricted socket permission check as root")
+	}
+
+	restrictedSocket := filepath.Join(tmpDir, "restricted.sock")
+	restrictedListener, err := net.Listen("unix", restrictedSocket)
+	if err != nil {
+		if errors.Is(err, syscall.EPERM) || errors.Is(err, syscall.EACCES) {
+			t.Skipf("Skipping restricted unix socket bind in restricted environment: %v", err)
+		}
+		t.Fatalf("Failed to create restricted test socket: %v", err)
+	}
+	defer func() {
+		_ = os.Chmod(restrictedSocket, 0600)
+		if err := restrictedListener.Close(); err != nil {
+			_ = err
+		}
+	}()
+	if err := os.Chmod(restrictedSocket, 0000); err != nil {
+		t.Skipf("Skipping restricted unix socket chmod in restricted environment: %v", err)
+	}
+
+	err = checkSocketAccess(restrictedSocket)
+	if err == nil {
+		t.Fatal("checkSocketAccess() error = nil, want permission error")
+	}
+	if !strings.Contains(err.Error(), "not writable") {
+		t.Fatalf("checkSocketAccess() error = %v, want not writable detail", err)
+	}
 }
 
 // Fake implementations for testing
