@@ -54,6 +54,17 @@ func TestNewDataReply(t *testing.T) {
 	}
 }
 
+func TestNewDataReplyCopiesContent(t *testing.T) {
+	data := []byte("<interfaces/>")
+	reply := NewDataReply("102", data)
+
+	data[1] = 'x'
+
+	if string(reply.Data.Content) != "<interfaces/>" {
+		t.Fatalf("reply data content = %q, want original data", string(reply.Data.Content))
+	}
+}
+
 func TestNewErrorReply(t *testing.T) {
 	err := NewRPCError(ErrorTypeProtocol, ErrorTagInvalidValue, "test error")
 	reply := NewErrorReply("103", err)

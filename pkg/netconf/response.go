@@ -40,7 +40,7 @@ func NewDataReply(messageID string, data []byte) *RPCReply {
 	return &RPCReply{
 		MessageID: messageID,
 		Data: &DataReply{
-			Content: data,
+			Content: append([]byte(nil), data...),
 		},
 	}
 }
