@@ -92,7 +92,7 @@ func NewYANGValidator() (*YANGValidator, error) {
 // ValidateConfig validates configuration XML against the implemented NETCONF
 // schema subset and the internal semantic config rules.
 func (v *YANGValidator) ValidateConfig(xmlData []byte) error {
-	if v == nil {
+	if v == nil || v.modules == nil {
 		return fmt.Errorf("YANG validator not initialized")
 	}
 
@@ -111,7 +111,7 @@ func (v *YANGValidator) ValidateConfig(xmlData []byte) error {
 
 // GetModel returns the parsed YANG module for programmatic access
 func (v *YANGValidator) GetModel(moduleName string) (*yang.Module, error) {
-	if v == nil {
+	if v == nil || v.modules == nil {
 		return nil, fmt.Errorf("YANG validator not initialized")
 	}
 
@@ -133,7 +133,7 @@ func (v *YANGValidator) GetArcaRouterModel() (*yang.Module, error) {
 
 // ListModules returns the names of all loaded YANG modules
 func (v *YANGValidator) ListModules() []string {
-	if v == nil {
+	if v == nil || v.modules == nil {
 		return nil
 	}
 
@@ -150,7 +150,7 @@ func (v *YANGValidator) ListModules() []string {
 // ValidateElementPath validates that an XPath-like element path is valid
 // according to the YANG schema (Phase 3: basic implementation)
 func (v *YANGValidator) ValidateElementPath(path string) error {
-	if v == nil {
+	if v == nil || v.modules == nil {
 		return fmt.Errorf("YANG validator not initialized")
 	}
 
