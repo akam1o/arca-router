@@ -95,9 +95,14 @@ Commands:
   help              Show this help message
   version           Show version information
   show <subcommand> Show configuration or status
+  backup configuration <path>
+                    Save running configuration to a new file
+  backup configuration rollback <N> <path>
+                    Save archived configuration to a new file
 
 Show subcommands:
   configuration               Show full configuration
+  configuration rollback <N>  Show archived configuration N commits back
   configuration interfaces    Show interface configuration
   configuration protocols     Show routing protocol configuration
   interfaces                  Show interface status
@@ -189,6 +194,8 @@ func runOneShotCommand(ctx context.Context, f *cliFlags, args []string) int {
 			return ExitUsageError
 		}
 		return oneShotShow(ctx, client, args[1:], f)
+	case "backup":
+		return oneShotBackup(ctx, client, args[1:])
 	case "version":
 		fmt.Printf("arca %s (commit %s, built %s)\n", Version, Commit, BuildDate)
 		return ExitSuccess
@@ -200,6 +207,36 @@ func runOneShotCommand(ctx context.Context, f *cliFlags, args []string) int {
 		showUsage()
 		return ExitUsageError
 	}
+}
+
+func oneShotBackup(ctx context.Context, client showClient, args []string) int {
+	var text, path string
+	var err error
+	if len(args) == 2 && args[0] == "configuration" {
+		text, _, err = client.GetRunning(ctx)
+		path = args[1]
+	} else if len(args) == 4 && args[0] == "configuration" && args[1] == "rollback" {
+		rollbackNum, parseErr := parseRollbackNumber(args[2])
+		if parseErr != nil {
+			fmt.Fprintf(os.Stderr, "Error: %v\n", parseErr)
+			return ExitUsageError
+		}
+		text, err = archivedConfigurationText(ctx, client, rollbackNum)
+		path = args[3]
+	} else {
+		fmt.Fprintln(os.Stderr, "Error: usage: backup configuration [rollback <N>] <path>")
+		return ExitUsageError
+	}
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+		return ExitOperationError
+	}
+	if err := writeConfigBackupFile(path, text); err != nil {
+		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+		return ExitOperationError
+	}
+	fmt.Printf("configuration backup written to %s\n", path)
+	return ExitSuccess
 }
 
 func runLocalOneShotCommand(args []string) (bool, int) {

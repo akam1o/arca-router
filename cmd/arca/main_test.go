@@ -1029,6 +1029,63 @@ func TestBackupConfigurationRefusesOverwrite(t *testing.T) {
 	}
 }
 
+func TestOneShotBackupConfigurationWritesRunningConfig(t *testing.T) {
+	backupPath := t.TempDir() + "/running.conf"
+	client := &fakeInteractiveClient{runningText: "set system host-name running"}
+
+	code := oneShotBackup(context.Background(), client, []string{"configuration", backupPath})
+	if code != ExitSuccess {
+		t.Fatalf("oneShotBackup(configuration) = %d, want %d", code, ExitSuccess)
+	}
+	data, err := os.ReadFile(backupPath)
+	if err != nil {
+		t.Fatalf("ReadFile() error = %v", err)
+	}
+	if string(data) != "set system host-name running\n" {
+		t.Fatalf("backup content = %q, want running config", string(data))
+	}
+	if client.getRunningCalls != 1 {
+		t.Fatalf("GetRunning calls = %d, want 1", client.getRunningCalls)
+	}
+}
+
+func TestOneShotBackupConfigurationWritesArchivedRollbackConfig(t *testing.T) {
+	backupPath := t.TempDir() + "/rollback.conf"
+	client := &fakeInteractiveClient{
+		history: []grpcclient.CommitInfo{
+			{CommitID: "commit-new", ConfigText: "set system host-name new"},
+			{CommitID: "commit-old", ConfigText: "set system host-name old"},
+		},
+	}
+
+	code := oneShotBackup(context.Background(), client, []string{"configuration", "rollback", "1", backupPath})
+	if code != ExitSuccess {
+		t.Fatalf("oneShotBackup(configuration rollback 1) = %d, want %d", code, ExitSuccess)
+	}
+	data, err := os.ReadFile(backupPath)
+	if err != nil {
+		t.Fatalf("ReadFile() error = %v", err)
+	}
+	if string(data) != "set system host-name old\n" {
+		t.Fatalf("backup content = %q, want archived rollback config", string(data))
+	}
+	if client.listHistoryCalls != 1 || client.listHistoryLimit != 2 {
+		t.Fatalf("ListHistory calls/limit = %d/%d, want 1/2", client.listHistoryCalls, client.listHistoryLimit)
+	}
+}
+
+func TestOneShotBackupConfigurationRejectsInvalidRollbackNumber(t *testing.T) {
+	client := &fakeInteractiveClient{}
+
+	code := oneShotBackup(context.Background(), client, []string{"configuration", "rollback", "-1", "backup.conf"})
+	if code != ExitUsageError {
+		t.Fatalf("oneShotBackup(configuration rollback -1) = %d, want %d", code, ExitUsageError)
+	}
+	if client.listHistoryCalls != 0 {
+		t.Fatalf("ListHistory calls = %d, want 0", client.listHistoryCalls)
+	}
+}
+
 func TestCmdShowOSPFNeighborReturnsOutput(t *testing.T) {
 	ctx := context.Background()
 	client := &fakeInteractiveClient{ospfNeighbors: []grpcclient.OSPFNeighborInfo{{RouterID: "10.0.0.2", State: "Full"}}}
