@@ -73,19 +73,20 @@ type daemonFlags struct {
 	mockVPP       bool
 
 	// NETCONF settings.
-	netconfListen string
-	hostKeyPath   string
-	userDBPath    string
-	grpcSocket    string
-	grpcListen    string
-	grpcTLSCert   string
-	grpcTLSKey    string
-	grpcClientCA  string
-	metricsListen string
-	webListen     string
-	snmpListen    string
-	snmpCommunity string
-	frrApplyMode  string
+	netconfListen   string
+	hostKeyPath     string
+	userDBPath      string
+	grpcSocket      string
+	grpcListen      string
+	grpcTLSCert     string
+	grpcTLSKey      string
+	grpcClientCA    string
+	metricsListen   string
+	webListen       string
+	webAPITokenFile string
+	snmpListen      string
+	snmpCommunity   string
+	frrApplyMode    string
 }
 
 func main() {
@@ -179,6 +180,8 @@ func parseFlags() *daemonFlags {
 		"Prometheus metrics listen address (overrides system services prometheus config; disabled when empty and config disabled)")
 	flag.StringVar(&f.webListen, "web-listen", "",
 		"Web UI listen address (overrides system services web-ui config; disabled when empty and config disabled)")
+	flag.StringVar(&f.webAPITokenFile, "web-api-token-file", "",
+		"Path to web API token file (lines: name:role:token)")
 	flag.StringVar(&f.snmpListen, "snmp-listen", "",
 		"SNMPv2c UDP listen address (disabled when empty)")
 	flag.StringVar(&f.snmpCommunity, "snmp-community", "",
@@ -440,6 +443,11 @@ func run(ctx context.Context, f *daemonFlags, log *logger.Logger) error {
 	grpcServer.SetBFDOperationalSource(frrPlugin)
 	grpcServer.SetQoSCapabilitySource(vppPlugin)
 
+	webAPITokens, err := loadWebAPITokens(f.webAPITokenFile)
+	if err != nil {
+		return fmt.Errorf("load web API tokens: %w", err)
+	}
+
 	observabilitySource := metricsSource{
 		startedAt:     time.Now(),
 		engine:        eng,
@@ -447,6 +455,7 @@ func run(ctx context.Context, f *daemonFlags, log *logger.Logger) error {
 		datastore:     datastoreConfig,
 		configAPI:     grpcServer,
 		telemetryAPI:  grpcServer,
+		webAPITokens:  webAPITokens,
 		configSync:    configSync,
 		frr:           frrPlugin,
 		vpp:           vppPlugin,

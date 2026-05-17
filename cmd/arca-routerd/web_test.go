@@ -7,6 +7,8 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -929,6 +931,76 @@ func TestWebEndpointAcceptsReadOnlyBasicAuth(t *testing.T) {
 	}
 }
 
+func TestLoadWebAPITokensParsesTokenFile(t *testing.T) {
+	tokenFile := filepath.Join(t.TempDir(), "tokens")
+	if err := os.WriteFile(tokenFile, []byte("# comment\nrobot:operator:secret-token\n"), 0600); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+
+	tokens, err := loadWebAPITokens(tokenFile)
+	if err != nil {
+		t.Fatalf("loadWebAPITokens() error = %v", err)
+	}
+	token := tokens["robot"]
+	if token.Name != "robot" || token.Role != "operator" || token.Token != "secret-token" {
+		t.Fatalf("token = %#v, want parsed robot operator token", token)
+	}
+}
+
+func TestWebEndpointAcceptsBearerToken(t *testing.T) {
+	source := newWebAuthTestSource(t, "monitor", "secret", "read-only")
+	source.webAPITokens = map[string]webAPIToken{
+		"robot": {Name: "robot", Role: "read-only", Token: "secret-token"},
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/api/status", nil)
+	req.Header.Set("Authorization", "Bearer secret-token")
+	rec := httptest.NewRecorder()
+	source.handleWebStatus(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d: %s", rec.Code, http.StatusOK, rec.Body.String())
+	}
+}
+
+func TestWebEndpointAcceptsAPIKeyHeader(t *testing.T) {
+	source := newWebAuthTestSource(t, "monitor", "secret", "read-only")
+	source.webAPITokens = map[string]webAPIToken{
+		"robot": {Name: "robot", Role: "read-only", Token: "secret-token"},
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/api/config", nil)
+	req.Header.Set("X-API-Key", "secret-token")
+	rec := httptest.NewRecorder()
+	source.handleWebConfig(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d: %s", rec.Code, http.StatusOK, rec.Body.String())
+	}
+}
+
+func TestWebEndpointRequiresAuthWhenOnlyTokensConfigured(t *testing.T) {
+	eng := engine.NewEngine(nil, slog.Default())
+	cfg := model.NewRouterConfig()
+	cfg.System = &model.SystemConfig{HostName: "edge01"}
+	eng.InitializeRunning(cfg, 42)
+	source := metricsSource{
+		startedAt: time.Now(),
+		engine:    eng,
+		webAPITokens: map[string]webAPIToken{
+			"robot": {Name: "robot", Role: "read-only", Token: "secret-token"},
+		},
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/api/status", nil)
+	rec := httptest.NewRecorder()
+	source.handleWebStatus(rec, req)
+
+	if rec.Code != http.StatusUnauthorized {
+		t.Fatalf("status = %d, want %d", rec.Code, http.StatusUnauthorized)
+	}
+}
+
 func TestWebEndpointRejectsInvalidRole(t *testing.T) {
 	source := newWebAuthTestSource(t, "monitor", "secret", "invalid")
 
@@ -995,6 +1067,22 @@ func TestWebConfigWriteEndpointRejectsReadOnlyRole(t *testing.T) {
 
 	req := httptest.NewRequest(http.MethodPost, "/api/config/validate", strings.NewReader(`{"config_text":"set system host-name edge02"}`))
 	req.SetBasicAuth("read-only", "secret")
+	rec := httptest.NewRecorder()
+	source.handleWebConfigValidate(rec, req)
+
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("status = %d, want %d", rec.Code, http.StatusForbidden)
+	}
+}
+
+func TestWebConfigWriteEndpointRejectsReadOnlyToken(t *testing.T) {
+	source, _ := newWebConfigAPITestSource(t, "operator")
+	source.webAPITokens = map[string]webAPIToken{
+		"robot": {Name: "robot", Role: "read-only", Token: "secret-token"},
+	}
+
+	req := httptest.NewRequest(http.MethodPost, "/api/config/validate", strings.NewReader(`{"config_text":"set system host-name edge02"}`))
+	req.Header.Set("Authorization", "Bearer secret-token")
 	rec := httptest.NewRecorder()
 	source.handleWebConfigValidate(rec, req)
 

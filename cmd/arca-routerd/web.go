@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"crypto/subtle"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -10,6 +11,7 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"os"
 	"strconv"
 	"strings"
 	"time"
@@ -398,6 +400,12 @@ type webCommitEntry struct {
 type webAuthUser struct {
 	PasswordHash string
 	Role         string
+}
+
+type webAPIToken struct {
+	Name  string
+	Token string
+	Role  string
 }
 
 type webIndexData struct {
@@ -948,6 +956,61 @@ func effectiveWebListen(flagValue string, snapshot *model.ConfigSnapshot) string
 	return net.JoinHostPort(addr, strconv.Itoa(port))
 }
 
+func loadWebAPITokens(path string) (map[string]webAPIToken, error) {
+	path = strings.TrimSpace(path)
+	if path == "" {
+		return nil, nil
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil, fmt.Errorf("read token file %s: %w", path, err)
+	}
+	tokens := make(map[string]webAPIToken)
+	for lineNo, rawLine := range strings.Split(string(data), "\n") {
+		token, ok, err := parseWebAPITokenLine(rawLine, lineNo+1)
+		if err != nil {
+			return nil, err
+		}
+		if !ok {
+			continue
+		}
+		if _, exists := tokens[token.Name]; exists {
+			return nil, fmt.Errorf("duplicate web API token name %q on line %d", token.Name, lineNo+1)
+		}
+		tokens[token.Name] = token
+	}
+	if len(tokens) == 0 {
+		return nil, fmt.Errorf("web API token file %s does not contain any tokens", path)
+	}
+	return tokens, nil
+}
+
+func parseWebAPITokenLine(rawLine string, lineNo int) (webAPIToken, bool, error) {
+	line := strings.TrimSpace(rawLine)
+	if line == "" || strings.HasPrefix(line, "#") {
+		return webAPIToken{}, false, nil
+	}
+	parts := strings.SplitN(line, ":", 3)
+	if len(parts) != 3 {
+		return webAPIToken{}, false, fmt.Errorf("invalid web API token file line %d: expected name:role:token", lineNo)
+	}
+	token := webAPIToken{
+		Name:  strings.TrimSpace(parts[0]),
+		Role:  strings.TrimSpace(parts[1]),
+		Token: strings.TrimSpace(parts[2]),
+	}
+	if token.Name == "" {
+		return webAPIToken{}, false, fmt.Errorf("invalid web API token file line %d: token name is required", lineNo)
+	}
+	if !webRoleCanRead(token.Role) {
+		return webAPIToken{}, false, fmt.Errorf("invalid web API token file line %d: invalid role %q", lineNo, token.Role)
+	}
+	if token.Token == "" {
+		return webAPIToken{}, false, fmt.Errorf("invalid web API token file line %d: token value is required", lineNo)
+	}
+	return token, true, nil
+}
+
 func startWebServer(ctx context.Context, listenAddr string, source metricsSource, log *logger.Logger) (<-chan error, error) {
 	lis, err := net.Listen("tcp", listenAddr)
 	if err != nil {
@@ -1343,10 +1406,11 @@ func (s metricsSource) auditEvents(ctx context.Context, opts nbgrpc.AuditLogOpti
 
 func (s metricsSource) authorizeWebRead(w http.ResponseWriter, r *http.Request) bool {
 	users := s.webAuthUsers()
-	if len(users) == 0 {
+	tokens := s.webAutomationTokens()
+	if len(users) == 0 && len(tokens) == 0 {
 		return true
 	}
-	_, role, ok := authenticateWebUser(w, r, users)
+	_, role, ok := authenticateWebRequest(w, r, users, tokens)
 	if !ok {
 		return false
 	}
@@ -1359,11 +1423,12 @@ func (s metricsSource) authorizeWebRead(w http.ResponseWriter, r *http.Request) 
 
 func (s metricsSource) authorizeWebAdmin(w http.ResponseWriter, r *http.Request) bool {
 	users := s.webAuthUsers()
-	if len(users) == 0 {
-		http.Error(w, "audit export requires password-backed security users", http.StatusForbidden)
+	tokens := s.webAutomationTokens()
+	if len(users) == 0 && len(tokens) == 0 {
+		http.Error(w, "audit export requires password-backed security users or API tokens", http.StatusForbidden)
 		return false
 	}
-	_, role, ok := authenticateWebUser(w, r, users)
+	_, role, ok := authenticateWebRequest(w, r, users, tokens)
 	if !ok {
 		return false
 	}
@@ -1376,11 +1441,12 @@ func (s metricsSource) authorizeWebAdmin(w http.ResponseWriter, r *http.Request)
 
 func (s metricsSource) authorizeWebWrite(w http.ResponseWriter, r *http.Request) (string, bool) {
 	users := s.webAuthUsers()
-	if len(users) == 0 {
-		http.Error(w, "web configuration writes require password-backed security users", http.StatusForbidden)
+	tokens := s.webAutomationTokens()
+	if len(users) == 0 && len(tokens) == 0 {
+		http.Error(w, "web configuration writes require password-backed security users or API tokens", http.StatusForbidden)
 		return "", false
 	}
-	username, role, ok := authenticateWebUser(w, r, users)
+	username, role, ok := authenticateWebRequest(w, r, users, tokens)
 	if !ok {
 		return "", false
 	}
@@ -1389,6 +1455,22 @@ func (s metricsSource) authorizeWebWrite(w http.ResponseWriter, r *http.Request)
 		return "", false
 	}
 	return username, true
+}
+
+func authenticateWebRequest(w http.ResponseWriter, r *http.Request, users map[string]webAuthUser, tokens map[string]webAPIToken) (string, string, bool) {
+	if _, hasToken := webRequestToken(r); hasToken {
+		username, role, ok := authenticateWebToken(r, tokens)
+		if !ok {
+			writeWebAuthChallenge(w)
+			return "", "", false
+		}
+		return username, role, true
+	}
+	if len(users) > 0 {
+		return authenticateWebUser(w, r, users)
+	}
+	writeWebAuthChallenge(w)
+	return "", "", false
 }
 
 func authenticateWebUser(w http.ResponseWriter, r *http.Request, users map[string]webAuthUser) (string, string, bool) {
@@ -1409,6 +1491,51 @@ func authenticateWebUser(w http.ResponseWriter, r *http.Request, users map[strin
 		return "", "", false
 	}
 	return username, user.Role, true
+}
+
+func authenticateWebToken(r *http.Request, tokens map[string]webAPIToken) (string, string, bool) {
+	presented, ok := webRequestToken(r)
+	if !ok {
+		return "", "", false
+	}
+	for name, token := range tokens {
+		if token.Token == "" {
+			continue
+		}
+		if subtle.ConstantTimeCompare([]byte(presented), []byte(token.Token)) == 1 {
+			role := strings.TrimSpace(token.Role)
+			if role == "" {
+				role = pkgnetconf.RoleReadOnly
+			}
+			username := strings.TrimSpace(token.Name)
+			if username == "" {
+				username = name
+			}
+			return username, role, true
+		}
+	}
+	return "", "", false
+}
+
+func webRequestToken(r *http.Request) (string, bool) {
+	if authz := strings.TrimSpace(r.Header.Get("Authorization")); authz != "" {
+		scheme, value, ok := strings.Cut(authz, " ")
+		if ok && strings.EqualFold(scheme, "Bearer") {
+			token := strings.TrimSpace(value)
+			return token, token != ""
+		}
+	}
+	if token := strings.TrimSpace(r.Header.Get("X-API-Key")); token != "" {
+		return token, true
+	}
+	return "", false
+}
+
+func (s metricsSource) webAutomationTokens() map[string]webAPIToken {
+	if len(s.webAPITokens) == 0 {
+		return nil
+	}
+	return s.webAPITokens
 }
 
 func (s metricsSource) webAuthUsers() map[string]webAuthUser {
