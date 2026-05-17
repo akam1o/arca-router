@@ -39,10 +39,23 @@ If an upgrade fails after package replacement, reinstall the previous package ar
 
 | Component | Supported | Required | Notes |
 | --- | --- | --- | --- |
-| VPP | 24.10+ | `vpp`, `vpp-plugin-core`, linux-cp plugin | QoS scheduler, policer, and counter enforcement remain capability-gated by detected binapi support. |
-| FRR | 8.0+ | `bgpd`, `ospfd`, `ospf6d`, `zebra`, `staticd`, `mgmtd`, `vrrpd`, `bfdd` | Transactional mgmtd is the default apply path; file backend remains a recovery compatibility path. |
+| VPP | 24.10+ | `vpp`, `vpp-plugin-core`, linux-cp plugin | QoS scheduler, policer, and counter enforcement remain capability-gated by detected binapi support. Lab soak/restart evidence is deferred to v0.11. |
+| FRR | 8.0+ | `bgpd`, `ospfd`, `ospf6d`, `zebra`, `staticd`, `mgmtd`, `vrrpd`, `bfdd` | Transactional mgmtd is the default apply path; file backend remains a recovery compatibility path. Lab restart recovery evidence is deferred to v0.11. |
 | SQLite datastore | schema 1-2 | current schema 2 | Newer schemas are rejected so older binaries do not silently open a future datastore. |
-| NETCONF | base:1.0 and base:1.1 | candidate, validate, rollback-on-error | Standard `:xpath` and startup datastore capabilities remain unadvertised until full RFC behavior is implemented. |
+| NETCONF | base:1.0 and base:1.1 | candidate, validate, rollback-on-error | Standard `:xpath` and startup datastore capabilities remain unadvertised in v0.10 and are tracked as v0.11 deferred gates. |
+
+## Deferred Gates
+
+The following gates are intentionally outside the v0.10 compatibility guarantee
+and are tracked in `docs/v0.11-deferred-gates.md`:
+
+- HA failover soak, FRR/VPP restart recovery, and 24-hour churn lab evidence.
+- Formal NETCONF startup datastore capability.
+- Standard NETCONF `:xpath` capability advertisement.
+
+Do not advertise or document support for these gates in v0.10 release notes
+unless release-candidate lab evidence or full NETCONF compatibility evidence is
+attached.
 
 ## Audit Export
 

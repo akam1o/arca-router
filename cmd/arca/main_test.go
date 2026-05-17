@@ -1123,6 +1123,8 @@ func TestUpgradeReleaseReadinessLines(t *testing.T) {
 		"release readiness:",
 		"docs/v0.10-operational-runbook",
 		"docs/v0.10-release-readiness.md",
+		"docs/v0.11-deferred-gates.md",
+		"release sign-off must list owner",
 	} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("upgradeReleaseReadinessLines() = %q, want substring %q", got, want)
