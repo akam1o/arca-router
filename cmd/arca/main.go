@@ -1195,6 +1195,7 @@ func upgradePreflightLinesWithOptions(ctx context.Context, client showClient, op
 			lines = append(lines, "  running validation: ok")
 		}
 	}
+	lines = append(lines, upgradeCompatibilityPreflightLines()...)
 
 	history, err := client.ListHistory(ctx, 1, 0)
 	if err != nil {
@@ -1251,6 +1252,17 @@ func upgradePreflightLinesWithOptions(ctx context.Context, client showClient, op
 	}
 	lines = append(lines, "  next step: keep a fresh configuration backup and verify release-specific package notes")
 	return lines, nil
+}
+
+func upgradeCompatibilityPreflightLines() []string {
+	policy := compat.CurrentPolicy()
+	return []string{
+		fmt.Sprintf("  compatibility phase: %s", policy.Phase),
+		fmt.Sprintf("  supported direct upgrade sources: %s", strings.Join(policy.SupportedDirectUpgradeSources, ", ")),
+		fmt.Sprintf("  unsupported direct upgrades: %s", policy.UnsupportedDirectUpgradeNote),
+		fmt.Sprintf("  API compatibility: %s, %s", compat.GRPCAPIPackage, compat.TelemetryEventSchema),
+		fmt.Sprintf("  datastore schema guard: SQLite schema 1-%d accepted", compat.CurrentSQLiteSchema),
+	}
 }
 
 func appendUpgradePreflightWarning(lines []string, warnings int, message string) ([]string, int) {

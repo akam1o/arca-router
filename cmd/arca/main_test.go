@@ -1020,6 +1020,8 @@ func TestUpgradePreflightLinesReportsReadyState(t *testing.T) {
 		"upgrade preflight:",
 		"running config: version 7",
 		"running validation: ok",
+		"supported direct upgrade sources: v0.8.x, v0.9.x",
+		"datastore schema guard: SQLite schema 1-2 accepted",
 		"rollback archive: latest commit 12345678 available",
 		"rollback archive validation: ok",
 		"telemetry catalog:",
@@ -1033,6 +1035,21 @@ func TestUpgradePreflightLinesReportsReadyState(t *testing.T) {
 	if client.getRunningCalls != 1 || client.listHistoryCalls != 1 || client.telemetryCatalogCalls != 1 || client.cosCalls != 1 {
 		t.Fatalf("running/history/telemetry/cos calls = %d/%d/%d/%d, want 1/1/1/1",
 			client.getRunningCalls, client.listHistoryCalls, client.telemetryCatalogCalls, client.cosCalls)
+	}
+}
+
+func TestUpgradeCompatibilityPreflightLines(t *testing.T) {
+	got := strings.Join(upgradeCompatibilityPreflightLines(), "\n")
+	for _, want := range []string{
+		"compatibility phase: v0.10.x stabilization and compatibility",
+		"supported direct upgrade sources: v0.8.x, v0.9.x",
+		"unsupported direct upgrades: v0.7.x and older",
+		"API compatibility: arca.router.v1, arca.telemetry.v1",
+		"datastore schema guard: SQLite schema 1-2 accepted",
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("upgradeCompatibilityPreflightLines() = %q, want substring %q", got, want)
+		}
 	}
 }
 
