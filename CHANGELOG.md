@@ -2,6 +2,7 @@
 
 ## v0.9.x - NETCONF/YANG and Operational Safety (current)
 
+- **NETCONF user database defaults**: direct user database construction now installs a default logger when callers pass nil so schema initialization and auth audit logging stay stable
 - **NETCONF SSH server config defaults**: `NewSSHServer` now fills default listen, timeout, session-limit, rate-limit, and SSH algorithm settings for partial embedded configs without mutating caller values
 - **NETCONF rate limiter shutdown**: rate limiter cleanup shutdown is now idempotent so repeated embedded `Stop` calls do not panic
 - **NETCONF rate limiter defaults**: direct rate limiter construction now fills default lockout thresholds and windows for nil or partial SSH config values without mutating caller config
