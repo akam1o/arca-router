@@ -155,11 +155,11 @@ Focus: complete final pre-stable stabilization and compatibility work.
     implementation satisfies RFC 6241 response rules, interoperability
     expectations, DoS guardrails, and external client coverage
 - **Long-run soak and failure testing**
-  - HA failover soak
-  - FRR and VPP restart recovery
-  - Datastore lock recovery
-  - Resource leak and churn testing
+  - HA failover soak (manual runbook documented; release execution still required)
+  - FRR and VPP restart recovery (manual runbook documented; release execution still required)
+  - Datastore lock recovery (startup cleanup covered in tests; release runbook documented)
+  - Resource leak and churn testing (manual runbook documented; release execution still required)
 - **Release readiness**
   - Documentation freeze
   - Support matrix
-  - Operational runbooks
+  - Operational runbooks (v0.10 runbook documented)
