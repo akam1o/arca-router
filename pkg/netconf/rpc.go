@@ -806,6 +806,9 @@ func (f *Filter) Validate(rpcName string) error {
 	if f == nil {
 		return nil // Filter is optional
 	}
+	if err := validateFilterNamespaceDeclarationAttrs(rpcName, f.InheritedAttrs, f.Attrs); err != nil {
+		return err
+	}
 	for _, attr := range f.Attrs {
 		if isNamespaceDeclarationAttribute(attr) {
 			continue
@@ -848,6 +851,18 @@ func (f *Filter) Validate(rpcName string) error {
 		}
 	}
 
+	return nil
+}
+
+func validateFilterNamespaceDeclarationAttrs(rpcName string, attrGroups ...[]xml.Attr) *RPCError {
+	for _, attrs := range attrGroups {
+		for _, attr := range attrs {
+			if err := validateNamespaceDeclarationAttr(attr); err != nil {
+				return NewRPCError(ErrorTypeRPC, ErrorTagInvalidValue, err.Error()).
+					WithPath("/rpc/" + rpcName + "/filter")
+			}
+		}
+	}
 	return nil
 }
 

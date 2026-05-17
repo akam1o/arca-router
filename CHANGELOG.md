@@ -2,6 +2,7 @@
 
 ## v0.9.x - NETCONF/YANG and Operational Safety (current)
 
+- **NETCONF filter reserved namespace validation**: direct filter validation now rejects reserved namespace declarations on filter attributes and inherited namespace context
 - **NETCONF reserved namespace declaration validation**: reply and config XML helpers now reject hand-built declarations that rebind `xml`, declare `xmlns`, or use reserved XML namespace URIs incorrectly
 - **NETCONF RPC error-info normalization**: RPC reply marshaling now omits empty hand-built error-info blocks without mutating caller-owned errors
 - **NETCONF RPC error enum validation**: RPC reply marshaling now rejects hand-built errors with unsupported error type, tag, or severity values

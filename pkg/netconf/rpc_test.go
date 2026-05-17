@@ -1171,6 +1171,59 @@ func TestFilterValidateRejectsEmptyAttributeName(t *testing.T) {
 	}
 }
 
+func TestFilterValidateRejectsReservedNamespaceDeclarations(t *testing.T) {
+	tests := []struct {
+		name           string
+		attrs          []xml.Attr
+		inheritedAttrs []xml.Attr
+		want           string
+	}{
+		{
+			name: "direct xml prefix rebound",
+			attrs: []xml.Attr{
+				{Name: xml.Name{Space: "xmlns", Local: "xml"}, Value: "urn:bad"},
+			},
+			want: "namespace prefix xml must be bound",
+		},
+		{
+			name: "inherited xmlns prefix declared",
+			inheritedAttrs: []xml.Attr{
+				{Name: xml.Name{Space: "xmlns", Local: "xmlns"}, Value: "urn:bad"},
+			},
+			want: "namespace prefix xmlns must not be declared",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			filter := &Filter{
+				Type:           "subtree",
+				Content:        []byte(`<interfaces/>`),
+				Attrs:          tt.attrs,
+				InheritedAttrs: tt.inheritedAttrs,
+			}
+
+			err := filter.Validate("get-config")
+			if err == nil {
+				t.Fatalf("Validate() error = nil, want %q", tt.want)
+			}
+			rpcErr, ok := err.(*RPCError)
+			if !ok {
+				t.Fatalf("Validate() error = %T, want *RPCError", err)
+			}
+			if rpcErr.ErrorTag != ErrorTagInvalidValue {
+				t.Fatalf("Validate() error tag = %s, want %s", rpcErr.ErrorTag, ErrorTagInvalidValue)
+			}
+			if rpcErr.ErrorPath != "/rpc/get-config/filter" {
+				t.Fatalf("Validate() error path = %q, want /rpc/get-config/filter", rpcErr.ErrorPath)
+			}
+			if !strings.Contains(rpcErr.ErrorMessage, tt.want) {
+				t.Fatalf("Validate() error = %v, want %q", rpcErr, tt.want)
+			}
+		})
+	}
+}
+
 func TestFilterValidateDoesNotMutateFilter(t *testing.T) {
 	tests := []struct {
 		name   string
