@@ -18,6 +18,7 @@ type fakeInteractiveClient struct {
 	commitErr        error
 	discardErr       error
 	releaseLockErr   error
+	replaceErr       error
 	history          []grpcclient.CommitInfo
 	runningText      string
 	candidateText    string
@@ -72,6 +73,7 @@ type fakeInteractiveClient struct {
 	telemetryCalls                int
 	validateCalls                 int
 	editTexts                     []string
+	replaceTexts                  []string
 	telemetryCatalogPaths         []string
 	telemetryCatalogCardinalities []string
 	telemetryCatalogSchemas       []string
@@ -95,6 +97,11 @@ func (f *fakeInteractiveClient) GetCandidate(ctx context.Context, sessionID stri
 func (f *fakeInteractiveClient) EditCandidate(ctx context.Context, sessionID, configText string) error {
 	f.editTexts = append(f.editTexts, configText)
 	return nil
+}
+
+func (f *fakeInteractiveClient) ReplaceCandidate(ctx context.Context, sessionID, configText string) error {
+	f.replaceTexts = append(f.replaceTexts, configText)
+	return f.replaceErr
 }
 
 func (f *fakeInteractiveClient) Commit(ctx context.Context, sessionID, user, message string) (string, uint64, error) {
@@ -1026,6 +1033,91 @@ func TestBackupConfigurationRefusesOverwrite(t *testing.T) {
 	}
 	if string(data) != "existing\n" {
 		t.Fatalf("backup content = %q, want existing content preserved", string(data))
+	}
+}
+
+func TestRestoreConfigurationBackupReplacesCandidate(t *testing.T) {
+	ctx := context.Background()
+	backupPath := t.TempDir() + "/backup.conf"
+	if err := os.WriteFile(backupPath, []byte("set system host-name restored\n"), 0o600); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+	client := &fakeInteractiveClient{}
+	sh := &interactiveShell{
+		client:    client,
+		hostname:  "router",
+		mode:      modeConfiguration,
+		sessionID: "session-1",
+	}
+
+	if err := sh.cmdRestore(ctx, []string{"configuration", backupPath}); err != nil {
+		t.Fatalf("cmdRestore(configuration) error = %v", err)
+	}
+	if len(client.replaceTexts) != 1 || client.replaceTexts[0] != "set system host-name restored\n" {
+		t.Fatalf("ReplaceCandidate texts = %#v, want backup content", client.replaceTexts)
+	}
+}
+
+func TestRestoreConfigurationRollbackReplacesCandidate(t *testing.T) {
+	ctx := context.Background()
+	client := &fakeInteractiveClient{
+		history: []grpcclient.CommitInfo{
+			{CommitID: "commit-new", ConfigText: "set system host-name new"},
+			{CommitID: "commit-old", ConfigText: "set system host-name old"},
+		},
+	}
+	sh := &interactiveShell{
+		client:    client,
+		hostname:  "router",
+		mode:      modeConfiguration,
+		sessionID: "session-1",
+	}
+
+	if err := sh.cmdRestore(ctx, []string{"configuration", "rollback", "1"}); err != nil {
+		t.Fatalf("cmdRestore(configuration rollback 1) error = %v", err)
+	}
+	if len(client.replaceTexts) != 1 || client.replaceTexts[0] != "set system host-name old" {
+		t.Fatalf("ReplaceCandidate texts = %#v, want archived config", client.replaceTexts)
+	}
+	if client.listHistoryCalls != 1 || client.listHistoryLimit != 2 {
+		t.Fatalf("ListHistory calls/limit = %d/%d, want 1/2", client.listHistoryCalls, client.listHistoryLimit)
+	}
+}
+
+func TestRestoreConfigurationRequiresConfigurationMode(t *testing.T) {
+	ctx := context.Background()
+	backupPath := t.TempDir() + "/backup.conf"
+	if err := os.WriteFile(backupPath, []byte("set system host-name restored\n"), 0o600); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+	client := &fakeInteractiveClient{}
+	sh := &interactiveShell{
+		client:    client,
+		hostname:  "router",
+		mode:      modeOperational,
+		sessionID: "session-1",
+	}
+
+	err := sh.cmdRestore(ctx, []string{"configuration", backupPath})
+	if err == nil || !strings.Contains(err.Error(), "configuration mode") {
+		t.Fatalf("cmdRestore(configuration) error = %v, want configuration mode error", err)
+	}
+	if len(client.replaceTexts) != 0 {
+		t.Fatalf("ReplaceCandidate texts = %#v, want none outside configuration mode", client.replaceTexts)
+	}
+}
+
+func TestRestoreConfigurationRejectsInvalidUsage(t *testing.T) {
+	sh := &interactiveShell{
+		client:    &fakeInteractiveClient{},
+		hostname:  "router",
+		mode:      modeConfiguration,
+		sessionID: "session-1",
+	}
+
+	err := sh.cmdRestore(context.Background(), []string{"configuration"})
+	if err == nil || !strings.Contains(err.Error(), "usage: restore configuration") {
+		t.Fatalf("cmdRestore(configuration) error = %v, want usage error", err)
 	}
 }
 

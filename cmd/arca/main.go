@@ -513,6 +513,7 @@ type interactiveClient interface {
 	showClient
 	GetCandidate(context.Context, string) (string, error)
 	EditCandidate(context.Context, string, string) error
+	ReplaceCandidate(context.Context, string, string) error
 	Commit(context.Context, string, string, string) (string, uint64, error)
 	ValidateCandidate(context.Context, string) error
 	Discard(context.Context, string) error
@@ -707,6 +708,8 @@ func (sh *interactiveShell) processCommand(ctx context.Context, line string) err
 		return sh.cmdRollback(ctx, args)
 	case "backup":
 		return sh.cmdBackup(ctx, args)
+	case "restore":
+		return sh.cmdRestore(ctx, args)
 	case "compare":
 		return sh.cmdCompare(ctx)
 	case "discard-changes":
@@ -1121,6 +1124,39 @@ func (sh *interactiveShell) cmdBackup(ctx context.Context, args []string) error 
 	}
 
 	return fmt.Errorf("usage: backup configuration [rollback <N>] <path>")
+}
+
+func (sh *interactiveShell) cmdRestore(ctx context.Context, args []string) error {
+	if sh.mode != modeConfiguration {
+		return fmt.Errorf("'restore' command only available in configuration mode")
+	}
+	if len(args) == 2 && args[0] == "configuration" {
+		data, err := os.ReadFile(args[1])
+		if err != nil {
+			return fmt.Errorf("read configuration backup: %w", err)
+		}
+		if err := sh.client.ReplaceCandidate(ctx, sh.sessionID, string(data)); err != nil {
+			return fmt.Errorf("restore configuration: %w", err)
+		}
+		fmt.Printf("configuration restored to candidate from %s\n", args[1])
+		return nil
+	}
+	if len(args) == 3 && args[0] == "configuration" && args[1] == "rollback" {
+		rollbackNum, err := parseRollbackNumber(args[2])
+		if err != nil {
+			return err
+		}
+		text, err := sh.archivedConfiguration(ctx, rollbackNum)
+		if err != nil {
+			return err
+		}
+		if err := sh.client.ReplaceCandidate(ctx, sh.sessionID, text); err != nil {
+			return fmt.Errorf("restore configuration: %w", err)
+		}
+		fmt.Printf("configuration restored to candidate from rollback %d\n", rollbackNum)
+		return nil
+	}
+	return fmt.Errorf("usage: restore configuration <path> | restore configuration rollback <N>")
 }
 
 func (sh *interactiveShell) writeConfigurationBackup(path, text string) error {
@@ -1894,6 +1930,8 @@ func (sh *interactiveShell) showHelp() {
 		fmt.Println("  backup configuration rollback <N> <path> Save archived config to a file")
 		fmt.Println("  set <config>              Add or modify configuration")
 		fmt.Println("  delete <config>           Delete configuration")
+		fmt.Println("  restore configuration <path> Replace candidate from a backup file")
+		fmt.Println("  restore configuration rollback <N> Replace candidate from archived config")
 		fmt.Println("  show                      Show candidate configuration")
 		fmt.Println("  show configuration rollback <N> Show archived config N commits back")
 		fmt.Println("  show | compare            Show differences from running config")
@@ -3260,6 +3298,11 @@ func createCompleter() *readline.PrefixCompleter {
 			readline.PcItem("comment"),
 		),
 		readline.PcItem("backup",
+			readline.PcItem("configuration",
+				readline.PcItem("rollback"),
+			),
+		),
+		readline.PcItem("restore",
 			readline.PcItem("configuration",
 				readline.PcItem("rollback"),
 			),
