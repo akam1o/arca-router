@@ -165,6 +165,29 @@ func TestHandleRPCWithoutRPCReturnsOperationFailed(t *testing.T) {
 	}
 }
 
+func TestHandleRPCWithZeroValueRPCReturnsOperationFailed(t *testing.T) {
+	srv := NewServer(nil, nil)
+	sess := &Session{
+		ID:             "session-1",
+		NumericID:      1,
+		Username:       "alice",
+		Role:           RoleOperator,
+		LastUsed:       time.Now(),
+		datastoreLocks: map[string]struct{}{},
+	}
+
+	reply := srv.HandleRPC(context.Background(), sess, &RPC{MessageID: "101"})
+	if len(reply.Errors) != 1 {
+		t.Fatalf("zero-value rpc errors = %d, want 1", len(reply.Errors))
+	}
+	if reply.Errors[0].ErrorTag != ErrorTagOperationFailed {
+		t.Fatalf("zero-value rpc error tag = %s, want %s", reply.Errors[0].ErrorTag, ErrorTagOperationFailed)
+	}
+	if reply.MessageID != "101" {
+		t.Fatalf("zero-value rpc reply message-id = %q, want 101", reply.MessageID)
+	}
+}
+
 func TestValidateInlineSourceWithoutDatastoreSucceeds(t *testing.T) {
 	srv := NewServer(nil, nil)
 	sess := &Session{

@@ -67,6 +67,9 @@ func (s *Server) HandleRPC(ctx context.Context, sess *Session, rpc *RPC) *RPCRep
 	}
 
 	opName := rpc.GetOperationName()
+	if opName == "" {
+		return NewErrorReply(rpc.MessageID, ErrOperationFailed("rpc operation unavailable")).WithAttributes(rpc.ReplyAttrs)
+	}
 
 	// Update session last used timestamp
 	sess.UpdateLastUsed()
