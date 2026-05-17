@@ -374,6 +374,12 @@ func TestFilterMatches(t *testing.T) {
 			want:    false,
 		},
 		{
+			name:    "xpath filter missing select does not match",
+			filter:  &Filter{Type: "xpath"},
+			element: "interfaces",
+			want:    false,
+		},
+		{
 			name:    "text filter does not match all",
 			filter:  &Filter{Content: []byte("junk")},
 			element: "interfaces",

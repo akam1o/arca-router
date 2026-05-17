@@ -628,8 +628,12 @@ func parseFilterXPathWithNamespaces(filter *Filter) (*XPathFilter, error) {
 		return nil, nil
 	}
 
+	selectExpr := strings.TrimSpace(filter.Select)
+	if selectExpr == "" {
+		return nil, fmt.Errorf("xpath filter requires select attribute")
+	}
 	namespaceAttrs := collectNamespaceAttrs(filter.InheritedAttrs, filter.Attrs)
-	xpathFilter, err := ParseXPathFilterWithContext(strings.TrimSpace(filter.Select), namespaceAttrs)
+	xpathFilter, err := ParseXPathFilterWithContext(selectExpr, namespaceAttrs)
 	if err != nil {
 		return nil, err
 	}

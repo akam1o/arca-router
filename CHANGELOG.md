@@ -2,6 +2,7 @@
 
 ## v0.9.x - NETCONF/YANG and Operational Safety (current)
 
+- **NETCONF empty XPath filter validation**: direct output filtering and filter limit checks now reject `type=xpath` filters without a select expression instead of treating them as match-all filters
 - **NETCONF XPath limit namespace validation**: filter depth and size validation now parses XPath selectors with declared namespace context before applying limits
 - **NETCONF output XPath namespace validation**: config and operational output filtering now parses XPath filters with declared namespace context instead of silently accepting undeclared or mismatched prefixes
 - **NETCONF YANG path namespace validation**: direct YANG element path validation now rejects undeclared or mismatched XPath namespace prefixes and accepts explicit namespace declaration context
