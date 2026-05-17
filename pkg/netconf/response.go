@@ -131,6 +131,9 @@ func MarshalReply(reply *RPCReply) ([]byte, error) {
 	}
 
 	buf.WriteString("</rpc-reply>")
+	if buf.Len() > MaxXMLSize {
+		return nil, fmt.Errorf("RPC reply exceeds maximum (%d bytes)", MaxXMLSize)
+	}
 	return buf.Bytes(), nil
 }
 

@@ -323,6 +323,21 @@ func TestMarshalReplyRejectsInvalidDataContent(t *testing.T) {
 	}
 }
 
+func TestMarshalReplyRejectsOversizedReplyXML(t *testing.T) {
+	reply := NewErrorReply("109", ErrOperationFailed(strings.Repeat("x", MaxXMLSize)))
+
+	data, err := MarshalReply(reply)
+	if err == nil {
+		t.Fatal("MarshalReply() error = nil, want size limit error")
+	}
+	if data != nil {
+		t.Fatalf("MarshalReply() data length = %d, want nil", len(data))
+	}
+	if !strings.Contains(err.Error(), "RPC reply exceeds maximum") {
+		t.Fatalf("MarshalReply() error = %v, want reply size limit error", err)
+	}
+}
+
 func TestMarshalReplyPreservesAttributes(t *testing.T) {
 	reply := NewOKReply("101").WithAttributes([]xml.Attr{
 		{Name: xml.Name{Space: "xmlns", Local: "ex"}, Value: "http://example.net/content/1.0"},
