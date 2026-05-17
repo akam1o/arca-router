@@ -474,6 +474,9 @@ make release-check
 # Validate local package metadata without building artifacts
 make package-lint
 
+# Audit installed service users, capabilities, and file/socket permissions on a release-candidate host
+make security-audit
+
 # Generate local NETCONF client evidence for release sign-off
 make netconf-client-evidence
 make netconf-evidence-verify
@@ -485,6 +488,10 @@ make frr-mgmtd-smoke
 Attach the ncclient and libnetconf2 artifacts from either
 `artifacts/netconf-clients/` or the `NETCONF Client Interoperability` workflow
 to the v0.10 release sign-off record.
+
+The security audit requires an installed release-candidate host. Attach the
+output to sign-off when that host is available, or record the missing host
+evidence as an accepted warning with owner and rationale.
 
 The FRR smoke test requires a host with FRR running, the standard daemon set enabled
 in `/etc/frr/daemons`, and `vtysh` access for the current user.

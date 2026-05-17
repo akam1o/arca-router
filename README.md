@@ -28,6 +28,7 @@ Current capabilities:
 - Prometheus, health, SNMP, Web UI, Grafana observability, and authenticated Web config workflow
 - SQLite or etcd-backed candidate/running datastore with commit history and etcd config sync
 - v0.10 compatibility preflight, schema migration guardrails, support matrix reporting, gRPC TLS/mTLS, Web API token auth, and admin-only audit export
+- v0.10 release readiness/sign-off checklists, NETCONF client evidence gates, and installed-host security audit
 
 ---
 

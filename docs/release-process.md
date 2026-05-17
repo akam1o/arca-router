@@ -166,12 +166,12 @@ Detailed future scope is maintained in [`ROADMAP.md`](../ROADMAP.md).
 
 ### 3. Documentation
 
-- [ ] **README.md** updated
+- [ ] **README.md / README.ja.md** updated
   - Version references
   - Feature list
   - Quick start guide
 
-- [ ] **SPEC.md** updated
+- [ ] **SPEC.md / SPEC.ja.md** updated
   - Configuration changes
   - New fields/options
   - Deprecated features marked
@@ -251,11 +251,11 @@ git checkout main
 git pull origin main
 
 # Commit final changes
-git add CHANGELOG.md README.md
+git add CHANGELOG.md README.md README.ja.md
 git commit -m "chore: prepare for v0.10.0 release
 
 - Update CHANGELOG.md
-- Update version references in README.md"
+- Update version references in README files"
 
 git push origin main
 ```
