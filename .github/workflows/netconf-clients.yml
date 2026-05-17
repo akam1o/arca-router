@@ -1,0 +1,72 @@
+name: NETCONF Client Interoperability
+
+on:
+  pull_request:
+    branches: [ main, develop ]
+    types: [ opened, synchronize, reopened, ready_for_review ]
+  workflow_dispatch:
+  schedule:
+    - cron: '17 18 * * *'
+
+permissions:
+  contents: read
+
+jobs:
+  ncclient:
+    name: ncclient interop
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Set up Go
+      uses: actions/setup-go@v5
+      with:
+        go-version: '1.25.5'
+        cache: true
+
+    - name: Set up Python
+      uses: actions/setup-python@v6
+      with:
+        python-version: '3.12'
+        cache: 'pip'
+        cache-dependency-path: tests/netconf_clients/requirements-ncclient.txt
+
+    - name: Install ncclient
+      run: |
+        python -m pip install --upgrade pip
+        python -m pip install -r tests/netconf_clients/requirements-ncclient.txt
+
+    - name: Run ncclient NETCONF interop
+      run: bash tests/netconf_clients/run_interop.sh tests/netconf_clients/ncclient_interop.py
+
+  junos-eznc:
+    name: Junos PyEZ smoke
+    runs-on: ubuntu-latest
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Set up Go
+      uses: actions/setup-go@v5
+      with:
+        go-version: '1.25.5'
+        cache: true
+
+    - name: Set up Python
+      uses: actions/setup-python@v6
+      with:
+        python-version: '3.12'
+        cache: 'pip'
+        cache-dependency-path: tests/netconf_clients/requirements-junos-eznc.txt
+
+    - name: Install Junos PyEZ
+      run: |
+        python -m pip install --upgrade pip
+        python -m pip install -r tests/netconf_clients/requirements-junos-eznc.txt
+
+    - name: Run Junos PyEZ NETCONF smoke
+      run: bash tests/netconf_clients/run_interop.sh tests/netconf_clients/junos_eznc_smoke.py
