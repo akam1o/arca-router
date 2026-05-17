@@ -132,6 +132,10 @@ Detailed future scope is maintained in [`ROADMAP.md`](../ROADMAP.md).
   make release-check
   ```
 
+- [ ] **NETCONF client interoperability**: `NETCONF Client Interoperability`
+  workflow passed and the `netconf-client-ncclient-evidence` and
+  `netconf-client-libnetconf2-evidence` artifacts are linked from sign-off.
+
 - [ ] **FRR mgmtd smoke**: Transactional FRR apply works on a live FRR host
   ```bash
   make frr-mgmtd-smoke
@@ -596,6 +600,7 @@ git push origin v0.10.0
 - [ ] Security review done
 - [ ] `make package-lint` passing
 - [ ] `make release-check` passing
+- [ ] NETCONF client interop workflow artifacts linked from release sign-off
 - [ ] Live FRR mgmtd smoke checked, or explicitly recorded as a v0.11 deferred lab gate
 - [ ] v0.10 release sign-off recorded with `docs/v0.10-release-signoff.md`
 - [ ] Packages tested on all distros
