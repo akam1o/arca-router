@@ -212,6 +212,24 @@ func TestConfigToXMLRejectsEmptyXPathFilterSelect(t *testing.T) {
 	}
 }
 
+func TestConfigToXMLRejectsUnsupportedFilterType(t *testing.T) {
+	cfg := &config.Config{
+		System: &config.SystemConfig{HostName: "router1"},
+		Interfaces: map[string]*config.Interface{
+			"ge-0/0/0": {},
+		},
+	}
+	filter := &Filter{Type: "unsupported"}
+
+	xmlData, err := ConfigToXML(cfg, filter)
+	if err != nil {
+		t.Fatalf("ConfigToXML() error = %v", err)
+	}
+	if len(bytes.TrimSpace(xmlData)) != 0 {
+		t.Fatalf("ConfigToXML() = %q, want empty output for unsupported filter type", xmlData)
+	}
+}
+
 func TestConfigToXMLWithXPathFilterFiltersStaticRoutePredicates(t *testing.T) {
 	cfg := &config.Config{
 		RoutingOptions: &config.RoutingOptions{

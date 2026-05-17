@@ -3295,8 +3295,13 @@ func ValidateFilterDepthAndSize(rpcName string, filter *Filter) error {
 	if filter == nil {
 		return nil
 	}
-	if normalizedFilterType(filter) == "xpath" {
+	filterType := normalizedFilterType(filter)
+	switch filterType {
+	case "xpath":
 		return validateXPathFilterDepthAndSize(rpcName, filter)
+	case "", "subtree":
+	default:
+		return ErrUnsupportedFilterType(rpcName, filterType)
 	}
 	if len(filter.Content) == 0 {
 		return nil

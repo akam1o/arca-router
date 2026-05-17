@@ -588,12 +588,17 @@ func filterMatchesEnhanced(filter *Filter, elementPath []string) bool {
 		return true
 	}
 
-	if normalizedFilterType(filter) == "xpath" {
+	filterType := normalizedFilterType(filter)
+	switch filterType {
+	case "xpath":
 		xpathFilter, err := parseFilterXPathWithNamespaces(filter)
 		if err != nil {
 			return false
 		}
 		return xpathFilter.MatchesSection(elementPath)
+	case "", "subtree":
+	default:
+		return false
 	}
 
 	content := bytes.TrimSpace(filter.Content)
