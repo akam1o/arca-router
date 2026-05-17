@@ -73,6 +73,11 @@ def parse_args():
         default="artifacts/netconf-clients",
         help="directory containing ncclient/ and libnetconf2/ evidence",
     )
+    parser.add_argument(
+        "--expect-standard-xpath",
+        action="store_true",
+        help="require standard NETCONF :xpath capability instead of forbidding it",
+    )
     return parser.parse_args()
 
 
@@ -98,12 +103,19 @@ def require_files(client_dir, relative_paths):
         fail(f"{client_dir.name} evidence missing files: {missing}")
 
 
-def require_capabilities(client_dir):
+def require_capabilities(client_dir, expect_standard_xpath):
     capabilities = set(read_text(client_dir / "server_capabilities.txt").splitlines())
-    missing = sorted(REQUIRED_CAPABILITIES - capabilities)
+    required = set(REQUIRED_CAPABILITIES)
+    if expect_standard_xpath:
+        required.add(CAP_XPATH)
+    missing = sorted(required - capabilities)
     if missing:
         fail(f"{client_dir.name} evidence missing capabilities: {missing}")
-    advertised = sorted(FORBIDDEN_CAPABILITIES & capabilities)
+
+    forbidden = set(FORBIDDEN_CAPABILITIES)
+    if expect_standard_xpath:
+        forbidden.discard(CAP_XPATH)
+    advertised = sorted(forbidden & capabilities)
     if advertised:
         fail(f"{client_dir.name} evidence advertised unsupported capabilities: {advertised}")
 
@@ -115,13 +127,13 @@ def require_text(client_dir, relative_path, needles):
         fail(f"{client_dir.name} {relative_path} missing text: {missing}")
 
 
-def verify_client(root, client):
+def verify_client(root, client, expect_standard_xpath):
     client_dir = root / client
     if not client_dir.is_dir():
         fail(f"missing {client} evidence directory: {client_dir}")
 
     require_files(client_dir, COMMON_FILES | CLIENT_FILES[client])
-    require_capabilities(client_dir)
+    require_capabilities(client_dir, expect_standard_xpath)
     require_text(client_dir, "reply/xpath-node-set.xml", ["ge-0/0/0", "interop-uplink"])
 
     if client == "ncclient":
@@ -138,7 +150,7 @@ def main():
     args = parse_args()
     root = Path(args.evidence_dir)
     for client in ("ncclient", "libnetconf2"):
-        verify_client(root, client)
+        verify_client(root, client, args.expect_standard_xpath)
     print(f"NETCONF evidence OK: {root}")
 
 

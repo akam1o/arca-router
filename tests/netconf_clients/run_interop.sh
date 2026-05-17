@@ -61,6 +61,7 @@ CONFIG
 if [[ -n "$EVIDENCE_DIR" ]]; then
   {
     echo "script=$SCRIPT"
+    echo "standard_xpath=${NETCONF_STANDARD_XPATH:-0}"
     echo "host=$HOST"
     echo "port=$PORT"
     go version
@@ -76,12 +77,18 @@ go run -buildvcs=false ./tools/netconf-userdb \
 
 go build -buildvcs=false -o "$TMPDIR/netconf-interop-server" ./tools/netconf-interop-server
 
-"$TMPDIR/netconf-interop-server" \
-  --datastore "$TMPDIR/config.db" \
-  --host-key "$TMPDIR/ssh_host_ed25519_key" \
-  --user-db "$TMPDIR/users.db" \
-  --listen "$HOST:$PORT" \
-  --running-config "$TMPDIR/running.conf" \
+server_args=(
+  --datastore "$TMPDIR/config.db"
+  --host-key "$TMPDIR/ssh_host_ed25519_key"
+  --user-db "$TMPDIR/users.db"
+  --listen "$HOST:$PORT"
+  --running-config "$TMPDIR/running.conf"
+)
+if [[ "${NETCONF_STANDARD_XPATH:-0}" == "1" ]]; then
+  server_args+=(--standard-xpath)
+fi
+
+"$TMPDIR/netconf-interop-server" "${server_args[@]}" \
   >"$TMPDIR/netconf-interop-server.log" 2>&1 &
 DAEMON_PID=$!
 
@@ -121,6 +128,9 @@ client_args=(
 )
 if [[ -n "$EVIDENCE_DIR" ]]; then
   client_args+=(--evidence-dir "$EVIDENCE_DIR")
+fi
+if [[ "${NETCONF_STANDARD_XPATH:-0}" == "1" ]]; then
+  client_args+=(--expect-standard-xpath)
 fi
 
 if ! "${PYTHON:-python3}" "$ROOT/$SCRIPT" "${client_args[@]}" \

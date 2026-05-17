@@ -27,6 +27,7 @@ def parse_args():
     parser.add_argument("--username", required=True)
     parser.add_argument("--password", required=True)
     parser.add_argument("--evidence-dir")
+    parser.add_argument("--expect-standard-xpath", action="store_true")
     return parser.parse_args()
 
 
@@ -79,16 +80,19 @@ def main():
             CAP_ARCA_ROUTER,
             CAP_ARCA_XPATH_FILTER_SUBSET,
         }
+        if args.expect_standard_xpath:
+            required.add(CAP_XPATH)
         missing = sorted(required - caps)
         if missing:
             fail(f"missing server capabilities: {missing}")
 
         forbidden = {
-            CAP_XPATH,
             CAP_STARTUP,
             CAP_WRITABLE_RUNNING,
             CAP_CONFIRMED_COMMIT,
         }
+        if not args.expect_standard_xpath:
+            forbidden.add(CAP_XPATH)
         advertised = sorted(forbidden & caps)
         if advertised:
             fail(f"unsupported capabilities were advertised: {advertised}")

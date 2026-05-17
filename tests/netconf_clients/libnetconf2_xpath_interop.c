@@ -231,6 +231,7 @@ main(int argc, char **argv)
     const char *username = NULL;
     const char *public_key = NULL;
     const char *private_key = NULL;
+    const char *expect_standard_xpath = NULL;
     uint16_t port = 0;
     struct nc_session *session = NULL;
     struct ly_ctx *ctx = NULL;
@@ -247,6 +248,7 @@ main(int argc, char **argv)
     username = argv[3];
     public_key = argv[4];
     private_key = argv[5];
+    expect_standard_xpath = getenv("NETCONF_STANDARD_XPATH");
     port = (uint16_t)strtoul(port_text, NULL, 10);
     if (!port) {
         fail("invalid port");
@@ -285,7 +287,11 @@ main(int argc, char **argv)
     if (!nc_session_cpblt(session, cap_arca_xpath_subset)) {
         fail("missing Arca XPath filter subset capability");
     }
-    if (nc_session_cpblt(session, cap_xpath)) {
+    if (expect_standard_xpath && !strcmp(expect_standard_xpath, "1")) {
+        if (!nc_session_cpblt(session, cap_xpath)) {
+            fail("missing standard XPath capability");
+        }
+    } else if (nc_session_cpblt(session, cap_xpath)) {
         fail("standard XPath capability was advertised");
     }
 
