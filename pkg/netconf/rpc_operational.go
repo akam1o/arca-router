@@ -24,6 +24,9 @@ type GetRequest struct {
 }
 
 func (r *GetRequest) SetInheritedNamespaceAttrs(attrs []xml.Attr) {
+	if r == nil {
+		return
+	}
 	if r.Filter != nil {
 		r.Filter.InheritedAttrs = cloneXMLAttrs(attrs)
 	}

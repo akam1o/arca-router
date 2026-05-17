@@ -358,6 +358,59 @@ func TestUnmarshalOperationPreservesAncestorNamespaceDeclarations(t *testing.T) 
 	}
 }
 
+func TestInheritedNamespaceReceiversNilSafe(t *testing.T) {
+	attrs := []xml.Attr{
+		{Name: xml.Name{Space: "xmlns", Local: "arca"}, Value: ArcaConfigNS},
+	}
+
+	tests := []struct {
+		name string
+		set  func()
+	}{
+		{
+			name: "get",
+			set: func() {
+				var req *GetRequest
+				req.SetInheritedNamespaceAttrs(attrs)
+			},
+		},
+		{
+			name: "get-config",
+			set: func() {
+				var req *GetConfigRequest
+				req.SetInheritedNamespaceAttrs(attrs)
+			},
+		},
+		{
+			name: "edit-config",
+			set: func() {
+				var req *EditConfigRequest
+				req.SetInheritedNamespaceAttrs(attrs)
+			},
+		},
+		{
+			name: "copy-config",
+			set: func() {
+				var req *CopyConfigRequest
+				req.SetInheritedNamespaceAttrs(attrs)
+			},
+		},
+		{
+			name: "validate",
+			set: func() {
+				var req *ValidateRequest
+				req.SetInheritedNamespaceAttrs(attrs)
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			tt.set()
+		})
+	}
+}
+
 func TestUnmarshalOperationPreservesFilterNamespaceDeclarations(t *testing.T) {
 	tests := []struct {
 		name string

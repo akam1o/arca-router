@@ -21,6 +21,9 @@ type GetConfigRequest struct {
 }
 
 func (r *GetConfigRequest) SetInheritedNamespaceAttrs(attrs []xml.Attr) {
+	if r == nil {
+		return
+	}
 	if r.Filter != nil {
 		r.Filter.InheritedAttrs = cloneXMLAttrs(attrs)
 	}
@@ -146,6 +149,9 @@ type EditConfigRequest struct {
 }
 
 func (r *EditConfigRequest) SetInheritedNamespaceAttrs(attrs []xml.Attr) {
+	if r == nil {
+		return
+	}
 	r.Config.InheritedAttrs = cloneXMLAttrs(attrs)
 }
 
@@ -356,6 +362,9 @@ type CopyConfigRequest struct {
 }
 
 func (r *CopyConfigRequest) SetInheritedNamespaceAttrs(attrs []xml.Attr) {
+	if r == nil {
+		return
+	}
 	if r.Source.Config != nil {
 		r.Source.Config.InheritedAttrs = cloneXMLAttrs(attrs)
 	}

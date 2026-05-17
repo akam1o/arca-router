@@ -153,6 +153,9 @@ type ValidateRequest struct {
 }
 
 func (r *ValidateRequest) SetInheritedNamespaceAttrs(attrs []xml.Attr) {
+	if r == nil {
+		return
+	}
 	if r.Source.Config != nil {
 		r.Source.Config.InheritedAttrs = cloneXMLAttrs(attrs)
 	}
