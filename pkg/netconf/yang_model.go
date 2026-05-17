@@ -16,6 +16,38 @@ import (
 //go:embed yang_model_data.yang
 var arcaRouterYANG string
 
+const ietfInterfacesYANG = `
+module ietf-interfaces {
+  namespace "urn:ietf:params:xml:ns:yang:ietf-interfaces";
+  prefix if;
+
+  container interfaces {
+    list interface {
+      key "name";
+      leaf name {
+        type string;
+      }
+      leaf description {
+        type string;
+      }
+      leaf enabled {
+        type boolean;
+      }
+    }
+  }
+}
+`
+
+const ietfRoutingYANG = `
+module ietf-routing {
+  namespace "urn:ietf:params:xml:ns:yang:ietf-routing";
+  prefix rt;
+
+  container routing {
+  }
+}
+`
+
 // YANGValidator provides YANG model validation capabilities
 type YANGValidator struct {
 	modules *yang.Modules
@@ -44,10 +76,23 @@ func GetGlobalValidator() (*YANGValidator, error) {
 	return globalValidator, nil
 }
 
-// NewYANGValidator creates a new YANG validator with the arca-router model loaded
-// Phase 3 implementation: Parse validation only (full semantic validation in Phase 4)
+// NewYANGValidator creates a new YANG validator with arca-router and the local
+// dependency stubs needed to resolve its IETF augment/import references.
 func NewYANGValidator() (*YANGValidator, error) {
 	ms := yang.NewModules()
+
+	dependencies := []struct {
+		name  string
+		model string
+	}{
+		{name: "ietf-interfaces.yang", model: ietfInterfacesYANG},
+		{name: "ietf-routing.yang", model: ietfRoutingYANG},
+	}
+	for _, dependency := range dependencies {
+		if err := ms.Parse(dependency.model, dependency.name); err != nil {
+			return nil, fmt.Errorf("failed to parse %s: %w", dependency.name, err)
+		}
+	}
 
 	// Parse the embedded arca-router.yang model
 	if err := ms.Parse(arcaRouterYANG, "arca-router.yang"); err != nil {
@@ -55,35 +100,8 @@ func NewYANGValidator() (*YANGValidator, error) {
 	}
 
 	// Process imports and build the module tree
-	// Note: For Phase 3, we skip full semantic validation with external IETF models
-	// This is a limitation accepted for the initial implementation
 	if errs := ms.Process(); len(errs) > 0 {
-		// Only tolerate "module not found" errors for IETF imports
-		// All other errors (e.g., duplicate leafs, type mismatches) should fail
-		hasNonIgnorableError := false
-		for _, err := range errs {
-			errStr := err.Error()
-			// Allow missing IETF modules (Phase 4 dependency)
-			// Check for "no such module" pattern which indicates missing dependency
-			isModuleNotFound := strings.Contains(errStr, "no such module")
-			isIETFModule := strings.Contains(errStr, "ietf-interfaces") || strings.Contains(errStr, "ietf-routing")
-
-			if !isModuleNotFound || !isIETFModule {
-				// Non-IETF errors or other types of errors are fatal
-				hasNonIgnorableError = true
-			}
-		}
-		if hasNonIgnorableError {
-			// Return first non-ignorable error for clarity
-			for _, err := range errs {
-				errStr := err.Error()
-				isModuleNotFound := strings.Contains(errStr, "no such module")
-				isIETFModule := strings.Contains(errStr, "ietf-interfaces") || strings.Contains(errStr, "ietf-routing")
-				if !isModuleNotFound || !isIETFModule {
-					return nil, fmt.Errorf("YANG schema error: %v", err)
-				}
-			}
-		}
+		return nil, fmt.Errorf("YANG schema error: %v", errs[0])
 	}
 
 	return &YANGValidator{
