@@ -47,6 +47,7 @@ type Datastore interface {
 
 	// Audit logging
 	LogAuditEvent(ctx context.Context, event *AuditEvent) error
+	ListAuditEvents(ctx context.Context, opts *AuditOptions) ([]*AuditEvent, error)
 	CleanupAuditLog(ctx context.Context, cutoff time.Time) (int64, error)
 
 	// Close the datastore
@@ -160,6 +161,17 @@ type AuditEvent struct {
 	Result        string    // Result (e.g., "success", "failure")
 	ErrorCode     string    // Error code for failures (empty for success)
 	Details       string    // Additional details (JSON or text)
+}
+
+// AuditOptions contains filtering options for audit log export.
+type AuditOptions struct {
+	Limit     int       // Maximum number of entries to return (0 = backend default)
+	Offset    int       // Number of entries to skip (for pagination)
+	StartTime time.Time // Filter events after this time (zero = no filter)
+	EndTime   time.Time // Filter events before this time (zero = no filter)
+	User      string    // Filter by username (empty = no filter)
+	Action    string    // Filter by action (empty = no filter)
+	Result    string    // Filter by result (empty = no filter)
 }
 
 // EtcdStatusProvider reports live etcd datastore metadata. It is implemented

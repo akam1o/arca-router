@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/json"
+	"sort"
 	"time"
 
 	"github.com/oklog/ulid/v2"
@@ -42,6 +43,78 @@ func (ds *etcdDatastore) LogAuditEvent(ctx context.Context, event *AuditEvent) e
 	}
 
 	return nil
+}
+
+// ListAuditEvents returns audit events in newest-first order.
+func (ds *etcdDatastore) ListAuditEvents(ctx context.Context, opts *AuditOptions) ([]*AuditEvent, error) {
+	if opts == nil {
+		opts = &AuditOptions{}
+	}
+	ctx, cancel := ds.withTimeout(ctx)
+	defer cancel()
+
+	prefix := ds.key("audit", "")
+	resp, err := ds.client.Get(ctx, prefix, clientv3.WithPrefix())
+	if err != nil {
+		return nil, NewError(ErrCodeInternal, "failed to list audit events", err)
+	}
+
+	events := make([]*AuditEvent, 0, len(resp.Kvs))
+	for _, kv := range resp.Kvs {
+		var event AuditEvent
+		if err := json.Unmarshal(kv.Value, &event); err != nil {
+			continue
+		}
+		if event.Key == "" {
+			event.Key = string(kv.Key)
+		}
+		if !auditEventMatchesOptions(&event, opts) {
+			continue
+		}
+		events = append(events, &event)
+	}
+
+	sort.SliceStable(events, func(i, j int) bool {
+		if !events[i].Timestamp.Equal(events[j].Timestamp) {
+			return events[i].Timestamp.After(events[j].Timestamp)
+		}
+		return events[i].Key > events[j].Key
+	})
+
+	start := opts.Offset
+	if start < 0 {
+		start = 0
+	}
+	if start >= len(events) {
+		return nil, nil
+	}
+	end := len(events)
+	if opts.Limit > 0 && start+opts.Limit < end {
+		end = start + opts.Limit
+	}
+	return events[start:end], nil
+}
+
+func auditEventMatchesOptions(event *AuditEvent, opts *AuditOptions) bool {
+	if event == nil || opts == nil {
+		return true
+	}
+	if !opts.StartTime.IsZero() && event.Timestamp.Before(opts.StartTime) {
+		return false
+	}
+	if !opts.EndTime.IsZero() && event.Timestamp.After(opts.EndTime) {
+		return false
+	}
+	if opts.User != "" && event.User != opts.User {
+		return false
+	}
+	if opts.Action != "" && event.Action != opts.Action {
+		return false
+	}
+	if opts.Result != "" && event.Result != opts.Result {
+		return false
+	}
+	return true
 }
 
 // generateULID generates a ULID (Universally Unique Lexicographically Sortable Identifier).
