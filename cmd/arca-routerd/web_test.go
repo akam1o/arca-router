@@ -947,6 +947,24 @@ func TestLoadWebAPITokensParsesTokenFile(t *testing.T) {
 	}
 }
 
+func TestLoadWebAPITokensRejectsInsecurePermissions(t *testing.T) {
+	tokenFile := filepath.Join(t.TempDir(), "tokens")
+	if err := os.WriteFile(tokenFile, []byte("robot:operator:secret-token\n"), 0600); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+	if err := os.Chmod(tokenFile, 0644); err != nil {
+		t.Fatalf("Chmod() error = %v", err)
+	}
+
+	_, err := loadWebAPITokens(tokenFile)
+	if err == nil {
+		t.Fatal("loadWebAPITokens() error = nil, want permission error")
+	}
+	if !strings.Contains(err.Error(), "validate token file permissions") {
+		t.Fatalf("loadWebAPITokens() error = %v, want permission validation error", err)
+	}
+}
+
 func TestWebEndpointAcceptsBearerToken(t *testing.T) {
 	source := newWebAuthTestSource(t, "monitor", "secret", "read-only")
 	source.webAPITokens = map[string]webAPIToken{
