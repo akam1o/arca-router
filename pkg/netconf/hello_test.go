@@ -490,3 +490,43 @@ func TestUnmarshalHelloMalformedXML(t *testing.T) {
 		t.Errorf("Expected error for malformed XML, but got nil")
 	}
 }
+
+func TestUnmarshalHelloRejectsTrailingContent(t *testing.T) {
+	tests := []struct {
+		name string
+		xml  string
+	}{
+		{
+			name: "trailing hello",
+			xml: `<hello xmlns="urn:ietf:params:xml:ns:netconf:base:1.0">
+  <capabilities>
+    <capability>urn:ietf:params:netconf:base:1.0</capability>
+  </capabilities>
+</hello><hello xmlns="urn:ietf:params:xml:ns:netconf:base:1.0">
+  <capabilities>
+    <capability>urn:ietf:params:netconf:base:1.0</capability>
+  </capabilities>
+</hello>`,
+		},
+		{
+			name: "trailing text",
+			xml: `<hello xmlns="urn:ietf:params:xml:ns:netconf:base:1.0">
+  <capabilities>
+    <capability>urn:ietf:params:netconf:base:1.0</capability>
+  </capabilities>
+</hello>junk`,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := UnmarshalHello([]byte(tt.xml))
+			if err == nil {
+				t.Fatal("UnmarshalHello() error = nil, want trailing content error")
+			}
+			if !strings.Contains(err.Error(), "trailing content after hello element") {
+				t.Fatalf("UnmarshalHello() error = %v, want trailing hello content error", err)
+			}
+		})
+	}
+}

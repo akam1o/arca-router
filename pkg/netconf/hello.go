@@ -1,6 +1,7 @@
 package netconf
 
 import (
+	"bytes"
 	"encoding/xml"
 	"fmt"
 	"strings"
@@ -66,7 +67,14 @@ func MarshalHello(hello *Hello) ([]byte, error) {
 // UnmarshalHello unmarshals XML data into a Hello message
 func UnmarshalHello(data []byte) (*Hello, error) {
 	var hello Hello
-	if err := xml.Unmarshal(data, &hello); err != nil {
+	decoder := xml.NewDecoder(bytes.NewReader(data))
+	decoder.Strict = true
+	decoder.Entity = nil
+
+	if err := decoder.Decode(&hello); err != nil {
+		return nil, fmt.Errorf("unmarshal hello: %w", err)
+	}
+	if err := ensureNoTrailingXML(decoder, "hello"); err != nil {
 		return nil, fmt.Errorf("unmarshal hello: %w", err)
 	}
 

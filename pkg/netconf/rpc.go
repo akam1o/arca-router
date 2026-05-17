@@ -55,7 +55,7 @@ func ParseRPC(data []byte) (*RPC, error) {
 	if err := decoder.Decode(&envelope); err != nil {
 		return nil, ErrMalformedMessage(fmt.Sprintf("XML parse error: %v", err))
 	}
-	if err := ensureNoTrailingXML(decoder); err != nil {
+	if err := ensureNoTrailingXML(decoder, "rpc"); err != nil {
 		return nil, err
 	}
 
@@ -105,7 +105,7 @@ func ParseRPC(data []byte) (*RPC, error) {
 	return rpc, nil
 }
 
-func ensureNoTrailingXML(decoder *xml.Decoder) error {
+func ensureNoTrailingXML(decoder *xml.Decoder, rootElement string) error {
 	for {
 		token, err := decoder.Token()
 		if err == io.EOF {
@@ -117,7 +117,7 @@ func ensureNoTrailingXML(decoder *xml.Decoder) error {
 		if charData, ok := token.(xml.CharData); ok && len(bytes.TrimSpace(charData)) == 0 {
 			continue
 		}
-		return ErrMalformedMessage("trailing content after rpc element")
+		return ErrMalformedMessage(fmt.Sprintf("trailing content after %s element", rootElement))
 	}
 }
 
