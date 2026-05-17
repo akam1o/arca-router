@@ -589,7 +589,7 @@ func filterMatchesEnhanced(filter *Filter, elementPath []string) bool {
 	}
 
 	if normalizedFilterType(filter) == "xpath" {
-		xpathFilter, err := ParseXPathFilter(strings.TrimSpace(filter.Select))
+		xpathFilter, err := parseFilterXPathWithNamespaces(filter)
 		if err != nil {
 			return false
 		}
@@ -621,4 +621,22 @@ func filterMatchesEnhanced(filter *Filter, elementPath []string) bool {
 // Phase 3: Keep for existing code, use filterMatchesEnhanced for new code
 func filterMatches(filter *Filter, element string) bool {
 	return filterMatchesEnhanced(filter, []string{element})
+}
+
+func parseFilterXPathWithNamespaces(filter *Filter) (*XPathFilter, error) {
+	if filter == nil || normalizedFilterType(filter) != "xpath" {
+		return nil, nil
+	}
+
+	namespaceAttrs := collectNamespaceAttrs(filter.InheritedAttrs, filter.Attrs)
+	xpathFilter, err := ParseXPathFilterWithContext(strings.TrimSpace(filter.Select), namespaceAttrs)
+	if err != nil {
+		return nil, err
+	}
+	if xpathFilter != nil {
+		if err := validateXPathFilterNamespaces(xpathFilter); err != nil {
+			return nil, err
+		}
+	}
+	return xpathFilter, nil
 }
