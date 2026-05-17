@@ -101,7 +101,8 @@ Focus: mature management-plane correctness and operator safety.
 - **NETCONF maturity**
   - Candidate/running semantics hardening
   - Capability advertisement accuracy
-  - Interoperability tests with external NETCONF clients
+  - Interoperability tests with external NETCONF clients: required `ncclient`
+    PR CI plus scheduled/manual Junos PyEZ (`junos-eznc`) smoke coverage
 - **Operational safety**
   - Config backup and restore
   - Startup config and rollback archive
