@@ -498,6 +498,60 @@ func TestCommitFailureReportsDiagnosticCollectionError(t *testing.T) {
 	}
 }
 
+func TestCommitRunsClassOfServicePostCommitDiagnostics(t *testing.T) {
+	ctx := context.Background()
+	client := &fakeInteractiveClient{
+		diffText:       "+ set class-of-service interfaces ge-0/0/0 output-traffic-control-profile WAN",
+		diffHasChanges: true,
+		cosInfo: &grpcclient.ClassOfServiceInfo{
+			EnforcementStatus: "intent-only",
+			Interfaces: []grpcclient.ClassOfServiceInterfaceInfo{
+				{Name: "ge-0/0/0", OutputTrafficControlProfile: "WAN"},
+			},
+			Capabilities: &grpcclient.ClassOfServiceCapabilitiesInfo{
+				MetadataBindingSupported: true,
+				Diagnostics:              []string{"scheduler unavailable"},
+			},
+		},
+	}
+	sh := &interactiveShell{
+		client:    client,
+		hostname:  "router",
+		mode:      modeConfiguration,
+		sessionID: "session-1",
+		hasLock:   true,
+	}
+
+	if err := sh.cmdCommit(ctx, nil); err != nil {
+		t.Fatalf("cmdCommit() error = %v", err)
+	}
+	if client.commitCalls != 1 || client.diffCalls != 1 || client.cosCalls != 1 {
+		t.Fatalf("commit/diff/cos calls = %d/%d/%d, want 1/1/1", client.commitCalls, client.diffCalls, client.cosCalls)
+	}
+}
+
+func TestCommitSkipsClassOfServicePostCommitDiagnosticsWithoutCosDiff(t *testing.T) {
+	ctx := context.Background()
+	client := &fakeInteractiveClient{
+		diffText:       "+ set routing-options static route 198.51.100.0/24 next-hop 192.0.2.1",
+		diffHasChanges: true,
+	}
+	sh := &interactiveShell{
+		client:    client,
+		hostname:  "router",
+		mode:      modeConfiguration,
+		sessionID: "session-1",
+		hasLock:   true,
+	}
+
+	if err := sh.cmdCommit(ctx, nil); err != nil {
+		t.Fatalf("cmdCommit() error = %v", err)
+	}
+	if client.commitCalls != 1 || client.diffCalls != 1 || client.cosCalls != 0 {
+		t.Fatalf("commit/diff/cos calls = %d/%d/%d, want 1/1/0", client.commitCalls, client.diffCalls, client.cosCalls)
+	}
+}
+
 func TestCmdSetQuotesValuesWithSpaces(t *testing.T) {
 	ctx := context.Background()
 	client := &fakeInteractiveClient{}
@@ -817,6 +871,40 @@ func TestFormatClassOfServicePreflightWarnsOnCapabilityGaps(t *testing.T) {
 	} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("formatClassOfServicePreflight() = %q, want substring %q", got, want)
+		}
+	}
+}
+
+func TestFormatClassOfServicePostCommitSummarizesStatus(t *testing.T) {
+	lines := formatClassOfServicePostCommit(&grpcclient.ClassOfServiceInfo{
+		EnforcementStatus: "intent-only",
+		Interfaces: []grpcclient.ClassOfServiceInterfaceInfo{
+			{Name: "ge-0/0/0", OutputTrafficControlProfile: "WAN"},
+			{Name: "ge-0/0/1", OutputTrafficControlProfile: "LAN"},
+		},
+		Capabilities: &grpcclient.ClassOfServiceCapabilitiesInfo{
+			MetadataBindingSupported: true,
+			QueueSchedulerSupported:  false,
+			PolicerSupported:         false,
+			CountersSupported:        true,
+			LastError:                "capability probe failed",
+			Diagnostics:              []string{"scheduler unsupported"},
+		},
+	})
+	got := strings.Join(lines, "\n")
+	for _, want := range []string{
+		"qos post-commit diagnostics:",
+		"enforcement status: intent-only",
+		"bound interfaces: 2",
+		"metadata binding: yes",
+		"queue scheduler: no",
+		"policer: no",
+		"counters: yes",
+		"warning: capability detection error: capability probe failed",
+		"diagnostic: scheduler unsupported",
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("formatClassOfServicePostCommit() = %q, want substring %q", got, want)
 		}
 	}
 }

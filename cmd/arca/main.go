@@ -1265,16 +1265,20 @@ func (sh *interactiveShell) cmdCommit(ctx context.Context, args []string) error 
 		return nil
 	}
 
+	diffText, hasChanges, diffErr := sh.client.Diff(ctx, sh.sessionID)
 	user := currentUsername()
 
 	commitID, version, err := sh.client.Commit(ctx, sh.sessionID, user, message)
 	if err != nil {
-		if diagErr := sh.printCommitFailureDiagnostics(ctx); diagErr != nil {
+		if diagErr := sh.printCommitFailureDiagnostics(ctx, diffText, hasChanges, diffErr); diagErr != nil {
 			return fmt.Errorf("commit failed: %w (diagnostics unavailable: %v)", err, diagErr)
 		}
 		return fmt.Errorf("commit failed: %w", err)
 	}
 	fmt.Printf("commit complete (id: %s, version: %d)\n", shortCommitID(commitID), version)
+	if diagErr := sh.printPostCommitDiagnostics(ctx, diffText, hasChanges, diffErr); diagErr != nil {
+		fmt.Printf("post-commit diagnostics unavailable: %v\n", diagErr)
+	}
 
 	if andQuit {
 		if err := sh.releaseConfigurationLock(ctx); err != nil {
@@ -1362,10 +1366,9 @@ func (sh *interactiveShell) printChangeImpactPreview(ctx context.Context) error 
 	return nil
 }
 
-func (sh *interactiveShell) printCommitFailureDiagnostics(ctx context.Context) error {
-	diffText, hasChanges, err := sh.client.Diff(ctx, sh.sessionID)
-	if err != nil {
-		return err
+func (sh *interactiveShell) printCommitFailureDiagnostics(ctx context.Context, diffText string, hasChanges bool, diffErr error) error {
+	if diffErr != nil {
+		return diffErr
 	}
 	fmt.Println("commit failure diagnostics:")
 	for _, line := range formatChangeImpactPreview(diffText, hasChanges) {
@@ -1375,6 +1378,20 @@ func (sh *interactiveShell) printCommitFailureDiagnostics(ctx context.Context) e
 		fmt.Printf("  %s\n", line)
 	}
 	fmt.Println("  next step: resolve the error and run 'commit check'")
+	return nil
+}
+
+func (sh *interactiveShell) printPostCommitDiagnostics(ctx context.Context, diffText string, hasChanges bool, diffErr error) error {
+	if diffErr != nil || !hasChanges || !analyzeChangeImpact(diffText).classOfService.hasChanges() {
+		return diffErr
+	}
+	info, err := sh.client.GetClassOfService(ctx)
+	if err != nil {
+		return err
+	}
+	for _, line := range formatClassOfServicePostCommit(info) {
+		fmt.Println(line)
+	}
 	return nil
 }
 
@@ -1668,6 +1685,44 @@ func formatClassOfServicePreflight(info *grpcclient.ClassOfServiceInfo) []string
 		lines = append(lines, "  diagnostic: "+diagnostic)
 	}
 	return lines
+}
+
+func formatClassOfServicePostCommit(info *grpcclient.ClassOfServiceInfo) []string {
+	if info == nil {
+		return []string{"qos post-commit diagnostics: class-of-service status unavailable"}
+	}
+	lines := []string{
+		"qos post-commit diagnostics:",
+		fmt.Sprintf("  enforcement status: %s", displayValue(info.EnforcementStatus, "unknown")),
+		fmt.Sprintf("  bound interfaces: %d", len(info.Interfaces)),
+	}
+	if info.Capabilities == nil {
+		return append(lines, "  warning: capability snapshot unavailable")
+	}
+	capabilities := info.Capabilities
+	lines = append(lines,
+		fmt.Sprintf("  metadata binding: %s", yesNo(capabilities.MetadataBindingSupported)),
+		fmt.Sprintf("  queue scheduler: %s", yesNo(capabilities.QueueSchedulerSupported)),
+		fmt.Sprintf("  policer: %s", yesNo(capabilities.PolicerSupported)),
+		fmt.Sprintf("  counters: %s", yesNo(capabilities.CountersSupported)),
+	)
+	if capabilities.LastError != "" {
+		lines = append(lines, "  warning: capability detection error: "+capabilities.LastError)
+	}
+	for _, diagnostic := range capabilities.Diagnostics {
+		if diagnostic == "" {
+			continue
+		}
+		lines = append(lines, "  diagnostic: "+diagnostic)
+	}
+	return lines
+}
+
+func displayValue(value, fallback string) string {
+	if strings.TrimSpace(value) == "" {
+		return fallback
+	}
+	return value
 }
 
 func analyzeChangeImpact(diffText string) changeImpactPreview {
