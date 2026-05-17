@@ -650,6 +650,8 @@ func (sh *interactiveShell) processCommand(ctx context.Context, line string) err
 		return sh.cmdCommit(ctx, args)
 	case "rollback":
 		return sh.cmdRollback(ctx, args)
+	case "backup":
+		return sh.cmdBackup(ctx, args)
 	case "compare":
 		return sh.cmdCompare(ctx)
 	case "discard-changes":
@@ -990,25 +992,32 @@ func (sh *interactiveShell) cmdShowArchivedConfiguration(ctx context.Context, ar
 	if err != nil {
 		return err
 	}
+	text, err := sh.archivedConfiguration(ctx, rollbackNum)
+	if err != nil {
+		return err
+	}
+	fmt.Println(text)
+	return nil
+}
 
+func (sh *interactiveShell) archivedConfiguration(ctx context.Context, rollbackNum int) (string, error) {
 	history, err := sh.client.ListHistory(ctx, rollbackNum+1, 0)
 	if err != nil {
-		return fmt.Errorf("failed to load commit history: %w", err)
+		return "", fmt.Errorf("failed to load commit history: %w", err)
 	}
 	if len(history) <= rollbackNum {
 		if rollbackNum == 0 {
 			text, _, err := sh.client.GetRunning(ctx)
 			if err != nil {
-				return err
+				return "", err
 			}
-			fmt.Println(text)
-			return nil
+			return text, nil
 		}
 		availableCommits := len(history) - 1
 		if availableCommits < 0 {
 			availableCommits = 0
 		}
-		return fmt.Errorf("not enough history for rollback %d (only %d commits available)", rollbackNum, availableCommits)
+		return "", fmt.Errorf("not enough history for rollback %d (only %d commits available)", rollbackNum, availableCommits)
 	}
 
 	entry := history[rollbackNum]
@@ -1016,14 +1025,76 @@ func (sh *interactiveShell) cmdShowArchivedConfiguration(ctx context.Context, ar
 		if rollbackNum == 0 {
 			text, _, err := sh.client.GetRunning(ctx)
 			if err != nil {
-				return err
+				return "", err
 			}
-			fmt.Println(text)
-			return nil
+			return text, nil
 		}
-		return fmt.Errorf("archived config text unavailable for rollback %d", rollbackNum)
+		return "", fmt.Errorf("archived config text unavailable for rollback %d", rollbackNum)
 	}
-	fmt.Println(entry.ConfigText)
+	return entry.ConfigText, nil
+}
+
+func (sh *interactiveShell) cmdBackup(ctx context.Context, args []string) error {
+	if len(args) == 2 && args[0] == "configuration" {
+		var text string
+		var err error
+		if sh.mode == modeConfiguration {
+			text, err = sh.client.GetCandidate(ctx, sh.sessionID)
+		} else {
+			text, _, err = sh.client.GetRunning(ctx)
+		}
+		if err != nil {
+			return err
+		}
+		return sh.writeConfigurationBackup(args[1], text)
+	}
+
+	if len(args) == 4 && args[0] == "configuration" && args[1] == "rollback" {
+		rollbackNum, err := parseRollbackNumber(args[2])
+		if err != nil {
+			return err
+		}
+		text, err := sh.archivedConfiguration(ctx, rollbackNum)
+		if err != nil {
+			return err
+		}
+		return sh.writeConfigurationBackup(args[3], text)
+	}
+
+	return fmt.Errorf("usage: backup configuration [rollback <N>] <path>")
+}
+
+func (sh *interactiveShell) writeConfigurationBackup(path, text string) error {
+	if err := writeConfigBackupFile(path, text); err != nil {
+		return err
+	}
+	fmt.Printf("configuration backup written to %s\n", path)
+	return nil
+}
+
+func writeConfigBackupFile(path, text string) error {
+	if strings.TrimSpace(path) == "" {
+		return fmt.Errorf("backup path must not be empty")
+	}
+	data := []byte(text)
+	if len(data) == 0 || data[len(data)-1] != '\n' {
+		data = append(data, '\n')
+	}
+	file, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
+	if err != nil {
+		return fmt.Errorf("create backup file: %w", err)
+	}
+	var writeErr error
+	if _, err := file.Write(data); err != nil {
+		writeErr = err
+	}
+	closeErr := file.Close()
+	if writeErr != nil {
+		return fmt.Errorf("write backup file: %w", writeErr)
+	}
+	if closeErr != nil {
+		return fmt.Errorf("close backup file: %w", closeErr)
+	}
 	return nil
 }
 
@@ -1731,6 +1802,8 @@ func (sh *interactiveShell) showHelp() {
 	if sh.mode == modeOperational {
 		fmt.Println("Operational mode commands:")
 		fmt.Println("  help                          Show this help message")
+		fmt.Println("  backup configuration <path>   Save running configuration to a file")
+		fmt.Println("  backup configuration rollback <N> <path> Save archived config to a file")
 		fmt.Println("  configure                     Enter configuration mode")
 		fmt.Println("  show configuration            Show running configuration")
 		fmt.Println("  show configuration rollback <N> Show archived config N commits back")
@@ -1758,6 +1831,8 @@ func (sh *interactiveShell) showHelp() {
 	} else {
 		fmt.Println("Configuration mode commands:")
 		fmt.Println("  help                      Show this help message")
+		fmt.Println("  backup configuration <path> Save candidate configuration to a file")
+		fmt.Println("  backup configuration rollback <N> <path> Save archived config to a file")
 		fmt.Println("  set <config>              Add or modify configuration")
 		fmt.Println("  delete <config>           Delete configuration")
 		fmt.Println("  show                      Show candidate configuration")
@@ -3124,6 +3199,11 @@ func createCompleter() *readline.PrefixCompleter {
 			readline.PcItem("check"),
 			readline.PcItem("and-quit"),
 			readline.PcItem("comment"),
+		),
+		readline.PcItem("backup",
+			readline.PcItem("configuration",
+				readline.PcItem("rollback"),
+			),
 		),
 		readline.PcItem("rollback"),
 		readline.PcItem("discard-changes"),
