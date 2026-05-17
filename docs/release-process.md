@@ -123,9 +123,13 @@ Detailed future scope is maintained in [`ROADMAP.md`](../ROADMAP.md).
   make integration-test
   ```
 
-- [ ] **Package metadata lint**: v0.6 service and package metadata expectations pass
+- [ ] **Package metadata lint**: current service and package metadata expectations pass
   ```bash
   make package-lint
+  ```
+- [ ] **Local release readiness**: v0.10 local checks pass
+  ```bash
+  make release-check
   ```
 
 - [ ] **FRR mgmtd smoke**: Transactional FRR apply works on a live FRR host
@@ -591,6 +595,7 @@ git push origin v0.5.0
 - [ ] CHANGELOG.md complete
 - [ ] Security review done
 - [ ] `make package-lint` passing
+- [ ] `make release-check` passing
 - [ ] Live FRR mgmtd smoke checked, or explicitly recorded as a v0.11 deferred lab gate
 - [ ] v0.10 release sign-off recorded with `docs/v0.10-release-signoff.md`
 - [ ] Packages tested on all distros

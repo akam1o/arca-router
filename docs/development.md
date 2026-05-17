@@ -105,7 +105,7 @@ make check
 ### 4. Build Locally
 
 ```bash
-# Build current v0.6.x unified daemon + CLI
+# Build current unified daemon + CLI
 make build
 
 # Verify binaries
@@ -427,7 +427,7 @@ See [Release Process Guide](release-process.md) for details.
 # Build DEB package
 make deb
 
-# Test package contents and v0.5 package metadata expectations
+# Test package contents and current package metadata expectations
 make deb-test
 
 # Verify reproducibility
@@ -439,7 +439,7 @@ make deb-verify
 # Build RPM package
 make rpm
 
-# Test package contents and v0.5 package metadata expectations
+# Test package contents and current package metadata expectations
 make rpm-test
 
 # Verify reproducibility
@@ -465,9 +465,12 @@ Packages are configured via NFPM: [build/package/nfpm.yaml](../build/package/nfp
 - Warns when required FRR daemons such as `mgmtd=yes`, `vrrpd=yes`, or `bfdd=yes` are missing
 - Reloads systemd daemon
 
-### v0.6 Smoke Checks
+### Release Readiness Checks
 
 ```bash
+# Run local release readiness checks used by v0.10 sign-off
+make release-check
+
 # Validate local package metadata without building artifacts
 make package-lint
 
