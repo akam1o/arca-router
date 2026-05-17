@@ -101,6 +101,56 @@ func TestSSHServerStartAfterStopRejected(t *testing.T) {
 	}
 }
 
+func TestSSHServerStopWithStartupCleanupSkipped(t *testing.T) {
+	cfg, _ := testSSHServerConfig(t, "127.0.0.1:0")
+	cfg.SkipDatastoreStartupCleanup = true
+	server, err := NewSSHServer(cfg)
+	if err != nil {
+		t.Fatalf("NewSSHServer() error = %v", err)
+	}
+	if server.processLock != nil {
+		t.Fatal("processLock = non-nil, want nil when startup cleanup is skipped")
+	}
+
+	if err := server.Stop(); err != nil {
+		t.Fatalf("Stop() error = %v", err)
+	}
+}
+
+func TestSSHServerLifecycleMethodsNilReceiver(t *testing.T) {
+	var server *SSHServer
+
+	if err := server.Stop(); err != nil {
+		t.Fatalf("Stop() error = %v", err)
+	}
+	if err := server.Start(context.Background()); err == nil {
+		t.Fatal("Start() error = nil, want uninitialized server error")
+	}
+	if metrics := server.GetMetrics(); metrics != (ServerMetrics{}) {
+		t.Fatalf("GetMetrics() = %+v, want zero metrics", metrics)
+	}
+	if err := server.HealthCheck(); err == nil {
+		t.Fatal("HealthCheck() error = nil, want unavailable server error")
+	}
+}
+
+func TestSSHServerLifecycleMethodsZeroValue(t *testing.T) {
+	server := &SSHServer{}
+
+	if err := server.Start(context.Background()); err == nil {
+		t.Fatal("Start() error = nil, want uninitialized server error")
+	}
+	if err := server.Stop(); err != nil {
+		t.Fatalf("Stop() error = %v", err)
+	}
+	if metrics := server.GetMetrics(); metrics != (ServerMetrics{}) {
+		t.Fatalf("GetMetrics() = %+v, want zero metrics", metrics)
+	}
+	if err := server.HealthCheck(); err == nil {
+		t.Fatal("HealthCheck() error = nil, want not accepting error")
+	}
+}
+
 func TestNewSSHServerDefaultsPartialConfig(t *testing.T) {
 	dir := t.TempDir()
 	cfg := &SSHConfig{

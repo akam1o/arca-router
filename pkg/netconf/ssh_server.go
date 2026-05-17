@@ -202,6 +202,10 @@ func (s *SSHServer) SetOperationalStateProvider(provider OperationalStateProvide
 
 // Start starts the SSH server
 func (s *SSHServer) Start(ctx context.Context) error {
+	if s == nil || s.config == nil || s.sessionMgr == nil || s.activeConns == nil || s.done == nil || s.log == nil {
+		return fmt.Errorf("server not initialized")
+	}
+
 	s.mu.Lock()
 	if s.stopped {
 		s.mu.Unlock()
@@ -235,6 +239,10 @@ func (s *SSHServer) Start(ctx context.Context) error {
 
 // Stop stops the SSH server gracefully
 func (s *SSHServer) Stop() error {
+	if s == nil {
+		return nil
+	}
+
 	s.stopOnce.Do(func() {
 		// Mark as not listening
 		atomic.StoreInt32(&s.isListening, 0)
@@ -250,11 +258,15 @@ func (s *SSHServer) Stop() error {
 		s.mu.Unlock()
 
 		// Signal shutdown even if Start failed before creating a listener.
-		close(s.done)
+		if s.done != nil {
+			close(s.done)
+		}
 
 		if listener != nil {
 			if err := listener.Close(); err != nil {
-				s.log.Error("Failed to close listener", "error", err)
+				if s.log != nil {
+					s.log.Error("Failed to close listener", "error", err)
+				}
 			}
 		}
 		for _, conn := range activeConns {
@@ -264,7 +276,9 @@ func (s *SSHServer) Stop() error {
 		}
 
 		// Close all sessions (this will trigger cleanup goroutine to stop)
-		s.sessionMgr.CloseAll()
+		if s.sessionMgr != nil {
+			s.sessionMgr.CloseAll()
+		}
 
 		// Stop rate limiter
 		s.rateLimiter.Stop()
@@ -273,19 +287,27 @@ func (s *SSHServer) Stop() error {
 		s.wg.Wait()
 
 		// Close datastore
-		if err := s.datastore.Close(); err != nil {
-			s.log.Error("Failed to close datastore", "error", err)
+		if s.datastore != nil {
+			if err := s.datastore.Close(); err != nil && s.log != nil {
+				s.log.Error("Failed to close datastore", "error", err)
+			}
 		}
-		if err := s.processLock.Close(); err != nil {
-			s.log.Error("Failed to release datastore process lock", "error", err)
+		if s.processLock != nil {
+			if err := s.processLock.Close(); err != nil && s.log != nil {
+				s.log.Error("Failed to release datastore process lock", "error", err)
+			}
 		}
 
 		// Close user database
-		if err := s.userDB.Close(); err != nil {
-			s.log.Error("Failed to close user database", "error", err)
+		if s.userDB != nil {
+			if err := s.userDB.Close(); err != nil && s.log != nil {
+				s.log.Error("Failed to close user database", "error", err)
+			}
 		}
 
-		s.log.Info("SSH server stopped")
+		if s.log != nil {
+			s.log.Info("SSH server stopped")
+		}
 	})
 	return nil
 }
@@ -693,15 +715,24 @@ type ServerMetrics struct {
 // GetMetrics returns current server metrics
 // All metrics are thread-safe and can be called concurrently
 func (s *SSHServer) GetMetrics() ServerMetrics {
-	return ServerMetrics{
+	if s == nil {
+		return ServerMetrics{}
+	}
+
+	metrics := ServerMetrics{
 		TotalConnections:     atomic.LoadUint64(&s.totalConnections),
 		SuccessfulHandshakes: atomic.LoadUint64(&s.successfulHandshakes),
 		FailedHandshakes:     atomic.LoadUint64(&s.failedHandshakes),
 		ActiveConnections:    atomic.LoadInt32(&s.activeConnections),
-		ActiveSessions:       s.sessionMgr.Count(),
-		ListenAddr:           s.config.ListenAddr,
 		IsListening:          atomic.LoadInt32(&s.isListening) == 1,
 	}
+	if s.sessionMgr != nil {
+		metrics.ActiveSessions = s.sessionMgr.Count()
+	}
+	if s.config != nil {
+		metrics.ListenAddr = s.config.ListenAddr
+	}
+	return metrics
 }
 
 // HealthCheck verifies the server is healthy and operational
@@ -710,6 +741,10 @@ func (s *SSHServer) GetMetrics() ServerMetrics {
 // 2. User database is accessible and healthy
 // 3. Session count is within configured limits
 func (s *SSHServer) HealthCheck() error {
+	if s == nil {
+		return fmt.Errorf("server unavailable")
+	}
+
 	// Check if server is actively accepting connections
 	// Uses atomic flag set by Start/Stop to avoid race conditions
 	if atomic.LoadInt32(&s.isListening) != 1 {
@@ -725,11 +760,17 @@ func (s *SSHServer) HealthCheck() error {
 	s.mu.Unlock()
 
 	// Check user database health
+	if s.userDB == nil {
+		return fmt.Errorf("user database unavailable")
+	}
 	if err := s.userDB.HealthCheck(); err != nil {
 		return fmt.Errorf("user database unhealthy: %w", err)
 	}
 
 	// Check session manager is operational
+	if s.config == nil {
+		return fmt.Errorf("server config unavailable")
+	}
 	metrics := s.GetMetrics()
 	if metrics.ActiveSessions > s.config.MaxSessions {
 		return fmt.Errorf("session count (%d) exceeds max sessions (%d)",
