@@ -104,6 +104,17 @@ func (c *Client) EditCandidate(ctx context.Context, sessionID, configText string
 	return err
 }
 
+// ReplaceCandidate replaces a session's candidate configuration text.
+func (c *Client) ReplaceCandidate(ctx context.Context, sessionID, configText string) error {
+	ctx, cancel := contextWithDefaultTimeout(ctx)
+	defer cancel()
+	_, err := c.config.ReplaceCandidate(ctx, &apiv1.ReplaceCandidateRequest{
+		SessionId:  sessionID,
+		ConfigText: configText,
+	})
+	return err
+}
+
 // Commit commits the candidate configuration.
 func (c *Client) Commit(ctx context.Context, sessionID, user, message string) (commitID string, version uint64, err error) {
 	ctx, cancel := contextWithDefaultTimeout(ctx)

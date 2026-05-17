@@ -17,6 +17,9 @@ service ConfigService {
   // EditCandidate modifies the candidate configuration.
   rpc EditCandidate(EditCandidateRequest) returns (EditCandidateResponse);
 
+  // ReplaceCandidate replaces the candidate configuration.
+  rpc ReplaceCandidate(ReplaceCandidateRequest) returns (ReplaceCandidateResponse);
+
   // Commit promotes the candidate to running, applying changes.
   rpc Commit(CommitRequest) returns (CommitResponse);
 
@@ -135,6 +138,13 @@ message EditCandidateRequest {
 }
 
 message EditCandidateResponse {}
+
+message ReplaceCandidateRequest {
+  string session_id = 1;
+  string config_text = 2;  // full set-command configuration
+}
+
+message ReplaceCandidateResponse {}
 
 message CommitRequest {
   string session_id = 1;

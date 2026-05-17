@@ -22,6 +22,7 @@ const (
 	ConfigService_GetRunning_FullMethodName        = "/arca.router.v1.ConfigService/GetRunning"
 	ConfigService_GetCandidate_FullMethodName      = "/arca.router.v1.ConfigService/GetCandidate"
 	ConfigService_EditCandidate_FullMethodName     = "/arca.router.v1.ConfigService/EditCandidate"
+	ConfigService_ReplaceCandidate_FullMethodName  = "/arca.router.v1.ConfigService/ReplaceCandidate"
 	ConfigService_Commit_FullMethodName            = "/arca.router.v1.ConfigService/Commit"
 	ConfigService_ValidateCandidate_FullMethodName = "/arca.router.v1.ConfigService/ValidateCandidate"
 	ConfigService_Discard_FullMethodName           = "/arca.router.v1.ConfigService/Discard"
@@ -44,6 +45,8 @@ type ConfigServiceClient interface {
 	GetCandidate(ctx context.Context, in *GetCandidateRequest, opts ...grpc.CallOption) (*GetCandidateResponse, error)
 	// EditCandidate modifies the candidate configuration.
 	EditCandidate(ctx context.Context, in *EditCandidateRequest, opts ...grpc.CallOption) (*EditCandidateResponse, error)
+	// ReplaceCandidate replaces the candidate configuration.
+	ReplaceCandidate(ctx context.Context, in *ReplaceCandidateRequest, opts ...grpc.CallOption) (*ReplaceCandidateResponse, error)
 	// Commit promotes the candidate to running, applying changes.
 	Commit(ctx context.Context, in *CommitRequest, opts ...grpc.CallOption) (*CommitResponse, error)
 	// ValidateCandidate validates the candidate configuration without committing it.
@@ -90,6 +93,16 @@ func (c *configServiceClient) EditCandidate(ctx context.Context, in *EditCandida
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(EditCandidateResponse)
 	err := c.cc.Invoke(ctx, ConfigService_EditCandidate_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *configServiceClient) ReplaceCandidate(ctx context.Context, in *ReplaceCandidateRequest, opts ...grpc.CallOption) (*ReplaceCandidateResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ReplaceCandidateResponse)
+	err := c.cc.Invoke(ctx, ConfigService_ReplaceCandidate_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
 	}
@@ -170,6 +183,8 @@ type ConfigServiceServer interface {
 	GetCandidate(context.Context, *GetCandidateRequest) (*GetCandidateResponse, error)
 	// EditCandidate modifies the candidate configuration.
 	EditCandidate(context.Context, *EditCandidateRequest) (*EditCandidateResponse, error)
+	// ReplaceCandidate replaces the candidate configuration.
+	ReplaceCandidate(context.Context, *ReplaceCandidateRequest) (*ReplaceCandidateResponse, error)
 	// Commit promotes the candidate to running, applying changes.
 	Commit(context.Context, *CommitRequest) (*CommitResponse, error)
 	// ValidateCandidate validates the candidate configuration without committing it.
@@ -200,6 +215,9 @@ func (UnimplementedConfigServiceServer) GetCandidate(context.Context, *GetCandid
 }
 func (UnimplementedConfigServiceServer) EditCandidate(context.Context, *EditCandidateRequest) (*EditCandidateResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method EditCandidate not implemented")
+}
+func (UnimplementedConfigServiceServer) ReplaceCandidate(context.Context, *ReplaceCandidateRequest) (*ReplaceCandidateResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method ReplaceCandidate not implemented")
 }
 func (UnimplementedConfigServiceServer) Commit(context.Context, *CommitRequest) (*CommitResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method Commit not implemented")
@@ -290,6 +308,24 @@ func _ConfigService_EditCandidate_Handler(srv interface{}, ctx context.Context, 
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
 		return srv.(ConfigServiceServer).EditCandidate(ctx, req.(*EditCandidateRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _ConfigService_ReplaceCandidate_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ReplaceCandidateRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ConfigServiceServer).ReplaceCandidate(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: ConfigService_ReplaceCandidate_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ConfigServiceServer).ReplaceCandidate(ctx, req.(*ReplaceCandidateRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
@@ -420,6 +456,10 @@ var ConfigService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "EditCandidate",
 			Handler:    _ConfigService_EditCandidate_Handler,
+		},
+		{
+			MethodName: "ReplaceCandidate",
+			Handler:    _ConfigService_ReplaceCandidate_Handler,
 		},
 		{
 			MethodName: "Commit",
