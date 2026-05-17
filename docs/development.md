@@ -458,6 +458,11 @@ Packages are configured via NFPM: [build/package/nfpm.yaml](../build/package/nfp
 - Log directory: `/var/log/arca-router/`
 - Grafana dashboard: `/usr/share/arca-router/grafana/arca-routerd-dashboard.json`
 
+The v0.10 NFPM metadata targets amd64/x86_64 packages. Build package binaries
+in a Linux amd64 environment before running `make deb-package` or
+`make rpm-package`; the package targets reject missing or non-Linux-amd64
+binaries before invoking NFPM.
+
 **Post-install scripts:**
 - Creates `arca-router` user/group
 - Adds the service user to `vpp` and `frrvty`
