@@ -10,6 +10,7 @@ const (
 	NMSTelemetryCatalogSchema = "arca.nms.telemetry-catalog.v1"
 	NMSTelemetrySchemaCatalog = "arca.nms.telemetry-schemas.v1"
 	NMSTelemetrySnapshot      = "arca.nms.telemetry-snapshot.v1"
+	AuditSchema               = "arca.audit.v1"
 	GRPCAPIPackage            = "arca.router.v1"
 )
 

@@ -27,6 +27,7 @@ This directory contains user guides, design notes, and internal drafts for `arca
 
 ## Development / Release
 - [`ROADMAP.md`](../ROADMAP.md)
+- `docs/compatibility.md`
 - `docs/development.md`
 - `docs/release-process.md`
 

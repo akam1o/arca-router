@@ -1074,6 +1074,7 @@ Endpoints:
 - `GET /`
 - `GET /api/config`
 - `GET /api/config/history`
+- `GET /api/audit`
 - `GET /api/status`
 - `GET /api/nms/v1/status`
 - `GET /api/nms/v1/telemetry/paths`
@@ -1089,6 +1090,7 @@ Endpoints:
 `/api/nms/v1/telemetry/snapshot` wraps one-shot structured telemetry events in the `arca.nms.telemetry-snapshot.v1` schema envelope for HTTP-only collectors and enforces configurable timeout, payload byte, and event count guardrails.
 `/api/config` returns the running configuration as set-command text with the running config version. The dashboard renders the same running configuration in the browser editor.
 `/api/config/history` returns recent configuration commits and backs the dashboard commit history panel.
+`/api/audit` returns newest-first audit events in the `arca.audit.v1` schema envelope with optional `limit`, `offset`, `user`, `action`, `result`, `since`, and `until` filters. Audit export requires password-backed `admin` authentication.
 
 When password-backed `security users` exist in running configuration, the Web UI requires HTTP Basic authentication. The built-in `read-only`, `operator`, and `admin` roles are authorized for the read-only dashboard and API endpoints.
 Configuration writes require `operator` or `admin`. The dashboard editor calls `/api/config/validate` and `/api/config/commit`. `/api/config/validate` accepts `{ "config_text": "set ..." }` and returns validation status plus diff text. `/api/config/commit` accepts `{ "config_text": "set ...", "message": "..." }` and commits through the same internal gRPC candidate workflow used by the CLI.
