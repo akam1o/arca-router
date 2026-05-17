@@ -94,7 +94,13 @@ func NewServer(eng *engine.Engine, st store.ConfigStore, log *slog.Logger) *Serv
 
 // Serve starts the gRPC server on the given listener.
 func (s *Server) Serve(lis net.Listener) error {
-	s.server = googlegrpc.NewServer()
+	return s.ServeWithOptions(lis)
+}
+
+// ServeWithOptions starts the gRPC server on the given listener with explicit
+// transport options.
+func (s *Server) ServeWithOptions(lis net.Listener, opts ...googlegrpc.ServerOption) error {
+	s.server = googlegrpc.NewServer(opts...)
 	apiv1.RegisterConfigServiceServer(s.server, &configServiceAdapter{server: s})
 	apiv1.RegisterSessionServiceServer(s.server, &sessionServiceAdapter{server: s})
 	apiv1.RegisterStateServiceServer(s.server, &stateServiceAdapter{server: s})

@@ -5,6 +5,8 @@ package main
 
 import (
 	"context"
+	"crypto/tls"
+	"crypto/x509"
 	"flag"
 	"fmt"
 	"io"
@@ -31,7 +33,10 @@ import (
 	pkgfrr "github.com/akam1o/arca-router/pkg/frr"
 	"github.com/akam1o/arca-router/pkg/logger"
 	"github.com/akam1o/arca-router/pkg/netconf"
+	"github.com/akam1o/arca-router/pkg/security"
 	pkgvpp "github.com/akam1o/arca-router/pkg/vpp"
+	googlegrpc "google.golang.org/grpc"
+	"google.golang.org/grpc/credentials"
 )
 
 var (
@@ -72,6 +77,10 @@ type daemonFlags struct {
 	hostKeyPath   string
 	userDBPath    string
 	grpcSocket    string
+	grpcListen    string
+	grpcTLSCert   string
+	grpcTLSKey    string
+	grpcClientCA  string
 	metricsListen string
 	webListen     string
 	snmpListen    string
@@ -158,6 +167,14 @@ func parseFlags() *daemonFlags {
 		"Path to user database")
 	flag.StringVar(&f.grpcSocket, "grpc-socket", "/run/arca-router/routerd.sock",
 		"Path to internal gRPC Unix socket")
+	flag.StringVar(&f.grpcListen, "grpc-listen", "",
+		"TCP listen address for the gRPC API (requires --grpc-tls-cert and --grpc-tls-key; Unix socket is used when empty)")
+	flag.StringVar(&f.grpcTLSCert, "grpc-tls-cert", "",
+		"gRPC server TLS certificate path for --grpc-listen")
+	flag.StringVar(&f.grpcTLSKey, "grpc-tls-key", "",
+		"gRPC server TLS private key path for --grpc-listen")
+	flag.StringVar(&f.grpcClientCA, "grpc-client-ca", "",
+		"CA certificate path for verifying gRPC client certificates (enables mTLS)")
 	flag.StringVar(&f.metricsListen, "metrics-listen", "",
 		"Prometheus metrics listen address (overrides system services prometheus config; disabled when empty and config disabled)")
 	flag.StringVar(&f.webListen, "web-listen", "",
@@ -407,16 +424,15 @@ func run(ctx context.Context, f *daemonFlags, log *logger.Logger) error {
 	}
 
 	// --- Step 9: Start gRPC API (for CLI) ---
-	log.Info("Starting gRPC API", slog.String("socket", f.grpcSocket))
-	if err := prepareGRPCSocketPath(f.grpcSocket); err != nil {
+	lis, grpcServerOptions, grpcTransport, err := listenGRPCAPI(f)
+	if err != nil {
 		return err
 	}
-
-	lis, err := listenSecureGRPCSocket(f.grpcSocket)
-	if err != nil {
-		return fmt.Errorf("listen on gRPC socket: %w", err)
-	}
 	defer func() { _ = lis.Close() }()
+	log.Info("Starting gRPC API",
+		slog.String("transport", grpcTransport),
+		slog.String("address", lis.Addr().String()),
+	)
 
 	grpcServer := nbgrpc.NewServer(eng, configStore, slog.Default())
 	grpcServer.SetInterfaceStateCollector(vppPlugin)
@@ -439,7 +455,7 @@ func run(ctx context.Context, f *daemonFlags, log *logger.Logger) error {
 
 	grpcErr := make(chan error, 1)
 	go func() {
-		grpcErr <- grpcServer.Serve(lis)
+		grpcErr <- grpcServer.ServeWithOptions(lis, grpcServerOptions...)
 	}()
 
 	// --- Step 10: Start metrics endpoint ---
@@ -547,6 +563,69 @@ func startNETCONFServer(
 		return nil, fmt.Errorf("start NETCONF server: %w", err)
 	}
 	return server, nil
+}
+
+func listenGRPCAPI(f *daemonFlags) (net.Listener, []googlegrpc.ServerOption, string, error) {
+	serverOptions, err := buildGRPCServerOptions(f)
+	if err != nil {
+		return nil, nil, "", err
+	}
+	if listenAddr := strings.TrimSpace(f.grpcListen); listenAddr != "" {
+		lis, err := net.Listen("tcp", listenAddr)
+		if err != nil {
+			return nil, nil, "", fmt.Errorf("listen on gRPC address %s: %w", listenAddr, err)
+		}
+		return lis, serverOptions, "tcp+tls", nil
+	}
+
+	if err := prepareGRPCSocketPath(f.grpcSocket); err != nil {
+		return nil, nil, "", err
+	}
+	lis, err := listenSecureGRPCSocket(f.grpcSocket)
+	if err != nil {
+		return nil, nil, "", fmt.Errorf("listen on gRPC socket: %w", err)
+	}
+	return lis, serverOptions, "unix", nil
+}
+
+func buildGRPCServerOptions(f *daemonFlags) ([]googlegrpc.ServerOption, error) {
+	if strings.TrimSpace(f.grpcListen) == "" {
+		if f.grpcTLSCert != "" || f.grpcTLSKey != "" || f.grpcClientCA != "" {
+			return nil, fmt.Errorf("gRPC TLS flags require --grpc-listen")
+		}
+		return nil, nil
+	}
+	if f.grpcTLSCert == "" || f.grpcTLSKey == "" {
+		return nil, fmt.Errorf("--grpc-listen requires --grpc-tls-cert and --grpc-tls-key")
+	}
+	tlsConfig, err := buildGRPCServerTLSConfig(f)
+	if err != nil {
+		return nil, err
+	}
+	return []googlegrpc.ServerOption{googlegrpc.Creds(credentials.NewTLS(tlsConfig))}, nil
+}
+
+func buildGRPCServerTLSConfig(f *daemonFlags) (*tls.Config, error) {
+	cert, err := tls.LoadX509KeyPair(f.grpcTLSCert, f.grpcTLSKey)
+	if err != nil {
+		return nil, fmt.Errorf("load gRPC server cert/key: %w", err)
+	}
+	cfg := &tls.Config{
+		Certificates: []tls.Certificate{cert},
+	}
+	if f.grpcClientCA != "" {
+		clientCAPEM, err := os.ReadFile(f.grpcClientCA)
+		if err != nil {
+			return nil, fmt.Errorf("read gRPC client CA: %w", err)
+		}
+		clientCAs := x509.NewCertPool()
+		if !clientCAs.AppendCertsFromPEM(clientCAPEM) {
+			return nil, fmt.Errorf("parse gRPC client CA")
+		}
+		cfg.ClientCAs = clientCAs
+		cfg.ClientAuth = tls.RequireAndVerifyClientCert
+	}
+	return security.ApplyTLSPolicy(cfg), nil
 }
 
 func prepareGRPCSocketPath(socketPath string) error {
