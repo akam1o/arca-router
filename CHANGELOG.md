@@ -2,6 +2,7 @@
 
 ## v0.9.x - NETCONF/YANG and Operational Safety (current)
 
+- **NETCONF rate limiter defaults**: direct rate limiter construction now fills default lockout thresholds and windows for nil or partial SSH config values without mutating caller config
 - **NETCONF session close lock cleanup**: session shutdown now removes successfully released datastore locks from session bookkeeping and reports the actual release count
 - **NETCONF session lock tracking hardening**: session lock bookkeeping now initializes missing lock maps on demand so hand-built embedded sessions can acquire locks without panicking
 - **NETCONF session manager defaults**: direct `SessionManager` construction now fills default SSH timeouts, max-session limits, and logger dependencies when embedded callers pass nil or partial config values

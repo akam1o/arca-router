@@ -5,6 +5,41 @@ import (
 	"time"
 )
 
+func TestNewRateLimiterDefaultsNilConfig(t *testing.T) {
+	rl := NewRateLimiter(nil)
+	defer rl.Stop()
+
+	if rl.config.IPFailureLimit != 3 {
+		t.Fatalf("IPFailureLimit = %d, want 3", rl.config.IPFailureLimit)
+	}
+	if rl.config.UserFailureLimit != 5 {
+		t.Fatalf("UserFailureLimit = %d, want 5", rl.config.UserFailureLimit)
+	}
+	if rl.config.LockoutDuration != 15*time.Minute {
+		t.Fatalf("LockoutDuration = %s, want 15m", rl.config.LockoutDuration)
+	}
+}
+
+func TestNewRateLimiterDefaultsPartialConfig(t *testing.T) {
+	config := &SSHConfig{IPFailureLimit: 7}
+
+	rl := NewRateLimiter(config)
+	defer rl.Stop()
+
+	if rl.config.IPFailureLimit != 7 {
+		t.Fatalf("IPFailureLimit = %d, want 7", rl.config.IPFailureLimit)
+	}
+	if rl.config.UserFailureLimit != 5 {
+		t.Fatalf("UserFailureLimit = %d, want 5", rl.config.UserFailureLimit)
+	}
+	if rl.config.IPLockoutWindow != 5*time.Minute {
+		t.Fatalf("IPLockoutWindow = %s, want 5m", rl.config.IPLockoutWindow)
+	}
+	if config.UserFailureLimit != 0 || config.IPLockoutWindow != 0 {
+		t.Fatalf("caller config mutated = %#v, want zero optional fields preserved", config)
+	}
+}
+
 func TestRateLimiterIPLockout(t *testing.T) {
 	config := &SSHConfig{
 		IPFailureLimit:  3,
