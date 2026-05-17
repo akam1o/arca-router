@@ -98,6 +98,9 @@ Focus: mature management-plane correctness and operator safety.
   - Schema-based semantic validation
   - Namespace-aware model traversal
   - XPath and subtree filter maturity
+  - XPath filtering intentionally remains a safe absolute-path subset in v0.9:
+    supported expressions are model-rooted paths with simple equality
+    predicates, and the standard NETCONF `:xpath` capability is not advertised
 - **NETCONF maturity**
   - Candidate/running semantics hardening
   - Capability advertisement accuracy
@@ -139,6 +142,11 @@ Focus: complete final pre-stable stabilization and compatibility work.
   - CLI and configuration compatibility policy
   - API versioning and deprecation policy
   - Supported VPP and FRR version matrix
+  - Full XPath 1.0 support, if required, should be introduced with a bounded
+    XPath engine, namespace-aware evaluation, expression size/depth limits,
+    evaluation timeouts, allowed-function controls, and external client
+    interoperability coverage before advertising the standard NETCONF `:xpath`
+    capability
 - **Long-run soak and failure testing**
   - HA failover soak
   - FRR and VPP restart recovery
