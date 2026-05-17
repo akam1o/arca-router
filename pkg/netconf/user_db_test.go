@@ -101,6 +101,38 @@ func TestNewUserDatabaseDefaultsNilLogger(t *testing.T) {
 	}
 }
 
+func TestUserDatabaseLifecycleMethodsNilReceiver(t *testing.T) {
+	var userDB *UserDatabase
+
+	userDB.SetAuditLogger(nil)
+	userDB.LogAuthSuccess("alice", "192.0.2.1")
+	userDB.LogAuthSuccessWithMethod("alice", "192.0.2.1", "publickey")
+	userDB.LogAuthFailure("alice", "192.0.2.1", "invalid_password")
+	userDB.LogAuthFailureWithMethod("alice", "192.0.2.1", "publickey", "key_not_found")
+
+	if err := userDB.HealthCheck(); err == nil {
+		t.Fatal("HealthCheck() error = nil, want database connection error")
+	}
+	if err := userDB.Close(); err != nil {
+		t.Fatalf("Close() error = %v", err)
+	}
+}
+
+func TestUserDatabaseLifecycleMethodsZeroValue(t *testing.T) {
+	userDB := &UserDatabase{}
+
+	userDB.SetAuditLogger(nil)
+	userDB.LogAuthSuccess("alice", "192.0.2.1")
+	userDB.LogAuthFailure("alice", "192.0.2.1", "invalid_password")
+
+	if err := userDB.HealthCheck(); err == nil {
+		t.Fatal("HealthCheck() error = nil, want database connection error")
+	}
+	if err := userDB.Close(); err != nil {
+		t.Fatalf("Close() error = %v", err)
+	}
+}
+
 func newTestUserDatabase(t *testing.T) *UserDatabase {
 	t.Helper()
 

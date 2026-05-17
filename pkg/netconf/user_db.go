@@ -469,6 +469,9 @@ func (udb *UserDatabase) VerifyPasswordWithReason(username, password string) (*U
 
 // SetAuditLogger sets the audit logger for persistent audit trail
 func (udb *UserDatabase) SetAuditLogger(logger *audit.Logger) {
+	if udb == nil {
+		return
+	}
 	udb.auditLogger = logger
 }
 
@@ -479,8 +482,16 @@ func (udb *UserDatabase) LogAuthSuccess(username, sourceIP string) {
 
 // LogAuthSuccessWithMethod logs a successful authentication event with specified method
 func (udb *UserDatabase) LogAuthSuccessWithMethod(username, sourceIP, method string) {
+	if udb == nil {
+		return
+	}
+	log := udb.log
+	if log == nil {
+		log = logger.New("netconf-userdb", logger.DefaultConfig())
+	}
+
 	// Log to structured logger (real-time monitoring)
-	udb.log.Info("Authentication successful",
+	log.Info("Authentication successful",
 		"event_type", "auth_success",
 		"username", username,
 		"source_ip", sourceIP,
@@ -491,7 +502,7 @@ func (udb *UserDatabase) LogAuthSuccessWithMethod(username, sourceIP, method str
 	if udb.auditLogger != nil {
 		ctx := context.Background()
 		if err := udb.auditLogger.LogAuthSuccess(ctx, username, sourceIP, method); err != nil {
-			udb.log.Warn("Failed to log auth success to audit datastore",
+			log.Warn("Failed to log auth success to audit datastore",
 				"username", username,
 				"error", err)
 		}
@@ -505,8 +516,16 @@ func (udb *UserDatabase) LogAuthFailure(username, sourceIP, reason string) {
 
 // LogAuthFailureWithMethod logs a failed authentication event with specified method
 func (udb *UserDatabase) LogAuthFailureWithMethod(username, sourceIP, method, reason string) {
+	if udb == nil {
+		return
+	}
+	log := udb.log
+	if log == nil {
+		log = logger.New("netconf-userdb", logger.DefaultConfig())
+	}
+
 	// Log to structured logger (real-time monitoring)
-	udb.log.Warn("Authentication failed",
+	log.Warn("Authentication failed",
 		"event_type", "auth_failure",
 		"username", username,
 		"source_ip", sourceIP,
@@ -518,7 +537,7 @@ func (udb *UserDatabase) LogAuthFailureWithMethod(username, sourceIP, method, re
 	if udb.auditLogger != nil {
 		ctx := context.Background()
 		if err := udb.auditLogger.LogAuthFailure(ctx, username, sourceIP, method, reason); err != nil {
-			udb.log.Warn("Failed to log auth failure to audit datastore",
+			log.Warn("Failed to log auth failure to audit datastore",
 				"username", username,
 				"error", err)
 		}
@@ -527,6 +546,9 @@ func (udb *UserDatabase) LogAuthFailureWithMethod(username, sourceIP, method, re
 
 // HealthCheck verifies the database connection is healthy
 func (udb *UserDatabase) HealthCheck() error {
+	if udb == nil {
+		return fmt.Errorf("database connection is nil")
+	}
 	if udb.db == nil {
 		return fmt.Errorf("database connection is nil")
 	}
@@ -549,6 +571,9 @@ func (udb *UserDatabase) HealthCheck() error {
 
 // Close closes the database connection
 func (udb *UserDatabase) Close() error {
+	if udb == nil {
+		return nil
+	}
 	if udb.db != nil {
 		return udb.db.Close()
 	}
