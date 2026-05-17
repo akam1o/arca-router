@@ -133,6 +133,18 @@ func TestUserDatabaseLifecycleMethodsZeroValue(t *testing.T) {
 	}
 }
 
+func TestUserDatabaseOperationsNilReceiver(t *testing.T) {
+	var userDB *UserDatabase
+
+	requireUserDatabaseOperationsUnavailable(t, userDB)
+}
+
+func TestUserDatabaseOperationsZeroValue(t *testing.T) {
+	userDB := &UserDatabase{}
+
+	requireUserDatabaseOperationsUnavailable(t, userDB)
+}
+
 func newTestUserDatabase(t *testing.T) *UserDatabase {
 	t.Helper()
 
@@ -143,6 +155,85 @@ func newTestUserDatabase(t *testing.T) *UserDatabase {
 	}
 	t.Cleanup(func() { _ = userDB.Close() })
 	return userDB
+}
+
+func requireUserDatabaseOperationsUnavailable(t *testing.T, userDB *UserDatabase) {
+	t.Helper()
+
+	passwordHash, err := auth.HashPassword("password")
+	if err != nil {
+		t.Fatalf("HashPassword() error = %v", err)
+	}
+
+	requireUserDatabaseConnectionError(t, userDB.Initialize())
+	requireUserDatabaseConnectionError(t, userDB.CreateUser("alice", passwordHash, RoleAdmin))
+	requireUserDatabaseConnectionError(t, userDB.UpdateUser("alice", "", RoleAdmin, true))
+	requireUserDatabaseConnectionError(t, userDB.DeleteUser("alice"))
+
+	if _, err := userDB.GetUser("alice"); err == nil {
+		t.Fatal("GetUser() error = nil, want database connection error")
+	} else {
+		requireUserDatabaseConnectionError(t, err)
+	}
+
+	if _, err := userDB.ListUsers(); err == nil {
+		t.Fatal("ListUsers() error = nil, want database connection error")
+	} else {
+		requireUserDatabaseConnectionError(t, err)
+	}
+
+	if _, err := userDB.ListUsersPaginated(10, 0); err == nil {
+		t.Fatal("ListUsersPaginated() error = nil, want database connection error")
+	} else {
+		requireUserDatabaseConnectionError(t, err)
+	}
+
+	if _, err := userDB.CountUsers(); err == nil {
+		t.Fatal("CountUsers() error = nil, want database connection error")
+	} else {
+		requireUserDatabaseConnectionError(t, err)
+	}
+
+	calls := capturePasswordVerification(t, false, nil)
+	if _, err := userDB.VerifyPassword("alice", "password"); err == nil || err.Error() != "authentication failed" {
+		t.Fatalf("VerifyPassword() error = %v, want authentication failed", err)
+	}
+	if _, reason, err := userDB.VerifyPasswordWithReason("alice", "password"); err == nil || reason != "user_not_found" {
+		t.Fatalf("VerifyPasswordWithReason() reason=%q error=%v, want user_not_found authentication failure", reason, err)
+	}
+	if len(*calls) != 2 {
+		t.Fatalf("password verification calls = %d, want 2", len(*calls))
+	}
+
+	requireUserDatabaseConnectionError(t, userDB.AddPublicKey("alice", "ssh-ed25519", "key-data", "SHA256:test", "test key"))
+	requireUserDatabaseConnectionError(t, userDB.RemovePublicKey("SHA256:test"))
+	requireUserDatabaseConnectionError(t, userDB.UpdatePublicKeyStatus("SHA256:test", false))
+
+	if _, err := userDB.GetPublicKey("SHA256:test"); err == nil {
+		t.Fatal("GetPublicKey() error = nil, want database connection error")
+	} else {
+		requireUserDatabaseConnectionError(t, err)
+	}
+
+	if _, err := userDB.ListPublicKeys("alice"); err == nil {
+		t.Fatal("ListPublicKeys() error = nil, want database connection error")
+	} else {
+		requireUserDatabaseConnectionError(t, err)
+	}
+
+	if _, reason, err := userDB.VerifyPublicKeyAuth("alice", "key-data"); err == nil || reason != "user_not_found" {
+		t.Fatalf("VerifyPublicKeyAuth() reason=%q error=%v, want user_not_found authentication failure", reason, err)
+	}
+}
+
+func requireUserDatabaseConnectionError(t *testing.T, err error) {
+	t.Helper()
+	if err == nil {
+		t.Fatal("error = nil, want database connection error")
+	}
+	if !strings.Contains(err.Error(), "database connection is nil") {
+		t.Fatalf("error = %v, want database connection error", err)
+	}
 }
 
 func weakPasswordHash(t *testing.T) string {

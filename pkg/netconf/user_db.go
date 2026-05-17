@@ -164,6 +164,11 @@ func restrictUserDatabaseFiles(path string) error {
 
 // Initialize initializes the database schema
 func (udb *UserDatabase) Initialize() error {
+	db, err := udb.database()
+	if err != nil {
+		return err
+	}
+
 	schema := `
 	CREATE TABLE IF NOT EXISTS users (
 		username      TEXT PRIMARY KEY,
@@ -193,12 +198,26 @@ func (udb *UserDatabase) Initialize() error {
 	CREATE INDEX IF NOT EXISTS idx_public_keys_enabled ON user_public_keys(enabled);
 	`
 
-	if _, err := udb.db.Exec(schema); err != nil {
+	if _, err := db.Exec(schema); err != nil {
 		return fmt.Errorf("failed to create schema: %w", err)
 	}
 
-	udb.log.Info("User database initialized", "path", udb.path)
+	udb.safeLog().Info("User database initialized", "path", udb.path)
 	return nil
+}
+
+func (udb *UserDatabase) database() (*sql.DB, error) {
+	if udb == nil || udb.db == nil {
+		return nil, fmt.Errorf("database connection is nil")
+	}
+	return udb.db, nil
+}
+
+func (udb *UserDatabase) safeLog() *logger.Logger {
+	if udb != nil && udb.log != nil {
+		return udb.log
+	}
+	return logger.New("netconf-userdb", logger.DefaultConfig())
 }
 
 // CreateUser creates a new user
@@ -215,16 +234,21 @@ func (udb *UserDatabase) CreateUser(username, passwordHash, role string) error {
 		return err
 	}
 
+	db, err := udb.database()
+	if err != nil {
+		return err
+	}
+
 	now := time.Now().Unix()
 	query := `INSERT INTO users (username, password_hash, role, created_at, updated_at, enabled)
 	          VALUES (?, ?, ?, ?, ?, 1)`
 
-	_, err := udb.db.Exec(query, username, passwordHash, role, now, now)
+	_, err = db.Exec(query, username, passwordHash, role, now, now)
 	if err != nil {
 		return fmt.Errorf("failed to create user: %w", err)
 	}
 
-	udb.log.Info("User created", "username", username, "role", role)
+	udb.safeLog().Info("User created", "username", username, "role", role)
 	return nil
 }
 
@@ -237,12 +261,17 @@ func validateStoredPasswordHash(passwordHash string) error {
 
 // GetUser retrieves a user by username
 func (udb *UserDatabase) GetUser(username string) (*User, error) {
+	db, err := udb.database()
+	if err != nil {
+		return nil, err
+	}
+
 	query := `SELECT username, password_hash, role, created_at, updated_at, enabled
 	          FROM users WHERE username = ?`
 
 	var user User
 	var enabled int
-	err := udb.db.QueryRow(query, username).Scan(
+	err = db.QueryRow(query, username).Scan(
 		&user.Username,
 		&user.PasswordHash,
 		&user.Role,
@@ -273,6 +302,11 @@ func (udb *UserDatabase) UpdateUser(username, passwordHash, role string, enabled
 		}
 	}
 
+	db, err := udb.database()
+	if err != nil {
+		return err
+	}
+
 	// Build update query dynamically
 	query := "UPDATE users SET updated_at = ?"
 	args := []interface{}{time.Now().Unix()}
@@ -291,7 +325,7 @@ func (udb *UserDatabase) UpdateUser(username, passwordHash, role string, enabled
 	query += " WHERE username = ?"
 	args = append(args, username)
 
-	result, err := udb.db.Exec(query, args...)
+	result, err := db.Exec(query, args...)
 	if err != nil {
 		return fmt.Errorf("failed to update user: %w", err)
 	}
@@ -304,14 +338,19 @@ func (udb *UserDatabase) UpdateUser(username, passwordHash, role string, enabled
 		return fmt.Errorf("user not found: %s", username)
 	}
 
-	udb.log.Info("User updated", "username", username)
+	udb.safeLog().Info("User updated", "username", username)
 	return nil
 }
 
 // DeleteUser deletes a user
 func (udb *UserDatabase) DeleteUser(username string) error {
+	db, err := udb.database()
+	if err != nil {
+		return err
+	}
+
 	query := "DELETE FROM users WHERE username = ?"
-	result, err := udb.db.Exec(query, username)
+	result, err := db.Exec(query, username)
 	if err != nil {
 		return fmt.Errorf("failed to delete user: %w", err)
 	}
@@ -324,7 +363,7 @@ func (udb *UserDatabase) DeleteUser(username string) error {
 		return fmt.Errorf("user not found: %s", username)
 	}
 
-	udb.log.Info("User deleted", "username", username)
+	udb.safeLog().Info("User deleted", "username", username)
 	return nil
 }
 
@@ -337,6 +376,11 @@ func (udb *UserDatabase) ListUsers() ([]User, error) {
 // ListUsersPaginated lists users with pagination support
 // limit=0 means no limit, offset=0 means start from beginning
 func (udb *UserDatabase) ListUsersPaginated(limit, offset int) ([]User, error) {
+	db, err := udb.database()
+	if err != nil {
+		return nil, err
+	}
+
 	query := `SELECT username, role, created_at, updated_at, enabled
 	          FROM users ORDER BY username`
 
@@ -346,7 +390,7 @@ func (udb *UserDatabase) ListUsersPaginated(limit, offset int) ([]User, error) {
 		args = append(args, limit, offset)
 	}
 
-	rows, err := udb.db.Query(query, args...)
+	rows, err := db.Query(query, args...)
 	if err != nil {
 		return nil, fmt.Errorf("failed to list users: %w", err)
 	}
@@ -376,9 +420,14 @@ func (udb *UserDatabase) ListUsersPaginated(limit, offset int) ([]User, error) {
 
 // CountUsers returns the total number of users
 func (udb *UserDatabase) CountUsers() (int, error) {
+	db, err := udb.database()
+	if err != nil {
+		return 0, err
+	}
+
 	var count int
 	query := "SELECT COUNT(*) FROM users"
-	err := udb.db.QueryRow(query).Scan(&count)
+	err = db.QueryRow(query).Scan(&count)
 	if err != nil {
 		return 0, fmt.Errorf("failed to count users: %w", err)
 	}
@@ -388,12 +437,14 @@ func (udb *UserDatabase) CountUsers() (int, error) {
 // VerifyPassword verifies a user's password
 // Returns generic "authentication failed" error to prevent user enumeration attacks
 func (udb *UserDatabase) VerifyPassword(username, password string) (*User, error) {
+	log := udb.safeLog()
+
 	// Get user from database
 	user, err := udb.GetUser(username)
 	if err != nil {
 		_, _ = verifyPasswordHash(password, dummyPasswordHash)
 		// Log for audit but return generic error to prevent user enumeration
-		udb.log.Warn("Authentication failed", "username", username, "reason", "user_not_found")
+		log.Warn("Authentication failed", "username", username, "reason", "user_not_found")
 		return nil, fmt.Errorf("authentication failed")
 	}
 
@@ -406,23 +457,23 @@ func (udb *UserDatabase) VerifyPassword(username, password string) (*User, error
 	// Verify password (constant-time comparison)
 	valid, err := verifyPasswordHash(password, hashToVerify)
 	if err != nil {
-		udb.log.Warn("Authentication failed", "username", username, "reason", "password_verification_error", "error", err)
+		log.Warn("Authentication failed", "username", username, "reason", "password_verification_error", "error", err)
 		return nil, fmt.Errorf("authentication failed")
 	}
 
 	if userDisabled {
 		// Log for audit but return generic error
-		udb.log.Warn("Authentication failed", "username", username, "reason", "user_disabled")
+		log.Warn("Authentication failed", "username", username, "reason", "user_disabled")
 		return nil, fmt.Errorf("authentication failed")
 	}
 
 	if !valid {
-		udb.log.Warn("Authentication failed", "username", username, "reason", "invalid_password")
+		log.Warn("Authentication failed", "username", username, "reason", "invalid_password")
 		return nil, fmt.Errorf("authentication failed")
 	}
 
 	// Success: log and return user (without password hash for security)
-	udb.log.Info("Authentication successful", "username", username, "role", user.Role)
+	log.Info("Authentication successful", "username", username, "role", user.Role)
 	user.PasswordHash = ""
 	return user, nil
 }
@@ -546,22 +597,20 @@ func (udb *UserDatabase) LogAuthFailureWithMethod(username, sourceIP, method, re
 
 // HealthCheck verifies the database connection is healthy
 func (udb *UserDatabase) HealthCheck() error {
-	if udb == nil {
-		return fmt.Errorf("database connection is nil")
-	}
-	if udb.db == nil {
-		return fmt.Errorf("database connection is nil")
+	db, err := udb.database()
+	if err != nil {
+		return err
 	}
 
 	// Ping the database to check connectivity
-	if err := udb.db.Ping(); err != nil {
+	if err := db.Ping(); err != nil {
 		return fmt.Errorf("database ping failed: %w", err)
 	}
 
 	// Verify we can query the schema
 	query := "SELECT name FROM sqlite_master WHERE type='table' AND name='users'"
 	var tableName string
-	err := udb.db.QueryRow(query).Scan(&tableName)
+	err = db.QueryRow(query).Scan(&tableName)
 	if err != nil {
 		return fmt.Errorf("failed to verify schema: %w", err)
 	}
@@ -593,6 +642,10 @@ func (udb *UserDatabase) AddPublicKey(username, algorithm, keyData, fingerprint,
 	if username == "" || algorithm == "" || keyData == "" || fingerprint == "" {
 		return fmt.Errorf("username, algorithm, key_data, and fingerprint are required")
 	}
+	db, err := udb.database()
+	if err != nil {
+		return err
+	}
 
 	// Verify user exists
 	if _, err := udb.GetUser(username); err != nil {
@@ -603,23 +656,28 @@ func (udb *UserDatabase) AddPublicKey(username, algorithm, keyData, fingerprint,
 	query := `INSERT INTO user_public_keys (username, algorithm, key_data, fingerprint, comment, enabled, created_at)
 	          VALUES (?, ?, ?, ?, ?, 1, ?)`
 
-	_, err := udb.db.Exec(query, username, algorithm, keyData, fingerprint, comment, now)
+	_, err = db.Exec(query, username, algorithm, keyData, fingerprint, comment, now)
 	if err != nil {
 		return fmt.Errorf("failed to add public key: %w", err)
 	}
 
-	udb.log.Info("Public key added", "username", username, "fingerprint", fingerprint, "algorithm", algorithm)
+	udb.safeLog().Info("Public key added", "username", username, "fingerprint", fingerprint, "algorithm", algorithm)
 	return nil
 }
 
 // GetPublicKey retrieves a specific public key by fingerprint
 func (udb *UserDatabase) GetPublicKey(fingerprint string) (*PublicKeyRecord, error) {
+	db, err := udb.database()
+	if err != nil {
+		return nil, err
+	}
+
 	query := `SELECT id, username, algorithm, key_data, fingerprint, comment, enabled, created_at
 	          FROM user_public_keys WHERE fingerprint = ?`
 
 	var record PublicKeyRecord
 	var enabled int
-	err := udb.db.QueryRow(query, fingerprint).Scan(
+	err = db.QueryRow(query, fingerprint).Scan(
 		&record.ID,
 		&record.Username,
 		&record.Algorithm,
@@ -642,10 +700,15 @@ func (udb *UserDatabase) GetPublicKey(fingerprint string) (*PublicKeyRecord, err
 
 // ListPublicKeys lists all public keys for a user
 func (udb *UserDatabase) ListPublicKeys(username string) ([]PublicKeyRecord, error) {
+	db, err := udb.database()
+	if err != nil {
+		return nil, err
+	}
+
 	query := `SELECT id, username, algorithm, key_data, fingerprint, comment, enabled, created_at
 	          FROM user_public_keys WHERE username = ? ORDER BY created_at DESC`
 
-	rows, err := udb.db.Query(query, username)
+	rows, err := db.Query(query, username)
 	if err != nil {
 		return nil, fmt.Errorf("failed to list public keys: %w", err)
 	}
@@ -676,8 +739,13 @@ func (udb *UserDatabase) ListPublicKeys(username string) ([]PublicKeyRecord, err
 
 // RemovePublicKey removes a public key by fingerprint
 func (udb *UserDatabase) RemovePublicKey(fingerprint string) error {
+	db, err := udb.database()
+	if err != nil {
+		return err
+	}
+
 	query := "DELETE FROM user_public_keys WHERE fingerprint = ?"
-	result, err := udb.db.Exec(query, fingerprint)
+	result, err := db.Exec(query, fingerprint)
 	if err != nil {
 		return fmt.Errorf("failed to remove public key: %w", err)
 	}
@@ -690,14 +758,19 @@ func (udb *UserDatabase) RemovePublicKey(fingerprint string) error {
 		return fmt.Errorf("public key not found: %s", fingerprint)
 	}
 
-	udb.log.Info("Public key removed", "fingerprint", fingerprint)
+	udb.safeLog().Info("Public key removed", "fingerprint", fingerprint)
 	return nil
 }
 
 // UpdatePublicKeyStatus updates the enabled status of a public key
 func (udb *UserDatabase) UpdatePublicKeyStatus(fingerprint string, enabled bool) error {
+	db, err := udb.database()
+	if err != nil {
+		return err
+	}
+
 	query := "UPDATE user_public_keys SET enabled = ? WHERE fingerprint = ?"
-	result, err := udb.db.Exec(query, boolToInt(enabled), fingerprint)
+	result, err := db.Exec(query, boolToInt(enabled), fingerprint)
 	if err != nil {
 		return fmt.Errorf("failed to update public key status: %w", err)
 	}
@@ -710,7 +783,7 @@ func (udb *UserDatabase) UpdatePublicKeyStatus(fingerprint string, enabled bool)
 		return fmt.Errorf("public key not found: %s", fingerprint)
 	}
 
-	udb.log.Info("Public key status updated", "fingerprint", fingerprint, "enabled", enabled)
+	udb.safeLog().Info("Public key status updated", "fingerprint", fingerprint, "enabled", enabled)
 	return nil
 }
 
@@ -719,6 +792,10 @@ func (udb *UserDatabase) UpdatePublicKeyStatus(fingerprint string, enabled bool)
 func (udb *UserDatabase) VerifyPublicKeyAuth(username, keyData string) (*User, string, error) {
 	// Get user from database
 	user, err := udb.GetUser(username)
+	if err != nil {
+		return nil, "user_not_found", fmt.Errorf("authentication failed")
+	}
+	db, err := udb.database()
 	if err != nil {
 		return nil, "user_not_found", fmt.Errorf("authentication failed")
 	}
@@ -733,7 +810,7 @@ func (udb *UserDatabase) VerifyPublicKeyAuth(username, keyData string) (*User, s
 	          WHERE username = ? AND key_data = ? AND enabled = 1`
 
 	var fingerprint string
-	err = udb.db.QueryRow(query, username, keyData).Scan(&fingerprint)
+	err = db.QueryRow(query, username, keyData).Scan(&fingerprint)
 	if err == sql.ErrNoRows {
 		return nil, "key_not_found", fmt.Errorf("authentication failed")
 	}
