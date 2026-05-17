@@ -9,7 +9,10 @@ import (
 	"github.com/antchfx/xpath"
 )
 
-const experimentalXPathDataPrefix = "arca_nc_data"
+const (
+	experimentalXPathDataPrefix = "arca_nc_data"
+	MaxXPathExpressionSize      = 4096
+)
 
 func usesExperimentalXPathEngine(filter *Filter) bool {
 	if filter == nil || normalizedFilterType(filter) != "xpath" {
@@ -97,6 +100,12 @@ func validateExperimentalXPathSelect(rpcName string, filter *Filter) *RPCError {
 	selectExpr := strings.TrimSpace(filter.Select)
 	if selectExpr == "" {
 		return ErrInvalidFilter(rpcName, "xpath filter requires select attribute")
+	}
+	if len(selectExpr) > MaxXPathExpressionSize {
+		return NewRPCError(ErrorTypeProtocol, ErrorTagInvalidValue,
+			fmt.Sprintf("xpath filter exceeds maximum expression size limit (%d bytes)", MaxXPathExpressionSize)).
+			WithPath(fmt.Sprintf("/rpc/%s/filter", rpcName)).
+			WithAppTag("size-limit")
 	}
 	if !strings.HasPrefix(selectExpr, "/") {
 		return ErrInvalidFilter(rpcName, fmt.Sprintf("invalid xpath filter: XPath must start with /: %s", selectExpr))
@@ -265,7 +274,57 @@ func parseExperimentalXPathDocument(rpcName string, xmlData []byte) (*xmlquery.N
 	if err != nil {
 		return nil, ErrInvalidFilter(rpcName, fmt.Sprintf("xpath evaluation input is not valid XML: %v", err))
 	}
+	if rpcErr := validateExperimentalXPathDocumentLimits(rpcName, doc); rpcErr != nil {
+		return nil, rpcErr
+	}
 	return doc, nil
+}
+
+func validateExperimentalXPathDocumentLimits(rpcName string, doc *xmlquery.Node) *RPCError {
+	dataRoot := experimentalXPathDataRoot(doc)
+	if dataRoot == nil {
+		return ErrOperationFailed("xpath filter failed to locate NETCONF data root")
+	}
+	elements := 0
+	for child := dataRoot.FirstChild; child != nil; child = child.NextSibling {
+		if rpcErr := validateExperimentalXPathNodeLimits(rpcName, child, 1, &elements); rpcErr != nil {
+			return rpcErr
+		}
+	}
+	return nil
+}
+
+func validateExperimentalXPathNodeLimits(rpcName string, node *xmlquery.Node, depth int, elements *int) *RPCError {
+	if node == nil {
+		return nil
+	}
+	if node.Type == xmlquery.ElementNode {
+		(*elements)++
+		if *elements > MaxXMLElements {
+			return NewRPCError(ErrorTypeProtocol, ErrorTagInvalidValue,
+				fmt.Sprintf("xpath evaluation input exceeds maximum element limit (%d)", MaxXMLElements)).
+				WithPath(fmt.Sprintf("/rpc/%s/filter", rpcName)).
+				WithAppTag("element-limit")
+		}
+		if depth > MaxXMLDepth {
+			return NewRPCError(ErrorTypeProtocol, ErrorTagInvalidValue,
+				fmt.Sprintf("xpath evaluation input exceeds maximum depth limit (%d)", MaxXMLDepth)).
+				WithPath(fmt.Sprintf("/rpc/%s/filter", rpcName)).
+				WithAppTag("depth-limit")
+		}
+		if len(node.Attr) > MaxXMLAttributes {
+			return NewRPCError(ErrorTypeProtocol, ErrorTagInvalidValue,
+				fmt.Sprintf("xpath evaluation input element %s exceeds maximum attribute limit (%d)", node.Data, MaxXMLAttributes)).
+				WithPath(fmt.Sprintf("/rpc/%s/filter", rpcName)).
+				WithAppTag("attribute-limit")
+		}
+	}
+	for child := node.FirstChild; child != nil; child = child.NextSibling {
+		if rpcErr := validateExperimentalXPathNodeLimits(rpcName, child, depth+1, elements); rpcErr != nil {
+			return rpcErr
+		}
+	}
+	return nil
 }
 
 func experimentalXPathResultIsNodeSet(expr *xpath.Expr, doc *xmlquery.Node) bool {
