@@ -140,12 +140,24 @@ def dispatch_xml(session, operation_xml, evidence=None, name=None):
     return reply
 
 
+def connect_ssh_compat(**kwargs):
+    try:
+        return manager.connect_ssh(
+            **kwargs,
+            errors_params={"raise_mode": RaiseMode.ALL},
+        )
+    except TypeError as err:
+        if "errors_params" not in str(err):
+            raise
+        return manager.connect_ssh(**kwargs)
+
+
 def main():
     args = parse_args()
     evidence = EvidenceWriter(args.evidence_dir) if args.evidence_dir else None
     locked = False
 
-    with manager.connect_ssh(
+    with connect_ssh_compat(
         host=args.host,
         port=args.port,
         username=args.username,
@@ -155,7 +167,6 @@ def main():
         allow_agent=False,
         device_params={"name": "default"},
         manager_params={"timeout": 10},
-        errors_params={"raise_mode": RaiseMode.ALL},
     ) as session:
         caps = {str(cap) for cap in session.server_capabilities}
         if evidence:
