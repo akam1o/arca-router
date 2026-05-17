@@ -372,6 +372,48 @@ func TestGetConfigExperimentalXPathFilterSupportsFunctions(t *testing.T) {
 	}
 }
 
+func TestGetConfigExperimentalXPathFilterReturnsEmptyData(t *testing.T) {
+	ds := &copyConfigDatastore{
+		running: &datastore.RunningConfig{ConfigText: strings.Join([]string{
+			`set interfaces ge-0/0/0 description "uplink"`,
+			"",
+		}, "\n")},
+	}
+
+	reply := copyConfigParsedRPC(t, ds, `<rpc message-id="101" xmlns="urn:ietf:params:xml:ns:netconf:base:1.0">
+		<get-config>
+			<source><running/></source>
+			<filter type="xpath" xmlns:if="urn:ietf:params:xml:ns:yang:ietf-interfaces" select="/if:interfaces/if:interface[contains(if:name, 'xe-0/0/0')]"/>
+		</get-config>
+	</rpc>`)
+	if len(reply.Errors) != 0 {
+		t.Fatalf("get-config empty experimental xpath errors = %#v, want none", reply.Errors)
+	}
+	if reply.Data == nil {
+		t.Fatal("get-config empty experimental xpath data = nil, want empty data")
+	}
+	if len(reply.Data.Content) != 0 {
+		t.Fatalf("get-config empty experimental xpath data = %q, want empty", reply.Data.Content)
+	}
+}
+
+func TestGetConfigExperimentalXPathFilterRejectsScalarAsInvalidValue(t *testing.T) {
+	ds := &copyConfigDatastore{
+		running: &datastore.RunningConfig{ConfigText: strings.Join([]string{
+			`set interfaces ge-0/0/0 description "uplink"`,
+			"",
+		}, "\n")},
+	}
+
+	reply := copyConfigParsedRPC(t, ds, `<rpc message-id="101" xmlns="urn:ietf:params:xml:ns:netconf:base:1.0">
+		<get-config>
+			<source><running/></source>
+			<filter type="xpath" xmlns:if="urn:ietf:params:xml:ns:yang:ietf-interfaces" select="/if:interfaces/if:interface = 'ge-0/0/0'"/>
+		</get-config>
+	</rpc>`)
+	assertXPathInvalidValue(t, reply, "/rpc/get-config/filter")
+}
+
 func TestEditConfigStartupTargetRejectedAsUnsupported(t *testing.T) {
 	reply := copyConfigParsedRPC(t, &copyConfigDatastore{}, `<rpc message-id="101" xmlns="urn:ietf:params:xml:ns:netconf:base:1.0">
 		<edit-config>
@@ -720,6 +762,21 @@ func assertStartupUnsupported(t *testing.T, reply *RPCReply, wantPath string) {
 	}
 	if err.ErrorInfo == nil || err.ErrorInfo.BadElement != DatastoreStartup {
 		t.Fatalf("error info = %#v, want bad-element startup", err.ErrorInfo)
+	}
+}
+
+func assertXPathInvalidValue(t *testing.T, reply *RPCReply, wantPath string) {
+	t.Helper()
+
+	if len(reply.Errors) != 1 {
+		t.Fatalf("reply errors = %d, want 1", len(reply.Errors))
+	}
+	err := reply.Errors[0]
+	if err.ErrorTag != ErrorTagInvalidValue {
+		t.Fatalf("error tag = %s, want %s", err.ErrorTag, ErrorTagInvalidValue)
+	}
+	if err.ErrorPath != wantPath {
+		t.Fatalf("error path = %q, want %s", err.ErrorPath, wantPath)
 	}
 }
 
