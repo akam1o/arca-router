@@ -409,13 +409,49 @@ func TestFilterMatchesEnhancedXPathPath(t *testing.T) {
 }
 
 func TestFilterMatchesEnhancedPrefixedXPathPath(t *testing.T) {
-	filter := &Filter{Type: "xpath", Select: "/if:interfaces/if:interface[if:name='ge-0/0/0']"}
+	filter := &Filter{
+		Type:   "xpath",
+		Select: "/if:interfaces/if:interface[if:name='ge-0/0/0']",
+		Attrs: []xml.Attr{
+			{Name: xml.Name{Space: "xmlns", Local: "if"}, Value: IETFInterfacesNS},
+		},
+	}
 
 	if !filterMatchesEnhanced(filter, []string{"interfaces"}) {
 		t.Fatal("filterMatchesEnhanced() = false, want true for selected prefixed interfaces branch")
 	}
 	if filterMatchesEnhanced(filter, []string{"protocols"}) {
 		t.Fatal("filterMatchesEnhanced() = true, want false for unrelated branch")
+	}
+}
+
+func TestFilterMatchesEnhancedRejectsInvalidXPathNamespace(t *testing.T) {
+	tests := []struct {
+		name   string
+		filter *Filter
+	}{
+		{
+			name:   "undeclared namespace prefix",
+			filter: &Filter{Type: "xpath", Select: "/if:interfaces"},
+		},
+		{
+			name: "namespace mismatch",
+			filter: &Filter{
+				Type:   "xpath",
+				Select: "/rt:interfaces",
+				Attrs: []xml.Attr{
+					{Name: xml.Name{Space: "xmlns", Local: "rt"}, Value: IETFRoutingNS},
+				},
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if filterMatchesEnhanced(tt.filter, []string{"interfaces"}) {
+				t.Fatal("filterMatchesEnhanced() = true, want false for invalid XPath namespace")
+			}
+		})
 	}
 }
 

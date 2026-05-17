@@ -2,6 +2,7 @@
 
 ## v0.9.x - NETCONF/YANG and Operational Safety (current)
 
+- **NETCONF output XPath namespace validation**: config and operational output filtering now parses XPath filters with declared namespace context instead of silently accepting undeclared or mismatched prefixes
 - **NETCONF YANG path namespace validation**: direct YANG element path validation now rejects undeclared or mismatched XPath namespace prefixes and accepts explicit namespace declaration context
 - **NETCONF filter attribute validation**: filter validation now rejects empty direct attribute names before reporting unknown attributes
 - **NETCONF namespace declaration validation**: XML helpers now reject empty-prefix namespace declarations from direct attribute construction before malformed `xmlns:` output can be produced

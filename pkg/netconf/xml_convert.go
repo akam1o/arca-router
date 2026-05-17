@@ -430,10 +430,7 @@ func writeRoutingOptionsXML(buf *bytes.Buffer, ro *config.RoutingOptions, filter
 }
 
 func outputXPathFilter(filter *Filter) *XPathFilter {
-	if filter == nil || normalizedFilterType(filter) != "xpath" {
-		return nil
-	}
-	xpathFilter, err := ParseXPathFilter(strings.TrimSpace(filter.Select))
+	xpathFilter, err := parseFilterXPathWithNamespaces(filter)
 	if err != nil {
 		return nil
 	}

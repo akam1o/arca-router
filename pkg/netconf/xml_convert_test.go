@@ -1,6 +1,8 @@
 package netconf
 
 import (
+	"bytes"
+	"encoding/xml"
 	"strings"
 	"testing"
 
@@ -133,6 +135,62 @@ func TestConfigToXMLWithWhitespaceXPathFilterType(t *testing.T) {
 	}
 	if strings.Contains(xmlStr, "ge-0/0/1") || strings.Contains(xmlStr, "peer") {
 		t.Fatalf("ConfigToXML() included predicate-mismatched interface:\n%s", xmlStr)
+	}
+}
+
+func TestConfigToXMLWithPrefixedXPathFilter(t *testing.T) {
+	cfg := &config.Config{
+		System: &config.SystemConfig{HostName: "router1"},
+		Interfaces: map[string]*config.Interface{
+			"ge-0/0/0": {},
+			"ge-0/0/1": {},
+		},
+	}
+	filter := &Filter{
+		Type:   "xpath",
+		Select: "/if:interfaces/if:interface[if:name='ge-0/0/0']",
+		Attrs: []xml.Attr{
+			{Name: xml.Name{Space: "xmlns", Local: "if"}, Value: IETFInterfacesNS},
+		},
+	}
+
+	xmlData, err := ConfigToXML(cfg, filter)
+	if err != nil {
+		t.Fatalf("ConfigToXML() error = %v", err)
+	}
+	xmlStr := string(xmlData)
+	if strings.Contains(xmlStr, "<system") {
+		t.Fatalf("ConfigToXML() included unrelated system section:\n%s", xmlStr)
+	}
+	if !strings.Contains(xmlStr, "ge-0/0/0") {
+		t.Fatalf("ConfigToXML() missing prefixed XPath interface match:\n%s", xmlStr)
+	}
+	if strings.Contains(xmlStr, "ge-0/0/1") {
+		t.Fatalf("ConfigToXML() included predicate-mismatched interface:\n%s", xmlStr)
+	}
+}
+
+func TestConfigToXMLRejectsMismatchedPrefixedXPathFilter(t *testing.T) {
+	cfg := &config.Config{
+		System: &config.SystemConfig{HostName: "router1"},
+		Interfaces: map[string]*config.Interface{
+			"ge-0/0/0": {},
+		},
+	}
+	filter := &Filter{
+		Type:   "xpath",
+		Select: "/rt:interfaces",
+		Attrs: []xml.Attr{
+			{Name: xml.Name{Space: "xmlns", Local: "rt"}, Value: IETFRoutingNS},
+		},
+	}
+
+	xmlData, err := ConfigToXML(cfg, filter)
+	if err != nil {
+		t.Fatalf("ConfigToXML() error = %v", err)
+	}
+	if len(bytes.TrimSpace(xmlData)) != 0 {
+		t.Fatalf("ConfigToXML() = %q, want empty output for mismatched namespace", xmlData)
 	}
 }
 
