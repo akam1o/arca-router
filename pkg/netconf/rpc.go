@@ -805,18 +805,18 @@ func (f *Filter) Validate(rpcName string) error {
 	}
 
 	// Check filter type
-	f.Type = strings.TrimSpace(f.Type)
-	if f.Type == "" {
+	filterType := normalizedFilterType(f)
+	if filterType == "" {
 		// Default to subtree if not specified
-		f.Type = "subtree"
+		filterType = "subtree"
 	}
 
-	switch f.Type {
+	switch filterType {
 	case "xpath":
 		return f.validateXPathFilter(rpcName)
 	case "subtree":
 	default:
-		return ErrUnsupportedFilterType(rpcName, f.Type)
+		return ErrUnsupportedFilterType(rpcName, filterType)
 	}
 
 	// Validate subtree filter content (basic check)
@@ -858,7 +858,6 @@ func (f *Filter) validateXPathFilter(rpcName string) error {
 			return ErrInvalidFilter(rpcName, fmt.Sprintf("unsupported xpath filter path: %v", err))
 		}
 	}
-	f.Select = selectExpr
 	return nil
 }
 

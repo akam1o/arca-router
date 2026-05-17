@@ -935,6 +935,39 @@ func TestFilterValidate(t *testing.T) {
 	}
 }
 
+func TestFilterValidateDoesNotMutateFilter(t *testing.T) {
+	tests := []struct {
+		name   string
+		filter *Filter
+	}{
+		{
+			name:   "default subtree keeps empty type",
+			filter: &Filter{Content: []byte("<interfaces/>")},
+		},
+		{
+			name:   "xpath keeps raw type and select",
+			filter: &Filter{Type: "\n xpath \t", Select: "\n /interfaces \t"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			originalType := tt.filter.Type
+			originalSelect := tt.filter.Select
+
+			if err := tt.filter.Validate("get-config"); err != nil {
+				t.Fatalf("Validate() error = %v", err)
+			}
+			if tt.filter.Type != originalType {
+				t.Fatalf("Validate() Type = %q, want %q", tt.filter.Type, originalType)
+			}
+			if tt.filter.Select != originalSelect {
+				t.Fatalf("Validate() Select = %q, want %q", tt.filter.Select, originalSelect)
+			}
+		})
+	}
+}
+
 func TestValidateFilterDepthAndSizeTrimsFilterType(t *testing.T) {
 	filter := &Filter{Type: "\n xpath \t", Select: "interfaces"}
 
