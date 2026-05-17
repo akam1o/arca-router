@@ -1509,29 +1509,7 @@ func (sh *interactiveShell) writeConfigurationBackup(path, text string) error {
 }
 
 func writeConfigBackupFile(path, text string) error {
-	if strings.TrimSpace(path) == "" {
-		return fmt.Errorf("backup path must not be empty")
-	}
-	data := []byte(text)
-	if len(data) == 0 || data[len(data)-1] != '\n' {
-		data = append(data, '\n')
-	}
-	file, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
-	if err != nil {
-		return fmt.Errorf("create backup file: %w", err)
-	}
-	var writeErr error
-	if _, err := file.Write(data); err != nil {
-		writeErr = err
-	}
-	closeErr := file.Close()
-	if writeErr != nil {
-		return fmt.Errorf("write backup file: %w", writeErr)
-	}
-	if closeErr != nil {
-		return fmt.Errorf("close backup file: %w", closeErr)
-	}
-	return nil
+	return pkgconfig.WriteConfigBackupFile(path, text)
 }
 
 func validateConfigurationText(text string) error {
