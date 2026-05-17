@@ -2,7 +2,9 @@ package engine
 
 import (
 	"context"
+	"errors"
 	"log/slog"
+	"strings"
 	"testing"
 
 	"github.com/akam1o/arca-router/internal/model"
@@ -141,6 +143,70 @@ func TestApplyDiffIsIsolatedBetweenPlugins(t *testing.T) {
 	}
 }
 
+func TestApplyErrorReportsRollbackSucceeded(t *testing.T) {
+	first := &scriptedPlugin{name: "first"}
+	second := &scriptedPlugin{name: "second", applyErr: errors.New("apply boom")}
+	eng := NewEngine([]Plugin{first, second}, slog.Default())
+	eng.InitializeRunning(&model.RouterConfig{
+		System:     &model.SystemConfig{HostName: "router1"},
+		Interfaces: map[string]*model.InterfaceConfig{},
+	}, 1)
+	candidate := &model.RouterConfig{
+		System:     &model.SystemConfig{HostName: "router2"},
+		Interfaces: map[string]*model.InterfaceConfig{},
+	}
+
+	err := eng.Apply(context.Background(), candidate, "alice", "test")
+	var applyErr *ApplyError
+	if !errors.As(err, &applyErr) {
+		t.Fatalf("Apply() error = %T %v, want ApplyError", err, err)
+	}
+	if applyErr.Plugin != "second" || applyErr.Phase != "apply" || !applyErr.RollbackAttempted || !applyErr.RollbackSucceeded {
+		t.Fatalf("ApplyError = %#v, want second apply with successful rollback", applyErr)
+	}
+	if len(applyErr.RollbackDiagnostics) != 0 {
+		t.Fatalf("rollback diagnostics = %#v, want none", applyErr.RollbackDiagnostics)
+	}
+	if !strings.Contains(err.Error(), "rollback succeeded") || !strings.Contains(err.Error(), "apply boom") {
+		t.Fatalf("Apply() error = %v, want rollback success and apply cause", err)
+	}
+	if first.rollbackCalls != 1 || second.rollbackCalls != 0 {
+		t.Fatalf("rollback calls first/second = %d/%d, want 1/0", first.rollbackCalls, second.rollbackCalls)
+	}
+	if got := eng.Running().System.HostName; got != "router1" {
+		t.Fatalf("engine running hostname = %q, want unchanged router1", got)
+	}
+}
+
+func TestApplyErrorReportsRollbackFailure(t *testing.T) {
+	first := &scriptedPlugin{name: "first", rollbackErr: errors.New("undo failed")}
+	second := &scriptedPlugin{name: "second", applyErr: errors.New("apply boom")}
+	eng := NewEngine([]Plugin{first, second}, slog.Default())
+	eng.InitializeRunning(&model.RouterConfig{
+		System:     &model.SystemConfig{HostName: "router1"},
+		Interfaces: map[string]*model.InterfaceConfig{},
+	}, 1)
+	candidate := &model.RouterConfig{
+		System:     &model.SystemConfig{HostName: "router2"},
+		Interfaces: map[string]*model.InterfaceConfig{},
+	}
+
+	err := eng.Apply(context.Background(), candidate, "alice", "test")
+	var applyErr *ApplyError
+	if !errors.As(err, &applyErr) {
+		t.Fatalf("Apply() error = %T %v, want ApplyError", err, err)
+	}
+	if applyErr.RollbackSucceeded || len(applyErr.RollbackDiagnostics) != 1 {
+		t.Fatalf("ApplyError = %#v, want failed rollback diagnostic", applyErr)
+	}
+	if !strings.Contains(applyErr.RollbackDiagnostics[0], "plugin first rollback failed: undo failed") {
+		t.Fatalf("rollback diagnostics = %#v, want plugin failure detail", applyErr.RollbackDiagnostics)
+	}
+	if !strings.Contains(err.Error(), "rollback failed") || !strings.Contains(err.Error(), "undo failed") {
+		t.Fatalf("Apply() error = %v, want rollback failure detail", err)
+	}
+}
+
 type mutatingDiffPlugin struct{}
 
 func (p *mutatingDiffPlugin) Name() string { return "mutating" }
@@ -212,4 +278,37 @@ func diffHostnames(diff *ConfigDiff) (string, string) {
 		newHost = diff.NewConfig.System.HostName
 	}
 	return oldHost, newHost
+}
+
+type scriptedPlugin struct {
+	name          string
+	validateErr   error
+	applyErr      error
+	rollbackErr   error
+	validateCalls int
+	applyCalls    int
+	rollbackCalls int
+}
+
+func (p *scriptedPlugin) Name() string { return p.name }
+
+func (p *scriptedPlugin) Init(context.Context) error { return nil }
+
+func (p *scriptedPlugin) Close() error { return nil }
+
+func (p *scriptedPlugin) HealthCheck(context.Context) error { return nil }
+
+func (p *scriptedPlugin) ValidateChanges(context.Context, *ConfigDiff) error {
+	p.validateCalls++
+	return p.validateErr
+}
+
+func (p *scriptedPlugin) ApplyChanges(context.Context, *ConfigDiff) error {
+	p.applyCalls++
+	return p.applyErr
+}
+
+func (p *scriptedPlugin) RollbackChanges(context.Context, *ConfigDiff) error {
+	p.rollbackCalls++
+	return p.rollbackErr
 }

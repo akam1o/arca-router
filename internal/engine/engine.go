@@ -6,8 +6,10 @@ package engine
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
+	"strings"
 	"sync"
 
 	"github.com/akam1o/arca-router/internal/model"
@@ -22,6 +24,49 @@ type Engine struct {
 	plugins []Plugin
 	log     *slog.Logger
 	version uint64
+}
+
+// ApplyError describes a failed configuration apply phase with rollback status.
+type ApplyError struct {
+	Plugin              string
+	Phase               string
+	RollbackAttempted   bool
+	RollbackSucceeded   bool
+	RollbackDiagnostics []string
+	Err                 error
+}
+
+func (e *ApplyError) Error() string {
+	if e == nil {
+		return ""
+	}
+	phase := e.Phase
+	if phase == "" {
+		phase = "apply"
+	}
+	msg := fmt.Sprintf("plugin %s %s failed", e.Plugin, phase)
+	if e.RollbackAttempted {
+		if e.RollbackSucceeded {
+			msg += " (rollback succeeded)"
+		} else {
+			msg += " (rollback failed"
+			if len(e.RollbackDiagnostics) > 0 {
+				msg += ": " + strings.Join(e.RollbackDiagnostics, "; ")
+			}
+			msg += ")"
+		}
+	}
+	if e.Err != nil {
+		msg += ": " + e.Err.Error()
+	}
+	return msg
+}
+
+func (e *ApplyError) Unwrap() error {
+	if e == nil {
+		return nil
+	}
+	return e.Err
 }
 
 // NewEngine creates a new Engine with the given plugins and logger.
@@ -142,8 +187,16 @@ func (e *Engine) Apply(ctx context.Context, candidate *model.RouterConfig, autho
 			e.log.Error("Plugin apply failed, initiating rollback",
 				slog.String("plugin", p.Name()),
 				slog.Any("error", err))
-			tx.rollback(ctx)
-			return fmt.Errorf("plugin %s apply failed (rolled back): %w", p.Name(), err)
+			rollbackErr := tx.rollback(ctx)
+			diagnostics := rollbackDiagnostics(rollbackErr)
+			return &ApplyError{
+				Plugin:              p.Name(),
+				Phase:               "apply",
+				RollbackAttempted:   true,
+				RollbackSucceeded:   rollbackErr == nil,
+				RollbackDiagnostics: diagnostics,
+				Err:                 err,
+			}
 		}
 		tx.applied = append(tx.applied, appliedPlugin{
 			plugin: p,
@@ -183,15 +236,36 @@ type appliedPlugin struct {
 	diff   *ConfigDiff
 }
 
-func (t *transaction) rollback(ctx context.Context) {
+func (t *transaction) rollback(ctx context.Context) error {
 	// Rollback in reverse order
+	var rollbackErrs []error
 	for i := len(t.applied) - 1; i >= 0; i-- {
 		applied := t.applied[i]
 		p := applied.plugin
 		if err := p.RollbackChanges(ctx, applied.diff); err != nil {
+			rollbackErrs = append(rollbackErrs, fmt.Errorf("plugin %s rollback failed: %w", p.Name(), err))
 			t.log.Error("Plugin rollback failed (manual intervention may be required)",
 				slog.String("plugin", p.Name()),
 				slog.Any("error", err))
 		}
 	}
+	return errors.Join(rollbackErrs...)
+}
+
+func rollbackDiagnostics(err error) []string {
+	if err == nil {
+		return nil
+	}
+	joined, ok := err.(interface{ Unwrap() []error })
+	if !ok {
+		return []string{err.Error()}
+	}
+	errs := joined.Unwrap()
+	diagnostics := make([]string, 0, len(errs))
+	for _, rollbackErr := range errs {
+		if rollbackErr != nil {
+			diagnostics = append(diagnostics, rollbackErr.Error())
+		}
+	}
+	return diagnostics
 }
