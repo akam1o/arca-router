@@ -404,7 +404,7 @@ arca-router uses GitHub Actions for continuous integration and deployment.
    - Uploads artifacts
 
 2. **verify-packages** - Test packages on multiple distros
-   - Matrix: Debian 12, Ubuntu 22.04, Rocky Linux 9
+   - Matrix: Debian 12/13, Ubuntu 24.04, Rocky Linux 9
    - Installs packages
    - Verifies binaries work
    - Checks systemd unit files

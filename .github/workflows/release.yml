@@ -63,9 +63,6 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - runner: ubuntu-22.04
-            deb_release: 1~ubuntu22.04
-            artifact_name: deb-ubuntu22.04
           - runner: ubuntu-24.04
             deb_release: 1~ubuntu24.04
             artifact_name: deb-ubuntu24.04
@@ -271,9 +268,6 @@ jobs:
     strategy:
       matrix:
         os:
-          - image: ubuntu:22.04
-            type: deb
-            deb_suffix: ubuntu22.04
           - image: ubuntu:24.04
             type: deb
             deb_suffix: ubuntu24.04

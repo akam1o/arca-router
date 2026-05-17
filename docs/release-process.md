@@ -154,7 +154,7 @@ Detailed future scope is maintained in [`ROADMAP.md`](../ROADMAP.md).
 - [ ] **Package testing**: Verify on all supported distros
   - Debian 12 (Bookworm)
   - Debian 13 (Trixie)
-  - Ubuntu 22.04 LTS / 24.04 LTS
+  - Ubuntu 24.04 LTS
   - RHEL 9 / AlmaLinux 9 / Rocky Linux 9
 
 ### 3. Documentation
@@ -557,7 +557,7 @@ git push origin main v0.10.0
 
 Check which distro failed:
 - Debian 12 / Debian 13
-- Ubuntu 22.04 / Ubuntu 24.04
+- Ubuntu 24.04
 - Rocky Linux 9
 
 Common causes:
