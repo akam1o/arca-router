@@ -95,6 +95,22 @@ func TestMarshalHelloNil(t *testing.T) {
 	}
 }
 
+func TestMarshalHelloRejectsOversizedXML(t *testing.T) {
+	hello := &Hello{}
+	hello.Capabilities.Capability = []string{strings.Repeat("x", MaxXMLSize)}
+
+	data, err := MarshalHello(hello)
+	if err == nil {
+		t.Fatal("MarshalHello() error = nil, want size limit error")
+	}
+	if data != nil {
+		t.Fatalf("MarshalHello() data length = %d, want nil", len(data))
+	}
+	if !strings.Contains(err.Error(), "XML size exceeds maximum") {
+		t.Fatalf("MarshalHello() error = %v, want size limit error", err)
+	}
+}
+
 func TestUnmarshalClientHello(t *testing.T) {
 	clientHelloXML := `<?xml version="1.0" encoding="UTF-8"?>
 <hello xmlns="urn:ietf:params:xml:ns:netconf:base:1.0">

@@ -61,7 +61,11 @@ func MarshalHello(hello *Hello) ([]byte, error) {
 
 	// Add XML declaration
 	xmlDecl := []byte(`<?xml version="1.0" encoding="UTF-8"?>` + "\n")
-	return append(xmlDecl, data...), nil
+	result := append(xmlDecl, data...)
+	if len(result) > MaxXMLSize {
+		return nil, fmt.Errorf("marshal hello: XML size exceeds maximum (%d bytes)", MaxXMLSize)
+	}
+	return result, nil
 }
 
 // UnmarshalHello unmarshals XML data into a Hello message
