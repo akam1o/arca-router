@@ -14,7 +14,7 @@ permissions:
 jobs:
   ncclient:
     name: ncclient interop
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
 
     steps:
     - name: Checkout code
@@ -111,7 +111,7 @@ jobs:
 
   ncclient-standard-xpath:
     name: ncclient standard xpath interop
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
 
     steps:
     - name: Checkout code
@@ -208,7 +208,7 @@ jobs:
 
   junos-eznc:
     name: Junos PyEZ smoke
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
 
     steps:
