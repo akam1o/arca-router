@@ -165,6 +165,24 @@ func TestSessionAddLockInitializesNilTrackingMap(t *testing.T) {
 	}
 }
 
+func TestSessionGetLocksReturnsSortedLocks(t *testing.T) {
+	session := &Session{}
+	session.AddLock("running")
+	session.AddLock("candidate")
+	session.AddLock("startup")
+
+	locks := session.GetLocks()
+	want := []string{"candidate", "running", "startup"}
+	if len(locks) != len(want) {
+		t.Fatalf("GetLocks() = %#v, want %#v", locks, want)
+	}
+	for i := range want {
+		if locks[i] != want[i] {
+			t.Fatalf("GetLocks() = %#v, want %#v", locks, want)
+		}
+	}
+}
+
 func TestSessionManagerNilReceiverMethods(t *testing.T) {
 	var sm *SessionManager
 
