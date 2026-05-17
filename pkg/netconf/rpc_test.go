@@ -1143,6 +1143,32 @@ func TestValidateFilterDepthAndSizeTrimsFilterType(t *testing.T) {
 	}
 }
 
+func TestValidateFilterDepthAndSizeUsesXPathNamespaceContext(t *testing.T) {
+	valid := &Filter{
+		Type:   "xpath",
+		Select: "/if:interfaces",
+		Attrs: []xml.Attr{
+			{Name: xml.Name{Space: "xmlns", Local: "if"}, Value: IETFInterfacesNS},
+		},
+	}
+	if err := ValidateFilterDepthAndSize("get-config", valid); err != nil {
+		t.Fatalf("ValidateFilterDepthAndSize() valid prefix error = %v", err)
+	}
+
+	invalid := &Filter{Type: "xpath", Select: "/if:interfaces"}
+	err := ValidateFilterDepthAndSize("get-config", invalid)
+	if err == nil {
+		t.Fatal("ValidateFilterDepthAndSize() error = nil, want undeclared namespace error")
+	}
+	rpcErr, ok := err.(*RPCError)
+	if !ok {
+		t.Fatalf("ValidateFilterDepthAndSize() error = %T, want *RPCError", err)
+	}
+	if rpcErr.ErrorTag != ErrorTagInvalidValue {
+		t.Fatalf("ValidateFilterDepthAndSize() error tag = %s, want %s", rpcErr.ErrorTag, ErrorTagInvalidValue)
+	}
+}
+
 func TestParseSizeLimit(t *testing.T) {
 	// Create a large XML (> 10MB)
 	largeXML := `<rpc message-id="101" xmlns="urn:ietf:params:xml:ns:netconf:base:1.0"><get-config>`

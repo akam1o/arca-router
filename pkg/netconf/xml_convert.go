@@ -3296,7 +3296,7 @@ func ValidateFilterDepthAndSize(rpcName string, filter *Filter) error {
 		return nil
 	}
 	if normalizedFilterType(filter) == "xpath" {
-		return validateXPathFilterDepthAndSize(rpcName, filter.Select)
+		return validateXPathFilterDepthAndSize(rpcName, filter)
 	}
 	if len(filter.Content) == 0 {
 		return nil
@@ -3323,7 +3323,11 @@ func ValidateFilterDepthAndSize(rpcName string, filter *Filter) error {
 	return nil
 }
 
-func validateXPathFilterDepthAndSize(rpcName, selectExpr string) error {
+func validateXPathFilterDepthAndSize(rpcName string, filter *Filter) error {
+	selectExpr := ""
+	if filter != nil {
+		selectExpr = filter.Select
+	}
 	selectExpr = strings.TrimSpace(selectExpr)
 	if len(selectExpr) > MaxXMLSize {
 		return NewRPCError(ErrorTypeProtocol, ErrorTagInvalidValue,
@@ -3332,7 +3336,7 @@ func validateXPathFilterDepthAndSize(rpcName, selectExpr string) error {
 			WithAppTag("size-limit")
 	}
 
-	xpathFilter, err := ParseXPathFilter(selectExpr)
+	xpathFilter, err := parseFilterXPathWithNamespaces(filter)
 	if err != nil {
 		return ErrInvalidFilter(rpcName, fmt.Sprintf("invalid xpath filter: %v", err))
 	}
