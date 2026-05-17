@@ -130,6 +130,72 @@ func TestGetOperationalDataExperimentalXPathFilterSupportsFunctions(t *testing.T
 	}
 }
 
+func TestBuildOperationalDataFiltersIETFRoutingStateRouteXPathPredicates(t *testing.T) {
+	cfg := config.NewConfig()
+	cfg.RoutingOptions = &config.RoutingOptions{
+		StaticRoutes: []*config.StaticRoute{
+			{Prefix: "0.0.0.0/0", NextHop: "192.0.2.254", Distance: 5},
+			{Prefix: "198.51.100.0/24", NextHop: "192.0.2.253", Distance: 20},
+		},
+	}
+	filter := &Filter{Type: "xpath", Select: "/routing/routing-state/routes/route[destination-prefix='0.0.0.0/0'][metric='5']"}
+
+	data, err := buildOperationalData(cfg, filter, time.Date(2026, 5, 12, 4, 0, 0, 0, time.UTC), nil, nil, nil, nil, nil, nil)
+	if err != nil {
+		t.Fatalf("buildOperationalData() error = %v", err)
+	}
+
+	for _, want := range []string{
+		`<routing xmlns="urn:ietf:params:xml:ns:yang:ietf-routing">`,
+		"<routing-state>",
+		"<destination-prefix>0.0.0.0/0</destination-prefix>",
+		"<next-hop>192.0.2.254</next-hop>",
+		"<source-protocol>static</source-protocol>",
+		"<metric>5</metric>",
+	} {
+		if !bytes.Contains(data, []byte(want)) {
+			t.Fatalf("operational data missing filtered routing-state route value %q:\n%s", want, data)
+		}
+	}
+	for _, unexpected := range []string{"198.51.100.0/24", "192.0.2.253", "<metric>20</metric>"} {
+		if bytes.Contains(data, []byte(unexpected)) {
+			t.Fatalf("operational data included predicate-mismatched routing-state route value %q:\n%s", unexpected, data)
+		}
+	}
+}
+
+func TestBuildOperationalDataFiltersIETFRoutingStateProtocolXPathPredicates(t *testing.T) {
+	cfg := config.NewConfig()
+	cfg.RoutingOptions = &config.RoutingOptions{AutonomousSystem: 65000}
+	cfg.Protocols = &config.ProtocolConfig{
+		BGP:  &config.BGPConfig{},
+		OSPF: &config.OSPFConfig{},
+	}
+	filter := &Filter{Type: "xpath", Select: "/routing/routing-state/routing-protocols/routing-protocol[type='bgp']"}
+
+	data, err := buildOperationalData(cfg, filter, time.Date(2026, 5, 12, 4, 0, 0, 0, time.UTC), nil, nil, nil, nil, nil, nil)
+	if err != nil {
+		t.Fatalf("buildOperationalData() error = %v", err)
+	}
+
+	for _, want := range []string{
+		`<routing xmlns="urn:ietf:params:xml:ns:yang:ietf-routing">`,
+		"<routing-protocols>",
+		"<type>bgp</type>",
+		"<name>BGP-65000</name>",
+		"<admin-status>configured</admin-status>",
+	} {
+		if !bytes.Contains(data, []byte(want)) {
+			t.Fatalf("operational data missing filtered routing protocol value %q:\n%s", want, data)
+		}
+	}
+	for _, unexpected := range []string{"<type>ospf</type>", "<name>OSPF</name>"} {
+		if bytes.Contains(data, []byte(unexpected)) {
+			t.Fatalf("operational data included predicate-mismatched routing protocol value %q:\n%s", unexpected, data)
+		}
+	}
+}
+
 func TestBuildOperationalDataRejectsUnsupportedFilterType(t *testing.T) {
 	cfg := config.NewConfig()
 	cfg.System = &config.SystemConfig{HostName: "router1"}

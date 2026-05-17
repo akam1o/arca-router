@@ -10,6 +10,7 @@ import (
 	"os"
 	"runtime"
 	"sort"
+	"strconv"
 	"time"
 
 	"github.com/akam1o/arca-router/internal/model"
@@ -217,7 +218,7 @@ func buildOperationalData(cfg *config.Config, filter *Filter, now time.Time, int
 		[]string{"routing", "routing-state", "routes"},
 		[]string{"routing", "routing-state", "routing-protocols"},
 	) && hasRoutingState(cfg) {
-		if err := writeRoutingStateXML(&buf, cfg); err != nil {
+		if err := writeRoutingStateXML(&buf, cfg, xpathFilter); err != nil {
 			return nil, err
 		}
 	}
@@ -777,13 +778,16 @@ func writeInterfaceQueuesXML(buf *bytes.Buffer, queues *InterfaceOperationalQueu
 	return nil
 }
 
-func writeRoutingStateXML(buf *bytes.Buffer, cfg *config.Config) error {
+func writeRoutingStateXML(buf *bytes.Buffer, cfg *config.Config, xpathFilter *XPathFilter) error {
 	buf.WriteString(`  <routing xmlns="` + IETFRoutingNS + `">` + "\n")
 	buf.WriteString("    <routing-state>\n")
 	if cfg.RoutingOptions != nil && len(cfg.RoutingOptions.StaticRoutes) > 0 {
 		buf.WriteString("      <routes>\n")
 		for _, route := range cfg.RoutingOptions.StaticRoutes {
 			if route == nil {
+				continue
+			}
+			if !routingStateRouteMatchesXPathPredicates(xpathFilter, route) {
 				continue
 			}
 			buf.WriteString("        <route>\n")
@@ -810,12 +814,12 @@ func writeRoutingStateXML(buf *bytes.Buffer, cfg *config.Config) error {
 			if cfg.RoutingOptions != nil && cfg.RoutingOptions.AutonomousSystem != 0 {
 				name = fmt.Sprintf("BGP-%d", cfg.RoutingOptions.AutonomousSystem)
 			}
-			if err := writeRoutingProtocolXML(buf, "bgp", name); err != nil {
+			if err := writeRoutingProtocolXML(buf, xpathFilter, "bgp", name); err != nil {
 				return err
 			}
 		}
 		if cfg.Protocols.OSPF != nil {
-			if err := writeRoutingProtocolXML(buf, "ospf", "OSPF"); err != nil {
+			if err := writeRoutingProtocolXML(buf, xpathFilter, "ospf", "OSPF"); err != nil {
 				return err
 			}
 		}
@@ -826,7 +830,40 @@ func writeRoutingStateXML(buf *bytes.Buffer, cfg *config.Config) error {
 	return nil
 }
 
-func writeRoutingProtocolXML(buf *bytes.Buffer, protocolType, name string) error {
+func routingStateRouteMatchesXPathPredicates(xpathFilter *XPathFilter, route *config.StaticRoute) bool {
+	segmentIndex, ok := xpathListSegmentIndex(xpathFilter, []string{"routing", "routing-state", "routes", "route"})
+	if !ok {
+		return true
+	}
+	for key, want := range xpathFilter.Predicates[segmentIndex] {
+		var got string
+		switch key {
+		case "destination-prefix":
+			got = route.Prefix
+		case "next-hop":
+			got = route.NextHop
+		case "source-protocol":
+			got = "static"
+		case "metric":
+			if route.Distance == 0 {
+				return false
+			}
+			got = strconv.Itoa(route.Distance)
+		default:
+			return false
+		}
+		if got != want {
+			return false
+		}
+	}
+	return true
+}
+
+func writeRoutingProtocolXML(buf *bytes.Buffer, xpathFilter *XPathFilter, protocolType, name string) error {
+	const adminStatus = "configured"
+	if !routingProtocolMatchesXPathPredicates(xpathFilter, protocolType, name, adminStatus) {
+		return nil
+	}
 	buf.WriteString("        <routing-protocol>\n")
 	if err := writeEscapedElement(buf, "          ", "type", protocolType); err != nil {
 		return err
@@ -834,11 +871,35 @@ func writeRoutingProtocolXML(buf *bytes.Buffer, protocolType, name string) error
 	if err := writeEscapedElement(buf, "          ", "name", name); err != nil {
 		return err
 	}
-	if err := writeEscapedElement(buf, "          ", "admin-status", "configured"); err != nil {
+	if err := writeEscapedElement(buf, "          ", "admin-status", adminStatus); err != nil {
 		return err
 	}
 	buf.WriteString("        </routing-protocol>\n")
 	return nil
+}
+
+func routingProtocolMatchesXPathPredicates(xpathFilter *XPathFilter, protocolType, name, adminStatus string) bool {
+	segmentIndex, ok := xpathListSegmentIndex(xpathFilter, []string{"routing", "routing-state", "routing-protocols", "routing-protocol"})
+	if !ok {
+		return true
+	}
+	for key, want := range xpathFilter.Predicates[segmentIndex] {
+		var got string
+		switch key {
+		case "type":
+			got = protocolType
+		case "name":
+			got = name
+		case "admin-status":
+			got = adminStatus
+		default:
+			return false
+		}
+		if got != want {
+			return false
+		}
+	}
+	return true
 }
 
 func writeArcaStateXML(buf *bytes.Buffer, routes []RouteOperationalState, routingInstances []RoutingInstanceOperationalState, bgpNeighbors []BGPNeighborOperationalState, ospfNeighbors []OSPFNeighborOperationalState, ospf3Neighbors []OSPFNeighborOperationalState, bfdStatus *BFDOperationalState) error {
