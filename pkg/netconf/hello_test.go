@@ -152,6 +152,11 @@ func TestNegotiateBaseVersion(t *testing.T) {
 			capabilities: []string{"other:capability"},
 			want:         "1.0",
 		},
+		{
+			name:         "base 1.1 trims whitespace",
+			capabilities: []string{"\n " + CapabilityBase11 + "\t"},
+			want:         "1.1",
+		},
 	}
 
 	for _, tt := range tests {
@@ -217,6 +222,17 @@ func TestValidateClientHello(t *testing.T) {
 					Capability []string `xml:"capability"`
 				}{
 					Capability: []string{CapabilityBase11 + "?foo=bar"},
+				},
+			},
+			wantError: false,
+		},
+		{
+			name: "valid hello trims base capability",
+			hello: &Hello{
+				Capabilities: struct {
+					Capability []string `xml:"capability"`
+				}{
+					Capability: []string{"\n " + CapabilityBase10 + "\t"},
 				},
 			},
 			wantError: false,
@@ -310,6 +326,11 @@ func TestHasCapability(t *testing.T) {
 			capability: "unknown:capability",
 			want:       false,
 		},
+		{
+			name:       "trims capability value",
+			capability: " " + CapabilityCandidate + "\t",
+			want:       true,
+		},
 	}
 
 	for _, tt := range tests {
@@ -333,7 +354,7 @@ func TestGetClientCapabilities(t *testing.T) {
 		CapabilityBase10,
 		CapabilityBase11,
 		CapabilityCandidate,
-		"custom:capability",
+		" custom:capability ",
 	}
 
 	caps := GetClientCapabilities(hello)

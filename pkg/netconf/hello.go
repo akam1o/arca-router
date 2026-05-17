@@ -86,8 +86,9 @@ func (h *Hello) HasCapability(capability string) bool {
 	if h == nil {
 		return false
 	}
+	want := strings.TrimSpace(capability)
 	for _, cap := range h.Capabilities.Capability {
-		if cap == capability {
+		if strings.TrimSpace(cap) == want {
 			return true
 		}
 	}
@@ -148,6 +149,7 @@ func (h *Hello) hasBaseCapability(capability string) bool {
 }
 
 func capabilityBasePart(capability string) string {
+	capability = strings.TrimSpace(capability)
 	if idx := strings.Index(capability, "?"); idx != -1 {
 		return capability[:idx]
 	}
@@ -155,6 +157,7 @@ func capabilityBasePart(capability string) string {
 }
 
 func shortCapabilityName(capability string) string {
+	capability = strings.TrimSpace(capability)
 	base := capabilityBasePart(capability)
 	const prefix = "urn:ietf:params:netconf:"
 	if !strings.HasPrefix(base, prefix) {
