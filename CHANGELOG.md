@@ -11,6 +11,7 @@
 - **Permission error integration coverage**: Integration tests now exercise restricted-directory failures across configuration backup writes and FRR file apply preflight
 - **Security audit target**: `make security-audit` now runs an installed-host audit for service user, capabilities, file permissions, VPP socket access, and FRR file-backend readiness
 - **Shell helper lint**: `make release-check` now runs `script-lint` across package, repo, integration, and NETCONF shell helpers
+- **Security audit release evidence**: v0.10 readiness, runbook, and release process docs now call out `make security-audit` output as installed-host evidence
 - **Local NETCONF evidence target**: `make netconf-client-evidence` now collects ncclient and libnetconf2 interop artifacts for release sign-off, with `make netconf-pyez-evidence` available for supplementary PyEZ smoke
 - **NETCONF evidence verification**: `make netconf-evidence-verify` now checks required ncclient and libnetconf2 artifact files, required capabilities, and unsupported capability absence before sign-off
 - **NETCONF client evidence artifacts**: ncclient, libnetconf2, and scheduled PyEZ interop jobs now upload capabilities, RPC payloads, replies, logs, and client version evidence for release sign-off

@@ -132,6 +132,13 @@ Detailed future scope is maintained in [`ROADMAP.md`](../ROADMAP.md).
   make release-check
   ```
 
+- [ ] **Installed-host security audit**: service user, capabilities, config
+  file modes, VPP socket access, and FRR file-backend readiness checked on a
+  release-candidate host, or recorded as deferred host evidence
+  ```bash
+  make security-audit
+  ```
+
 - [ ] **NETCONF client interoperability**: `NETCONF Client Interoperability`
   workflow passed and the `netconf-client-ncclient-evidence` and
   `netconf-client-libnetconf2-evidence` artifacts are linked from sign-off, or
@@ -602,6 +609,7 @@ git push origin v0.10.0
 - [ ] Security review done
 - [ ] `make package-lint` passing
 - [ ] `make release-check` passing
+- [ ] Installed-host `make security-audit` output linked, or deferred host evidence recorded
 - [ ] NETCONF client interop artifacts linked from release sign-off
 - [ ] Live FRR mgmtd smoke checked, or explicitly recorded as a v0.11 deferred lab gate
 - [ ] v0.10 release sign-off recorded with `docs/v0.10-release-signoff.md`
