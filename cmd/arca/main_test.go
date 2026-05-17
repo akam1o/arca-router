@@ -2206,6 +2206,16 @@ func TestRunLocalOneShotTelemetryPaths(t *testing.T) {
 	}
 }
 
+func TestRunLocalOneShotCompatibility(t *testing.T) {
+	handled, code := runLocalOneShotCommand([]string{"show", "compatibility"})
+	if !handled || code != ExitSuccess {
+		t.Fatalf("runLocalOneShotCommand(show compatibility) = handled %v code %d, want local success", handled, code)
+	}
+	if handled, code := runLocalOneShotCommand([]string{"show", "compatibility", "extra"}); !handled || code != ExitUsageError {
+		t.Fatalf("runLocalOneShotCommand(show compatibility extra) = handled %v code %d, want local usage error", handled, code)
+	}
+}
+
 func TestTelemetryCatalogCommand(t *testing.T) {
 	if !isTelemetryCatalogCommand([]string{"paths"}) || !isTelemetryCatalogCommand([]string{"catalog"}) {
 		t.Fatal("isTelemetryCatalogCommand() did not recognize paths/catalog")

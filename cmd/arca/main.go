@@ -18,6 +18,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/akam1o/arca-router/internal/compat"
 	"github.com/akam1o/arca-router/internal/model"
 	grpcclient "github.com/akam1o/arca-router/internal/northbound/grpc"
 	configcli "github.com/akam1o/arca-router/pkg/cli"
@@ -112,6 +113,7 @@ Show subcommands:
   configuration rollback <N>  Show archived configuration N commits back
   configuration interfaces    Show interface configuration
   configuration protocols     Show routing protocol configuration
+  compatibility               Show v0.10 compatibility policy
   interfaces                  Show interface status
   interfaces <name>           Show specific interface details
   routing-instances [name]    Show routing-instance table mapping
@@ -266,6 +268,14 @@ func oneShotBackup(ctx context.Context, client showClient, args []string) int {
 }
 
 func runLocalOneShotCommand(args []string) (bool, int) {
+	if len(args) >= 2 && args[0] == "show" && args[1] == "compatibility" {
+		if len(args) > 2 {
+			fmt.Fprintln(os.Stderr, "Error: 'show compatibility' does not accept extra arguments")
+			return true, ExitUsageError
+		}
+		printCompatibilityPolicy()
+		return true, ExitSuccess
+	}
 	if len(args) >= 3 && args[0] == "show" && args[1] == "telemetry" {
 		opts, ok, err := telemetryCatalogOptions(args[2:])
 		if !ok {
@@ -878,6 +888,13 @@ func (sh *interactiveShell) cmdShow(ctx context.Context, args []string) error {
 			}
 			fmt.Printf("  %s  %s  by %s%s  %s\n", shortCommitID(e.CommitID), e.Timestamp, e.User, rb, e.Message)
 		}
+		return nil
+
+	case "compatibility":
+		if len(args) > 1 {
+			return fmt.Errorf("'show compatibility' does not accept extra arguments")
+		}
+		printCompatibilityPolicy()
 		return nil
 
 	case "interfaces":
@@ -2947,6 +2964,31 @@ func printCommandOutput(output string) {
 	}
 }
 
+func printCompatibilityPolicy() {
+	policy := compat.CurrentPolicy()
+	fmt.Println("compatibility policy:")
+	fmt.Printf("  phase: %s\n", policy.Phase)
+	fmt.Printf("  direct upgrade sources: %s\n", strings.Join(policy.SupportedDirectUpgradeSources, ", "))
+	fmt.Printf("  unsupported direct upgrades: %s\n", policy.UnsupportedDirectUpgradeNote)
+	fmt.Printf("  configuration: %s\n", policy.ConfigCompatibility)
+	fmt.Printf("  CLI: %s\n", policy.CLICompatibility)
+	fmt.Printf("  API: %s\n", policy.APIVersioning)
+	fmt.Printf("  deprecation: %s\n", policy.DeprecationPolicy)
+	fmt.Println("schema IDs:")
+	fmt.Printf("  gRPC: %s\n", compat.GRPCAPIPackage)
+	fmt.Printf("  telemetry events: %s\n", compat.TelemetryEventSchema)
+	fmt.Printf("  NMS status: %s\n", compat.NMSOperationalSchema)
+	fmt.Printf("  NMS telemetry catalog: %s\n", compat.NMSTelemetryCatalogSchema)
+	fmt.Printf("  NMS telemetry schemas: %s\n", compat.NMSTelemetrySchemaCatalog)
+	fmt.Printf("  NMS telemetry snapshot: %s\n", compat.NMSTelemetrySnapshot)
+	fmt.Println("support matrix:")
+	for _, item := range compat.ComponentMatrix() {
+		fmt.Printf("  %s: %s\n", item.Component, item.Supported)
+		fmt.Printf("    required: %s\n", item.Required)
+		fmt.Printf("    notes: %s\n", item.Notes)
+	}
+}
+
 type telemetryCLIOptions struct {
 	paths    []string
 	interval time.Duration
@@ -3543,6 +3585,7 @@ func createCompleter() *readline.PrefixCompleter {
 			readline.PcItem("configuration",
 				readline.PcItem("rollback"),
 			),
+			readline.PcItem("compatibility"),
 			readline.PcItem("interfaces"),
 			readline.PcItem("bgp",
 				readline.PcItem("summary"),
