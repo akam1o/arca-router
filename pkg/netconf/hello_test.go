@@ -152,6 +152,10 @@ func TestNegotiateBaseVersion(t *testing.T) {
 			}
 		})
 	}
+
+	if got := NegotiateBaseVersion(nil); got != "1.0" {
+		t.Errorf("NegotiateBaseVersion(nil) = %q, want 1.0", got)
+	}
 }
 
 func TestValidateClientHello(t *testing.T) {
@@ -203,6 +207,11 @@ func TestValidateClientHello(t *testing.T) {
 				},
 			},
 			wantError: false,
+		},
+		{
+			name:      "invalid - nil hello",
+			hello:     nil,
+			wantError: true,
 		},
 		{
 			name: "invalid - no base capability",
@@ -298,6 +307,11 @@ func TestHasCapability(t *testing.T) {
 			}
 		})
 	}
+
+	var nilHello *Hello
+	if nilHello.HasCapability(CapabilityBase10) {
+		t.Error("HasCapability() on nil receiver = true, want false")
+	}
 }
 
 func TestGetClientCapabilities(t *testing.T) {
@@ -319,6 +333,10 @@ func TestGetClientCapabilities(t *testing.T) {
 		if !containsString(caps, want) {
 			t.Errorf("GetClientCapabilities() = %v, missing %q", caps, want)
 		}
+	}
+
+	if caps := GetClientCapabilities(nil); caps != nil {
+		t.Errorf("GetClientCapabilities(nil) = %v, want nil", caps)
 	}
 }
 
