@@ -1274,6 +1274,23 @@ func appendUpgradeBackupPathCheck(lines []string, warnings int, path string) ([]
 	return append(lines, "  backup path: writable "+path), warnings
 }
 
+func commitRollbackArchiveWarnings(ctx context.Context, client showClient) []string {
+	history, err := client.ListHistory(ctx, 1, 0)
+	if err != nil {
+		return []string{"commit safety warning: rollback archive check failed: " + err.Error()}
+	}
+	if len(history) == 0 {
+		return []string{"commit safety warning: no rollback archive entry is available before commit"}
+	}
+	if strings.TrimSpace(history[0].ConfigText) == "" {
+		return []string{"commit safety warning: latest rollback archive has no config text"}
+	}
+	if err := validateConfigurationText(history[0].ConfigText); err != nil {
+		return []string{"commit safety warning: latest rollback archive validation failed: " + err.Error()}
+	}
+	return nil
+}
+
 func (sh *interactiveShell) cmdBackup(ctx context.Context, args []string) error {
 	if len(args) == 2 && args[0] == "configuration" {
 		var text string
@@ -1465,6 +1482,9 @@ func (sh *interactiveShell) cmdCommit(ctx context.Context, args []string) error 
 	}
 
 	diffText, hasChanges, diffErr := sh.client.Diff(ctx, sh.sessionID)
+	for _, warning := range commitRollbackArchiveWarnings(ctx, sh.client) {
+		fmt.Println(warning)
+	}
 	user := currentUsername()
 
 	commitID, version, err := sh.client.Commit(ctx, sh.sessionID, user, message)

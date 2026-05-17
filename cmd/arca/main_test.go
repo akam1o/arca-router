@@ -20,6 +20,7 @@ type fakeInteractiveClient struct {
 	releaseLockErr   error
 	replaceErr       error
 	history          []grpcclient.CommitInfo
+	listHistoryErr   error
 	runningText      string
 	runningVersion   uint64
 	candidateText    string
@@ -137,6 +138,9 @@ func (f *fakeInteractiveClient) ListHistory(ctx context.Context, limit, offset i
 	f.listHistoryCalls++
 	f.listHistoryLimit = limit
 	f.listHistoryOffset = offset
+	if f.listHistoryErr != nil {
+		return nil, f.listHistoryErr
+	}
 	return f.history, nil
 }
 
@@ -504,6 +508,9 @@ func TestCommitRunsClassOfServicePostCommitDiagnostics(t *testing.T) {
 	client := &fakeInteractiveClient{
 		diffText:       "+ set class-of-service interfaces ge-0/0/0 output-traffic-control-profile WAN",
 		diffHasChanges: true,
+		history: []grpcclient.CommitInfo{
+			{CommitID: "1234567890abcdef", ConfigText: "set system host-name router"},
+		},
 		cosInfo: &grpcclient.ClassOfServiceInfo{
 			EnforcementStatus: "intent-only",
 			Interfaces: []grpcclient.ClassOfServiceInterfaceInfo{
@@ -526,8 +533,9 @@ func TestCommitRunsClassOfServicePostCommitDiagnostics(t *testing.T) {
 	if err := sh.cmdCommit(ctx, nil); err != nil {
 		t.Fatalf("cmdCommit() error = %v", err)
 	}
-	if client.commitCalls != 1 || client.diffCalls != 1 || client.cosCalls != 1 {
-		t.Fatalf("commit/diff/cos calls = %d/%d/%d, want 1/1/1", client.commitCalls, client.diffCalls, client.cosCalls)
+	if client.commitCalls != 1 || client.diffCalls != 1 || client.listHistoryCalls != 1 || client.cosCalls != 1 {
+		t.Fatalf("commit/diff/history/cos calls = %d/%d/%d/%d, want 1/1/1/1",
+			client.commitCalls, client.diffCalls, client.listHistoryCalls, client.cosCalls)
 	}
 }
 
@@ -536,6 +544,9 @@ func TestCommitSkipsClassOfServicePostCommitDiagnosticsWithoutCosDiff(t *testing
 	client := &fakeInteractiveClient{
 		diffText:       "+ set routing-options static route 198.51.100.0/24 next-hop 192.0.2.1",
 		diffHasChanges: true,
+		history: []grpcclient.CommitInfo{
+			{CommitID: "1234567890abcdef", ConfigText: "set system host-name router"},
+		},
 	}
 	sh := &interactiveShell{
 		client:    client,
@@ -548,8 +559,74 @@ func TestCommitSkipsClassOfServicePostCommitDiagnosticsWithoutCosDiff(t *testing
 	if err := sh.cmdCommit(ctx, nil); err != nil {
 		t.Fatalf("cmdCommit() error = %v", err)
 	}
-	if client.commitCalls != 1 || client.diffCalls != 1 || client.cosCalls != 0 {
-		t.Fatalf("commit/diff/cos calls = %d/%d/%d, want 1/1/0", client.commitCalls, client.diffCalls, client.cosCalls)
+	if client.commitCalls != 1 || client.diffCalls != 1 || client.listHistoryCalls != 1 || client.cosCalls != 0 {
+		t.Fatalf("commit/diff/history/cos calls = %d/%d/%d/%d, want 1/1/1/0",
+			client.commitCalls, client.diffCalls, client.listHistoryCalls, client.cosCalls)
+	}
+}
+
+func TestCommitRollbackArchiveWarnings(t *testing.T) {
+	tests := []struct {
+		name   string
+		client *fakeInteractiveClient
+		want   string
+	}{
+		{
+			name: "valid archive",
+			client: &fakeInteractiveClient{
+				history: []grpcclient.CommitInfo{
+					{CommitID: "1234567890abcdef", ConfigText: "set system host-name router"},
+				},
+			},
+			want: "",
+		},
+		{
+			name:   "missing archive",
+			client: &fakeInteractiveClient{},
+			want:   "no rollback archive entry is available",
+		},
+		{
+			name: "empty config text",
+			client: &fakeInteractiveClient{
+				history: []grpcclient.CommitInfo{{CommitID: "1234567890abcdef"}},
+			},
+			want: "latest rollback archive has no config text",
+		},
+		{
+			name: "invalid config text",
+			client: &fakeInteractiveClient{
+				history: []grpcclient.CommitInfo{
+					{CommitID: "1234567890abcdef", ConfigText: "set system host-name bad_name"},
+				},
+			},
+			want: "latest rollback archive validation failed",
+		},
+		{
+			name: "history unavailable",
+			client: &fakeInteractiveClient{
+				listHistoryErr: errors.New("history unavailable"),
+			},
+			want: "rollback archive check failed: history unavailable",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			warnings := commitRollbackArchiveWarnings(context.Background(), tt.client)
+			if tt.want == "" {
+				if len(warnings) != 0 {
+					t.Fatalf("commitRollbackArchiveWarnings() = %#v, want none", warnings)
+				}
+				return
+			}
+			got := strings.Join(warnings, "\n")
+			if !strings.Contains(got, tt.want) {
+				t.Fatalf("commitRollbackArchiveWarnings() = %#v, want substring %q", warnings, tt.want)
+			}
+			if tt.client.listHistoryCalls != 1 || tt.client.listHistoryLimit != 1 {
+				t.Fatalf("ListHistory calls/limit = %d/%d, want 1/1", tt.client.listHistoryCalls, tt.client.listHistoryLimit)
+			}
+		})
 	}
 }
 
