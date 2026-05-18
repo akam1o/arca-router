@@ -86,7 +86,7 @@ release-check: package-lint script-lint netconf-client-lint ## Run local v0.10 r
 
 release-evidence-check: release-check netconf-evidence-verify netconf-standard-xpath-evidence-verify ## Verify local v0.10 release evidence before sign-off
 	@echo "Local v0.10 release evidence checks passed"
-	@echo "Attach artifacts from $(NETCONF_EVIDENCE_DIR) to sign-off; installed-host security audit, package install checks, and lab gates still require their release-candidate environments."
+	@echo "Attach artifacts from $(NETCONF_EVIDENCE_DIR) to sign-off; v0.10 PR release does not require RC packages, and host/lab-only evidence can be recorded as accepted warnings or deferred gates."
 
 clean: ## Clean build artifacts
 	@echo "Cleaning..."

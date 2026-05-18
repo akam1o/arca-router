@@ -479,7 +479,7 @@ make release-check
 # Validate local package metadata without building artifacts
 make package-lint
 
-# Audit installed service users, capabilities, and file/socket permissions on a release-candidate host
+# Audit installed service users, capabilities, and file/socket permissions when a host is available
 make security-audit
 
 # Generate local NETCONF client evidence for release sign-off
@@ -504,13 +504,14 @@ NETCONF `:xpath` advertisement, passing XPath RPCs, and startup datastore
 rejection.
 
 `make release-evidence-check` validates the local checks plus the default and
-standard XPath NETCONF evidence directories. It does not replace installed-host
-`make security-audit`, package install verification, or lab-only soak/restart
-evidence.
+standard XPath NETCONF evidence directories. v0.10 PR release sign-off does not
+require RC package artifacts; installed-host `make security-audit`, package
+install verification, and lab-only soak/restart evidence can be attached when
+available or recorded as accepted warnings/deferred gates.
 
-The security audit requires an installed release-candidate host. Attach the
-output to sign-off when that host is available, or record the missing host
-evidence as an accepted warning with owner and rationale.
+The security audit requires an installed host. Attach the output to sign-off
+when that host is available, or record the missing host evidence as an accepted
+warning with owner and rationale.
 
 The FRR smoke test requires a host with FRR running, the standard daemon set enabled
 in `/etc/frr/daemons`, and `vtysh` access for the current user.

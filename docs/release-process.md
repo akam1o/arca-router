@@ -139,7 +139,7 @@ Detailed future scope is maintained in [`ROADMAP.md`](../ROADMAP.md).
 
 - [ ] **Installed-host security audit**: service user, capabilities, config
   file modes, VPP socket access, and FRR file-backend readiness checked on a
-  release-candidate host, or recorded as deferred host evidence
+  host when available, or recorded as accepted warning for missing host evidence
   ```bash
   make security-audit
   ```
@@ -162,7 +162,7 @@ Detailed future scope is maintained in [`ROADMAP.md`](../ROADMAP.md).
   ```
 
 - [ ] **Manual testing**: Key scenarios verified
-  - Fresh installation (DEB/RPM)
+  - Fresh installation (DEB/RPM), when package artifacts are produced
   - Upgrade from previous version
   - VPP/FRR integration
   - FRR transactional apply with the standard daemon set enabled
@@ -621,12 +621,12 @@ git push origin v0.10.0
 - [ ] `make package-lint` passing
 - [ ] `make release-check` passing
 - [ ] `make release-evidence-check` passing when using local sign-off evidence
-- [ ] Installed-host `make security-audit` output linked, or deferred host evidence recorded
+- [ ] Installed-host `make security-audit` output linked, or missing host evidence recorded as accepted warning
 - [ ] NETCONF client interop artifacts linked from release sign-off
-- [ ] Standard NETCONF `:xpath` evidence linked if `:xpath` is enabled or claimed
+- [ ] Standard NETCONF `:xpath` evidence linked
 - [ ] Live FRR mgmtd smoke checked, or explicitly recorded as a v0.11 deferred lab gate
 - [ ] v0.10 release sign-off recorded with `docs/v0.10-release-signoff.md`
-- [ ] Packages tested on all distros
+- [ ] Package artifacts tested when produced; RC packages are not required for v0.10 PR release
 
 **Release:**
 - [ ] Create annotated tag (`git tag -a v0.10.0`)

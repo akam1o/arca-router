@@ -2,6 +2,7 @@
 
 ## v0.10.x - Stabilization and Compatibility (current)
 
+- **v0.10 PR release gate**: release readiness and sign-off docs now treat PR CI plus required evidence as sufficient for v0.10, without requiring RC package artifacts
 - **NETCONF standard XPath default**: `arca-routerd` and NETCONF interop helpers now advertise standard `:xpath` by default, while `--netconf-standard-xpath=false` and `-standard-xpath=false` remain available for compatibility suppression tests
 - **NETCONF startup datastore policy**: startup datastore support is now formalized as intentionally unsupported and unadvertised instead of a v0.11 deferred gate
 - **Package architecture guard**: `make deb-package` and `make rpm-package` now reject non-Linux-amd64 binaries before packaging because v0.10 package metadata targets amd64/x86_64
