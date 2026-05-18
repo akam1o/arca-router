@@ -1099,6 +1099,49 @@ func TestWebConfigCommitEndpointAppliesConfig(t *testing.T) {
 	}
 }
 
+func TestWebConfigCommitEndpointReplacesFullConfig(t *testing.T) {
+	source, eng := newWebConfigAPITestSource(t, "operator")
+	hash, err := pkgconfig.NormalizePasswordForStorage("secret")
+	if err != nil {
+		t.Fatalf("NormalizePasswordForStorage() error = %v", err)
+	}
+	eng.InitializeRunning(&model.RouterConfig{
+		System: &model.SystemConfig{
+			HostName: "edge01",
+			Services: &model.SystemServicesConfig{
+				SNMP: &model.SNMPConfig{
+					Enabled:   true,
+					Community: "private-community",
+				},
+			},
+		},
+		Security: &model.SecurityConfig{
+			Users: map[string]*model.UserConfig{
+				"operator": {
+					Password: hash,
+					Role:     "operator",
+				},
+			},
+		},
+	}, 42)
+
+	req := httptest.NewRequest(http.MethodPost, "/api/config/commit", strings.NewReader(`{"config_text":"set system host-name edge02","message":"replace full config"}`))
+	req.SetBasicAuth("operator", "secret")
+	rec := httptest.NewRecorder()
+	source.handleWebConfigCommit(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d: %s", rec.Code, http.StatusOK, rec.Body.String())
+	}
+	running := eng.Running()
+	if got := running.System.HostName; got != "edge02" {
+		t.Fatalf("running hostname = %q, want edge02", got)
+	}
+	if running.System.Services != nil && running.System.Services.SNMP != nil {
+		t.Fatalf("SNMP config remained after full replacement: %#v", running.System.Services.SNMP)
+	}
+}
+
 func TestWebConfigWriteEndpointRejectsReadOnlyRole(t *testing.T) {
 	source, _ := newWebConfigAPITestSource(t, "read-only")
 

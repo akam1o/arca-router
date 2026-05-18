@@ -61,6 +61,7 @@ type webConfigAPI interface {
 	AcquireLock(ctx context.Context, sessionID, user string) error
 	ReleaseLock(ctx context.Context, sessionID string) error
 	EditCandidate(ctx context.Context, sessionID, configText string) error
+	ReplaceCandidate(ctx context.Context, sessionID, configText string) error
 	ValidateCandidate(ctx context.Context, sessionID string) error
 	Diff(ctx context.Context, sessionID string) (string, bool, error)
 	Commit(ctx context.Context, sessionID, user, message string) (string, uint64, error)
@@ -1360,7 +1361,7 @@ func (s metricsSource) validateWebConfig(ctx context.Context, username, configTe
 		return "", false, err
 	}
 	defer func() { _ = api.ReleaseLock(context.Background(), sessionID) }()
-	if err := api.EditCandidate(ctx, sessionID, configText); err != nil {
+	if err := api.ReplaceCandidate(ctx, sessionID, configText); err != nil {
 		return "", false, err
 	}
 	if err := api.ValidateCandidate(ctx, sessionID); err != nil {
@@ -1389,7 +1390,7 @@ func (s metricsSource) commitWebConfig(ctx context.Context, username, configText
 		return "", 0, err
 	}
 	defer func() { _ = api.ReleaseLock(context.Background(), sessionID) }()
-	if err := api.EditCandidate(ctx, sessionID, configText); err != nil {
+	if err := api.ReplaceCandidate(ctx, sessionID, configText); err != nil {
 		return "", 0, err
 	}
 	return api.Commit(ctx, sessionID, username, message)
