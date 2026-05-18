@@ -59,6 +59,13 @@ type QoSCapabilityStatus struct {
 
 // NewVPPPlugin creates a new VPP plugin.
 func NewVPPPlugin(client pkgvpp.Client, hwConfig *device.HardwareConfig, log *slog.Logger) *VPPPlugin {
+	if hwConfig == nil {
+		hwConfig = &device.HardwareConfig{}
+	}
+	if log == nil {
+		log = slog.Default()
+	}
+
 	return &VPPPlugin{
 		client:            client,
 		lcpManager:        pkgvpp.NewLCPStateManager(client),
@@ -462,6 +469,9 @@ func (p *VPPPlugin) QoSCapabilityStatus() QoSCapabilityStatus {
 // --- Internal helpers ---
 
 func (p *VPPPlugin) hasHardwareConfig(name string) bool {
+	if p == nil || p.hwConfig == nil {
+		return false
+	}
 	for _, hw := range p.hwConfig.Interfaces {
 		if hw.Name == name {
 			return true
@@ -471,6 +481,9 @@ func (p *VPPPlugin) hasHardwareConfig(name string) bool {
 }
 
 func (p *VPPPlugin) getHardwareConfig(name string) *device.PhysicalInterface {
+	if p == nil || p.hwConfig == nil {
+		return nil
+	}
 	for i := range p.hwConfig.Interfaces {
 		if p.hwConfig.Interfaces[i].Name == name {
 			return &p.hwConfig.Interfaces[i]

@@ -3,6 +3,7 @@ package device
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -109,6 +110,29 @@ func TestLoadHardware_InvalidDriver(t *testing.T) {
 	_, err := LoadHardware(testFile, nil)
 	if err == nil {
 		t.Error("Expected error for invalid driver, got nil")
+	}
+}
+
+func TestLoadHardware_DPDKDriverUnsupported(t *testing.T) {
+	tmpDir := t.TempDir()
+	testFile := filepath.Join(tmpDir, "dpdk_driver.yaml")
+
+	dpdkDriverYAML := `interfaces:
+  - name: "ge-0/0/0"
+    pci: "0000:03:00.0"
+    driver: "dpdk"
+`
+
+	if err := os.WriteFile(testFile, []byte(dpdkDriverYAML), 0644); err != nil {
+		t.Fatalf("Failed to create test file: %v", err)
+	}
+
+	_, err := LoadHardware(testFile, nil)
+	if err == nil {
+		t.Fatal("Expected error for unsupported dpdk driver, got nil")
+	}
+	if !strings.Contains(err.Error(), "driver must be one of: avf, rdma") {
+		t.Fatalf("Unexpected error for unsupported dpdk driver: %v", err)
 	}
 }
 

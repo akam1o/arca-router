@@ -19,6 +19,22 @@ func testLogger() *slog.Logger {
 	return slog.New(slog.NewTextHandler(io.Discard, nil))
 }
 
+func TestNewVPPPluginDefaultsNilLoggerAndHardwareConfig(t *testing.T) {
+	plugin := NewVPPPlugin(pkgvpp.NewMockClient(), nil, nil)
+	if plugin.log == nil {
+		t.Fatal("NewVPPPlugin() left log nil")
+	}
+	if plugin.hwConfig == nil {
+		t.Fatal("NewVPPPlugin() left hwConfig nil")
+	}
+	if plugin.hasHardwareConfig("ge-0/0/0") {
+		t.Fatal("hasHardwareConfig() = true for nil hardware config")
+	}
+	if got := plugin.getHardwareConfig("ge-0/0/0"); got != nil {
+		t.Fatalf("getHardwareConfig() = %#v, want nil", got)
+	}
+}
+
 func TestInitRecordsQoSCapabilities(t *testing.T) {
 	ctx := context.Background()
 	client := pkgvpp.NewMockClient()
