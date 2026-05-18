@@ -2,8 +2,12 @@ package netconf
 
 import (
 	"context"
+	"crypto/ed25519"
+	"crypto/rand"
+	"encoding/pem"
 	"encoding/xml"
 	"net"
+	"os"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -11,6 +15,7 @@ import (
 	"time"
 
 	"github.com/akam1o/arca-router/pkg/datastore"
+	"golang.org/x/crypto/ssh"
 )
 
 func TestSSHServerStopBeforeStartReleasesProcessLock(t *testing.T) {
@@ -248,6 +253,25 @@ func TestNewSSHServerDefaultsPartialConfig(t *testing.T) {
 	}
 }
 
+func TestNewSSHServerRestrictsExistingHostKeyPermissions(t *testing.T) {
+	cfg, _ := testSSHServerConfig(t, "127.0.0.1:0")
+	writeTestHostKey(t, cfg.HostKeyPath, 0o644)
+
+	server, err := NewSSHServer(cfg)
+	if err != nil {
+		t.Fatalf("NewSSHServer() error = %v", err)
+	}
+	t.Cleanup(func() { _ = server.Stop() })
+
+	info, err := os.Stat(cfg.HostKeyPath)
+	if err != nil {
+		t.Fatalf("Stat(%s) error = %v", cfg.HostKeyPath, err)
+	}
+	if got := info.Mode().Perm(); got != 0o600 {
+		t.Fatalf("host key mode = %04o, want 0600", got)
+	}
+}
+
 func TestNewSSHServerCanDisableStandardXPath(t *testing.T) {
 	cfg, _ := testSSHServerConfig(t, "127.0.0.1:0")
 	cfg.DisableStandardXPath = true
@@ -319,6 +343,25 @@ func testSSHServerConfig(t *testing.T, listenAddr string) (*SSHConfig, string) {
 	cfg.DatastorePath = filepath.Join(dir, "config.db")
 
 	return cfg, cfg.DatastorePath
+}
+
+func writeTestHostKey(t *testing.T, path string, mode os.FileMode) {
+	t.Helper()
+
+	_, privateKey, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatalf("GenerateKey() error = %v", err)
+	}
+	pemBlock, err := ssh.MarshalPrivateKey(privateKey, "")
+	if err != nil {
+		t.Fatalf("MarshalPrivateKey() error = %v", err)
+	}
+	if err := os.WriteFile(path, pem.EncodeToMemory(pemBlock), mode); err != nil {
+		t.Fatalf("WriteFile(%s) error = %v", path, err)
+	}
+	if err := os.Chmod(path, mode); err != nil {
+		t.Fatalf("Chmod(%s) error = %v", path, err)
+	}
 }
 
 func testSSHServerListenAddr(t *testing.T, server *SSHServer) string {

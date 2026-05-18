@@ -8,6 +8,7 @@ import (
 	"encoding/binary"
 	"encoding/pem"
 	"encoding/xml"
+	"errors"
 	"fmt"
 	"net"
 	"os"
@@ -59,20 +60,17 @@ func NewSSHServer(config *SSHConfig) (*SSHServer, error) {
 
 	log := logger.New("netconf-ssh", logger.DefaultConfig())
 
+	if err := ensureHostKeyFilePermissions(config.HostKeyPath); err != nil {
+		return nil, fmt.Errorf("secure host key permissions: %w", err)
+	}
+
 	// Load or generate host key
 	hostKey, err := loadOrGenerateHostKey(config.HostKeyPath, log)
 	if err != nil {
 		return nil, fmt.Errorf("failed to load host key: %w", err)
 	}
-
-	// Validate host key permissions for security
-	// This ensures the key file has 0600 permissions (owner read/write only)
-	if err := auth.ValidateKeyFilePermissions(config.HostKeyPath, 0, 0); err != nil {
-		log.Warn("Host key has insecure permissions - startup allowed but should be fixed",
-			"path", config.HostKeyPath,
-			"error", err)
-		// Note: We warn but don't fail startup to avoid breaking existing deployments
-		// In production, consider making this a hard failure
+	if err := ensureHostKeyFilePermissions(config.HostKeyPath); err != nil {
+		return nil, fmt.Errorf("secure host key permissions: %w", err)
 	}
 
 	// Create user database
@@ -159,6 +157,22 @@ func NewSSHServer(config *SSHConfig) (*SSHServer, error) {
 	srv.sshConfig = sshConfig
 
 	return srv, nil
+}
+
+func ensureHostKeyFilePermissions(path string) error {
+	if err := auth.ValidateKeyFilePermissions(path, 0, 0); err == nil {
+		return nil
+	} else if errors.Is(err, os.ErrNotExist) {
+		return nil
+	}
+
+	if err := os.Chmod(path, auth.ExpectedKeyFilePerms); err != nil {
+		return fmt.Errorf("restrict %s to %04o: %w", path, auth.ExpectedKeyFilePerms, err)
+	}
+	if err := auth.ValidateKeyFilePermissions(path, 0, 0); err != nil {
+		return err
+	}
+	return nil
 }
 
 func netconfDatastoreConfig(config *SSHConfig) *datastore.Config {
