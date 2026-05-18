@@ -68,6 +68,10 @@ type webConfigAPI interface {
 	ListAuditEvents(ctx context.Context, opts nbgrpc.AuditLogOptions) ([]nbgrpc.AuditEventInfo, error)
 }
 
+type webUnredactedConfigAPI interface {
+	GetRunningUnredacted(ctx context.Context) (string, uint64, error)
+}
+
 type webTelemetryAPI interface {
 	SubscribeTelemetry(ctx context.Context, rawPaths []string, interval time.Duration, once bool, send func(nbgrpc.TelemetryEvent) error) error
 }
@@ -1020,10 +1024,7 @@ func startWebServer(ctx context.Context, listenAddr string, source metricsSource
 		return nil, fmt.Errorf("listen web endpoint: %w", err)
 	}
 
-	srv := &http.Server{
-		Handler:           newWebMux(source),
-		ReadHeaderTimeout: 5 * time.Second,
-	}
+	srv := newObservabilityHTTPServer(newWebMux(source))
 
 	errCh := make(chan error, 1)
 	go func() {
@@ -1153,10 +1154,11 @@ func (s metricsSource) handleWebConfig(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
-	if !s.authorizeWebRead(w, r) {
+	role, ok := s.authorizeWebReadRole(w, r)
+	if !ok {
 		return
 	}
-	cfg, err := s.runningConfig()
+	cfg, err := s.runningConfig(!webRoleCanWrite(role))
 	if err != nil {
 		http.Error(w, "render config: "+err.Error(), http.StatusInternalServerError)
 		return
@@ -1273,7 +1275,8 @@ func (s metricsSource) handleWebIndex(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
-	if !s.authorizeWebRead(w, r) {
+	role, ok := s.authorizeWebReadRole(w, r)
+	if !ok {
 		return
 	}
 
@@ -1282,7 +1285,7 @@ func (s metricsSource) handleWebIndex(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	status := newWebStatus(s.snapshot(time.Now()))
-	cfg, err := s.runningConfig()
+	cfg, err := s.runningConfig(!webRoleCanWrite(role))
 	if err != nil {
 		http.Error(w, "render config: "+err.Error(), http.StatusInternalServerError)
 		return
@@ -1297,9 +1300,15 @@ func (s metricsSource) handleWebIndex(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-func (s metricsSource) runningConfig() (webConfig, error) {
+func (s metricsSource) runningConfig(redactSecrets bool) (webConfig, error) {
 	if s.configAPI != nil {
-		text, version, err := s.configAPI.GetRunning(context.Background())
+		getRunning := s.configAPI.GetRunning
+		if !redactSecrets {
+			if api, ok := s.configAPI.(webUnredactedConfigAPI); ok {
+				getRunning = api.GetRunningUnredacted
+			}
+		}
+		text, version, err := getRunning(context.Background())
 		if err != nil {
 			return webConfig{}, fmt.Errorf("get running config: %w", err)
 		}
@@ -1315,7 +1324,16 @@ func (s metricsSource) runningConfig() (webConfig, error) {
 	if snap == nil || snap.Config == nil {
 		return webConfig{}, nil
 	}
-	text, err := pkgconfig.ToSetCommandsWithError(snap.Config.ToLegacyConfig())
+	legacyCfg := snap.Config.ToLegacyConfig()
+	var (
+		text string
+		err  error
+	)
+	if redactSecrets {
+		text, err = pkgconfig.ToSetCommandsRedactedWithError(legacyCfg)
+	} else {
+		text, err = pkgconfig.ToSetCommandsWithError(legacyCfg)
+	}
 	if err != nil {
 		return webConfig{}, fmt.Errorf("serialize running config: %w", err)
 	}
@@ -1408,20 +1426,25 @@ func (s metricsSource) auditEvents(ctx context.Context, opts nbgrpc.AuditLogOpti
 }
 
 func (s metricsSource) authorizeWebRead(w http.ResponseWriter, r *http.Request) bool {
+	_, ok := s.authorizeWebReadRole(w, r)
+	return ok
+}
+
+func (s metricsSource) authorizeWebReadRole(w http.ResponseWriter, r *http.Request) (string, bool) {
 	users := s.webAuthUsers()
 	tokens := s.webAutomationTokens()
 	if len(users) == 0 && len(tokens) == 0 {
-		return true
+		return pkgnetconf.RoleReadOnly, true
 	}
 	_, role, ok := authenticateWebRequest(w, r, users, tokens)
 	if !ok {
-		return false
+		return "", false
 	}
 	if !webRoleCanRead(role) {
 		http.Error(w, "forbidden", http.StatusForbidden)
-		return false
+		return "", false
 	}
-	return true
+	return role, true
 }
 
 func (s metricsSource) authorizeWebAdmin(w http.ResponseWriter, r *http.Request) bool {

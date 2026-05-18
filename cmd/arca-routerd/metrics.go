@@ -25,6 +25,10 @@ const defaultPrometheusPort = 9090
 const (
 	classOfServiceIntentOnlyStatus    = "intent-only"
 	classOfServiceNotConfiguredStatus = "not configured"
+	observabilityReadHeaderTimeout    = 5 * time.Second
+	observabilityReadTimeout          = 15 * time.Second
+	observabilityWriteTimeout         = 30 * time.Second
+	observabilityIdleTimeout          = 60 * time.Second
 )
 
 type metricsSource struct {
@@ -426,10 +430,7 @@ func startMetricsServer(ctx context.Context, listenAddr string, source metricsSo
 	mux.HandleFunc("/metrics", source.handleMetrics)
 	mux.HandleFunc("/healthz", source.handleHealthz)
 
-	srv := &http.Server{
-		Handler:           mux,
-		ReadHeaderTimeout: 5 * time.Second,
-	}
+	srv := newObservabilityHTTPServer(mux)
 
 	errCh := make(chan error, 1)
 	go func() {
@@ -451,6 +452,16 @@ func startMetricsServer(ctx context.Context, listenAddr string, source metricsSo
 	}()
 
 	return errCh, nil
+}
+
+func newObservabilityHTTPServer(handler http.Handler) *http.Server {
+	return &http.Server{
+		Handler:           handler,
+		ReadHeaderTimeout: observabilityReadHeaderTimeout,
+		ReadTimeout:       observabilityReadTimeout,
+		WriteTimeout:      observabilityWriteTimeout,
+		IdleTimeout:       observabilityIdleTimeout,
+	}
 }
 
 func (s metricsSource) handleHealthz(w http.ResponseWriter, r *http.Request) {

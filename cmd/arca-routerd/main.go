@@ -615,6 +615,9 @@ func buildGRPCServerOptions(f *daemonFlags) ([]googlegrpc.ServerOption, error) {
 	if f.grpcTLSCert == "" || f.grpcTLSKey == "" {
 		return nil, fmt.Errorf("--grpc-listen requires --grpc-tls-cert and --grpc-tls-key")
 	}
+	if f.grpcClientCA == "" {
+		return nil, fmt.Errorf("--grpc-listen requires --grpc-client-ca for mutual TLS")
+	}
 	tlsConfig, err := buildGRPCServerTLSConfig(f)
 	if err != nil {
 		return nil, err
@@ -627,21 +630,22 @@ func buildGRPCServerTLSConfig(f *daemonFlags) (*tls.Config, error) {
 	if err != nil {
 		return nil, fmt.Errorf("load gRPC server cert/key: %w", err)
 	}
+	if f.grpcClientCA == "" {
+		return nil, fmt.Errorf("gRPC TCP listener requires --grpc-client-ca for mutual TLS")
+	}
 	cfg := &tls.Config{
 		Certificates: []tls.Certificate{cert},
 	}
-	if f.grpcClientCA != "" {
-		clientCAPEM, err := os.ReadFile(f.grpcClientCA)
-		if err != nil {
-			return nil, fmt.Errorf("read gRPC client CA: %w", err)
-		}
-		clientCAs := x509.NewCertPool()
-		if !clientCAs.AppendCertsFromPEM(clientCAPEM) {
-			return nil, fmt.Errorf("parse gRPC client CA")
-		}
-		cfg.ClientCAs = clientCAs
-		cfg.ClientAuth = tls.RequireAndVerifyClientCert
+	clientCAPEM, err := os.ReadFile(f.grpcClientCA)
+	if err != nil {
+		return nil, fmt.Errorf("read gRPC client CA: %w", err)
 	}
+	clientCAs := x509.NewCertPool()
+	if !clientCAs.AppendCertsFromPEM(clientCAPEM) {
+		return nil, fmt.Errorf("parse gRPC client CA")
+	}
+	cfg.ClientCAs = clientCAs
+	cfg.ClientAuth = tls.RequireAndVerifyClientCert
 	return security.ApplyTLSPolicy(cfg), nil
 }
 

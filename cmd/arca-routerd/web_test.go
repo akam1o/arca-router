@@ -871,7 +871,15 @@ func TestNMSTelemetrySnapshotEndpointRejectsInvalidMaxEvents(t *testing.T) {
 func TestWebConfigEndpoint(t *testing.T) {
 	eng := engine.NewEngine(nil, slog.Default())
 	cfg := model.NewRouterConfig()
-	cfg.System = &model.SystemConfig{HostName: "edge01"}
+	cfg.System = &model.SystemConfig{
+		HostName: "edge01",
+		Services: &model.SystemServicesConfig{
+			SNMP: &model.SNMPConfig{
+				Enabled:   true,
+				Community: "private-community",
+			},
+		},
+	}
 	eng.InitializeRunning(cfg, 42)
 
 	req := httptest.NewRequest(http.MethodGet, "/api/config", nil)
@@ -893,6 +901,14 @@ func TestWebConfigEndpoint(t *testing.T) {
 	}
 	if !strings.Contains(cfgResp.ConfigText, "set system host-name edge01") {
 		t.Fatalf("ConfigText missing hostname:\n%s", cfgResp.ConfigText)
+	}
+	for _, secret := range []string{"private-community"} {
+		if strings.Contains(cfgResp.ConfigText, secret) {
+			t.Fatalf("ConfigText leaked %q:\n%s", secret, cfgResp.ConfigText)
+		}
+	}
+	if strings.Count(cfgResp.ConfigText, "<redacted>") != 1 {
+		t.Fatalf("ConfigText =\n%s\nwant one redacted marker", cfgResp.ConfigText)
 	}
 }
 
@@ -928,6 +944,9 @@ func TestWebEndpointAcceptsReadOnlyBasicAuth(t *testing.T) {
 	}
 	if !strings.Contains(cfgResp.ConfigText, "set system host-name edge01") {
 		t.Fatalf("ConfigText missing hostname:\n%s", cfgResp.ConfigText)
+	}
+	if strings.Contains(cfgResp.ConfigText, "$argon2id$") || !strings.Contains(cfgResp.ConfigText, "<redacted>") {
+		t.Fatalf("read-only ConfigText =\n%s\nwant redacted security password", cfgResp.ConfigText)
 	}
 }
 

@@ -3,6 +3,7 @@ package main
 import (
 	"io"
 	"log/slog"
+	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
@@ -48,6 +49,23 @@ func (s fakeFRRVRRPSource) VRRPOperationalStatus() sbfrr.VRRPOperationalStatus {
 
 func (s fakeFRRVRRPSource) BFDOperationalStatus() sbfrr.BFDOperationalStatus {
 	return s.bfdStatus
+}
+
+func TestNewObservabilityHTTPServerSetsTimeouts(t *testing.T) {
+	srv := newObservabilityHTTPServer(http.NewServeMux())
+
+	if srv.ReadHeaderTimeout != observabilityReadHeaderTimeout {
+		t.Fatalf("ReadHeaderTimeout = %v, want %v", srv.ReadHeaderTimeout, observabilityReadHeaderTimeout)
+	}
+	if srv.ReadTimeout != observabilityReadTimeout {
+		t.Fatalf("ReadTimeout = %v, want %v", srv.ReadTimeout, observabilityReadTimeout)
+	}
+	if srv.WriteTimeout != observabilityWriteTimeout {
+		t.Fatalf("WriteTimeout = %v, want %v", srv.WriteTimeout, observabilityWriteTimeout)
+	}
+	if srv.IdleTimeout != observabilityIdleTimeout {
+		t.Fatalf("IdleTimeout = %v, want %v", srv.IdleTimeout, observabilityIdleTimeout)
+	}
 }
 
 func TestEffectiveMetricsListenUsesFlagOverride(t *testing.T) {

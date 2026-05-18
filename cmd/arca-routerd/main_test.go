@@ -275,12 +275,28 @@ func TestBuildGRPCServerOptionsTCPRequiresTLSKeyPair(t *testing.T) {
 	}
 }
 
-func TestBuildGRPCServerOptionsTCPUsesTLSCredentials(t *testing.T) {
+func TestBuildGRPCServerOptionsTCPRequiresClientCA(t *testing.T) {
 	certFile, keyFile, _ := writeTestCertificateFiles(t)
-	opts, err := buildGRPCServerOptions(&daemonFlags{
+	_, err := buildGRPCServerOptions(&daemonFlags{
 		grpcListen:  "127.0.0.1:0",
 		grpcTLSCert: certFile,
 		grpcTLSKey:  keyFile,
+	})
+	if err == nil {
+		t.Fatal("buildGRPCServerOptions() error = nil, want missing client CA error")
+	}
+	if !strings.Contains(err.Error(), "--grpc-client-ca") {
+		t.Fatalf("buildGRPCServerOptions() error = %v, want client CA error", err)
+	}
+}
+
+func TestBuildGRPCServerOptionsTCPUsesTLSCredentials(t *testing.T) {
+	certFile, keyFile, caFile := writeTestCertificateFiles(t)
+	opts, err := buildGRPCServerOptions(&daemonFlags{
+		grpcListen:   "127.0.0.1:0",
+		grpcTLSCert:  certFile,
+		grpcTLSKey:   keyFile,
+		grpcClientCA: caFile,
 	})
 	if err != nil {
 		t.Fatalf("buildGRPCServerOptions() error = %v", err)

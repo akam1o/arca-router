@@ -41,6 +41,8 @@ type fakeStore struct {
 	commits     map[string]*store.CommitRecord
 	listRecords []*store.CommitRecord
 	listCalls   int
+	listOpts    *store.ListOptions
+	auditOpts   *store.AuditOptions
 }
 
 type fakeInterfaceStateCollector struct {
@@ -118,6 +120,7 @@ func (f *fakeStore) GetCommit(ctx context.Context, commitID string) (*store.Comm
 
 func (f *fakeStore) ListCommits(ctx context.Context, opts *store.ListOptions) ([]*store.CommitRecord, error) {
 	f.listCalls++
+	f.listOpts = opts
 	return f.listRecords, nil
 }
 
@@ -126,6 +129,7 @@ func (f *fakeStore) AuditLog(ctx context.Context, event *store.AuditEvent) error
 }
 
 func (f *fakeStore) ListAuditEvents(ctx context.Context, opts *store.AuditOptions) ([]*store.AuditEvent, error) {
+	f.auditOpts = opts
 	return nil, nil
 }
 
@@ -353,6 +357,86 @@ func TestClientServerConfigFlow(t *testing.T) {
 	}
 	if _, err := stream.Recv(); err != io.EOF {
 		t.Fatalf("TelemetryStream.Recv() after once = %v, want EOF", err)
+	}
+}
+
+func TestGetRunningRedactsCredentialMaterial(t *testing.T) {
+	eng := engine.NewEngine(nil, testLogger())
+	cfg := model.NewRouterConfig()
+	cfg.System = &model.SystemConfig{
+		HostName: "edge01",
+		Services: &model.SystemServicesConfig{
+			SNMP: &model.SNMPConfig{
+				Enabled:   true,
+				Community: "private-community",
+			},
+		},
+	}
+	cfg.Security = &model.SecurityConfig{
+		Users: map[string]*model.UserConfig{
+			"admin": {
+				Password: "plain-password",
+				Role:     "admin",
+			},
+		},
+	}
+	eng.InitializeRunning(cfg, 1)
+	srv := NewServer(eng, nil, testLogger())
+
+	text, version, err := srv.GetRunning(context.Background())
+	if err != nil {
+		t.Fatalf("GetRunning() error = %v", err)
+	}
+	if version != 1 || !strings.Contains(text, "set system host-name edge01") {
+		t.Fatalf("GetRunning() = (%q, %d), want hostname version 1", text, version)
+	}
+	for _, secret := range []string{"plain-password", "private-community", "$argon2id$"} {
+		if strings.Contains(text, secret) {
+			t.Fatalf("GetRunning() leaked %q:\n%s", secret, text)
+		}
+	}
+	if strings.Count(text, "<redacted>") != 2 {
+		t.Fatalf("GetRunning() =\n%s\nwant two redacted markers", text)
+	}
+}
+
+func TestCommitUsesSessionUserForAudit(t *testing.T) {
+	oldParser := ConfigTextParser
+	ConfigTextParser = func(text string) (*model.RouterConfig, error) {
+		cfg, err := pkgconfig.NewParser(strings.NewReader(text)).Parse()
+		if err != nil {
+			return nil, err
+		}
+		return model.FromLegacyConfig(cfg), nil
+	}
+	t.Cleanup(func() { ConfigTextParser = oldParser })
+
+	eng := engine.NewEngine(nil, testLogger())
+	eng.InitializeRunning(&model.RouterConfig{
+		System: &model.SystemConfig{HostName: "router1"},
+	}, 1)
+	st := &fakeStore{commitID: "commit-1"}
+	srv := NewServer(eng, st, testLogger())
+	ctx := context.Background()
+
+	sessionID, err := srv.CreateSession(ctx, "alice")
+	if err != nil {
+		t.Fatalf("CreateSession() error = %v", err)
+	}
+	if err := srv.AcquireLock(ctx, sessionID, "mallory"); err != nil {
+		t.Fatalf("AcquireLock() error = %v", err)
+	}
+	if err := srv.ReplaceCandidate(ctx, sessionID, "set system host-name router2"); err != nil {
+		t.Fatalf("ReplaceCandidate() error = %v", err)
+	}
+	if _, _, err := srv.Commit(ctx, sessionID, "mallory", "test"); err != nil {
+		t.Fatalf("Commit() error = %v", err)
+	}
+	if st.saved == nil || st.saved.Author != "alice" {
+		t.Fatalf("persisted author = %#v, want alice", st.saved)
+	}
+	if snap := eng.RunningSnapshot(); snap == nil || snap.Author != "alice" {
+		t.Fatalf("running snapshot author = %#v, want alice", snap)
 	}
 }
 
@@ -1699,6 +1783,70 @@ func TestListHistoryRejectsNegativePagination(t *testing.T) {
 	}
 }
 
+func TestListHistoryBoundsLimit(t *testing.T) {
+	eng := engine.NewEngine(nil, testLogger())
+	st := &fakeStore{}
+	srv := NewServer(eng, st, testLogger())
+	ctx := context.Background()
+
+	tests := []struct {
+		name      string
+		limit     int
+		wantLimit int
+	}{
+		{name: "default", limit: 0, wantLimit: maxListHistoryLimit},
+		{name: "within limit", limit: 25, wantLimit: 25},
+		{name: "above limit", limit: maxListHistoryLimit + 1, wantLimit: maxListHistoryLimit},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			st.listOpts = nil
+			if _, err := srv.ListHistory(ctx, tt.limit, 7); err != nil {
+				t.Fatalf("ListHistory() error = %v", err)
+			}
+			if st.listOpts == nil {
+				t.Fatal("ListHistory() did not call ListCommits")
+			}
+			if st.listOpts.Limit != tt.wantLimit || st.listOpts.Offset != 7 {
+				t.Fatalf("ListOptions = %+v, want limit %d offset 7", st.listOpts, tt.wantLimit)
+			}
+		})
+	}
+}
+
+func TestListAuditEventsBoundsLimit(t *testing.T) {
+	eng := engine.NewEngine(nil, testLogger())
+	st := &fakeStore{}
+	srv := NewServer(eng, st, testLogger())
+	ctx := context.Background()
+
+	tests := []struct {
+		name      string
+		limit     int
+		wantLimit int
+	}{
+		{name: "default", limit: 0, wantLimit: maxListAuditEventsLimit},
+		{name: "within limit", limit: 25, wantLimit: 25},
+		{name: "above limit", limit: maxListAuditEventsLimit + 1, wantLimit: maxListAuditEventsLimit},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			st.auditOpts = nil
+			if _, err := srv.ListAuditEvents(ctx, AuditLogOptions{Limit: tt.limit, Offset: 7}); err != nil {
+				t.Fatalf("ListAuditEvents() error = %v", err)
+			}
+			if st.auditOpts == nil {
+				t.Fatal("ListAuditEvents() did not call store")
+			}
+			if st.auditOpts.Limit != tt.wantLimit || st.auditOpts.Offset != 7 {
+				t.Fatalf("AuditOptions = %+v, want limit %d offset 7", st.auditOpts, tt.wantLimit)
+			}
+		})
+	}
+}
+
 func TestListHistoryIncludesConfigText(t *testing.T) {
 	eng := engine.NewEngine(nil, testLogger())
 	st := &fakeStore{
@@ -1710,6 +1858,14 @@ func TestListHistoryIncludesConfigText(t *testing.T) {
 				Timestamp: time.Date(2026, 5, 17, 12, 0, 0, 0, time.UTC),
 				Config: &model.RouterConfig{
 					System: &model.SystemConfig{HostName: "router1"},
+					Security: &model.SecurityConfig{
+						Users: map[string]*model.UserConfig{
+							"admin": {
+								Password: "plain-password",
+								Role:     "admin",
+							},
+						},
+					},
 				},
 			},
 		},
@@ -1725,6 +1881,9 @@ func TestListHistoryIncludesConfigText(t *testing.T) {
 	}
 	if !strings.Contains(entries[0].ConfigText, "set system host-name router1") {
 		t.Fatalf("ListHistory() config text = %q, want archived set commands", entries[0].ConfigText)
+	}
+	if strings.Contains(entries[0].ConfigText, "plain-password") || strings.Contains(entries[0].ConfigText, "$argon2id$") {
+		t.Fatalf("ListHistory() leaked credential material:\n%s", entries[0].ConfigText)
 	}
 }
 

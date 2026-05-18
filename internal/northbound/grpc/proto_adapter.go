@@ -2,9 +2,13 @@ package grpc
 
 import (
 	"context"
+	"crypto/tls"
+	"strings"
 	"time"
 
 	apiv1 "github.com/akam1o/arca-router/api/v1"
+	"google.golang.org/grpc/credentials"
+	"google.golang.org/grpc/peer"
 )
 
 type configServiceAdapter struct {
@@ -46,7 +50,7 @@ func (a *configServiceAdapter) ReplaceCandidate(ctx context.Context, req *apiv1.
 }
 
 func (a *configServiceAdapter) Commit(ctx context.Context, req *apiv1.CommitRequest) (*apiv1.CommitResponse, error) {
-	commitID, version, err := a.server.Commit(ctx, req.GetSessionId(), req.GetUser(), req.GetMessage())
+	commitID, version, err := a.server.Commit(ctx, req.GetSessionId(), grpcRequestUser(ctx, req.GetUser()), req.GetMessage())
 	if err != nil {
 		return nil, err
 	}
@@ -68,7 +72,7 @@ func (a *configServiceAdapter) Discard(ctx context.Context, req *apiv1.DiscardRe
 }
 
 func (a *configServiceAdapter) Rollback(ctx context.Context, req *apiv1.RollbackRequest) (*apiv1.RollbackResponse, error) {
-	commitID, version, err := a.server.Rollback(ctx, req.GetSessionId(), req.GetCommitId(), req.GetUser(), req.GetMessage())
+	commitID, version, err := a.server.Rollback(ctx, req.GetSessionId(), req.GetCommitId(), grpcRequestUser(ctx, req.GetUser()), req.GetMessage())
 	if err != nil {
 		return nil, err
 	}
@@ -107,8 +111,39 @@ type sessionServiceAdapter struct {
 	server *Server
 }
 
+func grpcRequestUser(ctx context.Context, requested string) string {
+	if p, ok := peer.FromContext(ctx); ok && p.AuthInfo != nil {
+		if tlsInfo, ok := p.AuthInfo.(credentials.TLSInfo); ok {
+			if user := grpcTLSUser(tlsInfo.State); user != "" {
+				return user
+			}
+		}
+	}
+	return strings.TrimSpace(requested)
+}
+
+func grpcTLSUser(state tls.ConnectionState) string {
+	if len(state.VerifiedChains) == 0 || len(state.VerifiedChains[0]) == 0 {
+		return ""
+	}
+	cert := state.VerifiedChains[0][0]
+	if len(cert.URIs) > 0 {
+		return cert.URIs[0].String()
+	}
+	if cert.Subject.CommonName != "" {
+		return cert.Subject.CommonName
+	}
+	if len(cert.DNSNames) > 0 {
+		return cert.DNSNames[0]
+	}
+	if len(cert.EmailAddresses) > 0 {
+		return cert.EmailAddresses[0]
+	}
+	return ""
+}
+
 func (a *sessionServiceAdapter) CreateSession(ctx context.Context, req *apiv1.CreateSessionRequest) (*apiv1.CreateSessionResponse, error) {
-	sessionID, err := a.server.CreateSession(ctx, req.GetUser())
+	sessionID, err := a.server.CreateSession(ctx, grpcRequestUser(ctx, req.GetUser()))
 	if err != nil {
 		return nil, err
 	}
@@ -123,7 +158,7 @@ func (a *sessionServiceAdapter) CloseSession(ctx context.Context, req *apiv1.Clo
 }
 
 func (a *sessionServiceAdapter) AcquireLock(ctx context.Context, req *apiv1.AcquireLockRequest) (*apiv1.AcquireLockResponse, error) {
-	if err := a.server.AcquireLock(ctx, req.GetSessionId(), req.GetUser()); err != nil {
+	if err := a.server.AcquireLock(ctx, req.GetSessionId(), grpcRequestUser(ctx, req.GetUser())); err != nil {
 		return nil, err
 	}
 	return &apiv1.AcquireLockResponse{}, nil

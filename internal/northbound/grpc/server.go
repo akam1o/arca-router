@@ -57,6 +57,8 @@ var (
 const (
 	classOfServiceEnforcementIntentOnly    = "intent-only"
 	classOfServiceEnforcementNotConfigured = "not configured"
+	maxListHistoryLimit                    = 1000
+	maxListAuditEventsLimit                = 1000
 )
 
 type interfaceStateCollector interface {
@@ -165,7 +167,14 @@ func runOperationalVtyshBytesCommand(ctx context.Context, command string) ([]byt
 
 // GetRunning returns the current running configuration.
 func (s *Server) GetRunning(ctx context.Context) (configText string, version uint64, err error) {
-	return s.runningText()
+	return s.runningText(true)
+}
+
+// GetRunningUnredacted returns the current running configuration including
+// credential material. It is intentionally not exposed through the public gRPC
+// protobuf service.
+func (s *Server) GetRunningUnredacted(ctx context.Context) (configText string, version uint64, err error) {
+	return s.runningText(false)
 }
 
 // GetCandidate returns the session candidate configuration.
@@ -249,6 +258,7 @@ func (s *Server) Commit(ctx context.Context, sessionID, user, message string) (s
 	if !session.HasLock {
 		return "", 0, fmt.Errorf("session %s does not hold the candidate lock", sessionID)
 	}
+	user = sessionAuditUser(session, user)
 
 	// Parse the candidate config text using the existing pkg/config parser
 	candidateText := session.CandidateText
@@ -383,9 +393,7 @@ func (s *Server) Rollback(ctx context.Context, sessionID, commitID, user, messag
 	if err := s.ensureCandidateBaseCurrentLocked(session); err != nil {
 		return "", 0, err
 	}
-	if user == "" {
-		user = session.User
-	}
+	user = sessionAuditUser(session, user)
 	if message == "" {
 		message = fmt.Sprintf("rollback to commit %s", commitID)
 	}
@@ -465,7 +473,7 @@ func (s *Server) Diff(ctx context.Context, sessionID string) (string, bool, erro
 	if err != nil {
 		return "", false, err
 	}
-	running, _, err := s.runningText()
+	running, _, err := s.runningText(false)
 	if err != nil {
 		return "", false, err
 	}
@@ -478,8 +486,9 @@ func (s *Server) Diff(ctx context.Context, sessionID string) (string, bool, erro
 
 // ListHistory returns persisted commit history.
 func (s *Server) ListHistory(ctx context.Context, limit, offset int) ([]CommitInfo, error) {
-	if limit < 0 {
-		return nil, fmt.Errorf("invalid history limit: %d", limit)
+	boundedLimit, err := boundedListLimit("history", limit, maxListHistoryLimit)
+	if err != nil {
+		return nil, err
 	}
 	if offset < 0 {
 		return nil, fmt.Errorf("invalid history offset: %d", offset)
@@ -487,7 +496,7 @@ func (s *Server) ListHistory(ctx context.Context, limit, offset int) ([]CommitIn
 	if s.store == nil {
 		return nil, nil
 	}
-	records, err := s.store.ListCommits(ctx, &store.ListOptions{Limit: limit, Offset: offset})
+	records, err := s.store.ListCommits(ctx, &store.ListOptions{Limit: boundedLimit, Offset: offset})
 	if err != nil {
 		return nil, err
 	}
@@ -511,8 +520,9 @@ func (s *Server) ListHistory(ctx context.Context, limit, offset int) ([]CommitIn
 
 // ListAuditEvents returns persisted audit events for export.
 func (s *Server) ListAuditEvents(ctx context.Context, opts AuditLogOptions) ([]AuditEventInfo, error) {
-	if opts.Limit < 0 {
-		return nil, fmt.Errorf("invalid audit limit: %d", opts.Limit)
+	boundedLimit, err := boundedListLimit("audit", opts.Limit, maxListAuditEventsLimit)
+	if err != nil {
+		return nil, err
 	}
 	if opts.Offset < 0 {
 		return nil, fmt.Errorf("invalid audit offset: %d", opts.Offset)
@@ -521,7 +531,7 @@ func (s *Server) ListAuditEvents(ctx context.Context, opts AuditLogOptions) ([]A
 		return nil, nil
 	}
 	events, err := s.store.ListAuditEvents(ctx, &store.AuditOptions{
-		Limit:     opts.Limit,
+		Limit:     boundedLimit,
 		Offset:    opts.Offset,
 		StartTime: opts.StartTime,
 		EndTime:   opts.EndTime,
@@ -555,11 +565,21 @@ func (s *Server) ListAuditEvents(ctx context.Context, opts AuditLogOptions) ([]A
 	return result, nil
 }
 
+func boundedListLimit(name string, limit, max int) (int, error) {
+	if limit < 0 {
+		return 0, fmt.Errorf("invalid %s limit: %d", name, limit)
+	}
+	if limit == 0 || limit > max {
+		return max, nil
+	}
+	return limit, nil
+}
+
 func commitRecordConfigText(record *store.CommitRecord) (string, error) {
 	if record == nil || record.Config == nil {
 		return "", nil
 	}
-	text, err := pkgconfig.ToSetCommandsWithError(record.Config.ToLegacyConfig())
+	text, err := pkgconfig.ToSetCommandsRedactedWithError(record.Config.ToLegacyConfig())
 	if err != nil {
 		return "", fmt.Errorf("serialize commit %s config: %w", record.CommitID, err)
 	}
@@ -1348,16 +1368,32 @@ func runVtyshCommandReal(ctx context.Context, command string) (string, error) {
 	return stdout.String(), nil
 }
 
-func (s *Server) runningText() (string, uint64, error) {
+func (s *Server) runningText(redactSecrets bool) (string, uint64, error) {
 	snap := s.engine.RunningSnapshot()
 	if snap == nil || snap.Config == nil {
 		return "", 0, nil
 	}
-	text, err := pkgconfig.ToSetCommandsWithError(snap.Config.ToLegacyConfig())
+	legacyCfg := snap.Config.ToLegacyConfig()
+	var (
+		text string
+		err  error
+	)
+	if redactSecrets {
+		text, err = pkgconfig.ToSetCommandsRedactedWithError(legacyCfg)
+	} else {
+		text, err = pkgconfig.ToSetCommandsWithError(legacyCfg)
+	}
 	if err != nil {
 		return "", 0, fmt.Errorf("serialize running config: %w", err)
 	}
 	return text, snap.Version, nil
+}
+
+func sessionAuditUser(session *Session, requestedUser string) string {
+	if session != nil && strings.TrimSpace(session.User) != "" {
+		return session.User
+	}
+	return requestedUser
 }
 
 func (s *Server) resetSessionCandidate(session *Session) error {

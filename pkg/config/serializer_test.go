@@ -99,6 +99,9 @@ func TestToSetCommandsRoundTrip(t *testing.T) {
 	if strings.Contains(text, " secret") {
 		t.Fatalf("ToSetCommands() leaked plain password:\n%s", text)
 	}
+	if cfg.Security.Users["admin"].Password == "" || cfg.Security.Users["admin"].Password != "secret" {
+		t.Fatalf("ToSetCommands() mutated source password: %q", cfg.Security.Users["admin"].Password)
+	}
 	parsed, err := NewParser(strings.NewReader(text)).Parse()
 	if err != nil {
 		t.Fatalf("round-trip parse failed:\n%s\nerror: %v", text, err)
@@ -107,6 +110,44 @@ func TestToSetCommandsRoundTrip(t *testing.T) {
 	roundTripText := ToSetCommands(parsed)
 	if roundTripText != text {
 		t.Fatalf("round-trip text mismatch\nwant:\n%s\ngot:\n%s", text, roundTripText)
+	}
+}
+
+func TestToSetCommandsRedactedWithErrorRedactsCredentials(t *testing.T) {
+	cfg := &Config{
+		System: &SystemConfig{
+			Services: &SystemServicesConfig{
+				SNMP: &SNMPConfig{
+					Enabled:   true,
+					Community: "private-community",
+				},
+			},
+		},
+		Security: &SecurityConfig{
+			Users: map[string]*UserConfig{
+				"admin": {
+					Username: "admin",
+					Password: "plain-password",
+					Role:     "admin",
+				},
+			},
+		},
+	}
+
+	text, err := ToSetCommandsRedactedWithError(cfg)
+	if err != nil {
+		t.Fatalf("ToSetCommandsRedactedWithError() error = %v", err)
+	}
+	for _, secret := range []string{"plain-password", "private-community", "$argon2id$"} {
+		if strings.Contains(text, secret) {
+			t.Fatalf("redacted config leaked %q:\n%s", secret, text)
+		}
+	}
+	if strings.Count(text, redactedSecretValue) != 2 {
+		t.Fatalf("redacted config =\n%s\nwant two redacted markers", text)
+	}
+	if cfg.Security.Users["admin"].Password != "plain-password" {
+		t.Fatalf("redacted serialization mutated source password: %q", cfg.Security.Users["admin"].Password)
 	}
 }
 

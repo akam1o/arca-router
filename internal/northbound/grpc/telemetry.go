@@ -503,7 +503,7 @@ func (s *Server) telemetryPayload(ctx context.Context, path string) (any, error)
 			UptimeSecs: info.UptimeSecs,
 		}, nil
 	case "/config/running":
-		text, version, err := s.runningText()
+		text, version, err := s.runningText(true)
 		if err != nil {
 			return nil, err
 		}
