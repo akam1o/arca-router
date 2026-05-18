@@ -1142,6 +1142,43 @@ func TestWebConfigCommitEndpointReplacesFullConfig(t *testing.T) {
 	}
 }
 
+func TestWebConfigWriteEndpointRejectsTrailingJSON(t *testing.T) {
+	source, eng := newWebConfigAPITestSource(t, "operator")
+
+	req := httptest.NewRequest(
+		http.MethodPost,
+		"/api/config/commit",
+		strings.NewReader(`{"config_text":"set system host-name edge02"}{"config_text":"set system host-name edge03"}`),
+	)
+	req.SetBasicAuth("operator", "secret")
+	rec := httptest.NewRecorder()
+	source.handleWebConfigCommit(rec, req)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want %d: %s", rec.Code, http.StatusBadRequest, rec.Body.String())
+	}
+	if got := eng.Running().System.HostName; got != "edge01" {
+		t.Fatalf("running hostname = %q, want unchanged edge01", got)
+	}
+	if !strings.Contains(rec.Body.String(), "unexpected trailing JSON value") {
+		t.Fatalf("response body = %q, want trailing JSON error", rec.Body.String())
+	}
+}
+
+func TestWebConfigWriteEndpointRejectsOversizedBody(t *testing.T) {
+	source, _ := newWebConfigAPITestSource(t, "operator")
+	body := `{"config_text":"` + strings.Repeat("x", webConfigEditBodyLimit) + `"}`
+
+	req := httptest.NewRequest(http.MethodPost, "/api/config/validate", strings.NewReader(body))
+	req.SetBasicAuth("operator", "secret")
+	rec := httptest.NewRecorder()
+	source.handleWebConfigValidate(rec, req)
+
+	if rec.Code != http.StatusRequestEntityTooLarge {
+		t.Fatalf("status = %d, want %d: %s", rec.Code, http.StatusRequestEntityTooLarge, rec.Body.String())
+	}
+}
+
 func TestWebConfigWriteEndpointRejectsReadOnlyRole(t *testing.T) {
 	source, _ := newWebConfigAPITestSource(t, "read-only")
 

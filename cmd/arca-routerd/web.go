@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"html/template"
+	"io"
 	"log/slog"
 	"net"
 	"net/http"
@@ -1644,10 +1645,28 @@ func decodeWebJSONRequest(w http.ResponseWriter, r *http.Request, dst any) bool 
 	dec := json.NewDecoder(http.MaxBytesReader(w, r.Body, webConfigEditBodyLimit))
 	dec.DisallowUnknownFields()
 	if err := dec.Decode(dst); err != nil {
-		writeWebJSONError(w, http.StatusBadRequest, "decode request: "+err.Error())
+		writeWebJSONDecodeError(w, err)
+		return false
+	}
+	var trailing any
+	if err := dec.Decode(&trailing); err != io.EOF {
+		if err != nil {
+			writeWebJSONDecodeError(w, err)
+		} else {
+			writeWebJSONError(w, http.StatusBadRequest, "decode request: unexpected trailing JSON value")
+		}
 		return false
 	}
 	return true
+}
+
+func writeWebJSONDecodeError(w http.ResponseWriter, err error) {
+	var maxBytesErr *http.MaxBytesError
+	if errors.As(err, &maxBytesErr) {
+		writeWebJSONError(w, http.StatusRequestEntityTooLarge, "decode request: request body too large")
+		return
+	}
+	writeWebJSONError(w, http.StatusBadRequest, "decode request: "+err.Error())
 }
 
 func writeWebJSON(w http.ResponseWriter, status int, value any) {
