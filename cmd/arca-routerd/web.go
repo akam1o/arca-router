@@ -1179,7 +1179,12 @@ func (s metricsSource) handleWebConfigHistory(w http.ResponseWriter, r *http.Req
 	if !s.authorizeWebRead(w, r) {
 		return
 	}
-	history, err := s.configHistory(r.Context(), webHistoryLimit(r), webHistoryOffset(r))
+	limit, offset, err := webHistoryPaginationFromRequest(r)
+	if err != nil {
+		writeWebJSONError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	history, err := s.configHistory(r.Context(), limit, offset)
 	if err != nil {
 		writeWebJSONError(w, http.StatusInternalServerError, err.Error())
 		return
@@ -1679,29 +1684,35 @@ func writeWebJSONError(w http.ResponseWriter, status int, message string) {
 	writeWebJSON(w, status, map[string]string{"error": message})
 }
 
-func webHistoryLimit(r *http.Request) int {
-	limit := 20
-	if raw := strings.TrimSpace(r.URL.Query().Get("limit")); raw != "" {
-		if parsed, err := strconv.Atoi(raw); err == nil && parsed > 0 {
-			limit = parsed
-		}
+func webHistoryPaginationFromRequest(r *http.Request) (int, int, error) {
+	query := r.URL.Query()
+	limit, err := webHistoryLimitQuery(query.Get("limit"))
+	if err != nil {
+		return 0, 0, err
 	}
-	if limit > 100 {
-		return 100
+	offset, err := boundedWebIntQuery(query.Get("offset"), 0, 0, 1<<31-1, "offset")
+	if err != nil {
+		return 0, 0, err
 	}
-	return limit
+	return limit, offset, nil
 }
 
-func webHistoryOffset(r *http.Request) int {
-	raw := strings.TrimSpace(r.URL.Query().Get("offset"))
-	if raw == "" {
-		return 0
+func webHistoryLimitQuery(raw string) (int, error) {
+	value := strings.TrimSpace(raw)
+	if value == "" {
+		return 20, nil
 	}
-	offset, err := strconv.Atoi(raw)
-	if err != nil || offset < 0 {
-		return 0
+	limit, err := strconv.Atoi(value)
+	if err != nil {
+		return 0, fmt.Errorf("limit must be an integer")
 	}
-	return offset
+	if limit <= 0 {
+		return 0, fmt.Errorf("limit must be between 1 and 100")
+	}
+	if limit > 100 {
+		return 100, nil
+	}
+	return limit, nil
 }
 
 func webAuditOptionsFromRequest(r *http.Request) (nbgrpc.AuditLogOptions, error) {

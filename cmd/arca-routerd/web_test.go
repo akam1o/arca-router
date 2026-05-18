@@ -1243,6 +1243,30 @@ func TestWebConfigHistoryEndpointUsesConfigAPI(t *testing.T) {
 	}
 }
 
+func TestWebConfigHistoryEndpointRejectsInvalidPagination(t *testing.T) {
+	tests := []string{
+		"/api/config/history?limit=abc",
+		"/api/config/history?limit=0",
+		"/api/config/history?offset=-1",
+		"/api/config/history?offset=abc",
+	}
+	for _, target := range tests {
+		t.Run(target, func(t *testing.T) {
+			source := newWebAuthTestSource(t, "monitor", "secret", "read-only")
+			source.configAPI = webHistoryTestAPI{}
+
+			req := httptest.NewRequest(http.MethodGet, target, nil)
+			req.SetBasicAuth("monitor", "secret")
+			rec := httptest.NewRecorder()
+			source.handleWebConfigHistory(rec, req)
+
+			if rec.Code != http.StatusBadRequest {
+				t.Fatalf("status = %d, want %d: %s", rec.Code, http.StatusBadRequest, rec.Body.String())
+			}
+		})
+	}
+}
+
 func TestWebAuditEndpointRequiresAdminRole(t *testing.T) {
 	source := newWebAuthTestSource(t, "monitor", "secret", "read-only")
 	source.configAPI = &webAuditTestAPI{}
