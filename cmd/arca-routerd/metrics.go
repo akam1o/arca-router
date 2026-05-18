@@ -34,6 +34,7 @@ type metricsSource struct {
 	datastore     *datastore.Config
 	configAPI     webConfigAPI
 	telemetryAPI  webTelemetryAPI
+	webAPITokens  map[string]webAPIToken
 	configSync    configSyncRuntimeSource
 	frr           frrVRRPSource
 	vpp           vppReconciliationSource

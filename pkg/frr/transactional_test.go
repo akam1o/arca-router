@@ -1041,6 +1041,36 @@ func TestVtyshMgmtClientApplySequence(t *testing.T) {
 	}
 }
 
+func TestVtyshMgmtClientApplyPreservesPermissionDenied(t *testing.T) {
+	client := NewVtyshMgmtClientWithRunner(func(ctx context.Context, command string) ([]byte, error) {
+		return nil, NewPermissionDeniedError("run vtysh management command", nil)
+	})
+
+	err := client.Apply(context.Background(), []MgmtOperation{setOp("/x", "1")})
+	if err == nil {
+		t.Fatal("Apply() error = nil, want permission error")
+	}
+	if !IsPermissionDenied(err) {
+		t.Fatalf("Apply() error = %v, want FRR permission error", err)
+	}
+	if !strings.Contains(err.Error(), "abort stale FRR management candidate") {
+		t.Fatalf("Apply() error = %v, want operation detail", err)
+	}
+}
+
+func TestCommandFailureLooksPermissionDenied(t *testing.T) {
+	err := commandFailureError([]byte("vtysh: permission denied\n"), context.Canceled)
+	if err == nil || !strings.Contains(err.Error(), "permission denied") {
+		t.Fatalf("commandFailureError() = %v, want output detail", err)
+	}
+	if !commandFailureLooksPermissionDenied([]byte("vtysh: permission denied\n"), context.Canceled) {
+		t.Fatal("commandFailureLooksPermissionDenied() = false, want true")
+	}
+	if commandFailureLooksPermissionDenied([]byte("validation failed\n"), context.Canceled) {
+		t.Fatal("commandFailureLooksPermissionDenied() = true, want false")
+	}
+}
+
 func commandsFromOps(ops []MgmtOperation) string {
 	commands := make([]string, 0, len(ops))
 	for _, op := range ops {

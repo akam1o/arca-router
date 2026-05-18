@@ -12,6 +12,8 @@ import (
 	"time"
 
 	clientv3 "go.etcd.io/etcd/client/v3"
+
+	"github.com/akam1o/arca-router/pkg/security"
 )
 
 // etcdDatastore implements the Datastore interface using etcd.
@@ -113,11 +115,10 @@ func buildTLSConfig(cfg *TLSConfig) (*tls.Config, error) {
 		return nil, fmt.Errorf("failed to parse CA cert")
 	}
 
-	tlsConfig := &tls.Config{
+	tlsConfig := security.ApplyTLSPolicy(&tls.Config{
 		Certificates: []tls.Certificate{cert},
 		RootCAs:      caCertPool,
-		MinVersion:   tls.VersionTLS12, // Enforce TLS 1.2+
-	}
+	})
 
 	return tlsConfig, nil
 }

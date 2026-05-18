@@ -6,7 +6,7 @@ if [[ $# -ne 1 ]]; then
   exit 2
 fi
 
-ROOT="$(git rev-parse --show-toplevel)"
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 SCRIPT="$1"
 TMPDIR="$(mktemp -d)"
 PASSWORD="NetconfInterop123"
@@ -23,11 +23,31 @@ PY
 
 cd "$ROOT"
 
+STANDARD_XPATH="${NETCONF_STANDARD_XPATH:-1}"
+
+EVIDENCE_DIR="${NETCONF_INTEROP_EVIDENCE_DIR:-}"
+if [[ -n "$EVIDENCE_DIR" ]]; then
+  mkdir -p "$EVIDENCE_DIR"
+  EVIDENCE_DIR="$(cd "$EVIDENCE_DIR" && pwd)"
+  export NETCONF_INTEROP_EVIDENCE_DIR="$EVIDENCE_DIR"
+fi
+
+collect_evidence() {
+  if [[ -z "$EVIDENCE_DIR" ]]; then
+    return
+  fi
+  cp -f "$TMPDIR/running.conf" "$EVIDENCE_DIR/running.conf" 2>/dev/null || true
+  cp -f "$TMPDIR/netconf-interop-server.log" "$EVIDENCE_DIR/server.log" 2>/dev/null || true
+  cp -f "$TMPDIR/client.stdout" "$EVIDENCE_DIR/client.stdout" 2>/dev/null || true
+  cp -f "$TMPDIR/client.stderr" "$EVIDENCE_DIR/client.stderr" 2>/dev/null || true
+}
+
 cleanup() {
   if [[ -n "${DAEMON_PID:-}" ]] && kill -0 "$DAEMON_PID" 2>/dev/null; then
     kill "$DAEMON_PID" 2>/dev/null || true
     wait "$DAEMON_PID" 2>/dev/null || true
   fi
+  collect_evidence
   rm -rf "$TMPDIR"
 }
 trap cleanup EXIT
@@ -40,20 +60,37 @@ set interfaces ge-0/0/0 description "interop-uplink"
 set interfaces xe-0/0/0 description "interop-peer"
 CONFIG
 
-go run ./tools/netconf-userdb \
+if [[ -n "$EVIDENCE_DIR" ]]; then
+  {
+    echo "script=$SCRIPT"
+    echo "standard_xpath=$STANDARD_XPATH"
+    echo "host=$HOST"
+    echo "port=$PORT"
+    go version
+    "${PYTHON:-python3}" --version
+  } >"$EVIDENCE_DIR/metadata.txt"
+fi
+
+go run -buildvcs=false ./tools/netconf-userdb \
   -path "$TMPDIR/users.db" \
   -username "$USERNAME" \
   -password "$PASSWORD" \
   -role admin
 
-go build -o "$TMPDIR/netconf-interop-server" ./tools/netconf-interop-server
+go build -buildvcs=false -o "$TMPDIR/netconf-interop-server" ./tools/netconf-interop-server
 
-"$TMPDIR/netconf-interop-server" \
-  --datastore "$TMPDIR/config.db" \
-  --host-key "$TMPDIR/ssh_host_ed25519_key" \
-  --user-db "$TMPDIR/users.db" \
-  --listen "$HOST:$PORT" \
-  --running-config "$TMPDIR/running.conf" \
+server_args=(
+  --datastore "$TMPDIR/config.db"
+  --host-key "$TMPDIR/ssh_host_ed25519_key"
+  --user-db "$TMPDIR/users.db"
+  --listen "$HOST:$PORT"
+  --running-config "$TMPDIR/running.conf"
+)
+if [[ "$STANDARD_XPATH" == "0" ]]; then
+  server_args+=(--standard-xpath=false)
+fi
+
+"$TMPDIR/netconf-interop-server" "${server_args[@]}" \
   >"$TMPDIR/netconf-interop-server.log" 2>&1 &
 DAEMON_PID=$!
 
@@ -85,11 +122,27 @@ if [[ "$READY" -ne 1 ]]; then
   exit 1
 fi
 
-if ! "${PYTHON:-python3}" "$ROOT/$SCRIPT" \
-  --host "$HOST" \
-  --port "$PORT" \
-  --username "$USERNAME" \
-  --password "$PASSWORD"; then
+client_args=(
+  --host "$HOST"
+  --port "$PORT"
+  --username "$USERNAME"
+  --password "$PASSWORD"
+)
+if [[ -n "$EVIDENCE_DIR" ]]; then
+  client_args+=(--evidence-dir "$EVIDENCE_DIR")
+fi
+if [[ "$STANDARD_XPATH" == "1" ]]; then
+  client_args+=(--expect-standard-xpath)
+else
+  client_args+=(--no-standard-xpath)
+fi
+
+if ! "${PYTHON:-python3}" "$ROOT/$SCRIPT" "${client_args[@]}" \
+  >"$TMPDIR/client.stdout" 2>"$TMPDIR/client.stderr"; then
+  cat "$TMPDIR/client.stdout"
+  cat "$TMPDIR/client.stderr" >&2
   cat "$TMPDIR/netconf-interop-server.log" >&2
   exit 1
 fi
+cat "$TMPDIR/client.stdout"
+cat "$TMPDIR/client.stderr" >&2

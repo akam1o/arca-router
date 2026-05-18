@@ -18,6 +18,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/akam1o/arca-router/internal/compat"
 	"github.com/akam1o/arca-router/internal/model"
 	grpcclient "github.com/akam1o/arca-router/internal/northbound/grpc"
 	configcli "github.com/akam1o/arca-router/pkg/cli"
@@ -48,10 +49,15 @@ const (
 var errTelemetryUsage = errors.New("telemetry usage error")
 
 type cliFlags struct {
-	grpcSocket  string
-	debug       bool
-	showHelp    bool
-	showVersion bool
+	grpcSocket     string
+	grpcAddress    string
+	grpcCAFile     string
+	grpcServerName string
+	grpcClientCert string
+	grpcClientKey  string
+	debug          bool
+	showHelp       bool
+	showVersion    bool
 }
 
 func main() {
@@ -80,6 +86,11 @@ func main() {
 func parseFlags() *cliFlags {
 	f := &cliFlags{}
 	flag.StringVar(&f.grpcSocket, "socket", defaultSocket, "Path to arca-routerd gRPC Unix socket")
+	flag.StringVar(&f.grpcAddress, "grpc-address", "", "arca-routerd TCP/TLS gRPC address (host:port; overrides -socket)")
+	flag.StringVar(&f.grpcCAFile, "grpc-ca", "", "CA certificate path for verifying arca-routerd gRPC TLS")
+	flag.StringVar(&f.grpcServerName, "grpc-server-name", "", "Expected gRPC TLS server name")
+	flag.StringVar(&f.grpcClientCert, "grpc-client-cert", "", "Client certificate path for gRPC mTLS")
+	flag.StringVar(&f.grpcClientKey, "grpc-client-key", "", "Client private key path for gRPC mTLS")
 	flag.BoolVar(&f.debug, "debug", false, "Enable debug output")
 	flag.BoolVar(&f.showHelp, "help", false, "Show help")
 	flag.BoolVar(&f.showHelp, "h", false, "Show help (shorthand)")
@@ -112,6 +123,7 @@ Show subcommands:
   configuration rollback <N>  Show archived configuration N commits back
   configuration interfaces    Show interface configuration
   configuration protocols     Show routing protocol configuration
+  compatibility               Show v0.10 compatibility policy
   interfaces                  Show interface status
   interfaces <name>           Show specific interface details
   routing-instances [name]    Show routing-instance table mapping
@@ -134,10 +146,15 @@ Show subcommands:
   route [inet|inet6] protocol <proto> Show routes by protocol
 
 Options:
-  -socket <path>     arca-routerd gRPC socket (default: %s)
-  -debug             Enable debug output
-  -help, -h          Show this help message
-  -version, -v       Show version information
+  -socket <path>             arca-routerd gRPC socket (default: %s)
+  -grpc-address <host:port>  arca-routerd TCP/TLS gRPC address (overrides -socket)
+  -grpc-ca <path>            CA certificate for gRPC TLS verification
+  -grpc-server-name <name>   Expected gRPC TLS server name
+  -grpc-client-cert <path>   Client certificate for gRPC mTLS
+  -grpc-client-key <path>    Client private key for gRPC mTLS
+  -debug                     Enable debug output
+  -help, -h                  Show this help message
+  -version, -v               Show version information
 
 `, defaultSocket)
 }
@@ -146,6 +163,21 @@ func debugLog(f *cliFlags, format string, args ...interface{}) {
 	if f.debug {
 		fmt.Fprintf(os.Stderr, "[DEBUG] "+format+"\n", args...)
 	}
+}
+
+func dialGRPC(f *cliFlags) (*grpcclient.Client, error) {
+	if address := strings.TrimSpace(f.grpcAddress); address != "" {
+		return grpcclient.DialTCP(address, grpcclient.TLSClientOptions{
+			CAFile:         f.grpcCAFile,
+			ServerName:     f.grpcServerName,
+			ClientCertFile: f.grpcClientCert,
+			ClientKeyFile:  f.grpcClientKey,
+		})
+	}
+	if f.grpcCAFile != "" || f.grpcServerName != "" || f.grpcClientCert != "" || f.grpcClientKey != "" {
+		return nil, fmt.Errorf("gRPC TLS flags require -grpc-address")
+	}
+	return grpcclient.Dial(f.grpcSocket)
 }
 
 func currentUsername() string {
@@ -185,7 +217,7 @@ func runOneShotCommand(ctx context.Context, f *cliFlags, args []string) int {
 	if handled, code := runLocalOneShotCommand(args); handled {
 		return code
 	}
-	client, err := grpcclient.Dial(f.grpcSocket)
+	client, err := dialGRPC(f)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 		return ExitOperationError
@@ -266,6 +298,14 @@ func oneShotBackup(ctx context.Context, client showClient, args []string) int {
 }
 
 func runLocalOneShotCommand(args []string) (bool, int) {
+	if len(args) >= 2 && args[0] == "show" && args[1] == "compatibility" {
+		if len(args) > 2 {
+			fmt.Fprintln(os.Stderr, "Error: 'show compatibility' does not accept extra arguments")
+			return true, ExitUsageError
+		}
+		printCompatibilityPolicy()
+		return true, ExitSuccess
+	}
 	if len(args) >= 3 && args[0] == "show" && args[1] == "telemetry" {
 		opts, ok, err := telemetryCatalogOptions(args[2:])
 		if !ok {
@@ -582,7 +622,7 @@ const (
 )
 
 func runInteractive(ctx context.Context, f *cliFlags) int {
-	client, err := grpcclient.Dial(f.grpcSocket)
+	client, err := dialGRPC(f)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error: failed to connect to arca-routerd: %v\n", err)
 		return ExitOperationError
@@ -878,6 +918,13 @@ func (sh *interactiveShell) cmdShow(ctx context.Context, args []string) error {
 			}
 			fmt.Printf("  %s  %s  by %s%s  %s\n", shortCommitID(e.CommitID), e.Timestamp, e.User, rb, e.Message)
 		}
+		return nil
+
+	case "compatibility":
+		if len(args) > 1 {
+			return fmt.Errorf("'show compatibility' does not accept extra arguments")
+		}
+		printCompatibilityPolicy()
 		return nil
 
 	case "interfaces":
@@ -1178,6 +1225,7 @@ func upgradePreflightLinesWithOptions(ctx context.Context, client showClient, op
 			lines = append(lines, "  running validation: ok")
 		}
 	}
+	lines = append(lines, upgradeCompatibilityPreflightLines()...)
 
 	history, err := client.ListHistory(ctx, 1, 0)
 	if err != nil {
@@ -1226,6 +1274,11 @@ func upgradePreflightLinesWithOptions(ctx context.Context, client showClient, op
 	if options.BackupPath != "" {
 		lines, warnings = appendUpgradeBackupPathCheck(lines, warnings, options.BackupPath)
 	}
+	packageLines, packageWarnings := upgradePackagePreflightLines()
+	lines = append(lines, packageLines...)
+	warnings += packageWarnings
+	lines = append(lines, upgradeReleaseReadinessLines()...)
+	lines = append(lines, upgradeRollbackGuidanceLines()...)
 
 	if warnings == 0 {
 		lines = append(lines, "  status: ready for package-specific upgrade checks")
@@ -1234,6 +1287,92 @@ func upgradePreflightLinesWithOptions(ctx context.Context, client showClient, op
 	}
 	lines = append(lines, "  next step: keep a fresh configuration backup and verify release-specific package notes")
 	return lines, nil
+}
+
+type upgradePackageCheck struct {
+	Path        string
+	Description string
+}
+
+func upgradePackagePreflightLines() ([]string, int) {
+	return upgradePackagePreflightLinesWithRoot("")
+}
+
+func upgradePackagePreflightLinesWithRoot(root string) ([]string, int) {
+	checks := []upgradePackageCheck{
+		{Path: "/usr/sbin/arca-routerd", Description: "daemon binary"},
+		{Path: "/usr/bin/arca", Description: "CLI binary"},
+		{Path: "/usr/lib/systemd/system/arca-routerd.service", Description: "systemd unit"},
+		{Path: "/etc/arca-router", Description: "configuration directory"},
+		{Path: "/var/lib/arca-router", Description: "state directory"},
+	}
+
+	lines := []string{"  package preflight:"}
+	if !packagedInstallDetected(root, checks) {
+		return append(lines, "    packaged install paths: not detected; run package manager dry-run checks before deployment"), 0
+	}
+
+	warnings := 0
+	for _, check := range checks {
+		fullPath := rootedPackagePath(root, check.Path)
+		info, err := os.Stat(fullPath)
+		if err != nil {
+			lines, warnings = appendUpgradePreflightWarning(lines, warnings, fmt.Sprintf("%s missing at %s", check.Description, check.Path))
+			continue
+		}
+		kind := "file"
+		if info.IsDir() {
+			kind = "directory"
+		}
+		lines = append(lines, fmt.Sprintf("    %s: %s present", check.Description, kind))
+	}
+	return lines, warnings
+}
+
+func packagedInstallDetected(root string, checks []upgradePackageCheck) bool {
+	for _, check := range checks {
+		if _, err := os.Stat(rootedPackagePath(root, check.Path)); err == nil {
+			return true
+		}
+	}
+	return false
+}
+
+func rootedPackagePath(root, path string) string {
+	if strings.TrimSpace(root) == "" {
+		return path
+	}
+	return filepath.Join(root, strings.TrimPrefix(path, string(os.PathSeparator)))
+}
+
+func upgradeRollbackGuidanceLines() []string {
+	return []string{
+		"  rollback guidance:",
+		"    keep the pre-upgrade package artifact or repository pin available until post-upgrade validation passes",
+		"    keep a fresh configuration backup and verify at least one rollback archive entry before replacing packages",
+		"    if daemon startup fails after upgrade, restore the previous package, then use arca backup/show configuration rollback output to recover config",
+	}
+}
+
+func upgradeReleaseReadinessLines() []string {
+	return []string{
+		"  release readiness:",
+		"    complete docs/v0.10-operational-runbook.md or docs/v0.10-operational-runbook.ja.md before release sign-off",
+		"    attach docs/v0.10-release-readiness.md evidence for package build, tests, compatibility output, and accepted warnings",
+		fmt.Sprintf("    record lab-only HA/restart/churn gaps and NETCONF capability gaps in %s", compat.DeferredGateDocument),
+		"    release sign-off must list owner, date, commit/tag, accepted warnings, and deferred gates",
+	}
+}
+
+func upgradeCompatibilityPreflightLines() []string {
+	policy := compat.CurrentPolicy()
+	return []string{
+		fmt.Sprintf("  compatibility phase: %s", policy.Phase),
+		fmt.Sprintf("  supported direct upgrade sources: %s", strings.Join(policy.SupportedDirectUpgradeSources, ", ")),
+		fmt.Sprintf("  unsupported direct upgrades: %s", policy.UnsupportedDirectUpgradeNote),
+		fmt.Sprintf("  API compatibility: %s, %s", compat.GRPCAPIPackage, compat.TelemetryEventSchema),
+		fmt.Sprintf("  datastore schema guard: SQLite schema 1-%d accepted", compat.CurrentSQLiteSchema),
+	}
 }
 
 func appendUpgradePreflightWarning(lines []string, warnings int, message string) ([]string, int) {
@@ -1370,29 +1509,7 @@ func (sh *interactiveShell) writeConfigurationBackup(path, text string) error {
 }
 
 func writeConfigBackupFile(path, text string) error {
-	if strings.TrimSpace(path) == "" {
-		return fmt.Errorf("backup path must not be empty")
-	}
-	data := []byte(text)
-	if len(data) == 0 || data[len(data)-1] != '\n' {
-		data = append(data, '\n')
-	}
-	file, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
-	if err != nil {
-		return fmt.Errorf("create backup file: %w", err)
-	}
-	var writeErr error
-	if _, err := file.Write(data); err != nil {
-		writeErr = err
-	}
-	closeErr := file.Close()
-	if writeErr != nil {
-		return fmt.Errorf("write backup file: %w", writeErr)
-	}
-	if closeErr != nil {
-		return fmt.Errorf("close backup file: %w", closeErr)
-	}
-	return nil
+	return pkgconfig.WriteConfigBackupFile(path, text)
 }
 
 func validateConfigurationText(text string) error {
@@ -2947,6 +3064,36 @@ func printCommandOutput(output string) {
 	}
 }
 
+func printCompatibilityPolicy() {
+	policy := compat.CurrentPolicy()
+	fmt.Println("compatibility policy:")
+	fmt.Printf("  phase: %s\n", policy.Phase)
+	fmt.Printf("  direct upgrade sources: %s\n", strings.Join(policy.SupportedDirectUpgradeSources, ", "))
+	fmt.Printf("  unsupported direct upgrades: %s\n", policy.UnsupportedDirectUpgradeNote)
+	fmt.Printf("  configuration: %s\n", policy.ConfigCompatibility)
+	fmt.Printf("  CLI: %s\n", policy.CLICompatibility)
+	fmt.Printf("  API: %s\n", policy.APIVersioning)
+	fmt.Printf("  deprecation: %s\n", policy.DeprecationPolicy)
+	fmt.Println("schema IDs:")
+	fmt.Printf("  gRPC: %s\n", compat.GRPCAPIPackage)
+	fmt.Printf("  telemetry events: %s\n", compat.TelemetryEventSchema)
+	fmt.Printf("  NMS status: %s\n", compat.NMSOperationalSchema)
+	fmt.Printf("  NMS telemetry catalog: %s\n", compat.NMSTelemetryCatalogSchema)
+	fmt.Printf("  NMS telemetry schemas: %s\n", compat.NMSTelemetrySchemaCatalog)
+	fmt.Printf("  NMS telemetry snapshot: %s\n", compat.NMSTelemetrySnapshot)
+	fmt.Printf("  audit export: %s\n", compat.AuditSchema)
+	fmt.Println("support matrix:")
+	for _, item := range compat.ComponentMatrix() {
+		fmt.Printf("  %s: %s\n", item.Component, item.Supported)
+		fmt.Printf("    required: %s\n", item.Required)
+		fmt.Printf("    notes: %s\n", item.Notes)
+	}
+	fmt.Printf("deferred gates (%s):\n", compat.DeferredGateDocument)
+	for _, gate := range compat.DeferredCompatibilityGates() {
+		fmt.Printf("  - %s\n", gate)
+	}
+}
+
 type telemetryCLIOptions struct {
 	paths    []string
 	interval time.Duration
@@ -3543,6 +3690,7 @@ func createCompleter() *readline.PrefixCompleter {
 			readline.PcItem("configuration",
 				readline.PcItem("rollback"),
 			),
+			readline.PcItem("compatibility"),
 			readline.PcItem("interfaces"),
 			readline.PcItem("bgp",
 				readline.PcItem("summary"),

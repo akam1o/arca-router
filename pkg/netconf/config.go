@@ -13,10 +13,14 @@ type SSHConfig struct {
 	UserDBPath                  string // Default: "/var/lib/arca-router/users.db"
 	DatastorePath               string // Default: "/var/lib/arca-router/config.db"
 	DatastoreConfig             *datastore.Config
-	SkipDatastoreStartupCleanup bool          // For embedded servers whose parent owns datastore startup
-	IdleTimeout                 time.Duration // Default: 30m (idle timeout)
-	AbsoluteTimeout             time.Duration // Default: 24h (max session lifetime)
-	MaxSessions                 int           // Default: 100
+	SkipDatastoreStartupCleanup bool // For embedded servers whose parent owns datastore startup
+	// AdvertiseStandardXPath controls standard :xpath capability advertisement.
+	// It defaults to true for v0.10; set DisableStandardXPath to suppress it.
+	AdvertiseStandardXPath bool
+	DisableStandardXPath   bool
+	IdleTimeout            time.Duration // Default: 30m (idle timeout)
+	AbsoluteTimeout        time.Duration // Default: 24h (max session lifetime)
+	MaxSessions            int           // Default: 100
 
 	// Lockout configuration
 	IPFailureLimit    int           // Default: 3 (IP-based lockout threshold)
@@ -25,7 +29,7 @@ type SSHConfig struct {
 	UserLockoutWindow time.Duration // Default: 10m (User failure tracking window)
 	LockoutDuration   time.Duration // Default: 15m (lockout duration for both IP and user)
 
-	SSHCiphers      []string // Default: ["chacha20-poly1305@openssh.com", "aes256-gcm@openssh.com"]
+	SSHCiphers      []string // Default: modern AEAD ciphers plus AES-CTR for NETCONF client interop
 	SSHKeyExchanges []string // Default: ["curve25519-sha256", "ecdh-sha2-nistp256"]
 	SSHMACs         []string // Default: ["hmac-sha2-256-etm@openssh.com", "hmac-sha2-512-etm@openssh.com"]
 }
@@ -33,22 +37,25 @@ type SSHConfig struct {
 // DefaultSSHConfig returns default SSH server configuration
 func DefaultSSHConfig() *SSHConfig {
 	return &SSHConfig{
-		ListenAddr:        ":830",
-		HostKeyPath:       "/var/lib/arca-router/ssh_host_ed25519_key",
-		UserDBPath:        "/var/lib/arca-router/users.db",
-		DatastorePath:     "/var/lib/arca-router/config.db",
-		IdleTimeout:       30 * time.Minute,
-		AbsoluteTimeout:   24 * time.Hour,
-		MaxSessions:       100,
-		IPFailureLimit:    3,
-		IPLockoutWindow:   5 * time.Minute,
-		UserFailureLimit:  5,
-		UserLockoutWindow: 10 * time.Minute,
-		LockoutDuration:   15 * time.Minute,
+		ListenAddr:             ":830",
+		HostKeyPath:            "/var/lib/arca-router/ssh_host_ed25519_key",
+		UserDBPath:             "/var/lib/arca-router/users.db",
+		DatastorePath:          "/var/lib/arca-router/config.db",
+		IdleTimeout:            30 * time.Minute,
+		AbsoluteTimeout:        24 * time.Hour,
+		MaxSessions:            100,
+		IPFailureLimit:         3,
+		IPLockoutWindow:        5 * time.Minute,
+		UserFailureLimit:       5,
+		UserLockoutWindow:      10 * time.Minute,
+		LockoutDuration:        15 * time.Minute,
+		AdvertiseStandardXPath: true,
 		SSHCiphers: []string{
 			"chacha20-poly1305@openssh.com",
 			"aes256-gcm@openssh.com",
 			"aes128-gcm@openssh.com",
+			"aes256-ctr",
+			"aes128-ctr",
 		},
 		SSHKeyExchanges: []string{
 			"curve25519-sha256",
@@ -84,6 +91,11 @@ func sshConfigWithDefaults(config *SSHConfig) *SSHConfig {
 	if merged.DatastoreConfig != nil {
 		datastoreConfig := *merged.DatastoreConfig
 		merged.DatastoreConfig = &datastoreConfig
+	}
+	if merged.DisableStandardXPath {
+		merged.AdvertiseStandardXPath = false
+	} else if !merged.AdvertiseStandardXPath {
+		merged.AdvertiseStandardXPath = defaults.AdvertiseStandardXPath
 	}
 	if merged.IdleTimeout <= 0 {
 		merged.IdleTimeout = defaults.IdleTimeout

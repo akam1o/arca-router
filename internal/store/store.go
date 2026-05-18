@@ -33,6 +33,9 @@ type ConfigStore interface {
 	// AuditLog logs an audit event.
 	AuditLog(ctx context.Context, event *AuditEvent) error
 
+	// ListAuditEvents returns audit events for export.
+	ListAuditEvents(ctx context.Context, opts *AuditOptions) ([]*AuditEvent, error)
+
 	// Close releases resources.
 	Close() error
 }
@@ -69,11 +72,27 @@ type ListOptions struct {
 
 // AuditEvent represents a logged audit event.
 type AuditEvent struct {
-	Timestamp time.Time         `json:"timestamp"`
-	User      string            `json:"user"`
-	SessionID string            `json:"session_id,omitempty"`
-	SourceIP  string            `json:"source_ip,omitempty"`
-	Action    string            `json:"action"`
-	Result    string            `json:"result"`
-	Details   map[string]string `json:"details,omitempty"`
+	ID            int64          `json:"id,omitempty"`
+	Key           string         `json:"key,omitempty"`
+	Timestamp     time.Time      `json:"timestamp"`
+	User          string         `json:"user"`
+	SessionID     string         `json:"session_id,omitempty"`
+	SourceIP      string         `json:"source_ip,omitempty"`
+	CorrelationID string         `json:"correlation_id,omitempty"`
+	Action        string         `json:"action"`
+	Result        string         `json:"result"`
+	ErrorCode     string         `json:"error_code,omitempty"`
+	Details       map[string]any `json:"details,omitempty"`
+	RawDetails    string         `json:"raw_details,omitempty"`
+}
+
+// AuditOptions controls pagination and filtering for audit export.
+type AuditOptions struct {
+	Limit     int
+	Offset    int
+	StartTime time.Time
+	EndTime   time.Time
+	User      string
+	Action    string
+	Result    string
 }

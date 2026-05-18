@@ -13,7 +13,7 @@ arca-router is a software router with Junos-compatible configuration syntax, pow
 
 ## Status
 
-arca-router is currently in the v0.9.x NETCONF/YANG and operational safety phase after completing the v0.8.x overlay and streaming telemetry implementation. This README
+arca-router is currently in the v0.10.x stabilization and compatibility phase after completing the v0.9.x NETCONF/YANG and operational safety implementation. This README
 describes the current unified daemon path; detailed release history is kept in
 [`CHANGELOG.md`](CHANGELOG.md), and future scope is tracked in
 [`ROADMAP.md`](ROADMAP.md).
@@ -27,6 +27,8 @@ Current capabilities:
 - v0.6-v0.8 config and observability foundations for clustering, VRRP, MPLS, routing instances, QoS, IPv6 parity, BFD, EVPN/VXLAN, streaming telemetry, and NMS APIs
 - Prometheus, health, SNMP, Web UI, Grafana observability, and authenticated Web config workflow
 - SQLite or etcd-backed candidate/running datastore with commit history and etcd config sync
+- v0.10 compatibility preflight, schema migration guardrails, support matrix reporting, gRPC TLS/mTLS, Web API token auth, and admin-only audit export
+- v0.10 release readiness/sign-off checklists, NETCONF client evidence gates, and installed-host security audit
 
 ---
 
@@ -52,7 +54,7 @@ Current capabilities:
 
 ---
 
-## Quick Start (v0.8.x)
+## Quick Start
 
 Requires VPP 24.10+ and FRR 8.0+ with the standard arca-router FRR daemon set enabled.
 
@@ -212,6 +214,13 @@ set security rate-limit per-user 20
 ```
 
 > NETCONF is built into `arca-routerd`; no separate NETCONF daemon is needed. When `--netconf-listen` is omitted, the daemon listens on the configured NETCONF port and falls back to `:830`.
+
+Standard NETCONF `:xpath` capability advertisement is enabled by default. Use
+`arca-routerd --netconf-standard-xpath=false` only for compatibility testing
+against clients that cannot handle advertised XPath filters. The NETCONF
+`startup` datastore is intentionally unsupported and is not advertised.
+
+For automation against the Web/NMS API, provide a `0600` token file with one `name:role:token` entry per line and start the daemon with `--web-api-token-file=/etc/arca-router/web-api-tokens`. Tokens can use `Authorization: Bearer <token>` or `X-API-Key: <token>` and reuse the `read-only`, `operator`, and `admin` RBAC roles.
 
 **Test NETCONF connection**:
 

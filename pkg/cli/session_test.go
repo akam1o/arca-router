@@ -144,6 +144,10 @@ func (m *mockDatastore) LogAuditEvent(ctx context.Context, event *datastore.Audi
 	return nil
 }
 
+func (m *mockDatastore) ListAuditEvents(ctx context.Context, opts *datastore.AuditOptions) ([]*datastore.AuditEvent, error) {
+	return nil, nil
+}
+
 func (m *mockDatastore) CleanupAuditLog(ctx context.Context, cutoff time.Time) (int64, error) {
 	return 0, nil
 }

@@ -1,10 +1,12 @@
-.PHONY: help build build-cli clean rpm rpm-package deb deb-package version test fmt vet check install-nfpm integration-test frr-mgmtd-smoke package-lint generate-binapi generate-proto
+.PHONY: help build build-cli clean rpm rpm-package rpm-test rpm-verify deb deb-package deb-test deb-verify version test fmt vet check release-check release-evidence-check install-nfpm integration-test script-lint netconf-client-lint netconf-client-evidence netconf-ncclient-evidence netconf-libnetconf2-evidence netconf-evidence-verify netconf-standard-xpath-evidence netconf-standard-xpath-evidence-verify netconf-pyez-evidence frr-mgmtd-smoke security-audit package-lint package-binary-arch-check generate-binapi generate-proto all packages
 
 # Binary names
 BINARY_NAME=arca-routerd
 CLI_BINARY_NAME=arca
 BUILD_DIR=build/bin
 DIST_DIR=dist
+NETCONF_EVIDENCE_DIR ?= artifacts/netconf-clients
+PYTHON ?= python3
 
 # Version information
 VERSION ?= $(shell git describe --tags --abbrev=0 2>/dev/null || echo "0.1.0")
@@ -28,7 +30,7 @@ NFPM_VERSION=v2.35.0
 help: ## Display this help message
 	@echo "ARCA Router - Makefile targets:"
 	@echo ""
-	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | sort | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-20s\033[0m %s\n", $$1, $$2}'
+	@grep -E '^[a-zA-Z0-9_-]+:.*?## .*$$' $(MAKEFILE_LIST) | sort | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-20s\033[0m %s\n", $$1, $$2}'
 	@echo ""
 	@echo "Environment variables:"
 	@echo "  VERSION            Override version (default: from git tag)"
@@ -40,7 +42,7 @@ version: ## Display version information
 	@echo "Build Date: $(BUILD_DATE)"
 	@echo "EPOCH:      $(SOURCE_DATE_EPOCH)"
 
-build: ## Build current v0.6 binaries (unified arca-routerd and arca CLI)
+build: ## Build current binaries (unified arca-routerd and arca CLI)
 	@echo "Building $(BINARY_NAME) and $(CLI_BINARY_NAME)..."
 	@mkdir -p $(BUILD_DIR)
 	CGO_ENABLED=1 SOURCE_DATE_EPOCH=$(SOURCE_DATE_EPOCH) go build $(BUILD_FLAGS) -o $(BUILD_DIR)/$(BINARY_NAME) ./cmd/arca-routerd
@@ -75,6 +77,17 @@ vet: ## Run go vet
 check: fmt vet test ## Run all checks (fmt, vet, test)
 	@echo "All checks passed"
 
+release-check: package-lint script-lint netconf-client-lint ## Run local v0.10 release readiness checks
+	@echo "Running v0.10 release readiness checks..."
+	go test ./...
+	go vet ./...
+	git diff --check
+	@echo "v0.10 release readiness checks passed"
+
+release-evidence-check: release-check netconf-evidence-verify netconf-standard-xpath-evidence-verify ## Verify local v0.10 release evidence before sign-off
+	@echo "Local v0.10 release evidence checks passed"
+	@echo "Attach artifacts from $(NETCONF_EVIDENCE_DIR) to sign-off; v0.10 PR release does not require RC packages, and host/lab-only evidence can be recorded as accepted warnings or deferred gates."
+
 clean: ## Clean build artifacts
 	@echo "Cleaning..."
 	rm -rf $(BUILD_DIR)
@@ -89,7 +102,21 @@ install-nfpm: ## Install NFPM tool
 
 rpm: build rpm-package ## Build RPM package
 
-rpm-package: package-lint ## Build RPM package (assumes binaries already built)
+package-binary-arch-check: ## Verify package binaries match amd64/x86_64 package metadata
+	@for bin in "$(BUILD_DIR)/$(BINARY_NAME)" "$(BUILD_DIR)/$(CLI_BINARY_NAME)"; do \
+		if [ ! -f "$$bin" ]; then \
+			echo "Error: $$bin not found. Run make build in a Linux amd64 environment before packaging."; \
+			exit 1; \
+		fi; \
+		if ! file "$$bin" | grep -Eq 'ELF 64-bit.*(x86-64|x86_64|AMD x86-64)'; then \
+			echo "Error: $$bin must be a Linux amd64 ELF binary for package arch amd64/x86_64."; \
+			file "$$bin"; \
+			exit 1; \
+		fi; \
+	done
+	@echo "Package binary architecture OK"
+
+rpm-package: package-lint package-binary-arch-check ## Build RPM package (assumes binaries already built)
 	@echo "Building RPM package..."
 	@mkdir -p $(DIST_DIR)
 	@if ! command -v nfpm >/dev/null 2>&1; then \
@@ -108,7 +135,7 @@ rpm-package: package-lint ## Build RPM package (assumes binaries already built)
 
 deb: build deb-package ## Build DEB package (for Debian Bookworm)
 
-deb-package: package-lint ## Build DEB package (assumes binaries already built)
+deb-package: package-lint package-binary-arch-check ## Build DEB package (assumes binaries already built)
 	@echo "Building DEB package..."
 	@mkdir -p $(DIST_DIR)
 	@if ! command -v nfpm >/dev/null 2>&1; then \
@@ -183,13 +210,58 @@ integration-test: build ## Run integration tests
 	@echo "Running integration tests..."
 	@bash test/integration_test.sh
 
+script-lint: ## Syntax-check shell helper scripts
+	@echo "Linting shell helper scripts..."
+	@for script in \
+		build/package/scripts/*.sh \
+		scripts/*.sh \
+		test/integration_test.sh \
+		tests/netconf_clients/*.sh; do \
+		bash -n "$$script"; \
+	done
+
+netconf-client-lint: ## Syntax-check NETCONF client helper scripts
+	@echo "Linting NETCONF client helper scripts..."
+	@$(PYTHON) -c 'import pathlib; [compile(path.read_text(encoding="utf-8"), str(path), "exec") for path in pathlib.Path("tests/netconf_clients").glob("*.py")]'
+
+netconf-client-evidence: netconf-ncclient-evidence netconf-libnetconf2-evidence ## Run required NETCONF client interop checks and write sign-off evidence
+	@echo "NETCONF client evidence complete: $(NETCONF_EVIDENCE_DIR)"
+
+netconf-ncclient-evidence: ## Run ncclient NETCONF interop and write sign-off evidence
+	@echo "Running ncclient NETCONF interop evidence..."
+	NETCONF_INTEROP_EVIDENCE_DIR="$(NETCONF_EVIDENCE_DIR)/ncclient" PYTHON="$(PYTHON)" bash tests/netconf_clients/run_interop.sh tests/netconf_clients/ncclient_interop.py
+
+netconf-libnetconf2-evidence: ## Run libnetconf2 NETCONF interop and write sign-off evidence
+	@echo "Running libnetconf2 NETCONF interop evidence..."
+	NETCONF_INTEROP_EVIDENCE_DIR="$(NETCONF_EVIDENCE_DIR)/libnetconf2" bash tests/netconf_clients/libnetconf2_interop.sh
+
+netconf-evidence-verify: ## Verify required NETCONF client evidence files for sign-off
+	@echo "Verifying NETCONF client evidence..."
+	$(PYTHON) tests/netconf_clients/verify_evidence.py "$(NETCONF_EVIDENCE_DIR)"
+
+netconf-standard-xpath-evidence: ## Run dedicated standard :xpath interop checks and write evidence
+	@echo "Running standard NETCONF :xpath evidence..."
+	NETCONF_STANDARD_XPATH=1 NETCONF_INTEROP_EVIDENCE_DIR="$(NETCONF_EVIDENCE_DIR)/standard-xpath/ncclient" PYTHON="$(PYTHON)" bash tests/netconf_clients/run_interop.sh tests/netconf_clients/ncclient_interop.py
+	NETCONF_STANDARD_XPATH=1 NETCONF_INTEROP_EVIDENCE_DIR="$(NETCONF_EVIDENCE_DIR)/standard-xpath/libnetconf2" bash tests/netconf_clients/libnetconf2_interop.sh
+	@echo "Standard NETCONF :xpath evidence complete: $(NETCONF_EVIDENCE_DIR)/standard-xpath"
+
+netconf-standard-xpath-evidence-verify: ## Verify dedicated standard :xpath evidence files
+	@echo "Verifying standard NETCONF :xpath evidence..."
+	$(PYTHON) tests/netconf_clients/verify_evidence.py "$(NETCONF_EVIDENCE_DIR)/standard-xpath" --expect-standard-xpath
+
+netconf-pyez-evidence: ## Run supplementary PyEZ NETCONF smoke and write sign-off evidence
+	@echo "Running supplementary Junos PyEZ NETCONF evidence..."
+	NETCONF_INTEROP_EVIDENCE_DIR="$(NETCONF_EVIDENCE_DIR)/junos-eznc" PYTHON="$(PYTHON)" bash tests/netconf_clients/run_interop.sh tests/netconf_clients/junos_eznc_smoke.py
+
 frr-mgmtd-smoke: ## Run live FRR mgmtd transactional apply smoke test
 	@echo "Running live FRR mgmtd smoke test..."
 	ARCA_FRR_MGMTD_SMOKE=1 go test -v ./pkg/frr -run TestFRRMgmtdSmokeApplyAndCleanup -count=1
 
-package-lint: ## Validate package metadata and v0.6 service expectations
+security-audit: ## Audit installed service users, capabilities, and file/socket permissions
+	@bash scripts/security-audit.sh
+
+package-lint: ## Validate package metadata and current service expectations
 	@echo "Linting package metadata..."
-	@for script in build/package/scripts/*.sh; do sh -n "$$script"; done
 	@grep -q 'SupplementaryGroups=vpp frrvty' build/systemd/arca-routerd.service
 	@if grep -Eq '^[[:space:]]*ReadWritePaths=.*\/etc\/frr' build/systemd/arca-routerd.service; then \
 		echo "Error: default service must not grant direct /etc/frr writes"; \

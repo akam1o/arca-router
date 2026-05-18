@@ -68,6 +68,36 @@ func TestWriteConfigAtomic(t *testing.T) {
 	}
 }
 
+func TestWriteConfigAtomicRejectsUnwritableDirectory(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("skipping permission check as root")
+	}
+
+	tmpDir := t.TempDir()
+	if err := os.Chmod(tmpDir, 0500); err != nil {
+		t.Fatalf("failed to restrict temp directory: %v", err)
+	}
+	defer func() {
+		_ = os.Chmod(tmpDir, 0700)
+	}()
+
+	r := &Reloader{
+		ConfigPath:    filepath.Join(tmpDir, "frr.conf"),
+		BackupEnabled: false,
+	}
+
+	err := r.WriteConfig("test config content\n")
+	if err == nil {
+		t.Fatal("WriteConfig() error = nil, want permission error")
+	}
+	if !IsPermissionDenied(err) {
+		t.Fatalf("WriteConfig() error = %v, want FRR permission error", err)
+	}
+	if !strings.Contains(err.Error(), "write FRR config directory") {
+		t.Fatalf("WriteConfig() error = %v, want config directory detail", err)
+	}
+}
+
 // TestBackupConfig tests backup creation.
 func TestBackupConfig(t *testing.T) {
 	// Create temp directory

@@ -7,6 +7,8 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -929,6 +931,94 @@ func TestWebEndpointAcceptsReadOnlyBasicAuth(t *testing.T) {
 	}
 }
 
+func TestLoadWebAPITokensParsesTokenFile(t *testing.T) {
+	tokenFile := filepath.Join(t.TempDir(), "tokens")
+	if err := os.WriteFile(tokenFile, []byte("# comment\nrobot:operator:secret-token\n"), 0600); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+
+	tokens, err := loadWebAPITokens(tokenFile)
+	if err != nil {
+		t.Fatalf("loadWebAPITokens() error = %v", err)
+	}
+	token := tokens["robot"]
+	if token.Name != "robot" || token.Role != "operator" || token.Token != "secret-token" {
+		t.Fatalf("token = %#v, want parsed robot operator token", token)
+	}
+}
+
+func TestLoadWebAPITokensRejectsInsecurePermissions(t *testing.T) {
+	tokenFile := filepath.Join(t.TempDir(), "tokens")
+	if err := os.WriteFile(tokenFile, []byte("robot:operator:secret-token\n"), 0600); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+	if err := os.Chmod(tokenFile, 0644); err != nil {
+		t.Fatalf("Chmod() error = %v", err)
+	}
+
+	_, err := loadWebAPITokens(tokenFile)
+	if err == nil {
+		t.Fatal("loadWebAPITokens() error = nil, want permission error")
+	}
+	if !strings.Contains(err.Error(), "validate token file permissions") {
+		t.Fatalf("loadWebAPITokens() error = %v, want permission validation error", err)
+	}
+}
+
+func TestWebEndpointAcceptsBearerToken(t *testing.T) {
+	source := newWebAuthTestSource(t, "monitor", "secret", "read-only")
+	source.webAPITokens = map[string]webAPIToken{
+		"robot": {Name: "robot", Role: "read-only", Token: "secret-token"},
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/api/status", nil)
+	req.Header.Set("Authorization", "Bearer secret-token")
+	rec := httptest.NewRecorder()
+	source.handleWebStatus(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d: %s", rec.Code, http.StatusOK, rec.Body.String())
+	}
+}
+
+func TestWebEndpointAcceptsAPIKeyHeader(t *testing.T) {
+	source := newWebAuthTestSource(t, "monitor", "secret", "read-only")
+	source.webAPITokens = map[string]webAPIToken{
+		"robot": {Name: "robot", Role: "read-only", Token: "secret-token"},
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/api/config", nil)
+	req.Header.Set("X-API-Key", "secret-token")
+	rec := httptest.NewRecorder()
+	source.handleWebConfig(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d: %s", rec.Code, http.StatusOK, rec.Body.String())
+	}
+}
+
+func TestWebEndpointRequiresAuthWhenOnlyTokensConfigured(t *testing.T) {
+	eng := engine.NewEngine(nil, slog.Default())
+	cfg := model.NewRouterConfig()
+	cfg.System = &model.SystemConfig{HostName: "edge01"}
+	eng.InitializeRunning(cfg, 42)
+	source := metricsSource{
+		startedAt: time.Now(),
+		engine:    eng,
+		webAPITokens: map[string]webAPIToken{
+			"robot": {Name: "robot", Role: "read-only", Token: "secret-token"},
+		},
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/api/status", nil)
+	rec := httptest.NewRecorder()
+	source.handleWebStatus(rec, req)
+
+	if rec.Code != http.StatusUnauthorized {
+		t.Fatalf("status = %d, want %d", rec.Code, http.StatusUnauthorized)
+	}
+}
+
 func TestWebEndpointRejectsInvalidRole(t *testing.T) {
 	source := newWebAuthTestSource(t, "monitor", "secret", "invalid")
 
@@ -1003,6 +1093,22 @@ func TestWebConfigWriteEndpointRejectsReadOnlyRole(t *testing.T) {
 	}
 }
 
+func TestWebConfigWriteEndpointRejectsReadOnlyToken(t *testing.T) {
+	source, _ := newWebConfigAPITestSource(t, "operator")
+	source.webAPITokens = map[string]webAPIToken{
+		"robot": {Name: "robot", Role: "read-only", Token: "secret-token"},
+	}
+
+	req := httptest.NewRequest(http.MethodPost, "/api/config/validate", strings.NewReader(`{"config_text":"set system host-name edge02"}`))
+	req.Header.Set("Authorization", "Bearer secret-token")
+	rec := httptest.NewRecorder()
+	source.handleWebConfigValidate(rec, req)
+
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("status = %d, want %d", rec.Code, http.StatusForbidden)
+	}
+}
+
 func TestWebConfigHistoryEndpointUsesConfigAPI(t *testing.T) {
 	source := newWebAuthTestSource(t, "monitor", "secret", "read-only")
 	source.configAPI = webHistoryTestAPI{history: []nbgrpc.CommitInfo{
@@ -1035,6 +1141,81 @@ func TestWebConfigHistoryEndpointUsesConfigAPI(t *testing.T) {
 	}
 	if entry.Timestamp != "2026-05-13T09:10:11Z" {
 		t.Fatalf("Timestamp = %q, want RFC3339 UTC", entry.Timestamp)
+	}
+}
+
+func TestWebAuditEndpointRequiresAdminRole(t *testing.T) {
+	source := newWebAuthTestSource(t, "monitor", "secret", "read-only")
+	source.configAPI = &webAuditTestAPI{}
+
+	req := httptest.NewRequest(http.MethodGet, "/api/audit", nil)
+	req.SetBasicAuth("monitor", "secret")
+	rec := httptest.NewRecorder()
+	source.handleWebAudit(rec, req)
+
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("status = %d, want %d", rec.Code, http.StatusForbidden)
+	}
+}
+
+func TestWebAuditEndpointExportsFilteredEvents(t *testing.T) {
+	source := newWebAuthTestSource(t, "admin", "secret", "admin")
+	auditAPI := &webAuditTestAPI{events: []nbgrpc.AuditEventInfo{
+		{
+			ID:        7,
+			Timestamp: time.Date(2026, 5, 17, 10, 11, 12, 0, time.UTC),
+			User:      "alice",
+			SessionID: "session-1",
+			SourceIP:  "192.0.2.10",
+			Action:    "access_denied",
+			Result:    "denied",
+			ErrorCode: "rbac-deny",
+			Details:   map[string]any{"operation": "kill-session"},
+		},
+	}}
+	source.configAPI = auditAPI
+
+	req := httptest.NewRequest(http.MethodGet, "/api/audit?limit=1&offset=2&user=alice&action=access_denied&result=denied&since=2026-05-17T00:00:00Z&until=2026-05-18T00:00:00Z", nil)
+	req.SetBasicAuth("admin", "secret")
+	rec := httptest.NewRecorder()
+	source.handleWebAudit(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d: %s", rec.Code, http.StatusOK, rec.Body.String())
+	}
+	if auditAPI.opts.Limit != 1 || auditAPI.opts.Offset != 2 || auditAPI.opts.User != "alice" ||
+		auditAPI.opts.Action != "access_denied" || auditAPI.opts.Result != "denied" ||
+		auditAPI.opts.StartTime.IsZero() || auditAPI.opts.EndTime.IsZero() {
+		t.Fatalf("audit options = %#v, want filtered request options", auditAPI.opts)
+	}
+	var resp webAuditResponse
+	if err := json.NewDecoder(rec.Result().Body).Decode(&resp); err != nil {
+		t.Fatalf("Decode() error = %v", err)
+	}
+	if resp.SchemaVersion != webAuditSchemaVersion || resp.Count != 1 || resp.Limit != 1 || resp.Offset != 2 {
+		t.Fatalf("audit response metadata = %#v, want schema/count/limit/offset", resp)
+	}
+	entry := resp.Entries[0]
+	if entry.ID != 7 || entry.User != "alice" || entry.Action != "access_denied" ||
+		entry.ErrorCode != "rbac-deny" || entry.Timestamp != "2026-05-17T10:11:12Z" {
+		t.Fatalf("audit entry = %#v, want exported RBAC denial", entry)
+	}
+	if entry.Details["operation"] != "kill-session" {
+		t.Fatalf("audit entry details = %#v, want operation detail", entry.Details)
+	}
+}
+
+func TestWebAuditEndpointRejectsInvalidTimeRange(t *testing.T) {
+	source := newWebAuthTestSource(t, "admin", "secret", "admin")
+	source.configAPI = &webAuditTestAPI{}
+
+	req := httptest.NewRequest(http.MethodGet, "/api/audit?since=2026-05-18T00:00:00Z&until=2026-05-17T00:00:00Z", nil)
+	req.SetBasicAuth("admin", "secret")
+	rec := httptest.NewRecorder()
+	source.handleWebAudit(rec, req)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want %d", rec.Code, http.StatusBadRequest)
 	}
 }
 
@@ -1155,6 +1336,17 @@ func (a webHistoryTestAPI) ListHistory(ctx context.Context, limit, offset int) (
 		history = history[:limit]
 	}
 	return history, nil
+}
+
+type webAuditTestAPI struct {
+	webConfigAPI
+	events []nbgrpc.AuditEventInfo
+	opts   nbgrpc.AuditLogOptions
+}
+
+func (a *webAuditTestAPI) ListAuditEvents(ctx context.Context, opts nbgrpc.AuditLogOptions) ([]nbgrpc.AuditEventInfo, error) {
+	a.opts = opts
+	return a.events, nil
 }
 
 type webTelemetryTestAPI struct {

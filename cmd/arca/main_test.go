@@ -6,12 +6,23 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 
 	grpcclient "github.com/akam1o/arca-router/internal/northbound/grpc"
 )
+
+func TestDialGRPCRejectsTLSFlagsWithoutAddress(t *testing.T) {
+	_, err := dialGRPC(&cliFlags{grpcCAFile: "/ca.crt"})
+	if err == nil {
+		t.Fatal("dialGRPC() error = nil, want TLS flag usage error")
+	}
+	if !strings.Contains(err.Error(), "-grpc-address") {
+		t.Fatalf("dialGRPC() error = %v, want -grpc-address", err)
+	}
+}
 
 type fakeInteractiveClient struct {
 	acquireLockErr   error
@@ -1020,10 +1031,15 @@ func TestUpgradePreflightLinesReportsReadyState(t *testing.T) {
 		"upgrade preflight:",
 		"running config: version 7",
 		"running validation: ok",
+		"supported direct upgrade sources: v0.8.x, v0.9.x",
+		"datastore schema guard: SQLite schema 1-2 accepted",
 		"rollback archive: latest commit 12345678 available",
 		"rollback archive validation: ok",
 		"telemetry catalog:",
 		"qos metadata binding: yes",
+		"package preflight:",
+		"release readiness:",
+		"rollback guidance:",
 		"status: ready for package-specific upgrade checks",
 	} {
 		if !strings.Contains(got, want) {
@@ -1033,6 +1049,86 @@ func TestUpgradePreflightLinesReportsReadyState(t *testing.T) {
 	if client.getRunningCalls != 1 || client.listHistoryCalls != 1 || client.telemetryCatalogCalls != 1 || client.cosCalls != 1 {
 		t.Fatalf("running/history/telemetry/cos calls = %d/%d/%d/%d, want 1/1/1/1",
 			client.getRunningCalls, client.listHistoryCalls, client.telemetryCatalogCalls, client.cosCalls)
+	}
+}
+
+func TestUpgradeCompatibilityPreflightLines(t *testing.T) {
+	got := strings.Join(upgradeCompatibilityPreflightLines(), "\n")
+	for _, want := range []string{
+		"compatibility phase: v0.10.x stabilization and compatibility",
+		"supported direct upgrade sources: v0.8.x, v0.9.x",
+		"unsupported direct upgrades: v0.7.x and older",
+		"API compatibility: arca.router.v1, arca.telemetry.v1",
+		"datastore schema guard: SQLite schema 1-2 accepted",
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("upgradeCompatibilityPreflightLines() = %q, want substring %q", got, want)
+		}
+	}
+}
+
+func TestUpgradePackagePreflightSkipsSourceCheckout(t *testing.T) {
+	lines, warnings := upgradePackagePreflightLinesWithRoot(t.TempDir())
+	got := strings.Join(lines, "\n")
+	if warnings != 0 {
+		t.Fatalf("warnings = %d, want 0", warnings)
+	}
+	if !strings.Contains(got, "packaged install paths: not detected") {
+		t.Fatalf("upgradePackagePreflightLinesWithRoot() = %q, want skipped packaged install paths", got)
+	}
+}
+
+func TestUpgradePackagePreflightWarnsMissingPackagedPaths(t *testing.T) {
+	root := t.TempDir()
+	cliPath := filepath.Join(root, "usr/bin/arca")
+	if err := os.MkdirAll(filepath.Dir(cliPath), 0755); err != nil {
+		t.Fatalf("MkdirAll() error = %v", err)
+	}
+	if err := os.WriteFile(cliPath, []byte("arca"), 0755); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+
+	lines, warnings := upgradePackagePreflightLinesWithRoot(root)
+	got := strings.Join(lines, "\n")
+	if warnings == 0 {
+		t.Fatal("warnings = 0, want missing packaged path warnings")
+	}
+	for _, want := range []string{
+		"CLI binary: file present",
+		"warning: daemon binary missing at /usr/sbin/arca-routerd",
+		"warning: systemd unit missing at /usr/lib/systemd/system/arca-routerd.service",
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("upgradePackagePreflightLinesWithRoot() = %q, want substring %q", got, want)
+		}
+	}
+}
+
+func TestUpgradeRollbackGuidanceLines(t *testing.T) {
+	got := strings.Join(upgradeRollbackGuidanceLines(), "\n")
+	for _, want := range []string{
+		"rollback guidance:",
+		"previous package",
+		"configuration backup",
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("upgradeRollbackGuidanceLines() = %q, want substring %q", got, want)
+		}
+	}
+}
+
+func TestUpgradeReleaseReadinessLines(t *testing.T) {
+	got := strings.Join(upgradeReleaseReadinessLines(), "\n")
+	for _, want := range []string{
+		"release readiness:",
+		"docs/v0.10-operational-runbook",
+		"docs/v0.10-release-readiness.md",
+		"docs/v0.11-deferred-gates.md",
+		"release sign-off must list owner",
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("upgradeReleaseReadinessLines() = %q, want substring %q", got, want)
+		}
 	}
 }
 
@@ -2203,6 +2299,16 @@ func TestRunLocalOneShotTelemetryPaths(t *testing.T) {
 	}
 	if handled, _ := runLocalOneShotCommand([]string{"show", "telemetry", "path", "/system"}); handled {
 		t.Fatal("runLocalOneShotCommand(show telemetry path /system) handled streaming command locally")
+	}
+}
+
+func TestRunLocalOneShotCompatibility(t *testing.T) {
+	handled, code := runLocalOneShotCommand([]string{"show", "compatibility"})
+	if !handled || code != ExitSuccess {
+		t.Fatalf("runLocalOneShotCommand(show compatibility) = handled %v code %d, want local success", handled, code)
+	}
+	if handled, code := runLocalOneShotCommand([]string{"show", "compatibility", "extra"}); !handled || code != ExitUsageError {
+		t.Fatalf("runLocalOneShotCommand(show compatibility extra) = handled %v code %d, want local usage error", handled, code)
 	}
 }
 

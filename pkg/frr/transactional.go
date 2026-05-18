@@ -2,8 +2,10 @@ package frr
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net"
+	"os"
 	"os/exec"
 	"sort"
 	"strconv"
@@ -64,24 +66,24 @@ func (c *VtyshMgmtClient) Apply(ctx context.Context, ops []MgmtOperation) error 
 		c.run = runVtyshMgmtCommand
 	}
 	if _, err := c.run(ctx, "mgmt commit abort"); err != nil {
-		return NewApplyError("abort stale FRR management candidate", err)
+		return wrapMgmtApplyError("abort stale FRR management candidate", err)
 	}
 	for _, op := range ops {
 		if _, err := c.run(ctx, op.Command()); err != nil {
 			_, _ = c.run(ctx, "mgmt commit abort")
-			return NewApplyError(fmt.Sprintf("apply FRR management operation %q", op.Command()), err)
+			return wrapMgmtApplyError(fmt.Sprintf("apply FRR management operation %q", op.Command()), err)
 		}
 	}
 	if _, err := c.run(ctx, "mgmt commit check"); err != nil {
 		_, _ = c.run(ctx, "mgmt commit abort")
-		return NewValidateError("FRR management commit check failed", err)
+		return wrapMgmtValidateError("FRR management commit check failed", err)
 	}
 	if _, err := c.run(ctx, "mgmt commit apply"); err != nil {
 		_, _ = c.run(ctx, "mgmt commit abort")
-		return NewApplyError("FRR management commit apply failed", err)
+		return wrapMgmtApplyError("FRR management commit apply failed", err)
 	}
 	if _, err := c.run(ctx, "write memory"); err != nil {
-		return NewApplyError("persist FRR running configuration", err)
+		return wrapMgmtApplyError("persist FRR running configuration", err)
 	}
 	return nil
 }
@@ -89,14 +91,35 @@ func (c *VtyshMgmtClient) Apply(ctx context.Context, ops []MgmtOperation) error 
 func runVtyshMgmtCommand(ctx context.Context, command string) ([]byte, error) {
 	vtyshPath, err := exec.LookPath("vtysh")
 	if err != nil {
+		if errors.Is(err, os.ErrPermission) {
+			return nil, NewPermissionDeniedError("find vtysh", err)
+		}
 		return nil, NewToolNotFoundError("vtysh")
 	}
 	cmd := exec.CommandContext(ctx, vtyshPath, "-c", command)
 	output, err := cmd.CombinedOutput()
 	if err != nil {
-		return output, fmt.Errorf("%s: %w", strings.TrimSpace(string(output)), err)
+		commandErr := commandFailureError(output, err)
+		if commandFailureLooksPermissionDenied(output, err) {
+			return output, NewPermissionDeniedError("run vtysh management command", commandErr)
+		}
+		return output, commandErr
 	}
 	return output, nil
+}
+
+func wrapMgmtApplyError(operation string, err error) error {
+	if IsPermissionDenied(err) {
+		return NewPermissionDeniedError(operation, err)
+	}
+	return NewApplyError(operation, err)
+}
+
+func wrapMgmtValidateError(operation string, err error) error {
+	if IsPermissionDenied(err) {
+		return NewPermissionDeniedError(operation, err)
+	}
+	return NewValidateError(operation, err)
 }
 
 // TransactionalApplier applies FRR config through the management candidate datastore.

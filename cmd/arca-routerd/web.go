@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"crypto/subtle"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -10,10 +11,12 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"os"
 	"strconv"
 	"strings"
 	"time"
 
+	"github.com/akam1o/arca-router/internal/compat"
 	"github.com/akam1o/arca-router/internal/model"
 	nbgrpc "github.com/akam1o/arca-router/internal/northbound/grpc"
 	sbfrr "github.com/akam1o/arca-router/internal/southbound/frr"
@@ -35,6 +38,7 @@ const nmsOperationalStatusSchemaVersion = "arca.nms.operational.v1"
 const nmsTelemetryCatalogSchemaVersion = "arca.nms.telemetry-catalog.v1"
 const nmsTelemetrySchemasSchemaVersion = "arca.nms.telemetry-schemas.v1"
 const nmsTelemetrySnapshotSchemaVersion = "arca.nms.telemetry-snapshot.v1"
+const webAuditSchemaVersion = compat.AuditSchema
 
 const (
 	defaultNMSTelemetrySnapshotTimeout         = 5 * time.Second
@@ -61,6 +65,7 @@ type webConfigAPI interface {
 	Diff(ctx context.Context, sessionID string) (string, bool, error)
 	Commit(ctx context.Context, sessionID, user, message string) (string, uint64, error)
 	ListHistory(ctx context.Context, limit, offset int) ([]nbgrpc.CommitInfo, error)
+	ListAuditEvents(ctx context.Context, opts nbgrpc.AuditLogOptions) ([]nbgrpc.AuditEventInfo, error)
 }
 
 type webTelemetryAPI interface {
@@ -359,6 +364,30 @@ type webConfigHistoryResponse struct {
 	Entries []webCommitEntry `json:"entries"`
 }
 
+type webAuditResponse struct {
+	SchemaVersion string          `json:"schema_version"`
+	GeneratedAt   string          `json:"generated_at"`
+	Limit         int             `json:"limit"`
+	Offset        int             `json:"offset"`
+	Count         int             `json:"count"`
+	Entries       []webAuditEntry `json:"entries"`
+}
+
+type webAuditEntry struct {
+	ID            int64          `json:"id,omitempty"`
+	Key           string         `json:"key,omitempty"`
+	Timestamp     string         `json:"timestamp"`
+	User          string         `json:"user"`
+	SessionID     string         `json:"session_id,omitempty"`
+	SourceIP      string         `json:"source_ip,omitempty"`
+	CorrelationID string         `json:"correlation_id,omitempty"`
+	Action        string         `json:"action"`
+	Result        string         `json:"result"`
+	ErrorCode     string         `json:"error_code,omitempty"`
+	Details       map[string]any `json:"details,omitempty"`
+	RawDetails    string         `json:"raw_details,omitempty"`
+}
+
 type webCommitEntry struct {
 	CommitID      string `json:"commit_id"`
 	ShortCommitID string `json:"short_commit_id"`
@@ -371,6 +400,12 @@ type webCommitEntry struct {
 type webAuthUser struct {
 	PasswordHash string
 	Role         string
+}
+
+type webAPIToken struct {
+	Name  string
+	Token string
+	Role  string
 }
 
 type webIndexData struct {
@@ -921,6 +956,64 @@ func effectiveWebListen(flagValue string, snapshot *model.ConfigSnapshot) string
 	return net.JoinHostPort(addr, strconv.Itoa(port))
 }
 
+func loadWebAPITokens(path string) (map[string]webAPIToken, error) {
+	path = strings.TrimSpace(path)
+	if path == "" {
+		return nil, nil
+	}
+	if err := auth.ValidateKeyFilePermissions(path, 0, 0); err != nil {
+		return nil, fmt.Errorf("validate token file permissions: %w", err)
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil, fmt.Errorf("read token file %s: %w", path, err)
+	}
+	tokens := make(map[string]webAPIToken)
+	for lineNo, rawLine := range strings.Split(string(data), "\n") {
+		token, ok, err := parseWebAPITokenLine(rawLine, lineNo+1)
+		if err != nil {
+			return nil, err
+		}
+		if !ok {
+			continue
+		}
+		if _, exists := tokens[token.Name]; exists {
+			return nil, fmt.Errorf("duplicate web API token name %q on line %d", token.Name, lineNo+1)
+		}
+		tokens[token.Name] = token
+	}
+	if len(tokens) == 0 {
+		return nil, fmt.Errorf("web API token file %s does not contain any tokens", path)
+	}
+	return tokens, nil
+}
+
+func parseWebAPITokenLine(rawLine string, lineNo int) (webAPIToken, bool, error) {
+	line := strings.TrimSpace(rawLine)
+	if line == "" || strings.HasPrefix(line, "#") {
+		return webAPIToken{}, false, nil
+	}
+	parts := strings.SplitN(line, ":", 3)
+	if len(parts) != 3 {
+		return webAPIToken{}, false, fmt.Errorf("invalid web API token file line %d: expected name:role:token", lineNo)
+	}
+	token := webAPIToken{
+		Name:  strings.TrimSpace(parts[0]),
+		Role:  strings.TrimSpace(parts[1]),
+		Token: strings.TrimSpace(parts[2]),
+	}
+	if token.Name == "" {
+		return webAPIToken{}, false, fmt.Errorf("invalid web API token file line %d: token name is required", lineNo)
+	}
+	if !webRoleCanRead(token.Role) {
+		return webAPIToken{}, false, fmt.Errorf("invalid web API token file line %d: invalid role %q", lineNo, token.Role)
+	}
+	if token.Token == "" {
+		return webAPIToken{}, false, fmt.Errorf("invalid web API token file line %d: token value is required", lineNo)
+	}
+	return token, true, nil
+}
+
 func startWebServer(ctx context.Context, listenAddr string, source metricsSource, log *logger.Logger) (<-chan error, error) {
 	lis, err := net.Listen("tcp", listenAddr)
 	if err != nil {
@@ -960,6 +1053,7 @@ func newWebMux(source metricsSource) *http.ServeMux {
 	mux.HandleFunc("/api/config", source.handleWebConfig)
 	mux.HandleFunc("/api/config/commit", source.handleWebConfigCommit)
 	mux.HandleFunc("/api/config/history", source.handleWebConfigHistory)
+	mux.HandleFunc("/api/audit", source.handleWebAudit)
 	mux.HandleFunc("/api/status", source.handleWebStatus)
 	mux.HandleFunc("/api/nms/v1/status", source.handleNMSStatus)
 	mux.HandleFunc("/api/nms/v1/telemetry/paths", source.handleNMSTelemetryCatalog)
@@ -1087,6 +1181,38 @@ func (s metricsSource) handleWebConfigHistory(w http.ResponseWriter, r *http.Req
 		return
 	}
 	writeWebJSON(w, http.StatusOK, webConfigHistoryResponse{Entries: history})
+}
+
+func (s metricsSource) handleWebAudit(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	if !s.authorizeWebAdmin(w, r) {
+		return
+	}
+	if s.configAPI == nil {
+		writeWebJSONError(w, http.StatusServiceUnavailable, "audit API is not available")
+		return
+	}
+	opts, err := webAuditOptionsFromRequest(r)
+	if err != nil {
+		writeWebJSONError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	entries, err := s.auditEvents(r.Context(), opts)
+	if err != nil {
+		writeWebJSONError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeWebJSON(w, http.StatusOK, webAuditResponse{
+		SchemaVersion: webAuditSchemaVersion,
+		GeneratedAt:   time.Now().UTC().Format(time.RFC3339Nano),
+		Limit:         opts.Limit,
+		Offset:        opts.Offset,
+		Count:         len(entries),
+		Entries:       entries,
+	})
 }
 
 func (s metricsSource) handleWebConfigValidate(w http.ResponseWriter, r *http.Request) {
@@ -1266,12 +1392,28 @@ func (s metricsSource) configHistory(ctx context.Context, limit, offset int) ([]
 	return history, nil
 }
 
+func (s metricsSource) auditEvents(ctx context.Context, opts nbgrpc.AuditLogOptions) ([]webAuditEntry, error) {
+	if s.configAPI == nil {
+		return nil, fmt.Errorf("audit API is unavailable")
+	}
+	events, err := s.configAPI.ListAuditEvents(ctx, opts)
+	if err != nil {
+		return nil, fmt.Errorf("list audit events: %w", err)
+	}
+	result := make([]webAuditEntry, 0, len(events))
+	for _, event := range events {
+		result = append(result, newWebAuditEntry(event))
+	}
+	return result, nil
+}
+
 func (s metricsSource) authorizeWebRead(w http.ResponseWriter, r *http.Request) bool {
 	users := s.webAuthUsers()
-	if len(users) == 0 {
+	tokens := s.webAutomationTokens()
+	if len(users) == 0 && len(tokens) == 0 {
 		return true
 	}
-	_, role, ok := authenticateWebUser(w, r, users)
+	_, role, ok := authenticateWebRequest(w, r, users, tokens)
 	if !ok {
 		return false
 	}
@@ -1282,13 +1424,32 @@ func (s metricsSource) authorizeWebRead(w http.ResponseWriter, r *http.Request) 
 	return true
 }
 
+func (s metricsSource) authorizeWebAdmin(w http.ResponseWriter, r *http.Request) bool {
+	users := s.webAuthUsers()
+	tokens := s.webAutomationTokens()
+	if len(users) == 0 && len(tokens) == 0 {
+		http.Error(w, "audit export requires password-backed security users or API tokens", http.StatusForbidden)
+		return false
+	}
+	_, role, ok := authenticateWebRequest(w, r, users, tokens)
+	if !ok {
+		return false
+	}
+	if role != pkgnetconf.RoleAdmin {
+		http.Error(w, "forbidden", http.StatusForbidden)
+		return false
+	}
+	return true
+}
+
 func (s metricsSource) authorizeWebWrite(w http.ResponseWriter, r *http.Request) (string, bool) {
 	users := s.webAuthUsers()
-	if len(users) == 0 {
-		http.Error(w, "web configuration writes require password-backed security users", http.StatusForbidden)
+	tokens := s.webAutomationTokens()
+	if len(users) == 0 && len(tokens) == 0 {
+		http.Error(w, "web configuration writes require password-backed security users or API tokens", http.StatusForbidden)
 		return "", false
 	}
-	username, role, ok := authenticateWebUser(w, r, users)
+	username, role, ok := authenticateWebRequest(w, r, users, tokens)
 	if !ok {
 		return "", false
 	}
@@ -1297,6 +1458,22 @@ func (s metricsSource) authorizeWebWrite(w http.ResponseWriter, r *http.Request)
 		return "", false
 	}
 	return username, true
+}
+
+func authenticateWebRequest(w http.ResponseWriter, r *http.Request, users map[string]webAuthUser, tokens map[string]webAPIToken) (string, string, bool) {
+	if _, hasToken := webRequestToken(r); hasToken {
+		username, role, ok := authenticateWebToken(r, tokens)
+		if !ok {
+			writeWebAuthChallenge(w)
+			return "", "", false
+		}
+		return username, role, true
+	}
+	if len(users) > 0 {
+		return authenticateWebUser(w, r, users)
+	}
+	writeWebAuthChallenge(w)
+	return "", "", false
 }
 
 func authenticateWebUser(w http.ResponseWriter, r *http.Request, users map[string]webAuthUser) (string, string, bool) {
@@ -1317,6 +1494,51 @@ func authenticateWebUser(w http.ResponseWriter, r *http.Request, users map[strin
 		return "", "", false
 	}
 	return username, user.Role, true
+}
+
+func authenticateWebToken(r *http.Request, tokens map[string]webAPIToken) (string, string, bool) {
+	presented, ok := webRequestToken(r)
+	if !ok {
+		return "", "", false
+	}
+	for name, token := range tokens {
+		if token.Token == "" {
+			continue
+		}
+		if subtle.ConstantTimeCompare([]byte(presented), []byte(token.Token)) == 1 {
+			role := strings.TrimSpace(token.Role)
+			if role == "" {
+				role = pkgnetconf.RoleReadOnly
+			}
+			username := strings.TrimSpace(token.Name)
+			if username == "" {
+				username = name
+			}
+			return username, role, true
+		}
+	}
+	return "", "", false
+}
+
+func webRequestToken(r *http.Request) (string, bool) {
+	if authz := strings.TrimSpace(r.Header.Get("Authorization")); authz != "" {
+		scheme, value, ok := strings.Cut(authz, " ")
+		if ok && strings.EqualFold(scheme, "Bearer") {
+			token := strings.TrimSpace(value)
+			return token, token != ""
+		}
+	}
+	if token := strings.TrimSpace(r.Header.Get("X-API-Key")); token != "" {
+		return token, true
+	}
+	return "", false
+}
+
+func (s metricsSource) webAutomationTokens() map[string]webAPIToken {
+	if len(s.webAPITokens) == 0 {
+		return nil
+	}
+	return s.webAPITokens
 }
 
 func (s metricsSource) webAuthUsers() map[string]webAuthUser {
@@ -1439,6 +1661,65 @@ func webHistoryOffset(r *http.Request) int {
 	return offset
 }
 
+func webAuditOptionsFromRequest(r *http.Request) (nbgrpc.AuditLogOptions, error) {
+	query := r.URL.Query()
+	limit, err := boundedWebIntQuery(query.Get("limit"), 100, 1, 1000, "limit")
+	if err != nil {
+		return nbgrpc.AuditLogOptions{}, err
+	}
+	offset, err := boundedWebIntQuery(query.Get("offset"), 0, 0, 1<<31-1, "offset")
+	if err != nil {
+		return nbgrpc.AuditLogOptions{}, err
+	}
+	since, err := optionalWebTimeQuery(query.Get("since"), "since")
+	if err != nil {
+		return nbgrpc.AuditLogOptions{}, err
+	}
+	until, err := optionalWebTimeQuery(query.Get("until"), "until")
+	if err != nil {
+		return nbgrpc.AuditLogOptions{}, err
+	}
+	if !since.IsZero() && !until.IsZero() && since.After(until) {
+		return nbgrpc.AuditLogOptions{}, fmt.Errorf("since must be before until")
+	}
+	return nbgrpc.AuditLogOptions{
+		Limit:     limit,
+		Offset:    offset,
+		StartTime: since,
+		EndTime:   until,
+		User:      strings.TrimSpace(query.Get("user")),
+		Action:    strings.TrimSpace(query.Get("action")),
+		Result:    strings.TrimSpace(query.Get("result")),
+	}, nil
+}
+
+func boundedWebIntQuery(raw string, defaultValue, minValue, maxValue int, name string) (int, error) {
+	value := strings.TrimSpace(raw)
+	if value == "" {
+		return defaultValue, nil
+	}
+	parsed, err := strconv.Atoi(value)
+	if err != nil {
+		return 0, fmt.Errorf("%s must be an integer", name)
+	}
+	if parsed < minValue || parsed > maxValue {
+		return 0, fmt.Errorf("%s must be between %d and %d", name, minValue, maxValue)
+	}
+	return parsed, nil
+}
+
+func optionalWebTimeQuery(raw, name string) (time.Time, error) {
+	value := strings.TrimSpace(raw)
+	if value == "" {
+		return time.Time{}, nil
+	}
+	parsed, err := time.Parse(time.RFC3339Nano, value)
+	if err != nil {
+		return time.Time{}, fmt.Errorf("%s must be RFC3339 timestamp", name)
+	}
+	return parsed, nil
+}
+
 func newWebCommitEntry(entry nbgrpc.CommitInfo) webCommitEntry {
 	message := entry.Message
 	if strings.TrimSpace(message) == "" {
@@ -1452,6 +1733,26 @@ func newWebCommitEntry(entry nbgrpc.CommitInfo) webCommitEntry {
 		Message:       message,
 		IsRollback:    entry.IsRollback,
 	}
+}
+
+func newWebAuditEntry(event nbgrpc.AuditEventInfo) webAuditEntry {
+	entry := webAuditEntry{
+		ID:            event.ID,
+		Key:           event.Key,
+		User:          event.User,
+		SessionID:     event.SessionID,
+		SourceIP:      event.SourceIP,
+		CorrelationID: event.CorrelationID,
+		Action:        event.Action,
+		Result:        event.Result,
+		ErrorCode:     event.ErrorCode,
+		Details:       event.Details,
+		RawDetails:    event.RawDetails,
+	}
+	if !event.Timestamp.IsZero() {
+		entry.Timestamp = event.Timestamp.UTC().Format(time.RFC3339Nano)
+	}
+	return entry
 }
 
 func shortCommitID(commitID string) string {

@@ -133,33 +133,52 @@ Focus: mature management-plane correctness and operator safety.
 Focus: complete final pre-stable stabilization and compatibility work.
 
 - **Security hardening**
-  - TLS/mTLS for gRPC
-  - Token or API key authentication for automation
-  - RBAC audit export
-  - Crypto policy alignment where required
+  - TLS/mTLS for gRPC (implemented for optional TCP listener; Unix socket remains the default local transport)
+  - Token or API key authentication for automation (implemented for Web/NMS API Bearer and `X-API-Key` access)
+  - RBAC audit export (implemented for admin-only Web API export)
+  - Crypto policy alignment where required (implemented for etcd and gRPC TLS policy)
 - **Upgrade path**
   - Supported upgrades from previous minor releases
   - Datastore schema migration guardrails
-  - Package preflight checks
-  - Rollback guidance for failed upgrades
-  - Formal NETCONF startup datastore support, if required, should use a separate
-    startup config record with SQLite/etcd migrations, lock/validate/copy-config
-    semantics, and explicit compatibility tests instead of aliasing `startup` to
-    the latest running config
+  - Package preflight checks (implemented for packaged install path detection in `arca check upgrade`)
+  - Rollback guidance for failed upgrades (implemented in `arca check upgrade` output and compatibility docs)
+  - NETCONF startup datastore support is intentionally out of scope; `:startup`
+    is not advertised and `<startup/>` RPC targets return
+    `operation-not-supported`
 - **Compatibility guarantees**
   - CLI and configuration compatibility policy
   - API versioning and deprecation policy
   - Supported VPP and FRR version matrix
-  - Formal standard NETCONF `:xpath` support should advertise
-    `urn:ietf:params:netconf:capability:xpath:1.0` in `<hello>` only after the
-    implementation satisfies RFC 6241 response rules, interoperability
-    expectations, DoS guardrails, and external client coverage
+  - Standard NETCONF `:xpath` support advertises
+    `urn:ietf:params:netconf:capability:xpath:1.0` in `<hello>` by default
+    after ncclient/libnetconf2 evidence covers interoperability expectations,
+    DoS guardrails, and external client behavior
 - **Long-run soak and failure testing**
-  - HA failover soak
-  - FRR and VPP restart recovery
-  - Datastore lock recovery
-  - Resource leak and churn testing
+  - HA failover soak (manual runbook documented; lab execution deferred to v0.11)
+  - FRR and VPP restart recovery (manual runbook documented; lab execution deferred to v0.11)
+  - Datastore lock recovery (startup cleanup covered in tests; release runbook documented)
+  - Resource leak and churn testing (manual runbook documented; lab execution deferred to v0.11)
 - **Release readiness**
-  - Documentation freeze
-  - Support matrix
-  - Operational runbooks
+  - Documentation freeze (checklist documented; final release sign-off records
+    accepted v0.11 deferred gates)
+  - Support matrix (published through compatibility policy and release readiness docs)
+  - Operational runbooks (v0.10 runbook documented)
+
+## v0.11.x - Deferred Lab Compatibility Gates
+
+Focus: complete the gates intentionally deferred from v0.10 because they need a
+dedicated lab environment.
+
+- **Lab execution**
+  - Execute HA failover soak on clustered packages and attach convergence,
+    daemon log, and metrics evidence
+  - Execute FRR and VPP restart recovery on release-candidate packages with
+    protocol neighbors or traffic generation
+  - Execute 24-hour resource churn and leak checks with CLI, NETCONF, Web/NMS,
+    and telemetry traffic
+- **NETCONF compatibility**
+  - Keep startup datastore intentionally unsupported unless a future design
+    reopens it with independent storage, migration, lock, validate, and
+    copy-config semantics.
+  - Re-run standard XPath evidence when client libraries or XPath DoS guardrails
+    change.

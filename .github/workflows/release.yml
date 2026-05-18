@@ -17,7 +17,7 @@ jobs:
     name: Prepare Release
     # Avoid infinite loop: tag-push run publishes a release which emits a `release` event by github-actions[bot].
     if: github.event_name != 'release' || github.actor != 'github-actions[bot]'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     outputs:
       version: ${{ steps.version.outputs.version }}
       tag: ${{ steps.version.outputs.tag }}
@@ -63,16 +63,13 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - runner: ubuntu-22.04
-            deb_release: 1~ubuntu22.04
-            artifact_name: deb-ubuntu22.04
           - runner: ubuntu-24.04
             deb_release: 1~ubuntu24.04
             artifact_name: deb-ubuntu24.04
-          - runner: ubuntu-latest
+          - runner: ubuntu-24.04
             deb_release: 1~debian12
             artifact_name: deb-debian12
-          - runner: ubuntu-latest
+          - runner: ubuntu-24.04
             deb_release: 1~debian13
             artifact_name: deb-debian13
 
@@ -110,7 +107,7 @@ jobs:
   build-rpm:
     name: Build RPM (EL)
     needs: prepare
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
 
     strategy:
       fail-fast: false
@@ -178,7 +175,7 @@ jobs:
 
   bundle-artifacts:
     name: Bundle Artifacts
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     needs:
       - prepare
       - build-deb
@@ -210,7 +207,7 @@ jobs:
   attach-assets:
     name: Attach Assets to Published Release
     if: github.event_name == 'release'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     needs:
       - prepare
       - bundle-artifacts
@@ -236,7 +233,7 @@ jobs:
   publish-tag-release:
     name: Publish Tag Release
     if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     needs:
       - prepare
       - bundle-artifacts
@@ -263,7 +260,7 @@ jobs:
 
   verify-packages:
     name: Verify Packages
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     needs:
       - prepare
       - bundle-artifacts
@@ -271,9 +268,6 @@ jobs:
     strategy:
       matrix:
         os:
-          - image: ubuntu:22.04
-            type: deb
-            deb_suffix: ubuntu22.04
           - image: ubuntu:24.04
             type: deb
             deb_suffix: ubuntu24.04

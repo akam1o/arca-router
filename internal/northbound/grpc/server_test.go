@@ -125,6 +125,10 @@ func (f *fakeStore) AuditLog(ctx context.Context, event *store.AuditEvent) error
 	return nil
 }
 
+func (f *fakeStore) ListAuditEvents(ctx context.Context, opts *store.AuditOptions) ([]*store.AuditEvent, error) {
+	return nil, nil
+}
+
 func (f *fakeStore) Close() error {
 	return nil
 }

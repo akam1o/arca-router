@@ -105,7 +105,7 @@ make check
 ### 4. Build Locally
 
 ```bash
-# Build current v0.6.x unified daemon + CLI
+# Build current unified daemon + CLI
 make build
 
 # Verify binaries
@@ -153,7 +153,7 @@ Build uses version from git tags:
 make version
 
 # Override version
-VERSION=0.5.0 make build
+VERSION=0.10.0 make build
 ```
 
 **Version sources (priority order):**
@@ -404,7 +404,7 @@ arca-router uses GitHub Actions for continuous integration and deployment.
    - Uploads artifacts
 
 2. **verify-packages** - Test packages on multiple distros
-   - Matrix: Debian 12, Ubuntu 22.04, Rocky Linux 9
+   - Matrix: Debian 12/13, Ubuntu 24.04, Rocky Linux 9
    - Installs packages
    - Verifies binaries work
    - Checks systemd unit files
@@ -427,7 +427,7 @@ See [Release Process Guide](release-process.md) for details.
 # Build DEB package
 make deb
 
-# Test package contents and v0.5 package metadata expectations
+# Test package contents and current package metadata expectations
 make deb-test
 
 # Verify reproducibility
@@ -439,7 +439,7 @@ make deb-verify
 # Build RPM package
 make rpm
 
-# Test package contents and v0.5 package metadata expectations
+# Test package contents and current package metadata expectations
 make rpm-test
 
 # Verify reproducibility
@@ -458,6 +458,11 @@ Packages are configured via NFPM: [build/package/nfpm.yaml](../build/package/nfp
 - Log directory: `/var/log/arca-router/`
 - Grafana dashboard: `/usr/share/arca-router/grafana/arca-routerd-dashboard.json`
 
+The v0.10 NFPM metadata targets amd64/x86_64 packages. Build package binaries
+in a Linux amd64 environment before running `make deb-package` or
+`make rpm-package`; the package targets reject missing or non-Linux-amd64
+binaries before invoking NFPM.
+
 **Post-install scripts:**
 - Creates `arca-router` user/group
 - Adds the service user to `vpp` and `frrvty`
@@ -465,15 +470,48 @@ Packages are configured via NFPM: [build/package/nfpm.yaml](../build/package/nfp
 - Warns when required FRR daemons such as `mgmtd=yes`, `vrrpd=yes`, or `bfdd=yes` are missing
 - Reloads systemd daemon
 
-### v0.6 Smoke Checks
+### Release Readiness Checks
 
 ```bash
+# Run local release readiness checks used by v0.10 sign-off
+make release-check
+
 # Validate local package metadata without building artifacts
 make package-lint
+
+# Audit installed service users, capabilities, and file/socket permissions when a host is available
+make security-audit
+
+# Generate local NETCONF client evidence for release sign-off
+make netconf-client-evidence
+make netconf-evidence-verify
+
+# Generate dedicated standard NETCONF :xpath evidence for release sign-off
+make netconf-standard-xpath-evidence
+make netconf-standard-xpath-evidence-verify
+
+# Re-run local release checks and verify required local evidence before sign-off
+make release-evidence-check
 
 # Run the live FRR mgmtd transactional apply smoke test
 make frr-mgmtd-smoke
 ```
+
+Attach the ncclient and libnetconf2 artifacts from either
+`artifacts/netconf-clients/` or the `NETCONF Client Interoperability` workflow
+to the v0.10 release sign-off record. Default evidence must show standard
+NETCONF `:xpath` advertisement, passing XPath RPCs, and startup datastore
+rejection.
+
+`make release-evidence-check` validates the local checks plus the default and
+standard XPath NETCONF evidence directories. v0.10 PR release sign-off does not
+require RC package artifacts; installed-host `make security-audit`, package
+install verification, and lab-only soak/restart evidence can be attached when
+available or recorded as accepted warnings/deferred gates.
+
+The security audit requires an installed host. Attach the output to sign-off
+when that host is available, or record the missing host evidence as an accepted
+warning with owner and rationale.
 
 The FRR smoke test requires a host with FRR running, the standard daemon set enabled
 in `/etc/frr/daemons`, and `vtysh` access for the current user.
@@ -583,6 +621,6 @@ make rpm                     # Build RPM
 make deb-test rpm-test       # Test packages
 
 # Release (maintainers only)
-git tag v0.5.0
-git push origin v0.5.0       # Triggers release workflow
+git tag -a v0.10.0 -m "Release v0.10.0"
+git push origin v0.10.0       # Triggers release workflow
 ```

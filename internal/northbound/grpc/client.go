@@ -1,16 +1,22 @@
 // Package grpc provides the internal gRPC client for arca to communicate
-// with the arca-routerd engine over a Unix domain socket.
+// with the arca-routerd engine over Unix sockets or TLS-protected TCP.
 package grpc
 
 import (
 	"context"
+	"crypto/tls"
+	"crypto/x509"
 	"fmt"
 	"net"
+	"os"
+	"strings"
 	"time"
 
 	apiv1 "github.com/akam1o/arca-router/api/v1"
+	"github.com/akam1o/arca-router/pkg/security"
 	googlegrpc "google.golang.org/grpc"
 	"google.golang.org/grpc/connectivity"
+	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/credentials/insecure"
 )
 
@@ -23,6 +29,14 @@ type Client struct {
 	session   apiv1.SessionServiceClient
 	state     apiv1.StateServiceClient
 	telemetry apiv1.TelemetryServiceClient
+}
+
+// TLSClientOptions configures TLS verification for TCP gRPC connections.
+type TLSClientOptions struct {
+	CAFile         string
+	ServerName     string
+	ClientCertFile string
+	ClientKeyFile  string
 }
 
 // Dial connects to the arca-routerd gRPC server via Unix socket.
@@ -40,6 +54,61 @@ func Dial(socketPath string) (*Client, error) {
 	if err != nil {
 		return nil, fmt.Errorf("dial arca-routerd at %s: %w", socketPath, err)
 	}
+	return clientFromConn(ctx, conn, socketPath)
+}
+
+// DialTCP connects to the arca-routerd gRPC server via TCP/TLS.
+func DialTCP(address string, opts TLSClientOptions) (*Client, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	tlsConfig, err := buildClientTLSConfig(opts)
+	if err != nil {
+		return nil, err
+	}
+	conn, err := googlegrpc.NewClient(address,
+		googlegrpc.WithTransportCredentials(credentials.NewTLS(tlsConfig)),
+	)
+	if err != nil {
+		return nil, fmt.Errorf("dial arca-routerd at %s: %w", address, err)
+	}
+	return clientFromConn(ctx, conn, address)
+}
+
+func buildClientTLSConfig(opts TLSClientOptions) (*tls.Config, error) {
+	cfg := &tls.Config{
+		ServerName: strings.TrimSpace(opts.ServerName),
+	}
+
+	if caFile := strings.TrimSpace(opts.CAFile); caFile != "" {
+		caPEM, err := os.ReadFile(caFile)
+		if err != nil {
+			return nil, fmt.Errorf("read gRPC CA: %w", err)
+		}
+		rootCAs := x509.NewCertPool()
+		if !rootCAs.AppendCertsFromPEM(caPEM) {
+			return nil, fmt.Errorf("parse gRPC CA")
+		}
+		cfg.RootCAs = rootCAs
+	}
+
+	clientCertFile := strings.TrimSpace(opts.ClientCertFile)
+	clientKeyFile := strings.TrimSpace(opts.ClientKeyFile)
+	if clientCertFile != "" || clientKeyFile != "" {
+		if clientCertFile == "" || clientKeyFile == "" {
+			return nil, fmt.Errorf("gRPC client TLS requires both client cert and key")
+		}
+		cert, err := tls.LoadX509KeyPair(clientCertFile, clientKeyFile)
+		if err != nil {
+			return nil, fmt.Errorf("load gRPC client cert/key: %w", err)
+		}
+		cfg.Certificates = []tls.Certificate{cert}
+	}
+
+	return security.ApplyTLSPolicy(cfg), nil
+}
+
+func clientFromConn(ctx context.Context, conn *googlegrpc.ClientConn, target string) (*Client, error) {
 	conn.Connect()
 	for {
 		state := conn.GetState()
@@ -48,7 +117,7 @@ func Dial(socketPath string) (*Client, error) {
 		}
 		if !conn.WaitForStateChange(ctx, state) {
 			_ = conn.Close()
-			return nil, fmt.Errorf("dial arca-routerd at %s: %w", socketPath, ctx.Err())
+			return nil, fmt.Errorf("dial arca-routerd at %s: %w", target, ctx.Err())
 		}
 	}
 
@@ -817,6 +886,33 @@ type CommitInfo struct {
 	Message    string
 	IsRollback bool
 	ConfigText string
+}
+
+// AuditLogOptions controls audit event export filtering.
+type AuditLogOptions struct {
+	Limit     int
+	Offset    int
+	StartTime time.Time
+	EndTime   time.Time
+	User      string
+	Action    string
+	Result    string
+}
+
+// AuditEventInfo represents one exported audit event.
+type AuditEventInfo struct {
+	ID            int64
+	Key           string
+	Timestamp     time.Time
+	User          string
+	SessionID     string
+	SourceIP      string
+	CorrelationID string
+	Action        string
+	Result        string
+	ErrorCode     string
+	Details       map[string]any
+	RawDetails    string
 }
 
 // InterfaceInfo represents interface operational state.

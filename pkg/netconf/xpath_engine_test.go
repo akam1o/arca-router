@@ -2,8 +2,10 @@ package netconf
 
 import (
 	"encoding/xml"
+	"fmt"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestExperimentalXPathFilterSupportsFunctions(t *testing.T) {
@@ -79,6 +81,95 @@ func TestExperimentalXPathFilterRejectsAttributeSelection(t *testing.T) {
 	}
 	if rpcErr, ok := err.(*RPCError); !ok || rpcErr.ErrorTag != ErrorTagInvalidValue {
 		t.Fatalf("applyExperimentalXPathFilter() error = %#v, want invalid-value RPCError", err)
+	}
+}
+
+func TestExperimentalXPathFilterRejectsOversizedExpression(t *testing.T) {
+	filter := prefixedXPathFilter("/if:interfaces/" + strings.Repeat("if:interface/", MaxXPathExpressionSize))
+
+	err := ValidateFilterDepthAndSize("get-config", filter)
+	if err == nil {
+		t.Fatal("ValidateFilterDepthAndSize() error = nil, want expression size error")
+	}
+	if rpcErr, ok := err.(*RPCError); !ok || rpcErr.ErrorTag != ErrorTagInvalidValue || rpcErr.ErrorAppTag != "size-limit" {
+		t.Fatalf("ValidateFilterDepthAndSize() error = %#v, want invalid-value size-limit RPCError", err)
+	}
+}
+
+func TestExperimentalXPathFilterRejectsInputElementLimit(t *testing.T) {
+	var b strings.Builder
+	b.WriteString(`<interfaces xmlns="` + IETFInterfacesNS + `">`)
+	for i := 0; i < MaxXMLElements; i++ {
+		fmt.Fprintf(&b, "<interface><name>ge-0/0/%d</name></interface>", i)
+	}
+	b.WriteString(`</interfaces>`)
+	filter := prefixedXPathFilter("/if:interfaces/if:interface[contains(if:name, 'ge-0/0')]")
+
+	_, err := applyExperimentalXPathFilter("get-config", []byte(b.String()), filter)
+	if err == nil {
+		t.Fatal("applyExperimentalXPathFilter() error = nil, want element limit error")
+	}
+	if rpcErr, ok := err.(*RPCError); !ok || rpcErr.ErrorTag != ErrorTagInvalidValue || rpcErr.ErrorAppTag != "element-limit" {
+		t.Fatalf("applyExperimentalXPathFilter() error = %#v, want invalid-value element-limit RPCError", err)
+	}
+}
+
+func TestExperimentalXPathFilterRejectsInputDepthLimit(t *testing.T) {
+	var b strings.Builder
+	b.WriteString(`<interfaces xmlns="` + IETFInterfacesNS + `">`)
+	for i := 0; i <= MaxXMLDepth; i++ {
+		b.WriteString("<nested>")
+	}
+	for i := 0; i <= MaxXMLDepth; i++ {
+		b.WriteString("</nested>")
+	}
+	b.WriteString(`</interfaces>`)
+	filter := prefixedXPathFilter("/if:interfaces/*")
+
+	_, err := applyExperimentalXPathFilter("get-config", []byte(b.String()), filter)
+	if err == nil {
+		t.Fatal("applyExperimentalXPathFilter() error = nil, want depth limit error")
+	}
+	if rpcErr, ok := err.(*RPCError); !ok || rpcErr.ErrorTag != ErrorTagInvalidValue || rpcErr.ErrorAppTag != "depth-limit" {
+		t.Fatalf("applyExperimentalXPathFilter() error = %#v, want invalid-value depth-limit RPCError", err)
+	}
+}
+
+func TestExperimentalXPathFilterRejectsInputAttributeLimit(t *testing.T) {
+	var b strings.Builder
+	b.WriteString(`<interfaces xmlns="` + IETFInterfacesNS + `"><interface`)
+	for i := 0; i <= MaxXMLAttributes; i++ {
+		fmt.Fprintf(&b, ` a%d="%d"`, i, i)
+	}
+	b.WriteString(`><name>ge-0/0/0</name></interface></interfaces>`)
+	filter := prefixedXPathFilter("/if:interfaces/if:interface[contains(if:name, 'ge')]")
+
+	_, err := applyExperimentalXPathFilter("get-config", []byte(b.String()), filter)
+	if err == nil {
+		t.Fatal("applyExperimentalXPathFilter() error = nil, want attribute limit error")
+	}
+	if rpcErr, ok := err.(*RPCError); !ok || rpcErr.ErrorTag != ErrorTagInvalidValue || rpcErr.ErrorAppTag != "attribute-limit" {
+		t.Fatalf("applyExperimentalXPathFilter() error = %#v, want invalid-value attribute-limit RPCError", err)
+	}
+}
+
+func TestExperimentalXPathEvaluationTimeout(t *testing.T) {
+	_, err := runExperimentalXPathEvaluation("get-config", time.Millisecond, func() (bool, error) {
+		time.Sleep(10 * time.Millisecond)
+		return true, nil
+	})
+	if err == nil {
+		t.Fatal("runExperimentalXPathEvaluation() error = nil, want timeout")
+	}
+	rpcErr, ok := err.(*RPCError)
+	if !ok {
+		t.Fatalf("runExperimentalXPathEvaluation() error = %#v, want RPCError", err)
+	}
+	if rpcErr.ErrorTag != ErrorTagOperationFailed || rpcErr.ErrorAppTag != "timeout" {
+		t.Fatalf("runExperimentalXPathEvaluation() error = %#v, want operation-failed timeout RPCError", err)
+	}
+	if rpcErr.ErrorPath != "/rpc/get-config/filter" {
+		t.Fatalf("runExperimentalXPathEvaluation() path = %q, want /rpc/get-config/filter", rpcErr.ErrorPath)
 	}
 }
 

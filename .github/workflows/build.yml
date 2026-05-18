@@ -11,7 +11,7 @@ permissions:
 jobs:
   build:
     name: Build and Test
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
 
     steps:
     - name: Checkout code
@@ -75,7 +75,7 @@ jobs:
 
   build-packages:
     name: Build DEB/RPM Packages
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     needs: build
 
     steps:
@@ -118,7 +118,7 @@ jobs:
 
   lint:
     name: Lint Code
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
 
     steps:
     - name: Checkout code

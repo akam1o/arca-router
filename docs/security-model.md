@@ -200,6 +200,11 @@ systemd `RuntimeDirectory`/`StateDirectory`により自動作成される。
 内部 gRPC ソケット `/run/arca-router/routerd.sock` は
 `arca-router:arca-router` の `0660` で作成される。root 以外で
 `arca` を実行する運用ユーザーは `arca-router` グループに所属させる。
+リモート管理が必要な場合は `--grpc-listen` と `--grpc-tls-cert` /
+`--grpc-tls-key` で TCP/TLS の gRPC endpoint を明示的に有効化する。
+`--grpc-client-ca` を指定すると client certificate を必須にする mTLS
+境界になる。CLI 側は `-grpc-address`、`-grpc-ca`、`-grpc-server-name`、
+`-grpc-client-cert`、`-grpc-client-key` でこの endpoint に接続する。
 
 ---
 
@@ -339,10 +344,10 @@ func (r *Reloader) ApplyConfig(ctx context.Context, configContent string) error 
 - [x] `AmbientCapabilities=CAP_NET_ADMIN`を設定
 - [x] RPM postinstallで`arca-router`ユーザー作成
 - [x] RPM postinstallで標準グループ追加（`vpp`, `frrvty`）
-- [ ] VPP socket権限確認ロジック実装（`pkg/vpp/govpp_client.go`）
-- [ ] FRR設定適用権限確認（`pkg/frr/transactional.go`, `pkg/frr/reloader.go`）
-- [ ] 設定ファイル権限設定（`pkg/config/writer.go`）
-- [ ] 統合テストで権限エラーハンドリング検証
+- [x] VPP socket権限確認ロジック実装（`pkg/vpp/govpp_client.go`）
+- [x] FRR設定適用権限確認（`pkg/frr/transactional.go`, `pkg/frr/reloader.go`）
+- [x] 設定ファイル権限設定（`pkg/config/writer.go`）
+- [x] 統合テストで権限エラーハンドリング検証
 
 ---
 
@@ -445,28 +450,19 @@ sudo systemctl restart arca-routerd
 - [ ] 不要なCapabilitiesが付与されていないことを確認
 - [ ] SELinux/AppArmorポリシーの確認（Phase 3）
 
-### 監査スクリプト例
+### 監査スクリプト
+
+実機または release-candidate package を入れた lab では、以下を実行して
+systemd unit、daemon user、capabilities、config file、VPP socket、FRR file
+backend permission を確認する。
 
 ```bash
-#!/bin/bash
-# scripts/security-audit.sh
-
-echo "=== arca-router Security Audit ==="
-
-# Check user
-echo "User: $(systemctl show -p User arca-routerd | cut -d= -f2)"
-
-# Check capabilities
-echo "Capabilities: $(systemctl show -p AmbientCapabilities arca-routerd | cut -d= -f2)"
-
-# Check file permissions
-echo "Config: $(ls -l /etc/arca-router/arca-router.conf)"
-echo "FRR file backend: $(ls -l /etc/frr/frr.conf)"
-echo "VPP socket: $(ls -l /run/vpp/api.sock)"
-
-# Check groups
-echo "Groups: $(id arca-router)"
+make security-audit
 ```
+
+実体は [`scripts/security-audit.sh`](../scripts/security-audit.sh)。
+必要に応じて `ARCA_SECURITY_UNIT`、`ARCA_SECURITY_USER`、
+`ARCA_VPP_SOCKET` で確認対象を上書きできる。
 
 ---
 

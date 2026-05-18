@@ -27,8 +27,19 @@ This directory contains user guides, design notes, and internal drafts for `arca
 
 ## Development / Release
 - [`ROADMAP.md`](../ROADMAP.md)
+- `docs/compatibility.md`
 - `docs/development.md`
+- `docs/netconf-xpath-interop.md`
+- `docs/netconf-xpath-interop.ja.md`
 - `docs/release-process.md`
+- `docs/v0.10-release-readiness.md`
+- `docs/v0.10-release-readiness.ja.md`
+- `docs/v0.10-release-signoff.md`
+- `docs/v0.10-release-signoff.ja.md`
+- `docs/v0.10-operational-runbook.md`
+- `docs/v0.10-operational-runbook.ja.md`
+- `docs/v0.11-deferred-gates.md`
+- `docs/v0.11-deferred-gates.ja.md`
 
 ## Security / Operations
 - `docs/security-model.md` (Japanese)

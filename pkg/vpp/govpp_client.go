@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/akam1o/arca-router/pkg/vpp/binapi/avf"
@@ -1505,21 +1506,64 @@ func parseInterfaceTag(tag string) map[string]string {
 	return fields
 }
 
-// checkSocketAccess verifies socket accessibility
+// checkSocketAccess verifies socket accessibility.
 func checkSocketAccess(path string) error {
-	// Try to open the socket to verify access
-	// This is a basic check - actual permission check happens during connect
 	info, err := os.Stat(path)
 	if err != nil {
 		return err
 	}
 
-	// Check if it's a socket
 	if info.Mode()&os.ModeSocket == 0 {
 		return fmt.Errorf("not a socket: %s", path)
 	}
 
+	if err := checkSocketWritableByProcess(info); err != nil {
+		return err
+	}
+
 	return nil
+}
+
+func checkSocketWritableByProcess(info os.FileInfo) error {
+	mode := info.Mode().Perm()
+	if mode&0002 != 0 || os.Geteuid() == 0 {
+		return nil
+	}
+
+	stat, ok := info.Sys().(*syscall.Stat_t)
+	if !ok {
+		return nil
+	}
+
+	euid := os.Geteuid()
+	if int(stat.Uid) == euid && mode&0200 != 0 {
+		return nil
+	}
+
+	gids, err := os.Getgroups()
+	if err != nil {
+		return fmt.Errorf("inspect process groups: %w", err)
+	}
+	egid := os.Getegid()
+	if !containsGroupID(gids, egid) {
+		gids = append(gids, egid)
+	}
+	for _, gid := range gids {
+		if int(stat.Gid) == gid && mode&0020 != 0 {
+			return nil
+		}
+	}
+
+	return fmt.Errorf("socket mode=%04o owner uid=%d gid=%d is not writable by uid=%d gids=%v", mode, stat.Uid, stat.Gid, euid, gids)
+}
+
+func containsGroupID(groups []int, want int) bool {
+	for _, group := range groups {
+		if group == want {
+			return true
+		}
+	}
+	return false
 }
 
 // CreateLCPInterface creates an LCP pair for an existing VPP interface

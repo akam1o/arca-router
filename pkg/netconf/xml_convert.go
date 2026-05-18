@@ -3398,9 +3398,9 @@ func validateXPathFilterDepthAndSize(rpcName string, filter *Filter) error {
 		selectExpr = filter.Select
 	}
 	selectExpr = strings.TrimSpace(selectExpr)
-	if len(selectExpr) > MaxXMLSize {
+	if len(selectExpr) > MaxXPathExpressionSize {
 		return NewRPCError(ErrorTypeProtocol, ErrorTagInvalidValue,
-			fmt.Sprintf("xpath filter exceeds maximum size limit (%d bytes)", MaxXMLSize)).
+			fmt.Sprintf("xpath filter exceeds maximum expression size limit (%d bytes)", MaxXPathExpressionSize)).
 			WithPath(fmt.Sprintf("/rpc/%s/filter", rpcName)).
 			WithAppTag("size-limit")
 	}

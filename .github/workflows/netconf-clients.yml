@@ -14,7 +14,7 @@ permissions:
 jobs:
   ncclient:
     name: ncclient interop
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
 
     steps:
     - name: Checkout code
@@ -39,11 +39,176 @@ jobs:
         python -m pip install -r tests/netconf_clients/requirements-ncclient.txt
 
     - name: Run ncclient NETCONF interop
-      run: bash tests/netconf_clients/run_interop.sh tests/netconf_clients/ncclient_interop.py
+      run: NETCONF_INTEROP_EVIDENCE_DIR=artifacts/netconf-clients/ncclient bash tests/netconf_clients/run_interop.sh tests/netconf_clients/ncclient_interop.py
+
+    - name: Upload ncclient evidence
+      if: always()
+      uses: actions/upload-artifact@v4
+      with:
+        name: netconf-client-ncclient-evidence
+        path: artifacts/netconf-clients/ncclient
+        if-no-files-found: ignore
+
+  libnetconf2:
+    name: libnetconf2 interop
+    runs-on: ubuntu-24.04
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Set up Go
+      uses: actions/setup-go@v5
+      with:
+        go-version: '1.25.5'
+        cache: true
+
+    - name: Install libnetconf2 client dependencies
+      env:
+        DEBIAN_FRONTEND: noninteractive
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y software-properties-common
+        sudo add-apt-repository -y universe
+        sudo apt-get update
+        sudo apt-get install -y build-essential libnetconf2-dev libssh-dev libyang2-tools openssh-client pkg-config
+        pkg-config --modversion libnetconf2
+
+    - name: Run libnetconf2 NETCONF interop
+      run: NETCONF_INTEROP_EVIDENCE_DIR=artifacts/netconf-clients/libnetconf2 bash tests/netconf_clients/libnetconf2_interop.sh
+
+    - name: Upload libnetconf2 evidence
+      if: always()
+      uses: actions/upload-artifact@v4
+      with:
+        name: netconf-client-libnetconf2-evidence
+        path: artifacts/netconf-clients/libnetconf2
+        if-no-files-found: ignore
+
+  evidence-verify:
+    name: verify interop evidence
+    runs-on: ubuntu-24.04
+    needs: [ ncclient, libnetconf2 ]
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Download ncclient evidence
+      uses: actions/download-artifact@v4
+      with:
+        name: netconf-client-ncclient-evidence
+        path: artifacts/netconf-clients/ncclient
+
+    - name: Download libnetconf2 evidence
+      uses: actions/download-artifact@v4
+      with:
+        name: netconf-client-libnetconf2-evidence
+        path: artifacts/netconf-clients/libnetconf2
+
+    - name: Verify NETCONF evidence
+      run: make netconf-evidence-verify
+
+  ncclient-standard-xpath:
+    name: ncclient standard xpath interop
+    runs-on: ubuntu-24.04
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Set up Go
+      uses: actions/setup-go@v5
+      with:
+        go-version: '1.25.5'
+        cache: true
+
+    - name: Set up Python
+      uses: actions/setup-python@v6
+      with:
+        python-version: '3.12'
+        cache: 'pip'
+        cache-dependency-path: tests/netconf_clients/requirements-ncclient.txt
+
+    - name: Install ncclient
+      run: |
+        python -m pip install --upgrade pip
+        python -m pip install -r tests/netconf_clients/requirements-ncclient.txt
+
+    - name: Run ncclient standard XPath interop
+      run: NETCONF_STANDARD_XPATH=1 NETCONF_INTEROP_EVIDENCE_DIR=artifacts/netconf-clients/standard-xpath/ncclient bash tests/netconf_clients/run_interop.sh tests/netconf_clients/ncclient_interop.py
+
+    - name: Upload ncclient standard XPath evidence
+      if: always()
+      uses: actions/upload-artifact@v4
+      with:
+        name: netconf-client-ncclient-standard-xpath-evidence
+        path: artifacts/netconf-clients/standard-xpath/ncclient
+        if-no-files-found: ignore
+
+  libnetconf2-standard-xpath:
+    name: libnetconf2 standard xpath interop
+    runs-on: ubuntu-24.04
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Set up Go
+      uses: actions/setup-go@v5
+      with:
+        go-version: '1.25.5'
+        cache: true
+
+    - name: Install libnetconf2 client dependencies
+      env:
+        DEBIAN_FRONTEND: noninteractive
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y software-properties-common
+        sudo add-apt-repository -y universe
+        sudo apt-get update
+        sudo apt-get install -y build-essential libnetconf2-dev libssh-dev libyang2-tools openssh-client pkg-config
+        pkg-config --modversion libnetconf2
+
+    - name: Run libnetconf2 standard XPath interop
+      run: NETCONF_STANDARD_XPATH=1 NETCONF_INTEROP_EVIDENCE_DIR=artifacts/netconf-clients/standard-xpath/libnetconf2 bash tests/netconf_clients/libnetconf2_interop.sh
+
+    - name: Upload libnetconf2 standard XPath evidence
+      if: always()
+      uses: actions/upload-artifact@v4
+      with:
+        name: netconf-client-libnetconf2-standard-xpath-evidence
+        path: artifacts/netconf-clients/standard-xpath/libnetconf2
+        if-no-files-found: ignore
+
+  standard-xpath-evidence-verify:
+    name: verify standard xpath evidence
+    runs-on: ubuntu-24.04
+    needs: [ ncclient-standard-xpath, libnetconf2-standard-xpath ]
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Download ncclient standard XPath evidence
+      uses: actions/download-artifact@v4
+      with:
+        name: netconf-client-ncclient-standard-xpath-evidence
+        path: artifacts/netconf-clients/standard-xpath/ncclient
+
+    - name: Download libnetconf2 standard XPath evidence
+      uses: actions/download-artifact@v4
+      with:
+        name: netconf-client-libnetconf2-standard-xpath-evidence
+        path: artifacts/netconf-clients/standard-xpath/libnetconf2
+
+    - name: Verify standard XPath evidence
+      run: make netconf-standard-xpath-evidence-verify
 
   junos-eznc:
     name: Junos PyEZ smoke
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
 
     steps:
@@ -69,4 +234,12 @@ jobs:
         python -m pip install -r tests/netconf_clients/requirements-junos-eznc.txt
 
     - name: Run Junos PyEZ NETCONF smoke
-      run: bash tests/netconf_clients/run_interop.sh tests/netconf_clients/junos_eznc_smoke.py
+      run: NETCONF_INTEROP_EVIDENCE_DIR=artifacts/netconf-clients/junos-eznc bash tests/netconf_clients/run_interop.sh tests/netconf_clients/junos_eznc_smoke.py
+
+    - name: Upload Junos PyEZ evidence
+      if: always()
+      uses: actions/upload-artifact@v4
+      with:
+        name: netconf-client-junos-eznc-evidence
+        path: artifacts/netconf-clients/junos-eznc
+        if-no-files-found: ignore

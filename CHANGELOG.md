@@ -1,6 +1,54 @@
 # Changelog
 
-## v0.9.x - NETCONF/YANG and Operational Safety (current)
+## v0.10.x - Stabilization and Compatibility (current)
+
+- **v0.10 PR release gate**: release readiness and sign-off docs now treat PR CI plus required evidence as sufficient for v0.10, without requiring RC package artifacts
+- **NETCONF standard XPath default**: `arca-routerd` and NETCONF interop helpers now advertise standard `:xpath` by default, while `--netconf-standard-xpath=false` and `-standard-xpath=false` remain available for compatibility suppression tests
+- **NETCONF startup datastore policy**: startup datastore support is now formalized as intentionally unsupported and unadvertised instead of a v0.11 deferred gate
+- **Package architecture guard**: `make deb-package` and `make rpm-package` now reject non-Linux-amd64 binaries before packaging because v0.10 package metadata targets amd64/x86_64
+- **Local release evidence gate**: `make release-evidence-check` now reruns local release checks and verifies default plus standard XPath NETCONF evidence before sign-off
+- **NETCONF evidence CI verification**: NETCONF client interoperability workflow now downloads ncclient and libnetconf2 artifacts and runs `make netconf-evidence-verify` before sign-off
+- **NETCONF client helper lint**: `make release-check` now syntax-checks NETCONF client helper scripts without importing external client packages
+- **Ubuntu 24.04 package target**: Release packaging now builds and verifies Ubuntu DEB artifacts on Ubuntu 24.04 only, dropping the older Ubuntu 22.04 target from the v0.10 matrix
+- **VPP socket permission preflight**: govpp startup checks now reject VPP API sockets that are not writable by the daemon user or its groups before attempting to connect
+- **FRR permission preflight**: file-based FRR apply now checks config directory write access before replacing `frr.conf`, and FRR command permission failures are reported with the FRR permission error code
+- **Secure configuration backup writer**: CLI configuration backups now use a shared `pkg/config` writer that creates new `0600` files only and preserves the no-overwrite behavior
+- **Permission error integration coverage**: Integration tests now exercise restricted-directory failures across configuration backup writes and FRR file apply preflight
+- **Security audit target**: `make security-audit` now runs an installed-host audit for service user, capabilities, file permissions, VPP socket access, and FRR file-backend readiness
+- **Shell helper lint**: `make release-check` now runs `script-lint` across package, repo, integration, and NETCONF shell helpers
+- **Security audit release evidence**: v0.10 readiness, runbook, and release process docs now call out `make security-audit` output as installed-host evidence
+- **Security audit sign-off field**: v0.10 sign-off templates now include installed-host `make security-audit` evidence or accepted deferred host evidence
+- **Local NETCONF evidence target**: `make netconf-client-evidence` now collects ncclient and libnetconf2 interop artifacts for release sign-off, with `make netconf-pyez-evidence` available for supplementary PyEZ smoke
+- **NETCONF evidence verification**: `make netconf-evidence-verify` now checks required ncclient and libnetconf2 artifact files, required capabilities, and unsupported capability absence before sign-off
+- **NETCONF client evidence artifacts**: ncclient, libnetconf2, and scheduled PyEZ interop jobs now upload capabilities, RPC payloads, replies, logs, and client version evidence for release sign-off
+- **v0.10 sign-off NETCONF evidence**: release sign-off templates now require ncclient and libnetconf2 interop artifact links before approving the release
+- **Release checklist NETCONF evidence**: release process guidance now calls out NETCONF client interop workflow artifacts as a pre-release gate
+- **libnetconf2 interop CI**: NETCONF client workflow now runs a Ubuntu 24.04 apt-installed libnetconf2 smoke against the Arca interop server for second-family XPath evidence
+- **NETCONF XPath evaluation timeout**: experimental XPath evaluation now fails deterministically with a timeout `rpc-error` when expression evaluation exceeds the guardrail
+- **NETCONF XPath client-family policy**: clarified that PyEZ is supplementary ncclient-family smoke and that standard `:xpath` promotion requires libnetconf2-family evidence
+- **NETCONF XPath interop runbook**: documented ncclient and second-client evidence collection before standard `:xpath` advertisement
+- **NETCONF experimental XPath guardrails**: XPath evaluation now enforces expression length, element count, depth, and attribute limits before response shaping
+- **v0.10 release process examples**: release guide and development quick reference now use v0.10 tag, artifact, and announcement examples
+- **Release readiness make target**: `make release-check` now runs package metadata lint, tests, vet, and whitespace checks for v0.10 sign-off evidence
+- **v0.10 sign-off template**: added English and Japanese release sign-off records for evidence links, accepted warnings, and v0.11 deferred gate approval
+- **Compatibility deferred gates**: `arca show compatibility` now lists v0.11-deferred lab gates and NETCONF capability scope
+- **v0.10 sign-off and deferred gates**: release readiness now records v0.11-deferred lab evidence, NETCONF startup non-support, standard XPath evidence, and final sign-off fields
+- **Upgrade release-readiness guidance**: `arca check upgrade` now points operators at the v0.10 operational runbook and release-readiness evidence checklist
+- **v0.10 release readiness checklist**: documented docs-freeze criteria, support matrix release gates, release-candidate evidence, and deferred compatibility gates
+- **v0.10 operational runbook**: documented release-candidate checks for management security, HA failover, FRR/VPP restart recovery, datastore lock recovery, resource churn, and upgrade rollback
+- **Web API token file permissions**: `--web-api-token-file` now rejects token files that are not restricted to `0600`
+- **Upgrade package preflight guidance**: `arca check upgrade` now reports packaged install path checks when a packaged layout is detected and prints rollback guidance for package upgrade windows
+- **Web API token authentication**: `arca-routerd --web-api-token-file` enables Bearer token or `X-API-Key` authentication for Web/NMS automation, using the existing read-only/operator/admin RBAC checks
+- **CLI TLS gRPC connections**: `arca` can connect to remote TCP/TLS gRPC endpoints with CA verification, server-name override, and client certificate/key options for mTLS
+- **gRPC TLS listener**: `arca-routerd --grpc-listen` exposes the internal gRPC API over TCP/TLS, and `--grpc-client-ca` enables client certificate verification for mTLS deployments
+- **Shared TLS policy**: etcd and gRPC TLS paths now use a common TLS 1.2+ minimum policy
+- **Web audit export**: authenticated Web API now exposes admin-only `GET /api/audit` with schema `arca.audit.v1`, pagination, user/action/result filters, and RFC3339 time range filters
+- **Audit event listing**: SQLite and etcd datastores can list audit events in newest-first order for export workflows
+- **CLI upgrade compatibility policy**: `arca check upgrade` now reports supported v0.10 direct upgrade sources, API compatibility IDs, and SQLite schema guardrails
+- **CLI compatibility report**: `arca show compatibility` prints the v0.10 compatibility policy, schema IDs, and VPP/FRR/NETCONF/datastore support matrix without requiring a daemon connection
+- **SQLite schema downgrade guard**: SQLite datastore startup now rejects schema versions newer than the binary supports instead of silently opening a future datastore
+
+## v0.9.x - NETCONF/YANG and Operational Safety
 
 - **CLI route-policy dry-run preview**: `commit check` now reports route-policy dry-run details for prefix-list, route-map, and BGP policy binding changes
 - **CLI upgrade preflight checks**: `arca check upgrade` verifies running config availability, rollback archive coverage, telemetry catalog metadata, and QoS capability snapshots before maintenance

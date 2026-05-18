@@ -1,7 +1,9 @@
 #!/usr/bin/env python3
 import argparse
 import sys
+from pathlib import Path
 
+import jnpr.junos
 from jnpr.junos import Device
 
 
@@ -24,12 +26,41 @@ def parse_args():
     parser.add_argument("--port", required=True, type=int)
     parser.add_argument("--username", required=True)
     parser.add_argument("--password", required=True)
+    parser.add_argument("--evidence-dir")
+    parser.add_argument(
+        "--expect-standard-xpath",
+        dest="expect_standard_xpath",
+        action="store_true",
+        default=True,
+        help="require standard NETCONF :xpath capability advertisement (default)",
+    )
+    parser.add_argument(
+        "--no-standard-xpath",
+        dest="expect_standard_xpath",
+        action="store_false",
+        help="forbid standard NETCONF :xpath capability advertisement",
+    )
     return parser.parse_args()
 
 
 def fail(message):
     print(f"junos-eznc smoke failed: {message}", file=sys.stderr)
     sys.exit(1)
+
+
+def write_evidence(evidence_dir, caps):
+    if not evidence_dir:
+        return
+    root = Path(evidence_dir)
+    root.mkdir(parents=True, exist_ok=True)
+    (root / "server_capabilities.txt").write_text(
+        "\n".join(sorted(caps)) + "\n",
+        encoding="utf-8",
+    )
+    (root / "client_versions.txt").write_text(
+        f"junos-eznc={getattr(jnpr.junos, '__version__', 'unknown')}\n",
+        encoding="utf-8",
+    )
 
 
 def main():
@@ -51,6 +82,7 @@ def main():
             fail("Device.open() returned but device is not connected")
 
         caps = {str(cap) for cap in dev._conn.server_capabilities}
+        write_evidence(args.evidence_dir, caps)
         required = {
             CAP_BASE_10,
             CAP_BASE_11,
@@ -60,16 +92,19 @@ def main():
             CAP_ARCA_ROUTER,
             CAP_ARCA_XPATH_FILTER_SUBSET,
         }
+        if args.expect_standard_xpath:
+            required.add(CAP_XPATH)
         missing = sorted(required - caps)
         if missing:
             fail(f"missing server capabilities: {missing}")
 
         forbidden = {
-            CAP_XPATH,
             CAP_STARTUP,
             CAP_WRITABLE_RUNNING,
             CAP_CONFIRMED_COMMIT,
         }
+        if not args.expect_standard_xpath:
+            forbidden.add(CAP_XPATH)
         advertised = sorted(forbidden & caps)
         if advertised:
             fail(f"unsupported capabilities were advertised: {advertised}")

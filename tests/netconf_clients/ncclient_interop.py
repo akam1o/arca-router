@@ -1,7 +1,9 @@
 #!/usr/bin/env python3
 import argparse
 import sys
+from pathlib import Path
 
+import ncclient
 from lxml import etree
 from ncclient import manager
 from ncclient.operations.errors import TimeoutExpiredError
@@ -29,6 +31,20 @@ def parse_args():
     parser.add_argument("--port", required=True, type=int)
     parser.add_argument("--username", required=True)
     parser.add_argument("--password", required=True)
+    parser.add_argument("--evidence-dir")
+    parser.add_argument(
+        "--expect-standard-xpath",
+        dest="expect_standard_xpath",
+        action="store_true",
+        default=True,
+        help="require standard NETCONF :xpath capability advertisement (default)",
+    )
+    parser.add_argument(
+        "--no-standard-xpath",
+        dest="expect_standard_xpath",
+        action="store_false",
+        help="forbid standard NETCONF :xpath capability advertisement",
+    )
     return parser.parse_args()
 
 
@@ -37,7 +53,7 @@ def fail(message):
     sys.exit(1)
 
 
-def assert_capabilities(caps):
+def assert_capabilities(caps, expect_standard_xpath):
     required = {
         CAP_BASE_10,
         CAP_BASE_11,
@@ -47,16 +63,19 @@ def assert_capabilities(caps):
         CAP_ARCA_ROUTER,
         CAP_ARCA_XPATH_FILTER_SUBSET,
     }
+    if expect_standard_xpath:
+        required.add(CAP_XPATH)
     missing = sorted(required - caps)
     if missing:
         fail(f"missing server capabilities: {missing}")
 
     forbidden = {
-        CAP_XPATH,
         CAP_STARTUP,
         CAP_WRITABLE_RUNNING,
         CAP_CONFIRMED_COMMIT,
     }
+    if not expect_standard_xpath:
+        forbidden.add(CAP_XPATH)
     advertised = sorted(forbidden & caps)
     if advertised:
         fail(f"unsupported capabilities were advertised: {advertised}")
@@ -74,16 +93,83 @@ def assert_rpc_error(operation, want_tag):
     fail("operation unexpectedly succeeded")
 
 
-def dispatch_xml(session, operation_xml):
+class EvidenceWriter:
+    def __init__(self, evidence_dir):
+        self.root = Path(evidence_dir)
+        self.root.mkdir(parents=True, exist_ok=True)
+
+    def write_text(self, relative_path, content):
+        path = self.root / relative_path
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(content.rstrip() + "\n", encoding="utf-8")
+
+    def write_capabilities(self, caps):
+        self.write_text("server_capabilities.txt", "\n".join(sorted(caps)))
+
+    def write_rpc(self, name, xml):
+        self.write_text(f"rpc/{name}.xml", xml)
+
+    def write_reply(self, name, reply):
+        self.write_text(f"reply/{name}.xml", reply)
+
+
+def xml_text(value):
+    if value is None:
+        return ""
+    if isinstance(value, etree._Element):
+        return etree.tostring(value, pretty_print=True, encoding="unicode")
+    return str(value)
+
+
+def rpc_error_text(err):
+    err_xml = getattr(err, "xml", None)
+    if err_xml is not None:
+        return xml_text(err_xml)
+    return "\n".join(
+        [
+            f"tag={getattr(err, 'tag', '')}",
+            f"type={getattr(err, 'type', '')}",
+            f"severity={getattr(err, 'severity', '')}",
+            f"path={getattr(err, 'path', '')}",
+            f"message={getattr(err, 'message', '')}",
+            str(err),
+        ]
+    )
+
+
+def dispatch_xml(session, operation_xml, evidence=None, name=None):
+    if evidence and name:
+        evidence.write_rpc(name, operation_xml)
     element = etree.fromstring(operation_xml.encode("utf-8"))
-    return session.dispatch(element)
+    try:
+        reply = session.dispatch(element)
+    except RPCError as err:
+        if evidence and name:
+            evidence.write_reply(name, rpc_error_text(err))
+        raise
+    if evidence and name:
+        evidence.write_reply(name, xml_text(reply.xml))
+    return reply
+
+
+def connect_ssh_compat(**kwargs):
+    try:
+        return manager.connect_ssh(
+            **kwargs,
+            errors_params={"raise_mode": RaiseMode.ALL},
+        )
+    except TypeError as err:
+        if "errors_params" not in str(err):
+            raise
+        return manager.connect_ssh(**kwargs)
 
 
 def main():
     args = parse_args()
+    evidence = EvidenceWriter(args.evidence_dir) if args.evidence_dir else None
     locked = False
 
-    with manager.connect_ssh(
+    with connect_ssh_compat(
         host=args.host,
         port=args.port,
         username=args.username,
@@ -93,10 +179,15 @@ def main():
         allow_agent=False,
         device_params={"name": "default"},
         manager_params={"timeout": 10},
-        errors_params={"raise_mode": RaiseMode.ALL},
     ) as session:
         caps = {str(cap) for cap in session.server_capabilities}
-        assert_capabilities(caps)
+        if evidence:
+            evidence.write_capabilities(caps)
+            evidence.write_text(
+                "client_versions.txt",
+                f"ncclient={getattr(ncclient, '__version__', 'unknown')}",
+            )
+        assert_capabilities(caps, args.expect_standard_xpath)
 
         running = session.get_config(source="running").data_xml
         if "arca-ci" not in running:
@@ -113,6 +204,8 @@ def main():
                 select="/if:interfaces/if:interface[contains(if:name, 'ge-0/0/0')]"/>
             </get-config>
             """,
+            evidence,
+            "xpath-node-set",
         )
         xpath_xml = str(xpath_reply.xml)
         if "ge-0/0/0" not in xpath_xml or "interop-uplink" not in xpath_xml:
@@ -132,6 +225,8 @@ def main():
                     select="/if:interfaces/if:interface[if:ipv4-table-id='not-a-number']"/>
                 </get-config>
                 """,
+                evidence,
+                "xpath-invalid-predicate",
             ),
             "invalid-value",
         )
@@ -144,6 +239,8 @@ def main():
                   <source><startup/></source>
                 </get-config>
                 """,
+                evidence,
+                "startup-get-config-rejected",
             ),
             "operation-not-supported",
         )
@@ -161,6 +258,8 @@ def main():
                   </config>
                 </edit-config>
                 """,
+                evidence,
+                "writable-running-rejected",
             ),
             "operation-not-supported",
         )
@@ -213,7 +312,12 @@ def main():
             if "discarded-ci" not in candidate:
                 fail("candidate did not include staged hostname before discard")
 
-            dispatch_xml(session, f'<discard-changes xmlns="{NETCONF_NS}"/>')
+            dispatch_xml(
+                session,
+                f'<discard-changes xmlns="{NETCONF_NS}"/>',
+                evidence,
+                "discard-changes",
+            )
 
             discarded = session.get_config(source="candidate").data_xml
             if "discarded-ci" in discarded:
@@ -230,9 +334,11 @@ def main():
                     f"""
                     <copy-config xmlns="{NETCONF_NS}">
                       <target><startup/></target>
-                      <source><running/></source>
+                        <source><running/></source>
                     </copy-config>
                     """,
+                    evidence,
+                    "startup-copy-config-rejected",
                 ),
                 "operation-not-supported",
             )

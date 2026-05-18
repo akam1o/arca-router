@@ -4,12 +4,22 @@ import (
 	"bytes"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/antchfx/xmlquery"
 	"github.com/antchfx/xpath"
 )
 
-const experimentalXPathDataPrefix = "arca_nc_data"
+const (
+	experimentalXPathDataPrefix = "arca_nc_data"
+	MaxXPathExpressionSize      = 4096
+	MaxXPathEvaluationDuration  = 2 * time.Second
+)
+
+type experimentalXPathEvaluationResult[T any] struct {
+	value T
+	err   error
+}
 
 func usesExperimentalXPathEngine(filter *Filter) bool {
 	if filter == nil || normalizedFilterType(filter) != "xpath" {
@@ -31,8 +41,8 @@ func validateExperimentalXPathFilter(rpcName string, filter *Filter) *RPCError {
 	if rpcErr != nil {
 		return rpcErr
 	}
-	if !experimentalXPathResultIsNodeSet(expr, doc) {
-		return ErrInvalidFilter(rpcName, "xpath filter must evaluate to a node-set")
+	if err := validateExperimentalXPathResultNodeSet(rpcName, expr, doc); err != nil {
+		return err
 	}
 	return nil
 }
@@ -52,11 +62,10 @@ func applyExperimentalXPathFilter(rpcName string, xmlData []byte, filter *Filter
 	if rpcErr != nil {
 		return nil, rpcErr
 	}
-	if !experimentalXPathResultIsNodeSet(expr, doc) {
-		return nil, ErrInvalidFilter(rpcName, "xpath filter must evaluate to a node-set")
+	nodes, err := evaluateExperimentalXPathNodeSet(rpcName, expr, doc)
+	if err != nil {
+		return nil, err
 	}
-
-	nodes := xmlquery.QuerySelectorAll(doc, expr)
 	if len(nodes) > MaxXMLElements {
 		return nil, NewRPCError(ErrorTypeProtocol, ErrorTagInvalidValue,
 			fmt.Sprintf("xpath filter result exceeds maximum element limit (%d)", MaxXMLElements)).
@@ -97,6 +106,12 @@ func validateExperimentalXPathSelect(rpcName string, filter *Filter) *RPCError {
 	selectExpr := strings.TrimSpace(filter.Select)
 	if selectExpr == "" {
 		return ErrInvalidFilter(rpcName, "xpath filter requires select attribute")
+	}
+	if len(selectExpr) > MaxXPathExpressionSize {
+		return NewRPCError(ErrorTypeProtocol, ErrorTagInvalidValue,
+			fmt.Sprintf("xpath filter exceeds maximum expression size limit (%d bytes)", MaxXPathExpressionSize)).
+			WithPath(fmt.Sprintf("/rpc/%s/filter", rpcName)).
+			WithAppTag("size-limit")
 	}
 	if !strings.HasPrefix(selectExpr, "/") {
 		return ErrInvalidFilter(rpcName, fmt.Sprintf("invalid xpath filter: XPath must start with /: %s", selectExpr))
@@ -163,7 +178,7 @@ func validateExperimentalXPathRootStep(rpcName, selectExpr string, namespaceCtx 
 		return nil
 	}
 	if prefix == "" {
-		return ErrInvalidFilter(rpcName, fmt.Sprintf("experimental xpath filter requires namespace-prefixed root element: %s", local))
+		return ErrInvalidFilter(rpcName, fmt.Sprintf("xpath filter requires namespace-prefixed root element: %s", local))
 	}
 	namespace := namespaceCtx[prefix]
 	if namespace == "" {
@@ -265,12 +280,118 @@ func parseExperimentalXPathDocument(rpcName string, xmlData []byte) (*xmlquery.N
 	if err != nil {
 		return nil, ErrInvalidFilter(rpcName, fmt.Sprintf("xpath evaluation input is not valid XML: %v", err))
 	}
+	if rpcErr := validateExperimentalXPathDocumentLimits(rpcName, doc); rpcErr != nil {
+		return nil, rpcErr
+	}
 	return doc, nil
 }
 
-func experimentalXPathResultIsNodeSet(expr *xpath.Expr, doc *xmlquery.Node) bool {
-	_, ok := expr.Evaluate(xmlquery.CreateXPathNavigator(doc)).(*xpath.NodeIterator)
-	return ok
+func validateExperimentalXPathDocumentLimits(rpcName string, doc *xmlquery.Node) *RPCError {
+	dataRoot := experimentalXPathDataRoot(doc)
+	if dataRoot == nil {
+		return ErrOperationFailed("xpath filter failed to locate NETCONF data root")
+	}
+	elements := 0
+	for child := dataRoot.FirstChild; child != nil; child = child.NextSibling {
+		if rpcErr := validateExperimentalXPathNodeLimits(rpcName, child, 1, &elements); rpcErr != nil {
+			return rpcErr
+		}
+	}
+	return nil
+}
+
+func validateExperimentalXPathNodeLimits(rpcName string, node *xmlquery.Node, depth int, elements *int) *RPCError {
+	if node == nil {
+		return nil
+	}
+	if node.Type == xmlquery.ElementNode {
+		(*elements)++
+		if *elements > MaxXMLElements {
+			return NewRPCError(ErrorTypeProtocol, ErrorTagInvalidValue,
+				fmt.Sprintf("xpath evaluation input exceeds maximum element limit (%d)", MaxXMLElements)).
+				WithPath(fmt.Sprintf("/rpc/%s/filter", rpcName)).
+				WithAppTag("element-limit")
+		}
+		if depth > MaxXMLDepth {
+			return NewRPCError(ErrorTypeProtocol, ErrorTagInvalidValue,
+				fmt.Sprintf("xpath evaluation input exceeds maximum depth limit (%d)", MaxXMLDepth)).
+				WithPath(fmt.Sprintf("/rpc/%s/filter", rpcName)).
+				WithAppTag("depth-limit")
+		}
+		if len(node.Attr) > MaxXMLAttributes {
+			return NewRPCError(ErrorTypeProtocol, ErrorTagInvalidValue,
+				fmt.Sprintf("xpath evaluation input element %s exceeds maximum attribute limit (%d)", node.Data, MaxXMLAttributes)).
+				WithPath(fmt.Sprintf("/rpc/%s/filter", rpcName)).
+				WithAppTag("attribute-limit")
+		}
+	}
+	for child := node.FirstChild; child != nil; child = child.NextSibling {
+		if rpcErr := validateExperimentalXPathNodeLimits(rpcName, child, depth+1, elements); rpcErr != nil {
+			return rpcErr
+		}
+	}
+	return nil
+}
+
+func validateExperimentalXPathResultNodeSet(rpcName string, expr *xpath.Expr, doc *xmlquery.Node) *RPCError {
+	isNodeSet, err := runExperimentalXPathEvaluation(rpcName, MaxXPathEvaluationDuration, func() (bool, error) {
+		_, ok := expr.Evaluate(xmlquery.CreateXPathNavigator(doc)).(*xpath.NodeIterator)
+		return ok, nil
+	})
+	if err != nil {
+		if rpcErr, ok := err.(*RPCError); ok {
+			return rpcErr
+		}
+		return ErrOperationFailed(fmt.Sprintf("xpath evaluation failed: %v", err)).
+			WithPath(fmt.Sprintf("/rpc/%s/filter", rpcName))
+	}
+	if !isNodeSet {
+		return ErrInvalidFilter(rpcName, "xpath filter must evaluate to a node-set")
+	}
+	return nil
+}
+
+func evaluateExperimentalXPathNodeSet(rpcName string, expr *xpath.Expr, doc *xmlquery.Node) ([]*xmlquery.Node, error) {
+	return runExperimentalXPathEvaluation(rpcName, MaxXPathEvaluationDuration, func() ([]*xmlquery.Node, error) {
+		if _, ok := expr.Evaluate(xmlquery.CreateXPathNavigator(doc)).(*xpath.NodeIterator); !ok {
+			return nil, ErrInvalidFilter(rpcName, "xpath filter must evaluate to a node-set")
+		}
+		return xmlquery.QuerySelectorAll(doc, expr), nil
+	})
+}
+
+func runExperimentalXPathEvaluation[T any](rpcName string, timeout time.Duration, evaluate func() (T, error)) (T, error) {
+	var zero T
+	resultCh := make(chan experimentalXPathEvaluationResult[T], 1)
+	go func() {
+		defer func() {
+			if r := recover(); r != nil {
+				resultCh <- experimentalXPathEvaluationResult[T]{
+					err: ErrOperationFailed(fmt.Sprintf("xpath evaluation failed: %v", r)).
+						WithPath(fmt.Sprintf("/rpc/%s/filter", rpcName)),
+				}
+			}
+		}()
+		value, err := evaluate()
+		resultCh <- experimentalXPathEvaluationResult[T]{value: value, err: err}
+	}()
+
+	timer := time.NewTimer(timeout)
+	defer timer.Stop()
+
+	select {
+	case result := <-resultCh:
+		return result.value, result.err
+	case <-timer.C:
+		return zero, xpathEvaluationTimeoutError(rpcName, timeout)
+	}
+}
+
+func xpathEvaluationTimeoutError(rpcName string, timeout time.Duration) *RPCError {
+	return NewRPCError(ErrorTypeApplication, ErrorTagOperationFailed,
+		fmt.Sprintf("xpath evaluation exceeded timeout (%s)", timeout)).
+		WithPath(fmt.Sprintf("/rpc/%s/filter", rpcName)).
+		WithAppTag("timeout")
 }
 
 func experimentalXPathDataRoot(doc *xmlquery.Node) *xmlquery.Node {
@@ -294,7 +415,7 @@ func renderExperimentalXPathNodes(dataRoot *xmlquery.Node, nodes []*xmlquery.Nod
 		}
 		switch node.Type {
 		case xmlquery.AttributeNode:
-			return nil, fmt.Errorf("xpath filter selected attributes, which are not supported by experimental response shaping")
+			return nil, fmt.Errorf("xpath filter selected attributes, which are not supported by response shaping")
 		case xmlquery.ElementNode:
 			if !markExperimentalXPathAncestors(dataRoot, node, include) {
 				return nil, fmt.Errorf("xpath filter selected a node outside NETCONF data")

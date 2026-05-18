@@ -2,13 +2,20 @@ package main
 
 import (
 	"context"
+	"crypto/rand"
+	"crypto/rsa"
+	"crypto/tls"
+	"crypto/x509"
+	"encoding/pem"
 	"errors"
 	"log/slog"
+	"math/big"
 	"net"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/akam1o/arca-router/internal/engine"
 	"github.com/akam1o/arca-router/internal/model"
@@ -53,6 +60,10 @@ func (s *initialConfigStore) ListCommits(ctx context.Context, opts *store.ListOp
 
 func (s *initialConfigStore) AuditLog(ctx context.Context, event *store.AuditEvent) error {
 	return nil
+}
+
+func (s *initialConfigStore) ListAuditEvents(ctx context.Context, opts *store.AuditOptions) ([]*store.AuditEvent, error) {
+	return nil, nil
 }
 
 func (s *initialConfigStore) Close() error {
@@ -244,6 +255,62 @@ func TestBuildDatastoreConfigEtcdRejectsPartialTLS(t *testing.T) {
 	}
 }
 
+func TestBuildGRPCServerOptionsUnixRejectsTLSFlags(t *testing.T) {
+	_, err := buildGRPCServerOptions(&daemonFlags{grpcTLSCert: "/cert.pem"})
+	if err == nil {
+		t.Fatal("buildGRPCServerOptions() error = nil, want TLS flags without listen error")
+	}
+	if !strings.Contains(err.Error(), "--grpc-listen") {
+		t.Fatalf("buildGRPCServerOptions() error = %v, want --grpc-listen", err)
+	}
+}
+
+func TestBuildGRPCServerOptionsTCPRequiresTLSKeyPair(t *testing.T) {
+	_, err := buildGRPCServerOptions(&daemonFlags{grpcListen: "127.0.0.1:0"})
+	if err == nil {
+		t.Fatal("buildGRPCServerOptions() error = nil, want missing TLS key pair error")
+	}
+	if !strings.Contains(err.Error(), "--grpc-tls-cert") {
+		t.Fatalf("buildGRPCServerOptions() error = %v, want TLS key pair error", err)
+	}
+}
+
+func TestBuildGRPCServerOptionsTCPUsesTLSCredentials(t *testing.T) {
+	certFile, keyFile, _ := writeTestCertificateFiles(t)
+	opts, err := buildGRPCServerOptions(&daemonFlags{
+		grpcListen:  "127.0.0.1:0",
+		grpcTLSCert: certFile,
+		grpcTLSKey:  keyFile,
+	})
+	if err != nil {
+		t.Fatalf("buildGRPCServerOptions() error = %v", err)
+	}
+	if len(opts) != 1 {
+		t.Fatalf("buildGRPCServerOptions() returned %d options, want 1", len(opts))
+	}
+}
+
+func TestBuildGRPCServerTLSConfigEnablesMTLS(t *testing.T) {
+	certFile, keyFile, caFile := writeTestCertificateFiles(t)
+	cfg, err := buildGRPCServerTLSConfig(&daemonFlags{
+		grpcTLSCert:  certFile,
+		grpcTLSKey:   keyFile,
+		grpcClientCA: caFile,
+	})
+	if err != nil {
+		t.Fatalf("buildGRPCServerTLSConfig() error = %v", err)
+	}
+	if cfg.MinVersion != tls.VersionTLS12 {
+		t.Fatalf("MinVersion = %x, want TLS 1.2", cfg.MinVersion)
+	}
+	if cfg.ClientAuth != tls.RequireAndVerifyClientCert {
+		t.Fatalf("ClientAuth = %v, want RequireAndVerifyClientCert", cfg.ClientAuth)
+	}
+	if cfg.ClientCAs == nil {
+		t.Fatal("ClientCAs = nil, want configured pool")
+	}
+}
+
 func TestEffectiveNETCONFListenUsesFlagOverride(t *testing.T) {
 	cfg := model.NewRouterConfig()
 	cfg.Security = &model.SecurityConfig{
@@ -256,6 +323,47 @@ func TestEffectiveNETCONFListenUsesFlagOverride(t *testing.T) {
 	if got != ":2830" {
 		t.Fatalf("effectiveNETCONFListen() = %q, want %q", got, ":2830")
 	}
+}
+
+func writeTestCertificateFiles(t *testing.T) (certFile, keyFile, caFile string) {
+	t.Helper()
+
+	privateKey, err := rsa.GenerateKey(rand.Reader, 2048)
+	if err != nil {
+		t.Fatalf("GenerateKey() error = %v", err)
+	}
+	template := &x509.Certificate{
+		SerialNumber:          big.NewInt(1),
+		NotBefore:             time.Now().Add(-time.Hour),
+		NotAfter:              time.Now().Add(time.Hour),
+		KeyUsage:              x509.KeyUsageDigitalSignature | x509.KeyUsageKeyEncipherment | x509.KeyUsageCertSign,
+		ExtKeyUsage:           []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth, x509.ExtKeyUsageClientAuth},
+		BasicConstraintsValid: true,
+		IsCA:                  true,
+		DNSNames:              []string{"localhost"},
+	}
+	certDER, err := x509.CreateCertificate(rand.Reader, template, template, &privateKey.PublicKey, privateKey)
+	if err != nil {
+		t.Fatalf("CreateCertificate() error = %v", err)
+	}
+
+	certPEM := pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: certDER})
+	keyPEM := pem.EncodeToMemory(&pem.Block{Type: "RSA PRIVATE KEY", Bytes: x509.MarshalPKCS1PrivateKey(privateKey)})
+
+	dir := t.TempDir()
+	certFile = filepath.Join(dir, "server.crt")
+	keyFile = filepath.Join(dir, "server.key")
+	caFile = filepath.Join(dir, "ca.crt")
+	if err := os.WriteFile(certFile, certPEM, 0600); err != nil {
+		t.Fatalf("WriteFile(cert) error = %v", err)
+	}
+	if err := os.WriteFile(keyFile, keyPEM, 0600); err != nil {
+		t.Fatalf("WriteFile(key) error = %v", err)
+	}
+	if err := os.WriteFile(caFile, certPEM, 0600); err != nil {
+		t.Fatalf("WriteFile(ca) error = %v", err)
+	}
+	return certFile, keyFile, caFile
 }
 
 func TestEffectiveNETCONFListenUsesConfigPort(t *testing.T) {

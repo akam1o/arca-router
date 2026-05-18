@@ -94,7 +94,13 @@ func NewServer(eng *engine.Engine, st store.ConfigStore, log *slog.Logger) *Serv
 
 // Serve starts the gRPC server on the given listener.
 func (s *Server) Serve(lis net.Listener) error {
-	s.server = googlegrpc.NewServer()
+	return s.ServeWithOptions(lis)
+}
+
+// ServeWithOptions starts the gRPC server on the given listener with explicit
+// transport options.
+func (s *Server) ServeWithOptions(lis net.Listener, opts ...googlegrpc.ServerOption) error {
+	s.server = googlegrpc.NewServer(opts...)
 	apiv1.RegisterConfigServiceServer(s.server, &configServiceAdapter{server: s})
 	apiv1.RegisterSessionServiceServer(s.server, &sessionServiceAdapter{server: s})
 	apiv1.RegisterStateServiceServer(s.server, &stateServiceAdapter{server: s})
@@ -501,6 +507,52 @@ func (s *Server) ListHistory(ctx context.Context, limit, offset int) ([]CommitIn
 		})
 	}
 	return entries, nil
+}
+
+// ListAuditEvents returns persisted audit events for export.
+func (s *Server) ListAuditEvents(ctx context.Context, opts AuditLogOptions) ([]AuditEventInfo, error) {
+	if opts.Limit < 0 {
+		return nil, fmt.Errorf("invalid audit limit: %d", opts.Limit)
+	}
+	if opts.Offset < 0 {
+		return nil, fmt.Errorf("invalid audit offset: %d", opts.Offset)
+	}
+	if s.store == nil {
+		return nil, nil
+	}
+	events, err := s.store.ListAuditEvents(ctx, &store.AuditOptions{
+		Limit:     opts.Limit,
+		Offset:    opts.Offset,
+		StartTime: opts.StartTime,
+		EndTime:   opts.EndTime,
+		User:      opts.User,
+		Action:    opts.Action,
+		Result:    opts.Result,
+	})
+	if err != nil {
+		return nil, err
+	}
+	result := make([]AuditEventInfo, 0, len(events))
+	for _, event := range events {
+		if event == nil {
+			continue
+		}
+		result = append(result, AuditEventInfo{
+			ID:            event.ID,
+			Key:           event.Key,
+			Timestamp:     event.Timestamp,
+			User:          event.User,
+			SessionID:     event.SessionID,
+			SourceIP:      event.SourceIP,
+			CorrelationID: event.CorrelationID,
+			Action:        event.Action,
+			Result:        event.Result,
+			ErrorCode:     event.ErrorCode,
+			Details:       event.Details,
+			RawDetails:    event.RawDetails,
+		})
+	}
+	return result, nil
 }
 
 func commitRecordConfigText(record *store.CommitRecord) (string, error) {
