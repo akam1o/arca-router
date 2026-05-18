@@ -6,6 +6,7 @@ import (
 	"time"
 
 	pkgconfig "github.com/akam1o/arca-router/pkg/config"
+	clientv3 "go.etcd.io/etcd/client/v3"
 )
 
 // runningMetadata stores metadata about the current running configuration.
@@ -19,8 +20,13 @@ func (ds *etcdDatastore) GetRunning(ctx context.Context) (*RunningConfig, error)
 	ctx, cancel := ds.withTimeout(ctx)
 	defer cancel()
 
-	// Get running config metadata
 	metadataKey := ds.key("running", "current")
+	configKey := ds.key("running", "config")
+
+	// Read metadata first, then pin the config read to the same etcd revision.
+	// Commit writes both keys in one transaction; using the metadata response
+	// revision prevents a reader from combining metadata from one commit with
+	// config text from a later commit.
 	metadataResp, err := ds.client.Get(ctx, metadataKey)
 	if err != nil {
 		return nil, NewError(ErrCodeInternal, "failed to get running metadata", err)
@@ -35,22 +41,36 @@ func (ds *etcdDatastore) GetRunning(ctx context.Context) (*RunningConfig, error)
 		return nil, NewError(ErrCodeInternal, "failed to unmarshal running metadata", err)
 	}
 
-	// Get running config text
-	configKey := ds.key("running", "config")
-	configResp, err := ds.client.Get(ctx, configKey)
+	readRevision := etcdGetResponseRevision(metadataResp)
+	configResp, err := ds.client.Get(ctx, configKey, clientv3.WithRev(readRevision))
 	if err != nil {
 		return nil, NewError(ErrCodeInternal, "failed to get running config", err)
 	}
 
-	if len(configResp.Kvs) == 0 {
-		return nil, NewError(ErrCodeInternal, "running config text not found (inconsistent state)", nil)
+	configText, err := runningConfigTextFromEtcdResponse(configResp)
+	if err != nil {
+		return nil, err
 	}
 
 	return &RunningConfig{
 		CommitID:   metadata.CommitID,
-		ConfigText: string(configResp.Kvs[0].Value),
+		ConfigText: configText,
 		Timestamp:  metadata.Timestamp,
 	}, nil
+}
+
+func etcdGetResponseRevision(resp *clientv3.GetResponse) int64 {
+	if resp == nil || resp.Header == nil {
+		return 0
+	}
+	return resp.Header.Revision
+}
+
+func runningConfigTextFromEtcdResponse(resp *clientv3.GetResponse) (string, error) {
+	if resp == nil || len(resp.Kvs) == 0 {
+		return "", NewError(ErrCodeInternal, "running config text not found (inconsistent state)", nil)
+	}
+	return string(resp.Kvs[0].Value), nil
 }
 
 // GetCandidate retrieves a session's candidate configuration.
