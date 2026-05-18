@@ -1054,7 +1054,7 @@ func TestWebEndpointRejectsInvalidRole(t *testing.T) {
 func TestWebConfigValidateEndpointUsesConfigAPI(t *testing.T) {
 	source, _ := newWebConfigAPITestSource(t, "operator")
 
-	req := httptest.NewRequest(http.MethodPost, "/api/config/validate", strings.NewReader(`{"config_text":"set system host-name edge02"}`))
+	req := newWebJSONTestRequest(http.MethodPost, "/api/config/validate", `{"config_text":"set system host-name edge02"}`)
 	req.SetBasicAuth("operator", "secret")
 	rec := httptest.NewRecorder()
 	source.handleWebConfigValidate(rec, req)
@@ -1079,7 +1079,7 @@ func TestWebConfigValidateEndpointUsesConfigAPI(t *testing.T) {
 func TestWebConfigCommitEndpointAppliesConfig(t *testing.T) {
 	source, eng := newWebConfigAPITestSource(t, "operator")
 
-	req := httptest.NewRequest(http.MethodPost, "/api/config/commit", strings.NewReader(`{"config_text":"set system host-name edge02","message":"web update"}`))
+	req := newWebJSONTestRequest(http.MethodPost, "/api/config/commit", `{"config_text":"set system host-name edge02","message":"web update"}`)
 	req.SetBasicAuth("operator", "secret")
 	rec := httptest.NewRecorder()
 	source.handleWebConfigCommit(rec, req)
@@ -1125,7 +1125,7 @@ func TestWebConfigCommitEndpointReplacesFullConfig(t *testing.T) {
 		},
 	}, 42)
 
-	req := httptest.NewRequest(http.MethodPost, "/api/config/commit", strings.NewReader(`{"config_text":"set system host-name edge02","message":"replace full config"}`))
+	req := newWebJSONTestRequest(http.MethodPost, "/api/config/commit", `{"config_text":"set system host-name edge02","message":"replace full config"}`)
 	req.SetBasicAuth("operator", "secret")
 	rec := httptest.NewRecorder()
 	source.handleWebConfigCommit(rec, req)
@@ -1145,11 +1145,7 @@ func TestWebConfigCommitEndpointReplacesFullConfig(t *testing.T) {
 func TestWebConfigWriteEndpointRejectsTrailingJSON(t *testing.T) {
 	source, eng := newWebConfigAPITestSource(t, "operator")
 
-	req := httptest.NewRequest(
-		http.MethodPost,
-		"/api/config/commit",
-		strings.NewReader(`{"config_text":"set system host-name edge02"}{"config_text":"set system host-name edge03"}`),
-	)
+	req := newWebJSONTestRequest(http.MethodPost, "/api/config/commit", `{"config_text":"set system host-name edge02"}{"config_text":"set system host-name edge03"}`)
 	req.SetBasicAuth("operator", "secret")
 	rec := httptest.NewRecorder()
 	source.handleWebConfigCommit(rec, req)
@@ -1169,7 +1165,7 @@ func TestWebConfigWriteEndpointRejectsOversizedBody(t *testing.T) {
 	source, _ := newWebConfigAPITestSource(t, "operator")
 	body := `{"config_text":"` + strings.Repeat("x", webConfigEditBodyLimit) + `"}`
 
-	req := httptest.NewRequest(http.MethodPost, "/api/config/validate", strings.NewReader(body))
+	req := newWebJSONTestRequest(http.MethodPost, "/api/config/validate", body)
 	req.SetBasicAuth("operator", "secret")
 	rec := httptest.NewRecorder()
 	source.handleWebConfigValidate(rec, req)
@@ -1179,10 +1175,40 @@ func TestWebConfigWriteEndpointRejectsOversizedBody(t *testing.T) {
 	}
 }
 
+func TestWebConfigWriteEndpointRequiresJSONContentType(t *testing.T) {
+	tests := []struct {
+		name        string
+		contentType string
+	}{
+		{name: "missing"},
+		{name: "text plain", contentType: "text/plain"},
+		{name: "form", contentType: "application/x-www-form-urlencoded"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			source, eng := newWebConfigAPITestSource(t, "operator")
+			req := httptest.NewRequest(http.MethodPost, "/api/config/commit", strings.NewReader(`{"config_text":"set system host-name edge02"}`))
+			if tt.contentType != "" {
+				req.Header.Set("Content-Type", tt.contentType)
+			}
+			req.SetBasicAuth("operator", "secret")
+			rec := httptest.NewRecorder()
+			source.handleWebConfigCommit(rec, req)
+
+			if rec.Code != http.StatusUnsupportedMediaType {
+				t.Fatalf("status = %d, want %d: %s", rec.Code, http.StatusUnsupportedMediaType, rec.Body.String())
+			}
+			if got := eng.Running().System.HostName; got != "edge01" {
+				t.Fatalf("running hostname = %q, want unchanged edge01", got)
+			}
+		})
+	}
+}
+
 func TestWebConfigWriteEndpointRejectsReadOnlyRole(t *testing.T) {
 	source, _ := newWebConfigAPITestSource(t, "read-only")
 
-	req := httptest.NewRequest(http.MethodPost, "/api/config/validate", strings.NewReader(`{"config_text":"set system host-name edge02"}`))
+	req := newWebJSONTestRequest(http.MethodPost, "/api/config/validate", `{"config_text":"set system host-name edge02"}`)
 	req.SetBasicAuth("read-only", "secret")
 	rec := httptest.NewRecorder()
 	source.handleWebConfigValidate(rec, req)
@@ -1198,7 +1224,7 @@ func TestWebConfigWriteEndpointRejectsReadOnlyToken(t *testing.T) {
 		"robot": {Name: "robot", Role: "read-only", Token: "secret-token"},
 	}
 
-	req := httptest.NewRequest(http.MethodPost, "/api/config/validate", strings.NewReader(`{"config_text":"set system host-name edge02"}`))
+	req := newWebJSONTestRequest(http.MethodPost, "/api/config/validate", `{"config_text":"set system host-name edge02"}`)
 	req.Header.Set("Authorization", "Bearer secret-token")
 	rec := httptest.NewRecorder()
 	source.handleWebConfigValidate(rec, req)
@@ -1416,6 +1442,12 @@ func newWebAuthTestSource(t *testing.T, username, password, role string) metrics
 		startedAt: time.Now().Add(-2 * time.Minute),
 		engine:    eng,
 	}
+}
+
+func newWebJSONTestRequest(method, target, body string) *http.Request {
+	req := httptest.NewRequest(method, target, strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	return req
 }
 
 func newWebConfigAPITestSource(t *testing.T, role string) (metricsSource, *engine.Engine) {

@@ -9,6 +9,7 @@ import (
 	"html/template"
 	"io"
 	"log/slog"
+	"mime"
 	"net"
 	"net/http"
 	"net/url"
@@ -1647,6 +1648,10 @@ func decodeWebConfigCommitRequest(w http.ResponseWriter, r *http.Request) (webCo
 }
 
 func decodeWebJSONRequest(w http.ResponseWriter, r *http.Request, dst any) bool {
+	if !webJSONContentType(r.Header.Get("Content-Type")) {
+		writeWebJSONError(w, http.StatusUnsupportedMediaType, "content-type must be application/json")
+		return false
+	}
 	dec := json.NewDecoder(http.MaxBytesReader(w, r.Body, webConfigEditBodyLimit))
 	dec.DisallowUnknownFields()
 	if err := dec.Decode(dst); err != nil {
@@ -1663,6 +1668,11 @@ func decodeWebJSONRequest(w http.ResponseWriter, r *http.Request, dst any) bool 
 		return false
 	}
 	return true
+}
+
+func webJSONContentType(raw string) bool {
+	mediaType, _, err := mime.ParseMediaType(raw)
+	return err == nil && strings.EqualFold(mediaType, "application/json")
 }
 
 func writeWebJSONDecodeError(w http.ResponseWriter, err error) {
