@@ -1480,6 +1480,10 @@ func (s metricsSource) authorizeWebWrite(w http.ResponseWriter, r *http.Request)
 		http.Error(w, "web configuration writes require password-backed security users or API tokens", http.StatusForbidden)
 		return "", false
 	}
+	if !webWriteOriginAllowed(r) {
+		http.Error(w, "cross-origin web configuration writes are forbidden", http.StatusForbidden)
+		return "", false
+	}
 	username, role, ok := authenticateWebRequest(w, r, users, tokens)
 	if !ok {
 		return "", false
@@ -1489,6 +1493,28 @@ func (s metricsSource) authorizeWebWrite(w http.ResponseWriter, r *http.Request)
 		return "", false
 	}
 	return username, true
+}
+
+func webWriteOriginAllowed(r *http.Request) bool {
+	if origin := strings.TrimSpace(r.Header.Get("Origin")); origin != "" {
+		return webURLHostMatchesRequest(origin, r)
+	}
+	if referer := strings.TrimSpace(r.Header.Get("Referer")); referer != "" {
+		return webURLHostMatchesRequest(referer, r)
+	}
+	return true
+}
+
+func webURLHostMatchesRequest(rawURL string, r *http.Request) bool {
+	u, err := url.Parse(rawURL)
+	if err != nil || u.Host == "" || strings.TrimSpace(r.Host) == "" {
+		return false
+	}
+	return normalizedWebHost(u.Host) == normalizedWebHost(r.Host)
+}
+
+func normalizedWebHost(host string) string {
+	return strings.ToLower(strings.TrimSuffix(strings.TrimSpace(host), "."))
 }
 
 func authenticateWebRequest(w http.ResponseWriter, r *http.Request, users map[string]webAuthUser, tokens map[string]webAPIToken) (string, string, bool) {

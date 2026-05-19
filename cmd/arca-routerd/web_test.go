@@ -1205,6 +1205,51 @@ func TestWebConfigWriteEndpointRequiresJSONContentType(t *testing.T) {
 	}
 }
 
+func TestWebConfigWriteEndpointRejectsCrossOriginHeaders(t *testing.T) {
+	tests := []struct {
+		name   string
+		header string
+		value  string
+	}{
+		{name: "origin", header: "Origin", value: "https://evil.example"},
+		{name: "referer", header: "Referer", value: "https://evil.example/config"},
+		{name: "malformed origin", header: "Origin", value: "://bad"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			source, eng := newWebConfigAPITestSource(t, "operator")
+			req := newWebJSONTestRequest(http.MethodPost, "/api/config/commit", `{"config_text":"set system host-name edge02"}`)
+			req.Header.Set(tt.header, tt.value)
+			req.SetBasicAuth("operator", "secret")
+			rec := httptest.NewRecorder()
+			source.handleWebConfigCommit(rec, req)
+
+			if rec.Code != http.StatusForbidden {
+				t.Fatalf("status = %d, want %d: %s", rec.Code, http.StatusForbidden, rec.Body.String())
+			}
+			if got := eng.Running().System.HostName; got != "edge01" {
+				t.Fatalf("running hostname = %q, want unchanged edge01", got)
+			}
+		})
+	}
+}
+
+func TestWebConfigWriteEndpointAllowsSameOriginHeader(t *testing.T) {
+	source, eng := newWebConfigAPITestSource(t, "operator")
+	req := newWebJSONTestRequest(http.MethodPost, "/api/config/commit", `{"config_text":"set system host-name edge02"}`)
+	req.Header.Set("Origin", "http://example.com")
+	req.SetBasicAuth("operator", "secret")
+	rec := httptest.NewRecorder()
+	source.handleWebConfigCommit(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d: %s", rec.Code, http.StatusOK, rec.Body.String())
+	}
+	if got := eng.Running().System.HostName; got != "edge02" {
+		t.Fatalf("running hostname = %q, want edge02", got)
+	}
+}
+
 func TestWebConfigWriteEndpointRejectsReadOnlyRole(t *testing.T) {
 	source, _ := newWebConfigAPITestSource(t, "read-only")
 
