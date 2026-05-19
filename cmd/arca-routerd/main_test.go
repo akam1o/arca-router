@@ -327,6 +327,25 @@ func TestBuildGRPCServerTLSConfigEnablesMTLS(t *testing.T) {
 	}
 }
 
+func TestBuildGRPCServerTLSConfigRejectsInsecureKeyPermissions(t *testing.T) {
+	certFile, keyFile, caFile := writeTestCertificateFiles(t)
+	if err := os.Chmod(keyFile, 0644); err != nil {
+		t.Fatalf("Chmod() error = %v", err)
+	}
+
+	_, err := buildGRPCServerTLSConfig(&daemonFlags{
+		grpcTLSCert:  certFile,
+		grpcTLSKey:   keyFile,
+		grpcClientCA: caFile,
+	})
+	if err == nil {
+		t.Fatal("buildGRPCServerTLSConfig() error = nil, want key permission error")
+	}
+	if !strings.Contains(err.Error(), "validate gRPC TLS key permissions") {
+		t.Fatalf("buildGRPCServerTLSConfig() error = %v, want key permission validation error", err)
+	}
+}
+
 func TestEffectiveNETCONFListenUsesFlagOverride(t *testing.T) {
 	cfg := model.NewRouterConfig()
 	cfg.Security = &model.SecurityConfig{

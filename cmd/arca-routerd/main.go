@@ -27,6 +27,7 @@ import (
 	sbvpp "github.com/akam1o/arca-router/internal/southbound/vpp"
 	internalstore "github.com/akam1o/arca-router/internal/store"
 	storesqlite "github.com/akam1o/arca-router/internal/store/sqlite"
+	"github.com/akam1o/arca-router/pkg/auth"
 	"github.com/akam1o/arca-router/pkg/config"
 	"github.com/akam1o/arca-router/pkg/datastore"
 	"github.com/akam1o/arca-router/pkg/device"
@@ -626,6 +627,9 @@ func buildGRPCServerOptions(f *daemonFlags) ([]googlegrpc.ServerOption, error) {
 }
 
 func buildGRPCServerTLSConfig(f *daemonFlags) (*tls.Config, error) {
+	if err := auth.ValidateKeyFilePermissions(f.grpcTLSKey, 0, 0); err != nil {
+		return nil, fmt.Errorf("validate gRPC TLS key permissions: %w", err)
+	}
 	cert, err := tls.LoadX509KeyPair(f.grpcTLSCert, f.grpcTLSKey)
 	if err != nil {
 		return nil, fmt.Errorf("load gRPC server cert/key: %w", err)

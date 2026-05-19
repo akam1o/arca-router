@@ -202,6 +202,8 @@ systemd `RuntimeDirectory`/`StateDirectory`により自動作成される。
 `arca` を実行する運用ユーザーは `arca-router` グループに所属させる。
 リモート管理が必要な場合は `--grpc-listen` と `--grpc-tls-cert` /
 `--grpc-tls-key` で TCP/TLS の gRPC endpoint を明示的に有効化する。
+server TLS private key は `0600` に制限されていない場合、daemon startup
+時に拒否される。
 `--grpc-client-ca` を指定すると client certificate を必須にする mTLS
 境界になる。CLI 側は `-grpc-address`、`-grpc-ca`、`-grpc-server-name`、
 `-grpc-client-cert`、`-grpc-client-key` でこの endpoint に接続する。

@@ -31,7 +31,7 @@ If an upgrade fails after package replacement, reinstall the previous package ar
 ## Management Transport Security
 
 - Local `arca` access continues to use the restricted Unix socket by default.
-- `arca-routerd --grpc-listen=<host:port> --grpc-tls-cert=<cert> --grpc-tls-key=<key>` enables TCP/TLS gRPC access. Add `--grpc-client-ca=<ca>` to require and verify client certificates.
+- `arca-routerd --grpc-listen=<host:port> --grpc-tls-cert=<cert> --grpc-tls-key=<key>` enables TCP/TLS gRPC access. Add `--grpc-client-ca=<ca>` to require and verify client certificates. The server TLS private key must be restricted to `0600`.
 - `arca -grpc-address=<host:port>` uses TLS for remote gRPC access, with optional `-grpc-ca`, `-grpc-server-name`, `-grpc-client-cert`, and `-grpc-client-key`.
 - `arca-routerd --web-api-token-file=<path>` enables Web/NMS API automation tokens. The token file must be restricted to `0600`. The file format is one `name:role:token` entry per line, where `role` is `read-only`, `operator`, or `admin`. Token values must be at least 32 characters, must not contain whitespace, and should be generated from random bytes, for example `openssl rand -base64 32`. Requests may use `Authorization: Bearer <token>` or `X-API-Key: <token>`.
 
