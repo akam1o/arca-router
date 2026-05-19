@@ -966,6 +966,25 @@ func TestLoadWebAPITokensParsesTokenFile(t *testing.T) {
 	}
 }
 
+func TestLoadWebAPITokensRejectsDuplicateTokenValue(t *testing.T) {
+	tokenFile := filepath.Join(t.TempDir(), "tokens")
+	data := []byte("readonly:read-only:shared-token\nadmin:admin:shared-token\n")
+	if err := os.WriteFile(tokenFile, data, 0600); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+
+	_, err := loadWebAPITokens(tokenFile)
+	if err == nil {
+		t.Fatal("loadWebAPITokens() error = nil, want duplicate token value error")
+	}
+	if !strings.Contains(err.Error(), "duplicate web API token value") {
+		t.Fatalf("loadWebAPITokens() error = %v, want duplicate token value error", err)
+	}
+	if strings.Contains(err.Error(), "shared-token") {
+		t.Fatalf("loadWebAPITokens() error leaked token value: %v", err)
+	}
+}
+
 func TestLoadWebAPITokensRejectsInsecurePermissions(t *testing.T) {
 	tokenFile := filepath.Join(t.TempDir(), "tokens")
 	if err := os.WriteFile(tokenFile, []byte("robot:operator:secret-token\n"), 0600); err != nil {

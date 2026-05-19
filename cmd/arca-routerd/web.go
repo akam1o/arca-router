@@ -976,6 +976,7 @@ func loadWebAPITokens(path string) (map[string]webAPIToken, error) {
 		return nil, fmt.Errorf("read token file %s: %w", path, err)
 	}
 	tokens := make(map[string]webAPIToken)
+	tokenValues := make(map[string]string)
 	for lineNo, rawLine := range strings.Split(string(data), "\n") {
 		token, ok, err := parseWebAPITokenLine(rawLine, lineNo+1)
 		if err != nil {
@@ -987,7 +988,11 @@ func loadWebAPITokens(path string) (map[string]webAPIToken, error) {
 		if _, exists := tokens[token.Name]; exists {
 			return nil, fmt.Errorf("duplicate web API token name %q on line %d", token.Name, lineNo+1)
 		}
+		if existingName, exists := tokenValues[token.Token]; exists {
+			return nil, fmt.Errorf("duplicate web API token value on line %d: already used by token %q", lineNo+1, existingName)
+		}
 		tokens[token.Name] = token
+		tokenValues[token.Token] = token.Name
 	}
 	if len(tokens) == 0 {
 		return nil, fmt.Errorf("web API token file %s does not contain any tokens", path)
