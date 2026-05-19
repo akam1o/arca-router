@@ -216,7 +216,7 @@ curl -H 'Authorization: Bearer operator-token' \
 Start the daemon with an SNMP listen address:
 
 ```bash
-arca-routerd --snmp-listen=:1161 --snmp-community=public
+arca-routerd --snmp-listen=:1161 --snmp-community=<read-only-community>
 ```
 
 SNMP can also be enabled from running configuration:
@@ -225,7 +225,7 @@ SNMP can also be enabled from running configuration:
 set system services snmp enabled true
 set system services snmp listen-address 127.0.0.1
 set system services snmp port 1161
-set system services snmp community public
+set system services snmp community <read-only-community>
 ```
 
 For the standard port 161, the packaged systemd unit already grants `CAP_NET_BIND_SERVICE`:
@@ -302,6 +302,6 @@ arca-router custom OIDs currently use the provisional experimental base `1.3.6.1
 Example:
 
 ```bash
-snmpget -v 2c -c public 127.0.0.1:1161 1.3.6.1.3.9950.1.3.0
-snmpwalk -v 2c -c public 127.0.0.1:1161 1.3.6.1.3.9950.1
+snmpget -v 2c -c <read-only-community> 127.0.0.1:1161 1.3.6.1.3.9950.1.3.0
+snmpwalk -v 2c -c <read-only-community> 127.0.0.1:1161 1.3.6.1.3.9950.1
 ```

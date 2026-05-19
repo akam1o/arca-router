@@ -84,9 +84,9 @@ func TestEffectiveSNMPCommunityUsesConfig(t *testing.T) {
 	}
 }
 
-func TestEffectiveSNMPCommunityUsesDefault(t *testing.T) {
-	if got := effectiveSNMPCommunity("", nil); got != "public" {
-		t.Fatalf("effectiveSNMPCommunity() = %q, want public", got)
+func TestEffectiveSNMPCommunityRequiresExplicitCommunity(t *testing.T) {
+	if got := effectiveSNMPCommunity("", nil); got != "" {
+		t.Fatalf("effectiveSNMPCommunity() = %q, want empty community", got)
 	}
 }
 

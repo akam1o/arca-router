@@ -612,10 +612,10 @@ set system services web-ui port 8080
 set system services snmp enabled true
 set system services snmp listen-address 127.0.0.1
 set system services snmp port 1161
-set system services snmp community public
+set system services snmp community <read-only-community>
 ```
 
-`listen-address` は IP address または `localhost` を指定します。port を明示せずに有効化した場合、daemon は標準 UDP port `161` を使用します。community を明示しない場合は `public` を使用します。
+`listen-address` は IP address または `localhost` を指定します。port を明示せずに有効化した場合、daemon は標準 UDP port `161` を使用します。SNMPv2c を有効化する場合は community の明示が必要です。
 
 ### Multi-chassis and VRRP
 
@@ -1073,7 +1073,7 @@ set security rate-limit per-user 20
 --metrics-listen <addr>    Prometheus listen address。system services prometheus config より優先
 --web-listen <addr>        Web UI listen address。system services web-ui config より優先
 --snmp-listen <addr>       SNMPv2c UDP listen address。空の場合は無効
---snmp-community <value>   SNMPv2c read-only community。system services snmp config より優先（デフォルト: public）
+--snmp-community <value>   SNMPv2c read-only community。system services snmp config より優先。SNMP 有効時は必須
 --mock-vpp                 test 用の mock VPP client を使用
 ```
 
@@ -1179,7 +1179,7 @@ configuration write には `operator` または `admin` が必要です。dashbo
 read-only SNMPv2c endpoint は次のように起動します。
 
 ```bash
-arca-routerd --snmp-listen=:1161 --snmp-community=public
+arca-routerd --snmp-listen=:1161 --snmp-community=<read-only-community>
 ```
 
 running configuration からも有効化できます。
@@ -1188,7 +1188,7 @@ running configuration からも有効化できます。
 set system services snmp enabled true
 set system services snmp listen-address 127.0.0.1
 set system services snmp port 1161
-set system services snmp community public
+set system services snmp community <read-only-community>
 ```
 
 パッケージ版の systemd unit は `CAP_NET_BIND_SERVICE` を付与しているため、設定すれば標準 UDP port 161 も利用できます。
@@ -1365,7 +1365,7 @@ curl http://127.0.0.1:8080/api/status
 curl http://127.0.0.1:8080/api/config
 
 # --snmp-listen または system services snmp 有効時の SNMP
-snmpget -v 2c -c public 127.0.0.1:1161 1.3.6.1.3.9950.1.3.0
+snmpget -v 2c -c <read-only-community> 127.0.0.1:1161 1.3.6.1.3.9950.1.3.0
 ```
 
 ### インターフェースマッピング確認

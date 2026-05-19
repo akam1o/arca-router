@@ -520,10 +520,10 @@ set system services web-ui port 8080
 set system services snmp enabled true
 set system services snmp listen-address 127.0.0.1
 set system services snmp port 1161
-set system services snmp community public
+set system services snmp community <read-only-community>
 ```
 
-`listen-address` must be an IP address or `localhost`. When enabled without an explicit port, the daemon uses the standard UDP port `161`. When enabled without a community, the daemon uses `public`.
+`listen-address` must be an IP address or `localhost`. When enabled without an explicit port, the daemon uses the standard UDP port `161`. SNMPv2c requires an explicit community when enabled.
 
 ### Multi-chassis and VRRP
 
@@ -994,7 +994,7 @@ Common options:
 --metrics-listen <addr>    Prometheus listen address; overrides system services prometheus config
 --web-listen <addr>        Web UI listen address; overrides system services web-ui config
 --snmp-listen <addr>       SNMPv2c UDP listen address; disabled when empty
---snmp-community <value>   SNMPv2c read-only community; overrides system services snmp config (default: public)
+--snmp-community <value>   SNMPv2c read-only community; overrides system services snmp config; required when SNMP is enabled
 --mock-vpp                 Use mock VPP client for tests
 ```
 
@@ -1100,7 +1100,7 @@ Configuration writes require `operator` or `admin`. The dashboard editor calls `
 Start the read-only SNMPv2c endpoint with:
 
 ```bash
-arca-routerd --snmp-listen=:1161 --snmp-community=public
+arca-routerd --snmp-listen=:1161 --snmp-community=<read-only-community>
 ```
 
 It can also be enabled from running configuration:
@@ -1109,7 +1109,7 @@ It can also be enabled from running configuration:
 set system services snmp enabled true
 set system services snmp listen-address 127.0.0.1
 set system services snmp port 1161
-set system services snmp community public
+set system services snmp community <read-only-community>
 ```
 
 The packaged systemd unit grants `CAP_NET_BIND_SERVICE`, so the standard UDP port 161 can be used when configured:
@@ -1289,7 +1289,7 @@ curl http://127.0.0.1:8080/api/status
 curl http://127.0.0.1:8080/api/config
 
 # SNMP, when --snmp-listen or system services snmp is enabled
-snmpget -v 2c -c public 127.0.0.1:1161 1.3.6.1.3.9950.1.3.0
+snmpget -v 2c -c <read-only-community> 127.0.0.1:1161 1.3.6.1.3.9950.1.3.0
 ```
 
 ### Verify Interface Mapping

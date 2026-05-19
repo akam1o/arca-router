@@ -188,7 +188,7 @@ func parseFlags() *daemonFlags {
 	flag.StringVar(&f.snmpListen, "snmp-listen", "",
 		"SNMPv2c UDP listen address (disabled when empty)")
 	flag.StringVar(&f.snmpCommunity, "snmp-community", "",
-		"SNMPv2c read-only community (overrides system services snmp config; default: public)")
+		"SNMPv2c read-only community (overrides system services snmp config; required when SNMP is enabled)")
 	flag.StringVar(&f.frrApplyMode, "frr-apply-mode", string(pkgfrr.BackendModeTransactional),
 		"FRR apply backend: transactional or file")
 

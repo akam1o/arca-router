@@ -74,8 +74,7 @@ const (
 	snmpOIDCoSCapabilityErr  = arcaSNMPBaseOID + ".48.0"
 	snmpOIDCoSCapabilityLast = arcaSNMPBaseOID + ".49.0"
 
-	defaultSNMPPort      = 161
-	defaultSNMPCommunity = "public"
+	defaultSNMPPort = 161
 )
 
 func effectiveSNMPListen(flagValue string, snapshot *model.ConfigSnapshot) string {
@@ -104,7 +103,7 @@ func effectiveSNMPCommunity(flagValue string, snapshot *model.ConfigSnapshot) st
 	if snmp := snapshotSNMPConfig(snapshot); snmp != nil && strings.TrimSpace(snmp.Community) != "" {
 		return strings.TrimSpace(snmp.Community)
 	}
-	return defaultSNMPCommunity
+	return ""
 }
 
 func snapshotSNMPConfig(snapshot *model.ConfigSnapshot) *model.SNMPConfig {

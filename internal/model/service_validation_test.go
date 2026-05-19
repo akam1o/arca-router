@@ -25,12 +25,29 @@ func TestSNMPValidationRejectsInvalidListenAddress(t *testing.T) {
 			SNMP: &SNMPConfig{
 				Enabled:       true,
 				ListenAddress: "not an address",
+				Community:     "monitoring",
 			},
 		},
 	}
 
 	if err := cfg.Validate(); err == nil {
 		t.Fatal("Validate() error = nil, want invalid snmp listen-address error")
+	}
+}
+
+func TestSNMPValidationRejectsEnabledWithoutCommunity(t *testing.T) {
+	cfg := NewRouterConfig()
+	cfg.System = &SystemConfig{
+		Services: &SystemServicesConfig{
+			SNMP: &SNMPConfig{
+				Enabled:       true,
+				ListenAddress: "127.0.0.1",
+			},
+		},
+	}
+
+	if err := cfg.Validate(); err == nil {
+		t.Fatal("Validate() error = nil, want missing snmp community error")
 	}
 }
 

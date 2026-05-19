@@ -279,6 +279,14 @@ func validatePrometheus(prometheus *PrometheusConfig) error {
 }
 
 func validateSNMP(snmp *SNMPConfig) error {
+	if snmp.Enabled && strings.TrimSpace(snmp.Community) == "" {
+		return errors.New(
+			errors.ErrCodeConfigValidation,
+			"SNMP community is required when SNMP is enabled",
+			"SNMPv2c community strings are shared secrets and must be configured explicitly",
+			"Set system services snmp community to a non-empty value",
+		)
+	}
 	if snmp.Port < 0 || snmp.Port > 65535 {
 		return errors.New(
 			errors.ErrCodeConfigValidation,
