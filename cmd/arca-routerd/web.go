@@ -26,6 +26,7 @@ import (
 	pkgconfig "github.com/akam1o/arca-router/pkg/config"
 	"github.com/akam1o/arca-router/pkg/logger"
 	pkgnetconf "github.com/akam1o/arca-router/pkg/netconf"
+	"github.com/akam1o/arca-router/pkg/security"
 )
 
 const defaultWebUIPort = 8080
@@ -1022,6 +1023,9 @@ func parseWebAPITokenLine(rawLine string, lineNo int) (webAPIToken, bool, error)
 	}
 	if token.Token == "" {
 		return webAPIToken{}, false, fmt.Errorf("invalid web API token file line %d: token value is required", lineNo)
+	}
+	if err := security.ValidateWebAPIToken(token.Token); err != nil {
+		return webAPIToken{}, false, fmt.Errorf("invalid web API token file line %d: %w", lineNo, err)
 	}
 	return token, true, nil
 }

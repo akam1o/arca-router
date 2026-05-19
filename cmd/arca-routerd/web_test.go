@@ -950,9 +950,11 @@ func TestWebEndpointAcceptsReadOnlyBasicAuth(t *testing.T) {
 	}
 }
 
+const validWebAPITestToken = "0123456789abcdef0123456789ABCDEF"
+
 func TestLoadWebAPITokensParsesTokenFile(t *testing.T) {
 	tokenFile := filepath.Join(t.TempDir(), "tokens")
-	if err := os.WriteFile(tokenFile, []byte("# comment\nrobot:operator:secret-token\n"), 0600); err != nil {
+	if err := os.WriteFile(tokenFile, []byte("# comment\nrobot:operator:"+validWebAPITestToken+"\n"), 0600); err != nil {
 		t.Fatalf("WriteFile() error = %v", err)
 	}
 
@@ -961,14 +963,14 @@ func TestLoadWebAPITokensParsesTokenFile(t *testing.T) {
 		t.Fatalf("loadWebAPITokens() error = %v", err)
 	}
 	token := tokens["robot"]
-	if token.Name != "robot" || token.Role != "operator" || token.Token != "secret-token" {
+	if token.Name != "robot" || token.Role != "operator" || token.Token != validWebAPITestToken {
 		t.Fatalf("token = %#v, want parsed robot operator token", token)
 	}
 }
 
 func TestLoadWebAPITokensRejectsDuplicateTokenValue(t *testing.T) {
 	tokenFile := filepath.Join(t.TempDir(), "tokens")
-	data := []byte("readonly:read-only:shared-token\nadmin:admin:shared-token\n")
+	data := []byte("readonly:read-only:" + validWebAPITestToken + "\nadmin:admin:" + validWebAPITestToken + "\n")
 	if err := os.WriteFile(tokenFile, data, 0600); err != nil {
 		t.Fatalf("WriteFile() error = %v", err)
 	}
@@ -980,14 +982,32 @@ func TestLoadWebAPITokensRejectsDuplicateTokenValue(t *testing.T) {
 	if !strings.Contains(err.Error(), "duplicate web API token value") {
 		t.Fatalf("loadWebAPITokens() error = %v, want duplicate token value error", err)
 	}
-	if strings.Contains(err.Error(), "shared-token") {
+	if strings.Contains(err.Error(), validWebAPITestToken) {
+		t.Fatalf("loadWebAPITokens() error leaked token value: %v", err)
+	}
+}
+
+func TestLoadWebAPITokensRejectsWeakTokenValue(t *testing.T) {
+	tokenFile := filepath.Join(t.TempDir(), "tokens")
+	if err := os.WriteFile(tokenFile, []byte("robot:operator:secret-token\n"), 0600); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+
+	_, err := loadWebAPITokens(tokenFile)
+	if err == nil {
+		t.Fatal("loadWebAPITokens() error = nil, want weak token value error")
+	}
+	if !strings.Contains(err.Error(), "web API token") {
+		t.Fatalf("loadWebAPITokens() error = %v, want token validation error", err)
+	}
+	if strings.Contains(err.Error(), "secret-token") {
 		t.Fatalf("loadWebAPITokens() error leaked token value: %v", err)
 	}
 }
 
 func TestLoadWebAPITokensRejectsInsecurePermissions(t *testing.T) {
 	tokenFile := filepath.Join(t.TempDir(), "tokens")
-	if err := os.WriteFile(tokenFile, []byte("robot:operator:secret-token\n"), 0600); err != nil {
+	if err := os.WriteFile(tokenFile, []byte("robot:operator:"+validWebAPITestToken+"\n"), 0600); err != nil {
 		t.Fatalf("WriteFile() error = %v", err)
 	}
 	if err := os.Chmod(tokenFile, 0644); err != nil {

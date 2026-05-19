@@ -220,7 +220,7 @@ Standard NETCONF `:xpath` capability advertisement is enabled by default. Use
 against clients that cannot handle advertised XPath filters. The NETCONF
 `startup` datastore is intentionally unsupported and is not advertised.
 
-For automation against the Web/NMS API, provide a `0600` token file with one `name:role:token` entry per line and start the daemon with `--web-api-token-file=/etc/arca-router/web-api-tokens`. Tokens can use `Authorization: Bearer <token>` or `X-API-Key: <token>` and reuse the `read-only`, `operator`, and `admin` RBAC roles.
+For automation against the Web/NMS API, provide a `0600` token file with one `name:role:token` entry per line and start the daemon with `--web-api-token-file=/etc/arca-router/web-api-tokens`. Token values must be at least 32 characters, must not contain whitespace, and should be generated from random bytes, for example `openssl rand -base64 32`. Tokens can use `Authorization: Bearer <token>` or `X-API-Key: <token>` and reuse the `read-only`, `operator`, and `admin` RBAC roles.
 
 **Test NETCONF connection**:
 

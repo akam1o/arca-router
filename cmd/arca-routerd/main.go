@@ -184,7 +184,7 @@ func parseFlags() *daemonFlags {
 	flag.StringVar(&f.webListen, "web-listen", "",
 		"Web UI listen address (overrides system services web-ui config; disabled when empty and config disabled)")
 	flag.StringVar(&f.webAPITokenFile, "web-api-token-file", "",
-		"Path to web API token file (lines: name:role:token)")
+		"Path to web API token file (lines: name:role:token; token min 32 chars)")
 	flag.StringVar(&f.snmpListen, "snmp-listen", "",
 		"SNMPv2c UDP listen address (disabled when empty)")
 	flag.StringVar(&f.snmpCommunity, "snmp-community", "",
