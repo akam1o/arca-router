@@ -205,8 +205,11 @@ systemd `RuntimeDirectory`/`StateDirectory`により自動作成される。
 server TLS private key は `0600` に制限されていない場合、daemon startup
 時に拒否される。
 `--grpc-client-ca` を指定すると client certificate を必須にする mTLS
-境界になる。CLI 側は `-grpc-address`、`-grpc-ca`、`-grpc-server-name`、
-`-grpc-client-cert`、`-grpc-client-key` でこの endpoint に接続する。
+境界になる。`--grpc-client-identity` を指定した場合、検証済み client
+certificate の URI、CN、DNS SAN、email SAN のいずれかが exact match
+しない接続は TLS handshake 後の接続検証で拒否される。CLI 側は
+`-grpc-address`、`-grpc-ca`、`-grpc-server-name`、`-grpc-client-cert`、
+`-grpc-client-key` でこの endpoint に接続する。
 
 ---
 

@@ -83,6 +83,7 @@ type daemonFlags struct {
 	grpcTLSCert     string
 	grpcTLSKey      string
 	grpcClientCA    string
+	grpcClientID    string
 	metricsListen   string
 	webListen       string
 	webAPITokenFile string
@@ -180,6 +181,8 @@ func parseFlags() *daemonFlags {
 		"gRPC server TLS private key path for --grpc-listen")
 	flag.StringVar(&f.grpcClientCA, "grpc-client-ca", "",
 		"CA certificate path for verifying gRPC client certificates (enables mTLS)")
+	flag.StringVar(&f.grpcClientID, "grpc-client-identity", "",
+		"Comma-separated allowed gRPC client certificate identities (URI, CN, DNS, or email)")
 	flag.StringVar(&f.metricsListen, "metrics-listen", "",
 		"Prometheus metrics listen address (overrides system services prometheus config; disabled when empty and config disabled)")
 	flag.StringVar(&f.webListen, "web-listen", "",
@@ -608,7 +611,7 @@ func listenGRPCAPI(f *daemonFlags) (net.Listener, []googlegrpc.ServerOption, str
 
 func buildGRPCServerOptions(f *daemonFlags) ([]googlegrpc.ServerOption, error) {
 	if strings.TrimSpace(f.grpcListen) == "" {
-		if f.grpcTLSCert != "" || f.grpcTLSKey != "" || f.grpcClientCA != "" {
+		if f.grpcTLSCert != "" || f.grpcTLSKey != "" || f.grpcClientCA != "" || f.grpcClientID != "" {
 			return nil, fmt.Errorf("gRPC TLS flags require --grpc-listen")
 		}
 		return nil, nil
@@ -627,6 +630,10 @@ func buildGRPCServerOptions(f *daemonFlags) ([]googlegrpc.ServerOption, error) {
 }
 
 func buildGRPCServerTLSConfig(f *daemonFlags) (*tls.Config, error) {
+	allowedClientIDs, err := parseGRPCClientIdentities(f.grpcClientID)
+	if err != nil {
+		return nil, err
+	}
 	if err := auth.ValidateKeyFilePermissions(f.grpcTLSKey, 0, 0); err != nil {
 		return nil, fmt.Errorf("validate gRPC TLS key permissions: %w", err)
 	}
@@ -650,7 +657,65 @@ func buildGRPCServerTLSConfig(f *daemonFlags) (*tls.Config, error) {
 	}
 	cfg.ClientCAs = clientCAs
 	cfg.ClientAuth = tls.RequireAndVerifyClientCert
+	if len(allowedClientIDs) > 0 {
+		cfg.VerifyConnection = newGRPCClientIdentityVerifier(allowedClientIDs)
+	}
 	return security.ApplyTLSPolicy(cfg), nil
+}
+
+func parseGRPCClientIdentities(raw string) ([]string, error) {
+	if strings.TrimSpace(raw) == "" {
+		return nil, nil
+	}
+	parts := strings.Split(raw, ",")
+	identities := make([]string, 0, len(parts))
+	seen := make(map[string]struct{}, len(parts))
+	for _, part := range parts {
+		identity := strings.TrimSpace(part)
+		if identity == "" {
+			return nil, fmt.Errorf("invalid --grpc-client-identity: empty identity")
+		}
+		if _, ok := seen[identity]; ok {
+			continue
+		}
+		seen[identity] = struct{}{}
+		identities = append(identities, identity)
+	}
+	return identities, nil
+}
+
+func newGRPCClientIdentityVerifier(allowed []string) func(tls.ConnectionState) error {
+	allowedSet := make(map[string]struct{}, len(allowed))
+	for _, identity := range allowed {
+		allowedSet[identity] = struct{}{}
+	}
+	return func(state tls.ConnectionState) error {
+		for _, identity := range grpcClientCertificateIdentities(state) {
+			if _, ok := allowedSet[identity]; ok {
+				return nil
+			}
+		}
+		return fmt.Errorf("gRPC client certificate identity is not allowed")
+	}
+}
+
+func grpcClientCertificateIdentities(state tls.ConnectionState) []string {
+	if len(state.VerifiedChains) == 0 || len(state.VerifiedChains[0]) == 0 {
+		return nil
+	}
+	cert := state.VerifiedChains[0][0]
+	identities := make([]string, 0, len(cert.URIs)+len(cert.DNSNames)+len(cert.EmailAddresses)+1)
+	for _, uri := range cert.URIs {
+		if uri != nil && uri.String() != "" {
+			identities = append(identities, uri.String())
+		}
+	}
+	if cert.Subject.CommonName != "" {
+		identities = append(identities, cert.Subject.CommonName)
+	}
+	identities = append(identities, cert.DNSNames...)
+	identities = append(identities, cert.EmailAddresses...)
+	return identities
 }
 
 func prepareGRPCSocketPath(socketPath string) error {

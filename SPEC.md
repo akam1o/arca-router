@@ -987,6 +987,12 @@ Common options:
 --etcd-key <path>          etcd TLS client key
 --etcd-ca <path>           etcd TLS CA certificate
 --grpc-socket <path>       Internal gRPC Unix socket (default: /run/arca-router/routerd.sock)
+--grpc-listen <addr>       TCP/TLS gRPC listen address
+--grpc-tls-cert <path>     gRPC server TLS certificate
+--grpc-tls-key <path>      gRPC server TLS private key
+--grpc-client-ca <path>    CA certificate for verifying gRPC client certificates
+--grpc-client-identity <value>
+                           Comma-separated allowed gRPC client certificate identities
 --netconf-listen <addr>    NETCONF/SSH listen address; overrides security netconf ssh port (default: :830)
 --host-key <path>          NETCONF SSH host key path
 --user-db <path>           NETCONF user database path

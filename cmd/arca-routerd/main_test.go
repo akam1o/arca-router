@@ -6,11 +6,13 @@ import (
 	"crypto/rsa"
 	"crypto/tls"
 	"crypto/x509"
+	"crypto/x509/pkix"
 	"encoding/pem"
 	"errors"
 	"log/slog"
 	"math/big"
 	"net"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -265,6 +267,16 @@ func TestBuildGRPCServerOptionsUnixRejectsTLSFlags(t *testing.T) {
 	}
 }
 
+func TestBuildGRPCServerOptionsUnixRejectsClientIdentityFlag(t *testing.T) {
+	_, err := buildGRPCServerOptions(&daemonFlags{grpcClientID: "spiffe://arca-router/nms"})
+	if err == nil {
+		t.Fatal("buildGRPCServerOptions() error = nil, want client identity without listen error")
+	}
+	if !strings.Contains(err.Error(), "--grpc-listen") {
+		t.Fatalf("buildGRPCServerOptions() error = %v, want --grpc-listen", err)
+	}
+}
+
 func TestBuildGRPCServerOptionsTCPRequiresTLSKeyPair(t *testing.T) {
 	_, err := buildGRPCServerOptions(&daemonFlags{grpcListen: "127.0.0.1:0"})
 	if err == nil {
@@ -324,6 +336,55 @@ func TestBuildGRPCServerTLSConfigEnablesMTLS(t *testing.T) {
 	}
 	if cfg.ClientCAs == nil {
 		t.Fatal("ClientCAs = nil, want configured pool")
+	}
+}
+
+func TestBuildGRPCServerTLSConfigRestrictsClientIdentity(t *testing.T) {
+	certFile, keyFile, caFile := writeTestCertificateFiles(t)
+	cfg, err := buildGRPCServerTLSConfig(&daemonFlags{
+		grpcTLSCert:  certFile,
+		grpcTLSKey:   keyFile,
+		grpcClientCA: caFile,
+		grpcClientID: "spiffe://arca-router/nms,router-operator",
+	})
+	if err != nil {
+		t.Fatalf("buildGRPCServerTLSConfig() error = %v", err)
+	}
+	if cfg.VerifyConnection == nil {
+		t.Fatal("VerifyConnection = nil, want client identity verifier")
+	}
+
+	allowedURI := mustParseURL(t, "spiffe://arca-router/nms")
+	if err := cfg.VerifyConnection(tls.ConnectionState{VerifiedChains: [][]*x509.Certificate{{
+		{URIs: []*url.URL{allowedURI}},
+	}}}); err != nil {
+		t.Fatalf("VerifyConnection(allowed URI) error = %v", err)
+	}
+	if err := cfg.VerifyConnection(tls.ConnectionState{VerifiedChains: [][]*x509.Certificate{{
+		{Subject: pkix.Name{CommonName: "router-operator"}},
+	}}}); err != nil {
+		t.Fatalf("VerifyConnection(allowed CN) error = %v", err)
+	}
+	if err := cfg.VerifyConnection(tls.ConnectionState{VerifiedChains: [][]*x509.Certificate{{
+		{DNSNames: []string{"untrusted.example.net"}},
+	}}}); err == nil {
+		t.Fatal("VerifyConnection(untrusted DNS) error = nil, want authorization error")
+	}
+}
+
+func TestBuildGRPCServerTLSConfigRejectsEmptyClientIdentity(t *testing.T) {
+	certFile, keyFile, caFile := writeTestCertificateFiles(t)
+	_, err := buildGRPCServerTLSConfig(&daemonFlags{
+		grpcTLSCert:  certFile,
+		grpcTLSKey:   keyFile,
+		grpcClientCA: caFile,
+		grpcClientID: "spiffe://arca-router/nms,,router-operator",
+	})
+	if err == nil {
+		t.Fatal("buildGRPCServerTLSConfig() error = nil, want empty client identity error")
+	}
+	if !strings.Contains(err.Error(), "--grpc-client-identity") {
+		t.Fatalf("buildGRPCServerTLSConfig() error = %v, want client identity validation error", err)
 	}
 }
 
@@ -399,6 +460,16 @@ func writeTestCertificateFiles(t *testing.T) (certFile, keyFile, caFile string) 
 		t.Fatalf("WriteFile(ca) error = %v", err)
 	}
 	return certFile, keyFile, caFile
+}
+
+func mustParseURL(t *testing.T, raw string) *url.URL {
+	t.Helper()
+
+	parsed, err := url.Parse(raw)
+	if err != nil {
+		t.Fatalf("Parse(%q) error = %v", raw, err)
+	}
+	return parsed
 }
 
 func TestEffectiveNETCONFListenUsesConfigPort(t *testing.T) {
