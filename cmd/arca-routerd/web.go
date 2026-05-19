@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"crypto/sha256"
 	"crypto/subtle"
 	"encoding/json"
 	"errors"
@@ -1567,23 +1568,37 @@ func authenticateWebToken(r *http.Request, tokens map[string]webAPIToken) (strin
 	if !ok {
 		return "", "", false
 	}
+	var matchedName string
+	var matchedToken webAPIToken
+	matched := false
 	for name, token := range tokens {
 		if token.Token == "" {
 			continue
 		}
-		if subtle.ConstantTimeCompare([]byte(presented), []byte(token.Token)) == 1 {
-			role := strings.TrimSpace(token.Role)
-			if role == "" {
-				role = pkgnetconf.RoleReadOnly
-			}
-			username := strings.TrimSpace(token.Name)
-			if username == "" {
-				username = name
-			}
-			return username, role, true
+		if constantTimeWebTokenEqual(presented, token.Token) {
+			matchedName = name
+			matchedToken = token
+			matched = true
 		}
 	}
-	return "", "", false
+	if !matched {
+		return "", "", false
+	}
+	role := strings.TrimSpace(matchedToken.Role)
+	if role == "" {
+		role = pkgnetconf.RoleReadOnly
+	}
+	username := strings.TrimSpace(matchedToken.Name)
+	if username == "" {
+		username = matchedName
+	}
+	return username, role, true
+}
+
+func constantTimeWebTokenEqual(a, b string) bool {
+	aDigest := sha256.Sum256([]byte(a))
+	bDigest := sha256.Sum256([]byte(b))
+	return subtle.ConstantTimeCompare(aDigest[:], bDigest[:]) == 1
 }
 
 func webRequestToken(r *http.Request) (string, bool) {

@@ -1055,6 +1055,17 @@ func TestWebEndpointAcceptsAPIKeyHeader(t *testing.T) {
 	}
 }
 
+func TestConstantTimeWebTokenEqual(t *testing.T) {
+	if !constantTimeWebTokenEqual("secret-token", "secret-token") {
+		t.Fatal("constantTimeWebTokenEqual() = false, want true")
+	}
+	for _, candidate := range []string{"secret-token-extra", "secret", ""} {
+		if constantTimeWebTokenEqual("secret-token", candidate) {
+			t.Fatalf("constantTimeWebTokenEqual() matched %q, want false", candidate)
+		}
+	}
+}
+
 func TestWebEndpointRequiresAuthWhenOnlyTokensConfigured(t *testing.T) {
 	eng := engine.NewEngine(nil, slog.Default())
 	cfg := model.NewRouterConfig()
