@@ -523,7 +523,7 @@ set system services snmp port 1161
 set system services snmp community <read-only-community>
 ```
 
-`listen-address` must be an IP address or `localhost`. When enabled without an explicit port, the daemon uses the standard UDP port `161`. SNMPv2c requires an explicit community when enabled.
+`listen-address` must be an IP address or `localhost`. When enabled without an explicit port, the daemon uses the standard UDP port `161`. SNMPv2c requires an explicit community when enabled, and the well-known default communities `public` and `private` are rejected.
 
 ### Multi-chassis and VRRP
 
@@ -1112,7 +1112,7 @@ set system services snmp port 1161
 set system services snmp community <read-only-community>
 ```
 
-The packaged systemd unit grants `CAP_NET_BIND_SERVICE`, so the standard UDP port 161 can be used when configured:
+The packaged systemd unit grants `CAP_NET_BIND_SERVICE`, so the standard UDP port 161 can be used when configured. The well-known default communities `public` and `private` are rejected:
 
 ```bash
 arca-routerd --snmp-listen=:161 --snmp-community=<read-only-community>

@@ -51,6 +51,23 @@ func TestSNMPValidationRejectsEnabledWithoutCommunity(t *testing.T) {
 	}
 }
 
+func TestSNMPValidationRejectsWeakCommunity(t *testing.T) {
+	cfg := NewRouterConfig()
+	cfg.System = &SystemConfig{
+		Services: &SystemServicesConfig{
+			SNMP: &SNMPConfig{
+				Enabled:       true,
+				ListenAddress: "127.0.0.1",
+				Community:     "public",
+			},
+		},
+	}
+
+	if err := cfg.Validate(); err == nil {
+		t.Fatal("Validate() error = nil, want weak snmp community error")
+	}
+}
+
 func TestPrometheusValidationRejectsInvalidListenAddress(t *testing.T) {
 	cfg := NewRouterConfig()
 	cfg.System = &SystemConfig{

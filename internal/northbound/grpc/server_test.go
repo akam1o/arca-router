@@ -2387,7 +2387,7 @@ func TestApplyCandidateCommandReplacesV06ScalarAttributes(t *testing.T) {
 	candidate := strings.Join([]string{
 		"set system services web-ui port 8080",
 		"set system services prometheus port 9090",
-		"set system services snmp community public",
+		"set system services snmp community old-monitoring",
 		"set security netconf ssh port 830",
 		"set protocols vrrp group 10 priority 100",
 		"set routing-instances BLUE route-distinguisher 65000:100",
@@ -2413,7 +2413,7 @@ func TestApplyCandidateCommandReplacesV06ScalarAttributes(t *testing.T) {
 	for _, oldLine := range []string{
 		"set system services web-ui port 8080",
 		"set system services prometheus port 9090",
-		"set system services snmp community public",
+		"set system services snmp community old-monitoring",
 		"set security netconf ssh port 830",
 		"set protocols vrrp group 10 priority 100",
 		"set routing-instances BLUE route-distinguisher 65000:100",

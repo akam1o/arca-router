@@ -6,6 +6,8 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+
+	"github.com/akam1o/arca-router/pkg/security"
 )
 
 // junosIfacePattern matches the legacy config parser's supported Junos-style
@@ -69,8 +71,10 @@ func (c *RouterConfig) validateSystem() error {
 		}
 	}
 	if snmp := c.System.Services.SNMP; snmp != nil {
-		if snmp.Enabled && strings.TrimSpace(snmp.Community) == "" {
-			return fmt.Errorf("system services snmp: community is required when enabled")
+		if snmp.Enabled {
+			if err := security.ValidateSNMPCommunity(snmp.Community); err != nil {
+				return fmt.Errorf("system services snmp: %w", err)
+			}
 		}
 		if snmp.Port < 0 || snmp.Port > 65535 {
 			return fmt.Errorf("system services snmp: port must be 0-65535, got %d", snmp.Port)

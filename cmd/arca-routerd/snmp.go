@@ -15,6 +15,7 @@ import (
 	snmpserver "github.com/slayercat/GoSNMPServer"
 
 	"github.com/akam1o/arca-router/pkg/logger"
+	"github.com/akam1o/arca-router/pkg/security"
 )
 
 const (
@@ -115,8 +116,8 @@ func snapshotSNMPConfig(snapshot *model.ConfigSnapshot) *model.SNMPConfig {
 }
 
 func startSNMPServer(ctx context.Context, listenAddr, community string, source metricsSource, log *logger.Logger) (<-chan error, error) {
-	if community == "" {
-		return nil, fmt.Errorf("SNMP community must not be empty")
+	if err := security.ValidateSNMPCommunity(community); err != nil {
+		return nil, fmt.Errorf("validate SNMP community: %w", err)
 	}
 
 	server := newSNMPServer(source, community)

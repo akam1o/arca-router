@@ -14,7 +14,7 @@ func TestServiceConfigRoundTrip(t *testing.T) {
 		"set system services snmp enabled true",
 		"set system services snmp listen-address 127.0.0.1",
 		"set system services snmp port 1161",
-		"set system services snmp community public",
+		"set system services snmp community monitoring",
 		"set security netconf ssh port 1830",
 	)
 	if err := cfg.Validate(); err != nil {
@@ -45,5 +45,18 @@ func TestSNMPValidationRejectsEnabledWithoutCommunity(t *testing.T) {
 
 	if err := cfg.Validate(); err == nil {
 		t.Fatal("Validate() error = nil, want missing snmp community error")
+	}
+}
+
+func TestSNMPValidationRejectsWeakCommunity(t *testing.T) {
+	cfg := parseSetCommands(t,
+		"set system services snmp enabled true",
+		"set system services snmp listen-address 127.0.0.1",
+		"set system services snmp port 1161",
+		"set system services snmp community public",
+	)
+
+	if err := cfg.Validate(); err == nil {
+		t.Fatal("Validate() error = nil, want weak snmp community error")
 	}
 }

@@ -18,7 +18,7 @@ func TestAdvancedConfigConversionAndClone(t *testing.T) {
 		"set system services snmp enabled true",
 		"set system services snmp listen-address 127.0.0.1",
 		"set system services snmp port 1161",
-		"set system services snmp community public",
+		"set system services snmp community monitoring",
 		"set security netconf ssh port 1830",
 		"set chassis cluster node node0 address 192.0.2.10",
 		"set interfaces ge-0/0/0 unit 0 family inet address 192.0.2.1/24",
@@ -86,7 +86,7 @@ func TestAdvancedConfigConversionAndClone(t *testing.T) {
 	if got := roundTrip.System.Services.Prometheus.Port; got != 9090 {
 		t.Fatalf("prometheus port = %d", got)
 	}
-	if got := roundTrip.System.Services.SNMP.Community; got != "public" {
+	if got := roundTrip.System.Services.SNMP.Community; got != "monitoring" {
 		t.Fatalf("snmp community = %q", got)
 	}
 	if got := roundTrip.Security.NETCONF.SSH.Port; got != 1830 {

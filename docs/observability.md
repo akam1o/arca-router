@@ -234,7 +234,7 @@ For the standard port 161, the packaged systemd unit already grants `CAP_NET_BIN
 arca-routerd --snmp-listen=:161 --snmp-community=<read-only-community>
 ```
 
-SNMP support is read-only SNMPv2c and is intended for monitoring only. Do not expose it on untrusted networks.
+SNMP support is read-only SNMPv2c and is intended for monitoring only. The well-known default communities `public` and `private` are rejected. Do not expose SNMP on untrusted networks.
 
 Standard MIB-II OIDs:
 

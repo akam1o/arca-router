@@ -615,7 +615,7 @@ set system services snmp port 1161
 set system services snmp community <read-only-community>
 ```
 
-`listen-address` は IP address または `localhost` を指定します。port を明示せずに有効化した場合、daemon は標準 UDP port `161` を使用します。SNMPv2c を有効化する場合は community の明示が必要です。
+`listen-address` は IP address または `localhost` を指定します。port を明示せずに有効化した場合、daemon は標準 UDP port `161` を使用します。SNMPv2c を有効化する場合は community の明示が必要で、既知のデフォルト community である `public` と `private` は拒否されます。
 
 ### Multi-chassis and VRRP
 
@@ -1191,7 +1191,7 @@ set system services snmp port 1161
 set system services snmp community <read-only-community>
 ```
 
-パッケージ版の systemd unit は `CAP_NET_BIND_SERVICE` を付与しているため、設定すれば標準 UDP port 161 も利用できます。
+パッケージ版の systemd unit は `CAP_NET_BIND_SERVICE` を付与しているため、設定すれば標準 UDP port 161 も利用できます。既知のデフォルト community である `public` と `private` は拒否されます。
 
 ```bash
 arca-routerd --snmp-listen=:161 --snmp-community=<read-only-community>

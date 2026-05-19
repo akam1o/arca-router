@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/akam1o/arca-router/pkg/errors"
+	"github.com/akam1o/arca-router/pkg/security"
 )
 
 // Interface name patterns
@@ -279,13 +280,15 @@ func validatePrometheus(prometheus *PrometheusConfig) error {
 }
 
 func validateSNMP(snmp *SNMPConfig) error {
-	if snmp.Enabled && strings.TrimSpace(snmp.Community) == "" {
-		return errors.New(
-			errors.ErrCodeConfigValidation,
-			"SNMP community is required when SNMP is enabled",
-			"SNMPv2c community strings are shared secrets and must be configured explicitly",
-			"Set system services snmp community to a non-empty value",
-		)
+	if snmp.Enabled {
+		if err := security.ValidateSNMPCommunity(snmp.Community); err != nil {
+			return errors.New(
+				errors.ErrCodeConfigValidation,
+				"Invalid SNMP community",
+				err.Error(),
+				"Set system services snmp community to a non-default shared secret",
+			)
+		}
 	}
 	if snmp.Port < 0 || snmp.Port > 65535 {
 		return errors.New(

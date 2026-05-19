@@ -511,7 +511,7 @@ func TestV06AdvancedConfigXMLRoundTrip(t *testing.T) {
 			Services: &config.SystemServicesConfig{
 				WebUI:      &config.WebUIConfig{Enabled: true, ListenAddress: "127.0.0.1", Port: 8443},
 				Prometheus: &config.PrometheusConfig{Enabled: true, ListenAddress: "127.0.0.1", Port: 9090},
-				SNMP:       &config.SNMPConfig{Enabled: true, ListenAddress: "127.0.0.1", Port: 1161, Community: "public"},
+				SNMP:       &config.SNMPConfig{Enabled: true, ListenAddress: "127.0.0.1", Port: 1161, Community: "monitoring"},
 			},
 		},
 		Chassis: &config.ChassisConfig{
@@ -602,7 +602,7 @@ func TestV06AdvancedConfigXMLRoundTrip(t *testing.T) {
 	for _, want := range []string{
 		"set system services web-ui port 8443",
 		"set system services prometheus port 9090",
-		"set system services snmp community public",
+		"set system services snmp community monitoring",
 		"set security netconf ssh port 1830",
 		"set security rate-limit per-user 50",
 		"set chassis cluster node node0 priority 120",
