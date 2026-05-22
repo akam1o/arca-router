@@ -41,6 +41,7 @@ const webDummyPasswordHash = "$argon2id$v=19$m=65536,t=3,p=4$AAAAAAAAAAAAAAAAAAA
 const webConfigEditBodyLimit = 1 << 20
 const webAPITokenSHA256Prefix = "sha256:"
 const webAPITokenNotAfterPrefix = ":not-after="
+const webAPITokenUnavailableMessage = "web API token authentication unavailable"
 
 const nmsOperationalStatusSchemaVersion = "arca.nms.operational.v1"
 const nmsTelemetryCatalogSchemaVersion = "arca.nms.telemetry-catalog.v1"
@@ -1153,6 +1154,7 @@ func startWebServer(ctx context.Context, listenAddr string, source metricsSource
 	if err != nil {
 		return nil, fmt.Errorf("listen web endpoint: %w", err)
 	}
+	source.webLog = log.Logger
 
 	srv := newObservabilityHTTPServer(newWebMux(source))
 
@@ -1565,11 +1567,23 @@ func (s metricsSource) authorizeWebRead(w http.ResponseWriter, r *http.Request) 
 	return ok
 }
 
+func (s metricsSource) writeWebAPITokenUnavailable(w http.ResponseWriter, err error) {
+	s.webLogger().Warn("Web API token authentication unavailable", slog.Any("error", err))
+	http.Error(w, webAPITokenUnavailableMessage, http.StatusInternalServerError)
+}
+
+func (s metricsSource) webLogger() *slog.Logger {
+	if s.webLog != nil {
+		return s.webLog
+	}
+	return slog.Default()
+}
+
 func (s metricsSource) authorizeWebReadRole(w http.ResponseWriter, r *http.Request) (string, bool) {
 	users := s.webAuthUsers()
 	tokens, err := s.webAutomationTokens()
 	if err != nil {
-		http.Error(w, "load web API tokens: "+err.Error(), http.StatusInternalServerError)
+		s.writeWebAPITokenUnavailable(w, err)
 		return "", false
 	}
 	if len(users) == 0 && len(tokens) == 0 {
@@ -1590,7 +1604,7 @@ func (s metricsSource) authorizeWebAdmin(w http.ResponseWriter, r *http.Request)
 	users := s.webAuthUsers()
 	tokens, err := s.webAutomationTokens()
 	if err != nil {
-		http.Error(w, "load web API tokens: "+err.Error(), http.StatusInternalServerError)
+		s.writeWebAPITokenUnavailable(w, err)
 		return false
 	}
 	if len(users) == 0 && len(tokens) == 0 {
@@ -1612,7 +1626,7 @@ func (s metricsSource) authorizeWebWrite(w http.ResponseWriter, r *http.Request)
 	users := s.webAuthUsers()
 	tokens, err := s.webAutomationTokens()
 	if err != nil {
-		http.Error(w, "load web API tokens: "+err.Error(), http.StatusInternalServerError)
+		s.writeWebAPITokenUnavailable(w, err)
 		return "", false
 	}
 	if len(users) == 0 && len(tokens) == 0 {

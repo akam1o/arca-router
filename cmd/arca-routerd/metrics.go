@@ -41,6 +41,7 @@ type metricsSource struct {
 	webAPITokens     map[string]webAPIToken
 	webAPITokenFile  string
 	webAPITokenCache *webAPITokenCache
+	webLog           *slog.Logger
 	configSync       configSyncRuntimeSource
 	frr              frrVRRPSource
 	vpp              vppReconciliationSource

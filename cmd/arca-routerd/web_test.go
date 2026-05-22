@@ -985,6 +985,22 @@ func requestWebStatusWithBearer(source metricsSource, token string) *httptest.Re
 	return rec
 }
 
+func requireWebAPITokenUnavailable(t *testing.T, rec *httptest.ResponseRecorder, leakedValues ...string) {
+	t.Helper()
+	if rec.Code != http.StatusInternalServerError {
+		t.Fatalf("status = %d, want %d", rec.Code, http.StatusInternalServerError)
+	}
+	body := rec.Body.String()
+	if !strings.Contains(body, webAPITokenUnavailableMessage) {
+		t.Fatalf("response body = %q, want generic token unavailable message", body)
+	}
+	for _, leaked := range leakedValues {
+		if leaked != "" && strings.Contains(body, leaked) {
+			t.Fatalf("response body leaked %q: %q", leaked, body)
+		}
+	}
+}
+
 func TestLoadWebAPITokensParsesTokenFile(t *testing.T) {
 	tokenFile := filepath.Join(t.TempDir(), "tokens")
 	if err := os.WriteFile(tokenFile, []byte("# comment\nrobot:operator:"+validWebAPITestToken+"\n"), 0600); err != nil {
@@ -1086,9 +1102,7 @@ func TestWebEndpointFailsClosedWhenReloadedAPITokenFileIsInvalid(t *testing.T) {
 	req.Header.Set("Authorization", "Bearer "+validWebAPITestToken)
 	rec := httptest.NewRecorder()
 	source.handleWebStatus(rec, req)
-	if rec.Code != http.StatusInternalServerError {
-		t.Fatalf("status = %d, want %d", rec.Code, http.StatusInternalServerError)
-	}
+	requireWebAPITokenUnavailable(t, rec, tokenFile, "not-hex", "robot")
 }
 
 func TestWebEndpointReloadsCachedAPITokenFileWhenMetadataChanges(t *testing.T) {
@@ -1130,9 +1144,7 @@ func TestWebEndpointFailsClosedWhenCachedAPITokenReloadIsInvalid(t *testing.T) {
 	}
 
 	rec := requestWebStatusWithBearer(source, validWebAPITestToken)
-	if rec.Code != http.StatusInternalServerError {
-		t.Fatalf("status for invalid token file = %d, want %d", rec.Code, http.StatusInternalServerError)
-	}
+	requireWebAPITokenUnavailable(t, rec, tokenFile, "not-hex", "robot")
 
 	if err := os.WriteFile(tokenFile, []byte("# recovered\nrobot:read-only:"+hashedWebAPITestToken(rotatedWebAPITestToken)+"\n"), 0600); err != nil {
 		t.Fatalf("WriteFile(recovered) error = %v", err)
@@ -1156,9 +1168,7 @@ func TestWebEndpointFailsClosedWhenCachedAPITokenFilePermissionsChange(t *testin
 	}
 
 	rec := requestWebStatusWithBearer(source, validWebAPITestToken)
-	if rec.Code != http.StatusInternalServerError {
-		t.Fatalf("status after permission change = %d, want %d", rec.Code, http.StatusInternalServerError)
-	}
+	requireWebAPITokenUnavailable(t, rec, tokenFile, "permissions")
 }
 
 func TestLoadWebAPITokensParsesHashedTokenNotAfter(t *testing.T) {
@@ -1844,6 +1854,7 @@ func newWebAuthTestSource(t *testing.T, username, password, role string) metrics
 	return metricsSource{
 		startedAt: time.Now().Add(-2 * time.Minute),
 		engine:    eng,
+		webLog:    slog.New(slog.NewTextHandler(io.Discard, nil)),
 	}
 }
 
