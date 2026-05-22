@@ -46,6 +46,14 @@ func TestConfigEditStatusErrorClassifiesTypedErrors(t *testing.T) {
 		t.Fatalf("conflict status message = %q, want generic candidate message", got)
 	}
 
+	unavailableErr := configEditStatusError(fmt.Errorf("%w: commit history is unavailable", ErrCommitHistoryUnavailable))
+	if status.Code(unavailableErr) != codes.Unavailable {
+		t.Fatalf("unavailable status = %v, want %v", status.Code(unavailableErr), codes.Unavailable)
+	}
+	if got := status.Convert(unavailableErr).Message(); got != "commit history is unavailable" {
+		t.Fatalf("unavailable status message = %q, want commit history unavailable", got)
+	}
+
 	internalErr := configEditStatusError(errors.New("persist commit /var/lib/arca/config.db failed"))
 	if status.Code(internalErr) != codes.Internal {
 		t.Fatalf("internal status = %v, want %v", status.Code(internalErr), codes.Internal)
@@ -60,17 +68,18 @@ func listenUnix(path string) (net.Listener, error) {
 }
 
 type fakeStore struct {
-	commitID    string
-	prepareErr  error
-	prepareFn   func()
-	commitErr   error
-	saved       *model.ConfigSnapshot
-	aborted     bool
-	commits     map[string]*store.CommitRecord
-	listRecords []*store.CommitRecord
-	listCalls   int
-	listOpts    *store.ListOptions
-	auditOpts   *store.AuditOptions
+	commitID     string
+	prepareErr   error
+	prepareFn    func()
+	commitErr    error
+	getCommitErr error
+	saved        *model.ConfigSnapshot
+	aborted      bool
+	commits      map[string]*store.CommitRecord
+	listRecords  []*store.CommitRecord
+	listCalls    int
+	listOpts     *store.ListOptions
+	auditOpts    *store.AuditOptions
 }
 
 type fakeInterfaceStateCollector struct {
@@ -143,6 +152,9 @@ func (f *fakeStore) PrepareCommit(ctx context.Context, snap *model.ConfigSnapsho
 }
 
 func (f *fakeStore) GetCommit(ctx context.Context, commitID string) (*store.CommitRecord, error) {
+	if f.getCommitErr != nil {
+		return nil, f.getCommitErr
+	}
 	return f.commits[commitID], nil
 }
 
@@ -2260,7 +2272,7 @@ func TestRollbackRejectsNoopTarget(t *testing.T) {
 	}
 
 	_, _, err = srv.Rollback(ctx, sessionID, "commit-old", "alice", "")
-	if err == nil || !strings.Contains(err.Error(), "rollback target matches running configuration") {
+	if err == nil || !strings.Contains(err.Error(), "rollback target matches running configuration") || !errors.Is(err, ErrConfigInput) {
 		t.Fatalf("Rollback() error = %v, want no changes", err)
 	}
 	if st.saved != nil {
@@ -2314,6 +2326,38 @@ func TestRollbackAbortsWhenCandidateStalesAfterPrepare(t *testing.T) {
 	}
 	if got := eng.Running().System.HostName; got != "netconf-router" {
 		t.Fatalf("running hostname = %q, want netconf-router", got)
+	}
+}
+
+func TestRollbackAdapterRedactsInternalErrors(t *testing.T) {
+	eng := engine.NewEngine(nil, testLogger())
+	eng.InitializeRunning(&model.RouterConfig{
+		System:     &model.SystemConfig{HostName: "router2"},
+		Interfaces: map[string]*model.InterfaceConfig{},
+	}, 2)
+	srv := NewServer(eng, &fakeStore{getCommitErr: errors.New("sqlite /var/lib/arca/config.db failed")}, testLogger())
+	ctx := context.Background()
+	sessionID, err := srv.CreateSession(ctx, "alice")
+	if err != nil {
+		t.Fatalf("CreateSession() error = %v", err)
+	}
+	if err := srv.AcquireLock(ctx, sessionID, "alice"); err != nil {
+		t.Fatalf("AcquireLock() error = %v", err)
+	}
+
+	_, err = (&configServiceAdapter{server: srv}).Rollback(ctx, &apiv1.RollbackRequest{
+		SessionId: sessionID,
+		CommitId:  "commit-old",
+		User:      "alice",
+	})
+	if status.Code(err) != codes.Internal {
+		t.Fatalf("Rollback() status = %v, want %v", status.Code(err), codes.Internal)
+	}
+	if got := status.Convert(err).Message(); got != "internal server error" {
+		t.Fatalf("Rollback() status message = %q, want generic internal error", got)
+	}
+	if strings.Contains(err.Error(), "/var/lib/arca/config.db") {
+		t.Fatalf("Rollback() error leaked backend path: %v", err)
 	}
 }
 

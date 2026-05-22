@@ -78,7 +78,7 @@ func (a *configServiceAdapter) Discard(ctx context.Context, req *apiv1.DiscardRe
 func (a *configServiceAdapter) Rollback(ctx context.Context, req *apiv1.RollbackRequest) (*apiv1.RollbackResponse, error) {
 	commitID, version, err := a.server.Rollback(ctx, req.GetSessionId(), req.GetCommitId(), grpcRequestUser(ctx, req.GetUser()), req.GetMessage())
 	if err != nil {
-		return nil, err
+		return nil, configEditStatusError(err)
 	}
 	return &apiv1.RollbackResponse{NewCommitId: commitID, Version: version}, nil
 }
@@ -97,6 +97,8 @@ func configEditStatusError(err error) error {
 		return status.Error(codes.InvalidArgument, err.Error())
 	case errors.Is(err, ErrCandidateConflict):
 		return status.Error(codes.FailedPrecondition, "configuration candidate is unavailable")
+	case errors.Is(err, ErrCommitHistoryUnavailable):
+		return status.Error(codes.Unavailable, "commit history is unavailable")
 	case errors.Is(err, context.DeadlineExceeded):
 		return status.Error(codes.DeadlineExceeded, "configuration operation timed out")
 	case errors.Is(err, context.Canceled):

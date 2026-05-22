@@ -6,8 +6,9 @@ import (
 )
 
 var (
-	ErrConfigInput       = errors.New("configuration input error")
-	ErrCandidateConflict = errors.New("candidate conflict")
+	ErrConfigInput              = errors.New("configuration input error")
+	ErrCandidateConflict        = errors.New("candidate conflict")
+	ErrCommitHistoryUnavailable = errors.New("commit history unavailable")
 )
 
 type classifiedError struct {

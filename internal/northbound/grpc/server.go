@@ -375,10 +375,10 @@ func (s *Server) Discard(ctx context.Context, sessionID string) error {
 // Rollback reverts running configuration to a previous commit.
 func (s *Server) Rollback(ctx context.Context, sessionID, commitID, user, message string) (string, uint64, error) {
 	if s.store == nil {
-		return "", 0, fmt.Errorf("commit history is unavailable")
+		return "", 0, fmt.Errorf("%w: commit history is unavailable", ErrCommitHistoryUnavailable)
 	}
 	if commitID == "" {
-		return "", 0, fmt.Errorf("commit ID is required")
+		return "", 0, newConfigInputErrorf("commit ID is required")
 	}
 	session, err := s.sessions.Get(sessionID)
 	if err != nil {
@@ -388,7 +388,7 @@ func (s *Server) Rollback(ctx context.Context, sessionID, commitID, user, messag
 	session.mu.Lock()
 	defer session.mu.Unlock()
 	if !session.HasLock {
-		return "", 0, fmt.Errorf("session %s does not hold the candidate lock", sessionID)
+		return "", 0, newCandidateConflictErrorf("session %s does not hold the candidate lock", sessionID)
 	}
 	if err := s.ensureCandidateBaseCurrentLocked(session); err != nil {
 		return "", 0, err
@@ -403,14 +403,14 @@ func (s *Server) Rollback(ctx context.Context, sessionID, commitID, user, messag
 		return "", 0, fmt.Errorf("load rollback commit: %w", err)
 	}
 	if record == nil || record.Config == nil {
-		return "", 0, fmt.Errorf("commit %s has no configuration", commitID)
+		return "", 0, newConfigInputErrorf("commit %s has no configuration", commitID)
 	}
 	newCfg := record.Config
 	if err := s.engine.Validate(ctx, newCfg); err != nil {
 		return "", 0, err
 	}
 	if !s.hasCandidateChanges(newCfg) {
-		return "", 0, fmt.Errorf("rollback target matches running configuration")
+		return "", 0, newConfigInputErrorf("rollback target matches running configuration")
 	}
 
 	version := uint64(1)
@@ -439,7 +439,7 @@ func (s *Server) Rollback(ctx context.Context, sessionID, commitID, user, messag
 		if abortErr != nil {
 			return "", 0, fmt.Errorf("rollback target matches running configuration (abort failed: %v)", abortErr)
 		}
-		return "", 0, fmt.Errorf("rollback target matches running configuration")
+		return "", 0, newConfigInputErrorf("rollback target matches running configuration")
 	}
 
 	beforeSnap := s.engine.RunningSnapshot()
