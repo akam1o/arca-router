@@ -964,6 +964,27 @@ func hashedWebAPITestTokenNotAfter(token string, notAfter time.Time) string {
 	return hashedWebAPITestToken(token) + webAPITokenNotAfterPrefix + notAfter.UTC().Format(time.RFC3339)
 }
 
+func newCachedWebAPITokenTestSource(t *testing.T, tokenFile string) metricsSource {
+	t.Helper()
+	tokens, err := loadWebAPITokens(tokenFile)
+	if err != nil {
+		t.Fatalf("loadWebAPITokens() error = %v", err)
+	}
+	source := newWebAuthTestSource(t, "monitor", "secret", "read-only")
+	source.webAPITokens = tokens
+	source.webAPITokenFile = tokenFile
+	source.webAPITokenCache = newWebAPITokenCache(tokenFile, tokens)
+	return source
+}
+
+func requestWebStatusWithBearer(source metricsSource, token string) *httptest.ResponseRecorder {
+	req := httptest.NewRequest(http.MethodGet, "/api/status", nil)
+	req.Header.Set("Authorization", "Bearer "+token)
+	rec := httptest.NewRecorder()
+	source.handleWebStatus(rec, req)
+	return rec
+}
+
 func TestLoadWebAPITokensParsesTokenFile(t *testing.T) {
 	tokenFile := filepath.Join(t.TempDir(), "tokens")
 	if err := os.WriteFile(tokenFile, []byte("# comment\nrobot:operator:"+validWebAPITestToken+"\n"), 0600); err != nil {
@@ -1067,6 +1088,76 @@ func TestWebEndpointFailsClosedWhenReloadedAPITokenFileIsInvalid(t *testing.T) {
 	source.handleWebStatus(rec, req)
 	if rec.Code != http.StatusInternalServerError {
 		t.Fatalf("status = %d, want %d", rec.Code, http.StatusInternalServerError)
+	}
+}
+
+func TestWebEndpointReloadsCachedAPITokenFileWhenMetadataChanges(t *testing.T) {
+	tokenFile := filepath.Join(t.TempDir(), "tokens")
+	if err := os.WriteFile(tokenFile, []byte("robot:read-only:"+hashedWebAPITestToken(validWebAPITestToken)+"\n"), 0600); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+
+	source := newCachedWebAPITokenTestSource(t, tokenFile)
+	rec := requestWebStatusWithBearer(source, validWebAPITestToken)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status before rotation = %d, want %d: %s", rec.Code, http.StatusOK, rec.Body.String())
+	}
+
+	if err := os.WriteFile(tokenFile, []byte("# rotated\nrobot:read-only:"+hashedWebAPITestToken(rotatedWebAPITestToken)+"\n"), 0600); err != nil {
+		t.Fatalf("WriteFile(rotated) error = %v", err)
+	}
+
+	rec = requestWebStatusWithBearer(source, validWebAPITestToken)
+	if rec.Code != http.StatusUnauthorized {
+		t.Fatalf("status for old token = %d, want %d", rec.Code, http.StatusUnauthorized)
+	}
+
+	rec = requestWebStatusWithBearer(source, rotatedWebAPITestToken)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status after rotation = %d, want %d: %s", rec.Code, http.StatusOK, rec.Body.String())
+	}
+}
+
+func TestWebEndpointFailsClosedWhenCachedAPITokenReloadIsInvalid(t *testing.T) {
+	tokenFile := filepath.Join(t.TempDir(), "tokens")
+	if err := os.WriteFile(tokenFile, []byte("robot:read-only:"+hashedWebAPITestToken(validWebAPITestToken)+"\n"), 0600); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+
+	source := newCachedWebAPITokenTestSource(t, tokenFile)
+	if err := os.WriteFile(tokenFile, []byte("robot:read-only:sha256:not-hex\n# invalid\n"), 0600); err != nil {
+		t.Fatalf("WriteFile(invalid) error = %v", err)
+	}
+
+	rec := requestWebStatusWithBearer(source, validWebAPITestToken)
+	if rec.Code != http.StatusInternalServerError {
+		t.Fatalf("status for invalid token file = %d, want %d", rec.Code, http.StatusInternalServerError)
+	}
+
+	if err := os.WriteFile(tokenFile, []byte("# recovered\nrobot:read-only:"+hashedWebAPITestToken(rotatedWebAPITestToken)+"\n"), 0600); err != nil {
+		t.Fatalf("WriteFile(recovered) error = %v", err)
+	}
+
+	rec = requestWebStatusWithBearer(source, rotatedWebAPITestToken)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status after recovery = %d, want %d: %s", rec.Code, http.StatusOK, rec.Body.String())
+	}
+}
+
+func TestWebEndpointFailsClosedWhenCachedAPITokenFilePermissionsChange(t *testing.T) {
+	tokenFile := filepath.Join(t.TempDir(), "tokens")
+	if err := os.WriteFile(tokenFile, []byte("robot:read-only:"+hashedWebAPITestToken(validWebAPITestToken)+"\n"), 0600); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+
+	source := newCachedWebAPITokenTestSource(t, tokenFile)
+	if err := os.Chmod(tokenFile, 0644); err != nil {
+		t.Fatalf("Chmod() error = %v", err)
+	}
+
+	rec := requestWebStatusWithBearer(source, validWebAPITestToken)
+	if rec.Code != http.StatusInternalServerError {
+		t.Fatalf("status after permission change = %d, want %d", rec.Code, http.StatusInternalServerError)
 	}
 }
 

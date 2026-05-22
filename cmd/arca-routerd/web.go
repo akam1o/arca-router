@@ -18,6 +18,7 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/akam1o/arca-router/internal/compat"
@@ -420,6 +421,14 @@ type webAPIToken struct {
 	TokenSHA256 []byte
 	NotAfter    time.Time
 	Role        string
+}
+
+type webAPITokenCache struct {
+	mu       sync.Mutex
+	path     string
+	fileInfo os.FileInfo
+	tokens   map[string]webAPIToken
+	loadErr  error
 }
 
 type webIndexData struct {
@@ -968,6 +977,57 @@ func effectiveWebListen(flagValue string, snapshot *model.ConfigSnapshot) string
 		port = defaultWebUIPort
 	}
 	return net.JoinHostPort(addr, strconv.Itoa(port))
+}
+
+func newWebAPITokenCache(path string, tokens map[string]webAPIToken) *webAPITokenCache {
+	path = strings.TrimSpace(path)
+	if path == "" {
+		return nil
+	}
+	return &webAPITokenCache{
+		path:   path,
+		tokens: tokens,
+	}
+}
+
+func (c *webAPITokenCache) tokensForRequest() (map[string]webAPIToken, error) {
+	if c == nil {
+		return nil, nil
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	info, err := os.Stat(c.path)
+	if err != nil {
+		return nil, fmt.Errorf("stat token file %s: %w", c.path, err)
+	}
+	if sameWebAPITokenFile(c.fileInfo, info) {
+		if c.loadErr != nil {
+			return nil, c.loadErr
+		}
+		if c.tokens != nil {
+			return c.tokens, nil
+		}
+	}
+	tokens, err := loadWebAPITokens(c.path)
+	c.fileInfo = info
+	if err != nil {
+		c.loadErr = err
+		return nil, err
+	}
+	c.tokens = tokens
+	c.loadErr = nil
+	return tokens, nil
+}
+
+func sameWebAPITokenFile(previous, current os.FileInfo) bool {
+	if previous == nil || current == nil {
+		return false
+	}
+	return os.SameFile(previous, current) &&
+		previous.Size() == current.Size() &&
+		previous.Mode() == current.Mode() &&
+		previous.ModTime().Equal(current.ModTime())
 }
 
 func loadWebAPITokens(path string) (map[string]webAPIToken, error) {
@@ -1696,6 +1756,9 @@ func webRequestToken(r *http.Request) (string, bool) {
 }
 
 func (s metricsSource) webAutomationTokens() (map[string]webAPIToken, error) {
+	if s.webAPITokenCache != nil {
+		return s.webAPITokenCache.tokensForRequest()
+	}
 	if path := strings.TrimSpace(s.webAPITokenFile); path != "" {
 		tokens, err := loadWebAPITokens(path)
 		if err != nil {

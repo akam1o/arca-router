@@ -459,17 +459,18 @@ func run(ctx context.Context, f *daemonFlags, log *logger.Logger) error {
 	}
 
 	observabilitySource := metricsSource{
-		startedAt:       time.Now(),
-		engine:          eng,
-		netconfServer:   netconfServer,
-		datastore:       datastoreConfig,
-		configAPI:       grpcServer,
-		telemetryAPI:    grpcServer,
-		webAPITokens:    webAPITokens,
-		webAPITokenFile: strings.TrimSpace(f.webAPITokenFile),
-		configSync:      configSync,
-		frr:             frrPlugin,
-		vpp:             vppPlugin,
+		startedAt:        time.Now(),
+		engine:           eng,
+		netconfServer:    netconfServer,
+		datastore:        datastoreConfig,
+		configAPI:        grpcServer,
+		telemetryAPI:     grpcServer,
+		webAPITokens:     webAPITokens,
+		webAPITokenFile:  strings.TrimSpace(f.webAPITokenFile),
+		webAPITokenCache: newWebAPITokenCache(f.webAPITokenFile, webAPITokens),
+		configSync:       configSync,
+		frr:              frrPlugin,
+		vpp:              vppPlugin,
 	}
 	grpcServer.SetHAStatusSource(newGRPCHAStatusSource(observabilitySource))
 
