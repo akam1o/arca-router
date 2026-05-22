@@ -63,6 +63,36 @@ func TestConfigEditStatusErrorClassifiesTypedErrors(t *testing.T) {
 	}
 }
 
+func TestStateAdapterRedactsOperationalErrors(t *testing.T) {
+	oldVtysh := runOperationalVtyshCommand
+	runOperationalVtyshCommand = func(ctx context.Context, command string) (string, error) {
+		return "", errors.New("open /var/lib/frr/zebra.sock: permission denied")
+	}
+	t.Cleanup(func() { runOperationalVtyshCommand = oldVtysh })
+
+	srv := NewServer(engine.NewEngine(nil, testLogger()), &fakeStore{}, testLogger())
+	adapter := &stateServiceAdapter{server: srv}
+
+	_, err := adapter.GetRoutes(context.Background(), &apiv1.GetRoutesRequest{})
+	if status.Code(err) != codes.Internal {
+		t.Fatalf("GetRoutes() status = %v, want %v", status.Code(err), codes.Internal)
+	}
+	if got := status.Convert(err).Message(); got != "internal server error" {
+		t.Fatalf("GetRoutes() status message = %q, want generic internal error", got)
+	}
+	if strings.Contains(err.Error(), "/var/lib/frr/zebra.sock") {
+		t.Fatalf("GetRoutes() error leaked backend path: %v", err)
+	}
+
+	_, err = adapter.GetRoutes(context.Background(), &apiv1.GetRoutesRequest{PrefixFilter: "not-a-prefix"})
+	if status.Code(err) != codes.InvalidArgument {
+		t.Fatalf("GetRoutes(invalid prefix) status = %v, want %v", status.Code(err), codes.InvalidArgument)
+	}
+	if got := status.Convert(err).Message(); !strings.Contains(got, "invalid route prefix filter") {
+		t.Fatalf("GetRoutes(invalid prefix) message = %q, want input validation detail", got)
+	}
+}
+
 func listenUnix(path string) (net.Listener, error) {
 	return net.Listen("unix", path)
 }
@@ -571,6 +601,38 @@ func TestSubscribeTelemetryRouteScaleSnapshot(t *testing.T) {
 	}
 	if got.NextHop != "192.0.2.128" || got.Protocol != "bgp" || got.Metric != 127 || got.Interface != "ge0-0-127" || !got.Active {
 		t.Fatalf("route telemetry payload route = %#v, want generated BGP route attributes", got)
+	}
+}
+
+func TestSubscribeTelemetryRedactsPayloadErrors(t *testing.T) {
+	oldVtysh := runOperationalVtyshCommand
+	runOperationalVtyshCommand = func(ctx context.Context, command string) (string, error) {
+		return "", errors.New("open /var/lib/frr/zebra.sock: permission denied")
+	}
+	t.Cleanup(func() { runOperationalVtyshCommand = oldVtysh })
+
+	srv := NewServer(engine.NewEngine(nil, testLogger()), &fakeStore{}, testLogger())
+	var events []TelemetryEvent
+	err := srv.SubscribeTelemetry(context.Background(), []string{"/routes"}, 0, true, func(event TelemetryEvent) error {
+		events = append(events, event)
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("SubscribeTelemetry(/routes) error = %v", err)
+	}
+	if len(events) != 1 || events[0].EventType != telemetryEventTypeError {
+		t.Fatalf("events = %#v, want one redacted error event", events)
+	}
+
+	var payload telemetryErrorPayload
+	if err := json.Unmarshal([]byte(events[0].JSONPayload), &payload); err != nil {
+		t.Fatalf("telemetry error payload is invalid JSON: %v", err)
+	}
+	if payload.Error != telemetryPayloadErrorMessage {
+		t.Fatalf("telemetry error payload = %q, want redacted message", payload.Error)
+	}
+	if strings.Contains(events[0].JSONPayload, "/var/lib/frr/zebra.sock") {
+		t.Fatalf("telemetry error payload leaked backend path: %s", events[0].JSONPayload)
 	}
 }
 

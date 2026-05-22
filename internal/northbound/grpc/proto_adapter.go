@@ -209,7 +209,7 @@ type stateServiceAdapter struct {
 func (a *stateServiceAdapter) GetInterfaces(ctx context.Context, req *apiv1.GetInterfacesRequest) (*apiv1.GetInterfacesResponse, error) {
 	interfaces, err := a.server.GetInterfaces(ctx, req.GetNameFilter())
 	if err != nil {
-		return nil, err
+		return nil, stateStatusError(err)
 	}
 	resp := &apiv1.GetInterfacesResponse{Interfaces: make([]*apiv1.InterfaceState, 0, len(interfaces))}
 	for _, iface := range interfaces {
@@ -263,7 +263,7 @@ func txQueuesToProto(queues []InterfaceTxQueueInfo) []*apiv1.InterfaceTxQueue {
 func (a *stateServiceAdapter) GetRoutes(ctx context.Context, req *apiv1.GetRoutesRequest) (*apiv1.GetRoutesResponse, error) {
 	routes, err := a.server.GetRoutes(ctx, req.GetPrefixFilter(), req.GetProtocolFilter())
 	if err != nil {
-		return nil, err
+		return nil, stateStatusError(err)
 	}
 	resp := &apiv1.GetRoutesResponse{Routes: make([]*apiv1.RouteEntry, 0, len(routes))}
 	for _, route := range routes {
@@ -282,7 +282,7 @@ func (a *stateServiceAdapter) GetRoutes(ctx context.Context, req *apiv1.GetRoute
 func (a *stateServiceAdapter) GetBGPNeighbors(ctx context.Context, _ *apiv1.GetBGPNeighborsRequest) (*apiv1.GetBGPNeighborsResponse, error) {
 	neighbors, err := a.server.GetBGPNeighbors(ctx)
 	if err != nil {
-		return nil, err
+		return nil, stateStatusError(err)
 	}
 	resp := &apiv1.GetBGPNeighborsResponse{Neighbors: make([]*apiv1.BGPNeighborState, 0, len(neighbors))}
 	for _, neighbor := range neighbors {
@@ -301,7 +301,7 @@ func (a *stateServiceAdapter) GetBGPNeighbors(ctx context.Context, _ *apiv1.GetB
 func (a *stateServiceAdapter) GetOSPFNeighbors(ctx context.Context, req *apiv1.GetOSPFNeighborsRequest) (*apiv1.GetOSPFNeighborsResponse, error) {
 	neighbors, err := a.server.GetOSPFNeighbors(ctx, req.GetAddressFamily())
 	if err != nil {
-		return nil, err
+		return nil, stateStatusError(err)
 	}
 	resp := &apiv1.GetOSPFNeighborsResponse{Neighbors: make([]*apiv1.OSPFNeighborState, 0, len(neighbors))}
 	for _, neighbor := range neighbors {
@@ -322,7 +322,7 @@ func (a *stateServiceAdapter) GetOSPFNeighbors(ctx context.Context, req *apiv1.G
 func (a *stateServiceAdapter) GetRouteText(ctx context.Context, req *apiv1.GetRouteTextRequest) (*apiv1.GetRouteTextResponse, error) {
 	output, err := a.server.GetRouteText(ctx, req.GetProtocolFilter(), req.GetAddressFamily())
 	if err != nil {
-		return nil, err
+		return nil, stateStatusError(err)
 	}
 	return &apiv1.GetRouteTextResponse{Output: output}, nil
 }
@@ -330,7 +330,7 @@ func (a *stateServiceAdapter) GetRouteText(ctx context.Context, req *apiv1.GetRo
 func (a *stateServiceAdapter) GetBGPSummaryText(ctx context.Context, _ *apiv1.GetBGPSummaryTextRequest) (*apiv1.GetBGPSummaryTextResponse, error) {
 	output, err := a.server.GetBGPSummaryText(ctx)
 	if err != nil {
-		return nil, err
+		return nil, stateStatusError(err)
 	}
 	return &apiv1.GetBGPSummaryTextResponse{Output: output}, nil
 }
@@ -338,7 +338,7 @@ func (a *stateServiceAdapter) GetBGPSummaryText(ctx context.Context, _ *apiv1.Ge
 func (a *stateServiceAdapter) GetBGPNeighborText(ctx context.Context, req *apiv1.GetBGPNeighborTextRequest) (*apiv1.GetBGPNeighborTextResponse, error) {
 	output, err := a.server.GetBGPNeighborText(ctx, req.GetPeerAddress())
 	if err != nil {
-		return nil, err
+		return nil, stateStatusError(err)
 	}
 	return &apiv1.GetBGPNeighborTextResponse{Output: output}, nil
 }
@@ -346,7 +346,7 @@ func (a *stateServiceAdapter) GetBGPNeighborText(ctx context.Context, req *apiv1
 func (a *stateServiceAdapter) GetOSPFNeighborsText(ctx context.Context, req *apiv1.GetOSPFNeighborsTextRequest) (*apiv1.GetOSPFNeighborsTextResponse, error) {
 	output, err := a.server.GetOSPFNeighborsText(ctx, req.GetAddressFamily())
 	if err != nil {
-		return nil, err
+		return nil, stateStatusError(err)
 	}
 	return &apiv1.GetOSPFNeighborsTextResponse{Output: output}, nil
 }
@@ -354,7 +354,7 @@ func (a *stateServiceAdapter) GetOSPFNeighborsText(ctx context.Context, req *api
 func (a *stateServiceAdapter) GetVRRPText(ctx context.Context, _ *apiv1.GetVRRPTextRequest) (*apiv1.GetVRRPTextResponse, error) {
 	output, err := a.server.GetVRRPText(ctx)
 	if err != nil {
-		return nil, err
+		return nil, stateStatusError(err)
 	}
 	return &apiv1.GetVRRPTextResponse{Output: output}, nil
 }
@@ -362,7 +362,7 @@ func (a *stateServiceAdapter) GetVRRPText(ctx context.Context, _ *apiv1.GetVRRPT
 func (a *stateServiceAdapter) GetBFDText(ctx context.Context, req *apiv1.GetBFDTextRequest) (*apiv1.GetBFDTextResponse, error) {
 	output, err := a.server.GetBFDText(ctx, req.GetPeerAddress(), req.GetBrief(), req.GetCounters())
 	if err != nil {
-		return nil, err
+		return nil, stateStatusError(err)
 	}
 	return &apiv1.GetBFDTextResponse{Output: output}, nil
 }
@@ -370,7 +370,7 @@ func (a *stateServiceAdapter) GetBFDText(ctx context.Context, req *apiv1.GetBFDT
 func (a *stateServiceAdapter) GetBFDStatus(ctx context.Context, _ *apiv1.GetBFDStatusRequest) (*apiv1.GetBFDStatusResponse, error) {
 	info, err := a.server.GetBFDStatus(ctx)
 	if err != nil {
-		return nil, err
+		return nil, stateStatusError(err)
 	}
 	resp := &apiv1.GetBFDStatusResponse{
 		ConfiguredPeers:   uint32(info.ConfiguredPeers),
@@ -406,7 +406,7 @@ func (a *stateServiceAdapter) GetBFDStatus(ctx context.Context, _ *apiv1.GetBFDS
 func (a *stateServiceAdapter) GetLCPReconciliation(ctx context.Context, _ *apiv1.GetLCPReconciliationRequest) (*apiv1.GetLCPReconciliationResponse, error) {
 	info, err := a.server.GetLCPReconciliation(ctx)
 	if err != nil {
-		return nil, err
+		return nil, stateStatusError(err)
 	}
 	resp := &apiv1.GetLCPReconciliationResponse{
 		PairCount:       uint32(info.PairCount),
@@ -422,7 +422,7 @@ func (a *stateServiceAdapter) GetLCPReconciliation(ctx context.Context, _ *apiv1
 func (a *stateServiceAdapter) GetHAStatus(ctx context.Context, _ *apiv1.GetHAStatusRequest) (*apiv1.GetHAStatusResponse, error) {
 	info, err := a.server.GetHAStatus(ctx)
 	if err != nil {
-		return nil, err
+		return nil, stateStatusError(err)
 	}
 	resp := &apiv1.GetHAStatusResponse{
 		Configured:              info.Configured,
@@ -463,7 +463,7 @@ func (a *stateServiceAdapter) GetHAStatus(ctx context.Context, _ *apiv1.GetHASta
 func (a *stateServiceAdapter) GetRoutingInstances(ctx context.Context, _ *apiv1.GetRoutingInstancesRequest) (*apiv1.GetRoutingInstancesResponse, error) {
 	instances, err := a.server.GetRoutingInstances(ctx)
 	if err != nil {
-		return nil, err
+		return nil, stateStatusError(err)
 	}
 	resp := &apiv1.GetRoutingInstancesResponse{Instances: make([]*apiv1.RoutingInstanceState, 0, len(instances))}
 	for _, instance := range instances {
@@ -486,7 +486,7 @@ func (a *stateServiceAdapter) GetRoutingInstances(ctx context.Context, _ *apiv1.
 func (a *stateServiceAdapter) GetClassOfService(ctx context.Context, _ *apiv1.GetClassOfServiceRequest) (*apiv1.GetClassOfServiceResponse, error) {
 	info, err := a.server.GetClassOfService(ctx)
 	if err != nil {
-		return nil, err
+		return nil, stateStatusError(err)
 	}
 	resp := &apiv1.GetClassOfServiceResponse{
 		EnforcementStatus: info.EnforcementStatus,
@@ -535,13 +535,39 @@ func (a *stateServiceAdapter) GetClassOfService(ctx context.Context, _ *apiv1.Ge
 func (a *stateServiceAdapter) GetSystemInfo(ctx context.Context, _ *apiv1.GetSystemInfoRequest) (*apiv1.GetSystemInfoResponse, error) {
 	info, err := a.server.GetSystemInfo(ctx)
 	if err != nil {
-		return nil, err
+		return nil, stateStatusError(err)
 	}
 	return &apiv1.GetSystemInfoResponse{
 		Hostname:   info.Hostname,
 		Version:    info.Version,
 		UptimeSecs: info.UptimeSecs,
 	}, nil
+}
+
+func stateStatusError(err error) error {
+	switch {
+	case isStateInputError(err):
+		return status.Error(codes.InvalidArgument, err.Error())
+	case errors.Is(err, context.DeadlineExceeded):
+		return status.Error(codes.DeadlineExceeded, "state operation timed out")
+	case errors.Is(err, context.Canceled):
+		return status.Error(codes.Canceled, "state operation canceled")
+	default:
+		return status.Error(codes.Internal, "internal server error")
+	}
+}
+
+func isStateInputError(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := err.Error()
+	return strings.HasPrefix(msg, "invalid route prefix filter") ||
+		strings.HasPrefix(msg, "invalid route protocol") ||
+		strings.HasPrefix(msg, "invalid address family") ||
+		strings.HasPrefix(msg, "invalid BGP neighbor address") ||
+		strings.HasPrefix(msg, "invalid BFD peer address") ||
+		strings.Contains(msg, "does not support brief")
 }
 
 type telemetryServiceAdapter struct {
