@@ -84,6 +84,7 @@ type daemonFlags struct {
 	grpcTLSKey      string
 	grpcClientCA    string
 	grpcClientID    string
+	grpcClientRole  string
 	metricsListen   string
 	webListen       string
 	webAPITokenFile string
@@ -183,6 +184,8 @@ func parseFlags() *daemonFlags {
 		"CA certificate path for verifying gRPC client certificates (enables mTLS)")
 	flag.StringVar(&f.grpcClientID, "grpc-client-identity", "",
 		"Comma-separated allowed gRPC client certificate identities (URI, CN, DNS, or email)")
+	flag.StringVar(&f.grpcClientRole, "grpc-client-role", "",
+		"Comma-separated gRPC client certificate identity=role mappings for method-level RBAC")
 	flag.StringVar(&f.metricsListen, "metrics-listen", "",
 		"Prometheus metrics listen address (overrides system services prometheus config; disabled when empty and config disabled)")
 	flag.StringVar(&f.webListen, "web-listen", "",
@@ -611,7 +614,7 @@ func listenGRPCAPI(f *daemonFlags) (net.Listener, []googlegrpc.ServerOption, str
 
 func buildGRPCServerOptions(f *daemonFlags) ([]googlegrpc.ServerOption, error) {
 	if strings.TrimSpace(f.grpcListen) == "" {
-		if f.grpcTLSCert != "" || f.grpcTLSKey != "" || f.grpcClientCA != "" || f.grpcClientID != "" {
+		if f.grpcTLSCert != "" || f.grpcTLSKey != "" || f.grpcClientCA != "" || f.grpcClientID != "" || f.grpcClientRole != "" {
 			return nil, fmt.Errorf("gRPC TLS flags require --grpc-listen")
 		}
 		return nil, nil
@@ -626,7 +629,18 @@ func buildGRPCServerOptions(f *daemonFlags) ([]googlegrpc.ServerOption, error) {
 	if err != nil {
 		return nil, err
 	}
-	return []googlegrpc.ServerOption{googlegrpc.Creds(credentials.NewTLS(tlsConfig))}, nil
+	opts := []googlegrpc.ServerOption{googlegrpc.Creds(credentials.NewTLS(tlsConfig))}
+	clientRoles, err := nbgrpc.ParseTLSClientRoles(f.grpcClientRole)
+	if err != nil {
+		return nil, fmt.Errorf("parse gRPC client roles: %w", err)
+	}
+	if len(clientRoles) > 0 {
+		opts = append(opts,
+			googlegrpc.UnaryInterceptor(nbgrpc.NewTLSClientRoleUnaryInterceptor(clientRoles)),
+			googlegrpc.StreamInterceptor(nbgrpc.NewTLSClientRoleStreamInterceptor(clientRoles)),
+		)
+	}
+	return opts, nil
 }
 
 func buildGRPCServerTLSConfig(f *daemonFlags) (*tls.Config, error) {

@@ -993,6 +993,7 @@ Common options:
 --grpc-client-ca <path>    CA certificate for verifying gRPC client certificates
 --grpc-client-identity <value>
                            Comma-separated allowed gRPC client certificate identities
+--grpc-client-role <value> Comma-separated gRPC client certificate identity=role mappings
 --netconf-listen <addr>    NETCONF/SSH listen address; overrides security netconf ssh port (default: :830)
 --host-key <path>          NETCONF SSH host key path
 --user-db <path>           NETCONF user database path

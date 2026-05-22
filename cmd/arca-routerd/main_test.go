@@ -277,6 +277,16 @@ func TestBuildGRPCServerOptionsUnixRejectsClientIdentityFlag(t *testing.T) {
 	}
 }
 
+func TestBuildGRPCServerOptionsUnixRejectsClientRoleFlag(t *testing.T) {
+	_, err := buildGRPCServerOptions(&daemonFlags{grpcClientRole: "spiffe://arca-router/nms=read-only"})
+	if err == nil {
+		t.Fatal("buildGRPCServerOptions() error = nil, want client role without listen error")
+	}
+	if !strings.Contains(err.Error(), "--grpc-listen") {
+		t.Fatalf("buildGRPCServerOptions() error = %v, want --grpc-listen", err)
+	}
+}
+
 func TestBuildGRPCServerOptionsTCPRequiresTLSKeyPair(t *testing.T) {
 	_, err := buildGRPCServerOptions(&daemonFlags{grpcListen: "127.0.0.1:0"})
 	if err == nil {
@@ -315,6 +325,40 @@ func TestBuildGRPCServerOptionsTCPUsesTLSCredentials(t *testing.T) {
 	}
 	if len(opts) != 1 {
 		t.Fatalf("buildGRPCServerOptions() returned %d options, want 1", len(opts))
+	}
+}
+
+func TestBuildGRPCServerOptionsTCPUsesClientRoleInterceptors(t *testing.T) {
+	certFile, keyFile, caFile := writeTestCertificateFiles(t)
+	opts, err := buildGRPCServerOptions(&daemonFlags{
+		grpcListen:     "127.0.0.1:0",
+		grpcTLSCert:    certFile,
+		grpcTLSKey:     keyFile,
+		grpcClientCA:   caFile,
+		grpcClientRole: "spiffe://arca-router/nms=read-only,router-operator=operator",
+	})
+	if err != nil {
+		t.Fatalf("buildGRPCServerOptions() error = %v", err)
+	}
+	if len(opts) != 3 {
+		t.Fatalf("buildGRPCServerOptions() returned %d options, want TLS credentials plus unary and stream interceptors", len(opts))
+	}
+}
+
+func TestBuildGRPCServerOptionsTCPRejectsInvalidClientRole(t *testing.T) {
+	certFile, keyFile, caFile := writeTestCertificateFiles(t)
+	_, err := buildGRPCServerOptions(&daemonFlags{
+		grpcListen:     "127.0.0.1:0",
+		grpcTLSCert:    certFile,
+		grpcTLSKey:     keyFile,
+		grpcClientCA:   caFile,
+		grpcClientRole: "router-operator=superuser",
+	})
+	if err == nil {
+		t.Fatal("buildGRPCServerOptions() error = nil, want invalid client role error")
+	}
+	if !strings.Contains(err.Error(), "parse gRPC client roles") {
+		t.Fatalf("buildGRPCServerOptions() error = %v, want client role parse error", err)
 	}
 }
 

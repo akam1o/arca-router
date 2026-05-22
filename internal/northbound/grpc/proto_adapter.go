@@ -123,23 +123,32 @@ func grpcRequestUser(ctx context.Context, requested string) string {
 }
 
 func grpcTLSUser(state tls.ConnectionState) string {
-	if len(state.VerifiedChains) == 0 || len(state.VerifiedChains[0]) == 0 {
+	identities := grpcTLSIdentities(state)
+	if len(identities) == 0 {
 		return ""
 	}
+	return identities[0]
+}
+
+func grpcTLSIdentities(state tls.ConnectionState) []string {
+	if len(state.VerifiedChains) == 0 || len(state.VerifiedChains[0]) == 0 {
+		return nil
+	}
 	cert := state.VerifiedChains[0][0]
+	identities := make([]string, 0, len(cert.URIs)+len(cert.DNSNames)+len(cert.EmailAddresses)+1)
 	if len(cert.URIs) > 0 {
-		return cert.URIs[0].String()
+		for _, uri := range cert.URIs {
+			if uri != nil && uri.String() != "" {
+				identities = append(identities, uri.String())
+			}
+		}
 	}
 	if cert.Subject.CommonName != "" {
-		return cert.Subject.CommonName
+		identities = append(identities, cert.Subject.CommonName)
 	}
-	if len(cert.DNSNames) > 0 {
-		return cert.DNSNames[0]
-	}
-	if len(cert.EmailAddresses) > 0 {
-		return cert.EmailAddresses[0]
-	}
-	return ""
+	identities = append(identities, cert.DNSNames...)
+	identities = append(identities, cert.EmailAddresses...)
+	return identities
 }
 
 func (a *sessionServiceAdapter) CreateSession(ctx context.Context, req *apiv1.CreateSessionRequest) (*apiv1.CreateSessionResponse, error) {
