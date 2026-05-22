@@ -1507,7 +1507,11 @@ func (s metricsSource) authorizeWebRead(w http.ResponseWriter, r *http.Request) 
 
 func (s metricsSource) authorizeWebReadRole(w http.ResponseWriter, r *http.Request) (string, bool) {
 	users := s.webAuthUsers()
-	tokens := s.webAutomationTokens()
+	tokens, err := s.webAutomationTokens()
+	if err != nil {
+		http.Error(w, "load web API tokens: "+err.Error(), http.StatusInternalServerError)
+		return "", false
+	}
 	if len(users) == 0 && len(tokens) == 0 {
 		return pkgnetconf.RoleReadOnly, true
 	}
@@ -1524,7 +1528,11 @@ func (s metricsSource) authorizeWebReadRole(w http.ResponseWriter, r *http.Reque
 
 func (s metricsSource) authorizeWebAdmin(w http.ResponseWriter, r *http.Request) bool {
 	users := s.webAuthUsers()
-	tokens := s.webAutomationTokens()
+	tokens, err := s.webAutomationTokens()
+	if err != nil {
+		http.Error(w, "load web API tokens: "+err.Error(), http.StatusInternalServerError)
+		return false
+	}
 	if len(users) == 0 && len(tokens) == 0 {
 		http.Error(w, "audit export requires password-backed security users or API tokens", http.StatusForbidden)
 		return false
@@ -1542,7 +1550,11 @@ func (s metricsSource) authorizeWebAdmin(w http.ResponseWriter, r *http.Request)
 
 func (s metricsSource) authorizeWebWrite(w http.ResponseWriter, r *http.Request) (string, bool) {
 	users := s.webAuthUsers()
-	tokens := s.webAutomationTokens()
+	tokens, err := s.webAutomationTokens()
+	if err != nil {
+		http.Error(w, "load web API tokens: "+err.Error(), http.StatusInternalServerError)
+		return "", false
+	}
 	if len(users) == 0 && len(tokens) == 0 {
 		http.Error(w, "web configuration writes require password-backed security users or API tokens", http.StatusForbidden)
 		return "", false
@@ -1683,11 +1695,18 @@ func webRequestToken(r *http.Request) (string, bool) {
 	return "", false
 }
 
-func (s metricsSource) webAutomationTokens() map[string]webAPIToken {
-	if len(s.webAPITokens) == 0 {
-		return nil
+func (s metricsSource) webAutomationTokens() (map[string]webAPIToken, error) {
+	if path := strings.TrimSpace(s.webAPITokenFile); path != "" {
+		tokens, err := loadWebAPITokens(path)
+		if err != nil {
+			return nil, err
+		}
+		return tokens, nil
 	}
-	return s.webAPITokens
+	if len(s.webAPITokens) == 0 {
+		return nil, nil
+	}
+	return s.webAPITokens, nil
 }
 
 func (s metricsSource) webAuthUsers() map[string]webAuthUser {

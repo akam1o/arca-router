@@ -220,7 +220,7 @@ Standard NETCONF `:xpath` capability advertisement is enabled by default. Use
 against clients that cannot handle advertised XPath filters. The NETCONF
 `startup` datastore is intentionally unsupported and is not advertised.
 
-For automation against the Web/NMS API, provide a `0600` token file with one `name:role:token` or `name:role:sha256:<hex>[:not-after=<RFC3339>]` entry per line and start the daemon with `--web-api-token-file=/etc/arca-router/web-api-tokens`. Plain token values must be at least 32 characters, must not contain whitespace, and should be generated from random bytes, for example `openssl rand -base64 32`. Prefer storing `sha256:<hex>` token hashes in the file, with `not-after` for bounded rotation windows; clients still present the original token through `Authorization: Bearer <token>` or `X-API-Key: <token>` and reuse the `read-only`, `operator`, and `admin` RBAC roles.
+For automation against the Web/NMS API, provide a `0600` token file with one `name:role:token` or `name:role:sha256:<hex>[:not-after=<RFC3339>]` entry per line and start the daemon with `--web-api-token-file=/etc/arca-router/web-api-tokens`. Plain token values must be at least 32 characters, must not contain whitespace, and should be generated from random bytes, for example `openssl rand -base64 32`. Prefer storing `sha256:<hex>` token hashes in the file, with `not-after` for bounded rotation windows; clients still present the original token through `Authorization: Bearer <token>` or `X-API-Key: <token>` and reuse the `read-only`, `operator`, and `admin` RBAC roles. The token file is reloaded during request authentication so atomic file replacement can rotate or revoke tokens without restarting the daemon.
 
 **Test NETCONF connection**:
 

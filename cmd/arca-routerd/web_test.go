@@ -953,6 +953,7 @@ func TestWebEndpointAcceptsReadOnlyBasicAuth(t *testing.T) {
 }
 
 const validWebAPITestToken = "0123456789abcdef0123456789ABCDEF"
+const rotatedWebAPITestToken = "fedcba9876543210FEDCBA9876543210"
 
 func hashedWebAPITestToken(token string) string {
 	tokenSHA256 := sha256.Sum256([]byte(token))
@@ -1006,6 +1007,66 @@ func TestLoadWebAPITokensParsesHashedTokenFile(t *testing.T) {
 
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d, want %d: %s", rec.Code, http.StatusOK, rec.Body.String())
+	}
+}
+
+func TestWebEndpointReloadsAPITokenFile(t *testing.T) {
+	tokenFile := filepath.Join(t.TempDir(), "tokens")
+	if err := os.WriteFile(tokenFile, []byte("robot:read-only:"+hashedWebAPITestToken(validWebAPITestToken)+"\n"), 0600); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+
+	source := newWebAuthTestSource(t, "monitor", "secret", "read-only")
+	source.webAPITokenFile = tokenFile
+
+	req := httptest.NewRequest(http.MethodGet, "/api/status", nil)
+	req.Header.Set("Authorization", "Bearer "+validWebAPITestToken)
+	rec := httptest.NewRecorder()
+	source.handleWebStatus(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status before rotation = %d, want %d: %s", rec.Code, http.StatusOK, rec.Body.String())
+	}
+
+	if err := os.WriteFile(tokenFile, []byte("robot:read-only:"+hashedWebAPITestToken(rotatedWebAPITestToken)+"\n"), 0600); err != nil {
+		t.Fatalf("WriteFile(rotated) error = %v", err)
+	}
+
+	req = httptest.NewRequest(http.MethodGet, "/api/status", nil)
+	req.Header.Set("Authorization", "Bearer "+validWebAPITestToken)
+	rec = httptest.NewRecorder()
+	source.handleWebStatus(rec, req)
+	if rec.Code != http.StatusUnauthorized {
+		t.Fatalf("status for old token = %d, want %d", rec.Code, http.StatusUnauthorized)
+	}
+
+	req = httptest.NewRequest(http.MethodGet, "/api/status", nil)
+	req.Header.Set("Authorization", "Bearer "+rotatedWebAPITestToken)
+	rec = httptest.NewRecorder()
+	source.handleWebStatus(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status after rotation = %d, want %d: %s", rec.Code, http.StatusOK, rec.Body.String())
+	}
+}
+
+func TestWebEndpointFailsClosedWhenReloadedAPITokenFileIsInvalid(t *testing.T) {
+	tokenFile := filepath.Join(t.TempDir(), "tokens")
+	if err := os.WriteFile(tokenFile, []byte("robot:read-only:"+hashedWebAPITestToken(validWebAPITestToken)+"\n"), 0600); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+
+	source := newWebAuthTestSource(t, "monitor", "secret", "read-only")
+	source.webAPITokenFile = tokenFile
+
+	if err := os.WriteFile(tokenFile, []byte("robot:read-only:sha256:not-hex\n"), 0600); err != nil {
+		t.Fatalf("WriteFile(invalid) error = %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/api/status", nil)
+	req.Header.Set("Authorization", "Bearer "+validWebAPITestToken)
+	rec := httptest.NewRecorder()
+	source.handleWebStatus(rec, req)
+	if rec.Code != http.StatusInternalServerError {
+		t.Fatalf("status = %d, want %d", rec.Code, http.StatusInternalServerError)
 	}
 }
 

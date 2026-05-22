@@ -32,16 +32,17 @@ const (
 )
 
 type metricsSource struct {
-	startedAt     time.Time
-	engine        *engine.Engine
-	netconfServer *netconf.SSHServer
-	datastore     *datastore.Config
-	configAPI     webConfigAPI
-	telemetryAPI  webTelemetryAPI
-	webAPITokens  map[string]webAPIToken
-	configSync    configSyncRuntimeSource
-	frr           frrVRRPSource
-	vpp           vppReconciliationSource
+	startedAt       time.Time
+	engine          *engine.Engine
+	netconfServer   *netconf.SSHServer
+	datastore       *datastore.Config
+	configAPI       webConfigAPI
+	telemetryAPI    webTelemetryAPI
+	webAPITokens    map[string]webAPIToken
+	webAPITokenFile string
+	configSync      configSyncRuntimeSource
+	frr             frrVRRPSource
+	vpp             vppReconciliationSource
 }
 
 type frrVRRPSource interface {
