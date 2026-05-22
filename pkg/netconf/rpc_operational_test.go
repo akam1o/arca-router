@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/xml"
+	"errors"
 	"strings"
 	"testing"
 	"time"
@@ -81,6 +82,27 @@ func TestBuildOperationalDataUsesRunningConfig(t *testing.T) {
 		if !bytes.Contains(data, []byte(want)) {
 			t.Fatalf("operational data missing %q:\n%s", want, data)
 		}
+	}
+}
+
+func TestGetRedactsOperationalDataReadError(t *testing.T) {
+	srv := NewServer(&validateDatastore{
+		runningErr: errors.New("sqlite /var/lib/arca-router/config.db unavailable"),
+	}, nil)
+
+	reply := getParsedRPC(t, srv, `<rpc message-id="101" xmlns="urn:ietf:params:xml:ns:netconf:base:1.0"><get/></rpc>`)
+	if len(reply.Errors) != 1 {
+		t.Fatalf("get operational read errors = %d, want 1", len(reply.Errors))
+	}
+	err := reply.Errors[0]
+	if err.ErrorTag != ErrorTagOperationFailed {
+		t.Fatalf("get operational read error tag = %s, want %s", err.ErrorTag, ErrorTagOperationFailed)
+	}
+	if err.ErrorMessage != "failed to retrieve operational data" {
+		t.Fatalf("get operational read message = %q, want redacted operational failure", err.ErrorMessage)
+	}
+	if strings.Contains(err.ErrorMessage, "/var/lib/arca-router/config.db") {
+		t.Fatalf("get operational read message leaked backend path: %q", err.ErrorMessage)
 	}
 }
 

@@ -56,7 +56,7 @@ func (s *Server) handleGet(ctx context.Context, sess *Session, rpc *RPC) *RPCRep
 		if rpcErr, ok := err.(*RPCError); ok {
 			return NewErrorReply(rpc.MessageID, rpcErr)
 		}
-		return NewErrorReply(rpc.MessageID, ErrOperationFailed(fmt.Sprintf("failed to retrieve operational data: %v", err)))
+		return NewErrorReply(rpc.MessageID, ErrOperationFailed("failed to retrieve operational data"))
 	}
 
 	return NewDataReply(rpc.MessageID, operationalData)
