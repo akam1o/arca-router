@@ -41,6 +41,7 @@ const webDummyPasswordHash = "$argon2id$v=19$m=65536,t=3,p=4$AAAAAAAAAAAAAAAAAAA
 const webConfigEditBodyLimit = 1 << 20
 const webAPITokenSHA256Prefix = "sha256:"
 const webAPITokenNotAfterPrefix = ":not-after="
+const webInternalServerErrorMessage = "internal server error"
 const webAPITokenUnavailableMessage = "web API token authentication unavailable"
 
 const nmsOperationalStatusSchemaVersion = "arca.nms.operational.v1"
@@ -1206,7 +1207,7 @@ func (s metricsSource) handleWebStatus(w http.ResponseWriter, r *http.Request) {
 	}
 	w.Header().Set("Content-Type", "application/json")
 	if err := json.NewEncoder(w).Encode(newWebStatus(s.snapshot(time.Now()))); err != nil {
-		http.Error(w, "encode status: "+err.Error(), http.StatusInternalServerError)
+		s.writeWebInternalError(w, "encode status", err)
 	}
 }
 
@@ -1275,6 +1276,10 @@ func (s metricsSource) handleNMSTelemetrySnapshot(w http.ResponseWriter, r *http
 		case errors.Is(err, context.DeadlineExceeded), errors.Is(err, context.Canceled):
 			status = http.StatusGatewayTimeout
 		}
+		if status == http.StatusInternalServerError {
+			s.writeWebJSONInternalError(w, "collect telemetry snapshot", err)
+			return
+		}
 		writeWebJSONError(w, status, err.Error())
 		return
 	}
@@ -1292,12 +1297,12 @@ func (s metricsSource) handleWebConfig(w http.ResponseWriter, r *http.Request) {
 	}
 	cfg, err := s.runningConfig(!webRoleCanWrite(role))
 	if err != nil {
-		http.Error(w, "render config: "+err.Error(), http.StatusInternalServerError)
+		s.writeWebInternalError(w, "render config", err)
 		return
 	}
 	w.Header().Set("Content-Type", "application/json")
 	if err := json.NewEncoder(w).Encode(cfg); err != nil {
-		http.Error(w, "encode config: "+err.Error(), http.StatusInternalServerError)
+		s.writeWebInternalError(w, "encode config", err)
 	}
 }
 
@@ -1316,7 +1321,7 @@ func (s metricsSource) handleWebConfigHistory(w http.ResponseWriter, r *http.Req
 	}
 	history, err := s.configHistory(r.Context(), limit, offset)
 	if err != nil {
-		writeWebJSONError(w, http.StatusInternalServerError, err.Error())
+		s.writeWebJSONInternalError(w, "list config history", err)
 		return
 	}
 	writeWebJSON(w, http.StatusOK, webConfigHistoryResponse{Entries: history})
@@ -1341,7 +1346,7 @@ func (s metricsSource) handleWebAudit(w http.ResponseWriter, r *http.Request) {
 	}
 	entries, err := s.auditEvents(r.Context(), opts)
 	if err != nil {
-		writeWebJSONError(w, http.StatusInternalServerError, err.Error())
+		s.writeWebJSONInternalError(w, "list audit events", err)
 		return
 	}
 	writeWebJSON(w, http.StatusOK, webAuditResponse{
@@ -1424,16 +1429,16 @@ func (s metricsSource) handleWebIndex(w http.ResponseWriter, r *http.Request) {
 	status := newWebStatus(s.snapshot(time.Now()))
 	cfg, err := s.runningConfig(!webRoleCanWrite(role))
 	if err != nil {
-		http.Error(w, "render config: "+err.Error(), http.StatusInternalServerError)
+		s.writeWebInternalError(w, "render index config", err)
 		return
 	}
 	history, err := s.configHistory(r.Context(), 5, 0)
 	if err != nil {
-		http.Error(w, "render history: "+err.Error(), http.StatusInternalServerError)
+		s.writeWebInternalError(w, "render index history", err)
 		return
 	}
 	if err := webIndexTemplate.Execute(w, newWebIndexData(status, time.Now(), cfg.ConfigText, history)); err != nil {
-		http.Error(w, "render index: "+err.Error(), http.StatusInternalServerError)
+		s.writeWebInternalError(w, "render index", err)
 	}
 }
 
@@ -1565,6 +1570,20 @@ func (s metricsSource) auditEvents(ctx context.Context, opts nbgrpc.AuditLogOpti
 func (s metricsSource) authorizeWebRead(w http.ResponseWriter, r *http.Request) bool {
 	_, ok := s.authorizeWebReadRole(w, r)
 	return ok
+}
+
+func (s metricsSource) writeWebInternalError(w http.ResponseWriter, operation string, err error) {
+	s.logWebInternalError(operation, err)
+	http.Error(w, webInternalServerErrorMessage, http.StatusInternalServerError)
+}
+
+func (s metricsSource) writeWebJSONInternalError(w http.ResponseWriter, operation string, err error) {
+	s.logWebInternalError(operation, err)
+	writeWebJSONError(w, http.StatusInternalServerError, webInternalServerErrorMessage)
+}
+
+func (s metricsSource) logWebInternalError(operation string, err error) {
+	s.webLogger().Error("Web request failed", slog.String("operation", operation), slog.Any("error", err))
 }
 
 func (s metricsSource) writeWebAPITokenUnavailable(w http.ResponseWriter, err error) {

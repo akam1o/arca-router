@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"io"
 	"log/slog"
 	"net/http"
@@ -781,6 +782,19 @@ func TestNMSTelemetrySnapshotEndpointRejectsEmptyCatalogFilter(t *testing.T) {
 	}
 }
 
+func TestNMSTelemetrySnapshotEndpointRedactsInternalErrors(t *testing.T) {
+	source := metricsSource{
+		telemetryAPI: &webTelemetryTestAPI{err: errors.New("vpp socket /run/vpp/api.sock failed")},
+		webLog:       slog.New(slog.NewTextHandler(io.Discard, nil)),
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/api/nms/v1/telemetry/snapshot", nil)
+	rec := httptest.NewRecorder()
+	source.handleNMSTelemetrySnapshot(rec, req)
+
+	requireWebJSONInternalError(t, rec, "vpp socket", "/run/vpp/api.sock")
+}
+
 func TestNMSTelemetrySnapshotEndpointRejectsOversizedPayload(t *testing.T) {
 	telemetry := &webTelemetryTestAPI{events: []nbgrpc.TelemetryEvent{
 		{
@@ -997,6 +1011,26 @@ func requireWebAPITokenUnavailable(t *testing.T, rec *httptest.ResponseRecorder,
 	for _, leaked := range leakedValues {
 		if leaked != "" && strings.Contains(body, leaked) {
 			t.Fatalf("response body leaked %q: %q", leaked, body)
+		}
+	}
+}
+
+func requireWebJSONInternalError(t *testing.T, rec *httptest.ResponseRecorder, leakedValues ...string) {
+	t.Helper()
+	if rec.Code != http.StatusInternalServerError {
+		t.Fatalf("status = %d, want %d: %s", rec.Code, http.StatusInternalServerError, rec.Body.String())
+	}
+	var body map[string]string
+	if err := json.NewDecoder(rec.Result().Body).Decode(&body); err != nil {
+		t.Fatalf("Decode() error = %v", err)
+	}
+	if body["error"] != webInternalServerErrorMessage {
+		t.Fatalf("error = %q, want generic internal server error", body["error"])
+	}
+	rawBody := rec.Body.String()
+	for _, leaked := range leakedValues {
+		if leaked != "" && strings.Contains(rawBody, leaked) {
+			t.Fatalf("response body leaked %q: %q", leaked, rawBody)
 		}
 	}
 }
@@ -1706,6 +1740,18 @@ func TestWebConfigHistoryEndpointRejectsInvalidPagination(t *testing.T) {
 	}
 }
 
+func TestWebConfigHistoryEndpointRedactsInternalErrors(t *testing.T) {
+	source := newWebAuthTestSource(t, "monitor", "secret", "read-only")
+	source.configAPI = webHistoryTestAPI{err: errors.New("sqlite backend /var/lib/arca/history.db failed")}
+
+	req := httptest.NewRequest(http.MethodGet, "/api/config/history", nil)
+	req.SetBasicAuth("monitor", "secret")
+	rec := httptest.NewRecorder()
+	source.handleWebConfigHistory(rec, req)
+
+	requireWebJSONInternalError(t, rec, "sqlite backend", "/var/lib/arca/history.db")
+}
+
 func TestWebAuditEndpointRequiresAdminRole(t *testing.T) {
 	source := newWebAuthTestSource(t, "monitor", "secret", "read-only")
 	source.configAPI = &webAuditTestAPI{}
@@ -1779,6 +1825,18 @@ func TestWebAuditEndpointRejectsInvalidTimeRange(t *testing.T) {
 	if rec.Code != http.StatusBadRequest {
 		t.Fatalf("status = %d, want %d", rec.Code, http.StatusBadRequest)
 	}
+}
+
+func TestWebAuditEndpointRedactsInternalErrors(t *testing.T) {
+	source := newWebAuthTestSource(t, "admin", "secret", "admin")
+	source.configAPI = &webAuditTestAPI{err: errors.New("audit backend secret table failed")}
+
+	req := httptest.NewRequest(http.MethodGet, "/api/audit", nil)
+	req.SetBasicAuth("admin", "secret")
+	rec := httptest.NewRecorder()
+	source.handleWebAudit(rec, req)
+
+	requireWebJSONInternalError(t, rec, "audit backend", "secret table")
 }
 
 func TestWebIndexEndpoint(t *testing.T) {
@@ -1894,9 +1952,13 @@ func newWebConfigAPITestSource(t *testing.T, role string) (metricsSource, *engin
 type webHistoryTestAPI struct {
 	webConfigAPI
 	history []nbgrpc.CommitInfo
+	err     error
 }
 
 func (a webHistoryTestAPI) ListHistory(ctx context.Context, limit, offset int) ([]nbgrpc.CommitInfo, error) {
+	if a.err != nil {
+		return nil, a.err
+	}
 	if offset >= len(a.history) {
 		return nil, nil
 	}
@@ -1911,10 +1973,14 @@ type webAuditTestAPI struct {
 	webConfigAPI
 	events []nbgrpc.AuditEventInfo
 	opts   nbgrpc.AuditLogOptions
+	err    error
 }
 
 func (a *webAuditTestAPI) ListAuditEvents(ctx context.Context, opts nbgrpc.AuditLogOptions) ([]nbgrpc.AuditEventInfo, error) {
 	a.opts = opts
+	if a.err != nil {
+		return nil, a.err
+	}
 	return a.events, nil
 }
 
