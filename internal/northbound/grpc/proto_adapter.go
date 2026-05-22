@@ -23,7 +23,7 @@ type configServiceAdapter struct {
 func (a *configServiceAdapter) GetRunning(ctx context.Context, _ *apiv1.GetRunningRequest) (*apiv1.GetRunningResponse, error) {
 	configText, version, err := a.server.GetRunning(ctx)
 	if err != nil {
-		return nil, err
+		return nil, configEditStatusError(err)
 	}
 	return &apiv1.GetRunningResponse{
 		ConfigText: configText,
@@ -34,7 +34,7 @@ func (a *configServiceAdapter) GetRunning(ctx context.Context, _ *apiv1.GetRunni
 func (a *configServiceAdapter) GetCandidate(ctx context.Context, req *apiv1.GetCandidateRequest) (*apiv1.GetCandidateResponse, error) {
 	configText, err := a.server.GetCandidate(ctx, req.GetSessionId())
 	if err != nil {
-		return nil, err
+		return nil, configEditStatusError(err)
 	}
 	return &apiv1.GetCandidateResponse{ConfigText: configText}, nil
 }
@@ -70,7 +70,7 @@ func (a *configServiceAdapter) ValidateCandidate(ctx context.Context, req *apiv1
 
 func (a *configServiceAdapter) Discard(ctx context.Context, req *apiv1.DiscardRequest) (*apiv1.DiscardResponse, error) {
 	if err := a.server.Discard(ctx, req.GetSessionId()); err != nil {
-		return nil, err
+		return nil, configEditStatusError(err)
 	}
 	return &apiv1.DiscardResponse{}, nil
 }
@@ -86,7 +86,7 @@ func (a *configServiceAdapter) Rollback(ctx context.Context, req *apiv1.Rollback
 func (a *configServiceAdapter) Diff(ctx context.Context, req *apiv1.DiffRequest) (*apiv1.DiffResponse, error) {
 	diffText, hasChanges, err := a.server.Diff(ctx, req.GetSessionId())
 	if err != nil {
-		return nil, err
+		return nil, configEditStatusError(err)
 	}
 	return &apiv1.DiffResponse{DiffText: diffText, HasChanges: hasChanges}, nil
 }
@@ -95,6 +95,8 @@ func configEditStatusError(err error) error {
 	switch {
 	case errors.Is(err, ErrConfigInput), errors.Is(err, engine.ErrConfigValidation):
 		return status.Error(codes.InvalidArgument, err.Error())
+	case errors.Is(err, ErrSessionNotFound):
+		return status.Error(codes.NotFound, "configuration session not found")
 	case errors.Is(err, ErrCandidateConflict):
 		return status.Error(codes.FailedPrecondition, "configuration candidate is unavailable")
 	case errors.Is(err, ErrCommitHistoryUnavailable):
@@ -111,7 +113,7 @@ func configEditStatusError(err error) error {
 func (a *configServiceAdapter) ListHistory(ctx context.Context, req *apiv1.ListHistoryRequest) (*apiv1.ListHistoryResponse, error) {
 	entries, err := a.server.ListHistory(ctx, int(req.GetLimit()), int(req.GetOffset()))
 	if err != nil {
-		return nil, err
+		return nil, configEditStatusError(err)
 	}
 	resp := &apiv1.ListHistoryResponse{Entries: make([]*apiv1.CommitEntry, 0, len(entries))}
 	for _, entry := range entries {
@@ -175,30 +177,45 @@ func grpcTLSIdentities(state tls.ConnectionState) []string {
 func (a *sessionServiceAdapter) CreateSession(ctx context.Context, req *apiv1.CreateSessionRequest) (*apiv1.CreateSessionResponse, error) {
 	sessionID, err := a.server.CreateSession(ctx, grpcRequestUser(ctx, req.GetUser()))
 	if err != nil {
-		return nil, err
+		return nil, sessionStatusError(err)
 	}
 	return &apiv1.CreateSessionResponse{SessionId: sessionID}, nil
 }
 
 func (a *sessionServiceAdapter) CloseSession(ctx context.Context, req *apiv1.CloseSessionRequest) (*apiv1.CloseSessionResponse, error) {
 	if err := a.server.CloseSession(ctx, req.GetSessionId()); err != nil {
-		return nil, err
+		return nil, sessionStatusError(err)
 	}
 	return &apiv1.CloseSessionResponse{}, nil
 }
 
 func (a *sessionServiceAdapter) AcquireLock(ctx context.Context, req *apiv1.AcquireLockRequest) (*apiv1.AcquireLockResponse, error) {
 	if err := a.server.AcquireLock(ctx, req.GetSessionId(), grpcRequestUser(ctx, req.GetUser())); err != nil {
-		return nil, err
+		return nil, sessionStatusError(err)
 	}
 	return &apiv1.AcquireLockResponse{}, nil
 }
 
 func (a *sessionServiceAdapter) ReleaseLock(ctx context.Context, req *apiv1.ReleaseLockRequest) (*apiv1.ReleaseLockResponse, error) {
 	if err := a.server.ReleaseLock(ctx, req.GetSessionId()); err != nil {
-		return nil, err
+		return nil, sessionStatusError(err)
 	}
 	return &apiv1.ReleaseLockResponse{}, nil
+}
+
+func sessionStatusError(err error) error {
+	switch {
+	case errors.Is(err, ErrSessionNotFound):
+		return status.Error(codes.NotFound, "configuration session not found")
+	case errors.Is(err, ErrCandidateConflict):
+		return status.Error(codes.FailedPrecondition, "configuration candidate is unavailable")
+	case errors.Is(err, context.DeadlineExceeded):
+		return status.Error(codes.DeadlineExceeded, "session operation timed out")
+	case errors.Is(err, context.Canceled):
+		return status.Error(codes.Canceled, "session operation canceled")
+	default:
+		return status.Error(codes.Internal, "internal server error")
+	}
 }
 
 type stateServiceAdapter struct {

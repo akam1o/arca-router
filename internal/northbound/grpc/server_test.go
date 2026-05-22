@@ -93,6 +93,82 @@ func TestStateAdapterRedactsOperationalErrors(t *testing.T) {
 	}
 }
 
+func TestConfigAdapterRedactsReadAndHistoryErrors(t *testing.T) {
+	srv := NewServer(engine.NewEngine(nil, testLogger()), &fakeStore{
+		listErr: errors.New("open /var/lib/arca-router/config.db: permission denied"),
+	}, testLogger())
+	adapter := &configServiceAdapter{server: srv}
+
+	_, err := adapter.GetCandidate(context.Background(), &apiv1.GetCandidateRequest{SessionId: "session-secret"})
+	if status.Code(err) != codes.NotFound {
+		t.Fatalf("GetCandidate() status = %v, want %v", status.Code(err), codes.NotFound)
+	}
+	if got := status.Convert(err).Message(); got != "configuration session not found" {
+		t.Fatalf("GetCandidate() status message = %q, want redacted session message", got)
+	}
+	if strings.Contains(err.Error(), "session-secret") {
+		t.Fatalf("GetCandidate() error leaked session ID: %v", err)
+	}
+
+	_, err = adapter.ListHistory(context.Background(), &apiv1.ListHistoryRequest{Limit: 10})
+	if status.Code(err) != codes.Internal {
+		t.Fatalf("ListHistory() status = %v, want %v", status.Code(err), codes.Internal)
+	}
+	if got := status.Convert(err).Message(); got != "internal server error" {
+		t.Fatalf("ListHistory() status message = %q, want generic internal error", got)
+	}
+	if strings.Contains(err.Error(), "/var/lib/arca-router/config.db") {
+		t.Fatalf("ListHistory() error leaked backend path: %v", err)
+	}
+
+	_, err = adapter.ListHistory(context.Background(), &apiv1.ListHistoryRequest{Limit: -1})
+	if status.Code(err) != codes.InvalidArgument {
+		t.Fatalf("ListHistory(invalid limit) status = %v, want %v", status.Code(err), codes.InvalidArgument)
+	}
+	if got := status.Convert(err).Message(); !strings.Contains(got, "invalid history limit") {
+		t.Fatalf("ListHistory(invalid limit) message = %q, want validation detail", got)
+	}
+}
+
+func TestSessionAdapterRedactsSessionErrors(t *testing.T) {
+	srv := NewServer(engine.NewEngine(nil, testLogger()), &fakeStore{}, testLogger())
+	adapter := &sessionServiceAdapter{server: srv}
+
+	_, err := adapter.CloseSession(context.Background(), &apiv1.CloseSessionRequest{SessionId: "session-secret"})
+	if status.Code(err) != codes.NotFound {
+		t.Fatalf("CloseSession() status = %v, want %v", status.Code(err), codes.NotFound)
+	}
+	if got := status.Convert(err).Message(); got != "configuration session not found" {
+		t.Fatalf("CloseSession() status message = %q, want redacted session message", got)
+	}
+	if strings.Contains(err.Error(), "session-secret") {
+		t.Fatalf("CloseSession() error leaked session ID: %v", err)
+	}
+
+	session1, err := srv.CreateSession(context.Background(), "alice")
+	if err != nil {
+		t.Fatalf("CreateSession(session1) error = %v", err)
+	}
+	session2, err := srv.CreateSession(context.Background(), "bob")
+	if err != nil {
+		t.Fatalf("CreateSession(session2) error = %v", err)
+	}
+	if err := srv.AcquireLock(context.Background(), session1, "alice"); err != nil {
+		t.Fatalf("AcquireLock(session1) error = %v", err)
+	}
+
+	_, err = adapter.AcquireLock(context.Background(), &apiv1.AcquireLockRequest{SessionId: session2, User: "bob"})
+	if status.Code(err) != codes.FailedPrecondition {
+		t.Fatalf("AcquireLock(conflict) status = %v, want %v", status.Code(err), codes.FailedPrecondition)
+	}
+	if got := status.Convert(err).Message(); got != "configuration candidate is unavailable" {
+		t.Fatalf("AcquireLock(conflict) status message = %q, want generic candidate message", got)
+	}
+	if strings.Contains(err.Error(), session1) {
+		t.Fatalf("AcquireLock(conflict) error leaked lock owner session: %v", err)
+	}
+}
+
 func listenUnix(path string) (net.Listener, error) {
 	return net.Listen("unix", path)
 }
@@ -107,6 +183,7 @@ type fakeStore struct {
 	aborted      bool
 	commits      map[string]*store.CommitRecord
 	listRecords  []*store.CommitRecord
+	listErr      error
 	listCalls    int
 	listOpts     *store.ListOptions
 	auditOpts    *store.AuditOptions
@@ -191,6 +268,9 @@ func (f *fakeStore) GetCommit(ctx context.Context, commitID string) (*store.Comm
 func (f *fakeStore) ListCommits(ctx context.Context, opts *store.ListOptions) ([]*store.CommitRecord, error) {
 	f.listCalls++
 	f.listOpts = opts
+	if f.listErr != nil {
+		return nil, f.listErr
+	}
 	return f.listRecords, nil
 }
 

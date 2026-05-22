@@ -9,6 +9,7 @@ var (
 	ErrConfigInput              = errors.New("configuration input error")
 	ErrCandidateConflict        = errors.New("candidate conflict")
 	ErrCommitHistoryUnavailable = errors.New("commit history unavailable")
+	ErrSessionNotFound          = errors.New("session not found")
 )
 
 type classifiedError struct {
@@ -46,6 +47,13 @@ func wrapConfigInputErrorf(cause error, format string, args ...any) error {
 func newCandidateConflictErrorf(format string, args ...any) error {
 	return classifiedError{
 		kind: ErrCandidateConflict,
+		msg:  fmt.Sprintf(format, args...),
+	}
+}
+
+func newSessionNotFoundErrorf(format string, args ...any) error {
+	return classifiedError{
+		kind: ErrSessionNotFound,
 		msg:  fmt.Sprintf(format, args...),
 	}
 }

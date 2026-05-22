@@ -491,7 +491,7 @@ func (s *Server) ListHistory(ctx context.Context, limit, offset int) ([]CommitIn
 		return nil, err
 	}
 	if offset < 0 {
-		return nil, fmt.Errorf("invalid history offset: %d", offset)
+		return nil, newConfigInputErrorf("invalid history offset: %d", offset)
 	}
 	if s.store == nil {
 		return nil, nil
@@ -525,7 +525,7 @@ func (s *Server) ListAuditEvents(ctx context.Context, opts AuditLogOptions) ([]A
 		return nil, err
 	}
 	if opts.Offset < 0 {
-		return nil, fmt.Errorf("invalid audit offset: %d", opts.Offset)
+		return nil, newConfigInputErrorf("invalid audit offset: %d", opts.Offset)
 	}
 	if s.store == nil {
 		return nil, nil
@@ -567,7 +567,7 @@ func (s *Server) ListAuditEvents(ctx context.Context, opts AuditLogOptions) ([]A
 
 func boundedListLimit(name string, limit, max int) (int, error) {
 	if limit < 0 {
-		return 0, fmt.Errorf("invalid %s limit: %d", name, limit)
+		return 0, newConfigInputErrorf("invalid %s limit: %d", name, limit)
 	}
 	if limit == 0 || limit > max {
 		return max, nil
@@ -1845,7 +1845,7 @@ func (m *SessionManager) Get(id string) (*Session, error) {
 
 	s, ok := m.sessions[id]
 	if !ok {
-		return nil, fmt.Errorf("session %s not found", id)
+		return nil, newSessionNotFoundErrorf("session %s not found", id)
 	}
 	return s, nil
 }
@@ -1857,7 +1857,7 @@ func (m *SessionManager) Close(id string) error {
 
 	s, ok := m.sessions[id]
 	if !ok {
-		return fmt.Errorf("session %s not found", id)
+		return newSessionNotFoundErrorf("session %s not found", id)
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -1876,7 +1876,7 @@ func (m *SessionManager) AcquireLock(id string) error {
 
 	s, ok := m.sessions[id]
 	if !ok {
-		return fmt.Errorf("session %s not found", id)
+		return newSessionNotFoundErrorf("session %s not found", id)
 	}
 	if m.lockHeld != "" && m.lockHeld != id {
 		return newCandidateConflictErrorf("candidate lock held by session %s", m.lockHeld)
@@ -1895,12 +1895,12 @@ func (m *SessionManager) ReleaseLock(id string) error {
 
 	s, ok := m.sessions[id]
 	if !ok {
-		return fmt.Errorf("session %s not found", id)
+		return newSessionNotFoundErrorf("session %s not found", id)
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if !s.HasLock {
-		return fmt.Errorf("session %s does not hold the candidate lock", id)
+		return newCandidateConflictErrorf("session %s does not hold the candidate lock", id)
 	}
 	s.HasLock = false
 	m.lockHeld = ""
