@@ -2,6 +2,8 @@ package main
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"io"
 	"log/slog"
@@ -952,6 +954,11 @@ func TestWebEndpointAcceptsReadOnlyBasicAuth(t *testing.T) {
 
 const validWebAPITestToken = "0123456789abcdef0123456789ABCDEF"
 
+func hashedWebAPITestToken(token string) string {
+	tokenSHA256 := sha256.Sum256([]byte(token))
+	return webAPITokenSHA256Prefix + hex.EncodeToString(tokenSHA256[:])
+}
+
 func TestLoadWebAPITokensParsesTokenFile(t *testing.T) {
 	tokenFile := filepath.Join(t.TempDir(), "tokens")
 	if err := os.WriteFile(tokenFile, []byte("# comment\nrobot:operator:"+validWebAPITestToken+"\n"), 0600); err != nil {
@@ -966,11 +973,60 @@ func TestLoadWebAPITokensParsesTokenFile(t *testing.T) {
 	if token.Name != "robot" || token.Role != "operator" || token.Token != validWebAPITestToken {
 		t.Fatalf("token = %#v, want parsed robot operator token", token)
 	}
+	if len(token.TokenSHA256) != sha256.Size {
+		t.Fatalf("len(token.TokenSHA256) = %d, want %d", len(token.TokenSHA256), sha256.Size)
+	}
+}
+
+func TestLoadWebAPITokensParsesHashedTokenFile(t *testing.T) {
+	tokenFile := filepath.Join(t.TempDir(), "tokens")
+	if err := os.WriteFile(tokenFile, []byte("robot:operator:"+hashedWebAPITestToken(validWebAPITestToken)+"\n"), 0600); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+
+	tokens, err := loadWebAPITokens(tokenFile)
+	if err != nil {
+		t.Fatalf("loadWebAPITokens() error = %v", err)
+	}
+	token := tokens["robot"]
+	if token.Name != "robot" || token.Role != "operator" || token.Token != "" || len(token.TokenSHA256) != sha256.Size {
+		t.Fatalf("token = %#v, want parsed robot operator SHA-256 token", token)
+	}
+
+	source := newWebAuthTestSource(t, "monitor", "secret", "read-only")
+	source.webAPITokens = tokens
+	req := httptest.NewRequest(http.MethodGet, "/api/status", nil)
+	req.Header.Set("Authorization", "Bearer "+validWebAPITestToken)
+	rec := httptest.NewRecorder()
+	source.handleWebStatus(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d: %s", rec.Code, http.StatusOK, rec.Body.String())
+	}
 }
 
 func TestLoadWebAPITokensRejectsDuplicateTokenValue(t *testing.T) {
 	tokenFile := filepath.Join(t.TempDir(), "tokens")
 	data := []byte("readonly:read-only:" + validWebAPITestToken + "\nadmin:admin:" + validWebAPITestToken + "\n")
+	if err := os.WriteFile(tokenFile, data, 0600); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+
+	_, err := loadWebAPITokens(tokenFile)
+	if err == nil {
+		t.Fatal("loadWebAPITokens() error = nil, want duplicate token value error")
+	}
+	if !strings.Contains(err.Error(), "duplicate web API token value") {
+		t.Fatalf("loadWebAPITokens() error = %v, want duplicate token value error", err)
+	}
+	if strings.Contains(err.Error(), validWebAPITestToken) {
+		t.Fatalf("loadWebAPITokens() error leaked token value: %v", err)
+	}
+}
+
+func TestLoadWebAPITokensRejectsDuplicateHashedTokenValue(t *testing.T) {
+	tokenFile := filepath.Join(t.TempDir(), "tokens")
+	data := []byte("readonly:read-only:" + validWebAPITestToken + "\nadmin:admin:" + hashedWebAPITestToken(validWebAPITestToken) + "\n")
 	if err := os.WriteFile(tokenFile, data, 0600); err != nil {
 		t.Fatalf("WriteFile() error = %v", err)
 	}
@@ -1002,6 +1058,21 @@ func TestLoadWebAPITokensRejectsWeakTokenValue(t *testing.T) {
 	}
 	if strings.Contains(err.Error(), "secret-token") {
 		t.Fatalf("loadWebAPITokens() error leaked token value: %v", err)
+	}
+}
+
+func TestLoadWebAPITokensRejectsMalformedHashedTokenValue(t *testing.T) {
+	tokenFile := filepath.Join(t.TempDir(), "tokens")
+	if err := os.WriteFile(tokenFile, []byte("robot:operator:sha256:not-hex\n"), 0600); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+
+	_, err := loadWebAPITokens(tokenFile)
+	if err == nil {
+		t.Fatal("loadWebAPITokens() error = nil, want malformed hash error")
+	}
+	if !strings.Contains(err.Error(), "sha256:64 hex characters") {
+		t.Fatalf("loadWebAPITokens() error = %v, want malformed hash error", err)
 	}
 }
 

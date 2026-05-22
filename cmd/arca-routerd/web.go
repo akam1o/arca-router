@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"crypto/subtle"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -37,6 +38,7 @@ const webAuthRealm = `Basic realm="arca-router", charset="UTF-8"`
 const webDummyPasswordHash = "$argon2id$v=19$m=65536,t=3,p=4$AAAAAAAAAAAAAAAAAAAAAA$AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
 
 const webConfigEditBodyLimit = 1 << 20
+const webAPITokenSHA256Prefix = "sha256:"
 
 const nmsOperationalStatusSchemaVersion = "arca.nms.operational.v1"
 const nmsTelemetryCatalogSchemaVersion = "arca.nms.telemetry-catalog.v1"
@@ -412,9 +414,10 @@ type webAuthUser struct {
 }
 
 type webAPIToken struct {
-	Name  string
-	Token string
-	Role  string
+	Name        string
+	Token       string
+	TokenSHA256 []byte
+	Role        string
 }
 
 type webIndexData struct {
@@ -990,11 +993,12 @@ func loadWebAPITokens(path string) (map[string]webAPIToken, error) {
 		if _, exists := tokens[token.Name]; exists {
 			return nil, fmt.Errorf("duplicate web API token name %q on line %d", token.Name, lineNo+1)
 		}
-		if existingName, exists := tokenValues[token.Token]; exists {
+		tokenFingerprint := webAPITokenFingerprint(token)
+		if existingName, exists := tokenValues[tokenFingerprint]; exists {
 			return nil, fmt.Errorf("duplicate web API token value on line %d: already used by token %q", lineNo+1, existingName)
 		}
 		tokens[token.Name] = token
-		tokenValues[token.Token] = token.Name
+		tokenValues[tokenFingerprint] = token.Name
 	}
 	if len(tokens) == 0 {
 		return nil, fmt.Errorf("web API token file %s does not contain any tokens", path)
@@ -1012,23 +1016,50 @@ func parseWebAPITokenLine(rawLine string, lineNo int) (webAPIToken, bool, error)
 		return webAPIToken{}, false, fmt.Errorf("invalid web API token file line %d: expected name:role:token", lineNo)
 	}
 	token := webAPIToken{
-		Name:  strings.TrimSpace(parts[0]),
-		Role:  strings.TrimSpace(parts[1]),
-		Token: strings.TrimSpace(parts[2]),
+		Name: strings.TrimSpace(parts[0]),
+		Role: strings.TrimSpace(parts[1]),
 	}
+	rawToken := strings.TrimSpace(parts[2])
 	if token.Name == "" {
 		return webAPIToken{}, false, fmt.Errorf("invalid web API token file line %d: token name is required", lineNo)
 	}
 	if !webRoleCanRead(token.Role) {
 		return webAPIToken{}, false, fmt.Errorf("invalid web API token file line %d: invalid role %q", lineNo, token.Role)
 	}
-	if token.Token == "" {
+	if rawToken == "" {
 		return webAPIToken{}, false, fmt.Errorf("invalid web API token file line %d: token value is required", lineNo)
 	}
-	if err := security.ValidateWebAPIToken(token.Token); err != nil {
+	tokenValue, tokenSHA256, err := parseWebAPITokenValue(rawToken)
+	if err != nil {
 		return webAPIToken{}, false, fmt.Errorf("invalid web API token file line %d: %w", lineNo, err)
 	}
+	token.Token = tokenValue
+	token.TokenSHA256 = tokenSHA256
 	return token, true, nil
+}
+
+func parseWebAPITokenValue(rawToken string) (string, []byte, error) {
+	if strings.HasPrefix(strings.ToLower(rawToken), webAPITokenSHA256Prefix) {
+		rawHash := strings.TrimSpace(rawToken[len(webAPITokenSHA256Prefix):])
+		tokenSHA256, err := hex.DecodeString(rawHash)
+		if err != nil || len(tokenSHA256) != sha256.Size {
+			return "", nil, fmt.Errorf("web API token hash must be sha256:%d hex characters", sha256.Size*2)
+		}
+		return "", tokenSHA256, nil
+	}
+	if err := security.ValidateWebAPIToken(rawToken); err != nil {
+		return "", nil, err
+	}
+	tokenSHA256 := sha256.Sum256([]byte(rawToken))
+	return rawToken, tokenSHA256[:], nil
+}
+
+func webAPITokenFingerprint(token webAPIToken) string {
+	if len(token.TokenSHA256) == sha256.Size {
+		return hex.EncodeToString(token.TokenSHA256)
+	}
+	tokenSHA256 := sha256.Sum256([]byte(token.Token))
+	return hex.EncodeToString(tokenSHA256[:])
 }
 
 func startWebServer(ctx context.Context, listenAddr string, source metricsSource, log *logger.Logger) (<-chan error, error) {
@@ -1572,10 +1603,10 @@ func authenticateWebToken(r *http.Request, tokens map[string]webAPIToken) (strin
 	var matchedToken webAPIToken
 	matched := false
 	for name, token := range tokens {
-		if token.Token == "" {
+		if token.Token == "" && len(token.TokenSHA256) != sha256.Size {
 			continue
 		}
-		if constantTimeWebTokenEqual(presented, token.Token) {
+		if webAPITokenMatches(presented, token) {
 			matchedName = name
 			matchedToken = token
 			matched = true
@@ -1593,6 +1624,14 @@ func authenticateWebToken(r *http.Request, tokens map[string]webAPIToken) (strin
 		username = matchedName
 	}
 	return username, role, true
+}
+
+func webAPITokenMatches(presented string, token webAPIToken) bool {
+	if len(token.TokenSHA256) == sha256.Size {
+		presentedDigest := sha256.Sum256([]byte(presented))
+		return subtle.ConstantTimeCompare(presentedDigest[:], token.TokenSHA256) == 1
+	}
+	return token.Token != "" && constantTimeWebTokenEqual(presented, token.Token)
 }
 
 func constantTimeWebTokenEqual(a, b string) bool {
