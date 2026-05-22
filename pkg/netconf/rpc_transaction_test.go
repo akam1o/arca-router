@@ -161,7 +161,7 @@ func TestValidateStartupDatastoreRejected(t *testing.T) {
 
 func TestValidateRunningDatastoreReadError(t *testing.T) {
 	reply := validateRPC(t, &validateDatastore{
-		runningErr: errors.New("backend unavailable"),
+		runningErr: errors.New("sqlite /var/lib/arca-router/config.db unavailable"),
 	}, "<source><running/></source>")
 
 	if len(reply.Errors) != 1 {
@@ -169,6 +169,12 @@ func TestValidateRunningDatastoreReadError(t *testing.T) {
 	}
 	if reply.Errors[0].ErrorTag != ErrorTagOperationFailed {
 		t.Fatalf("validate running read error tag = %s, want %s", reply.Errors[0].ErrorTag, ErrorTagOperationFailed)
+	}
+	if got := reply.Errors[0].ErrorMessage; got != "failed to retrieve running config for validate" {
+		t.Fatalf("validate running read message = %q, want redacted datastore failure", got)
+	}
+	if strings.Contains(reply.Errors[0].ErrorMessage, "/var/lib/arca-router/config.db") {
+		t.Fatalf("validate running read message leaked backend path: %q", reply.Errors[0].ErrorMessage)
 	}
 }
 
@@ -239,7 +245,7 @@ func TestCommitConfirmedOptionsRejectedAsUnsupported(t *testing.T) {
 
 func TestCommitCandidateReadErrorReturnsDatastoreError(t *testing.T) {
 	reply := commitRPC(t, &validateDatastore{
-		candidateErr: errors.New("backend unavailable"),
+		candidateErr: errors.New("sqlite /var/lib/arca-router/config.db unavailable"),
 		lockInfo: &datastore.LockInfo{
 			IsLocked:  true,
 			SessionID: "session-1",
@@ -256,8 +262,11 @@ func TestCommitCandidateReadErrorReturnsDatastoreError(t *testing.T) {
 	if err.ErrorAppTag != "datastore-error" {
 		t.Fatalf("commit candidate read app-tag = %q, want datastore-error", err.ErrorAppTag)
 	}
-	if !strings.Contains(err.ErrorMessage, "failed to read candidate config") {
-		t.Fatalf("commit candidate read message = %q, want read failure detail", err.ErrorMessage)
+	if err.ErrorMessage != "failed to read candidate config" {
+		t.Fatalf("commit candidate read message = %q, want redacted read failure", err.ErrorMessage)
+	}
+	if strings.Contains(err.ErrorMessage, "/var/lib/arca-router/config.db") {
+		t.Fatalf("commit candidate read message leaked backend path: %q", err.ErrorMessage)
 	}
 }
 
@@ -281,8 +290,11 @@ func TestCommitDatastoreFailureReturnsDatastoreError(t *testing.T) {
 	if err.ErrorAppTag != "datastore-error" {
 		t.Fatalf("commit datastore app-tag = %q, want datastore-error", err.ErrorAppTag)
 	}
-	if !strings.Contains(err.ErrorMessage, "failed to insert commit history") {
-		t.Fatalf("commit datastore message = %q, want datastore failure detail", err.ErrorMessage)
+	if err.ErrorMessage != "commit failed" {
+		t.Fatalf("commit datastore message = %q, want redacted datastore failure", err.ErrorMessage)
+	}
+	if strings.Contains(err.ErrorMessage, "disk full") {
+		t.Fatalf("commit datastore message leaked backend detail: %q", err.ErrorMessage)
 	}
 }
 

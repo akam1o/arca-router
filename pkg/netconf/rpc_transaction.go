@@ -43,7 +43,7 @@ func (s *Server) handleCommit(ctx context.Context, sess *Session, rpc *RPC) *RPC
 			return NewErrorReply(rpc.MessageID, ErrOperationFailed("no candidate configuration to commit"))
 		}
 		log.Printf("[NETCONF] Failed to read candidate config for commit session %s: %v", sess.ID, err)
-		return NewErrorReply(rpc.MessageID, ErrDatastoreError(fmt.Sprintf("failed to read candidate config: %v", err)))
+		return NewErrorReply(rpc.MessageID, ErrDatastoreError("failed to read candidate config"))
 	}
 	if candidate == nil {
 		log.Printf("[NETCONF] No candidate config to commit for session %s", sess.ID)
@@ -98,7 +98,7 @@ func (s *Server) handleCommit(ctx context.Context, sess *Session, rpc *RPC) *RPC
 func commitFailureError(err error) *RPCError {
 	var dsErr *datastore.Error
 	if errors.As(err, &dsErr) {
-		return ErrDatastoreError(fmt.Sprintf("commit failed: %v", err))
+		return ErrDatastoreError("commit failed")
 	}
 	return ErrBackendValidationFailed(fmt.Sprintf("commit failed: %v", err))
 }
@@ -138,7 +138,7 @@ func (s *Server) handleDiscardChanges(ctx context.Context, sess *Session, rpc *R
 	// Delete candidate (idempotent)
 	if err := s.datastore.DeleteCandidate(ctx, sess.ID); err != nil {
 		log.Printf("[NETCONF] Discard changes failed for session %s: %v", sess.ID, err)
-		return NewErrorReply(rpc.MessageID, ErrDatastoreError(fmt.Sprintf("failed to discard candidate: %v", err)))
+		return NewErrorReply(rpc.MessageID, ErrDatastoreError("failed to discard candidate"))
 	}
 
 	log.Printf("[NETCONF] Candidate discarded for session %s", sess.ID)

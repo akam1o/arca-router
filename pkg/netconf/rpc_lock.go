@@ -65,7 +65,7 @@ func (s *Server) handleLock(ctx context.Context, sess *Session, rpc *RPC) *RPCRe
 			return NewErrorReply(rpc.MessageID, ErrLockDeniedForLock(target, ownerNumericID))
 		}
 
-		return NewErrorReply(rpc.MessageID, ErrDatastoreError(fmt.Sprintf("failed to acquire lock on %s: %v", target, err)))
+		return NewErrorReply(rpc.MessageID, ErrDatastoreError(fmt.Sprintf("failed to acquire lock on %s", target)))
 	}
 
 	log.Printf("[NETCONF] Lock acquired on %s by session %s (user: %s)", target, sess.ID, sess.Username)
@@ -105,7 +105,7 @@ func (s *Server) handleUnlock(ctx context.Context, sess *Session, rpc *RPC) *RPC
 	lockInfo, err := s.datastore.GetLockInfo(ctx, target)
 	if err != nil {
 		log.Printf("[NETCONF] Failed to get lock info for %s: %v", target, err)
-		return NewErrorReply(rpc.MessageID, ErrDatastoreError(fmt.Sprintf("failed to check lock status: %v", err)))
+		return NewErrorReply(rpc.MessageID, ErrDatastoreError("failed to check lock status"))
 	}
 
 	if lockInfo == nil || !lockInfo.IsLocked {
@@ -122,7 +122,7 @@ func (s *Server) handleUnlock(ctx context.Context, sess *Session, rpc *RPC) *RPC
 	// Release lock
 	if err := s.datastore.ReleaseLock(ctx, target, sess.ID); err != nil {
 		log.Printf("[NETCONF] Lock release failed for %s by session %s: %v", target, sess.ID, err)
-		return NewErrorReply(rpc.MessageID, ErrDatastoreError(fmt.Sprintf("failed to release lock on %s: %v", target, err)))
+		return NewErrorReply(rpc.MessageID, ErrDatastoreError(fmt.Sprintf("failed to release lock on %s", target)))
 	}
 
 	log.Printf("[NETCONF] Lock released on %s by session %s", target, sess.ID)
