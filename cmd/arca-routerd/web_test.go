@@ -1681,6 +1681,69 @@ func TestWebConfigWriteEndpointRejectsReadOnlyToken(t *testing.T) {
 	}
 }
 
+func TestWebConfigValidateEndpointRedactsInternalErrors(t *testing.T) {
+	source := newWebAuthTestSource(t, "operator", "secret", "operator")
+	source.configAPI = &webConfigEditErrorTestAPI{
+		createErr: errors.New("session store /var/lib/arca/session.db failed"),
+	}
+
+	req := newWebJSONTestRequest(http.MethodPost, "/api/config/validate", `{"config_text":"set system host-name edge02"}`)
+	req.SetBasicAuth("operator", "secret")
+	rec := httptest.NewRecorder()
+	source.handleWebConfigValidate(rec, req)
+
+	requireWebJSONInternalError(t, rec, "session store", "/var/lib/arca/session.db")
+}
+
+func TestWebConfigCommitEndpointRedactsInternalErrors(t *testing.T) {
+	source := newWebAuthTestSource(t, "operator", "secret", "operator")
+	source.configAPI = &webConfigEditErrorTestAPI{
+		commitErr: errors.New("persist commit /var/lib/arca/config.db failed"),
+	}
+
+	req := newWebJSONTestRequest(http.MethodPost, "/api/config/commit", `{"config_text":"set system host-name edge02"}`)
+	req.SetBasicAuth("operator", "secret")
+	rec := httptest.NewRecorder()
+	source.handleWebConfigCommit(rec, req)
+
+	requireWebJSONInternalError(t, rec, "persist commit", "/var/lib/arca/config.db")
+}
+
+func TestWebConfigCommitEndpointKeepsBadRequestForNoChanges(t *testing.T) {
+	source := newWebAuthTestSource(t, "operator", "secret", "operator")
+	source.configAPI = &webConfigEditErrorTestAPI{
+		commitErr: errors.New("no configuration changes to commit"),
+	}
+
+	req := newWebJSONTestRequest(http.MethodPost, "/api/config/commit", `{"config_text":"set system host-name edge01"}`)
+	req.SetBasicAuth("operator", "secret")
+	rec := httptest.NewRecorder()
+	source.handleWebConfigCommit(rec, req)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want %d: %s", rec.Code, http.StatusBadRequest, rec.Body.String())
+	}
+	if !strings.Contains(rec.Body.String(), "no configuration changes to commit") {
+		t.Fatalf("response body = %q, want no-changes message", rec.Body.String())
+	}
+}
+
+func TestWebConfigCommitEndpointReportsUnavailableConfigAPI(t *testing.T) {
+	source := newWebAuthTestSource(t, "operator", "secret", "operator")
+
+	req := newWebJSONTestRequest(http.MethodPost, "/api/config/commit", `{"config_text":"set system host-name edge02"}`)
+	req.SetBasicAuth("operator", "secret")
+	rec := httptest.NewRecorder()
+	source.handleWebConfigCommit(rec, req)
+
+	if rec.Code != http.StatusServiceUnavailable {
+		t.Fatalf("status = %d, want %d: %s", rec.Code, http.StatusServiceUnavailable, rec.Body.String())
+	}
+	if !strings.Contains(rec.Body.String(), errWebConfigAPIUnavailable.Error()) {
+		t.Fatalf("response body = %q, want API unavailable message", rec.Body.String())
+	}
+}
+
 func TestWebConfigHistoryEndpointUsesConfigAPI(t *testing.T) {
 	source := newWebAuthTestSource(t, "monitor", "secret", "read-only")
 	source.configAPI = webHistoryTestAPI{history: []nbgrpc.CommitInfo{
@@ -1947,6 +2010,57 @@ func newWebConfigAPITestSource(t *testing.T, role string) (metricsSource, *engin
 		engine:    eng,
 		configAPI: configAPI,
 	}, eng
+}
+
+type webConfigEditErrorTestAPI struct {
+	webConfigAPI
+	createErr   error
+	acquireErr  error
+	replaceErr  error
+	validateErr error
+	diffErr     error
+	commitErr   error
+}
+
+func (a *webConfigEditErrorTestAPI) CreateSession(ctx context.Context, user string) (string, error) {
+	if a.createErr != nil {
+		return "", a.createErr
+	}
+	return "session-1", nil
+}
+
+func (a *webConfigEditErrorTestAPI) CloseSession(ctx context.Context, sessionID string) error {
+	return nil
+}
+
+func (a *webConfigEditErrorTestAPI) AcquireLock(ctx context.Context, sessionID, user string) error {
+	return a.acquireErr
+}
+
+func (a *webConfigEditErrorTestAPI) ReleaseLock(ctx context.Context, sessionID string) error {
+	return nil
+}
+
+func (a *webConfigEditErrorTestAPI) ReplaceCandidate(ctx context.Context, sessionID, configText string) error {
+	return a.replaceErr
+}
+
+func (a *webConfigEditErrorTestAPI) ValidateCandidate(ctx context.Context, sessionID string) error {
+	return a.validateErr
+}
+
+func (a *webConfigEditErrorTestAPI) Diff(ctx context.Context, sessionID string) (string, bool, error) {
+	if a.diffErr != nil {
+		return "", false, a.diffErr
+	}
+	return "- set system host-name edge01\n+ set system host-name edge02\n", true, nil
+}
+
+func (a *webConfigEditErrorTestAPI) Commit(ctx context.Context, sessionID, user, message string) (string, uint64, error) {
+	if a.commitErr != nil {
+		return "", 0, a.commitErr
+	}
+	return "commit-1", 43, nil
 }
 
 type webHistoryTestAPI struct {

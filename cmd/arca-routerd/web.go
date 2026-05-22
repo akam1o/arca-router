@@ -62,6 +62,7 @@ const (
 var (
 	errNMSTelemetrySnapshotTooLarge      = errors.New("nms telemetry snapshot payload budget exceeded")
 	errNMSTelemetrySnapshotTooManyEvents = errors.New("nms telemetry snapshot event budget exceeded")
+	errWebConfigAPIUnavailable           = errors.New("configuration API is unavailable")
 )
 
 type webConfigAPI interface {
@@ -1374,7 +1375,7 @@ func (s metricsSource) handleWebConfigValidate(w http.ResponseWriter, r *http.Re
 	}
 	diff, hasChanges, err := s.validateWebConfig(r.Context(), username, req.ConfigText)
 	if err != nil {
-		writeWebJSONError(w, http.StatusBadRequest, err.Error())
+		s.writeWebConfigEditError(w, "validate config", err)
 		return
 	}
 	writeWebJSON(w, http.StatusOK, webConfigValidateResponse{
@@ -1399,7 +1400,7 @@ func (s metricsSource) handleWebConfigCommit(w http.ResponseWriter, r *http.Requ
 	}
 	commitID, version, err := s.commitWebConfig(r.Context(), username, req.ConfigText, req.Message)
 	if err != nil {
-		writeWebJSONError(w, http.StatusBadRequest, err.Error())
+		s.writeWebConfigEditError(w, "commit config", err)
 		return
 	}
 	writeWebJSON(w, http.StatusOK, webConfigCommitResponse{
@@ -1488,7 +1489,7 @@ func (s metricsSource) runningConfig(redactSecrets bool) (webConfig, error) {
 func (s metricsSource) validateWebConfig(ctx context.Context, username, configText string) (string, bool, error) {
 	api := s.configAPI
 	if api == nil {
-		return "", false, fmt.Errorf("configuration API is unavailable")
+		return "", false, errWebConfigAPIUnavailable
 	}
 	if strings.TrimSpace(configText) == "" {
 		return "", false, fmt.Errorf("config_text is required")
@@ -1514,7 +1515,7 @@ func (s metricsSource) validateWebConfig(ctx context.Context, username, configTe
 func (s metricsSource) commitWebConfig(ctx context.Context, username, configText, message string) (string, uint64, error) {
 	api := s.configAPI
 	if api == nil {
-		return "", 0, fmt.Errorf("configuration API is unavailable")
+		return "", 0, errWebConfigAPIUnavailable
 	}
 	if strings.TrimSpace(configText) == "" {
 		return "", 0, fmt.Errorf("config_text is required")
@@ -1580,6 +1581,59 @@ func (s metricsSource) writeWebInternalError(w http.ResponseWriter, operation st
 func (s metricsSource) writeWebJSONInternalError(w http.ResponseWriter, operation string, err error) {
 	s.logWebInternalError(operation, err)
 	writeWebJSONError(w, http.StatusInternalServerError, webInternalServerErrorMessage)
+}
+
+func (s metricsSource) writeWebConfigEditError(w http.ResponseWriter, operation string, err error) {
+	status, message := webConfigEditErrorResponse(err)
+	if status == http.StatusInternalServerError {
+		s.writeWebJSONInternalError(w, operation, err)
+		return
+	}
+	writeWebJSONError(w, status, message)
+}
+
+func webConfigEditErrorResponse(err error) (int, string) {
+	if errors.Is(err, errWebConfigAPIUnavailable) {
+		return http.StatusServiceUnavailable, errWebConfigAPIUnavailable.Error()
+	}
+	if errors.Is(err, context.DeadlineExceeded) || errors.Is(err, context.Canceled) {
+		return http.StatusGatewayTimeout, "configuration operation timed out"
+	}
+	message := err.Error()
+	switch {
+	case webConfigEditErrorIsConflict(message):
+		return http.StatusConflict, "configuration candidate is unavailable"
+	case webConfigEditErrorIsBadRequest(message):
+		return http.StatusBadRequest, message
+	default:
+		return http.StatusInternalServerError, webInternalServerErrorMessage
+	}
+}
+
+func webConfigEditErrorIsConflict(message string) bool {
+	return strings.Contains(message, "candidate lock held") ||
+		strings.Contains(message, "candidate configuration is stale")
+}
+
+func webConfigEditErrorIsBadRequest(message string) bool {
+	switch {
+	case message == "config_text is required":
+		return true
+	case strings.HasPrefix(message, "parse replacement config:"):
+		return true
+	case strings.HasPrefix(message, "parse candidate config:"):
+		return true
+	case strings.HasPrefix(message, "config validation failed:"):
+		return true
+	case message == "no candidate configuration to validate":
+		return true
+	case message == "no candidate configuration to commit":
+		return true
+	case message == "no configuration changes to commit":
+		return true
+	default:
+		return false
+	}
 }
 
 func (s metricsSource) logWebInternalError(operation string, err error) {
