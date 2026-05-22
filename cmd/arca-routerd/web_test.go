@@ -959,6 +959,10 @@ func hashedWebAPITestToken(token string) string {
 	return webAPITokenSHA256Prefix + hex.EncodeToString(tokenSHA256[:])
 }
 
+func hashedWebAPITestTokenNotAfter(token string, notAfter time.Time) string {
+	return hashedWebAPITestToken(token) + webAPITokenNotAfterPrefix + notAfter.UTC().Format(time.RFC3339)
+}
+
 func TestLoadWebAPITokensParsesTokenFile(t *testing.T) {
 	tokenFile := filepath.Join(t.TempDir(), "tokens")
 	if err := os.WriteFile(tokenFile, []byte("# comment\nrobot:operator:"+validWebAPITestToken+"\n"), 0600); err != nil {
@@ -1002,6 +1006,57 @@ func TestLoadWebAPITokensParsesHashedTokenFile(t *testing.T) {
 
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d, want %d: %s", rec.Code, http.StatusOK, rec.Body.String())
+	}
+}
+
+func TestLoadWebAPITokensParsesHashedTokenNotAfter(t *testing.T) {
+	tokenFile := filepath.Join(t.TempDir(), "tokens")
+	notAfter := time.Now().UTC().Add(time.Hour).Truncate(time.Second)
+	if err := os.WriteFile(tokenFile, []byte("robot:operator:"+hashedWebAPITestTokenNotAfter(validWebAPITestToken, notAfter)+"\n"), 0600); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+
+	tokens, err := loadWebAPITokens(tokenFile)
+	if err != nil {
+		t.Fatalf("loadWebAPITokens() error = %v", err)
+	}
+	token := tokens["robot"]
+	if !token.NotAfter.Equal(notAfter) {
+		t.Fatalf("token.NotAfter = %s, want %s", token.NotAfter, notAfter)
+	}
+
+	source := newWebAuthTestSource(t, "monitor", "secret", "read-only")
+	source.webAPITokens = tokens
+	req := httptest.NewRequest(http.MethodGet, "/api/status", nil)
+	req.Header.Set("Authorization", "Bearer "+validWebAPITestToken)
+	rec := httptest.NewRecorder()
+	source.handleWebStatus(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d: %s", rec.Code, http.StatusOK, rec.Body.String())
+	}
+}
+
+func TestWebEndpointRejectsExpiredHashedToken(t *testing.T) {
+	tokenFile := filepath.Join(t.TempDir(), "tokens")
+	notAfter := time.Now().UTC().Add(-time.Hour)
+	if err := os.WriteFile(tokenFile, []byte("robot:operator:"+hashedWebAPITestTokenNotAfter(validWebAPITestToken, notAfter)+"\n"), 0600); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+	tokens, err := loadWebAPITokens(tokenFile)
+	if err != nil {
+		t.Fatalf("loadWebAPITokens() error = %v", err)
+	}
+
+	source := newWebAuthTestSource(t, "monitor", "secret", "read-only")
+	source.webAPITokens = tokens
+	req := httptest.NewRequest(http.MethodGet, "/api/status", nil)
+	req.Header.Set("Authorization", "Bearer "+validWebAPITestToken)
+	rec := httptest.NewRecorder()
+	source.handleWebStatus(rec, req)
+
+	if rec.Code != http.StatusUnauthorized {
+		t.Fatalf("status = %d, want %d", rec.Code, http.StatusUnauthorized)
 	}
 }
 
@@ -1073,6 +1128,36 @@ func TestLoadWebAPITokensRejectsMalformedHashedTokenValue(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "sha256:64 hex characters") {
 		t.Fatalf("loadWebAPITokens() error = %v, want malformed hash error", err)
+	}
+}
+
+func TestLoadWebAPITokensRejectsMalformedHashedTokenNotAfter(t *testing.T) {
+	tokenFile := filepath.Join(t.TempDir(), "tokens")
+	if err := os.WriteFile(tokenFile, []byte("robot:operator:"+hashedWebAPITestToken(validWebAPITestToken)+webAPITokenNotAfterPrefix+"not-a-time\n"), 0600); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+
+	_, err := loadWebAPITokens(tokenFile)
+	if err == nil {
+		t.Fatal("loadWebAPITokens() error = nil, want malformed not-after error")
+	}
+	if !strings.Contains(err.Error(), "not-after must be RFC3339") {
+		t.Fatalf("loadWebAPITokens() error = %v, want malformed not-after error", err)
+	}
+}
+
+func TestLoadWebAPITokensRejectsUnknownHashedTokenSuffix(t *testing.T) {
+	tokenFile := filepath.Join(t.TempDir(), "tokens")
+	if err := os.WriteFile(tokenFile, []byte("robot:operator:"+hashedWebAPITestToken(validWebAPITestToken)+":expires=2026-01-01T00:00:00Z\n"), 0600); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+
+	_, err := loadWebAPITokens(tokenFile)
+	if err == nil {
+		t.Fatal("loadWebAPITokens() error = nil, want unknown suffix error")
+	}
+	if !strings.Contains(err.Error(), "hash suffix") {
+		t.Fatalf("loadWebAPITokens() error = %v, want unknown suffix error", err)
 	}
 }
 

@@ -39,6 +39,7 @@ const webDummyPasswordHash = "$argon2id$v=19$m=65536,t=3,p=4$AAAAAAAAAAAAAAAAAAA
 
 const webConfigEditBodyLimit = 1 << 20
 const webAPITokenSHA256Prefix = "sha256:"
+const webAPITokenNotAfterPrefix = ":not-after="
 
 const nmsOperationalStatusSchemaVersion = "arca.nms.operational.v1"
 const nmsTelemetryCatalogSchemaVersion = "arca.nms.telemetry-catalog.v1"
@@ -417,6 +418,7 @@ type webAPIToken struct {
 	Name        string
 	Token       string
 	TokenSHA256 []byte
+	NotAfter    time.Time
 	Role        string
 }
 
@@ -1029,29 +1031,53 @@ func parseWebAPITokenLine(rawLine string, lineNo int) (webAPIToken, bool, error)
 	if rawToken == "" {
 		return webAPIToken{}, false, fmt.Errorf("invalid web API token file line %d: token value is required", lineNo)
 	}
-	tokenValue, tokenSHA256, err := parseWebAPITokenValue(rawToken)
+	tokenValue, tokenSHA256, notAfter, err := parseWebAPITokenValue(rawToken)
 	if err != nil {
 		return webAPIToken{}, false, fmt.Errorf("invalid web API token file line %d: %w", lineNo, err)
 	}
 	token.Token = tokenValue
 	token.TokenSHA256 = tokenSHA256
+	token.NotAfter = notAfter
 	return token, true, nil
 }
 
-func parseWebAPITokenValue(rawToken string) (string, []byte, error) {
+func parseWebAPITokenValue(rawToken string) (string, []byte, time.Time, error) {
 	if strings.HasPrefix(strings.ToLower(rawToken), webAPITokenSHA256Prefix) {
-		rawHash := strings.TrimSpace(rawToken[len(webAPITokenSHA256Prefix):])
+		rawHash, notAfter, err := parseWebAPITokenHash(rawToken)
+		if err != nil {
+			return "", nil, time.Time{}, err
+		}
 		tokenSHA256, err := hex.DecodeString(rawHash)
 		if err != nil || len(tokenSHA256) != sha256.Size {
-			return "", nil, fmt.Errorf("web API token hash must be sha256:%d hex characters", sha256.Size*2)
+			return "", nil, time.Time{}, fmt.Errorf("web API token hash must be sha256:%d hex characters", sha256.Size*2)
 		}
-		return "", tokenSHA256, nil
+		return "", tokenSHA256, notAfter, nil
 	}
 	if err := security.ValidateWebAPIToken(rawToken); err != nil {
-		return "", nil, err
+		return "", nil, time.Time{}, err
 	}
 	tokenSHA256 := sha256.Sum256([]byte(rawToken))
-	return rawToken, tokenSHA256[:], nil
+	return rawToken, tokenSHA256[:], time.Time{}, nil
+}
+
+func parseWebAPITokenHash(rawToken string) (string, time.Time, error) {
+	raw := strings.TrimSpace(rawToken[len(webAPITokenSHA256Prefix):])
+	if len(raw) < sha256.Size*2 {
+		return "", time.Time{}, fmt.Errorf("web API token hash must be sha256:%d hex characters", sha256.Size*2)
+	}
+	rawHash := raw[:sha256.Size*2]
+	suffix := raw[sha256.Size*2:]
+	if suffix == "" {
+		return rawHash, time.Time{}, nil
+	}
+	if !strings.HasPrefix(suffix, webAPITokenNotAfterPrefix) {
+		return "", time.Time{}, fmt.Errorf("web API token hash suffix must be :not-after=<RFC3339>")
+	}
+	notAfter, err := time.Parse(time.RFC3339, strings.TrimPrefix(suffix, webAPITokenNotAfterPrefix))
+	if err != nil {
+		return "", time.Time{}, fmt.Errorf("web API token not-after must be RFC3339")
+	}
+	return rawHash, notAfter, nil
 }
 
 func webAPITokenFingerprint(token webAPIToken) string {
@@ -1627,6 +1653,9 @@ func authenticateWebToken(r *http.Request, tokens map[string]webAPIToken) (strin
 }
 
 func webAPITokenMatches(presented string, token webAPIToken) bool {
+	if !token.NotAfter.IsZero() && !time.Now().Before(token.NotAfter) {
+		return false
+	}
 	if len(token.TokenSHA256) == sha256.Size {
 		presentedDigest := sha256.Sum256([]byte(presented))
 		return subtle.ConstantTimeCompare(presentedDigest[:], token.TokenSHA256) == 1

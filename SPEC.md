@@ -1000,6 +1000,8 @@ Common options:
 --frr-apply-mode <mode>    FRR backend: transactional or file (default: transactional)
 --metrics-listen <addr>    Prometheus listen address; overrides system services prometheus config
 --web-listen <addr>        Web UI listen address; overrides system services web-ui config
+--web-api-token-file <path>
+                           Web/NMS API token file (name:role:token or name:role:sha256:<hex>[:not-after=<RFC3339>])
 --snmp-listen <addr>       SNMPv2c UDP listen address; disabled when empty
 --snmp-community <value>   SNMPv2c read-only community; overrides system services snmp config; required when SNMP is enabled
 --mock-vpp                 Use mock VPP client for tests
