@@ -1710,12 +1710,17 @@ func TestWebConfigCommitEndpointRedactsInternalErrors(t *testing.T) {
 }
 
 func TestWebConfigCommitEndpointKeepsBadRequestForNoChanges(t *testing.T) {
-	source := newWebAuthTestSource(t, "operator", "secret", "operator")
-	source.configAPI = &webConfigEditErrorTestAPI{
-		commitErr: errors.New("no configuration changes to commit"),
+	source, _ := newWebConfigAPITestSource(t, "operator")
+	cfg, err := source.runningConfig(false)
+	if err != nil {
+		t.Fatalf("runningConfig() error = %v", err)
+	}
+	body, err := json.Marshal(webConfigCommitRequest{ConfigText: cfg.ConfigText})
+	if err != nil {
+		t.Fatalf("Marshal() error = %v", err)
 	}
 
-	req := newWebJSONTestRequest(http.MethodPost, "/api/config/commit", `{"config_text":"set system host-name edge01"}`)
+	req := newWebJSONTestRequest(http.MethodPost, "/api/config/commit", string(body))
 	req.SetBasicAuth("operator", "secret")
 	rec := httptest.NewRecorder()
 	source.handleWebConfigCommit(rec, req)

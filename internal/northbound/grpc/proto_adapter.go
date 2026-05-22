@@ -3,12 +3,16 @@ package grpc
 import (
 	"context"
 	"crypto/tls"
+	"errors"
 	"strings"
 	"time"
 
 	apiv1 "github.com/akam1o/arca-router/api/v1"
+	"github.com/akam1o/arca-router/internal/engine"
+	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/peer"
+	"google.golang.org/grpc/status"
 )
 
 type configServiceAdapter struct {
@@ -37,14 +41,14 @@ func (a *configServiceAdapter) GetCandidate(ctx context.Context, req *apiv1.GetC
 
 func (a *configServiceAdapter) EditCandidate(ctx context.Context, req *apiv1.EditCandidateRequest) (*apiv1.EditCandidateResponse, error) {
 	if err := a.server.EditCandidate(ctx, req.GetSessionId(), req.GetConfigText()); err != nil {
-		return nil, err
+		return nil, configEditStatusError(err)
 	}
 	return &apiv1.EditCandidateResponse{}, nil
 }
 
 func (a *configServiceAdapter) ReplaceCandidate(ctx context.Context, req *apiv1.ReplaceCandidateRequest) (*apiv1.ReplaceCandidateResponse, error) {
 	if err := a.server.ReplaceCandidate(ctx, req.GetSessionId(), req.GetConfigText()); err != nil {
-		return nil, err
+		return nil, configEditStatusError(err)
 	}
 	return &apiv1.ReplaceCandidateResponse{}, nil
 }
@@ -52,14 +56,14 @@ func (a *configServiceAdapter) ReplaceCandidate(ctx context.Context, req *apiv1.
 func (a *configServiceAdapter) Commit(ctx context.Context, req *apiv1.CommitRequest) (*apiv1.CommitResponse, error) {
 	commitID, version, err := a.server.Commit(ctx, req.GetSessionId(), grpcRequestUser(ctx, req.GetUser()), req.GetMessage())
 	if err != nil {
-		return nil, err
+		return nil, configEditStatusError(err)
 	}
 	return &apiv1.CommitResponse{CommitId: commitID, Version: version}, nil
 }
 
 func (a *configServiceAdapter) ValidateCandidate(ctx context.Context, req *apiv1.ValidateCandidateRequest) (*apiv1.ValidateCandidateResponse, error) {
 	if err := a.server.ValidateCandidate(ctx, req.GetSessionId()); err != nil {
-		return nil, err
+		return nil, configEditStatusError(err)
 	}
 	return &apiv1.ValidateCandidateResponse{}, nil
 }
@@ -85,6 +89,21 @@ func (a *configServiceAdapter) Diff(ctx context.Context, req *apiv1.DiffRequest)
 		return nil, err
 	}
 	return &apiv1.DiffResponse{DiffText: diffText, HasChanges: hasChanges}, nil
+}
+
+func configEditStatusError(err error) error {
+	switch {
+	case errors.Is(err, ErrConfigInput), errors.Is(err, engine.ErrConfigValidation):
+		return status.Error(codes.InvalidArgument, err.Error())
+	case errors.Is(err, ErrCandidateConflict):
+		return status.Error(codes.FailedPrecondition, "configuration candidate is unavailable")
+	case errors.Is(err, context.DeadlineExceeded):
+		return status.Error(codes.DeadlineExceeded, "configuration operation timed out")
+	case errors.Is(err, context.Canceled):
+		return status.Error(codes.Canceled, "configuration operation canceled")
+	default:
+		return status.Error(codes.Internal, "internal server error")
+	}
 }
 
 func (a *configServiceAdapter) ListHistory(ctx context.Context, req *apiv1.ListHistoryRequest) (*apiv1.ListHistoryResponse, error) {

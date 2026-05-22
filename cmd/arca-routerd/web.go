@@ -22,6 +22,7 @@ import (
 	"time"
 
 	"github.com/akam1o/arca-router/internal/compat"
+	internalengine "github.com/akam1o/arca-router/internal/engine"
 	"github.com/akam1o/arca-router/internal/model"
 	nbgrpc "github.com/akam1o/arca-router/internal/northbound/grpc"
 	sbfrr "github.com/akam1o/arca-router/internal/southbound/frr"
@@ -30,6 +31,8 @@ import (
 	"github.com/akam1o/arca-router/pkg/logger"
 	pkgnetconf "github.com/akam1o/arca-router/pkg/netconf"
 	"github.com/akam1o/arca-router/pkg/security"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 )
 
 const defaultWebUIPort = 8080
@@ -1599,41 +1602,35 @@ func webConfigEditErrorResponse(err error) (int, string) {
 	if errors.Is(err, context.DeadlineExceeded) || errors.Is(err, context.Canceled) {
 		return http.StatusGatewayTimeout, "configuration operation timed out"
 	}
+	if grpcStatus := status.Code(err); grpcStatus != codes.Unknown {
+		switch grpcStatus {
+		case codes.InvalidArgument:
+			return http.StatusBadRequest, status.Convert(err).Message()
+		case codes.FailedPrecondition, codes.Aborted:
+			return http.StatusConflict, "configuration candidate is unavailable"
+		case codes.Unavailable:
+			return http.StatusServiceUnavailable, "configuration API is unavailable"
+		case codes.DeadlineExceeded, codes.Canceled:
+			return http.StatusGatewayTimeout, "configuration operation timed out"
+		}
+	}
+	switch {
+	case errors.Is(err, nbgrpc.ErrCandidateConflict):
+		return http.StatusConflict, "configuration candidate is unavailable"
+	case errors.Is(err, nbgrpc.ErrConfigInput), errors.Is(err, internalengine.ErrConfigValidation):
+		return http.StatusBadRequest, err.Error()
+	}
 	message := err.Error()
 	switch {
-	case webConfigEditErrorIsConflict(message):
-		return http.StatusConflict, "configuration candidate is unavailable"
-	case webConfigEditErrorIsBadRequest(message):
+	case webConfigEditLegacyErrorIsBadRequest(message):
 		return http.StatusBadRequest, message
 	default:
 		return http.StatusInternalServerError, webInternalServerErrorMessage
 	}
 }
 
-func webConfigEditErrorIsConflict(message string) bool {
-	return strings.Contains(message, "candidate lock held") ||
-		strings.Contains(message, "candidate configuration is stale")
-}
-
-func webConfigEditErrorIsBadRequest(message string) bool {
-	switch {
-	case message == "config_text is required":
-		return true
-	case strings.HasPrefix(message, "parse replacement config:"):
-		return true
-	case strings.HasPrefix(message, "parse candidate config:"):
-		return true
-	case strings.HasPrefix(message, "config validation failed:"):
-		return true
-	case message == "no candidate configuration to validate":
-		return true
-	case message == "no candidate configuration to commit":
-		return true
-	case message == "no configuration changes to commit":
-		return true
-	default:
-		return false
-	}
+func webConfigEditLegacyErrorIsBadRequest(message string) bool {
+	return message == "config_text is required"
 }
 
 func (s metricsSource) logWebInternalError(operation string, err error) {

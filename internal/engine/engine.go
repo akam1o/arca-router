@@ -15,6 +15,20 @@ import (
 	"github.com/akam1o/arca-router/internal/model"
 )
 
+var ErrConfigValidation = errors.New("configuration validation error")
+
+type configValidationError struct {
+	cause error
+}
+
+func (e configValidationError) Error() string {
+	return fmt.Sprintf("config validation failed: %v", e.cause)
+}
+
+func (e configValidationError) Unwrap() []error {
+	return []error{ErrConfigValidation, e.cause}
+}
+
 // Engine is the central configuration engine. It holds the current running
 // configuration and coordinates diff computation and atomic application
 // of changes across all southbound plugins.
@@ -107,7 +121,7 @@ func (e *Engine) Validate(ctx context.Context, candidate *model.RouterConfig) er
 		return fmt.Errorf("configuration is nil")
 	}
 	if err := candidate.Validate(); err != nil {
-		return fmt.Errorf("config validation failed: %w", err)
+		return configValidationError{cause: err}
 	}
 
 	e.mu.RLock()
@@ -141,7 +155,7 @@ func (e *Engine) Apply(ctx context.Context, candidate *model.RouterConfig, autho
 
 	// Validate the candidate config
 	if err := candidate.Validate(); err != nil {
-		return fmt.Errorf("config validation failed: %w", err)
+		return configValidationError{cause: err}
 	}
 
 	// Compute diff from running → candidate

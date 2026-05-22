@@ -21,10 +21,38 @@ import (
 	"github.com/akam1o/arca-router/internal/store"
 	pkgconfig "github.com/akam1o/arca-router/pkg/config"
 	pkgvpp "github.com/akam1o/arca-router/pkg/vpp"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 )
 
 func testLogger() *slog.Logger {
 	return slog.New(slog.NewTextHandler(io.Discard, nil))
+}
+
+func TestConfigEditStatusErrorClassifiesTypedErrors(t *testing.T) {
+	inputErr := configEditStatusError(newConfigInputErrorf("no configuration changes to commit"))
+	if status.Code(inputErr) != codes.InvalidArgument {
+		t.Fatalf("input status = %v, want %v", status.Code(inputErr), codes.InvalidArgument)
+	}
+	if got := status.Convert(inputErr).Message(); got != "no configuration changes to commit" {
+		t.Fatalf("input status message = %q, want no-changes message", got)
+	}
+
+	conflictErr := configEditStatusError(newCandidateConflictErrorf("candidate lock held by session session-1"))
+	if status.Code(conflictErr) != codes.FailedPrecondition {
+		t.Fatalf("conflict status = %v, want %v", status.Code(conflictErr), codes.FailedPrecondition)
+	}
+	if got := status.Convert(conflictErr).Message(); got != "configuration candidate is unavailable" {
+		t.Fatalf("conflict status message = %q, want generic candidate message", got)
+	}
+
+	internalErr := configEditStatusError(errors.New("persist commit /var/lib/arca/config.db failed"))
+	if status.Code(internalErr) != codes.Internal {
+		t.Fatalf("internal status = %v, want %v", status.Code(internalErr), codes.Internal)
+	}
+	if got := status.Convert(internalErr).Message(); got != "internal server error" {
+		t.Fatalf("internal status message = %q, want generic internal error", got)
+	}
 }
 
 func listenUnix(path string) (net.Listener, error) {
@@ -1602,7 +1630,7 @@ func TestCommitRejectsStaleCandidate(t *testing.T) {
 	}
 
 	_, _, err = srv.Commit(ctx, sessionID, "alice", "stale")
-	if err == nil || !strings.Contains(err.Error(), "candidate configuration is stale") {
+	if err == nil || !strings.Contains(err.Error(), "candidate configuration is stale") || !errors.Is(err, ErrCandidateConflict) {
 		t.Fatalf("Commit() error = %v, want stale candidate", err)
 	}
 	if st.saved != nil {
@@ -1653,7 +1681,7 @@ func TestCommitAbortsWhenCandidateStalesAfterPrepare(t *testing.T) {
 	}
 
 	_, _, err = srv.Commit(ctx, sessionID, "alice", "stale")
-	if err == nil || !strings.Contains(err.Error(), "candidate configuration is stale") {
+	if err == nil || !strings.Contains(err.Error(), "candidate configuration is stale") || !errors.Is(err, ErrCandidateConflict) {
 		t.Fatalf("Commit() error = %v, want stale candidate", err)
 	}
 	if !st.aborted {
@@ -1744,7 +1772,7 @@ func TestCommitRejectsNoopCandidate(t *testing.T) {
 	}
 
 	_, _, err = srv.Commit(ctx, sessionID, "alice", "noop")
-	if err == nil || !strings.Contains(err.Error(), "no configuration changes to commit") {
+	if err == nil || !strings.Contains(err.Error(), "no configuration changes to commit") || !errors.Is(err, ErrConfigInput) {
 		t.Fatalf("Commit() error = %v, want no changes", err)
 	}
 	if st.saved != nil {
@@ -2278,7 +2306,7 @@ func TestRollbackAbortsWhenCandidateStalesAfterPrepare(t *testing.T) {
 	}
 
 	_, _, err = srv.Rollback(ctx, sessionID, "commit-old", "alice", "")
-	if err == nil || !strings.Contains(err.Error(), "candidate configuration is stale") {
+	if err == nil || !strings.Contains(err.Error(), "candidate configuration is stale") || !errors.Is(err, ErrCandidateConflict) {
 		t.Fatalf("Rollback() error = %v, want stale candidate", err)
 	}
 	if !st.aborted {

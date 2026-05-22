@@ -198,7 +198,7 @@ func (s *Server) EditCandidate(ctx context.Context, sessionID, configText string
 	session.mu.Lock()
 	defer session.mu.Unlock()
 	if !session.HasLock {
-		return fmt.Errorf("session %s does not hold the candidate lock", sessionID)
+		return newCandidateConflictErrorf("session %s does not hold the candidate lock", sessionID)
 	}
 	if err := s.ensureCandidateBaseCurrentLocked(session); err != nil {
 		return err
@@ -206,7 +206,7 @@ func (s *Server) EditCandidate(ctx context.Context, sessionID, configText string
 
 	updated, err := applyCandidateCommand(session.CandidateText, configText)
 	if err != nil {
-		return err
+		return wrapConfigInputErrorf(err, "edit candidate config")
 	}
 	session.CandidateText = updated
 	return nil
@@ -222,7 +222,7 @@ func (s *Server) ReplaceCandidate(ctx context.Context, sessionID, configText str
 	session.mu.Lock()
 	defer session.mu.Unlock()
 	if !session.HasLock {
-		return fmt.Errorf("session %s does not hold the candidate lock", sessionID)
+		return newCandidateConflictErrorf("session %s does not hold the candidate lock", sessionID)
 	}
 	if err := s.ensureCandidateBaseCurrentLocked(session); err != nil {
 		return err
@@ -230,7 +230,7 @@ func (s *Server) ReplaceCandidate(ctx context.Context, sessionID, configText str
 
 	cfg, err := parseConfigText(configText)
 	if err != nil {
-		return fmt.Errorf("parse replacement config: %w", err)
+		return wrapConfigInputErrorf(err, "parse replacement config")
 	}
 	if err := s.engine.Validate(ctx, cfg); err != nil {
 		return err
@@ -256,7 +256,7 @@ func (s *Server) Commit(ctx context.Context, sessionID, user, message string) (s
 	session.mu.Lock()
 	defer session.mu.Unlock()
 	if !session.HasLock {
-		return "", 0, fmt.Errorf("session %s does not hold the candidate lock", sessionID)
+		return "", 0, newCandidateConflictErrorf("session %s does not hold the candidate lock", sessionID)
 	}
 	user = sessionAuditUser(session, user)
 
@@ -264,7 +264,7 @@ func (s *Server) Commit(ctx context.Context, sessionID, user, message string) (s
 	candidateText := session.CandidateText
 
 	if !session.CandidateBaseSet {
-		return "", 0, fmt.Errorf("no candidate configuration to commit")
+		return "", 0, newConfigInputErrorf("no candidate configuration to commit")
 	}
 	if err := s.ensureCandidateBaseCurrentLocked(session); err != nil {
 		return "", 0, err
@@ -273,13 +273,13 @@ func (s *Server) Commit(ctx context.Context, sessionID, user, message string) (s
 	// Parse candidate text into new config model
 	newCfg, err := parseConfigText(candidateText)
 	if err != nil {
-		return "", 0, fmt.Errorf("parse candidate config: %w", err)
+		return "", 0, wrapConfigInputErrorf(err, "parse candidate config")
 	}
 	if err := s.engine.Validate(ctx, newCfg); err != nil {
 		return "", 0, err
 	}
 	if !s.hasCandidateChanges(newCfg) {
-		return "", 0, fmt.Errorf("no configuration changes to commit")
+		return "", 0, newConfigInputErrorf("no configuration changes to commit")
 	}
 
 	var prepared store.PreparedCommit
@@ -304,7 +304,7 @@ func (s *Server) Commit(ctx context.Context, sessionID, user, message string) (s
 			if abortErr != nil {
 				return "", 0, fmt.Errorf("no configuration changes to commit (abort failed: %v)", abortErr)
 			}
-			return "", 0, fmt.Errorf("no configuration changes to commit")
+			return "", 0, newConfigInputErrorf("no configuration changes to commit")
 		}
 	}
 
@@ -351,14 +351,14 @@ func (s *Server) ValidateCandidate(ctx context.Context, sessionID string) error 
 	staleErr := s.ensureCandidateBaseCurrentLocked(session)
 	session.mu.RUnlock()
 	if !hasCandidate {
-		return fmt.Errorf("no candidate configuration to validate")
+		return newConfigInputErrorf("no candidate configuration to validate")
 	}
 	if staleErr != nil {
 		return staleErr
 	}
 	cfg, err := parseConfigText(candidateText)
 	if err != nil {
-		return fmt.Errorf("parse candidate config: %w", err)
+		return wrapConfigInputErrorf(err, "parse candidate config")
 	}
 	return s.engine.Validate(ctx, cfg)
 }
@@ -1441,7 +1441,7 @@ func (s *Server) ensureCandidateBaseCurrentLocked(session *Session) error {
 		hash = snap.Hash
 	}
 	if session.CandidateBaseVersion != version || session.CandidateBaseHash != hash {
-		return fmt.Errorf("candidate configuration is stale: running configuration changed from version %d to %d; discard or reload the candidate before editing", session.CandidateBaseVersion, version)
+		return newCandidateConflictErrorf("candidate configuration is stale: running configuration changed from version %d to %d; discard or reload the candidate before editing", session.CandidateBaseVersion, version)
 	}
 	return nil
 }
@@ -1879,7 +1879,7 @@ func (m *SessionManager) AcquireLock(id string) error {
 		return fmt.Errorf("session %s not found", id)
 	}
 	if m.lockHeld != "" && m.lockHeld != id {
-		return fmt.Errorf("candidate lock held by session %s", m.lockHeld)
+		return newCandidateConflictErrorf("candidate lock held by session %s", m.lockHeld)
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()

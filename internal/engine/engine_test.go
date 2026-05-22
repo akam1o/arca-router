@@ -71,6 +71,30 @@ func TestValidateDiffDoesNotExposeRunningOrCandidate(t *testing.T) {
 	}
 }
 
+func TestValidateClassifiesModelValidationErrors(t *testing.T) {
+	eng := NewEngine(nil, slog.Default())
+	cfg := model.NewRouterConfig()
+	cfg.System = &model.SystemConfig{
+		Services: &model.SystemServicesConfig{
+			WebUI: &model.WebUIConfig{
+				Enabled:       true,
+				ListenAddress: "not an address",
+			},
+		},
+	}
+
+	err := eng.Validate(context.Background(), cfg)
+	if err == nil {
+		t.Fatal("Validate() error = nil, want validation error")
+	}
+	if !errors.Is(err, ErrConfigValidation) {
+		t.Fatalf("Validate() error = %v, want ErrConfigValidation", err)
+	}
+	if !strings.Contains(err.Error(), "config validation failed:") {
+		t.Fatalf("Validate() error = %v, want existing validation prefix", err)
+	}
+}
+
 func TestValidateDiffIsIsolatedBetweenPlugins(t *testing.T) {
 	recorder := &recordingDiffPlugin{}
 	eng := NewEngine([]Plugin{&mutatingDiffPlugin{}, recorder}, slog.Default())
