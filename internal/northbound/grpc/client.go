@@ -24,11 +24,12 @@ import (
 // It provides high-level methods for config management, session control,
 // and operational state queries.
 type Client struct {
-	conn      *googlegrpc.ClientConn
-	config    apiv1.ConfigServiceClient
-	session   apiv1.SessionServiceClient
-	state     apiv1.StateServiceClient
-	telemetry apiv1.TelemetryServiceClient
+	conn       *googlegrpc.ClientConn
+	config     apiv1.ConfigServiceClient
+	session    apiv1.SessionServiceClient
+	state      apiv1.StateServiceClient
+	diagnostic apiv1.DiagnosticServiceClient
+	telemetry  apiv1.TelemetryServiceClient
 }
 
 // TLSClientOptions configures TLS verification for TCP gRPC connections.
@@ -122,11 +123,12 @@ func clientFromConn(ctx context.Context, conn *googlegrpc.ClientConn, target str
 	}
 
 	return &Client{
-		conn:      conn,
-		config:    apiv1.NewConfigServiceClient(conn),
-		session:   apiv1.NewSessionServiceClient(conn),
-		state:     apiv1.NewStateServiceClient(conn),
-		telemetry: apiv1.NewTelemetryServiceClient(conn),
+		conn:       conn,
+		config:     apiv1.NewConfigServiceClient(conn),
+		session:    apiv1.NewSessionServiceClient(conn),
+		state:      apiv1.NewStateServiceClient(conn),
+		diagnostic: apiv1.NewDiagnosticServiceClient(conn),
+		telemetry:  apiv1.NewTelemetryServiceClient(conn),
 	}, nil
 }
 
@@ -346,7 +348,7 @@ func (c *Client) GetOSPFNeighbors(ctx context.Context, addressFamily string) ([]
 func (c *Client) GetRouteText(ctx context.Context, protoFilter, addressFamily string) (string, error) {
 	ctx, cancel := contextWithDefaultTimeout(ctx)
 	defer cancel()
-	resp, err := c.state.GetRouteText(ctx, &apiv1.GetRouteTextRequest{
+	resp, err := c.diagnostic.GetRouteText(ctx, &apiv1.GetRouteTextRequest{
 		ProtocolFilter: protoFilter,
 		AddressFamily:  addressFamily,
 	})
@@ -360,7 +362,7 @@ func (c *Client) GetRouteText(ctx context.Context, protoFilter, addressFamily st
 func (c *Client) GetBGPSummaryText(ctx context.Context) (string, error) {
 	ctx, cancel := contextWithDefaultTimeout(ctx)
 	defer cancel()
-	resp, err := c.state.GetBGPSummaryText(ctx, &apiv1.GetBGPSummaryTextRequest{})
+	resp, err := c.diagnostic.GetBGPSummaryText(ctx, &apiv1.GetBGPSummaryTextRequest{})
 	if err != nil {
 		return "", err
 	}
@@ -371,7 +373,7 @@ func (c *Client) GetBGPSummaryText(ctx context.Context) (string, error) {
 func (c *Client) GetBGPNeighborText(ctx context.Context, peerAddress string) (string, error) {
 	ctx, cancel := contextWithDefaultTimeout(ctx)
 	defer cancel()
-	resp, err := c.state.GetBGPNeighborText(ctx, &apiv1.GetBGPNeighborTextRequest{PeerAddress: peerAddress})
+	resp, err := c.diagnostic.GetBGPNeighborText(ctx, &apiv1.GetBGPNeighborTextRequest{PeerAddress: peerAddress})
 	if err != nil {
 		return "", err
 	}
@@ -382,7 +384,7 @@ func (c *Client) GetBGPNeighborText(ctx context.Context, peerAddress string) (st
 func (c *Client) GetOSPFNeighborsText(ctx context.Context, addressFamily string) (string, error) {
 	ctx, cancel := contextWithDefaultTimeout(ctx)
 	defer cancel()
-	resp, err := c.state.GetOSPFNeighborsText(ctx, &apiv1.GetOSPFNeighborsTextRequest{AddressFamily: addressFamily})
+	resp, err := c.diagnostic.GetOSPFNeighborsText(ctx, &apiv1.GetOSPFNeighborsTextRequest{AddressFamily: addressFamily})
 	if err != nil {
 		return "", err
 	}
@@ -393,7 +395,7 @@ func (c *Client) GetOSPFNeighborsText(ctx context.Context, addressFamily string)
 func (c *Client) GetVRRPText(ctx context.Context) (string, error) {
 	ctx, cancel := contextWithDefaultTimeout(ctx)
 	defer cancel()
-	resp, err := c.state.GetVRRPText(ctx, &apiv1.GetVRRPTextRequest{})
+	resp, err := c.diagnostic.GetVRRPText(ctx, &apiv1.GetVRRPTextRequest{})
 	if err != nil {
 		return "", err
 	}
@@ -404,7 +406,7 @@ func (c *Client) GetVRRPText(ctx context.Context) (string, error) {
 func (c *Client) GetBFDText(ctx context.Context, peerAddress string, brief, counters bool) (string, error) {
 	ctx, cancel := contextWithDefaultTimeout(ctx)
 	defer cancel()
-	resp, err := c.state.GetBFDText(ctx, &apiv1.GetBFDTextRequest{
+	resp, err := c.diagnostic.GetBFDText(ctx, &apiv1.GetBFDTextRequest{
 		PeerAddress: peerAddress,
 		Brief:       brief,
 		Counters:    counters,

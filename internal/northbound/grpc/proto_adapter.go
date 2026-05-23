@@ -258,6 +258,7 @@ func sessionStatusError(err error) error {
 
 type stateServiceAdapter struct {
 	apiv1.UnimplementedStateServiceServer
+	apiv1.UnimplementedDiagnosticServiceServer
 	server *Server
 }
 

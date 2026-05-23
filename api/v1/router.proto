@@ -68,23 +68,41 @@ service StateService {
   // GetOSPFNeighbors returns OSPFv2 or OSPFv3 neighbor state.
   rpc GetOSPFNeighbors(GetOSPFNeighborsRequest) returns (GetOSPFNeighborsResponse);
 
-  // GetRouteText returns FRR route output for CLI display.
-  rpc GetRouteText(GetRouteTextRequest) returns (GetRouteTextResponse);
+  // GetRouteText returns FRR route output for legacy CLI display.
+  // Deprecated: use DiagnosticService.GetRouteText for raw text diagnostics.
+  rpc GetRouteText(GetRouteTextRequest) returns (GetRouteTextResponse) {
+    option deprecated = true;
+  }
 
-  // GetBGPSummaryText returns FRR BGP summary output for CLI display.
-  rpc GetBGPSummaryText(GetBGPSummaryTextRequest) returns (GetBGPSummaryTextResponse);
+  // GetBGPSummaryText returns FRR BGP summary output for legacy CLI display.
+  // Deprecated: use DiagnosticService.GetBGPSummaryText for raw text diagnostics.
+  rpc GetBGPSummaryText(GetBGPSummaryTextRequest) returns (GetBGPSummaryTextResponse) {
+    option deprecated = true;
+  }
 
-  // GetBGPNeighborText returns FRR BGP neighbor detail output for CLI display.
-  rpc GetBGPNeighborText(GetBGPNeighborTextRequest) returns (GetBGPNeighborTextResponse);
+  // GetBGPNeighborText returns FRR BGP neighbor detail output for legacy CLI display.
+  // Deprecated: use DiagnosticService.GetBGPNeighborText for raw text diagnostics.
+  rpc GetBGPNeighborText(GetBGPNeighborTextRequest) returns (GetBGPNeighborTextResponse) {
+    option deprecated = true;
+  }
 
-  // GetOSPFNeighborsText returns FRR OSPF neighbor output for CLI display.
-  rpc GetOSPFNeighborsText(GetOSPFNeighborsTextRequest) returns (GetOSPFNeighborsTextResponse);
+  // GetOSPFNeighborsText returns FRR OSPF neighbor output for legacy CLI display.
+  // Deprecated: use DiagnosticService.GetOSPFNeighborsText for raw text diagnostics.
+  rpc GetOSPFNeighborsText(GetOSPFNeighborsTextRequest) returns (GetOSPFNeighborsTextResponse) {
+    option deprecated = true;
+  }
 
-  // GetVRRPText returns FRR VRRP output for CLI display.
-  rpc GetVRRPText(GetVRRPTextRequest) returns (GetVRRPTextResponse);
+  // GetVRRPText returns FRR VRRP output for legacy CLI display.
+  // Deprecated: use DiagnosticService.GetVRRPText for raw text diagnostics.
+  rpc GetVRRPText(GetVRRPTextRequest) returns (GetVRRPTextResponse) {
+    option deprecated = true;
+  }
 
-  // GetBFDText returns FRR BFD output for CLI display.
-  rpc GetBFDText(GetBFDTextRequest) returns (GetBFDTextResponse);
+  // GetBFDText returns FRR BFD output for legacy CLI display.
+  // Deprecated: use DiagnosticService.GetBFDText for raw text diagnostics.
+  rpc GetBFDText(GetBFDTextRequest) returns (GetBFDTextResponse) {
+    option deprecated = true;
+  }
 
   // GetBFDStatus returns cached FRR BFD operational state.
   rpc GetBFDStatus(GetBFDStatusRequest) returns (GetBFDStatusResponse);
@@ -103,6 +121,29 @@ service StateService {
 
   // GetSystemInfo returns system information.
   rpc GetSystemInfo(GetSystemInfoRequest) returns (GetSystemInfoResponse);
+}
+
+// DiagnosticService provides raw diagnostic outputs intended for operator
+// troubleshooting and CLI display. Normal automation clients should prefer
+// typed StateService RPCs where available.
+service DiagnosticService {
+  // GetRouteText returns FRR route output for diagnostic display.
+  rpc GetRouteText(GetRouteTextRequest) returns (GetRouteTextResponse);
+
+  // GetBGPSummaryText returns FRR BGP summary output for diagnostic display.
+  rpc GetBGPSummaryText(GetBGPSummaryTextRequest) returns (GetBGPSummaryTextResponse);
+
+  // GetBGPNeighborText returns FRR BGP neighbor detail output for diagnostic display.
+  rpc GetBGPNeighborText(GetBGPNeighborTextRequest) returns (GetBGPNeighborTextResponse);
+
+  // GetOSPFNeighborsText returns FRR OSPF neighbor output for diagnostic display.
+  rpc GetOSPFNeighborsText(GetOSPFNeighborsTextRequest) returns (GetOSPFNeighborsTextResponse);
+
+  // GetVRRPText returns FRR VRRP output for diagnostic display.
+  rpc GetVRRPText(GetVRRPTextRequest) returns (GetVRRPTextResponse);
+
+  // GetBFDText returns FRR BFD output for diagnostic display.
+  rpc GetBFDText(GetBFDTextRequest) returns (GetBFDTextResponse);
 }
 
 // TelemetryService provides structured streaming telemetry snapshots.

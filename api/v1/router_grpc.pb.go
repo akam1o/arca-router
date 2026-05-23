@@ -751,17 +751,29 @@ type StateServiceClient interface {
 	GetBGPNeighbors(ctx context.Context, in *GetBGPNeighborsRequest, opts ...grpc.CallOption) (*GetBGPNeighborsResponse, error)
 	// GetOSPFNeighbors returns OSPFv2 or OSPFv3 neighbor state.
 	GetOSPFNeighbors(ctx context.Context, in *GetOSPFNeighborsRequest, opts ...grpc.CallOption) (*GetOSPFNeighborsResponse, error)
-	// GetRouteText returns FRR route output for CLI display.
+	// Deprecated: Do not use.
+	// GetRouteText returns FRR route output for legacy CLI display.
+	// Deprecated: use DiagnosticService.GetRouteText for raw text diagnostics.
 	GetRouteText(ctx context.Context, in *GetRouteTextRequest, opts ...grpc.CallOption) (*GetRouteTextResponse, error)
-	// GetBGPSummaryText returns FRR BGP summary output for CLI display.
+	// Deprecated: Do not use.
+	// GetBGPSummaryText returns FRR BGP summary output for legacy CLI display.
+	// Deprecated: use DiagnosticService.GetBGPSummaryText for raw text diagnostics.
 	GetBGPSummaryText(ctx context.Context, in *GetBGPSummaryTextRequest, opts ...grpc.CallOption) (*GetBGPSummaryTextResponse, error)
-	// GetBGPNeighborText returns FRR BGP neighbor detail output for CLI display.
+	// Deprecated: Do not use.
+	// GetBGPNeighborText returns FRR BGP neighbor detail output for legacy CLI display.
+	// Deprecated: use DiagnosticService.GetBGPNeighborText for raw text diagnostics.
 	GetBGPNeighborText(ctx context.Context, in *GetBGPNeighborTextRequest, opts ...grpc.CallOption) (*GetBGPNeighborTextResponse, error)
-	// GetOSPFNeighborsText returns FRR OSPF neighbor output for CLI display.
+	// Deprecated: Do not use.
+	// GetOSPFNeighborsText returns FRR OSPF neighbor output for legacy CLI display.
+	// Deprecated: use DiagnosticService.GetOSPFNeighborsText for raw text diagnostics.
 	GetOSPFNeighborsText(ctx context.Context, in *GetOSPFNeighborsTextRequest, opts ...grpc.CallOption) (*GetOSPFNeighborsTextResponse, error)
-	// GetVRRPText returns FRR VRRP output for CLI display.
+	// Deprecated: Do not use.
+	// GetVRRPText returns FRR VRRP output for legacy CLI display.
+	// Deprecated: use DiagnosticService.GetVRRPText for raw text diagnostics.
 	GetVRRPText(ctx context.Context, in *GetVRRPTextRequest, opts ...grpc.CallOption) (*GetVRRPTextResponse, error)
-	// GetBFDText returns FRR BFD output for CLI display.
+	// Deprecated: Do not use.
+	// GetBFDText returns FRR BFD output for legacy CLI display.
+	// Deprecated: use DiagnosticService.GetBFDText for raw text diagnostics.
 	GetBFDText(ctx context.Context, in *GetBFDTextRequest, opts ...grpc.CallOption) (*GetBFDTextResponse, error)
 	// GetBFDStatus returns cached FRR BFD operational state.
 	GetBFDStatus(ctx context.Context, in *GetBFDStatusRequest, opts ...grpc.CallOption) (*GetBFDStatusResponse, error)
@@ -825,6 +837,7 @@ func (c *stateServiceClient) GetOSPFNeighbors(ctx context.Context, in *GetOSPFNe
 	return out, nil
 }
 
+// Deprecated: Do not use.
 func (c *stateServiceClient) GetRouteText(ctx context.Context, in *GetRouteTextRequest, opts ...grpc.CallOption) (*GetRouteTextResponse, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(GetRouteTextResponse)
@@ -835,6 +848,7 @@ func (c *stateServiceClient) GetRouteText(ctx context.Context, in *GetRouteTextR
 	return out, nil
 }
 
+// Deprecated: Do not use.
 func (c *stateServiceClient) GetBGPSummaryText(ctx context.Context, in *GetBGPSummaryTextRequest, opts ...grpc.CallOption) (*GetBGPSummaryTextResponse, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(GetBGPSummaryTextResponse)
@@ -845,6 +859,7 @@ func (c *stateServiceClient) GetBGPSummaryText(ctx context.Context, in *GetBGPSu
 	return out, nil
 }
 
+// Deprecated: Do not use.
 func (c *stateServiceClient) GetBGPNeighborText(ctx context.Context, in *GetBGPNeighborTextRequest, opts ...grpc.CallOption) (*GetBGPNeighborTextResponse, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(GetBGPNeighborTextResponse)
@@ -855,6 +870,7 @@ func (c *stateServiceClient) GetBGPNeighborText(ctx context.Context, in *GetBGPN
 	return out, nil
 }
 
+// Deprecated: Do not use.
 func (c *stateServiceClient) GetOSPFNeighborsText(ctx context.Context, in *GetOSPFNeighborsTextRequest, opts ...grpc.CallOption) (*GetOSPFNeighborsTextResponse, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(GetOSPFNeighborsTextResponse)
@@ -865,6 +881,7 @@ func (c *stateServiceClient) GetOSPFNeighborsText(ctx context.Context, in *GetOS
 	return out, nil
 }
 
+// Deprecated: Do not use.
 func (c *stateServiceClient) GetVRRPText(ctx context.Context, in *GetVRRPTextRequest, opts ...grpc.CallOption) (*GetVRRPTextResponse, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(GetVRRPTextResponse)
@@ -875,6 +892,7 @@ func (c *stateServiceClient) GetVRRPText(ctx context.Context, in *GetVRRPTextReq
 	return out, nil
 }
 
+// Deprecated: Do not use.
 func (c *stateServiceClient) GetBFDText(ctx context.Context, in *GetBFDTextRequest, opts ...grpc.CallOption) (*GetBFDTextResponse, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(GetBFDTextResponse)
@@ -959,17 +977,29 @@ type StateServiceServer interface {
 	GetBGPNeighbors(context.Context, *GetBGPNeighborsRequest) (*GetBGPNeighborsResponse, error)
 	// GetOSPFNeighbors returns OSPFv2 or OSPFv3 neighbor state.
 	GetOSPFNeighbors(context.Context, *GetOSPFNeighborsRequest) (*GetOSPFNeighborsResponse, error)
-	// GetRouteText returns FRR route output for CLI display.
+	// Deprecated: Do not use.
+	// GetRouteText returns FRR route output for legacy CLI display.
+	// Deprecated: use DiagnosticService.GetRouteText for raw text diagnostics.
 	GetRouteText(context.Context, *GetRouteTextRequest) (*GetRouteTextResponse, error)
-	// GetBGPSummaryText returns FRR BGP summary output for CLI display.
+	// Deprecated: Do not use.
+	// GetBGPSummaryText returns FRR BGP summary output for legacy CLI display.
+	// Deprecated: use DiagnosticService.GetBGPSummaryText for raw text diagnostics.
 	GetBGPSummaryText(context.Context, *GetBGPSummaryTextRequest) (*GetBGPSummaryTextResponse, error)
-	// GetBGPNeighborText returns FRR BGP neighbor detail output for CLI display.
+	// Deprecated: Do not use.
+	// GetBGPNeighborText returns FRR BGP neighbor detail output for legacy CLI display.
+	// Deprecated: use DiagnosticService.GetBGPNeighborText for raw text diagnostics.
 	GetBGPNeighborText(context.Context, *GetBGPNeighborTextRequest) (*GetBGPNeighborTextResponse, error)
-	// GetOSPFNeighborsText returns FRR OSPF neighbor output for CLI display.
+	// Deprecated: Do not use.
+	// GetOSPFNeighborsText returns FRR OSPF neighbor output for legacy CLI display.
+	// Deprecated: use DiagnosticService.GetOSPFNeighborsText for raw text diagnostics.
 	GetOSPFNeighborsText(context.Context, *GetOSPFNeighborsTextRequest) (*GetOSPFNeighborsTextResponse, error)
-	// GetVRRPText returns FRR VRRP output for CLI display.
+	// Deprecated: Do not use.
+	// GetVRRPText returns FRR VRRP output for legacy CLI display.
+	// Deprecated: use DiagnosticService.GetVRRPText for raw text diagnostics.
 	GetVRRPText(context.Context, *GetVRRPTextRequest) (*GetVRRPTextResponse, error)
-	// GetBFDText returns FRR BFD output for CLI display.
+	// Deprecated: Do not use.
+	// GetBFDText returns FRR BFD output for legacy CLI display.
+	// Deprecated: use DiagnosticService.GetBFDText for raw text diagnostics.
 	GetBFDText(context.Context, *GetBFDTextRequest) (*GetBFDTextResponse, error)
 	// GetBFDStatus returns cached FRR BFD operational state.
 	GetBFDStatus(context.Context, *GetBFDStatusRequest) (*GetBFDStatusResponse, error)
@@ -1420,6 +1450,318 @@ var StateService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "GetSystemInfo",
 			Handler:    _StateService_GetSystemInfo_Handler,
+		},
+	},
+	Streams:  []grpc.StreamDesc{},
+	Metadata: "api/v1/router.proto",
+}
+
+const (
+	DiagnosticService_GetRouteText_FullMethodName         = "/arca.router.v1.DiagnosticService/GetRouteText"
+	DiagnosticService_GetBGPSummaryText_FullMethodName    = "/arca.router.v1.DiagnosticService/GetBGPSummaryText"
+	DiagnosticService_GetBGPNeighborText_FullMethodName   = "/arca.router.v1.DiagnosticService/GetBGPNeighborText"
+	DiagnosticService_GetOSPFNeighborsText_FullMethodName = "/arca.router.v1.DiagnosticService/GetOSPFNeighborsText"
+	DiagnosticService_GetVRRPText_FullMethodName          = "/arca.router.v1.DiagnosticService/GetVRRPText"
+	DiagnosticService_GetBFDText_FullMethodName           = "/arca.router.v1.DiagnosticService/GetBFDText"
+)
+
+// DiagnosticServiceClient is the client API for DiagnosticService service.
+//
+// For semantics around ctx use and closing/ending streaming RPCs, please refer to https://pkg.go.dev/google.golang.org/grpc/?tab=doc#ClientConn.NewStream.
+//
+// DiagnosticService provides raw diagnostic outputs intended for operator
+// troubleshooting and CLI display. Normal automation clients should prefer
+// typed StateService RPCs where available.
+type DiagnosticServiceClient interface {
+	// GetRouteText returns FRR route output for diagnostic display.
+	GetRouteText(ctx context.Context, in *GetRouteTextRequest, opts ...grpc.CallOption) (*GetRouteTextResponse, error)
+	// GetBGPSummaryText returns FRR BGP summary output for diagnostic display.
+	GetBGPSummaryText(ctx context.Context, in *GetBGPSummaryTextRequest, opts ...grpc.CallOption) (*GetBGPSummaryTextResponse, error)
+	// GetBGPNeighborText returns FRR BGP neighbor detail output for diagnostic display.
+	GetBGPNeighborText(ctx context.Context, in *GetBGPNeighborTextRequest, opts ...grpc.CallOption) (*GetBGPNeighborTextResponse, error)
+	// GetOSPFNeighborsText returns FRR OSPF neighbor output for diagnostic display.
+	GetOSPFNeighborsText(ctx context.Context, in *GetOSPFNeighborsTextRequest, opts ...grpc.CallOption) (*GetOSPFNeighborsTextResponse, error)
+	// GetVRRPText returns FRR VRRP output for diagnostic display.
+	GetVRRPText(ctx context.Context, in *GetVRRPTextRequest, opts ...grpc.CallOption) (*GetVRRPTextResponse, error)
+	// GetBFDText returns FRR BFD output for diagnostic display.
+	GetBFDText(ctx context.Context, in *GetBFDTextRequest, opts ...grpc.CallOption) (*GetBFDTextResponse, error)
+}
+
+type diagnosticServiceClient struct {
+	cc grpc.ClientConnInterface
+}
+
+func NewDiagnosticServiceClient(cc grpc.ClientConnInterface) DiagnosticServiceClient {
+	return &diagnosticServiceClient{cc}
+}
+
+func (c *diagnosticServiceClient) GetRouteText(ctx context.Context, in *GetRouteTextRequest, opts ...grpc.CallOption) (*GetRouteTextResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(GetRouteTextResponse)
+	err := c.cc.Invoke(ctx, DiagnosticService_GetRouteText_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *diagnosticServiceClient) GetBGPSummaryText(ctx context.Context, in *GetBGPSummaryTextRequest, opts ...grpc.CallOption) (*GetBGPSummaryTextResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(GetBGPSummaryTextResponse)
+	err := c.cc.Invoke(ctx, DiagnosticService_GetBGPSummaryText_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *diagnosticServiceClient) GetBGPNeighborText(ctx context.Context, in *GetBGPNeighborTextRequest, opts ...grpc.CallOption) (*GetBGPNeighborTextResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(GetBGPNeighborTextResponse)
+	err := c.cc.Invoke(ctx, DiagnosticService_GetBGPNeighborText_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *diagnosticServiceClient) GetOSPFNeighborsText(ctx context.Context, in *GetOSPFNeighborsTextRequest, opts ...grpc.CallOption) (*GetOSPFNeighborsTextResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(GetOSPFNeighborsTextResponse)
+	err := c.cc.Invoke(ctx, DiagnosticService_GetOSPFNeighborsText_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *diagnosticServiceClient) GetVRRPText(ctx context.Context, in *GetVRRPTextRequest, opts ...grpc.CallOption) (*GetVRRPTextResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(GetVRRPTextResponse)
+	err := c.cc.Invoke(ctx, DiagnosticService_GetVRRPText_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *diagnosticServiceClient) GetBFDText(ctx context.Context, in *GetBFDTextRequest, opts ...grpc.CallOption) (*GetBFDTextResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(GetBFDTextResponse)
+	err := c.cc.Invoke(ctx, DiagnosticService_GetBFDText_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+// DiagnosticServiceServer is the server API for DiagnosticService service.
+// All implementations must embed UnimplementedDiagnosticServiceServer
+// for forward compatibility.
+//
+// DiagnosticService provides raw diagnostic outputs intended for operator
+// troubleshooting and CLI display. Normal automation clients should prefer
+// typed StateService RPCs where available.
+type DiagnosticServiceServer interface {
+	// GetRouteText returns FRR route output for diagnostic display.
+	GetRouteText(context.Context, *GetRouteTextRequest) (*GetRouteTextResponse, error)
+	// GetBGPSummaryText returns FRR BGP summary output for diagnostic display.
+	GetBGPSummaryText(context.Context, *GetBGPSummaryTextRequest) (*GetBGPSummaryTextResponse, error)
+	// GetBGPNeighborText returns FRR BGP neighbor detail output for diagnostic display.
+	GetBGPNeighborText(context.Context, *GetBGPNeighborTextRequest) (*GetBGPNeighborTextResponse, error)
+	// GetOSPFNeighborsText returns FRR OSPF neighbor output for diagnostic display.
+	GetOSPFNeighborsText(context.Context, *GetOSPFNeighborsTextRequest) (*GetOSPFNeighborsTextResponse, error)
+	// GetVRRPText returns FRR VRRP output for diagnostic display.
+	GetVRRPText(context.Context, *GetVRRPTextRequest) (*GetVRRPTextResponse, error)
+	// GetBFDText returns FRR BFD output for diagnostic display.
+	GetBFDText(context.Context, *GetBFDTextRequest) (*GetBFDTextResponse, error)
+	mustEmbedUnimplementedDiagnosticServiceServer()
+}
+
+// UnimplementedDiagnosticServiceServer must be embedded to have
+// forward compatible implementations.
+//
+// NOTE: this should be embedded by value instead of pointer to avoid a nil
+// pointer dereference when methods are called.
+type UnimplementedDiagnosticServiceServer struct{}
+
+func (UnimplementedDiagnosticServiceServer) GetRouteText(context.Context, *GetRouteTextRequest) (*GetRouteTextResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method GetRouteText not implemented")
+}
+func (UnimplementedDiagnosticServiceServer) GetBGPSummaryText(context.Context, *GetBGPSummaryTextRequest) (*GetBGPSummaryTextResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method GetBGPSummaryText not implemented")
+}
+func (UnimplementedDiagnosticServiceServer) GetBGPNeighborText(context.Context, *GetBGPNeighborTextRequest) (*GetBGPNeighborTextResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method GetBGPNeighborText not implemented")
+}
+func (UnimplementedDiagnosticServiceServer) GetOSPFNeighborsText(context.Context, *GetOSPFNeighborsTextRequest) (*GetOSPFNeighborsTextResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method GetOSPFNeighborsText not implemented")
+}
+func (UnimplementedDiagnosticServiceServer) GetVRRPText(context.Context, *GetVRRPTextRequest) (*GetVRRPTextResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method GetVRRPText not implemented")
+}
+func (UnimplementedDiagnosticServiceServer) GetBFDText(context.Context, *GetBFDTextRequest) (*GetBFDTextResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method GetBFDText not implemented")
+}
+func (UnimplementedDiagnosticServiceServer) mustEmbedUnimplementedDiagnosticServiceServer() {}
+func (UnimplementedDiagnosticServiceServer) testEmbeddedByValue()                           {}
+
+// UnsafeDiagnosticServiceServer may be embedded to opt out of forward compatibility for this service.
+// Use of this interface is not recommended, as added methods to DiagnosticServiceServer will
+// result in compilation errors.
+type UnsafeDiagnosticServiceServer interface {
+	mustEmbedUnimplementedDiagnosticServiceServer()
+}
+
+func RegisterDiagnosticServiceServer(s grpc.ServiceRegistrar, srv DiagnosticServiceServer) {
+	// If the following call pancis, it indicates UnimplementedDiagnosticServiceServer was
+	// embedded by pointer and is nil.  This will cause panics if an
+	// unimplemented method is ever invoked, so we test this at initialization
+	// time to prevent it from happening at runtime later due to I/O.
+	if t, ok := srv.(interface{ testEmbeddedByValue() }); ok {
+		t.testEmbeddedByValue()
+	}
+	s.RegisterService(&DiagnosticService_ServiceDesc, srv)
+}
+
+func _DiagnosticService_GetRouteText_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(GetRouteTextRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(DiagnosticServiceServer).GetRouteText(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: DiagnosticService_GetRouteText_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(DiagnosticServiceServer).GetRouteText(ctx, req.(*GetRouteTextRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _DiagnosticService_GetBGPSummaryText_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(GetBGPSummaryTextRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(DiagnosticServiceServer).GetBGPSummaryText(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: DiagnosticService_GetBGPSummaryText_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(DiagnosticServiceServer).GetBGPSummaryText(ctx, req.(*GetBGPSummaryTextRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _DiagnosticService_GetBGPNeighborText_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(GetBGPNeighborTextRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(DiagnosticServiceServer).GetBGPNeighborText(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: DiagnosticService_GetBGPNeighborText_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(DiagnosticServiceServer).GetBGPNeighborText(ctx, req.(*GetBGPNeighborTextRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _DiagnosticService_GetOSPFNeighborsText_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(GetOSPFNeighborsTextRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(DiagnosticServiceServer).GetOSPFNeighborsText(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: DiagnosticService_GetOSPFNeighborsText_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(DiagnosticServiceServer).GetOSPFNeighborsText(ctx, req.(*GetOSPFNeighborsTextRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _DiagnosticService_GetVRRPText_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(GetVRRPTextRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(DiagnosticServiceServer).GetVRRPText(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: DiagnosticService_GetVRRPText_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(DiagnosticServiceServer).GetVRRPText(ctx, req.(*GetVRRPTextRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _DiagnosticService_GetBFDText_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(GetBFDTextRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(DiagnosticServiceServer).GetBFDText(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: DiagnosticService_GetBFDText_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(DiagnosticServiceServer).GetBFDText(ctx, req.(*GetBFDTextRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+// DiagnosticService_ServiceDesc is the grpc.ServiceDesc for DiagnosticService service.
+// It's only intended for direct use with grpc.RegisterService,
+// and not to be introspected or modified (even as a copy)
+var DiagnosticService_ServiceDesc = grpc.ServiceDesc{
+	ServiceName: "arca.router.v1.DiagnosticService",
+	HandlerType: (*DiagnosticServiceServer)(nil),
+	Methods: []grpc.MethodDesc{
+		{
+			MethodName: "GetRouteText",
+			Handler:    _DiagnosticService_GetRouteText_Handler,
+		},
+		{
+			MethodName: "GetBGPSummaryText",
+			Handler:    _DiagnosticService_GetBGPSummaryText_Handler,
+		},
+		{
+			MethodName: "GetBGPNeighborText",
+			Handler:    _DiagnosticService_GetBGPNeighborText_Handler,
+		},
+		{
+			MethodName: "GetOSPFNeighborsText",
+			Handler:    _DiagnosticService_GetOSPFNeighborsText_Handler,
+		},
+		{
+			MethodName: "GetVRRPText",
+			Handler:    _DiagnosticService_GetVRRPText_Handler,
+		},
+		{
+			MethodName: "GetBFDText",
+			Handler:    _DiagnosticService_GetBFDText_Handler,
 		},
 	},
 	Streams:  []grpc.StreamDesc{},

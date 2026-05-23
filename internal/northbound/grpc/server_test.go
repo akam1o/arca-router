@@ -444,6 +444,20 @@ func TestClientServerConfigFlow(t *testing.T) {
 		len(cosInfo.Capabilities.Diagnostics) != 1 {
 		t.Fatalf("GetClassOfService() capabilities = %#v, want VPP QoS capability diagnostics", cosInfo.Capabilities)
 	}
+
+	oldVtysh := runOperationalVtyshCommand
+	runOperationalVtyshCommand = func(ctx context.Context, command string) (string, error) {
+		return command + "\n", nil
+	}
+	t.Cleanup(func() { runOperationalVtyshCommand = oldVtysh })
+	routeText, err := client.GetRouteText(ctx, "ospf", "")
+	if err != nil {
+		t.Fatalf("GetRouteText() error = %v", err)
+	}
+	if routeText != "show ip route ospf\n" {
+		t.Fatalf("GetRouteText() = %q, want diagnostic FRR route output", routeText)
+	}
+
 	diffText, hasChanges, err := client.Diff(ctx, sessionID)
 	if err != nil {
 		t.Fatalf("Diff() error = %v", err)

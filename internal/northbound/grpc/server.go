@@ -106,7 +106,9 @@ func (s *Server) ServeWithOptions(lis net.Listener, opts ...googlegrpc.ServerOpt
 	s.server = googlegrpc.NewServer(opts...)
 	apiv1.RegisterConfigServiceServer(s.server, &configServiceAdapter{server: s})
 	apiv1.RegisterSessionServiceServer(s.server, &sessionServiceAdapter{server: s})
-	apiv1.RegisterStateServiceServer(s.server, &stateServiceAdapter{server: s})
+	stateAdapter := &stateServiceAdapter{server: s}
+	apiv1.RegisterStateServiceServer(s.server, stateAdapter)
+	apiv1.RegisterDiagnosticServiceServer(s.server, stateAdapter)
 	apiv1.RegisterTelemetryServiceServer(s.server, &telemetryServiceAdapter{server: s})
 	s.log.Info("gRPC server starting", slog.String("address", lis.Addr().String()))
 	return s.server.Serve(lis)
