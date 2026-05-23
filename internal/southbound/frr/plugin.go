@@ -20,6 +20,7 @@ type FRRPlugin struct {
 	fileApplier pkgfrr.Applier
 	mode        pkgfrr.BackendMode
 	log         *slog.Logger
+	healthCheck func(context.Context) error
 
 	statusReader    pkgfrr.VRRPStatusReader
 	bfdStatusReader pkgfrr.BFDStatusReader
@@ -47,6 +48,7 @@ func NewFRRPluginWithApplyMode(log *slog.Logger, mode pkgfrr.BackendMode) *FRRPl
 		fileApplier:     pkgfrr.NewApplier(pkgfrr.BackendModeFile),
 		mode:            mode,
 		log:             log.With("plugin", "frr", "apply_mode", string(mode)),
+		healthCheck:     defaultFRRHealthCheck,
 		statusReader:    pkgfrr.NewVtyshVRRPStatusReader(),
 		bfdStatusReader: pkgfrr.NewVtyshBFDStatusReader(),
 	}
@@ -77,7 +79,49 @@ func (p *FRRPlugin) Close() error {
 }
 
 func (p *FRRPlugin) HealthCheck(ctx context.Context) error {
-	// Could check if FRR daemons are running
+	p.mu.Lock()
+	healthCheck := p.healthCheck
+	cfg := p.currentFRRConfig
+	p.mu.Unlock()
+
+	if healthCheck == nil {
+		healthCheck = defaultFRRHealthCheck
+	}
+	if err := healthCheck(ctx); err != nil {
+		return fmt.Errorf("check FRR backend: %w", err)
+	}
+	if cfg == nil {
+		return nil
+	}
+
+	vrrpStatus := p.checkVRRPOperationalStatus(ctx, cfg)
+	bfdStatus := p.checkBFDOperationalStatus(ctx, cfg)
+	p.mu.Lock()
+	p.vrrpStatus = vrrpStatus
+	p.bfdStatus = bfdStatus
+	p.mu.Unlock()
+
+	if err := frrHealthStatusError("VRRP", vrrpStatus.LastError, vrrpStatus.Issues); err != nil {
+		return err
+	}
+	if err := frrHealthStatusError("BFD", bfdStatus.LastError, bfdStatus.Issues); err != nil {
+		return err
+	}
+	return nil
+}
+
+func defaultFRRHealthCheck(ctx context.Context) error {
+	_, err := pkgfrr.ShowRunningConfig(ctx)
+	return err
+}
+
+func frrHealthStatusError(name, lastError string, issues []string) error {
+	if lastError != "" {
+		return fmt.Errorf("check FRR %s status: %s", name, lastError)
+	}
+	if len(issues) > 0 {
+		return fmt.Errorf("check FRR %s status: %s", name, issues[0])
+	}
 	return nil
 }
 

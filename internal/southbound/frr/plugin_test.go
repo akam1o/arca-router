@@ -841,6 +841,61 @@ func TestCheckVRRPOperationalStatusReportsMissingGroup(t *testing.T) {
 	}
 }
 
+func TestHealthCheckReportsBackendError(t *testing.T) {
+	plugin := NewFRRPlugin(testLogger())
+	plugin.healthCheck = func(ctx context.Context) error {
+		return errors.New("vtysh unavailable")
+	}
+
+	err := plugin.HealthCheck(context.Background())
+	if err == nil {
+		t.Fatal("HealthCheck() error = nil, want backend error")
+	}
+	if !strings.Contains(err.Error(), "check FRR backend") {
+		t.Fatalf("HealthCheck() error = %v, want backend context", err)
+	}
+}
+
+func TestHealthCheckReportsOperationalStatusIssues(t *testing.T) {
+	plugin := NewFRRPlugin(testLogger())
+	plugin.healthCheck = func(ctx context.Context) error { return nil }
+	plugin.statusReader = fakeVRRPStatusReader{status: &pkgfrr.VRRPStatus{}}
+	plugin.currentFRRConfig = &pkgfrr.Config{
+		VRRP: &pkgfrr.VRRPConfig{Groups: []pkgfrr.VRRPGroup{
+			{ID: 10, Interface: "ge0-0-0", VirtualAddress: "192.0.2.254"},
+		}},
+	}
+
+	err := plugin.HealthCheck(context.Background())
+	if err == nil {
+		t.Fatal("HealthCheck() error = nil, want VRRP status issue")
+	}
+	if !strings.Contains(err.Error(), "check FRR VRRP status") {
+		t.Fatalf("HealthCheck() error = %v, want VRRP status context", err)
+	}
+	status := plugin.VRRPOperationalStatus()
+	if len(status.Issues) != 1 || status.Groups[0].State != "missing" {
+		t.Fatalf("VRRPOperationalStatus() = %#v, want recorded missing group", status)
+	}
+}
+
+func TestHealthCheckPassesWhenBackendAndOperationalStatusConverge(t *testing.T) {
+	plugin := NewFRRPlugin(testLogger())
+	plugin.healthCheck = func(ctx context.Context) error { return nil }
+	plugin.statusReader = fakeVRRPStatusReader{status: &pkgfrr.VRRPStatus{
+		Groups: []pkgfrr.VRRPRouterStatus{{Interface: "ge0-0-0", VRID: 10, State: "master"}},
+	}}
+	plugin.currentFRRConfig = &pkgfrr.Config{
+		VRRP: &pkgfrr.VRRPConfig{Groups: []pkgfrr.VRRPGroup{
+			{ID: 10, Interface: "ge0-0-0", VirtualAddress: "192.0.2.254"},
+		}},
+	}
+
+	if err := plugin.HealthCheck(context.Background()); err != nil {
+		t.Fatalf("HealthCheck() error = %v, want nil", err)
+	}
+}
+
 func TestCheckVRRPOperationalStatusRecordsReaderError(t *testing.T) {
 	plugin := NewFRRPlugin(testLogger())
 	plugin.statusReader = fakeVRRPStatusReader{err: errors.New("open /var/run/frr/vtysh.sock: permission denied")}
