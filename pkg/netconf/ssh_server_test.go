@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/akam1o/arca-router/pkg/datastore"
+	"github.com/akam1o/arca-router/pkg/logger"
 	"golang.org/x/crypto/ssh"
 )
 
@@ -331,6 +332,24 @@ func TestWriteHostKeyFileRejectsExistingSymlink(t *testing.T) {
 	}
 	if _, statErr := os.Lstat(linkPath); statErr != nil {
 		t.Fatalf("Lstat(%s) error = %v, want symlink preserved", linkPath, statErr)
+	}
+}
+
+func TestLoadOrGenerateHostKeyRejectsHardLinkedExistingKey(t *testing.T) {
+	dir := t.TempDir()
+	targetPath := filepath.Join(dir, "target-key")
+	linkPath := filepath.Join(dir, "hard-linked-key")
+	writeTestHostKey(t, targetPath, 0o600)
+	if err := os.Link(targetPath, linkPath); err != nil {
+		t.Skipf("hard links not supported: %v", err)
+	}
+
+	_, err := loadOrGenerateHostKey(linkPath, logger.New("test", logger.DefaultConfig()))
+	if err == nil {
+		t.Fatal("loadOrGenerateHostKey() error = nil, want hard link rejection")
+	}
+	if !strings.Contains(err.Error(), "multiple hard links") {
+		t.Fatalf("loadOrGenerateHostKey() error = %v, want hard link rejection", err)
 	}
 }
 

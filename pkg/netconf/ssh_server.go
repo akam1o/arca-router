@@ -676,7 +676,7 @@ func extractIP(addr net.Addr) string {
 // loadOrGenerateHostKey loads or generates an ED25519 host key
 func loadOrGenerateHostKey(path string, log *logger.Logger) (ssh.Signer, error) {
 	// Try to load existing key
-	data, err := os.ReadFile(path)
+	data, err := auth.ReadSecretFile(path)
 	if err == nil {
 		// Parse existing key
 		signer, err := ssh.ParsePrivateKey(data)
