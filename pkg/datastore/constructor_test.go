@@ -43,3 +43,76 @@ func TestDatastoreConstructorsRejectNilConfig(t *testing.T) {
 		})
 	}
 }
+
+func TestNewEtcdDatastoreRejectsCredentialsWithoutTLS(t *testing.T) {
+	ds, err := NewEtcdDatastore(&Config{
+		Backend:       BackendEtcd,
+		EtcdEndpoints: []string{"http://127.0.0.1:2379"},
+		EtcdUsername:  "arca",
+		EtcdPassword:  "secret",
+	})
+	if err == nil {
+		_ = ds.Close()
+		t.Fatal("NewEtcdDatastore() error = nil, want TLS requirement error")
+	}
+	if !strings.Contains(err.Error(), "etcd credentials require TLS") {
+		t.Fatalf("NewEtcdDatastore() error = %v, want TLS requirement error", err)
+	}
+}
+
+func TestValidateEtcdCredentialTransport(t *testing.T) {
+	tests := []struct {
+		name    string
+		cfg     *Config
+		wantErr bool
+	}{
+		{
+			name: "no credentials allows http",
+			cfg: &Config{
+				EtcdEndpoints: []string{"http://127.0.0.1:2379"},
+			},
+		},
+		{
+			name: "password requires https",
+			cfg: &Config{
+				EtcdEndpoints: []string{"http://127.0.0.1:2379"},
+				EtcdPassword:  "secret",
+			},
+			wantErr: true,
+		},
+		{
+			name: "username requires https",
+			cfg: &Config{
+				EtcdEndpoints: []string{"127.0.0.1:2379"},
+				EtcdUsername:  "arca",
+			},
+			wantErr: true,
+		},
+		{
+			name: "credentials allow all https endpoints",
+			cfg: &Config{
+				EtcdEndpoints: []string{"https://etcd1:2379", "https://etcd2:2379"},
+				EtcdUsername:  "arca",
+				EtcdPassword:  "secret",
+			},
+		},
+		{
+			name: "credentials reject mixed endpoints",
+			cfg: &Config{
+				EtcdEndpoints: []string{"https://etcd1:2379", "http://etcd2:2379"},
+				EtcdUsername:  "arca",
+				EtcdPassword:  "secret",
+			},
+			wantErr: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := validateEtcdCredentialTransport(tt.cfg)
+			if (err != nil) != tt.wantErr {
+				t.Fatalf("validateEtcdCredentialTransport() error = %v, wantErr %v", err, tt.wantErr)
+			}
+		})
+	}
+}

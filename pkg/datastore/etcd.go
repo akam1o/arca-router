@@ -6,6 +6,7 @@ import (
 	"crypto/x509"
 	"encoding/json"
 	"fmt"
+	"net/url"
 	"os"
 	"strings"
 	"sync"
@@ -36,6 +37,9 @@ func NewEtcdDatastore(cfg *Config) (Datastore, error) {
 
 	if len(cfg.EtcdEndpoints) == 0 {
 		return nil, fmt.Errorf("etcd endpoints cannot be empty")
+	}
+	if err := validateEtcdCredentialTransport(cfg); err != nil {
+		return nil, err
 	}
 
 	// Set default prefix if not specified
@@ -97,6 +101,26 @@ func NewEtcdDatastore(cfg *Config) (Datastore, error) {
 	}
 
 	return ds, nil
+}
+
+func validateEtcdCredentialTransport(cfg *Config) error {
+	if strings.TrimSpace(cfg.EtcdUsername) == "" && cfg.EtcdPassword == "" {
+		return nil
+	}
+	for _, endpoint := range cfg.EtcdEndpoints {
+		if !etcdEndpointUsesTLS(endpoint) {
+			return fmt.Errorf("etcd credentials require TLS; endpoint %q must use https", endpoint)
+		}
+	}
+	return nil
+}
+
+func etcdEndpointUsesTLS(endpoint string) bool {
+	parsed, err := url.Parse(strings.TrimSpace(endpoint))
+	if err != nil {
+		return false
+	}
+	return strings.EqualFold(parsed.Scheme, "https")
 }
 
 // buildTLSConfig creates a TLS configuration from the provided TLSConfig.
