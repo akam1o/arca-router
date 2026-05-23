@@ -9,6 +9,7 @@ import (
 
 	"github.com/akam1o/arca-router/internal/correlation"
 	"github.com/akam1o/arca-router/internal/model"
+	"github.com/akam1o/arca-router/internal/store"
 	pkgconfig "github.com/akam1o/arca-router/pkg/config"
 	"github.com/akam1o/arca-router/pkg/datastore"
 )
@@ -174,6 +175,27 @@ func TestSaveCommitPropagatesCorrelationIDToAudit(t *testing.T) {
 	}
 	if events[0].CorrelationID != "request-123" {
 		t.Fatalf("CorrelationID = %q, want request-123", events[0].CorrelationID)
+	}
+}
+
+func TestAuditLogRejectsUnmarshalableDetails(t *testing.T) {
+	st, err := NewFromPath(filepath.Join(t.TempDir(), "config.db"))
+	if err != nil {
+		t.Fatalf("NewFromPath() error = %v", err)
+	}
+	t.Cleanup(func() { _ = st.Close() })
+
+	err = st.AuditLog(context.Background(), &store.AuditEvent{
+		User:    "alice",
+		Action:  "test",
+		Result:  "failure",
+		Details: map[string]any{"bad": func() {}},
+	})
+	if err == nil {
+		t.Fatal("AuditLog() error = nil, want marshal error")
+	}
+	if !strings.Contains(err.Error(), "marshal audit details") {
+		t.Fatalf("AuditLog() error = %v, want marshal audit details", err)
 	}
 }
 

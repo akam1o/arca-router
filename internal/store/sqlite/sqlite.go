@@ -267,7 +267,10 @@ func (s *Store) ListCommits(ctx context.Context, opts *store.ListOptions) ([]*st
 }
 
 func (s *Store) AuditLog(ctx context.Context, event *store.AuditEvent) error {
-	detailsJSON, _ := json.Marshal(event.Details)
+	detailsJSON, err := json.Marshal(event.Details)
+	if err != nil {
+		return fmt.Errorf("marshal audit details: %w", err)
+	}
 
 	return s.ds.LogAuditEvent(ctx, &datastore.AuditEvent{
 		Timestamp:     event.Timestamp,
