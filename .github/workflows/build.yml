@@ -135,3 +135,42 @@ jobs:
       with:
         version: v2.7.2
         args: --timeout 5m
+
+  race:
+    name: Race Tests
+    runs-on: ubuntu-24.04
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Set up Go
+      uses: actions/setup-go@v5
+      with:
+        go-version: '1.26.3'
+        cache: true
+
+    - name: Install dependencies
+      run: |
+        go mod download
+        go mod verify
+
+    - name: Run race tests
+      run: go test -race ./...
+
+  vulnerability-scan:
+    name: Vulnerability Scan
+    runs-on: ubuntu-24.04
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Set up Go
+      uses: actions/setup-go@v5
+      with:
+        go-version: '1.26.3'
+        cache: true
+
+    - name: Run govulncheck
+      run: go run golang.org/x/vuln/cmd/govulncheck@latest ./...
