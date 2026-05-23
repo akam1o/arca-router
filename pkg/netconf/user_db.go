@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	_ "github.com/mattn/go-sqlite3"
@@ -57,6 +58,9 @@ func NewUserDatabase(path string, log *logger.Logger) (*UserDatabase, error) {
 		log = logger.New("netconf-userdb", logger.DefaultConfig())
 	}
 
+	if err := validateUserDatabasePath(path); err != nil {
+		return nil, err
+	}
 	if err := prepareSecureUserDatabaseFile(path); err != nil {
 		return nil, err
 	}
@@ -109,6 +113,17 @@ func NewUserDatabase(path string, log *logger.Logger) (*UserDatabase, error) {
 	}
 
 	return udb, nil
+}
+
+func validateUserDatabasePath(path string) error {
+	if path == "" {
+		return fmt.Errorf("user database path is required")
+	}
+	lowerPath := strings.ToLower(path)
+	if path == ":memory:" || strings.HasPrefix(lowerPath, "file:") || strings.Contains(path, "?") {
+		return fmt.Errorf("user database path must be a filesystem path without SQLite URI parameters")
+	}
+	return nil
 }
 
 func prepareSecureUserDatabaseFile(path string) error {

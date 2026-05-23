@@ -3,6 +3,7 @@ package netconf
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/akam1o/arca-router/pkg/logger"
@@ -38,6 +39,39 @@ func TestUserDatabaseRejectsInsecureDatabaseDirectory(t *testing.T) {
 	if err == nil {
 		_ = userDB.Close()
 		t.Fatal("NewUserDatabase() error = nil, want insecure directory error")
+	}
+}
+
+func TestUserDatabaseRejectsSQLiteDSNPaths(t *testing.T) {
+	tests := []struct {
+		name string
+		path string
+	}{
+		{
+			name: "query parameters",
+			path: filepath.Join(t.TempDir(), "users.db") + "?cache=shared",
+		},
+		{
+			name: "sqlite uri",
+			path: "file:" + filepath.Join(t.TempDir(), "users.db") + "?mode=rwc",
+		},
+		{
+			name: "memory database",
+			path: ":memory:",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			userDB, err := NewUserDatabase(tt.path, logger.New("test", logger.DefaultConfig()))
+			if err == nil {
+				_ = userDB.Close()
+				t.Fatal("NewUserDatabase() error = nil, want user database path validation error")
+			}
+			if !strings.Contains(err.Error(), "filesystem path") {
+				t.Fatalf("NewUserDatabase() error = %v, want filesystem path validation error", err)
+			}
+		})
 	}
 }
 
