@@ -116,13 +116,22 @@ func snapshotSNMPConfig(snapshot *model.ConfigSnapshot) *model.SNMPConfig {
 }
 
 func startSNMPServer(ctx context.Context, listenAddr, community string, source metricsSource, log *logger.Logger) (<-chan error, error) {
+	errCh, _, err := startSNMPServerWithShutdown(ctx, listenAddr, community, source, log)
+	return errCh, err
+}
+
+func startSNMPServerWithShutdown(ctx context.Context, listenAddr, community string, source metricsSource, log *logger.Logger) (<-chan error, func(context.Context) error, error) {
 	if err := security.ValidateSNMPCommunity(community); err != nil {
-		return nil, fmt.Errorf("validate SNMP community: %w", err)
+		return nil, nil, fmt.Errorf("validate SNMP community: %w", err)
 	}
 
 	server := newSNMPServer(source, community)
 	if err := server.ListenUDP("udp", listenAddr); err != nil {
-		return nil, fmt.Errorf("listen SNMP endpoint: %w", err)
+		return nil, nil, fmt.Errorf("listen SNMP endpoint: %w", err)
+	}
+	shutdown := func(context.Context) error {
+		server.Shutdown()
+		return nil
 	}
 
 	errCh := make(chan error, 1)
@@ -135,10 +144,10 @@ func startSNMPServer(ctx context.Context, listenAddr, community string, source m
 
 	go func() {
 		<-ctx.Done()
-		server.Shutdown()
+		_ = shutdown(context.Background())
 	}()
 
-	return errCh, nil
+	return errCh, shutdown, nil
 }
 
 func newSNMPServer(source metricsSource, community string) *snmpserver.SNMPServer {

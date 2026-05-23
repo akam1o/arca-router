@@ -423,10 +423,10 @@ func snapshotPrometheusConfig(snapshot *model.ConfigSnapshot) *model.PrometheusC
 	return snapshot.Config.System.Services.Prometheus
 }
 
-func startMetricsServer(ctx context.Context, listenAddr string, source metricsSource, log *logger.Logger) (<-chan error, error) {
+func startMetricsServerWithShutdown(ctx context.Context, listenAddr string, source metricsSource, log *logger.Logger) (<-chan error, func(context.Context) error, error) {
 	lis, err := net.Listen("tcp", listenAddr)
 	if err != nil {
-		return nil, fmt.Errorf("listen metrics endpoint: %w", err)
+		return nil, nil, fmt.Errorf("listen metrics endpoint: %w", err)
 	}
 
 	mux := http.NewServeMux()
@@ -434,6 +434,7 @@ func startMetricsServer(ctx context.Context, listenAddr string, source metricsSo
 	mux.HandleFunc("/healthz", source.handleHealthz)
 
 	srv := newObservabilityHTTPServer(mux)
+	shutdown := srv.Shutdown
 
 	errCh := make(chan error, 1)
 	go func() {
@@ -449,12 +450,12 @@ func startMetricsServer(ctx context.Context, listenAddr string, source metricsSo
 		<-ctx.Done()
 		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
-		if err := srv.Shutdown(shutdownCtx); err != nil {
+		if err := shutdown(shutdownCtx); err != nil {
 			log.Error("Metrics endpoint shutdown failed", slog.Any("error", err))
 		}
 	}()
 
-	return errCh, nil
+	return errCh, shutdown, nil
 }
 
 func newObservabilityHTTPServer(handler http.Handler) *http.Server {

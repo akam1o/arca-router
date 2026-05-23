@@ -6,11 +6,13 @@ import (
 	"crypto/rand"
 	"encoding/pem"
 	"encoding/xml"
+	"io"
 	"net"
 	"os"
 	"path/filepath"
 	"slices"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -90,6 +92,49 @@ func TestSSHServerStopClosesIdlePreAuthConnection(t *testing.T) {
 		}
 	case <-time.After(2 * time.Second):
 		t.Fatal("Stop() did not return with idle pre-auth connection")
+	}
+}
+
+func TestHandleConnectionSetsHandshakeDeadline(t *testing.T) {
+	server := newTestConnectionSSHServer(t, 100)
+	conn := &deadlineRecordingConn{}
+
+	server.wg.Add(1)
+	server.handleConnection(context.Background(), conn)
+
+	if len(conn.deadlines) < 2 {
+		t.Fatalf("deadlines recorded = %d, want set and clear", len(conn.deadlines))
+	}
+	if conn.deadlines[0].IsZero() {
+		t.Fatal("first deadline is zero, want handshake deadline")
+	}
+	if !conn.deadlines[len(conn.deadlines)-1].IsZero() {
+		t.Fatalf("last deadline = %s, want zero clear deadline", conn.deadlines[len(conn.deadlines)-1])
+	}
+	if conn.reads == 0 {
+		t.Fatal("connection was not read during SSH handshake")
+	}
+	if got := atomic.LoadUint64(&server.failedHandshakes); got != 1 {
+		t.Fatalf("failed handshakes = %d, want 1", got)
+	}
+}
+
+func TestHandleConnectionRejectsWhenActiveConnectionsReachLimit(t *testing.T) {
+	server := newTestConnectionSSHServer(t, 1)
+	atomic.StoreInt32(&server.activeConnections, 1)
+	conn := &deadlineRecordingConn{}
+
+	server.wg.Add(1)
+	server.handleConnection(context.Background(), conn)
+
+	if conn.reads != 0 {
+		t.Fatalf("connection reads = %d, want rejection before SSH handshake", conn.reads)
+	}
+	if got := atomic.LoadInt32(&server.activeConnections); got != 1 {
+		t.Fatalf("active connections = %d, want restored pre-existing count", got)
+	}
+	if got := atomic.LoadUint64(&server.failedHandshakes); got != 1 {
+		t.Fatalf("failed handshakes = %d, want 1", got)
 	}
 }
 
@@ -412,6 +457,77 @@ func TestSSHServerHookSettersNilReceiver(t *testing.T) {
 	server.SetCommitHook(nil)
 	server.SetOperationalStateProvider(nil)
 }
+
+func newTestConnectionSSHServer(t *testing.T, maxSessions int) *SSHServer {
+	t.Helper()
+
+	cfg := DefaultSSHConfig()
+	cfg.MaxSessions = maxSessions
+	log := logger.New("test", logger.DefaultConfig())
+	_, privateKey, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatalf("GenerateKey() error = %v", err)
+	}
+	signer, err := ssh.NewSignerFromKey(privateKey)
+	if err != nil {
+		t.Fatalf("NewSignerFromKey() error = %v", err)
+	}
+	sshConfig := &ssh.ServerConfig{NoClientAuth: true}
+	sshConfig.AddHostKey(signer)
+	return &SSHServer{
+		config:      cfg,
+		sessionMgr:  NewSessionManager(cfg, nil, log),
+		sshConfig:   sshConfig,
+		activeConns: make(map[net.Conn]struct{}),
+		log:         log,
+	}
+}
+
+type deadlineRecordingConn struct {
+	reads     int
+	closed    bool
+	deadlines []time.Time
+}
+
+func (c *deadlineRecordingConn) Read([]byte) (int, error) {
+	c.reads++
+	return 0, io.EOF
+}
+
+func (c *deadlineRecordingConn) Write(b []byte) (int, error) {
+	return len(b), nil
+}
+
+func (c *deadlineRecordingConn) Close() error {
+	c.closed = true
+	return nil
+}
+
+func (c *deadlineRecordingConn) LocalAddr() net.Addr {
+	return testConnAddr("local")
+}
+
+func (c *deadlineRecordingConn) RemoteAddr() net.Addr {
+	return testConnAddr("remote")
+}
+
+func (c *deadlineRecordingConn) SetDeadline(t time.Time) error {
+	c.deadlines = append(c.deadlines, t)
+	return nil
+}
+
+func (c *deadlineRecordingConn) SetReadDeadline(time.Time) error {
+	return nil
+}
+
+func (c *deadlineRecordingConn) SetWriteDeadline(time.Time) error {
+	return nil
+}
+
+type testConnAddr string
+
+func (a testConnAddr) Network() string { return "tcp" }
+func (a testConnAddr) String() string  { return string(a) }
 
 func testSSHServerConfig(t *testing.T, listenAddr string) (*SSHConfig, string) {
 	t.Helper()

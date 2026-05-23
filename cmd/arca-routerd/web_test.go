@@ -2284,7 +2284,6 @@ func newWebJSONTestRequest(method, target, body string) *http.Request {
 
 func newWebConfigAPITestSource(t *testing.T, role string) (metricsSource, *engine.Engine) {
 	t.Helper()
-	installParserHooks()
 	eng := engine.NewEngine(nil, slog.Default())
 	cfg := model.NewRouterConfig()
 	cfg.System = &model.SystemConfig{HostName: "edge01"}
@@ -2302,6 +2301,7 @@ func newWebConfigAPITestSource(t *testing.T, role string) (metricsSource, *engin
 	}
 	eng.InitializeRunning(cfg, 42)
 	configAPI := nbgrpc.NewServer(eng, nil, slog.Default())
+	configAPI.SetConfigTextParser(parseLegacyRouterConfigText)
 	return metricsSource{
 		startedAt: time.Now().Add(-2 * time.Minute),
 		engine:    eng,

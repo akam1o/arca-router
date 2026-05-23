@@ -37,6 +37,7 @@ type Server struct {
 	sessions       *SessionManager
 	log            *slog.Logger
 	server         *googlegrpc.Server
+	configParser   ConfigTextParserFunc
 	stateCollector interfaceStateCollector
 	lcpSource      lcpReconciliationSource
 	haSource       haStatusSource
@@ -84,14 +85,20 @@ type qosCapabilitySource interface {
 // NewServer creates a new gRPC server.
 func NewServer(eng *engine.Engine, st store.ConfigStore, log *slog.Logger) *Server {
 	return &Server{
-		engine:      eng,
-		store:       st,
-		sessions:    NewSessionManager(),
-		log:         log.With("component", "grpc"),
-		routeReader: newOperationalRouteStatusReader(),
-		bgpReader:   newOperationalBGPSummaryStatusReader(),
-		ospfReader:  newOperationalOSPFNeighborStatusReader(),
+		engine:       eng,
+		store:        st,
+		sessions:     NewSessionManager(),
+		log:          log.With("component", "grpc"),
+		configParser: ConfigTextParser,
+		routeReader:  newOperationalRouteStatusReader(),
+		bgpReader:    newOperationalBGPSummaryStatusReader(),
+		ospfReader:   newOperationalOSPFNeighborStatusReader(),
 	}
+}
+
+// SetConfigTextParser injects the parser used for set-command configuration text.
+func (s *Server) SetConfigTextParser(parser ConfigTextParserFunc) {
+	s.configParser = parser
 }
 
 // Serve starts the gRPC server on the given listener.
@@ -231,7 +238,7 @@ func (s *Server) ReplaceCandidate(ctx context.Context, sessionID, configText str
 		return err
 	}
 
-	cfg, err := parseConfigText(configText)
+	cfg, err := s.parseConfigText(configText)
 	if err != nil {
 		return wrapConfigInputErrorf(err, "parse replacement config")
 	}
@@ -274,7 +281,7 @@ func (s *Server) Commit(ctx context.Context, sessionID, user, message string) (s
 	}
 
 	// Parse candidate text into new config model
-	newCfg, err := parseConfigText(candidateText)
+	newCfg, err := s.parseConfigText(candidateText)
 	if err != nil {
 		return "", 0, wrapConfigInputErrorf(err, "parse candidate config")
 	}
@@ -359,7 +366,7 @@ func (s *Server) ValidateCandidate(ctx context.Context, sessionID string) error 
 	if staleErr != nil {
 		return staleErr
 	}
-	cfg, err := parseConfigText(candidateText)
+	cfg, err := s.parseConfigText(candidateText)
 	if err != nil {
 		return wrapConfigInputErrorf(err, "parse candidate config")
 	}
@@ -1781,9 +1788,19 @@ func lineDiff(oldText, newText string) string {
 	return strings.Join(out, "\n")
 }
 
-// ConfigTextParser is a hook for parsing set-command text into legacy config.
+// ConfigTextParserFunc parses set-command text into the canonical config model.
+type ConfigTextParserFunc func(text string) (*model.RouterConfig, error)
+
+// ConfigTextParser is a deprecated fallback hook for parsing set-command text.
 // Set at initialization to break circular dependency with pkg/config.
-var ConfigTextParser func(text string) (*model.RouterConfig, error)
+var ConfigTextParser ConfigTextParserFunc
+
+func (s *Server) parseConfigText(text string) (*model.RouterConfig, error) {
+	if s != nil && s.configParser != nil {
+		return s.configParser(text)
+	}
+	return parseConfigText(text)
+}
 
 // parseConfigText parses set-command text into the new config model.
 func parseConfigText(text string) (*model.RouterConfig, error) {

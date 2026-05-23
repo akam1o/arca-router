@@ -169,6 +169,27 @@ func TestDaemonManagementPlaneWaitPropagatesEndpointError(t *testing.T) {
 	}
 }
 
+func TestDaemonManagementPlaneStopStopsAuxiliaryEndpoints(t *testing.T) {
+	var stopped []string
+	recordStop := func(name string) func(context.Context) error {
+		return func(context.Context) error {
+			stopped = append(stopped, name)
+			return nil
+		}
+	}
+
+	plane := &daemonManagementPlane{
+		metricsStop: recordStop("metrics"),
+		webStop:     recordStop("web"),
+		snmpStop:    recordStop("snmp"),
+	}
+	plane.Stop(testDaemonLogger())
+
+	if got := strings.Join(stopped, ","); got != "metrics,web,snmp" {
+		t.Fatalf("stopped endpoints = %q, want metrics,web,snmp", got)
+	}
+}
+
 func TestLoadInitialConfigPrefersDatastore(t *testing.T) {
 	configPath := filepath.Join(t.TempDir(), "arca-router.conf")
 	if err := os.WriteFile(configPath, []byte("set system host-name file-router\n"), 0600); err != nil {

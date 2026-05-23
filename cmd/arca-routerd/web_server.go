@@ -226,16 +226,22 @@ func webAPITokenFingerprint(token webAPIToken) string {
 }
 
 func startWebServer(ctx context.Context, listenAddr string, source metricsSource, log *logger.Logger) (<-chan error, error) {
+	errCh, _, err := startWebServerWithShutdown(ctx, listenAddr, source, log)
+	return errCh, err
+}
+
+func startWebServerWithShutdown(ctx context.Context, listenAddr string, source metricsSource, log *logger.Logger) (<-chan error, func(context.Context) error, error) {
 	if !webPlainHTTPListenAllowed(listenAddr) {
-		return nil, fmt.Errorf("web endpoint serves plaintext HTTP and must listen on loopback, got %q", listenAddr)
+		return nil, nil, fmt.Errorf("web endpoint serves plaintext HTTP and must listen on loopback, got %q", listenAddr)
 	}
 	lis, err := net.Listen("tcp", listenAddr)
 	if err != nil {
-		return nil, fmt.Errorf("listen web endpoint: %w", err)
+		return nil, nil, fmt.Errorf("listen web endpoint: %w", err)
 	}
 	source.webLog = log.Logger
 
 	srv := newObservabilityHTTPServer(newWebMux(source))
+	shutdown := srv.Shutdown
 
 	errCh := make(chan error, 1)
 	go func() {
@@ -251,12 +257,12 @@ func startWebServer(ctx context.Context, listenAddr string, source metricsSource
 		<-ctx.Done()
 		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
-		if err := srv.Shutdown(shutdownCtx); err != nil {
+		if err := shutdown(shutdownCtx); err != nil {
 			log.Error("Web endpoint shutdown failed", slog.Any("error", err))
 		}
 	}()
 
-	return errCh, nil
+	return errCh, shutdown, nil
 }
 
 func newWebMux(source metricsSource) *http.ServeMux {

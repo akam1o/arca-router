@@ -350,7 +350,6 @@ func vppClientOptionsFromFlags(f *daemonFlags) pkgvpp.GovppClientOptions {
 }
 
 func run(ctx context.Context, f *daemonFlags, log *logger.Logger) error {
-	installParserHooks()
 	logDaemonConfiguration(f, log)
 
 	runtime, err := newDaemonRuntime(ctx, f, log)
@@ -509,8 +508,11 @@ type daemonManagementPlane struct {
 	netconfServer *netconf.SSHServer
 	grpcErr       <-chan error
 	metricsErr    <-chan error
+	metricsStop   func(context.Context) error
 	webErr        <-chan error
+	webStop       func(context.Context) error
 	snmpErr       <-chan error
+	snmpStop      func(context.Context) error
 }
 
 func startDaemonManagementPlane(ctx context.Context, f *daemonFlags, runtime *daemonRuntime, log *logger.Logger) (_ *daemonManagementPlane, err error) {
@@ -548,6 +550,7 @@ func startDaemonManagementPlane(ctx context.Context, f *daemonFlags, runtime *da
 	)
 
 	grpcServer := nbgrpc.NewServer(runtime.engine, runtime.configStore, slog.Default())
+	grpcServer.SetConfigTextParser(parseLegacyRouterConfigText)
 	grpcServer.SetInterfaceStateCollector(runtime.vppPlugin)
 	grpcServer.SetLCPReconciliationSource(newGRPCLCPReconciliationSource(runtime.vppPlugin))
 	grpcServer.SetBFDOperationalSource(runtime.frrPlugin)
@@ -582,21 +585,21 @@ func startDaemonManagementPlane(ctx context.Context, f *daemonFlags, runtime *da
 	}()
 
 	if metricsListen := effectiveMetricsListen(f.metricsListen, runtime.engine.RunningSnapshot()); metricsListen != "" {
-		plane.metricsErr, err = startMetricsServer(ctx, metricsListen, observabilitySource, log)
+		plane.metricsErr, plane.metricsStop, err = startMetricsServerWithShutdown(ctx, metricsListen, observabilitySource, log)
 		if err != nil {
 			return nil, err
 		}
 	}
 
 	if webListen := effectiveWebListen(f.webListen, runtime.engine.RunningSnapshot()); webListen != "" {
-		plane.webErr, err = startWebServer(ctx, webListen, observabilitySource, log)
+		plane.webErr, plane.webStop, err = startWebServerWithShutdown(ctx, webListen, observabilitySource, log)
 		if err != nil {
 			return nil, err
 		}
 	}
 
 	if snmpListen := effectiveSNMPListen(f.snmpListen, runtime.engine.RunningSnapshot()); snmpListen != "" {
-		plane.snmpErr, err = startSNMPServer(ctx, snmpListen, effectiveSNMPCommunity(f.snmpCommunity, runtime.engine.RunningSnapshot()), observabilitySource, log)
+		plane.snmpErr, plane.snmpStop, err = startSNMPServerWithShutdown(ctx, snmpListen, effectiveSNMPCommunity(f.snmpCommunity, runtime.engine.RunningSnapshot()), observabilitySource, log)
 		if err != nil {
 			return nil, err
 		}
@@ -609,6 +612,9 @@ func (p *daemonManagementPlane) Stop(log *logger.Logger) {
 	if p == nil {
 		return
 	}
+	stopDaemonEndpoint(log, "metrics endpoint", p.metricsStop)
+	stopDaemonEndpoint(log, "web endpoint", p.webStop)
+	stopDaemonEndpoint(log, "SNMP endpoint", p.snmpStop)
 	if p.grpcServer != nil {
 		p.grpcServer.Stop()
 	}
@@ -619,6 +625,17 @@ func (p *daemonManagementPlane) Stop(log *logger.Logger) {
 		if err := p.netconfServer.Stop(); err != nil {
 			log.Error("Failed to stop NETCONF server", slog.Any("error", err))
 		}
+	}
+}
+
+func stopDaemonEndpoint(log *logger.Logger, name string, stop func(context.Context) error) {
+	if stop == nil {
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if err := stop(ctx); err != nil && log != nil {
+		log.Error("Failed to stop "+name, slog.Any("error", err))
 	}
 }
 
@@ -1047,10 +1064,6 @@ func parseLegacyRouterConfigText(text string) (*model.RouterConfig, error) {
 		return nil, err
 	}
 	return model.FromLegacyConfig(legacyCfg), nil
-}
-
-func installParserHooks() {
-	nbgrpc.ConfigTextParser = parseLegacyRouterConfigText
 }
 
 func newNETCONFCommitHook(eng *engine.Engine) netconf.CommitHook {

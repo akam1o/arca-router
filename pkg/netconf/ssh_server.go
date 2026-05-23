@@ -26,6 +26,8 @@ import (
 	"github.com/akam1o/arca-router/pkg/logger"
 )
 
+const sshHandshakeTimeout = 30 * time.Second
+
 // SSHServer manages SSH connections for NETCONF
 // Note: This server is not designed to be restarted after Stop() is called.
 // Create a new instance if restart is needed.
@@ -442,17 +444,30 @@ func (s *SSHServer) handleConnection(ctx context.Context, conn net.Conn) {
 
 	// Update metrics
 	atomic.AddUint64(&s.totalConnections, 1)
-	atomic.AddInt32(&s.activeConnections, 1)
+	activeConnections := atomic.AddInt32(&s.activeConnections, 1)
 	defer atomic.AddInt32(&s.activeConnections, -1)
+
+	if int(activeConnections) > s.config.MaxSessions {
+		atomic.AddUint64(&s.failedHandshakes, 1)
+		s.log.Warn("Max active connections reached, rejecting connection", "remote", conn.RemoteAddr())
+		return
+	}
 
 	// Check max sessions
 	if s.sessionMgr.Count() >= s.config.MaxSessions {
+		atomic.AddUint64(&s.failedHandshakes, 1)
 		s.log.Warn("Max sessions reached, rejecting connection", "remote", conn.RemoteAddr())
 		return
 	}
 
 	// Perform SSH handshake
+	if err := conn.SetDeadline(time.Now().Add(sshHandshakeTimeout)); err != nil {
+		s.log.Warn("Failed to set SSH handshake deadline", "remote", conn.RemoteAddr(), "error", err)
+	}
 	sshConn, chans, reqs, err := ssh.NewServerConn(conn, s.sshConfig)
+	if deadlineErr := conn.SetDeadline(time.Time{}); deadlineErr != nil {
+		s.log.Warn("Failed to clear SSH handshake deadline", "remote", conn.RemoteAddr(), "error", deadlineErr)
+	}
 	if err != nil {
 		atomic.AddUint64(&s.failedHandshakes, 1)
 		s.log.Error("SSH handshake failed", "remote", conn.RemoteAddr(), "error", err)

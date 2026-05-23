@@ -65,6 +65,40 @@ func TestConfigEditStatusErrorClassifiesTypedErrors(t *testing.T) {
 	}
 }
 
+func TestServerConfigTextParserIsInstanceScoped(t *testing.T) {
+	oldParser := ConfigTextParser
+	ConfigTextParser = nil
+	t.Cleanup(func() { ConfigTextParser = oldParser })
+
+	parser := func(hostname string) ConfigTextParserFunc {
+		return func(string) (*model.RouterConfig, error) {
+			cfg := model.NewRouterConfig()
+			cfg.System = &model.SystemConfig{HostName: hostname}
+			return cfg, nil
+		}
+	}
+
+	first := NewServer(engine.NewEngine(nil, testLogger()), nil, testLogger())
+	second := NewServer(engine.NewEngine(nil, testLogger()), nil, testLogger())
+	first.SetConfigTextParser(parser("first"))
+	second.SetConfigTextParser(parser("second"))
+
+	firstCfg, err := first.parseConfigText("set system host-name ignored")
+	if err != nil {
+		t.Fatalf("first parseConfigText() error = %v", err)
+	}
+	secondCfg, err := second.parseConfigText("set system host-name ignored")
+	if err != nil {
+		t.Fatalf("second parseConfigText() error = %v", err)
+	}
+	if firstCfg.System.HostName != "first" {
+		t.Fatalf("first hostname = %q, want first", firstCfg.System.HostName)
+	}
+	if secondCfg.System.HostName != "second" {
+		t.Fatalf("second hostname = %q, want second", secondCfg.System.HostName)
+	}
+}
+
 func TestStateAdapterRedactsOperationalErrors(t *testing.T) {
 	oldVtysh := runOperationalVtyshCommand
 	runOperationalVtyshCommand = func(ctx context.Context, command string) (string, error) {
