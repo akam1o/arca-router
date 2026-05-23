@@ -4,6 +4,7 @@ package vpp
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net"
@@ -178,8 +179,10 @@ func (p *VPPPlugin) ApplyChanges(ctx context.Context, diff *engine.ConfigDiff) e
 	// 1. Create new interfaces
 	for name, ifaceCfg := range diff.InterfacesAdded {
 		if err := p.createInterface(ctx, name, ifaceCfg, &rollbackOps); err != nil {
-			p.executeRollback(ctx, rollbackOps)
-			return fmt.Errorf("create interface %s: %w", name, err)
+			return withRollbackError(
+				fmt.Errorf("create interface %s: %w", name, err),
+				p.executeRollback(ctx, rollbackOps),
+			)
 		}
 	}
 
@@ -188,8 +191,10 @@ func (p *VPPPlugin) ApplyChanges(ctx context.Context, diff *engine.ConfigDiff) e
 		var err error
 		tableAddressHandled, err = p.applyRoutingInstanceChanges(ctx, diff, &rollbackOps, false)
 		if err != nil {
-			p.executeRollback(ctx, rollbackOps)
-			return fmt.Errorf("update routing instance tables: %w", err)
+			return withRollbackError(
+				fmt.Errorf("update routing instance tables: %w", err),
+				p.executeRollback(ctx, rollbackOps),
+			)
 		}
 	}
 
@@ -199,12 +204,16 @@ func (p *VPPPlugin) ApplyChanges(ctx context.Context, diff *engine.ConfigDiff) e
 		}
 		swIfIndex, ok := p.ifaceIndex[name]
 		if !ok {
-			p.executeRollback(ctx, rollbackOps)
-			return fmt.Errorf("interface %s not found in VPP", name)
+			return withRollbackError(
+				fmt.Errorf("interface %s not found in VPP", name),
+				p.executeRollback(ctx, rollbackOps),
+			)
 		}
 		if err := p.applyAddresses(ctx, swIfIndex, ifaceCfg, &rollbackOps); err != nil {
-			p.executeRollback(ctx, rollbackOps)
-			return fmt.Errorf("apply interface %s addresses: %w", name, err)
+			return withRollbackError(
+				fmt.Errorf("apply interface %s addresses: %w", name, err),
+				p.executeRollback(ctx, rollbackOps),
+			)
 		}
 	}
 
@@ -214,47 +223,59 @@ func (p *VPPPlugin) ApplyChanges(ctx context.Context, diff *engine.ConfigDiff) e
 			continue
 		}
 		if err := p.applyInterfaceChanges(ctx, change, &rollbackOps); err != nil {
-			p.executeRollback(ctx, rollbackOps)
-			return fmt.Errorf("update interface %s: %w", change.Name, err)
+			return withRollbackError(
+				fmt.Errorf("update interface %s: %w", change.Name, err),
+				p.executeRollback(ctx, rollbackOps),
+			)
 		}
 	}
 
 	// 3. Apply MPLS forwarding state before interfaces are removed.
 	if diff.MPLSChanged {
 		if err := p.applyMPLSChanges(ctx, diff.OldMPLS, diff.NewMPLS, &rollbackOps); err != nil {
-			p.executeRollback(ctx, rollbackOps)
-			return fmt.Errorf("update MPLS interfaces: %w", err)
+			return withRollbackError(
+				fmt.Errorf("update MPLS interfaces: %w", err),
+				p.executeRollback(ctx, rollbackOps),
+			)
 		}
 	}
 
 	// 4. Apply class-of-service profile bindings before interfaces are removed.
 	if diff.ClassOfServiceChanged {
 		if err := p.applyClassOfServiceChanges(ctx, diff.OldClassOfService, diff.NewClassOfService, &rollbackOps); err != nil {
-			p.executeRollback(ctx, rollbackOps)
-			return fmt.Errorf("update class-of-service interfaces: %w", err)
+			return withRollbackError(
+				fmt.Errorf("update class-of-service interfaces: %w", err),
+				p.executeRollback(ctx, rollbackOps),
+			)
 		}
 	}
 
 	// 5. Apply EVPN/VXLAN overlay state before interfaces are removed.
 	if diff.EVPNChanged {
 		if err := p.applyEVPNChanges(ctx, diff, &rollbackOps); err != nil {
-			p.executeRollback(ctx, rollbackOps)
-			return fmt.Errorf("update EVPN/VXLAN dataplane: %w", err)
+			return withRollbackError(
+				fmt.Errorf("update EVPN/VXLAN dataplane: %w", err),
+				p.executeRollback(ctx, rollbackOps),
+			)
 		}
 	}
 
 	if diff.RoutingInstancesChanged {
 		if err := p.deleteStaleRoutingInstanceTables(ctx, diff, &rollbackOps); err != nil {
-			p.executeRollback(ctx, rollbackOps)
-			return fmt.Errorf("delete routing instance tables: %w", err)
+			return withRollbackError(
+				fmt.Errorf("delete routing instance tables: %w", err),
+				p.executeRollback(ctx, rollbackOps),
+			)
 		}
 	}
 
 	// 6. Remove interfaces (remove addresses, LCP, then disable)
 	for _, name := range diff.InterfacesRemoved {
 		if err := p.removeInterface(ctx, name, &rollbackOps); err != nil {
-			p.executeRollback(ctx, rollbackOps)
-			return fmt.Errorf("remove interface %s: %w", name, err)
+			return withRollbackError(
+				fmt.Errorf("remove interface %s: %w", name, err),
+				p.executeRollback(ctx, rollbackOps),
+			)
 		}
 	}
 
@@ -270,8 +291,8 @@ func (p *VPPPlugin) RollbackChanges(ctx context.Context, diff *engine.ConfigDiff
 	var rollbackErr error
 	if diff.MPLSChanged {
 		for _, name := range mplsAddedInterfaces(diff.OldMPLS, diff.NewMPLS) {
-			if err := p.setMPLSInterface(ctx, name, false); err != nil && rollbackErr == nil {
-				rollbackErr = fmt.Errorf("disable MPLS interface %s: %w", name, err)
+			if err := p.setMPLSInterface(ctx, name, false); err != nil {
+				rollbackErr = errors.Join(rollbackErr, fmt.Errorf("disable MPLS interface %s: %w", name, err))
 			}
 		}
 	}
@@ -282,21 +303,25 @@ func (p *VPPPlugin) RollbackChanges(ctx context.Context, diff *engine.ConfigDiff
 			continue
 		}
 		p.ifaceIndex[name] = swIfIndex
-		_ = p.client.SetInterfaceUp(ctx, swIfIndex)
+		if err := p.client.SetInterfaceUp(ctx, swIfIndex); err != nil {
+			rollbackErr = errors.Join(rollbackErr, fmt.Errorf("restore interface %s up: %w", name, err))
+		}
 		if linuxName, err := pkgvpp.ConvertJunosToLinuxName(name); err == nil {
-			_ = p.lcpManager.Create(ctx, swIfIndex, linuxName, name)
+			if err := p.lcpManager.Create(ctx, swIfIndex, linuxName, name); err != nil {
+				rollbackErr = errors.Join(rollbackErr, fmt.Errorf("restore LCP interface %s: %w", name, err))
+			}
 		}
 	}
 
 	if diff.ClassOfServiceChanged {
-		if err := p.applyClassOfServiceChanges(ctx, diff.NewClassOfService, diff.OldClassOfService, nil); err != nil && rollbackErr == nil {
-			rollbackErr = fmt.Errorf("restore class-of-service interfaces: %w", err)
+		if err := p.applyClassOfServiceChanges(ctx, diff.NewClassOfService, diff.OldClassOfService, nil); err != nil {
+			rollbackErr = errors.Join(rollbackErr, fmt.Errorf("restore class-of-service interfaces: %w", err))
 		}
 	}
 
 	if diff.EVPNChanged {
-		if err := p.applyEVPNChanges(ctx, reverseEVPNDiff(diff), nil); err != nil && rollbackErr == nil {
-			rollbackErr = fmt.Errorf("restore EVPN/VXLAN dataplane: %w", err)
+		if err := p.applyEVPNChanges(ctx, reverseEVPNDiff(diff), nil); err != nil {
+			rollbackErr = errors.Join(rollbackErr, fmt.Errorf("restore EVPN/VXLAN dataplane: %w", err))
 		}
 	}
 
@@ -306,9 +331,15 @@ func (p *VPPPlugin) RollbackChanges(ctx context.Context, diff *engine.ConfigDiff
 		if !ok {
 			continue
 		}
-		p.deleteConfiguredAddresses(ctx, swIfIndex, ifaceCfg)
-		_ = p.client.DeleteLCPInterface(ctx, swIfIndex)
-		_ = p.client.SetInterfaceDown(ctx, swIfIndex)
+		if err := p.deleteConfiguredAddresses(ctx, swIfIndex, ifaceCfg); err != nil {
+			rollbackErr = errors.Join(rollbackErr, fmt.Errorf("remove configured addresses for interface %s: %w", name, err))
+		}
+		if err := p.client.DeleteLCPInterface(ctx, swIfIndex); err != nil {
+			rollbackErr = errors.Join(rollbackErr, fmt.Errorf("delete LCP interface %s: %w", name, err))
+		}
+		if err := p.client.SetInterfaceDown(ctx, swIfIndex); err != nil {
+			rollbackErr = errors.Join(rollbackErr, fmt.Errorf("set interface %s down: %w", name, err))
+		}
 		delete(p.ifaceIndex, name)
 	}
 
@@ -321,8 +352,8 @@ func (p *VPPPlugin) RollbackChanges(ctx context.Context, diff *engine.ConfigDiff
 			OldRoutingInstances: diff.NewRoutingInstances,
 			NewRoutingInstances: diff.OldRoutingInstances,
 		}, nil, true)
-		if err != nil && rollbackErr == nil {
-			rollbackErr = fmt.Errorf("restore routing instance tables: %w", err)
+		if err != nil {
+			rollbackErr = errors.Join(rollbackErr, fmt.Errorf("restore routing instance tables: %w", err))
 		}
 	}
 
@@ -340,7 +371,9 @@ func (p *VPPPlugin) RollbackChanges(ctx context.Context, diff *engine.ConfigDiff
 			if err != nil {
 				continue
 			}
-			_ = p.client.DeleteInterfaceAddress(ctx, swIfIndex, ipNet)
+			if err := p.client.DeleteInterfaceAddress(ctx, swIfIndex, ipNet); err != nil {
+				rollbackErr = errors.Join(rollbackErr, fmt.Errorf("remove added address %s from interface %s: %w", addr.Address, change.Name, err))
+			}
 		}
 		// Re-add addresses that were removed
 		for _, addr := range change.AddressesRemoved {
@@ -348,14 +381,16 @@ func (p *VPPPlugin) RollbackChanges(ctx context.Context, diff *engine.ConfigDiff
 			if err != nil {
 				continue
 			}
-			_ = p.client.SetInterfaceAddress(ctx, swIfIndex, ipNet)
+			if err := p.client.SetInterfaceAddress(ctx, swIfIndex, ipNet); err != nil {
+				rollbackErr = errors.Join(rollbackErr, fmt.Errorf("restore removed address %s on interface %s: %w", addr.Address, change.Name, err))
+			}
 		}
 	}
 
 	if diff.MPLSChanged {
 		for _, name := range mplsRemovedInterfaces(diff.OldMPLS, diff.NewMPLS) {
-			if err := p.setMPLSInterface(ctx, name, true); err != nil && rollbackErr == nil {
-				rollbackErr = fmt.Errorf("enable MPLS interface %s: %w", name, err)
+			if err := p.setMPLSInterface(ctx, name, true); err != nil {
+				rollbackErr = errors.Join(rollbackErr, fmt.Errorf("enable MPLS interface %s: %w", name, err))
 			}
 		}
 	}
@@ -536,10 +571,15 @@ func (p *VPPPlugin) createInterface(ctx context.Context, name string, ifaceCfg *
 
 	p.ifaceIndex[name] = vppIface.SwIfIndex
 	*rollback = append(*rollback, func(ctx context.Context) error {
-		_ = p.client.DeleteLCPInterface(ctx, vppIface.SwIfIndex)
-		_ = p.client.SetInterfaceDown(ctx, vppIface.SwIfIndex)
+		var rollbackErr error
+		if err := p.client.DeleteLCPInterface(ctx, vppIface.SwIfIndex); err != nil {
+			rollbackErr = errors.Join(rollbackErr, fmt.Errorf("delete LCP interface %s: %w", name, err))
+		}
+		if err := p.client.SetInterfaceDown(ctx, vppIface.SwIfIndex); err != nil {
+			rollbackErr = errors.Join(rollbackErr, fmt.Errorf("set interface %s down: %w", name, err))
+		}
 		delete(p.ifaceIndex, name)
-		return nil
+		return rollbackErr
 	})
 
 	// Set interface up
@@ -614,10 +654,12 @@ func (p *VPPPlugin) removeInterface(ctx context.Context, name string, rollback *
 	*rollback = append(*rollback, func(ctx context.Context) error {
 		p.ifaceIndex[name] = swIfIndex
 		if err := p.client.SetInterfaceUp(ctx, swIfIndex); err != nil {
-			return err
+			return fmt.Errorf("restore interface %s up: %w", name, err)
 		}
 		if linuxName, err := pkgvpp.ConvertJunosToLinuxName(name); err == nil {
-			_ = p.lcpManager.Create(ctx, swIfIndex, linuxName, name)
+			if err := p.lcpManager.Create(ctx, swIfIndex, linuxName, name); err != nil {
+				return fmt.Errorf("restore LCP interface %s: %w", name, err)
+			}
 		}
 		return nil
 	})
@@ -1205,10 +1247,11 @@ func (p *VPPPlugin) applyAddresses(ctx context.Context, swIfIndex uint32, ifaceC
 	return nil
 }
 
-func (p *VPPPlugin) deleteConfiguredAddresses(ctx context.Context, swIfIndex uint32, ifaceCfg *model.InterfaceConfig) {
+func (p *VPPPlugin) deleteConfiguredAddresses(ctx context.Context, swIfIndex uint32, ifaceCfg *model.InterfaceConfig) error {
 	if ifaceCfg == nil {
-		return
+		return nil
 	}
+	var rollbackErr error
 	for _, unit := range ifaceCfg.Units {
 		if unit == nil {
 			continue
@@ -1227,10 +1270,12 @@ func (p *VPPPlugin) deleteConfiguredAddresses(ctx context.Context, swIfIndex uin
 						slog.Uint64("sw_if_index", uint64(swIfIndex)),
 						slog.String("address", addrStr),
 						slog.Any("error", err))
+					rollbackErr = errors.Join(rollbackErr, fmt.Errorf("delete address %s: %w", addrStr, err))
 				}
 			}
 		}
 	}
+	return rollbackErr
 }
 
 func cloneIPNet(ipNet *net.IPNet) *net.IPNet {
@@ -1252,12 +1297,22 @@ func (p *VPPPlugin) findJunosName(swIfIndex uint32) string {
 	return ""
 }
 
-func (p *VPPPlugin) executeRollback(ctx context.Context, ops []func(context.Context) error) {
+func (p *VPPPlugin) executeRollback(ctx context.Context, ops []func(context.Context) error) error {
+	var rollbackErr error
 	for i := len(ops) - 1; i >= 0; i-- {
 		if err := ops[i](ctx); err != nil {
 			p.log.Error("Rollback operation failed", slog.Any("error", err))
+			rollbackErr = errors.Join(rollbackErr, err)
 		}
 	}
+	return rollbackErr
+}
+
+func withRollbackError(operationErr, rollbackErr error) error {
+	if rollbackErr == nil {
+		return operationErr
+	}
+	return errors.Join(operationErr, fmt.Errorf("rollback failed: %w", rollbackErr))
 }
 
 func (p *VPPPlugin) updateLCPReconciliation(ctx context.Context) {

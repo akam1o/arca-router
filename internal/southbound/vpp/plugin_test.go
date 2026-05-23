@@ -154,6 +154,48 @@ func TestApplyChangesRollsBackInterfaceIndexOnAddressFailure(t *testing.T) {
 	}
 }
 
+func TestApplyChangesReturnsRollbackErrors(t *testing.T) {
+	ctx := context.Background()
+	client := pkgvpp.NewMockClient()
+	plugin := NewVPPPlugin(client, &device.HardwareConfig{
+		Interfaces: []device.PhysicalInterface{
+			{Name: "ge-0/0/0", PCI: "0000:03:00.0", Driver: "avf"},
+		},
+	}, testLogger())
+	if err := plugin.Init(ctx); err != nil {
+		t.Fatalf("Init() error = %v", err)
+	}
+	t.Cleanup(func() { _ = plugin.Close() })
+
+	client.SetInterfaceAddressError = errors.New("address failed")
+	client.SetInterfaceDownError = errors.New("down failed")
+	diff := engine.ComputeDiff(model.NewRouterConfig(), &model.RouterConfig{
+		Interfaces: map[string]*model.InterfaceConfig{
+			"ge-0/0/0": {
+				Units: map[int]*model.Unit{
+					0: {Family: map[string]*model.AddressFamily{"inet": {Addresses: []string{"192.0.2.1/24"}}}},
+				},
+			},
+		},
+	})
+
+	err := plugin.ApplyChanges(ctx, diff)
+	if err == nil {
+		t.Fatal("ApplyChanges() error = nil, want apply and rollback errors")
+	}
+	for _, want := range []string{
+		"apply interface ge-0/0/0 addresses",
+		"address failed",
+		"rollback failed",
+		"set interface ge-0/0/0 down",
+		"down failed",
+	} {
+		if !strings.Contains(err.Error(), want) {
+			t.Fatalf("ApplyChanges() error = %v, want substring %q", err, want)
+		}
+	}
+}
+
 func TestRollbackChangesRemovesAddedInterfaceIndex(t *testing.T) {
 	ctx := context.Background()
 	client := pkgvpp.NewMockClient()
@@ -196,6 +238,48 @@ func TestRollbackChangesRemovesAddedInterfaceIndex(t *testing.T) {
 	}
 	if len(iface.Addresses) != 0 {
 		t.Fatalf("RollbackChanges() left addresses on added interface: %#v", iface.Addresses)
+	}
+}
+
+func TestRollbackChangesReturnsAddedInterfaceCleanupErrors(t *testing.T) {
+	ctx := context.Background()
+	client := pkgvpp.NewMockClient()
+	plugin := NewVPPPlugin(client, &device.HardwareConfig{
+		Interfaces: []device.PhysicalInterface{
+			{Name: "ge-0/0/0", PCI: "0000:03:00.0", Driver: "avf"},
+		},
+	}, testLogger())
+	if err := plugin.Init(ctx); err != nil {
+		t.Fatalf("Init() error = %v", err)
+	}
+	t.Cleanup(func() { _ = plugin.Close() })
+
+	diff := engine.ComputeDiff(model.NewRouterConfig(), &model.RouterConfig{
+		Interfaces: map[string]*model.InterfaceConfig{
+			"ge-0/0/0": {
+				Units: map[int]*model.Unit{
+					0: {Family: map[string]*model.AddressFamily{"inet": {Addresses: []string{"192.0.2.1/24"}}}},
+				},
+			},
+		},
+	})
+	if err := plugin.ApplyChanges(ctx, diff); err != nil {
+		t.Fatalf("ApplyChanges() error = %v", err)
+	}
+
+	client.DeleteInterfaceAddressError = errors.New("delete address failed")
+	err := plugin.RollbackChanges(ctx, diff)
+	if err == nil {
+		t.Fatal("RollbackChanges() error = nil, want cleanup error")
+	}
+	for _, want := range []string{
+		"remove configured addresses for interface ge-0/0/0",
+		"delete address 192.0.2.1/24",
+		"delete address failed",
+	} {
+		if !strings.Contains(err.Error(), want) {
+			t.Fatalf("RollbackChanges() error = %v, want substring %q", err, want)
+		}
 	}
 }
 
