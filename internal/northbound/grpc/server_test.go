@@ -2177,7 +2177,7 @@ func TestListAuditEventsBoundsLimit(t *testing.T) {
 	}
 }
 
-func TestListHistoryIncludesConfigText(t *testing.T) {
+func TestListHistoryOmitsConfigText(t *testing.T) {
 	eng := engine.NewEngine(nil, testLogger())
 	st := &fakeStore{
 		listRecords: []*store.CommitRecord{
@@ -2209,11 +2209,8 @@ func TestListHistoryIncludesConfigText(t *testing.T) {
 	if len(entries) != 1 {
 		t.Fatalf("ListHistory() entries = %d, want 1", len(entries))
 	}
-	if !strings.Contains(entries[0].ConfigText, "set system host-name router1") {
-		t.Fatalf("ListHistory() config text = %q, want archived set commands", entries[0].ConfigText)
-	}
-	if strings.Contains(entries[0].ConfigText, "plain-password") || strings.Contains(entries[0].ConfigText, "$argon2id$") {
-		t.Fatalf("ListHistory() leaked credential material:\n%s", entries[0].ConfigText)
+	if entries[0].ConfigText != "" {
+		t.Fatalf("ListHistory() config text = %q, want metadata-only history entry", entries[0].ConfigText)
 	}
 }
 
