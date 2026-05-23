@@ -19,16 +19,37 @@ import (
 
 // Store implements store.ConfigStore using the legacy datastore.
 type Store struct {
-	ds datastore.Datastore
+	ds               datastore.Datastore
+	legacyTextParser LegacyTextParserFunc
+}
+
+// Option customizes Store construction.
+type Option func(*Store)
+
+// LegacyTextParserFunc parses legacy set-command text into the canonical model.
+type LegacyTextParserFunc func(text string) (*model.RouterConfig, error)
+
+// WithLegacyTextParser sets the parser used for legacy set-command text.
+func WithLegacyTextParser(parser LegacyTextParserFunc) Option {
+	return func(s *Store) {
+		s.legacyTextParser = parser
+	}
 }
 
 // New creates a new SQLite store, wrapping the legacy datastore.
-func New(ds datastore.Datastore) *Store {
-	return &Store{ds: ds}
+func New(ds datastore.Datastore, opts ...Option) *Store {
+	s := &Store{
+		ds:               ds,
+		legacyTextParser: LegacyTextParser,
+	}
+	for _, opt := range opts {
+		opt(s)
+	}
+	return s
 }
 
 // NewFromPath creates a new SQLite store from a file path.
-func NewFromPath(path string) (*Store, error) {
+func NewFromPath(path string, opts ...Option) (*Store, error) {
 	ds, err := datastore.NewDatastore(&datastore.Config{
 		Backend:    datastore.BackendSQLite,
 		SQLitePath: path,
@@ -36,7 +57,7 @@ func NewFromPath(path string) (*Store, error) {
 	if err != nil {
 		return nil, fmt.Errorf("open sqlite datastore: %w", err)
 	}
-	return &Store{ds: ds}, nil
+	return New(ds, opts...), nil
 }
 
 // CleanupEphemeralState removes lock and candidate rows left by a previous
@@ -65,7 +86,7 @@ func (s *Store) GetLatestSnapshot(ctx context.Context) (*model.ConfigSnapshot, e
 	}
 
 	// Parse the stored config text into the new model
-	cfg, err := parseStoredConfig(running.ConfigText)
+	cfg, err := s.parseStoredConfig(running.ConfigText)
 	if err != nil {
 		return nil, fmt.Errorf("parse stored config: %w", err)
 	}
@@ -199,7 +220,7 @@ func (s *Store) GetCommit(ctx context.Context, commitID string) (*store.CommitRe
 		return nil, nil
 	}
 
-	cfg, err := parseStoredConfig(entry.ConfigText)
+	cfg, err := s.parseStoredConfig(entry.ConfigText)
 	if err != nil {
 		return nil, fmt.Errorf("parse commit config: %w", err)
 	}
@@ -313,7 +334,7 @@ func (s *Store) Close() error {
 
 // parseStoredConfig attempts to parse stored config as JSON (new format)
 // or falls back to set-command text (legacy format).
-func parseStoredConfig(text string) (*model.RouterConfig, error) {
+func (s *Store) parseStoredConfig(text string) (*model.RouterConfig, error) {
 	// Try JSON first (new format)
 	var cfg model.RouterConfig
 	if err := json.Unmarshal([]byte(text), &cfg); err == nil {
@@ -321,18 +342,23 @@ func parseStoredConfig(text string) (*model.RouterConfig, error) {
 	}
 
 	// Fall back to legacy set-command text parsing
-	// This uses the existing pkg/config parser via the hook
-	return parseLegacyText(text)
+	return s.parseLegacyText(text)
 }
 
 // LegacyTextParser is a hook for parsing legacy set-command text.
 // It is set at initialization to break the circular dependency with pkg/config.
-var LegacyTextParser func(text string) (*model.RouterConfig, error)
+//
+// Deprecated: use WithLegacyTextParser to bind a parser to each Store instance.
+var LegacyTextParser LegacyTextParserFunc
 
 // parseLegacyText parses set-command format text using the existing parser.
-func parseLegacyText(text string) (*model.RouterConfig, error) {
-	if LegacyTextParser != nil {
-		return LegacyTextParser(text)
+func (s *Store) parseLegacyText(text string) (*model.RouterConfig, error) {
+	parser := s.legacyTextParser
+	if parser == nil {
+		parser = LegacyTextParser
+	}
+	if parser != nil {
+		return parser(text)
 	}
 	return nil, fmt.Errorf("legacy text parser not initialized")
 }

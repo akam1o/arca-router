@@ -97,9 +97,7 @@ func TestCleanupEphemeralStateRemovesLocksAndCandidates(t *testing.T) {
 }
 
 func TestSaveCommitStoresSetCommands(t *testing.T) {
-	installLegacyTextParser(t)
-
-	st, err := NewFromPath(filepath.Join(t.TempDir(), "config.db"))
+	st, err := NewFromPath(filepath.Join(t.TempDir(), "config.db"), testLegacyTextParserOption())
 	if err != nil {
 		t.Fatalf("NewFromPath() error = %v", err)
 	}
@@ -151,11 +149,9 @@ func TestSaveCommitStoresSetCommands(t *testing.T) {
 }
 
 func TestGetLatestSnapshotRestoresVersionFromCommitHistory(t *testing.T) {
-	installLegacyTextParser(t)
-
 	ctx := context.Background()
 	dbPath := filepath.Join(t.TempDir(), "config.db")
-	st, err := NewFromPath(dbPath)
+	st, err := NewFromPath(dbPath, testLegacyTextParserOption())
 	if err != nil {
 		t.Fatalf("NewFromPath() error = %v", err)
 	}
@@ -177,7 +173,7 @@ func TestGetLatestSnapshotRestoresVersionFromCommitHistory(t *testing.T) {
 		t.Fatalf("Close() error = %v", err)
 	}
 
-	reopened, err := NewFromPath(dbPath)
+	reopened, err := NewFromPath(dbPath, testLegacyTextParserOption())
 	if err != nil {
 		t.Fatalf("NewFromPath(reopen) error = %v", err)
 	}
@@ -200,7 +196,7 @@ func TestGetLatestSnapshotRestoresVersionFromCommitHistory(t *testing.T) {
 		t.Fatalf("Close(reopened) error = %v", err)
 	}
 
-	reopenedAgain, err := NewFromPath(dbPath)
+	reopenedAgain, err := NewFromPath(dbPath, testLegacyTextParserOption())
 	if err != nil {
 		t.Fatalf("NewFromPath(reopen again) error = %v", err)
 	}
@@ -220,15 +216,61 @@ func TestGetLatestSnapshotRestoresVersionFromCommitHistory(t *testing.T) {
 	}
 }
 
+func TestStoreUsesInstanceLegacyTextParser(t *testing.T) {
+	ctx := context.Background()
+	newStore := func(hostName string) *Store {
+		t.Helper()
+		st, err := NewFromPath(filepath.Join(t.TempDir(), "config.db"), WithLegacyTextParser(
+			func(text string) (*model.RouterConfig, error) {
+				if text == "" {
+					t.Fatal("legacy parser received empty config text")
+				}
+				return &model.RouterConfig{
+					System:     &model.SystemConfig{HostName: hostName},
+					Interfaces: map[string]*model.InterfaceConfig{},
+				}, nil
+			},
+		))
+		if err != nil {
+			t.Fatalf("NewFromPath() error = %v", err)
+		}
+		t.Cleanup(func() { _ = st.Close() })
+		snap := model.NewSnapshot(&model.RouterConfig{
+			System:     &model.SystemConfig{HostName: "stored"},
+			Interfaces: map[string]*model.InterfaceConfig{},
+		}, 1, "alice", "test")
+		if _, err := st.SaveCommit(ctx, snap); err != nil {
+			t.Fatalf("SaveCommit() error = %v", err)
+		}
+		return st
+	}
+
+	first := newStore("parser-one")
+	second := newStore("parser-two")
+
+	firstLatest, err := first.GetLatestSnapshot(ctx)
+	if err != nil {
+		t.Fatalf("first GetLatestSnapshot() error = %v", err)
+	}
+	secondLatest, err := second.GetLatestSnapshot(ctx)
+	if err != nil {
+		t.Fatalf("second GetLatestSnapshot() error = %v", err)
+	}
+	if firstLatest.Config.System.HostName != "parser-one" {
+		t.Fatalf("first hostname = %q, want parser-one", firstLatest.Config.System.HostName)
+	}
+	if secondLatest.Config.System.HostName != "parser-two" {
+		t.Fatalf("second hostname = %q, want parser-two", secondLatest.Config.System.HostName)
+	}
+}
+
 func isDatastoreNotFound(err error) bool {
 	var dsErr *datastore.Error
 	return errors.As(err, &dsErr) && dsErr.Code == datastore.ErrCodeNotFound
 }
 
 func TestSaveCommitPreservesOSPFPriorityZero(t *testing.T) {
-	installLegacyTextParser(t)
-
-	st, err := NewFromPath(filepath.Join(t.TempDir(), "config.db"))
+	st, err := NewFromPath(filepath.Join(t.TempDir(), "config.db"), testLegacyTextParserOption())
 	if err != nil {
 		t.Fatalf("NewFromPath() error = %v", err)
 	}
@@ -273,9 +315,7 @@ func TestSaveCommitPreservesOSPFPriorityZero(t *testing.T) {
 }
 
 func TestPrepareRollbackConflictsWithExistingDatastoreLock(t *testing.T) {
-	installLegacyTextParser(t)
-
-	st, err := NewFromPath(filepath.Join(t.TempDir(), "config.db"))
+	st, err := NewFromPath(filepath.Join(t.TempDir(), "config.db"), testLegacyTextParserOption())
 	if err != nil {
 		t.Fatalf("NewFromPath() error = %v", err)
 	}
@@ -313,9 +353,7 @@ func TestPrepareRollbackConflictsWithExistingDatastoreLock(t *testing.T) {
 }
 
 func TestPrepareRollbackPersistsRollbackHistory(t *testing.T) {
-	installLegacyTextParser(t)
-
-	st, err := NewFromPath(filepath.Join(t.TempDir(), "config.db"))
+	st, err := NewFromPath(filepath.Join(t.TempDir(), "config.db"), testLegacyTextParserOption())
 	if err != nil {
 		t.Fatalf("NewFromPath() error = %v", err)
 	}
@@ -372,15 +410,12 @@ func TestPrepareRollbackPersistsRollbackHistory(t *testing.T) {
 	}
 }
 
-func installLegacyTextParser(t *testing.T) {
-	t.Helper()
-	oldParser := LegacyTextParser
-	LegacyTextParser = func(text string) (*model.RouterConfig, error) {
+func testLegacyTextParserOption() Option {
+	return WithLegacyTextParser(func(text string) (*model.RouterConfig, error) {
 		cfg, err := pkgconfig.NewParser(strings.NewReader(text)).Parse()
 		if err != nil {
 			return nil, err
 		}
 		return model.FromLegacyConfig(cfg), nil
-	}
-	t.Cleanup(func() { LegacyTextParser = oldParser })
+	})
 }

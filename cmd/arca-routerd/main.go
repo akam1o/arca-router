@@ -243,7 +243,7 @@ func openConfigStore(f *daemonFlags) (*storesqlite.Store, *datastore.ProcessLock
 		}
 		return nil, nil, nil, err
 	}
-	return storesqlite.New(ds), processLock, cfg, nil
+	return storesqlite.New(ds, storesqlite.WithLegacyTextParser(parseLegacyRouterConfigText)), processLock, cfg, nil
 }
 
 func buildDatastoreConfig(f *daemonFlags) (*datastore.Config, error) {
@@ -972,16 +972,16 @@ func parseLegacyConfig(r io.Reader) (*config.Config, error) {
 	return parser.Parse()
 }
 
-func installParserHooks() {
-	parse := func(text string) (*model.RouterConfig, error) {
-		legacyCfg, err := parseLegacyConfig(strings.NewReader(text))
-		if err != nil {
-			return nil, err
-		}
-		return model.FromLegacyConfig(legacyCfg), nil
+func parseLegacyRouterConfigText(text string) (*model.RouterConfig, error) {
+	legacyCfg, err := parseLegacyConfig(strings.NewReader(text))
+	if err != nil {
+		return nil, err
 	}
-	nbgrpc.ConfigTextParser = parse
-	storesqlite.LegacyTextParser = parse
+	return model.FromLegacyConfig(legacyCfg), nil
+}
+
+func installParserHooks() {
+	nbgrpc.ConfigTextParser = parseLegacyRouterConfigText
 }
 
 func newNETCONFCommitHook(eng *engine.Engine) netconf.CommitHook {
