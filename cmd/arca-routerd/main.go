@@ -155,7 +155,7 @@ func parseFlags() *daemonFlags {
 	flag.StringVar(&f.etcdUsername, "etcd-username", "",
 		"etcd username")
 	flag.StringVar(&f.etcdPassword, "etcd-password", "",
-		"etcd password (discouraged; use --etcd-password-file)")
+		"DEPRECATED: etcd password in process arguments; use --etcd-password-file")
 	flag.StringVar(&f.etcdPasswordFile, "etcd-password-file", "",
 		"Path to file containing etcd password (or ARCA_ROUTER_ETCD_PASSWORD_FILE)")
 	flag.StringVar(&f.etcdCertFile, "etcd-cert", "",
@@ -309,7 +309,7 @@ func resolveEtcdPassword(f *daemonFlags) (string, error) {
 	if f.etcdPassword != "" {
 		return "", fmt.Errorf("--etcd-password and --etcd-password-file are mutually exclusive")
 	}
-	data, err := os.ReadFile(filePath)
+	data, err := auth.ReadSecretFile(filePath)
 	if err != nil {
 		return "", fmt.Errorf("read etcd password file: %w", err)
 	}

@@ -352,6 +352,78 @@ func TestBuildDatastoreConfigEtcdPasswordFileFromEnv(t *testing.T) {
 	}
 }
 
+func TestBuildDatastoreConfigEtcdPasswordFileRequiresSecureFile(t *testing.T) {
+	t.Run("rejects insecure mode", func(t *testing.T) {
+		passwordFile := filepath.Join(t.TempDir(), "etcd-password")
+		if err := os.WriteFile(passwordFile, []byte("secret\n"), 0600); err != nil {
+			t.Fatalf("WriteFile() error = %v", err)
+		}
+		if err := os.Chmod(passwordFile, 0644); err != nil {
+			t.Fatalf("Chmod() error = %v", err)
+		}
+
+		_, err := buildDatastoreConfig(&daemonFlags{
+			datastoreMode:    "etcd",
+			etcdEndpoints:    "http://127.0.0.1:2379",
+			etcdPasswordFile: passwordFile,
+		})
+		if err == nil {
+			t.Fatal("buildDatastoreConfig() error = nil, want insecure mode rejection")
+		}
+		if !strings.Contains(err.Error(), "insecure permissions") {
+			t.Fatalf("buildDatastoreConfig() error = %v, want insecure permissions", err)
+		}
+	})
+
+	t.Run("rejects symlink", func(t *testing.T) {
+		dir := t.TempDir()
+		passwordFile := filepath.Join(dir, "etcd-password")
+		linkFile := filepath.Join(dir, "etcd-password-link")
+		if err := os.WriteFile(passwordFile, []byte("secret\n"), 0600); err != nil {
+			t.Fatalf("WriteFile() error = %v", err)
+		}
+		if err := os.Symlink(passwordFile, linkFile); err != nil {
+			t.Skipf("Symlink() not available: %v", err)
+		}
+
+		_, err := buildDatastoreConfig(&daemonFlags{
+			datastoreMode:    "etcd",
+			etcdEndpoints:    "http://127.0.0.1:2379",
+			etcdPasswordFile: linkFile,
+		})
+		if err == nil {
+			t.Fatal("buildDatastoreConfig() error = nil, want symlink rejection")
+		}
+		if !strings.Contains(err.Error(), "symbolic link") {
+			t.Fatalf("buildDatastoreConfig() error = %v, want symbolic link rejection", err)
+		}
+	})
+
+	t.Run("rejects hardlink", func(t *testing.T) {
+		dir := t.TempDir()
+		passwordFile := filepath.Join(dir, "etcd-password")
+		linkFile := filepath.Join(dir, "etcd-password-hardlink")
+		if err := os.WriteFile(passwordFile, []byte("secret\n"), 0600); err != nil {
+			t.Fatalf("WriteFile() error = %v", err)
+		}
+		if err := os.Link(passwordFile, linkFile); err != nil {
+			t.Skipf("Link() not available: %v", err)
+		}
+
+		_, err := buildDatastoreConfig(&daemonFlags{
+			datastoreMode:    "etcd",
+			etcdEndpoints:    "http://127.0.0.1:2379",
+			etcdPasswordFile: linkFile,
+		})
+		if err == nil {
+			t.Fatal("buildDatastoreConfig() error = nil, want hardlink rejection")
+		}
+		if !strings.Contains(err.Error(), "multiple hard links") {
+			t.Fatalf("buildDatastoreConfig() error = %v, want hardlink rejection", err)
+		}
+	})
+}
+
 func TestBuildDatastoreConfigEtcdRejectsPasswordAndPasswordFile(t *testing.T) {
 	passwordFile := filepath.Join(t.TempDir(), "etcd-password")
 	if err := os.WriteFile(passwordFile, []byte("secret-from-file\n"), 0600); err != nil {
