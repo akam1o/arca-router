@@ -1797,6 +1797,8 @@ func parseConfigText(text string) (*model.RouterConfig, error) {
 
 // --- Session Management ---
 
+const defaultSessionTTL = 30 * time.Minute
+
 // Session represents an active configuration session.
 type Session struct {
 	mu                   sync.RWMutex
@@ -1808,6 +1810,7 @@ type Session struct {
 	CandidateBaseHash    [32]byte
 	CandidateBaseSet     bool
 	CreatedAt            time.Time
+	LastActiveAt         time.Time
 }
 
 // SessionManager manages active sessions with exclusive locking.
@@ -1815,12 +1818,23 @@ type SessionManager struct {
 	mu       sync.Mutex
 	sessions map[string]*Session
 	lockHeld string // session ID holding the candidate lock
+	ttl      time.Duration
+	now      func() time.Time
 }
 
 // NewSessionManager creates a new session manager.
 func NewSessionManager() *SessionManager {
+	return newSessionManager(defaultSessionTTL, time.Now)
+}
+
+func newSessionManager(ttl time.Duration, now func() time.Time) *SessionManager {
+	if now == nil {
+		now = time.Now
+	}
 	return &SessionManager{
 		sessions: make(map[string]*Session),
+		ttl:      ttl,
+		now:      now,
 	}
 }
 
@@ -1829,11 +1843,14 @@ func (m *SessionManager) Create(user string) (string, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
+	now := m.now()
+	m.expireLocked(now)
 	id := uuid.New().String()
 	m.sessions[id] = &Session{
-		ID:        id,
-		User:      user,
-		CreatedAt: time.Now(),
+		ID:           id,
+		User:         user,
+		CreatedAt:    now,
+		LastActiveAt: now,
 	}
 	return id, nil
 }
@@ -1843,10 +1860,13 @@ func (m *SessionManager) Get(id string) (*Session, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
+	now := m.now()
+	m.expireLocked(now)
 	s, ok := m.sessions[id]
 	if !ok {
 		return nil, newSessionNotFoundErrorf("session %s not found", id)
 	}
+	s.LastActiveAt = now
 	return s, nil
 }
 
@@ -1855,6 +1875,8 @@ func (m *SessionManager) Close(id string) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
+	now := m.now()
+	m.expireLocked(now)
 	s, ok := m.sessions[id]
 	if !ok {
 		return newSessionNotFoundErrorf("session %s not found", id)
@@ -1874,6 +1896,8 @@ func (m *SessionManager) AcquireLock(id string) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
+	now := m.now()
+	m.expireLocked(now)
 	s, ok := m.sessions[id]
 	if !ok {
 		return newSessionNotFoundErrorf("session %s not found", id)
@@ -1884,6 +1908,7 @@ func (m *SessionManager) AcquireLock(id string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.HasLock = true
+	s.LastActiveAt = now
 	m.lockHeld = id
 	return nil
 }
@@ -1893,6 +1918,8 @@ func (m *SessionManager) ReleaseLock(id string) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
+	now := m.now()
+	m.expireLocked(now)
 	s, ok := m.sessions[id]
 	if !ok {
 		return newSessionNotFoundErrorf("session %s not found", id)
@@ -1903,6 +1930,31 @@ func (m *SessionManager) ReleaseLock(id string) error {
 		return newCandidateConflictErrorf("session %s does not hold the candidate lock", id)
 	}
 	s.HasLock = false
+	s.LastActiveAt = now
 	m.lockHeld = ""
 	return nil
+}
+
+func (m *SessionManager) expireLocked(now time.Time) {
+	if m.ttl <= 0 {
+		return
+	}
+	for id, session := range m.sessions {
+		lastActive := session.LastActiveAt
+		if lastActive.IsZero() {
+			lastActive = session.CreatedAt
+		}
+		if !lastActive.IsZero() && now.Sub(lastActive) <= m.ttl {
+			continue
+		}
+		session.mu.Lock()
+		if session.HasLock {
+			session.HasLock = false
+			if m.lockHeld == id {
+				m.lockHeld = ""
+			}
+		}
+		session.mu.Unlock()
+		delete(m.sessions, id)
+	}
 }

@@ -1824,6 +1824,49 @@ func TestReleaseLockWaitsForInFlightCommit(t *testing.T) {
 	}
 }
 
+func TestSessionManagerExpiresAbandonedLock(t *testing.T) {
+	now := time.Unix(1700000000, 0)
+	mgr := newSessionManager(time.Minute, func() time.Time { return now })
+
+	abandonedID, err := mgr.Create("alice")
+	if err != nil {
+		t.Fatalf("Create(abandoned) error = %v", err)
+	}
+	if err := mgr.AcquireLock(abandonedID); err != nil {
+		t.Fatalf("AcquireLock(abandoned) error = %v", err)
+	}
+
+	now = now.Add(time.Minute + time.Second)
+	activeID, err := mgr.Create("bob")
+	if err != nil {
+		t.Fatalf("Create(active) error = %v", err)
+	}
+	if err := mgr.AcquireLock(activeID); err != nil {
+		t.Fatalf("AcquireLock(active) error = %v", err)
+	}
+	if _, err := mgr.Get(abandonedID); !errors.Is(err, ErrSessionNotFound) {
+		t.Fatalf("Get(abandoned) error = %v, want ErrSessionNotFound", err)
+	}
+}
+
+func TestSessionManagerRefreshesActiveSessionTTL(t *testing.T) {
+	now := time.Unix(1700000000, 0)
+	mgr := newSessionManager(time.Minute, func() time.Time { return now })
+
+	sessionID, err := mgr.Create("alice")
+	if err != nil {
+		t.Fatalf("Create() error = %v", err)
+	}
+	now = now.Add(45 * time.Second)
+	if _, err := mgr.Get(sessionID); err != nil {
+		t.Fatalf("Get() error = %v", err)
+	}
+	now = now.Add(45 * time.Second)
+	if err := mgr.AcquireLock(sessionID); err != nil {
+		t.Fatalf("AcquireLock() error = %v, want active session refreshed", err)
+	}
+}
+
 func TestCommitRejectsStaleCandidate(t *testing.T) {
 	oldParser := ConfigTextParser
 	ConfigTextParser = func(text string) (*model.RouterConfig, error) {
