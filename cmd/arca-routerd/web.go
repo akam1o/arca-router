@@ -1044,7 +1044,7 @@ func loadWebAPITokens(path string) (map[string]webAPIToken, error) {
 	if err := auth.ValidateKeyFilePermissions(path, 0, 0); err != nil {
 		return nil, fmt.Errorf("validate token file permissions: %w", err)
 	}
-	data, err := os.ReadFile(path)
+	data, err := auth.ReadSecretFile(path)
 	if err != nil {
 		return nil, fmt.Errorf("read token file %s: %w", path, err)
 	}

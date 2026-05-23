@@ -62,6 +62,10 @@ func ValidateKeyFilePermissions(path string, expectedUID, expectedGID uint32) er
 	if err != nil {
 		return fmt.Errorf("failed to stat key file %s: %w", path, err)
 	}
+	return validateKeyFileInfo(path, info, expectedUID, expectedGID)
+}
+
+func validateKeyFileInfo(path string, info os.FileInfo, expectedUID, expectedGID uint32) error {
 	if err := validateRegularSecretFile(path, info); err != nil {
 		return err
 	}
@@ -126,6 +130,52 @@ func ValidateKeyFilePermissions(path string, expectedUID, expectedGID uint32) er
 	}
 
 	return nil
+}
+
+// ReadSecretFile reads a 0600 regular secret file after validating the opened
+// file still matches the path that was checked.
+func ReadSecretFile(path string) ([]byte, error) {
+	info, err := os.Lstat(path)
+	if err != nil {
+		return nil, fmt.Errorf("failed to stat secret file %s: %w", path, err)
+	}
+	if err := validateKeyFileInfo(path, info, 0, 0); err != nil {
+		return nil, err
+	}
+
+	file, err := os.Open(path)
+	if err != nil {
+		return nil, fmt.Errorf("failed to open secret file %s: %w", path, err)
+	}
+	defer func() { _ = file.Close() }()
+
+	openedInfo, err := file.Stat()
+	if err != nil {
+		return nil, fmt.Errorf("failed to stat open secret file %s: %w", path, err)
+	}
+	if err := validateKeyFileInfo(path, openedInfo, 0, 0); err != nil {
+		return nil, err
+	}
+	if !os.SameFile(info, openedInfo) {
+		return nil, fmt.Errorf("refusing to read secret file %s: file changed before read", path)
+	}
+
+	currentInfo, err := os.Lstat(path)
+	if err != nil {
+		return nil, fmt.Errorf("failed to stat secret file before read %s: %w", path, err)
+	}
+	if err := validateKeyFileInfo(path, currentInfo, 0, 0); err != nil {
+		return nil, err
+	}
+	if !os.SameFile(info, currentInfo) {
+		return nil, fmt.Errorf("refusing to read secret file %s: file changed before read", path)
+	}
+
+	data, err := io.ReadAll(file)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read secret file %s: %w", path, err)
+	}
+	return data, nil
 }
 
 // ValidateKeyDirectoryPermissions verifies that a directory containing keys has secure permissions
