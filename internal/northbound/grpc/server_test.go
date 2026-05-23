@@ -131,6 +131,33 @@ func TestConfigAdapterRedactsReadAndHistoryErrors(t *testing.T) {
 	}
 }
 
+func TestConfigAdapterGetRunningIncludesCommitID(t *testing.T) {
+	eng := engine.NewEngine(nil, testLogger())
+	eng.InitializeRunning(&model.RouterConfig{
+		System:     &model.SystemConfig{HostName: "router1"},
+		Interfaces: map[string]*model.InterfaceConfig{},
+	}, 7)
+	st := &fakeStore{
+		listRecords: []*store.CommitRecord{{CommitID: "commit-7"}},
+	}
+	srv := NewServer(eng, st, testLogger())
+	adapter := &configServiceAdapter{server: srv}
+
+	resp, err := adapter.GetRunning(context.Background(), &apiv1.GetRunningRequest{})
+	if err != nil {
+		t.Fatalf("GetRunning() error = %v", err)
+	}
+	if got := resp.GetCommitId(); got != "commit-7" {
+		t.Fatalf("GetRunning() commit_id = %q, want commit-7", got)
+	}
+	if resp.GetVersion() != 7 || !strings.Contains(resp.GetConfigText(), "set system host-name router1") {
+		t.Fatalf("GetRunning() response = %#v, want router1 version 7", resp)
+	}
+	if st.listOpts == nil || st.listOpts.Limit != 1 {
+		t.Fatalf("ListCommits opts = %#v, want limit 1", st.listOpts)
+	}
+}
+
 func TestSessionAdapterRedactsSessionErrors(t *testing.T) {
 	srv := NewServer(engine.NewEngine(nil, testLogger()), &fakeStore{}, testLogger())
 	adapter := &sessionServiceAdapter{server: srv}

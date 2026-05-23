@@ -1389,6 +1389,17 @@ func (s *Server) runningText(redactSecrets bool) (string, uint64, error) {
 	return text, snap.Version, nil
 }
 
+func (s *Server) latestRunningCommitID(ctx context.Context) string {
+	if s.store == nil {
+		return ""
+	}
+	records, err := s.store.ListCommits(ctx, &store.ListOptions{Limit: 1})
+	if err != nil || len(records) == 0 || records[0] == nil {
+		return ""
+	}
+	return records[0].CommitID
+}
+
 func sessionAuditUser(session *Session, requestedUser string) string {
 	if session != nil && strings.TrimSpace(session.User) != "" {
 		return session.User

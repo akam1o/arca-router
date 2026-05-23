@@ -28,6 +28,7 @@ func (a *configServiceAdapter) GetRunning(ctx context.Context, _ *apiv1.GetRunni
 	return &apiv1.GetRunningResponse{
 		ConfigText: configText,
 		Version:    version,
+		CommitId:   a.server.latestRunningCommitID(ctx),
 	}, nil
 }
 
