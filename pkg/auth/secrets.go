@@ -135,11 +135,21 @@ func validateKeyFileInfo(path string, info os.FileInfo, expectedUID, expectedGID
 // ReadSecretFile reads a 0600 regular secret file after validating the opened
 // file still matches the path that was checked.
 func ReadSecretFile(path string) ([]byte, error) {
+	return readCheckedSecretFile(path, func(path string, info os.FileInfo) error {
+		return validateKeyFileInfo(path, info, 0, 0)
+	})
+}
+
+func readEnvSecretFile(path string) ([]byte, error) {
+	return readCheckedSecretFile(path, validateLinkedSecretFile)
+}
+
+func readCheckedSecretFile(path string, validate func(string, os.FileInfo) error) ([]byte, error) {
 	info, err := os.Lstat(path)
 	if err != nil {
 		return nil, fmt.Errorf("failed to stat secret file %s: %w", path, err)
 	}
-	if err := validateKeyFileInfo(path, info, 0, 0); err != nil {
+	if err := validate(path, info); err != nil {
 		return nil, err
 	}
 
@@ -153,7 +163,7 @@ func ReadSecretFile(path string) ([]byte, error) {
 	if err != nil {
 		return nil, fmt.Errorf("failed to stat open secret file %s: %w", path, err)
 	}
-	if err := validateKeyFileInfo(path, openedInfo, 0, 0); err != nil {
+	if err := validate(path, openedInfo); err != nil {
 		return nil, err
 	}
 	if !os.SameFile(info, openedInfo) {
@@ -164,7 +174,7 @@ func ReadSecretFile(path string) ([]byte, error) {
 	if err != nil {
 		return nil, fmt.Errorf("failed to stat secret file before read %s: %w", path, err)
 	}
-	if err := validateKeyFileInfo(path, currentInfo, 0, 0); err != nil {
+	if err := validate(path, currentInfo); err != nil {
 		return nil, err
 	}
 	if !os.SameFile(info, currentInfo) {
@@ -381,6 +391,13 @@ func validateRegularSecretFile(path string, info os.FileInfo) error {
 	return nil
 }
 
+func validateLinkedSecretFile(path string, info os.FileInfo) error {
+	if err := validateRegularSecretFile(path, info); err != nil {
+		return err
+	}
+	return validateSingleLinkSecretFile(path, info)
+}
+
 func validateSingleLinkSecretFile(path string, info os.FileInfo) error {
 	if stat, ok := info.Sys().(*syscall.Stat_t); ok && stat.Nlink > 1 {
 		return fmt.Errorf("secret file %s must not have multiple hard links", path)
@@ -402,7 +419,7 @@ func GetSecretFromEnv(envVar string) (string, error) {
 	// Try _FILE variant
 	fileEnvVar := envVar + "_FILE"
 	if filePath := os.Getenv(fileEnvVar); filePath != "" {
-		data, err := os.ReadFile(filePath)
+		data, err := readEnvSecretFile(filePath)
 		if err != nil {
 			return "", fmt.Errorf("failed to read secret from %s: %w", filePath, err)
 		}

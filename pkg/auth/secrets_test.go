@@ -481,6 +481,73 @@ func TestGetSecretFromEnv(t *testing.T) {
 	}
 }
 
+func TestGetSecretFromEnvFileAllowsReadOnlyFile(t *testing.T) {
+	tmpDir := t.TempDir()
+	secretFilePath := filepath.Join(tmpDir, "secret.txt")
+	if err := os.WriteFile(secretFilePath, []byte("file-secret-value\n"), 0600); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+	if err := os.Chmod(secretFilePath, 0400); err != nil {
+		t.Fatalf("Chmod() error = %v", err)
+	}
+
+	t.Setenv("TEST_READ_ONLY_SECRET_FILE_FILE", secretFilePath)
+
+	value, err := GetSecretFromEnv("TEST_READ_ONLY_SECRET_FILE")
+	if err != nil {
+		t.Fatalf("GetSecretFromEnv() error = %v", err)
+	}
+	if value != "file-secret-value" {
+		t.Fatalf("GetSecretFromEnv() = %q, want %q", value, "file-secret-value")
+	}
+}
+
+func TestGetSecretFromEnvFileRejectsSymlink(t *testing.T) {
+	tmpDir := t.TempDir()
+	targetPath := filepath.Join(tmpDir, "target-secret")
+	linkPath := filepath.Join(tmpDir, "linked-secret")
+
+	if err := os.WriteFile(targetPath, []byte("file-secret-value\n"), 0600); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+	if err := os.Symlink(targetPath, linkPath); err != nil {
+		t.Skipf("symlink not supported: %v", err)
+	}
+
+	t.Setenv("TEST_SYMLINK_SECRET_FILE_FILE", linkPath)
+
+	_, err := GetSecretFromEnv("TEST_SYMLINK_SECRET_FILE")
+	if err == nil {
+		t.Fatal("GetSecretFromEnv() error = nil, want symlink rejection")
+	}
+	if !contains(err.Error(), "symbolic link") {
+		t.Fatalf("GetSecretFromEnv() error = %v, want symbolic link rejection", err)
+	}
+}
+
+func TestGetSecretFromEnvFileRejectsHardLink(t *testing.T) {
+	tmpDir := t.TempDir()
+	targetPath := filepath.Join(tmpDir, "target-secret")
+	linkPath := filepath.Join(tmpDir, "hard-linked-secret")
+
+	if err := os.WriteFile(targetPath, []byte("file-secret-value\n"), 0600); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+	if err := os.Link(targetPath, linkPath); err != nil {
+		t.Skipf("hard links not supported: %v", err)
+	}
+
+	t.Setenv("TEST_HARD_LINK_SECRET_FILE_FILE", linkPath)
+
+	_, err := GetSecretFromEnv("TEST_HARD_LINK_SECRET_FILE")
+	if err == nil {
+		t.Fatal("GetSecretFromEnv() error = nil, want hard link rejection")
+	}
+	if !contains(err.Error(), "multiple hard links") {
+		t.Fatalf("GetSecretFromEnv() error = %v, want hard link rejection", err)
+	}
+}
+
 func TestKeyPermissionErrorMessage(t *testing.T) {
 	err := &KeyPermissionError{
 		Path:            "/var/lib/arca-router/ssh_host_key",
