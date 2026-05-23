@@ -55,6 +55,7 @@ func (e *KeyPermissionError) Error() string {
 // It checks:
 // - File permissions are 0600 (owner read/write only)
 // - File is not world-readable or group-writable
+// - File is not exposed through multiple hard links
 // - Optionally validates ownership (if expectedUID/GID are > 0)
 func ValidateKeyFilePermissions(path string, expectedUID, expectedGID uint32) error {
 	info, err := os.Lstat(path)
@@ -62,6 +63,9 @@ func ValidateKeyFilePermissions(path string, expectedUID, expectedGID uint32) er
 		return fmt.Errorf("failed to stat key file %s: %w", path, err)
 	}
 	if err := validateRegularSecretFile(path, info); err != nil {
+		return err
+	}
+	if err := validateSingleLinkSecretFile(path, info); err != nil {
 		return err
 	}
 

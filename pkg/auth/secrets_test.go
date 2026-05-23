@@ -97,6 +97,27 @@ func TestValidateKeyFilePermissionsRejectsSymlink(t *testing.T) {
 	}
 }
 
+func TestValidateKeyFilePermissionsRejectsHardLink(t *testing.T) {
+	tmpDir := t.TempDir()
+	targetPath := filepath.Join(tmpDir, "target-key")
+	linkPath := filepath.Join(tmpDir, "hard-linked-key")
+
+	if err := os.WriteFile(targetPath, []byte("test-key-data"), 0600); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+	if err := os.Link(targetPath, linkPath); err != nil {
+		t.Skipf("hard links not supported: %v", err)
+	}
+
+	err := ValidateKeyFilePermissions(linkPath, 0, 0)
+	if err == nil {
+		t.Fatal("ValidateKeyFilePermissions() error = nil, want hard link rejection")
+	}
+	if !contains(err.Error(), "multiple hard links") {
+		t.Fatalf("ValidateKeyFilePermissions() error = %v, want hard link rejection", err)
+	}
+}
+
 func TestValidateKeyFileOwnership(t *testing.T) {
 	tmpDir := t.TempDir()
 
