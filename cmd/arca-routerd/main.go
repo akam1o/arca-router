@@ -351,7 +351,24 @@ func vppClientOptionsFromFlags(f *daemonFlags) pkgvpp.GovppClientOptions {
 
 func run(ctx context.Context, f *daemonFlags, log *logger.Logger) error {
 	installParserHooks()
+	logDaemonConfiguration(f, log)
 
+	runtime, err := newDaemonRuntime(ctx, f, log)
+	if err != nil {
+		return err
+	}
+	defer runtime.Close(log)
+
+	managementPlane, err := startDaemonManagementPlane(ctx, f, runtime, log)
+	if err != nil {
+		return err
+	}
+	defer managementPlane.Stop(log)
+
+	return managementPlane.Wait(ctx, log)
+}
+
+func logDaemonConfiguration(f *daemonFlags, log *logger.Logger) {
 	log.Info("Configuration",
 		slog.String("config_path", f.configPath),
 		slog.String("hardware_path", f.hardwarePath),
@@ -367,16 +384,27 @@ func run(ctx context.Context, f *daemonFlags, log *logger.Logger) error {
 		slog.String("snmp_listen", f.snmpListen),
 		slog.String("frr_apply_mode", f.frrApplyMode),
 	)
+}
 
-	// --- Step 1: Load hardware configuration ---
+type daemonRuntime struct {
+	configStore     *storesqlite.Store
+	processLock     *datastore.ProcessLock
+	datastoreConfig *datastore.Config
+	engine          *engine.Engine
+	plugins         []engine.Plugin
+	vppPlugin       *sbvpp.VPPPlugin
+	frrPlugin       *sbfrr.FRRPlugin
+	configSync      configSyncRuntimeSource
+}
+
+func newDaemonRuntime(ctx context.Context, f *daemonFlags, log *logger.Logger) (_ *daemonRuntime, err error) {
 	log.Info("Loading hardware configuration")
 	hwConfig, err := device.LoadHardware(f.hardwarePath, log)
 	if err != nil {
-		return fmt.Errorf("load hardware config: %w", err)
+		return nil, fmt.Errorf("load hardware config: %w", err)
 	}
 	log.Info("Hardware loaded", slog.Int("interfaces", len(hwConfig.Interfaces)))
 
-	// --- Step 2: Create VPP client ---
 	var vppClient pkgvpp.Client
 	if f.mockVPP {
 		vppClient = pkgvpp.NewMockClient()
@@ -386,66 +414,59 @@ func run(ctx context.Context, f *daemonFlags, log *logger.Logger) error {
 
 	frrApplyMode, err := pkgfrr.ParseBackendMode(f.frrApplyMode)
 	if err != nil {
-		return err
+		return nil, err
 	}
 
-	// --- Step 3: Open config store ---
 	configStore, processLock, datastoreConfig, err := openConfigStore(f)
 	if err != nil {
-		return fmt.Errorf("open config store: %w", err)
+		return nil, fmt.Errorf("open config store: %w", err)
+	}
+	runtime := &daemonRuntime{
+		configStore:     configStore,
+		processLock:     processLock,
+		datastoreConfig: datastoreConfig,
 	}
 	defer func() {
-		if closeErr := configStore.Close(); closeErr != nil {
-			log.Error("Failed to close config store", slog.Any("error", closeErr))
-		}
-		if processLock != nil {
-			if closeErr := processLock.Close(); closeErr != nil {
-				log.Error("Failed to release datastore process lock", slog.Any("error", closeErr))
-			}
+		if err != nil {
+			runtime.Close(log)
 		}
 	}()
 	if err := configStore.CleanupEphemeralState(ctx); err != nil {
-		return fmt.Errorf("cleanup config store ephemeral state: %w", err)
+		return nil, fmt.Errorf("cleanup config store ephemeral state: %w", err)
 	}
 
-	// --- Step 4: Create validation and southbound plugins ---
 	clusterPlugin := newClusterSyncPlugin(datastoreConfig)
 	vppPlugin := sbvpp.NewVPPPlugin(vppClient, hwConfig, slog.Default())
 	frrPlugin := sbfrr.NewFRRPluginWithApplyMode(slog.Default(), frrApplyMode)
 
 	plugins := []engine.Plugin{clusterPlugin, vppPlugin, frrPlugin}
+	runtime.vppPlugin = vppPlugin
+	runtime.frrPlugin = frrPlugin
 
-	// --- Step 5: Create engine ---
 	eng := engine.NewEngine(plugins, slog.Default())
+	runtime.engine = eng
 
-	// --- Step 6: Initialize plugins ---
 	log.Info("Initializing engine plugins")
 	for _, p := range plugins {
 		if err := p.Init(ctx); err != nil {
-			return fmt.Errorf("init plugin %s: %w", p.Name(), err)
+			return nil, fmt.Errorf("init plugin %s: %w", p.Name(), err)
 		}
-		defer func(p engine.Plugin) {
-			if closeErr := p.Close(); closeErr != nil {
-				log.Error("Failed to close plugin", slog.String("plugin", p.Name()), slog.Any("error", closeErr))
-			}
-		}(p)
+		runtime.plugins = append(runtime.plugins, p)
 	}
 
-	// --- Step 7: Load initial configuration ---
 	log.Info("Loading initial configuration")
 	initialSnap, initialSource, err := loadInitialConfig(ctx, f, configStore, log)
 	if err != nil {
-		return fmt.Errorf("load initial config: %w", err)
+		return nil, fmt.Errorf("load initial config: %w", err)
 	}
 
 	// Apply initial configuration through the engine and keep the legacy
 	// datastore in sync for NETCONF running/candidate operations.
 	if err := applyInitialConfig(ctx, eng, configStore, initialSnap, initialSource); err != nil {
-		return fmt.Errorf("apply initial config: %w", err)
+		return nil, fmt.Errorf("apply initial config: %w", err)
 	}
 	log.Info("Initial configuration applied", slog.String("source", initialSource))
 
-	var configSync configSyncRuntimeSource
 	if datastoreConfig.Backend == datastore.BackendEtcd {
 		etcdStatus, ok := configStore.Legacy().(datastore.EtcdStatusProvider)
 		if !ok {
@@ -453,130 +474,174 @@ func run(ctx context.Context, f *daemonFlags, log *logger.Logger) error {
 		} else {
 			syncer := newEtcdConfigSynchronizer(configStore, eng, etcdStatus, defaultEtcdConfigSyncInterval, log.Logger)
 			syncer.Start(ctx)
-			configSync = syncer
+			runtime.configSync = syncer
 		}
 	}
 
-	// --- Step 8: Start NETCONF server ---
-	var netconfServer *netconf.SSHServer
-	netconfListen := effectiveNETCONFListen(f.netconfListen, eng.RunningSnapshot())
+	return runtime, nil
+}
+
+func (r *daemonRuntime) Close(log *logger.Logger) {
+	if r == nil {
+		return
+	}
+	for i := len(r.plugins) - 1; i >= 0; i-- {
+		p := r.plugins[i]
+		if closeErr := p.Close(); closeErr != nil {
+			log.Error("Failed to close plugin", slog.String("plugin", p.Name()), slog.Any("error", closeErr))
+		}
+	}
+	if r.configStore != nil {
+		if closeErr := r.configStore.Close(); closeErr != nil {
+			log.Error("Failed to close config store", slog.Any("error", closeErr))
+		}
+	}
+	if r.processLock != nil {
+		if closeErr := r.processLock.Close(); closeErr != nil {
+			log.Error("Failed to release datastore process lock", slog.Any("error", closeErr))
+		}
+	}
+}
+
+type daemonManagementPlane struct {
+	grpcServer    *nbgrpc.Server
+	grpcListener  net.Listener
+	netconfServer *netconf.SSHServer
+	grpcErr       <-chan error
+	metricsErr    <-chan error
+	webErr        <-chan error
+	snmpErr       <-chan error
+}
+
+func startDaemonManagementPlane(ctx context.Context, f *daemonFlags, runtime *daemonRuntime, log *logger.Logger) (_ *daemonManagementPlane, err error) {
+	plane := &daemonManagementPlane{}
+	defer func() {
+		if err != nil {
+			plane.Stop(log)
+		}
+	}()
+
+	netconfListen := effectiveNETCONFListen(f.netconfListen, runtime.engine.RunningSnapshot())
 	if f.hostKeyPath != "" && netconfListen != "" {
-		netconfServer, err = startNETCONFServer(
+		plane.netconfServer, err = startNETCONFServer(
 			ctx,
 			f,
-			datastoreConfig,
-			eng,
-			newNETCONFOperationalStateProvider(vppPlugin, frrPlugin),
+			runtime.datastoreConfig,
+			runtime.engine,
+			newNETCONFOperationalStateProvider(runtime.vppPlugin, runtime.frrPlugin),
 			log,
 			netconfListen,
 		)
 		if err != nil {
-			return err
+			return nil, err
 		}
-		defer func() {
-			if err := netconfServer.Stop(); err != nil {
-				log.Error("Failed to stop NETCONF server", slog.Any("error", err))
-			}
-		}()
 	}
 
-	// --- Step 9: Start gRPC API (for CLI) ---
 	lis, grpcServerOptions, grpcTransport, err := listenGRPCAPI(f)
 	if err != nil {
-		return err
+		return nil, err
 	}
-	defer func() { _ = lis.Close() }()
+	plane.grpcListener = lis
 	log.Info("Starting gRPC API",
 		slog.String("transport", grpcTransport),
 		slog.String("address", lis.Addr().String()),
 	)
 
-	grpcServer := nbgrpc.NewServer(eng, configStore, slog.Default())
-	grpcServer.SetInterfaceStateCollector(vppPlugin)
-	grpcServer.SetLCPReconciliationSource(newGRPCLCPReconciliationSource(vppPlugin))
-	grpcServer.SetBFDOperationalSource(frrPlugin)
-	grpcServer.SetQoSCapabilitySource(vppPlugin)
+	grpcServer := nbgrpc.NewServer(runtime.engine, runtime.configStore, slog.Default())
+	grpcServer.SetInterfaceStateCollector(runtime.vppPlugin)
+	grpcServer.SetLCPReconciliationSource(newGRPCLCPReconciliationSource(runtime.vppPlugin))
+	grpcServer.SetBFDOperationalSource(runtime.frrPlugin)
+	grpcServer.SetQoSCapabilitySource(runtime.vppPlugin)
+	plane.grpcServer = grpcServer
 
 	webAPITokens, err := loadWebAPITokens(f.webAPITokenFile)
 	if err != nil {
-		return fmt.Errorf("load web API tokens: %w", err)
+		return nil, fmt.Errorf("load web API tokens: %w", err)
 	}
 
 	observabilitySource := metricsSource{
 		startedAt:        time.Now(),
-		engine:           eng,
-		netconfServer:    netconfServer,
-		datastore:        datastoreConfig,
+		engine:           runtime.engine,
+		netconfServer:    plane.netconfServer,
+		datastore:        runtime.datastoreConfig,
 		configAPI:        grpcServer,
 		telemetryAPI:     grpcServer,
 		webAPITokens:     webAPITokens,
 		webAPITokenFile:  strings.TrimSpace(f.webAPITokenFile),
 		webAPITokenCache: newWebAPITokenCache(f.webAPITokenFile, webAPITokens),
-		configSync:       configSync,
-		frr:              frrPlugin,
-		vpp:              vppPlugin,
+		configSync:       runtime.configSync,
+		frr:              runtime.frrPlugin,
+		vpp:              runtime.vppPlugin,
 	}
 	grpcServer.SetHAStatusSource(newGRPCHAStatusSource(observabilitySource))
 
 	grpcErr := make(chan error, 1)
+	plane.grpcErr = grpcErr
 	go func() {
 		grpcErr <- grpcServer.ServeWithOptions(lis, grpcServerOptions...)
 	}()
 
-	// --- Step 10: Start metrics endpoint ---
-	var metricsErr <-chan error
-	if metricsListen := effectiveMetricsListen(f.metricsListen, eng.RunningSnapshot()); metricsListen != "" {
-		metricsErr, err = startMetricsServer(ctx, metricsListen, observabilitySource, log)
+	if metricsListen := effectiveMetricsListen(f.metricsListen, runtime.engine.RunningSnapshot()); metricsListen != "" {
+		plane.metricsErr, err = startMetricsServer(ctx, metricsListen, observabilitySource, log)
 		if err != nil {
-			grpcServer.Stop()
-			return err
+			return nil, err
 		}
 	}
 
-	// --- Step 11: Start Web UI endpoint ---
-	var webErr <-chan error
-	if webListen := effectiveWebListen(f.webListen, eng.RunningSnapshot()); webListen != "" {
-		webErr, err = startWebServer(ctx, webListen, observabilitySource, log)
+	if webListen := effectiveWebListen(f.webListen, runtime.engine.RunningSnapshot()); webListen != "" {
+		plane.webErr, err = startWebServer(ctx, webListen, observabilitySource, log)
 		if err != nil {
-			grpcServer.Stop()
-			return err
+			return nil, err
 		}
 	}
 
-	// --- Step 12: Start SNMP endpoint ---
-	var snmpErr <-chan error
-	if snmpListen := effectiveSNMPListen(f.snmpListen, eng.RunningSnapshot()); snmpListen != "" {
-		snmpErr, err = startSNMPServer(ctx, snmpListen, effectiveSNMPCommunity(f.snmpCommunity, eng.RunningSnapshot()), observabilitySource, log)
+	if snmpListen := effectiveSNMPListen(f.snmpListen, runtime.engine.RunningSnapshot()); snmpListen != "" {
+		plane.snmpErr, err = startSNMPServer(ctx, snmpListen, effectiveSNMPCommunity(f.snmpCommunity, runtime.engine.RunningSnapshot()), observabilitySource, log)
 		if err != nil {
-			grpcServer.Stop()
-			return err
+			return nil, err
 		}
 	}
 
-	// --- Wait for shutdown ---
+	return plane, nil
+}
+
+func (p *daemonManagementPlane) Stop(log *logger.Logger) {
+	if p == nil {
+		return
+	}
+	if p.grpcServer != nil {
+		p.grpcServer.Stop()
+	}
+	if p.grpcListener != nil {
+		_ = p.grpcListener.Close()
+	}
+	if p.netconfServer != nil {
+		if err := p.netconfServer.Stop(); err != nil {
+			log.Error("Failed to stop NETCONF server", slog.Any("error", err))
+		}
+	}
+}
+
+func (p *daemonManagementPlane) Wait(ctx context.Context, log *logger.Logger) error {
 	log.Info("Daemon running, waiting for shutdown signal")
 	select {
 	case <-ctx.Done():
 		log.Info("Shutdown signal received, stopping")
-	case err := <-grpcErr:
+	case err := <-p.grpcErr:
 		return fmt.Errorf("gRPC API stopped: %w", err)
-	case err := <-metricsErr:
+	case err := <-p.metricsErr:
 		if err != nil {
-			grpcServer.Stop()
 			return fmt.Errorf("metrics endpoint stopped: %w", err)
 		}
-	case err := <-webErr:
+	case err := <-p.webErr:
 		if err != nil {
-			grpcServer.Stop()
 			return fmt.Errorf("web endpoint stopped: %w", err)
 		}
-	case err := <-snmpErr:
+	case err := <-p.snmpErr:
 		if err != nil {
-			grpcServer.Stop()
 			return fmt.Errorf("SNMP endpoint stopped: %w", err)
 		}
 	}
-	grpcServer.Stop()
 
 	return nil
 }

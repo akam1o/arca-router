@@ -97,6 +97,78 @@ func testDaemonLogger() *logger.Logger {
 	return logger.New("test", &logger.Config{Level: slog.LevelError})
 }
 
+type lifecycleTestPlugin struct {
+	name     string
+	closeLog *[]string
+}
+
+func (p lifecycleTestPlugin) Name() string {
+	return p.name
+}
+
+func (p lifecycleTestPlugin) Init(ctx context.Context) error {
+	return nil
+}
+
+func (p lifecycleTestPlugin) ValidateChanges(ctx context.Context, diff *engine.ConfigDiff) error {
+	return nil
+}
+
+func (p lifecycleTestPlugin) ApplyChanges(ctx context.Context, diff *engine.ConfigDiff) error {
+	return nil
+}
+
+func (p lifecycleTestPlugin) RollbackChanges(ctx context.Context, diff *engine.ConfigDiff) error {
+	return nil
+}
+
+func (p lifecycleTestPlugin) Close() error {
+	*p.closeLog = append(*p.closeLog, p.name)
+	return nil
+}
+
+func (p lifecycleTestPlugin) HealthCheck(ctx context.Context) error {
+	return nil
+}
+
+func TestDaemonRuntimeCloseClosesPluginsInReverseInitOrder(t *testing.T) {
+	var closeLog []string
+	runtime := &daemonRuntime{
+		plugins: []engine.Plugin{
+			lifecycleTestPlugin{name: "first", closeLog: &closeLog},
+			lifecycleTestPlugin{name: "second", closeLog: &closeLog},
+		},
+	}
+
+	runtime.Close(testDaemonLogger())
+
+	if got := strings.Join(closeLog, ","); got != "second,first" {
+		t.Fatalf("close order = %q, want second,first", got)
+	}
+}
+
+func TestDaemonManagementPlaneWaitReturnsOnContextCancel(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	if err := (&daemonManagementPlane{}).Wait(ctx, testDaemonLogger()); err != nil {
+		t.Fatalf("Wait() error = %v, want nil", err)
+	}
+}
+
+func TestDaemonManagementPlaneWaitPropagatesEndpointError(t *testing.T) {
+	metricsErr := make(chan error, 1)
+	metricsErr <- errors.New("listen failed")
+
+	err := (&daemonManagementPlane{metricsErr: metricsErr}).Wait(context.Background(), testDaemonLogger())
+	if err == nil {
+		t.Fatal("Wait() error = nil, want metrics endpoint error")
+	}
+	if !strings.Contains(err.Error(), "metrics endpoint stopped") {
+		t.Fatalf("Wait() error = %v, want metrics endpoint stopped", err)
+	}
+}
+
 func TestLoadInitialConfigPrefersDatastore(t *testing.T) {
 	configPath := filepath.Join(t.TempDir(), "arca-router.conf")
 	if err := os.WriteFile(configPath, []byte("set system host-name file-router\n"), 0600); err != nil {
