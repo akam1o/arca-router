@@ -6,8 +6,10 @@ import (
 	"crypto/x509"
 	"crypto/x509/pkix"
 	"net/url"
+	"strings"
 	"testing"
 
+	apiv1 "github.com/akam1o/arca-router/api/v1"
 	internalauth "github.com/akam1o/arca-router/internal/auth"
 	googlegrpc "google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
@@ -37,6 +39,33 @@ func TestParseTLSClientRolesRejectsDuplicateIdentity(t *testing.T) {
 	_, err := ParseTLSClientRoles("router-operator=operator,router-operator=admin")
 	if err == nil {
 		t.Fatal("ParseTLSClientRoles() error = nil, want duplicate identity error")
+	}
+}
+
+func TestGRPCMethodOperationsCoverAllProtoMethods(t *testing.T) {
+	covered := make(map[string]struct{}, len(grpcMethodOperations))
+	services := apiv1.File_api_v1_router_proto.Services()
+	for i := 0; i < services.Len(); i++ {
+		service := services.Get(i)
+		methods := service.Methods()
+		for j := 0; j < methods.Len(); j++ {
+			method := methods.Get(j)
+			fullMethod := "/" + string(service.FullName()) + "/" + string(method.Name())
+			operation, ok := grpcMethodOperations[fullMethod]
+			if !ok {
+				t.Fatalf("grpcMethodOperations missing %s", fullMethod)
+			}
+			if strings.TrimSpace(operation) == "" {
+				t.Fatalf("grpcMethodOperations[%s] is empty", fullMethod)
+			}
+			covered[fullMethod] = struct{}{}
+		}
+	}
+
+	for fullMethod := range grpcMethodOperations {
+		if _, ok := covered[fullMethod]; !ok {
+			t.Fatalf("grpcMethodOperations contains stale method %s", fullMethod)
+		}
 	}
 }
 
