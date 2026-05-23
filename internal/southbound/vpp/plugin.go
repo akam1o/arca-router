@@ -18,6 +18,11 @@ import (
 	pkgvpp "github.com/akam1o/arca-router/pkg/vpp"
 )
 
+const (
+	vppQoSCapabilityErrorMessage     = "failed to detect VPP QoS capabilities"
+	vppLCPReconciliationErrorMessage = "failed to check VPP LCP reconciliation"
+)
+
 // VPPPlugin implements engine.Plugin for VPP dataplane operations.
 type VPPPlugin struct {
 	mu         sync.RWMutex
@@ -1273,7 +1278,7 @@ func (p *VPPPlugin) updateQoSCapabilities(ctx context.Context) {
 	status := QoSCapabilityStatus{LastCheck: time.Now()}
 	capabilities, err := p.client.GetQoSCapabilities(ctx)
 	if err != nil {
-		status.LastError = err.Error()
+		status.LastError = vppQoSCapabilityErrorMessage
 		p.log.Warn("VPP QoS capability detection failed", slog.String("error", status.LastError))
 	} else {
 		status.Capabilities = capabilities
@@ -1292,7 +1297,7 @@ func (p *VPPPlugin) checkLCPReconciliation(ctx context.Context) LCPReconciliatio
 	}
 	inconsistencies, err := p.lcpManager.CheckConsistency(ctx)
 	if err != nil {
-		status.LastError = err.Error()
+		status.LastError = vppLCPReconciliationErrorMessage
 		return status
 	}
 	status.Inconsistencies = append([]string(nil), inconsistencies...)

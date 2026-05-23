@@ -64,6 +64,23 @@ func TestInitRecordsQoSCapabilities(t *testing.T) {
 	}
 }
 
+func TestInitRecordsRedactedQoSCapabilityError(t *testing.T) {
+	ctx := context.Background()
+	client := pkgvpp.NewMockClient()
+	client.GetQoSCapabilitiesError = errors.New("connect /run/vpp/api.sock: permission denied with token=secret")
+	plugin := NewVPPPlugin(client, &device.HardwareConfig{}, testLogger())
+	if err := plugin.Init(ctx); err != nil {
+		t.Fatalf("Init() error = %v", err)
+	}
+	t.Cleanup(func() { _ = plugin.Close() })
+
+	status := plugin.QoSCapabilityStatus()
+	if status.LastError != vppQoSCapabilityErrorMessage {
+		t.Fatalf("QoSCapabilityStatus().LastError = %q, want redacted capability error", status.LastError)
+	}
+	assertVPPStatusErrorRedacted(t, status.LastError)
+}
+
 func TestApplyChangesPreservesInterfaceAddressHostIP(t *testing.T) {
 	ctx := context.Background()
 	client := pkgvpp.NewMockClient()
@@ -350,6 +367,23 @@ func TestInitRecordsLCPReconciliationStatus(t *testing.T) {
 	}
 }
 
+func TestInitRecordsRedactedLCPReconciliationError(t *testing.T) {
+	ctx := context.Background()
+	client := pkgvpp.NewMockClient()
+	client.ListLCPInterfacesError = errors.New("list /run/vpp/lcp.sock: permission denied with token=secret")
+	plugin := NewVPPPlugin(client, &device.HardwareConfig{}, testLogger())
+	if err := plugin.Init(ctx); err != nil {
+		t.Fatalf("Init() error = %v", err)
+	}
+	t.Cleanup(func() { _ = plugin.Close() })
+
+	status := plugin.LCPReconciliationStatus()
+	if status.LastError != vppLCPReconciliationErrorMessage {
+		t.Fatalf("LCPReconciliationStatus().LastError = %q, want redacted reconciliation error", status.LastError)
+	}
+	assertVPPStatusErrorRedacted(t, status.LastError)
+}
+
 func TestValidateChangesAllowsMPLSConfig(t *testing.T) {
 	plugin := NewVPPPlugin(pkgvpp.NewMockClient(), &device.HardwareConfig{}, testLogger())
 	newCfg := model.NewRouterConfig()
@@ -360,6 +394,15 @@ func TestValidateChangesAllowsMPLSConfig(t *testing.T) {
 
 	if err := plugin.ValidateChanges(context.Background(), diff); err != nil {
 		t.Fatalf("ValidateChanges() error = %v, want nil", err)
+	}
+}
+
+func assertVPPStatusErrorRedacted(t *testing.T, msg string) {
+	t.Helper()
+	for _, leaked := range []string{"/run/vpp", "api.sock", "lcp.sock", "permission denied", "secret"} {
+		if strings.Contains(msg, leaked) {
+			t.Fatalf("VPP status error leaked %q in %q", leaked, msg)
+		}
 	}
 }
 
