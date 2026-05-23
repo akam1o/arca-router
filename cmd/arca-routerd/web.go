@@ -46,6 +46,7 @@ const webAPITokenSHA256Prefix = "sha256:"
 const webAPITokenNotAfterPrefix = ":not-after="
 const webInternalServerErrorMessage = "internal server error"
 const webAPITokenUnavailableMessage = "web API token authentication unavailable"
+const webRedactedSecretMarker = "<redacted>"
 
 const nmsOperationalStatusSchemaVersion = "arca.nms.operational.v1"
 const nmsTelemetryCatalogSchemaVersion = "arca.nms.telemetry-catalog.v1"
@@ -1311,11 +1312,11 @@ func (s metricsSource) handleWebConfig(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
-	role, ok := s.authorizeWebReadRole(w, r)
+	_, ok := s.authorizeWebReadRole(w, r)
 	if !ok {
 		return
 	}
-	cfg, err := s.runningConfig(!webRoleCanWrite(role))
+	cfg, err := s.runningConfig(true)
 	if err != nil {
 		s.writeWebInternalError(w, "render config", err)
 		return
@@ -1437,7 +1438,7 @@ func (s metricsSource) handleWebIndex(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
-	role, ok := s.authorizeWebReadRole(w, r)
+	_, ok := s.authorizeWebReadRole(w, r)
 	if !ok {
 		return
 	}
@@ -1447,7 +1448,7 @@ func (s metricsSource) handleWebIndex(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	status := newWebStatus(s.snapshot(time.Now()))
-	cfg, err := s.runningConfig(!webRoleCanWrite(role))
+	cfg, err := s.runningConfig(true)
 	if err != nil {
 		s.writeWebInternalError(w, "render index config", err)
 		return
@@ -1928,8 +1929,7 @@ func decodeWebConfigEditRequest(w http.ResponseWriter, r *http.Request) (webConf
 	if !decodeWebJSONRequest(w, r, &req) {
 		return req, false
 	}
-	if strings.TrimSpace(req.ConfigText) == "" {
-		writeWebJSONError(w, http.StatusBadRequest, "config_text is required")
+	if !validateWebConfigTextForEdit(w, req.ConfigText) {
 		return req, false
 	}
 	return req, true
@@ -1940,11 +1940,22 @@ func decodeWebConfigCommitRequest(w http.ResponseWriter, r *http.Request) (webCo
 	if !decodeWebJSONRequest(w, r, &req) {
 		return req, false
 	}
-	if strings.TrimSpace(req.ConfigText) == "" {
-		writeWebJSONError(w, http.StatusBadRequest, "config_text is required")
+	if !validateWebConfigTextForEdit(w, req.ConfigText) {
 		return req, false
 	}
 	return req, true
+}
+
+func validateWebConfigTextForEdit(w http.ResponseWriter, configText string) bool {
+	if strings.TrimSpace(configText) == "" {
+		writeWebJSONError(w, http.StatusBadRequest, "config_text is required")
+		return false
+	}
+	if strings.Contains(configText, webRedactedSecretMarker) {
+		writeWebJSONError(w, http.StatusBadRequest, "redacted config text cannot be validated or committed")
+		return false
+	}
+	return true
 }
 
 func decodeWebJSONRequest(w http.ResponseWriter, r *http.Request, dst any) bool {

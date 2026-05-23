@@ -1004,6 +1004,43 @@ func TestWebEndpointAcceptsReadOnlyBasicAuth(t *testing.T) {
 	}
 }
 
+func TestWebConfigEndpointRedactsWriterRole(t *testing.T) {
+	source := newWebAuthTestSource(t, "operator", "secret", "operator")
+
+	req := httptest.NewRequest(http.MethodGet, "/api/config", nil)
+	req.SetBasicAuth("operator", "secret")
+	rec := httptest.NewRecorder()
+	source.handleWebConfig(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d: %s", rec.Code, http.StatusOK, rec.Body.String())
+	}
+	var cfgResp webConfig
+	if err := json.NewDecoder(rec.Result().Body).Decode(&cfgResp); err != nil {
+		t.Fatalf("Decode() error = %v", err)
+	}
+	if strings.Contains(cfgResp.ConfigText, "$argon2id$") || !strings.Contains(cfgResp.ConfigText, webRedactedSecretMarker) {
+		t.Fatalf("writer ConfigText =\n%s\nwant redacted security password", cfgResp.ConfigText)
+	}
+}
+
+func TestWebIndexEndpointRedactsWriterRole(t *testing.T) {
+	source := newWebAuthTestSource(t, "operator", "secret", "operator")
+
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	req.SetBasicAuth("operator", "secret")
+	rec := httptest.NewRecorder()
+	source.handleWebIndex(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d: %s", rec.Code, http.StatusOK, rec.Body.String())
+	}
+	body := rec.Body.String()
+	if strings.Contains(body, "$argon2id$") || !strings.Contains(body, "redacted") {
+		t.Fatalf("writer index body leaked or omitted redaction:\n%s", body)
+	}
+}
+
 const validWebAPITestToken = "0123456789abcdef0123456789ABCDEF"
 const rotatedWebAPITestToken = "fedcba9876543210FEDCBA9876543210"
 
@@ -1612,6 +1649,50 @@ func TestWebConfigWriteEndpointRejectsOversizedBody(t *testing.T) {
 
 	if rec.Code != http.StatusRequestEntityTooLarge {
 		t.Fatalf("status = %d, want %d: %s", rec.Code, http.StatusRequestEntityTooLarge, rec.Body.String())
+	}
+}
+
+func TestWebConfigWriteEndpointRejectsRedactedConfig(t *testing.T) {
+	tests := []struct {
+		name   string
+		path   string
+		handle func(metricsSource, http.ResponseWriter, *http.Request)
+	}{
+		{
+			name: "validate",
+			path: "/api/config/validate",
+			handle: func(source metricsSource, w http.ResponseWriter, r *http.Request) {
+				source.handleWebConfigValidate(w, r)
+			},
+		},
+		{
+			name: "commit",
+			path: "/api/config/commit",
+			handle: func(source metricsSource, w http.ResponseWriter, r *http.Request) {
+				source.handleWebConfigCommit(w, r)
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			source, eng := newWebConfigAPITestSource(t, "operator")
+			body := `{"config_text":"set security users operator password ` + webRedactedSecretMarker + `"}`
+			req := newWebJSONTestRequest(http.MethodPost, tt.path, body)
+			req.SetBasicAuth("operator", "secret")
+			rec := httptest.NewRecorder()
+			tt.handle(source, rec, req)
+
+			if rec.Code != http.StatusBadRequest {
+				t.Fatalf("status = %d, want %d: %s", rec.Code, http.StatusBadRequest, rec.Body.String())
+			}
+			if !strings.Contains(rec.Body.String(), "redacted config text cannot be validated or committed") {
+				t.Fatalf("response body = %q, want redacted config rejection", rec.Body.String())
+			}
+			if got := eng.Running().System.HostName; got != "edge01" {
+				t.Fatalf("running hostname = %q, want unchanged edge01", got)
+			}
+		})
 	}
 }
 
