@@ -13,6 +13,10 @@ import (
 // This operation is atomic within the database, but VPP/FRR application
 // happens outside the transaction (see docs/datastore-design.md for details).
 func (ds *sqliteDatastore) Commit(ctx context.Context, req *CommitRequest) (string, error) {
+	if err := validateCommitRequest(req); err != nil {
+		return "", err
+	}
+
 	// Generate commit ID
 	commitID := uuid.New().String()
 	now := time.Now()

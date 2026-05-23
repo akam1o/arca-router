@@ -24,6 +24,10 @@ type commitEntry struct {
 
 // Commit promotes a candidate configuration to running configuration.
 func (ds *etcdDatastore) Commit(ctx context.Context, req *CommitRequest) (string, error) {
+	if err := validateCommitRequest(req); err != nil {
+		return "", err
+	}
+
 	ctx, cancel := ds.withTimeout(ctx)
 	defer cancel()
 
