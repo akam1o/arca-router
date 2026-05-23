@@ -27,6 +27,9 @@ type etcdDatastore struct {
 
 // NewEtcdDatastore creates a new etcd-backed datastore.
 func NewEtcdDatastore(cfg *Config) (Datastore, error) {
+	if cfg == nil {
+		return nil, fmt.Errorf("datastore config cannot be nil")
+	}
 	if cfg.Backend != BackendEtcd {
 		return nil, fmt.Errorf("invalid backend type: %s (expected %s)", cfg.Backend, BackendEtcd)
 	}

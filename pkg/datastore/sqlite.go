@@ -38,6 +38,9 @@ type ProcessLock struct {
 
 // NewSQLiteDatastore creates a new SQLite-backed datastore.
 func NewSQLiteDatastore(cfg *Config) (Datastore, error) {
+	if cfg == nil {
+		return nil, fmt.Errorf("datastore config cannot be nil")
+	}
 	if cfg.Backend != BackendSQLite {
 		return nil, fmt.Errorf("invalid backend type: %s (expected %s)", cfg.Backend, BackendSQLite)
 	}
