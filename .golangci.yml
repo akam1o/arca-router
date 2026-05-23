@@ -14,14 +14,6 @@ linters:
     - misspell
     - staticcheck
     - unused
-  settings:
-    gocritic:
-      enabled-tags:
-        - diagnostic
-        - experimental
-        - opinionated
-        - performance
-        - style
   exclusions:
     paths:
       - vendor
