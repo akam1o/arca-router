@@ -67,8 +67,7 @@ test: ## Run tests
 
 fmt: ## Format code
 	@echo "Formatting code..."
-	go fmt ./...
-	gofmt -w .
+	gofmt -s -w $$(git ls-files '*.go')
 
 vet: ## Run go vet
 	@echo "Running go vet..."
