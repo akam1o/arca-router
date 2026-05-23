@@ -239,6 +239,66 @@ func TestBuildDatastoreConfigEtcd(t *testing.T) {
 	}
 }
 
+func TestBuildDatastoreConfigEtcdPasswordFile(t *testing.T) {
+	passwordFile := filepath.Join(t.TempDir(), "etcd-password")
+	if err := os.WriteFile(passwordFile, []byte("secret-from-file\n"), 0600); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+
+	cfg, err := buildDatastoreConfig(&daemonFlags{
+		datastoreMode:    "etcd",
+		etcdEndpoints:    "http://127.0.0.1:2379",
+		etcdUsername:     "arca",
+		etcdPasswordFile: passwordFile,
+	})
+	if err != nil {
+		t.Fatalf("buildDatastoreConfig() error = %v", err)
+	}
+	if cfg.EtcdPassword != "secret-from-file" {
+		t.Fatalf("EtcdPassword = %q, want secret-from-file", cfg.EtcdPassword)
+	}
+}
+
+func TestBuildDatastoreConfigEtcdPasswordFileFromEnv(t *testing.T) {
+	passwordFile := filepath.Join(t.TempDir(), "etcd-password")
+	if err := os.WriteFile(passwordFile, []byte("secret-from-env\n"), 0600); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+	t.Setenv(etcdPasswordFileEnv, passwordFile)
+
+	cfg, err := buildDatastoreConfig(&daemonFlags{
+		datastoreMode: "etcd",
+		etcdEndpoints: "http://127.0.0.1:2379",
+		etcdUsername:  "arca",
+	})
+	if err != nil {
+		t.Fatalf("buildDatastoreConfig() error = %v", err)
+	}
+	if cfg.EtcdPassword != "secret-from-env" {
+		t.Fatalf("EtcdPassword = %q, want secret-from-env", cfg.EtcdPassword)
+	}
+}
+
+func TestBuildDatastoreConfigEtcdRejectsPasswordAndPasswordFile(t *testing.T) {
+	passwordFile := filepath.Join(t.TempDir(), "etcd-password")
+	if err := os.WriteFile(passwordFile, []byte("secret-from-file\n"), 0600); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+
+	_, err := buildDatastoreConfig(&daemonFlags{
+		datastoreMode:    "etcd",
+		etcdEndpoints:    "http://127.0.0.1:2379",
+		etcdPassword:     "secret",
+		etcdPasswordFile: passwordFile,
+	})
+	if err == nil {
+		t.Fatal("buildDatastoreConfig() error = nil, want password source conflict")
+	}
+	if !strings.Contains(err.Error(), "--etcd-password") {
+		t.Fatalf("buildDatastoreConfig() error = %v, want password source conflict", err)
+	}
+}
+
 func TestBuildDatastoreConfigEtcdRequiresEndpoints(t *testing.T) {
 	_, err := buildDatastoreConfig(&daemonFlags{datastoreMode: "etcd"})
 	if err == nil {

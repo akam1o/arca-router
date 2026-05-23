@@ -49,6 +49,8 @@ var (
 
 const defaultNETCONFPort = 830
 
+const etcdPasswordFileEnv = "ARCA_ROUTER_ETCD_PASSWORD_FILE"
+
 const (
 	secureGRPCSocketDirPerms  os.FileMode = 0750
 	secureGRPCSocketFilePerms os.FileMode = 0660
@@ -58,21 +60,22 @@ const (
 var grpcSocketUmaskMu sync.Mutex
 
 type daemonFlags struct {
-	configPath    string
-	hardwarePath  string
-	datastorePath string
-	datastoreMode string
-	etcdEndpoints string
-	etcdPrefix    string
-	etcdTimeout   time.Duration
-	etcdUsername  string
-	etcdPassword  string
-	etcdCertFile  string
-	etcdKeyFile   string
-	etcdCAFile    string
-	logLevel      string
-	version       bool
-	mockVPP       bool
+	configPath       string
+	hardwarePath     string
+	datastorePath    string
+	datastoreMode    string
+	etcdEndpoints    string
+	etcdPrefix       string
+	etcdTimeout      time.Duration
+	etcdUsername     string
+	etcdPassword     string
+	etcdPasswordFile string
+	etcdCertFile     string
+	etcdKeyFile      string
+	etcdCAFile       string
+	logLevel         string
+	version          bool
+	mockVPP          bool
 
 	// NETCONF settings.
 	netconfListen   string
@@ -150,7 +153,9 @@ func parseFlags() *daemonFlags {
 	flag.StringVar(&f.etcdUsername, "etcd-username", "",
 		"etcd username")
 	flag.StringVar(&f.etcdPassword, "etcd-password", "",
-		"etcd password")
+		"etcd password (discouraged; use --etcd-password-file)")
+	flag.StringVar(&f.etcdPasswordFile, "etcd-password-file", "",
+		"Path to file containing etcd password (or ARCA_ROUTER_ETCD_PASSWORD_FILE)")
 	flag.StringVar(&f.etcdCertFile, "etcd-cert", "",
 		"etcd TLS client certificate path")
 	flag.StringVar(&f.etcdKeyFile, "etcd-key", "",
@@ -265,6 +270,10 @@ func buildDatastoreConfig(f *daemonFlags) (*datastore.Config, error) {
 		if len(endpoints) == 0 {
 			return nil, fmt.Errorf("etcd datastore requires --etcd-endpoints")
 		}
+		etcdPassword, err := resolveEtcdPassword(f)
+		if err != nil {
+			return nil, err
+		}
 		tlsConfig, err := buildEtcdTLSConfig(f)
 		if err != nil {
 			return nil, err
@@ -275,12 +284,30 @@ func buildDatastoreConfig(f *daemonFlags) (*datastore.Config, error) {
 			EtcdPrefix:    f.etcdPrefix,
 			EtcdTimeout:   f.etcdTimeout,
 			EtcdUsername:  f.etcdUsername,
-			EtcdPassword:  f.etcdPassword,
+			EtcdPassword:  etcdPassword,
 			EtcdTLS:       tlsConfig,
 		}, nil
 	default:
 		return nil, fmt.Errorf("unsupported datastore backend: %s", backend)
 	}
+}
+
+func resolveEtcdPassword(f *daemonFlags) (string, error) {
+	filePath := strings.TrimSpace(f.etcdPasswordFile)
+	if filePath == "" {
+		filePath = strings.TrimSpace(os.Getenv(etcdPasswordFileEnv))
+	}
+	if filePath == "" {
+		return f.etcdPassword, nil
+	}
+	if f.etcdPassword != "" {
+		return "", fmt.Errorf("--etcd-password and --etcd-password-file are mutually exclusive")
+	}
+	data, err := os.ReadFile(filePath)
+	if err != nil {
+		return "", fmt.Errorf("read etcd password file: %w", err)
+	}
+	return strings.TrimRight(string(data), "\r\n"), nil
 }
 
 func parseCommaList(value string) []string {
