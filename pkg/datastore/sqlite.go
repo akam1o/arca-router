@@ -146,13 +146,9 @@ func AcquireSQLiteProcessLock(dbPath string) (*ProcessLock, error) {
 	}
 
 	lockPath := dbPath + ".process.lock"
-	file, err := os.OpenFile(lockPath, os.O_RDWR|os.O_CREATE, secureSQLiteFilePerms)
+	file, err := openSecureSQLiteFile(lockPath, "datastore process lock", true)
 	if err != nil {
-		return nil, fmt.Errorf("failed to open datastore process lock: %w", err)
-	}
-	if err := os.Chmod(lockPath, secureSQLiteFilePerms); err != nil {
-		_ = file.Close()
-		return nil, fmt.Errorf("failed to restrict datastore process lock permissions: %w", err)
+		return nil, err
 	}
 	if err := syscall.Flock(int(file.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err != nil {
 		_ = file.Close()
@@ -209,23 +205,23 @@ func prepareSecureSQLiteFile(dbPath string) error {
 	if err := validateSQLiteDirectoryPermissions(dir); err != nil {
 		return err
 	}
-	file, err := os.OpenFile(dbPath, os.O_RDWR|os.O_CREATE, secureSQLiteFilePerms)
+	file, err := openSecureSQLiteFile(dbPath, "database file", true)
 	if err != nil {
-		return fmt.Errorf("failed to create database file: %w", err)
+		return err
 	}
 	if closeErr := file.Close(); closeErr != nil {
 		return fmt.Errorf("failed to close database file: %w", closeErr)
-	}
-	if err := os.Chmod(dbPath, secureSQLiteFilePerms); err != nil {
-		return fmt.Errorf("failed to restrict database file permissions: %w", err)
 	}
 	return nil
 }
 
 func validateSQLiteDirectoryPermissions(dir string) error {
-	info, err := os.Stat(dir)
+	info, err := os.Lstat(dir)
 	if err != nil {
 		return fmt.Errorf("failed to stat database directory: %w", err)
+	}
+	if info.Mode()&os.ModeSymlink != 0 {
+		return fmt.Errorf("database directory %s must not be a symbolic link", dir)
 	}
 	if !info.IsDir() {
 		return fmt.Errorf("database parent path is not a directory: %s", dir)
@@ -237,19 +233,113 @@ func validateSQLiteDirectoryPermissions(dir string) error {
 	return nil
 }
 
+func validateSQLiteFilePath(path string) error {
+	info, err := os.Lstat(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return fmt.Errorf("failed to stat database file %s: %w", path, err)
+	}
+	return validateSQLiteFileInfo(path, info)
+}
+
+func validateSQLiteFileInfo(path string, info os.FileInfo) error {
+	if info.Mode()&os.ModeSymlink != 0 {
+		return fmt.Errorf("database file %s must not be a symbolic link", path)
+	}
+	if !info.Mode().IsRegular() {
+		return fmt.Errorf("database file %s is not a regular file", path)
+	}
+	if stat, ok := info.Sys().(*syscall.Stat_t); ok && stat.Nlink > 1 {
+		return fmt.Errorf("database file %s must not have multiple hard links", path)
+	}
+	return nil
+}
+
+func openSecureSQLiteFile(path, label string, create bool) (*os.File, error) {
+	if err := validateSQLiteFilePath(path); err != nil {
+		return nil, err
+	}
+
+	flags := os.O_RDWR | syscall.O_NOFOLLOW
+	if create {
+		flags |= os.O_CREATE
+	}
+	file, err := os.OpenFile(path, flags, secureSQLiteFilePerms)
+	if err != nil {
+		return nil, fmt.Errorf("failed to open %s: %w", label, err)
+	}
+	cleanup := true
+	defer func() {
+		if cleanup {
+			_ = file.Close()
+		}
+	}()
+
+	openedInfo, err := file.Stat()
+	if err != nil {
+		return nil, fmt.Errorf("failed to stat %s: %w", label, err)
+	}
+	if err := validateSQLiteFileInfo(path, openedInfo); err != nil {
+		return nil, err
+	}
+	if err := file.Chmod(secureSQLiteFilePerms); err != nil {
+		return nil, fmt.Errorf("failed to restrict %s permissions: %w", label, err)
+	}
+	currentInfo, err := os.Lstat(path)
+	if err != nil {
+		return nil, fmt.Errorf("failed to stat database file %s: %w", path, err)
+	}
+	if err := validateSQLiteFileInfo(path, currentInfo); err != nil {
+		return nil, err
+	}
+	if !os.SameFile(openedInfo, currentInfo) {
+		return nil, fmt.Errorf("refusing to use database file %s: file changed during preparation", path)
+	}
+
+	cleanup = false
+	return file, nil
+}
+
 func restrictSQLiteFilePermissions(dbPath string) error {
 	if dbPath == "" || dbPath == ":memory:" {
 		return nil
 	}
 	for _, path := range []string{dbPath, dbPath + "-wal", dbPath + "-shm"} {
-		if _, err := os.Stat(path); err != nil {
+		info, err := os.Lstat(path)
+		if err != nil {
 			if os.IsNotExist(err) {
 				continue
 			}
 			return fmt.Errorf("failed to stat database file %s: %w", path, err)
 		}
-		if err := os.Chmod(path, secureSQLiteFilePerms); err != nil {
+		if err := validateSQLiteFileInfo(path, info); err != nil {
+			return err
+		}
+		file, err := os.OpenFile(path, os.O_RDWR|syscall.O_NOFOLLOW, secureSQLiteFilePerms)
+		if err != nil {
+			return fmt.Errorf("failed to open database file %s: %w", path, err)
+		}
+		openedInfo, statErr := file.Stat()
+		if statErr != nil {
+			_ = file.Close()
+			return fmt.Errorf("failed to stat database file %s: %w", path, statErr)
+		}
+		if err := validateSQLiteFileInfo(path, openedInfo); err != nil {
+			_ = file.Close()
+			return err
+		}
+		if !os.SameFile(info, openedInfo) {
+			_ = file.Close()
+			return fmt.Errorf("refusing to restrict database file %s: file changed during permission update", path)
+		}
+		if err := file.Chmod(secureSQLiteFilePerms); err != nil {
+			_ = file.Close()
 			return fmt.Errorf("failed to restrict database file permissions for %s: %w", path, err)
+		}
+		if err := file.Close(); err != nil {
+			return fmt.Errorf("failed to close database file %s: %w", path, err)
 		}
 	}
 	return nil
