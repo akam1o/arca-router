@@ -2097,6 +2097,24 @@ func TestWebAuditEndpointExportsFilteredEvents(t *testing.T) {
 	}
 }
 
+func TestWebAuditEndpointClampsOverLimit(t *testing.T) {
+	source := newWebAuthTestSource(t, "admin", "secret", "admin")
+	auditAPI := &webAuditTestAPI{}
+	source.configAPI = auditAPI
+
+	req := httptest.NewRequest(http.MethodGet, "/api/audit?limit=1001", nil)
+	req.SetBasicAuth("admin", "secret")
+	rec := httptest.NewRecorder()
+	source.handleWebAudit(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d: %s", rec.Code, http.StatusOK, rec.Body.String())
+	}
+	if auditAPI.opts.Limit != 1000 {
+		t.Fatalf("audit limit = %d, want clamped 1000", auditAPI.opts.Limit)
+	}
+}
+
 func TestWebAuditEndpointRejectsInvalidTimeRange(t *testing.T) {
 	source := newWebAuthTestSource(t, "admin", "secret", "admin")
 	source.configAPI = &webAuditTestAPI{}

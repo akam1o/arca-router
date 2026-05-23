@@ -141,26 +141,30 @@ func webHistoryPaginationFromRequest(r *http.Request) (int, int, error) {
 }
 
 func webHistoryLimitQuery(raw string) (int, error) {
+	return clampedWebIntQuery(raw, 20, 1, 100, "limit")
+}
+
+func clampedWebIntQuery(raw string, defaultValue, minValue, maxValue int, name string) (int, error) {
 	value := strings.TrimSpace(raw)
 	if value == "" {
-		return 20, nil
+		return defaultValue, nil
 	}
-	limit, err := strconv.Atoi(value)
+	parsed, err := strconv.Atoi(value)
 	if err != nil {
-		return 0, fmt.Errorf("limit must be an integer")
+		return 0, fmt.Errorf("%s must be an integer", name)
 	}
-	if limit <= 0 {
-		return 0, fmt.Errorf("limit must be between 1 and 100")
+	if parsed < minValue {
+		return 0, fmt.Errorf("%s must be between %d and %d", name, minValue, maxValue)
 	}
-	if limit > 100 {
-		return 100, nil
+	if parsed > maxValue {
+		return maxValue, nil
 	}
-	return limit, nil
+	return parsed, nil
 }
 
 func webAuditOptionsFromRequest(r *http.Request) (nbgrpc.AuditLogOptions, error) {
 	query := r.URL.Query()
-	limit, err := boundedWebIntQuery(query.Get("limit"), 100, 1, 1000, "limit")
+	limit, err := clampedWebIntQuery(query.Get("limit"), 100, 1, 1000, "limit")
 	if err != nil {
 		return nbgrpc.AuditLogOptions{}, err
 	}
