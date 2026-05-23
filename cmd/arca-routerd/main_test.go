@@ -551,6 +551,26 @@ func TestPrepareGRPCSocketPathRejectsInsecureDirectory(t *testing.T) {
 	}
 }
 
+func TestPrepareGRPCSocketPathRejectsSymlinkDirectory(t *testing.T) {
+	root := t.TempDir()
+	targetDir := filepath.Join(root, "target")
+	socketDir := filepath.Join(root, "linked")
+	if err := os.Mkdir(targetDir, secureGRPCSocketDirPerms); err != nil {
+		t.Fatalf("Mkdir(target) error = %v", err)
+	}
+	if err := os.Symlink(targetDir, socketDir); err != nil {
+		t.Skipf("symlink not supported: %v", err)
+	}
+
+	err := prepareGRPCSocketPath(filepath.Join(socketDir, "routerd.sock"))
+	if err == nil {
+		t.Fatal("prepareGRPCSocketPath() error = nil, want symlink directory rejection")
+	}
+	if !strings.Contains(err.Error(), "symbolic link") {
+		t.Fatalf("prepareGRPCSocketPath() error = %v, want symbolic link rejection", err)
+	}
+}
+
 func TestPrepareGRPCSocketPathRejectsNonSocketPath(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "routerd.sock")
@@ -593,6 +613,36 @@ func TestRestrictGRPCSocketPermissions(t *testing.T) {
 	}
 	if got := info.Mode().Perm(); got != secureGRPCSocketFilePerms {
 		t.Fatalf("socket mode = %04o, want %04o", got, secureGRPCSocketFilePerms)
+	}
+}
+
+func TestRestrictGRPCSocketPermissionsRejectsSymlinkPath(t *testing.T) {
+	dir := t.TempDir()
+	targetPath := filepath.Join(dir, "target")
+	socketPath := filepath.Join(dir, "routerd.sock")
+	if err := os.WriteFile(targetPath, []byte("not a socket"), 0644); err != nil {
+		t.Fatalf("WriteFile(target) error = %v", err)
+	}
+	if err := os.Chmod(targetPath, 0644); err != nil {
+		t.Fatalf("Chmod(target) error = %v", err)
+	}
+	if err := os.Symlink(targetPath, socketPath); err != nil {
+		t.Skipf("symlink not supported: %v", err)
+	}
+
+	err := restrictGRPCSocketPermissions(socketPath)
+	if err == nil {
+		t.Fatal("restrictGRPCSocketPermissions() error = nil, want symlink rejection")
+	}
+	if !strings.Contains(err.Error(), "symbolic link") {
+		t.Fatalf("restrictGRPCSocketPermissions() error = %v, want symbolic link rejection", err)
+	}
+	info, statErr := os.Stat(targetPath)
+	if statErr != nil {
+		t.Fatalf("Stat(target) error = %v", statErr)
+	}
+	if got := info.Mode().Perm(); got != 0644 {
+		t.Fatalf("target mode = %04o, want unchanged 0644", got)
 	}
 }
 

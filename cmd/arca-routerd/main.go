@@ -758,9 +758,12 @@ func prepareGRPCSocketPath(socketPath string) error {
 }
 
 func validateGRPCSocketDirectory(socketDir string) error {
-	info, err := os.Stat(socketDir)
+	info, err := os.Lstat(socketDir)
 	if err != nil {
 		return fmt.Errorf("stat gRPC socket directory: %w", err)
+	}
+	if info.Mode()&os.ModeSymlink != 0 {
+		return fmt.Errorf("gRPC socket directory %s must not be a symbolic link", socketDir)
 	}
 	if !info.IsDir() {
 		return fmt.Errorf("gRPC socket parent path is not a directory: %s", socketDir)
@@ -789,8 +792,35 @@ func removeStaleGRPCSocket(socketPath string) error {
 }
 
 func restrictGRPCSocketPermissions(socketPath string) error {
+	info, err := os.Lstat(socketPath)
+	if err != nil {
+		return fmt.Errorf("stat gRPC socket: %w", err)
+	}
+	if err := validateGRPCSocketPathInfo(socketPath, info); err != nil {
+		return err
+	}
 	if err := os.Chmod(socketPath, secureGRPCSocketFilePerms); err != nil {
 		return fmt.Errorf("restrict gRPC socket permissions: %w", err)
+	}
+	currentInfo, err := os.Lstat(socketPath)
+	if err != nil {
+		return fmt.Errorf("stat gRPC socket after permission update: %w", err)
+	}
+	if err := validateGRPCSocketPathInfo(socketPath, currentInfo); err != nil {
+		return err
+	}
+	if !os.SameFile(info, currentInfo) {
+		return fmt.Errorf("refusing to restrict gRPC socket %s: file changed during permission update", socketPath)
+	}
+	return nil
+}
+
+func validateGRPCSocketPathInfo(socketPath string, info os.FileInfo) error {
+	if info.Mode()&os.ModeSymlink != 0 {
+		return fmt.Errorf("gRPC socket path %s must not be a symbolic link", socketPath)
+	}
+	if info.Mode()&os.ModeSocket == 0 {
+		return fmt.Errorf("gRPC socket path is not a socket: %s", socketPath)
 	}
 	return nil
 }
