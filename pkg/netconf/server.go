@@ -191,7 +191,7 @@ func (s *Server) handleKillSession(ctx context.Context, sess *Session, rpc *RPC)
 
 	var req KillSession
 	if err := rpc.UnmarshalOperation(&req); err != nil {
-		return NewErrorReply(rpc.MessageID, err.(*RPCError))
+		return NewErrorReply(rpc.MessageID, rpcErrorFromError(err))
 	}
 
 	if req.SessionID == 0 {

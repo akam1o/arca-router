@@ -37,17 +37,17 @@ func (r *GetRequest) SetInheritedNamespaceAttrs(attrs []xml.Attr) {
 func (s *Server) handleGet(ctx context.Context, sess *Session, rpc *RPC) *RPCReply {
 	var req GetRequest
 	if err := rpc.UnmarshalOperation(&req); err != nil {
-		return NewErrorReply(rpc.MessageID, err.(*RPCError))
+		return NewErrorReply(rpc.MessageID, rpcErrorFromError(err))
 	}
 
 	// Validate filter
 	if err := req.Filter.Validate("get"); err != nil {
-		return NewErrorReply(rpc.MessageID, err.(*RPCError))
+		return NewErrorReply(rpc.MessageID, rpcErrorFromError(err))
 	}
 
 	// Validate filter depth and size limits
 	if err := ValidateFilterDepthAndSize("get", req.Filter); err != nil {
-		return NewErrorReply(rpc.MessageID, err.(*RPCError))
+		return NewErrorReply(rpc.MessageID, rpcErrorFromError(err))
 	}
 
 	operationalData, err := s.getOperationalData(ctx, req.Filter)

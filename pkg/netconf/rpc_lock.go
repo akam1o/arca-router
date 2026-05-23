@@ -25,13 +25,13 @@ type UnlockRequest struct {
 func (s *Server) handleLock(ctx context.Context, sess *Session, rpc *RPC) *RPCReply {
 	var req LockRequest
 	if err := rpc.UnmarshalOperation(&req); err != nil {
-		return NewErrorReply(rpc.MessageID, err.(*RPCError))
+		return NewErrorReply(rpc.MessageID, rpcErrorFromError(err))
 	}
 
 	// Get target datastore
 	target, err := req.Target.GetDatastore()
 	if err != nil {
-		return NewErrorReply(rpc.MessageID, err.(*RPCError))
+		return NewErrorReply(rpc.MessageID, rpcErrorFromError(err))
 	}
 
 	// Validate target (candidate and running are allowed)
@@ -80,13 +80,13 @@ func (s *Server) handleLock(ctx context.Context, sess *Session, rpc *RPC) *RPCRe
 func (s *Server) handleUnlock(ctx context.Context, sess *Session, rpc *RPC) *RPCReply {
 	var req UnlockRequest
 	if err := rpc.UnmarshalOperation(&req); err != nil {
-		return NewErrorReply(rpc.MessageID, err.(*RPCError))
+		return NewErrorReply(rpc.MessageID, rpcErrorFromError(err))
 	}
 
 	// Get target datastore
 	target, err := req.Target.GetDatastore()
 	if err != nil {
-		return NewErrorReply(rpc.MessageID, err.(*RPCError))
+		return NewErrorReply(rpc.MessageID, rpcErrorFromError(err))
 	}
 
 	// Validate target

@@ -24,7 +24,7 @@ type CommitRequest struct {
 func (s *Server) handleCommit(ctx context.Context, sess *Session, rpc *RPC) *RPCReply {
 	var req CommitRequest
 	if err := rpc.UnmarshalOperation(&req); err != nil {
-		return NewErrorReply(rpc.MessageID, err.(*RPCError))
+		return NewErrorReply(rpc.MessageID, rpcErrorFromError(err))
 	}
 	if rpcErr := unsupportedCommitOption(&req); rpcErr != nil {
 		return NewErrorReply(rpc.MessageID, rpcErr)
@@ -127,7 +127,7 @@ type DiscardChangesRequest struct {
 func (s *Server) handleDiscardChanges(ctx context.Context, sess *Session, rpc *RPC) *RPCReply {
 	var req DiscardChangesRequest
 	if err := rpc.UnmarshalOperation(&req); err != nil {
-		return NewErrorReply(rpc.MessageID, err.(*RPCError))
+		return NewErrorReply(rpc.MessageID, rpcErrorFromError(err))
 	}
 
 	// Check if candidate lock is held by this session
@@ -165,7 +165,7 @@ func (r *ValidateRequest) SetInheritedNamespaceAttrs(attrs []xml.Attr) {
 func (s *Server) handleValidate(ctx context.Context, sess *Session, rpc *RPC) *RPCReply {
 	var req ValidateRequest
 	if err := rpc.UnmarshalOperation(&req); err != nil {
-		return NewErrorReply(rpc.MessageID, err.(*RPCError))
+		return NewErrorReply(rpc.MessageID, rpcErrorFromError(err))
 	}
 
 	cfg, rpcErr := s.validateSourceConfig(ctx, sess, &req.Source)
@@ -187,7 +187,7 @@ func (s *Server) validateSourceConfig(ctx context.Context, sess *Session, source
 	if sourceReq.Config != nil {
 		configXML, err := sourceReq.Config.XML()
 		if err != nil {
-			return nil, err.(*RPCError)
+			return nil, rpcErrorFromError(err)
 		}
 		cfg, err := XMLToConfig(configXML, DefaultOpMerge)
 		if err != nil {
@@ -202,7 +202,7 @@ func (s *Server) validateSourceConfig(ctx context.Context, sess *Session, source
 
 	source, err := sourceReq.GetDatastore()
 	if err != nil {
-		return nil, err.(*RPCError)
+		return nil, rpcErrorFromError(err)
 	}
 
 	configText, rpcErr := s.validateSourceConfigText(ctx, sess, source)
