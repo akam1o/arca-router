@@ -54,6 +54,7 @@ type webConfigAPI interface {
 	ReleaseLock(ctx context.Context, sessionID string) error
 	EditCandidate(ctx context.Context, sessionID, configText string) error
 	ReplaceCandidate(ctx context.Context, sessionID, configText string) error
+	ReplaceCandidateWithBase(ctx context.Context, sessionID, configText string, expectedBaseVersion uint64) error
 	ValidateCandidate(ctx context.Context, sessionID string) error
 	Diff(ctx context.Context, sessionID string) (string, bool, error)
 	Commit(ctx context.Context, sessionID, user, message string) (string, uint64, error)
@@ -338,12 +339,14 @@ type webConfig struct {
 }
 
 type webConfigEditRequest struct {
-	ConfigText string `json:"config_text"`
+	ConfigText          string `json:"config_text"`
+	ExpectedBaseVersion uint64 `json:"expected_base_version,omitempty"`
 }
 
 type webConfigCommitRequest struct {
-	ConfigText string `json:"config_text"`
-	Message    string `json:"message"`
+	ConfigText          string `json:"config_text"`
+	Message             string `json:"message"`
+	ExpectedBaseVersion uint64 `json:"expected_base_version,omitempty"`
 }
 
 type webConfigValidateResponse struct {
@@ -460,6 +463,7 @@ type webIndexData struct {
 	VPPLCPLastReconcile      string
 	DatastoreBackend         string
 	GeneratedAt              string
+	ConfigVersion            uint64
 	ConfigVersionString      string
 	RunningConfig            string
 	History                  []webCommitEntry

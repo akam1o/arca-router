@@ -178,11 +178,18 @@ func (c *Client) EditCandidate(ctx context.Context, sessionID, configText string
 
 // ReplaceCandidate replaces a session's candidate configuration text.
 func (c *Client) ReplaceCandidate(ctx context.Context, sessionID, configText string) error {
+	return c.ReplaceCandidateWithBase(ctx, sessionID, configText, 0)
+}
+
+// ReplaceCandidateWithBase replaces a session's candidate configuration text
+// when the running config still matches the caller's expected base version.
+func (c *Client) ReplaceCandidateWithBase(ctx context.Context, sessionID, configText string, expectedBaseVersion uint64) error {
 	ctx, cancel := contextWithDefaultTimeout(ctx)
 	defer cancel()
 	_, err := c.config.ReplaceCandidate(ctx, &apiv1.ReplaceCandidateRequest{
-		SessionId:  sessionID,
-		ConfigText: configText,
+		SessionId:           sessionID,
+		ConfigText:          configText,
+		ExpectedBaseVersion: expectedBaseVersion,
 	})
 	return err
 }

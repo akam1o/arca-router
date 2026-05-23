@@ -52,7 +52,7 @@ func (a *configServiceAdapter) EditCandidate(ctx context.Context, req *apiv1.Edi
 }
 
 func (a *configServiceAdapter) ReplaceCandidate(ctx context.Context, req *apiv1.ReplaceCandidateRequest) (*apiv1.ReplaceCandidateResponse, error) {
-	if err := a.server.ReplaceCandidate(ctx, req.GetSessionId(), req.GetConfigText()); err != nil {
+	if err := a.server.ReplaceCandidateWithBase(ctx, req.GetSessionId(), req.GetConfigText(), req.GetExpectedBaseVersion()); err != nil {
 		return nil, configEditStatusError(err)
 	}
 	return &apiv1.ReplaceCandidateResponse{}, nil

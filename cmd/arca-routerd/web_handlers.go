@@ -189,7 +189,7 @@ func (s metricsSource) handleWebConfigValidate(w http.ResponseWriter, r *http.Re
 	if !ok {
 		return
 	}
-	diff, hasChanges, err := s.validateWebConfig(r.Context(), username, req.ConfigText)
+	diff, hasChanges, err := s.validateWebConfig(r.Context(), username, req.ConfigText, req.ExpectedBaseVersion)
 	if err != nil {
 		s.writeWebConfigEditError(w, "validate config", err)
 		return
@@ -216,7 +216,7 @@ func (s metricsSource) handleWebConfigCommit(w http.ResponseWriter, r *http.Requ
 	}
 	ctx, correlationID := webCorrelationContext(r)
 	w.Header().Set(correlation.HeaderName, correlationID)
-	commitID, version, err := s.commitWebConfig(ctx, username, req.ConfigText, req.Message)
+	commitID, version, err := s.commitWebConfig(ctx, username, req.ConfigText, req.Message, req.ExpectedBaseVersion)
 	if err != nil {
 		s.writeWebConfigEditError(w, "commit config", err)
 		return
@@ -304,7 +304,7 @@ func (s metricsSource) runningConfig(ctx context.Context, redactSecrets bool) (w
 	}, nil
 }
 
-func (s metricsSource) validateWebConfig(ctx context.Context, username, configText string) (string, bool, error) {
+func (s metricsSource) validateWebConfig(ctx context.Context, username, configText string, expectedBaseVersion uint64) (string, bool, error) {
 	api := s.configAPI
 	if api == nil {
 		return "", false, errWebConfigAPIUnavailable
@@ -321,7 +321,7 @@ func (s metricsSource) validateWebConfig(ctx context.Context, username, configTe
 		return "", false, err
 	}
 	defer func() { _ = api.ReleaseLock(context.Background(), sessionID) }()
-	if err := api.ReplaceCandidate(ctx, sessionID, configText); err != nil {
+	if err := api.ReplaceCandidateWithBase(ctx, sessionID, configText, expectedBaseVersion); err != nil {
 		return "", false, err
 	}
 	if err := api.ValidateCandidate(ctx, sessionID); err != nil {
@@ -330,7 +330,7 @@ func (s metricsSource) validateWebConfig(ctx context.Context, username, configTe
 	return api.Diff(ctx, sessionID)
 }
 
-func (s metricsSource) commitWebConfig(ctx context.Context, username, configText, message string) (string, uint64, error) {
+func (s metricsSource) commitWebConfig(ctx context.Context, username, configText, message string, expectedBaseVersion uint64) (string, uint64, error) {
 	api := s.configAPI
 	if api == nil {
 		return "", 0, errWebConfigAPIUnavailable
@@ -350,7 +350,7 @@ func (s metricsSource) commitWebConfig(ctx context.Context, username, configText
 		return "", 0, err
 	}
 	defer func() { _ = api.ReleaseLock(context.Background(), sessionID) }()
-	if err := api.ReplaceCandidate(ctx, sessionID, configText); err != nil {
+	if err := api.ReplaceCandidateWithBase(ctx, sessionID, configText, expectedBaseVersion); err != nil {
 		return "", 0, err
 	}
 	return api.Commit(ctx, sessionID, username, message)

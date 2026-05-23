@@ -2449,6 +2449,93 @@ func TestReplaceCandidateReplacesExistingCandidate(t *testing.T) {
 	}
 }
 
+func TestReplaceCandidateWithBaseRejectsStaleExpectedVersion(t *testing.T) {
+	oldParser := ConfigTextParser
+	ConfigTextParser = func(text string) (*model.RouterConfig, error) {
+		cfg, err := pkgconfig.NewParser(strings.NewReader(text)).Parse()
+		if err != nil {
+			return nil, err
+		}
+		return model.FromLegacyConfig(cfg), nil
+	}
+	t.Cleanup(func() { ConfigTextParser = oldParser })
+
+	eng := engine.NewEngine(nil, testLogger())
+	eng.InitializeRunning(&model.RouterConfig{
+		System:     &model.SystemConfig{HostName: "running"},
+		Interfaces: map[string]*model.InterfaceConfig{},
+	}, 1)
+	srv := NewServer(eng, &fakeStore{commitID: "commit-1"}, testLogger())
+	ctx := context.Background()
+	sessionID, err := srv.CreateSession(ctx, "alice")
+	if err != nil {
+		t.Fatalf("CreateSession() error = %v", err)
+	}
+	if err := srv.AcquireLock(ctx, sessionID, "alice"); err != nil {
+		t.Fatalf("AcquireLock() error = %v", err)
+	}
+	if err := eng.Apply(ctx, &model.RouterConfig{
+		System:     &model.SystemConfig{HostName: "external"},
+		Interfaces: map[string]*model.InterfaceConfig{},
+	}, "bob", "external commit"); err != nil {
+		t.Fatalf("Apply() external error = %v", err)
+	}
+
+	err = srv.ReplaceCandidateWithBase(ctx, sessionID, "set system host-name restored", 1)
+	if err == nil || !strings.Contains(err.Error(), "candidate configuration is stale") || !errors.Is(err, ErrCandidateConflict) {
+		t.Fatalf("ReplaceCandidateWithBase() error = %v, want stale candidate", err)
+	}
+	got, err := srv.GetCandidate(ctx, sessionID)
+	if err != nil {
+		t.Fatalf("GetCandidate() error = %v", err)
+	}
+	if strings.Contains(got, "restored") {
+		t.Fatalf("candidate text = %q, want unchanged after stale replacement", got)
+	}
+}
+
+func TestReplaceCandidateAdapterUsesExpectedBaseVersion(t *testing.T) {
+	oldParser := ConfigTextParser
+	ConfigTextParser = func(text string) (*model.RouterConfig, error) {
+		cfg, err := pkgconfig.NewParser(strings.NewReader(text)).Parse()
+		if err != nil {
+			return nil, err
+		}
+		return model.FromLegacyConfig(cfg), nil
+	}
+	t.Cleanup(func() { ConfigTextParser = oldParser })
+
+	eng := engine.NewEngine(nil, testLogger())
+	eng.InitializeRunning(&model.RouterConfig{
+		System:     &model.SystemConfig{HostName: "running"},
+		Interfaces: map[string]*model.InterfaceConfig{},
+	}, 1)
+	srv := NewServer(eng, &fakeStore{commitID: "commit-1"}, testLogger())
+	ctx := context.Background()
+	sessionID, err := srv.CreateSession(ctx, "alice")
+	if err != nil {
+		t.Fatalf("CreateSession() error = %v", err)
+	}
+	if err := srv.AcquireLock(ctx, sessionID, "alice"); err != nil {
+		t.Fatalf("AcquireLock() error = %v", err)
+	}
+	if err := eng.Apply(ctx, &model.RouterConfig{
+		System:     &model.SystemConfig{HostName: "external"},
+		Interfaces: map[string]*model.InterfaceConfig{},
+	}, "bob", "external commit"); err != nil {
+		t.Fatalf("Apply() external error = %v", err)
+	}
+
+	_, err = (&configServiceAdapter{server: srv}).ReplaceCandidate(ctx, &apiv1.ReplaceCandidateRequest{
+		SessionId:           sessionID,
+		ConfigText:          "set system host-name restored",
+		ExpectedBaseVersion: 1,
+	})
+	if status.Code(err) != codes.FailedPrecondition {
+		t.Fatalf("ReplaceCandidate() status = %v, want %v", status.Code(err), codes.FailedPrecondition)
+	}
+}
+
 func TestReplaceCandidateRejectsInvalidConfig(t *testing.T) {
 	oldParser := ConfigTextParser
 	ConfigTextParser = func(text string) (*model.RouterConfig, error) {

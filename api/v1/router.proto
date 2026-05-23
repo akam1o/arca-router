@@ -183,6 +183,7 @@ message EditCandidateResponse {}
 message ReplaceCandidateRequest {
   string session_id = 1;
   string config_text = 2;  // full set-command configuration
+  uint64 expected_base_version = 3;  // optional running version the replacement was edited from
 }
 
 message ReplaceCandidateResponse {}

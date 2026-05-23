@@ -1554,6 +1554,24 @@ func TestWebConfigValidateEndpointUsesConfigAPI(t *testing.T) {
 	}
 }
 
+func TestWebConfigValidateEndpointPassesExpectedBaseVersion(t *testing.T) {
+	api := &webConfigEditErrorTestAPI{}
+	source := newWebAuthTestSource(t, "operator", "secret", "operator")
+	source.configAPI = api
+
+	req := newWebJSONTestRequest(http.MethodPost, "/api/config/validate", `{"config_text":"set system host-name edge02","expected_base_version":42}`)
+	req.SetBasicAuth("operator", "secret")
+	rec := httptest.NewRecorder()
+	source.handleWebConfigValidate(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d: %s", rec.Code, http.StatusOK, rec.Body.String())
+	}
+	if api.expectedBaseVersion != 42 {
+		t.Fatalf("expected base version = %d, want 42", api.expectedBaseVersion)
+	}
+}
+
 func TestWebConfigCommitEndpointAppliesConfig(t *testing.T) {
 	source, eng := newWebConfigAPITestSource(t, "operator")
 
@@ -1577,12 +1595,36 @@ func TestWebConfigCommitEndpointAppliesConfig(t *testing.T) {
 	}
 }
 
+func TestWebConfigCommitEndpointRejectsStaleExpectedBaseVersion(t *testing.T) {
+	source, eng := newWebConfigAPITestSource(t, "operator")
+	updated := eng.Running()
+	updated.System.HostName = "edge03"
+	if err := eng.Apply(context.Background(), updated, "other", "external update"); err != nil {
+		t.Fatalf("Apply() external update error = %v", err)
+	}
+
+	req := newWebJSONTestRequest(http.MethodPost, "/api/config/commit", `{"config_text":"set system host-name edge02","expected_base_version":42}`)
+	req.SetBasicAuth("operator", "secret")
+	rec := httptest.NewRecorder()
+	source.handleWebConfigCommit(rec, req)
+
+	if rec.Code != http.StatusConflict {
+		t.Fatalf("status = %d, want %d: %s", rec.Code, http.StatusConflict, rec.Body.String())
+	}
+	if !strings.Contains(rec.Body.String(), "configuration candidate is unavailable") {
+		t.Fatalf("response body = %q, want candidate conflict", rec.Body.String())
+	}
+	if got := eng.Running().System.HostName; got != "edge03" {
+		t.Fatalf("running hostname = %q, want unchanged edge03", got)
+	}
+}
+
 func TestWebConfigCommitEndpointPropagatesCorrelationID(t *testing.T) {
 	api := &webConfigEditErrorTestAPI{}
 	source := newWebAuthTestSource(t, "operator", "secret", "operator")
 	source.configAPI = api
 
-	req := newWebJSONTestRequest(http.MethodPost, "/api/config/commit", `{"config_text":"set system host-name edge02"}`)
+	req := newWebJSONTestRequest(http.MethodPost, "/api/config/commit", `{"config_text":"set system host-name edge02","expected_base_version":42}`)
 	req.Header.Set(correlation.HeaderName, "web-request-1")
 	req.SetBasicAuth("operator", "secret")
 	rec := httptest.NewRecorder()
@@ -1596,6 +1638,9 @@ func TestWebConfigCommitEndpointPropagatesCorrelationID(t *testing.T) {
 	}
 	if api.commitCorrelationID != "web-request-1" {
 		t.Fatalf("commit correlation ID = %q, want web-request-1", api.commitCorrelationID)
+	}
+	if api.expectedBaseVersion != 42 {
+		t.Fatalf("expected base version = %d, want 42", api.expectedBaseVersion)
 	}
 }
 
@@ -2244,6 +2289,8 @@ func TestWebIndexEndpoint(t *testing.T) {
 		"/api/config/commit",
 		"validate-config",
 		"commit-config",
+		"let configVersion =",
+		"expected_base_version",
 	} {
 		if !strings.Contains(text, want) {
 			t.Fatalf("index missing %q:\n%s", want, text)
@@ -2318,6 +2365,7 @@ type webConfigEditErrorTestAPI struct {
 	diffErr             error
 	commitErr           error
 	commitCorrelationID string
+	expectedBaseVersion uint64
 
 	requireCanceledGetRunningContext bool
 }
@@ -2355,6 +2403,11 @@ func (a *webConfigEditErrorTestAPI) ReleaseLock(ctx context.Context, sessionID s
 
 func (a *webConfigEditErrorTestAPI) ReplaceCandidate(ctx context.Context, sessionID, configText string) error {
 	return a.replaceErr
+}
+
+func (a *webConfigEditErrorTestAPI) ReplaceCandidateWithBase(ctx context.Context, sessionID, configText string, expectedBaseVersion uint64) error {
+	a.expectedBaseVersion = expectedBaseVersion
+	return a.ReplaceCandidate(ctx, sessionID, configText)
 }
 
 func (a *webConfigEditErrorTestAPI) ValidateCandidate(ctx context.Context, sessionID string) error {

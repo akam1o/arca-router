@@ -224,6 +224,13 @@ func (s *Server) EditCandidate(ctx context.Context, sessionID, configText string
 
 // ReplaceCandidate replaces a session's candidate config with validated set-command text.
 func (s *Server) ReplaceCandidate(ctx context.Context, sessionID, configText string) error {
+	return s.ReplaceCandidateWithBase(ctx, sessionID, configText, 0)
+}
+
+// ReplaceCandidateWithBase replaces a session's candidate config only when the
+// running config still matches the caller's expected base version. A zero
+// expected version preserves the legacy unconditional replacement behavior.
+func (s *Server) ReplaceCandidateWithBase(ctx context.Context, sessionID, configText string, expectedBaseVersion uint64) error {
 	session, err := s.sessions.Get(sessionID)
 	if err != nil {
 		return err
@@ -233,6 +240,9 @@ func (s *Server) ReplaceCandidate(ctx context.Context, sessionID, configText str
 	defer session.mu.Unlock()
 	if !session.HasLock {
 		return newCandidateConflictErrorf("session %s does not hold the candidate lock", sessionID)
+	}
+	if err := s.ensureExpectedRunningVersion(expectedBaseVersion); err != nil {
+		return err
 	}
 	if err := s.ensureCandidateBaseCurrentLocked(session); err != nil {
 		return err
@@ -1447,6 +1457,20 @@ func (s *Server) ensureCandidateBaseCurrentLocked(session *Session) error {
 	}
 	if session.CandidateBaseVersion != version || session.CandidateBaseHash != hash {
 		return newCandidateConflictErrorf("candidate configuration is stale: running configuration changed from version %d to %d; discard or reload the candidate before editing", session.CandidateBaseVersion, version)
+	}
+	return nil
+}
+
+func (s *Server) ensureExpectedRunningVersion(expectedBaseVersion uint64) error {
+	if expectedBaseVersion == 0 {
+		return nil
+	}
+	var version uint64
+	if snap := s.engine.RunningSnapshot(); snap != nil {
+		version = snap.Version
+	}
+	if expectedBaseVersion != version {
+		return newCandidateConflictErrorf("candidate configuration is stale: running configuration changed from version %d to %d; discard or reload the candidate before editing", expectedBaseVersion, version)
 	}
 	return nil
 }

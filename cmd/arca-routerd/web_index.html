@@ -335,6 +335,7 @@
       const result = document.getElementById("config-result");
       const diff = document.getElementById("config-diff");
       const history = document.getElementById("commit-history");
+      let configVersion = {{.ConfigVersion}};
       if (!editor || !message || !validateButton || !commitButton || !result || !diff) {
         return;
       }
@@ -375,6 +376,9 @@
         const data = await response.json();
         if (typeof data.config_text === "string") {
           editor.value = data.config_text;
+        }
+        if (typeof data.version === "number") {
+          configVersion = data.version;
         }
       };
       const renderHistory = (entries) => {
@@ -424,7 +428,10 @@
         diff.hidden = true;
         diff.textContent = "";
         try {
-          const data = await requestJSON("/api/config/validate", { config_text: editor.value });
+          const data = await requestJSON("/api/config/validate", {
+            config_text: editor.value,
+            expected_base_version: configVersion,
+          });
           diff.textContent = data.diff_text || "";
           diff.hidden = !data.diff_text;
           setResult(data.has_changes ? "Valid" : "No changes", "ok");
@@ -444,6 +451,7 @@
           const data = await requestJSON("/api/config/commit", {
             config_text: editor.value,
             message: message.value,
+            expected_base_version: configVersion,
           });
           await refreshConfig();
           await refreshHistory();

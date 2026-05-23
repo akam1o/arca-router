@@ -295,6 +295,7 @@ func newWebIndexData(status webStatus, now time.Time, runningConfig string, hist
 		VPPLCPLastReconcile:      formatWebOptionalDisplayTime(status.VPP.LCP.LastReconcile),
 		DatastoreBackend:         status.Datastore.Backend,
 		GeneratedAt:              now.UTC().Format(time.RFC3339),
+		ConfigVersion:            status.ConfigVersion,
 		ConfigVersionString:      strconv.FormatUint(status.ConfigVersion, 10),
 		RunningConfig:            runningConfig,
 		History:                  history,
