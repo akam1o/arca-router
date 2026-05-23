@@ -784,16 +784,34 @@ func TestCheckVRRPOperationalStatusReportsMissingGroup(t *testing.T) {
 
 func TestCheckVRRPOperationalStatusRecordsReaderError(t *testing.T) {
 	plugin := NewFRRPlugin(testLogger())
-	plugin.statusReader = fakeVRRPStatusReader{err: errors.New("vtysh failed")}
+	plugin.statusReader = fakeVRRPStatusReader{err: errors.New("open /var/run/frr/vtysh.sock: permission denied")}
 
 	status := plugin.checkVRRPOperationalStatus(context.Background(), &pkgfrr.Config{
 		VRRP: &pkgfrr.VRRPConfig{Groups: []pkgfrr.VRRPGroup{
 			{ID: 10, Interface: "ge0-0-0", VirtualAddress: "192.0.2.254"},
 		}},
 	})
-	if status.LastError == "" || len(status.Issues) != 1 {
-		t.Fatalf("checkVRRPOperationalStatus() = %#v, want reader error issue", status)
+	if status.LastError != frrVRRPStatusReadErrorMessage || len(status.Issues) != 1 ||
+		status.Issues[0] != frrVRRPStatusReadErrorMessage {
+		t.Fatalf("checkVRRPOperationalStatus() = %#v, want redacted reader error issue", status)
 	}
+	assertOperationalStatusErrorRedacted(t, status.LastError, status.Issues)
+}
+
+func TestCheckBFDOperationalStatusRecordsReaderError(t *testing.T) {
+	plugin := NewFRRPlugin(testLogger())
+	plugin.bfdStatusReader = fakeBFDStatusReader{err: errors.New("dial /var/lib/frr/bfdd.sock with secret token failed")}
+
+	status := plugin.checkBFDOperationalStatus(context.Background(), &pkgfrr.Config{
+		BFD: &pkgfrr.BFDConfig{Peers: []pkgfrr.BFDPeer{
+			{Address: "192.0.2.2", LocalAddress: "192.0.2.1", Interface: "ge0-0-0"},
+		}},
+	})
+	if status.LastError != frrBFDStatusReadErrorMessage || len(status.Issues) != 1 ||
+		status.Issues[0] != frrBFDStatusReadErrorMessage {
+		t.Fatalf("checkBFDOperationalStatus() = %#v, want redacted reader error issue", status)
+	}
+	assertOperationalStatusErrorRedacted(t, status.LastError, status.Issues)
 }
 
 func TestCheckBFDOperationalStatusReportsMissingPeer(t *testing.T) {
@@ -855,6 +873,16 @@ func TestCheckBFDOperationalStatusConverged(t *testing.T) {
 	if status.ConfiguredPeers != 1 || status.ObservedPeers != 1 || status.UpPeers != 1 ||
 		status.DownPeers != 0 || len(status.Issues) != 0 || status.SessionDownEvents != 1 {
 		t.Fatalf("checkBFDOperationalStatus() = %#v, want converged peer", status)
+	}
+}
+
+func assertOperationalStatusErrorRedacted(t *testing.T, lastError string, issues []string) {
+	t.Helper()
+	combined := lastError + " " + strings.Join(issues, " ")
+	for _, leaked := range []string{"/var/run/frr", "/var/lib/frr", "permission denied", "secret"} {
+		if strings.Contains(combined, leaked) {
+			t.Fatalf("operational status error leaked %q in %q", leaked, combined)
+		}
 	}
 }
 
