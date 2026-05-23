@@ -21,14 +21,8 @@ func (ds *sqliteDatastore) Commit(ctx context.Context, req *CommitRequest) (stri
 	commitID := uuid.New().String()
 	now := time.Now()
 
-	// Load candidate config
-	candidate, err := ds.GetCandidate(ctx, req.SessionID)
-	if err != nil {
-		return "", err // Already wrapped by GetCandidate
-	}
-
 	// Execute commit transaction
-	err = ds.withTx(ctx, false, func(tx *sql.Tx) error {
+	err := ds.withTx(ctx, false, func(tx *sql.Tx) error {
 		// 0. Verify the session holds a valid (non-expired) candidate lock (enforces exclusive access)
 		var lockSessionID string
 		var expiresAt sqliteUnixTime
@@ -54,6 +48,20 @@ func (ds *sqliteDatastore) Commit(ctx context.Context, req *CommitRequest) (stri
 			return NewError(ErrCodeConflict,
 				fmt.Sprintf("cannot commit: config lock is held by another session (%s)", lockSessionID), nil)
 		}
+
+		var candidate CandidateConfig
+		err = tx.QueryRowContext(ctx, `
+				SELECT config_text, created_at, updated_at
+				FROM candidate_configs
+				WHERE session_id = ?
+			`, req.SessionID).Scan(&candidate.ConfigText, &candidate.CreatedAt, &candidate.UpdatedAt)
+		if err == sql.ErrNoRows {
+			return NewError(ErrCodeNotFound, "no candidate configuration found for session", nil)
+		}
+		if err != nil {
+			return NewError(ErrCodeInternal, "failed to get candidate config", err)
+		}
+		candidate.SessionID = req.SessionID
 
 		// 1. Update all running_config rows to is_current = 0
 		_, err = tx.ExecContext(ctx, `

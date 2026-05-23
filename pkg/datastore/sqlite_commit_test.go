@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
@@ -65,6 +66,75 @@ func TestListCommitHistoryCapsOversizedLimit(t *testing.T) {
 	}
 	if len(history) != maxCommitHistoryLimit {
 		t.Fatalf("history length = %d, want %d", len(history), maxCommitHistoryLimit)
+	}
+}
+
+func TestSQLiteCommitReadsCandidateInsideTransaction(t *testing.T) {
+	ds := openSQLiteDatastoreForTest(t, filepath.Join(t.TempDir(), "config.db"))
+	ctx := context.Background()
+	sessionID := "session-1"
+
+	if err := ds.AcquireLock(ctx, &LockRequest{
+		Target:    LockTargetCandidate,
+		SessionID: sessionID,
+		User:      "alice",
+	}); err != nil {
+		t.Fatalf("AcquireLock() error = %v", err)
+	}
+	if err := ds.SaveCandidate(ctx, sessionID, "set system host-name old\n"); err != nil {
+		t.Fatalf("SaveCandidate(old) error = %v", err)
+	}
+
+	tx, err := ds.db.BeginTx(ctx, nil)
+	if err != nil {
+		t.Fatalf("BeginTx() error = %v", err)
+	}
+	if _, err := tx.ExecContext(ctx, `
+		UPDATE candidate_configs
+		SET config_text = ?, updated_at = ?
+		WHERE session_id = ?
+	`, "set system host-name new\n", time.Now(), sessionID); err != nil {
+		_ = tx.Rollback()
+		t.Fatalf("update candidate in blocking tx: %v", err)
+	}
+
+	type commitResult struct {
+		commitID string
+		err      error
+	}
+	done := make(chan commitResult, 1)
+	go func() {
+		commitID, err := ds.Commit(ctx, &CommitRequest{
+			SessionID: sessionID,
+			User:      "alice",
+			Message:   "commit latest candidate",
+		})
+		done <- commitResult{commitID: commitID, err: err}
+	}()
+
+	time.Sleep(100 * time.Millisecond)
+	if err := tx.Commit(); err != nil {
+		t.Fatalf("commit blocking tx: %v", err)
+	}
+
+	select {
+	case result := <-done:
+		if result.err != nil {
+			t.Fatalf("Commit() error = %v", result.err)
+		}
+		if result.commitID == "" {
+			t.Fatal("Commit() commitID is empty")
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("Commit() timed out")
+	}
+
+	running, err := ds.GetRunning(ctx)
+	if err != nil {
+		t.Fatalf("GetRunning() error = %v", err)
+	}
+	if !strings.Contains(running.ConfigText, "host-name new") {
+		t.Fatalf("running config = %q, want latest candidate", running.ConfigText)
 	}
 }
 
