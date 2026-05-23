@@ -128,7 +128,10 @@ func (ds *sqliteDatastore) ReleaseLock(ctx context.Context, target string, sessi
 		// Check if lock has expired (treat as if no lock exists)
 		if time.Now().Unix() > expiresAt.Unix() {
 			// Lock is expired - delete it and return success
-			_, _ = tx.ExecContext(ctx, `DELETE FROM config_locks WHERE target = ?`, target)
+			_, err = tx.ExecContext(ctx, `DELETE FROM config_locks WHERE target = ?`, target)
+			if err != nil {
+				return NewError(ErrCodeInternal, fmt.Sprintf("failed to delete expired %s lock", target), err)
+			}
 			return nil
 		}
 
