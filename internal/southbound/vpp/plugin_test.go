@@ -122,6 +122,58 @@ func TestApplyChangesPreservesInterfaceAddressHostIP(t *testing.T) {
 	}
 }
 
+func TestApplyChangesFailsOnAddressDeleteFailure(t *testing.T) {
+	ctx := context.Background()
+	client := pkgvpp.NewMockClient()
+	plugin := NewVPPPlugin(client, &device.HardwareConfig{
+		Interfaces: []device.PhysicalInterface{
+			{Name: "ge-0/0/0", PCI: "0000:03:00.0", Driver: "avf"},
+		},
+	}, testLogger())
+	if err := plugin.Init(ctx); err != nil {
+		t.Fatalf("Init() error = %v", err)
+	}
+	t.Cleanup(func() { _ = plugin.Close() })
+
+	oldCfg := model.NewRouterConfig()
+	oldCfg.Interfaces["ge-0/0/0"] = &model.InterfaceConfig{
+		Units: map[int]*model.Unit{
+			0: {Family: map[string]*model.AddressFamily{"inet": {Addresses: []string{"192.0.2.1/24"}}}},
+		},
+	}
+	if err := plugin.ApplyChanges(ctx, engine.ComputeDiff(model.NewRouterConfig(), oldCfg)); err != nil {
+		t.Fatalf("initial ApplyChanges() error = %v", err)
+	}
+	idx, ok := plugin.GetInterfaceIndex("ge-0/0/0")
+	if !ok {
+		t.Fatal("initial ApplyChanges() did not add interface index")
+	}
+
+	newCfg := model.NewRouterConfig()
+	newCfg.Interfaces["ge-0/0/0"] = &model.InterfaceConfig{
+		Units: map[int]*model.Unit{
+			0: {Family: map[string]*model.AddressFamily{"inet": {}}},
+		},
+	}
+	client.DeleteInterfaceAddressError = errors.New("delete address failed")
+	err := plugin.ApplyChanges(ctx, engine.ComputeDiff(oldCfg, newCfg))
+	if err == nil {
+		t.Fatal("ApplyChanges() error = nil, want address delete failure")
+	}
+	for _, want := range []string{"update interface ge-0/0/0", "delete address 192.0.2.1/24", "delete address failed"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Fatalf("ApplyChanges() error = %v, want substring %q", err, want)
+		}
+	}
+	iface, err := client.GetInterface(ctx, idx)
+	if err != nil {
+		t.Fatalf("GetInterface() error = %v", err)
+	}
+	if len(iface.Addresses) != 1 {
+		t.Fatalf("addresses after failed deletion = %d, want original address retained", len(iface.Addresses))
+	}
+}
+
 func TestApplyChangesRollsBackInterfaceIndexOnAddressFailure(t *testing.T) {
 	ctx := context.Background()
 	client := pkgvpp.NewMockClient()

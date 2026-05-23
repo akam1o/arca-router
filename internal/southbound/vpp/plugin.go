@@ -613,13 +613,12 @@ func (p *VPPPlugin) applyInterfaceChanges(ctx context.Context, change *engine.In
 			continue
 		}
 		if err := p.client.DeleteInterfaceAddress(ctx, swIfIndex, ipNet); err != nil {
-			p.log.Warn("Failed to remove address", slog.String("interface", change.Name), slog.String("address", addr.Address), slog.Any("error", err))
-		} else {
-			addrCopy := cloneIPNet(ipNet)
-			*rollback = append(*rollback, func(ctx context.Context) error {
-				return p.client.SetInterfaceAddress(ctx, swIfIndex, addrCopy)
-			})
+			return fmt.Errorf("delete address %s: %w", addr.Address, err)
 		}
+		addrCopy := cloneIPNet(ipNet)
+		*rollback = append(*rollback, func(ctx context.Context) error {
+			return p.client.SetInterfaceAddress(ctx, swIfIndex, addrCopy)
+		})
 	}
 
 	// Add new addresses
