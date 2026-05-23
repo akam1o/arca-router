@@ -150,6 +150,76 @@ func TestSaveCommitStoresSetCommands(t *testing.T) {
 	}
 }
 
+func TestGetLatestSnapshotRestoresVersionFromCommitHistory(t *testing.T) {
+	installLegacyTextParser(t)
+
+	ctx := context.Background()
+	dbPath := filepath.Join(t.TempDir(), "config.db")
+	st, err := NewFromPath(dbPath)
+	if err != nil {
+		t.Fatalf("NewFromPath() error = %v", err)
+	}
+
+	saveSnapshot := func(st *Store, version uint64, hostName, message string) {
+		t.Helper()
+		snap := model.NewSnapshot(&model.RouterConfig{
+			System:     &model.SystemConfig{HostName: hostName},
+			Interfaces: map[string]*model.InterfaceConfig{},
+		}, version, "alice", message)
+		if _, err := st.SaveCommit(ctx, snap); err != nil {
+			t.Fatalf("SaveCommit(%s) error = %v", hostName, err)
+		}
+	}
+
+	saveSnapshot(st, 1, "router1", "first")
+	saveSnapshot(st, 2, "router2", "second")
+	if err := st.Close(); err != nil {
+		t.Fatalf("Close() error = %v", err)
+	}
+
+	reopened, err := NewFromPath(dbPath)
+	if err != nil {
+		t.Fatalf("NewFromPath(reopen) error = %v", err)
+	}
+	latest, err := reopened.GetLatestSnapshot(ctx)
+	if err != nil {
+		t.Fatalf("GetLatestSnapshot() after reopen error = %v", err)
+	}
+	if latest == nil || latest.Config == nil || latest.Config.System == nil {
+		t.Fatalf("latest snapshot after reopen = %#v, want config", latest)
+	}
+	if latest.Version != 2 {
+		t.Fatalf("latest snapshot version after reopen = %d, want 2", latest.Version)
+	}
+	if latest.Config.System.HostName != "router2" {
+		t.Fatalf("latest hostname after reopen = %q, want router2", latest.Config.System.HostName)
+	}
+
+	saveSnapshot(reopened, latest.Version+1, "router3", "third")
+	if err := reopened.Close(); err != nil {
+		t.Fatalf("Close(reopened) error = %v", err)
+	}
+
+	reopenedAgain, err := NewFromPath(dbPath)
+	if err != nil {
+		t.Fatalf("NewFromPath(reopen again) error = %v", err)
+	}
+	t.Cleanup(func() { _ = reopenedAgain.Close() })
+	latestAgain, err := reopenedAgain.GetLatestSnapshot(ctx)
+	if err != nil {
+		t.Fatalf("GetLatestSnapshot() after second reopen error = %v", err)
+	}
+	if latestAgain == nil || latestAgain.Config == nil || latestAgain.Config.System == nil {
+		t.Fatalf("latest snapshot after second reopen = %#v, want config", latestAgain)
+	}
+	if latestAgain.Version != 3 {
+		t.Fatalf("latest snapshot version after second reopen = %d, want 3", latestAgain.Version)
+	}
+	if latestAgain.Config.System.HostName != "router3" {
+		t.Fatalf("latest hostname after second reopen = %q, want router3", latestAgain.Config.System.HostName)
+	}
+}
+
 func isDatastoreNotFound(err error) bool {
 	var dsErr *datastore.Error
 	return errors.As(err, &dsErr) && dsErr.Code == datastore.ErrCodeNotFound

@@ -70,9 +70,37 @@ func (s *Store) GetLatestSnapshot(ctx context.Context) (*model.ConfigSnapshot, e
 		return nil, fmt.Errorf("parse stored config: %w", err)
 	}
 
-	snap := model.NewSnapshot(cfg, 1, "system", "loaded from datastore")
+	version, err := s.latestSnapshotVersion(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("load snapshot version: %w", err)
+	}
+
+	snap := model.NewSnapshot(cfg, version, "system", "loaded from datastore")
 	snap.CreatedAt = running.Timestamp
 	return snap, nil
+}
+
+func (s *Store) latestSnapshotVersion(ctx context.Context) (uint64, error) {
+	const pageSize = 1000
+
+	offset := 0
+	for {
+		entries, err := s.ds.ListCommitHistory(ctx, &datastore.HistoryOptions{
+			Limit:  pageSize,
+			Offset: offset,
+		})
+		if err != nil {
+			return 0, err
+		}
+		offset += len(entries)
+		if len(entries) < pageSize {
+			break
+		}
+	}
+	if offset == 0 {
+		return 1, nil
+	}
+	return uint64(offset), nil
 }
 
 func (s *Store) PrepareCommit(ctx context.Context, snap *model.ConfigSnapshot) (store.PreparedCommit, error) {
