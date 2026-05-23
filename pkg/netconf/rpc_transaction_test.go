@@ -298,6 +298,38 @@ func TestCommitDatastoreFailureReturnsDatastoreError(t *testing.T) {
 	}
 }
 
+func TestCommitBackendFailureRedactsDetails(t *testing.T) {
+	ds := &validateDatastore{
+		candidate: &datastore.CandidateConfig{ConfigText: "set system host-name router1\n"},
+		lockInfo: &datastore.LockInfo{
+			IsLocked:  true,
+			SessionID: "session-1",
+		},
+	}
+	srv := NewServer(ds, nil)
+	srv.SetCommitHook(func(ctx context.Context, req *CommitHookRequest, persist func(context.Context) (string, error)) (string, error) {
+		return "", errors.New("vtysh /var/run/frr/zserv.api apply failed")
+	})
+
+	reply := handleCommitRPC(t, srv, "")
+	if len(reply.Errors) != 1 {
+		t.Fatalf("commit backend errors = %d, want 1", len(reply.Errors))
+	}
+	err := reply.Errors[0]
+	if err.ErrorTag != ErrorTagInvalidValue {
+		t.Fatalf("commit backend error tag = %s, want %s", err.ErrorTag, ErrorTagInvalidValue)
+	}
+	if err.ErrorAppTag != "backend-validation-failed" {
+		t.Fatalf("commit backend app-tag = %q, want backend-validation-failed", err.ErrorAppTag)
+	}
+	if err.ErrorMessage != "commit failed" {
+		t.Fatalf("commit backend message = %q, want redacted commit failure", err.ErrorMessage)
+	}
+	if strings.Contains(err.ErrorMessage, "/var/run/frr/zserv.api") || strings.Contains(err.ErrorMessage, "vtysh") {
+		t.Fatalf("commit backend message leaked backend detail: %q", err.ErrorMessage)
+	}
+}
+
 func validateRPC(t *testing.T, ds datastore.Datastore, content string) *RPCReply {
 	t.Helper()
 
@@ -311,7 +343,28 @@ func validateRPC(t *testing.T, ds datastore.Datastore, content string) *RPCReply
 func validateParsedRPC(t *testing.T, ds datastore.Datastore, rpcXML string) *RPCReply {
 	t.Helper()
 
-	srv := NewServer(ds, nil)
+	return handleParsedRPC(t, NewServer(ds, nil), rpcXML)
+}
+
+func commitRPC(t *testing.T, ds datastore.Datastore, content string) *RPCReply {
+	t.Helper()
+
+	return handleCommitRPC(t, NewServer(ds, nil), content)
+}
+
+func handleCommitRPC(t *testing.T, srv *Server, content string) *RPCReply {
+	t.Helper()
+
+	return handleParsedRPC(t, srv, `<rpc message-id="101" xmlns="urn:ietf:params:xml:ns:netconf:base:1.0">
+		<commit>
+			`+content+`
+		</commit>
+	</rpc>`)
+}
+
+func handleParsedRPC(t *testing.T, srv *Server, rpcXML string) *RPCReply {
+	t.Helper()
+
 	sess := &Session{
 		ID:             "session-1",
 		NumericID:      1,
@@ -325,16 +378,6 @@ func validateParsedRPC(t *testing.T, ds datastore.Datastore, rpcXML string) *RPC
 		t.Fatalf("ParseRPC() error = %v", err)
 	}
 	return srv.HandleRPC(context.Background(), sess, rpc)
-}
-
-func commitRPC(t *testing.T, ds datastore.Datastore, content string) *RPCReply {
-	t.Helper()
-
-	return validateParsedRPC(t, ds, `<rpc message-id="101" xmlns="urn:ietf:params:xml:ns:netconf:base:1.0">
-		<commit>
-			`+content+`
-		</commit>
-	</rpc>`)
 }
 
 func assertConfirmedCommitUnsupported(t *testing.T, reply *RPCReply, element string) {

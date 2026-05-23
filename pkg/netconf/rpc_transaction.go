@@ -100,7 +100,7 @@ func commitFailureError(err error) *RPCError {
 	if errors.As(err, &dsErr) {
 		return ErrDatastoreError("commit failed")
 	}
-	return ErrBackendValidationFailed(fmt.Sprintf("commit failed: %v", err))
+	return ErrBackendValidationFailed("commit failed")
 }
 
 func unsupportedCommitOption(req *CommitRequest) *RPCError {
