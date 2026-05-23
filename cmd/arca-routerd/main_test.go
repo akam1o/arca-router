@@ -25,6 +25,7 @@ import (
 	"github.com/akam1o/arca-router/pkg/datastore"
 	"github.com/akam1o/arca-router/pkg/logger"
 	"github.com/akam1o/arca-router/pkg/netconf"
+	pkgvpp "github.com/akam1o/arca-router/pkg/vpp"
 )
 
 type initialConfigStore struct {
@@ -314,6 +315,32 @@ func TestBuildDatastoreConfigEtcdRejectsPartialTLS(t *testing.T) {
 	})
 	if err == nil {
 		t.Fatal("buildDatastoreConfig() error = nil, want partial TLS error")
+	}
+}
+
+func TestVPPClientOptionsFromFlags(t *testing.T) {
+	opts := vppClientOptionsFromFlags(&daemonFlags{
+		vppAPISocket:   "/tmp/daemon-vpp-api.sock",
+		vppStatsSocket: "/tmp/daemon-vpp-stats.sock",
+	})
+	if opts.SocketPath != "/tmp/daemon-vpp-api.sock" {
+		t.Fatalf("SocketPath = %q, want /tmp/daemon-vpp-api.sock", opts.SocketPath)
+	}
+	if opts.StatsSocketPath != "/tmp/daemon-vpp-stats.sock" {
+		t.Fatalf("StatsSocketPath = %q, want /tmp/daemon-vpp-stats.sock", opts.StatsSocketPath)
+	}
+}
+
+func TestVPPClientOptionsFromFlagsAllowsDefaults(t *testing.T) {
+	opts := vppClientOptionsFromFlags(&daemonFlags{
+		vppAPISocket:   pkgvpp.DefaultAPISocketPath,
+		vppStatsSocket: pkgvpp.DefaultStatsSocketPath(),
+	})
+	if opts.SocketPath != pkgvpp.DefaultAPISocketPath {
+		t.Fatalf("SocketPath = %q, want %q", opts.SocketPath, pkgvpp.DefaultAPISocketPath)
+	}
+	if opts.StatsSocketPath != pkgvpp.DefaultStatsSocketPath() {
+		t.Fatalf("StatsSocketPath = %q, want %q", opts.StatsSocketPath, pkgvpp.DefaultStatsSocketPath())
 	}
 }
 

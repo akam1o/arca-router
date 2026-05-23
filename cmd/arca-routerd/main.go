@@ -76,6 +76,8 @@ type daemonFlags struct {
 	logLevel         string
 	version          bool
 	mockVPP          bool
+	vppAPISocket     string
+	vppStatsSocket   string
 
 	// NETCONF settings.
 	netconfListen   string
@@ -168,6 +170,10 @@ func parseFlags() *daemonFlags {
 		"Print version information and exit")
 	flag.BoolVar(&f.mockVPP, "mock-vpp", false,
 		"Use mock VPP client for testing")
+	flag.StringVar(&f.vppAPISocket, "vpp-api-socket", pkgvpp.DefaultAPISocketPath,
+		"Path to VPP binary API socket")
+	flag.StringVar(&f.vppStatsSocket, "vpp-stats-socket", pkgvpp.DefaultStatsSocketPath(),
+		"Path to VPP stats socket")
 
 	// NETCONF flags
 	flag.StringVar(&f.netconfListen, "netconf-listen", "",
@@ -336,6 +342,13 @@ func buildEtcdTLSConfig(f *daemonFlags) (*datastore.TLSConfig, error) {
 	}, nil
 }
 
+func vppClientOptionsFromFlags(f *daemonFlags) pkgvpp.GovppClientOptions {
+	return pkgvpp.GovppClientOptions{
+		SocketPath:      f.vppAPISocket,
+		StatsSocketPath: f.vppStatsSocket,
+	}
+}
+
 func run(ctx context.Context, f *daemonFlags, log *logger.Logger) error {
 	installParserHooks()
 
@@ -345,6 +358,8 @@ func run(ctx context.Context, f *daemonFlags, log *logger.Logger) error {
 		slog.String("datastore_backend", f.datastoreMode),
 		slog.String("datastore_path", f.datastorePath),
 		slog.String("etcd_endpoints", f.etcdEndpoints),
+		slog.String("vpp_api_socket", f.vppAPISocket),
+		slog.String("vpp_stats_socket", f.vppStatsSocket),
 		slog.String("netconf_listen", f.netconfListen),
 		slog.String("grpc_socket", f.grpcSocket),
 		slog.String("metrics_listen", f.metricsListen),
@@ -366,7 +381,7 @@ func run(ctx context.Context, f *daemonFlags, log *logger.Logger) error {
 	if f.mockVPP {
 		vppClient = pkgvpp.NewMockClient()
 	} else {
-		vppClient = pkgvpp.NewGovppClient()
+		vppClient = pkgvpp.NewGovppClientWithOptions(vppClientOptionsFromFlags(f))
 	}
 
 	frrApplyMode, err := pkgfrr.ParseBackendMode(f.frrApplyMode)

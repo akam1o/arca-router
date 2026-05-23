@@ -213,6 +213,51 @@ func TestGovppClientGetQoSCapabilities(t *testing.T) {
 	}
 }
 
+func TestNewGovppClientWithOptionsUsesExplicitSockets(t *testing.T) {
+	client, ok := NewGovppClientWithOptions(GovppClientOptions{
+		SocketPath:      "/tmp/vpp-api.sock",
+		StatsSocketPath: "/tmp/vpp-stats.sock",
+	}).(*govppClient)
+	if !ok {
+		t.Fatalf("NewGovppClientWithOptions() returned %T, want *govppClient", client)
+	}
+	if client.socketPath != "/tmp/vpp-api.sock" {
+		t.Fatalf("socketPath = %q, want /tmp/vpp-api.sock", client.socketPath)
+	}
+	if client.statsSocketPath != "/tmp/vpp-stats.sock" {
+		t.Fatalf("statsSocketPath = %q, want /tmp/vpp-stats.sock", client.statsSocketPath)
+	}
+}
+
+func TestNewGovppClientWithOptionsUsesDefaults(t *testing.T) {
+	client, ok := NewGovppClientWithOptions(GovppClientOptions{}).(*govppClient)
+	if !ok {
+		t.Fatalf("NewGovppClientWithOptions() returned %T, want *govppClient", client)
+	}
+	if client.socketPath != DefaultAPISocketPath {
+		t.Fatalf("socketPath = %q, want %q", client.socketPath, DefaultAPISocketPath)
+	}
+	if client.statsSocketPath != DefaultStatsSocketPath() {
+		t.Fatalf("statsSocketPath = %q, want %q", client.statsSocketPath, DefaultStatsSocketPath())
+	}
+}
+
+func TestNewGovppClientUsesEnvironmentSockets(t *testing.T) {
+	t.Setenv(apiSocketPathEnv, "/env/vpp-api.sock")
+	t.Setenv(statsSocketPathEnv, "/env/vpp-stats.sock")
+
+	client, ok := NewGovppClient().(*govppClient)
+	if !ok {
+		t.Fatalf("NewGovppClient() returned %T, want *govppClient", client)
+	}
+	if client.socketPath != "/env/vpp-api.sock" {
+		t.Fatalf("socketPath = %q, want /env/vpp-api.sock", client.socketPath)
+	}
+	if client.statsSocketPath != "/env/vpp-stats.sock" {
+		t.Fatalf("statsSocketPath = %q, want /env/vpp-stats.sock", client.statsSocketPath)
+	}
+}
+
 func TestRxModeName(t *testing.T) {
 	tests := []struct {
 		mode interface_types.RxMode

@@ -32,8 +32,11 @@ import (
 )
 
 const (
-	// Default VPP API socket path
-	defaultSocketPath = "/run/vpp/api.sock"
+	// DefaultAPISocketPath is the default VPP binary API socket path.
+	DefaultAPISocketPath = "/run/vpp/api.sock"
+
+	// Environment override for the VPP API socket path.
+	apiSocketPathEnv = "VPP_API_SOCKET_PATH"
 
 	// Environment override for the VPP stats socket path.
 	statsSocketPathEnv = "VPP_STATS_SOCKET_PATH"
@@ -69,15 +72,34 @@ type govppClient struct {
 	ch              api.Channel
 }
 
+// GovppClientOptions configures the production govpp-backed VPP client.
+type GovppClientOptions struct {
+	SocketPath      string
+	StatsSocketPath string
+}
+
+// DefaultStatsSocketPath returns the default VPP stats socket path used by govpp.
+func DefaultStatsSocketPath() string {
+	return statsclient.DefaultSocketName
+}
+
 // NewGovppClient creates a new govpp-based VPP client
 func NewGovppClient() Client {
-	socketPath := os.Getenv("VPP_API_SOCKET_PATH")
+	return NewGovppClientWithOptions(GovppClientOptions{
+		SocketPath:      os.Getenv(apiSocketPathEnv),
+		StatsSocketPath: os.Getenv(statsSocketPathEnv),
+	})
+}
+
+// NewGovppClientWithOptions creates a new govpp-based VPP client with explicit socket paths.
+func NewGovppClientWithOptions(opts GovppClientOptions) Client {
+	socketPath := strings.TrimSpace(opts.SocketPath)
 	if socketPath == "" {
-		socketPath = defaultSocketPath
+		socketPath = DefaultAPISocketPath
 	}
-	statsSocketPath := os.Getenv(statsSocketPathEnv)
+	statsSocketPath := strings.TrimSpace(opts.StatsSocketPath)
 	if statsSocketPath == "" {
-		statsSocketPath = statsclient.DefaultSocketName
+		statsSocketPath = DefaultStatsSocketPath()
 	}
 
 	return &govppClient{
