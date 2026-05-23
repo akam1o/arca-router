@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/akam1o/arca-router/internal/model"
 )
@@ -234,6 +235,58 @@ func TestApplyErrorReportsRollbackFailure(t *testing.T) {
 	}
 }
 
+func TestApplyDoesNotBlockRunningSnapshotDuringPluginApply(t *testing.T) {
+	started := make(chan struct{})
+	release := make(chan struct{})
+	plugin := &blockingApplyPlugin{started: started, release: release}
+	eng := NewEngine([]Plugin{plugin}, slog.Default())
+	eng.InitializeRunning(&model.RouterConfig{
+		System:     &model.SystemConfig{HostName: "router1"},
+		Interfaces: map[string]*model.InterfaceConfig{},
+	}, 1)
+	candidate := &model.RouterConfig{
+		System:     &model.SystemConfig{HostName: "router2"},
+		Interfaces: map[string]*model.InterfaceConfig{},
+	}
+
+	errCh := make(chan error, 1)
+	go func() {
+		errCh <- eng.Apply(context.Background(), candidate, "alice", "test")
+	}()
+
+	select {
+	case <-started:
+	case <-time.After(time.Second):
+		t.Fatal("ApplyChanges() did not start")
+	}
+
+	readCh := make(chan *model.ConfigSnapshot, 1)
+	go func() {
+		readCh <- eng.RunningSnapshot()
+	}()
+	select {
+	case snap := <-readCh:
+		if snap == nil || snap.Config.System.HostName != "router1" || snap.Version != 1 {
+			t.Fatalf("RunningSnapshot() during apply = %#v, want current committed router1 version 1", snap)
+		}
+	case <-time.After(200 * time.Millisecond):
+		t.Fatal("RunningSnapshot() blocked while plugin ApplyChanges was running")
+	}
+
+	close(release)
+	select {
+	case err := <-errCh:
+		if err != nil {
+			t.Fatalf("Apply() error = %v", err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("Apply() did not finish after release")
+	}
+	if got := eng.Running().System.HostName; got != "router2" {
+		t.Fatalf("engine running hostname = %q, want router2", got)
+	}
+}
+
 type mutatingDiffPlugin struct{}
 
 func (p *mutatingDiffPlugin) Name() string { return "mutating" }
@@ -339,3 +392,30 @@ func (p *scriptedPlugin) RollbackChanges(context.Context, *ConfigDiff) error {
 	p.rollbackCalls++
 	return p.rollbackErr
 }
+
+type blockingApplyPlugin struct {
+	started chan<- struct{}
+	release <-chan struct{}
+}
+
+func (p *blockingApplyPlugin) Name() string { return "blocking" }
+
+func (p *blockingApplyPlugin) Init(context.Context) error { return nil }
+
+func (p *blockingApplyPlugin) Close() error { return nil }
+
+func (p *blockingApplyPlugin) HealthCheck(context.Context) error { return nil }
+
+func (p *blockingApplyPlugin) ValidateChanges(context.Context, *ConfigDiff) error { return nil }
+
+func (p *blockingApplyPlugin) ApplyChanges(ctx context.Context, diff *ConfigDiff) error {
+	close(p.started)
+	select {
+	case <-p.release:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}
+
+func (p *blockingApplyPlugin) RollbackChanges(context.Context, *ConfigDiff) error { return nil }
