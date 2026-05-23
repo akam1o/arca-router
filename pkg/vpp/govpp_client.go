@@ -49,11 +49,16 @@ const (
 
 	// Exponential backoff base duration
 	retryBackoff = 1 * time.Second
-
-	// Expected VPP version (major.minor)
-	expectedVPPMajor = 24
-	expectedVPPMinor = 10
 )
+
+type vppVersion struct {
+	Major int
+	Minor int
+}
+
+var supportedVPPVersions = []vppVersion{
+	{Major: 24, Minor: 10},
+}
 
 // govppClient is the production VPP client using govpp
 type govppClient struct {
@@ -252,13 +257,29 @@ func (c *govppClient) checkVersionCompatibility() error {
 		return fmt.Errorf("invalid VPP minor version in '%s': %s", version, parts[1])
 	}
 
-	// Check version compatibility (major.minor must match)
-	if major != expectedVPPMajor || minor != expectedVPPMinor {
-		return fmt.Errorf("VPP version incompatible: got %d.%d, expected %d.%d (full version: %s)",
-			major, minor, expectedVPPMajor, expectedVPPMinor, version)
+	if !isSupportedVPPVersion(major, minor) {
+		return fmt.Errorf("VPP version incompatible: got %d.%d, supported versions: %s (full version: %s)",
+			major, minor, supportedVPPVersionList(), version)
 	}
 
 	return nil
+}
+
+func isSupportedVPPVersion(major, minor int) bool {
+	for _, supported := range supportedVPPVersions {
+		if major == supported.Major && minor == supported.Minor {
+			return true
+		}
+	}
+	return false
+}
+
+func supportedVPPVersionList() string {
+	versions := make([]string, 0, len(supportedVPPVersions))
+	for _, supported := range supportedVPPVersions {
+		versions = append(versions, fmt.Sprintf("%d.%d", supported.Major, supported.Minor))
+	}
+	return strings.Join(versions, ", ")
 }
 
 // Close closes the VPP connection

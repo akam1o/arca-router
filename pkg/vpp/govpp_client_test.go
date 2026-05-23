@@ -1201,6 +1201,31 @@ func TestCheckVersionCompatibility(t *testing.T) {
 	}
 }
 
+func TestVPPVersionCompatibilityMatrix(t *testing.T) {
+	tests := []struct {
+		name  string
+		major int
+		minor int
+		want  bool
+	}{
+		{name: "supported generated API version", major: 24, minor: 10, want: true},
+		{name: "unsupported newer major", major: 25, minor: 10, want: false},
+		{name: "unsupported older minor", major: 24, minor: 6, want: false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := isSupportedVPPVersion(tt.major, tt.minor); got != tt.want {
+				t.Fatalf("isSupportedVPPVersion(%d, %d) = %v, want %v", tt.major, tt.minor, got, tt.want)
+			}
+		})
+	}
+
+	if got := supportedVPPVersionList(); !strings.Contains(got, "24.10") {
+		t.Fatalf("supportedVPPVersionList() = %q, want 24.10", got)
+	}
+}
+
 // TestCheckVersionCompatibility_APIError tests API call failure
 func TestCheckVersionCompatibility_APIError(t *testing.T) {
 	ch := &fakeChannel{
