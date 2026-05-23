@@ -138,8 +138,20 @@ func (p *FRRPlugin) ApplyChanges(ctx context.Context, diff *engine.ConfigDiff) e
 	}
 
 	applier, applyMode := p.applierForConfig(frrConfig)
-	if err := applier.ApplyConfig(ctx, configContent, frrConfig); err != nil {
-		return fmt.Errorf("apply FRR config: %w", err)
+	applied := false
+	if applyMode == pkgfrr.BackendModeTransactional && previousFRRConfig != nil {
+		if diffApplier, ok := applier.(pkgfrr.DifferentialApplier); ok {
+			diffApplied, err := diffApplier.ApplyConfigDiff(ctx, previousFRRConfig, frrConfig)
+			if err != nil {
+				return fmt.Errorf("apply FRR config diff: %w", err)
+			}
+			applied = diffApplied
+		}
+	}
+	if !applied {
+		if err := applier.ApplyConfig(ctx, configContent, frrConfig); err != nil {
+			return fmt.Errorf("apply FRR config: %w", err)
+		}
 	}
 
 	p.rollbackConfig = previousConfig

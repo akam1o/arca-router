@@ -7,6 +7,7 @@ import (
 	"net"
 	"os"
 	"os/exec"
+	"reflect"
 	"sort"
 	"strconv"
 	"strings"
@@ -40,6 +41,12 @@ func (o MgmtOperation) Command() string {
 // MgmtClient applies management operations transactionally.
 type MgmtClient interface {
 	Apply(ctx context.Context, ops []MgmtOperation) error
+}
+
+// DifferentialApplier applies a supported FRR config delta without replacing
+// every transactional subtree.
+type DifferentialApplier interface {
+	ApplyConfigDiff(ctx context.Context, oldCfg, newCfg *Config) (bool, error)
 }
 
 // VtyshRunner executes one vtysh command.
@@ -153,6 +160,23 @@ func (a *TransactionalApplier) ApplyConfig(ctx context.Context, _ string, cfg *C
 	return a.client.Apply(ctx, ops)
 }
 
+// ApplyConfigDiff applies a supported config delta through the management
+// candidate datastore. The returned bool is false when the delta is not yet
+// represented incrementally and callers should fall back to ApplyConfig.
+func (a *TransactionalApplier) ApplyConfigDiff(ctx context.Context, oldCfg, newCfg *Config) (bool, error) {
+	ops, ok, err := BuildMgmtDiffOperations(oldCfg, newCfg)
+	if !ok || err != nil {
+		return ok, err
+	}
+	if len(ops) == 0 {
+		return true, nil
+	}
+	if err := prepareVRRPSystem(ctx, a.vrrpPreparer, newCfg); err != nil {
+		return true, err
+	}
+	return true, a.client.Apply(ctx, ops)
+}
+
 // BuildMgmtOperations converts a complete generated FRR config into a deterministic
 // subtree-replace operation set for FRR's management candidate datastore.
 func BuildMgmtOperations(cfg *Config) ([]MgmtOperation, error) {
@@ -228,6 +252,35 @@ func BuildMgmtOperations(cfg *Config) ([]MgmtOperation, error) {
 	}
 	ops = append(ops, vrrpOps...)
 	return ops, nil
+}
+
+// BuildMgmtDiffOperations converts supported differences between generated FRR
+// configs into management operations. It currently handles static-route-only
+// changes and reports ok=false for broader config changes.
+func BuildMgmtDiffOperations(oldCfg, newCfg *Config) ([]MgmtOperation, bool, error) {
+	if oldCfg == nil || newCfg == nil {
+		return nil, false, nil
+	}
+	oldComparable := *oldCfg
+	newComparable := *newCfg
+	oldComparable.StaticRoutes = nil
+	newComparable.StaticRoutes = nil
+	if !reflect.DeepEqual(oldComparable, newComparable) {
+		return nil, false, nil
+	}
+	if err := validateTransactionalStaticRoutes(oldCfg); err != nil {
+		return nil, true, err
+	}
+	if err := validateTransactionalStaticRoutes(newCfg); err != nil {
+		return nil, true, err
+	}
+	if err := validateTransactionalStaticRouteBFDProfiles(oldCfg); err != nil {
+		return nil, true, err
+	}
+	if err := validateTransactionalStaticRouteBFDProfiles(newCfg); err != nil {
+		return nil, true, err
+	}
+	return buildStaticRouteDiffOps(oldCfg.StaticRoutes, newCfg.StaticRoutes), true, nil
 }
 
 func validateTransactionalBGP(cfg *Config) error {
@@ -630,26 +683,15 @@ func buildStaticRouteOps(routes []StaticRoute) []MgmtOperation {
 		return sortedRoutes[i].NextHop < sortedRoutes[j].NextHop
 	})
 	for _, route := range sortedRoutes {
-		afiSafi := "frr-routing:ipv4-unicast"
-		nhType := "ip4"
-		srcPrefix := "::/0"
-		if route.IsIPv6 {
-			afiSafi = "frr-routing:ipv6-unicast"
-			nhType = "ip6"
-		}
-		routeBase := staticProtocolBase() + "/frr-staticd:staticd/route-list" +
-			keyPred("prefix", route.Prefix) + keyPred("src-prefix", srcPrefix) + keyPred("afi-safi", afiSafi)
+		afiSafi, _, srcPrefix := staticRoutePathFields(route)
+		routeBase := staticRouteRouteBase(route)
 		ops = append(ops,
 			setOp(routeBase+"/prefix", route.Prefix),
 			setOp(routeBase+"/src-prefix", srcPrefix),
 			setOp(routeBase+"/afi-safi", afiSafi),
 		)
-		pathBase := routeBase + "/path-list" +
-			keyPred("table-id", "0") +
-			keyPred("nh-type", nhType) +
-			keyPred("vrf", defaultVRFName) +
-			keyPred("gateway", route.NextHop) +
-			keyPred("interface", "")
+		_, nhType, _ := staticRoutePathFields(route)
+		pathBase := staticRoutePathBase(route)
 		distance := route.Distance
 		if distance == 0 {
 			distance = 1
@@ -667,6 +709,107 @@ func buildStaticRouteOps(routes []StaticRoute) []MgmtOperation {
 		}
 	}
 	return ops
+}
+
+func buildStaticRouteDiffOps(oldRoutes, newRoutes []StaticRoute) []MgmtOperation {
+	if len(oldRoutes) > 0 && len(newRoutes) == 0 {
+		return []MgmtOperation{deleteOp(staticProtocolBase())}
+	}
+
+	oldByKey := staticRouteMap(oldRoutes)
+	newByKey := staticRouteMap(newRoutes)
+	newRouteBaseCounts := make(map[string]int, len(newRoutes))
+	for _, route := range newRoutes {
+		newRouteBaseCounts[staticRouteRouteBase(route)]++
+	}
+
+	deleteBases := map[string]struct{}{}
+	var deletePaths []string
+	var setRoutes []StaticRoute
+	for key, oldRoute := range oldByKey {
+		newRoute, exists := newByKey[key]
+		if exists && staticRoutesEquivalent(oldRoute, newRoute) {
+			continue
+		}
+		routeBase := staticRouteRouteBase(oldRoute)
+		if newRouteBaseCounts[routeBase] == 0 {
+			deleteBases[routeBase] = struct{}{}
+		} else {
+			deletePaths = append(deletePaths, staticRoutePathBase(oldRoute))
+		}
+	}
+	for key, newRoute := range newByKey {
+		oldRoute, exists := oldByKey[key]
+		if !exists || !staticRoutesEquivalent(oldRoute, newRoute) {
+			setRoutes = append(setRoutes, newRoute)
+		}
+	}
+
+	ops := make([]MgmtOperation, 0, len(deleteBases)+len(deletePaths)+(len(setRoutes)*9))
+	baseDeletes := make([]string, 0, len(deleteBases))
+	for base := range deleteBases {
+		baseDeletes = append(baseDeletes, base)
+	}
+	sort.Strings(baseDeletes)
+	for _, base := range baseDeletes {
+		ops = append(ops, deleteOp(base))
+	}
+	sort.Strings(deletePaths)
+	for _, path := range deletePaths {
+		ops = append(ops, deleteOp(path))
+	}
+	ops = append(ops, buildStaticRouteOps(setRoutes)...)
+	return ops
+}
+
+func staticRouteMap(routes []StaticRoute) map[string]StaticRoute {
+	result := make(map[string]StaticRoute, len(routes))
+	for _, route := range routes {
+		result[staticRoutePathKey(route)] = route
+	}
+	return result
+}
+
+func staticRoutePathKey(route StaticRoute) string {
+	return staticRoutePathBase(route)
+}
+
+func staticRoutesEquivalent(a, b StaticRoute) bool {
+	return normalizeStaticRoute(a) == normalizeStaticRoute(b)
+}
+
+func normalizeStaticRoute(route StaticRoute) StaticRoute {
+	if route.Distance == 0 {
+		route.Distance = 1
+	}
+	return route
+}
+
+func staticRouteRouteBase(route StaticRoute) string {
+	afiSafi, _, srcPrefix := staticRoutePathFields(route)
+	return staticProtocolBase() + "/frr-staticd:staticd/route-list" +
+		keyPred("prefix", route.Prefix) + keyPred("src-prefix", srcPrefix) + keyPred("afi-safi", afiSafi)
+}
+
+func staticRoutePathBase(route StaticRoute) string {
+	_, nhType, _ := staticRoutePathFields(route)
+	return staticRouteRouteBase(route) + "/path-list" +
+		keyPred("table-id", "0") +
+		keyPred("nh-type", nhType) +
+		keyPred("vrf", defaultVRFName) +
+		keyPred("gateway", route.NextHop) +
+		keyPred("interface", "")
+}
+
+func staticRoutePathFields(route StaticRoute) (afiSafi, nhType, srcPrefix string) {
+	afiSafi = "frr-routing:ipv4-unicast"
+	nhType = "ip4"
+	srcPrefix = "::/0"
+	if route.IsIPv6 {
+		afiSafi = "frr-routing:ipv6-unicast"
+		nhType = "ip6"
+	}
+	return afiSafi, nhType, srcPrefix
 }
 
 func staticRouteBFDConfigured(route StaticRoute) bool {

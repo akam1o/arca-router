@@ -750,6 +750,65 @@ func TestApplyChangesUsesConfiguredFileBackend(t *testing.T) {
 	}
 }
 
+func TestApplyChangesUsesTransactionalDiffForStaticRouteOnlyChange(t *testing.T) {
+	oldCfg := model.NewRouterConfig()
+	oldCfg.Routing = &model.RoutingConfig{StaticRoutes: []*model.StaticRoute{
+		{Prefix: "203.0.113.0/24", NextHop: "192.0.2.1"},
+	}}
+	newCfg := oldCfg.Clone()
+	newCfg.Routing.StaticRoutes = append(newCfg.Routing.StaticRoutes, &model.StaticRoute{
+		Prefix: "198.51.100.0/24", NextHop: "192.0.2.254",
+	})
+	diff := engine.ComputeDiff(oldCfg, newCfg)
+	applier := &recordingDiffApplier{diffApplied: true}
+	plugin := NewFRRPlugin(testLogger())
+	plugin.applier = applier
+
+	if err := plugin.ApplyChanges(context.Background(), diff); err != nil {
+		t.Fatalf("ApplyChanges() error = %v", err)
+	}
+	if applier.diffCalls != 1 {
+		t.Fatalf("ApplyConfigDiff calls = %d, want 1", applier.diffCalls)
+	}
+	if applier.calls != 0 {
+		t.Fatalf("ApplyConfig calls = %d, want 0", applier.calls)
+	}
+	if applier.oldCfg == nil || len(applier.oldCfg.StaticRoutes) != 1 {
+		t.Fatalf("diff old config = %#v, want one static route", applier.oldCfg)
+	}
+	if applier.newCfg == nil || len(applier.newCfg.StaticRoutes) != 2 {
+		t.Fatalf("diff new config = %#v, want two static routes", applier.newCfg)
+	}
+}
+
+func TestApplyChangesFallsBackWhenTransactionalDiffUnsupported(t *testing.T) {
+	oldCfg := model.NewRouterConfig()
+	oldCfg.Routing = &model.RoutingConfig{AutonomousSystem: 65000, RouterID: "192.0.2.1"}
+	newCfg := oldCfg.Clone()
+	newCfg.Protocols = &model.ProtocolsConfig{
+		BGP: &model.BGPConfig{Groups: map[string]*model.BGPGroup{
+			"external": {
+				Type:      "external",
+				Neighbors: map[string]*model.BGPNeighbor{"192.0.2.2": {PeerAS: 65001}},
+			},
+		}},
+	}
+	diff := engine.ComputeDiff(oldCfg, newCfg)
+	applier := &recordingDiffApplier{}
+	plugin := NewFRRPlugin(testLogger())
+	plugin.applier = applier
+
+	if err := plugin.ApplyChanges(context.Background(), diff); err != nil {
+		t.Fatalf("ApplyChanges() error = %v", err)
+	}
+	if applier.diffCalls != 1 {
+		t.Fatalf("ApplyConfigDiff calls = %d, want 1", applier.diffCalls)
+	}
+	if applier.calls != 1 {
+		t.Fatalf("ApplyConfig calls = %d, want 1 fallback", applier.calls)
+	}
+}
+
 func TestValidateChangesAllowsRemovingUnsupportedV06FRRConfig(t *testing.T) {
 	oldCfg := model.NewRouterConfig()
 	oldCfg.Protocols = &model.ProtocolsConfig{
@@ -897,6 +956,21 @@ func (a *recordingApplier) ApplyConfig(ctx context.Context, configContent string
 	a.configContent = configContent
 	a.cfg = cfg
 	return nil
+}
+
+type recordingDiffApplier struct {
+	recordingApplier
+	oldCfg      *pkgfrr.Config
+	newCfg      *pkgfrr.Config
+	diffCalls   int
+	diffApplied bool
+}
+
+func (a *recordingDiffApplier) ApplyConfigDiff(ctx context.Context, oldCfg, newCfg *pkgfrr.Config) (bool, error) {
+	a.diffCalls++
+	a.oldCfg = oldCfg
+	a.newCfg = newCfg
+	return a.diffApplied, nil
 }
 
 type fakeVRRPStatusReader struct {
