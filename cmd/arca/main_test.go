@@ -664,6 +664,49 @@ func TestCmdSetQuotesValuesWithSpaces(t *testing.T) {
 	}
 }
 
+func TestProcessCommandSplitsTabsLikeSharedTokenizer(t *testing.T) {
+	ctx := context.Background()
+	client := &fakeInteractiveClient{}
+	sh := &interactiveShell{
+		client:    client,
+		hostname:  "router",
+		mode:      modeConfiguration,
+		sessionID: "session-1",
+		hasLock:   true,
+	}
+
+	if err := sh.processCommand(ctx, "set\tinterfaces\tge-0/0/0\tdescription\tWAN"); err != nil {
+		t.Fatalf("processCommand() error = %v", err)
+	}
+	if len(client.editTexts) != 1 {
+		t.Fatalf("EditCandidate calls = %d, want 1", len(client.editTexts))
+	}
+	want := "set interfaces ge-0/0/0 description WAN"
+	if got := client.editTexts[0]; got != want {
+		t.Fatalf("EditCandidate config = %q, want %q", got, want)
+	}
+}
+
+func TestProcessCommandRejectsUnmatchedQuote(t *testing.T) {
+	ctx := context.Background()
+	client := &fakeInteractiveClient{}
+	sh := &interactiveShell{
+		client:    client,
+		hostname:  "router",
+		mode:      modeConfiguration,
+		sessionID: "session-1",
+		hasLock:   true,
+	}
+
+	err := sh.processCommand(ctx, `set interfaces ge-0/0/0 description "WAN`)
+	if err == nil || !strings.Contains(err.Error(), "unmatched quote") {
+		t.Fatalf("processCommand() error = %v, want unmatched quote", err)
+	}
+	if len(client.editTexts) != 0 {
+		t.Fatalf("EditCandidate calls = %d, want 0", len(client.editTexts))
+	}
+}
+
 func TestCommitCheckRejectsComment(t *testing.T) {
 	ctx := context.Background()
 	client := &fakeInteractiveClient{}

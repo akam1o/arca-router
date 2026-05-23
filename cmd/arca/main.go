@@ -732,7 +732,10 @@ func (sh *interactiveShell) processCommand(ctx context.Context, line string) err
 		return fmt.Errorf("unsupported pipe command: %s | %s", left, right)
 	}
 
-	parts := tokenize(line)
+	parts, err := configcli.TokenizeCommand(line)
+	if err != nil {
+		return fmt.Errorf("parse command: %w", err)
+	}
 	if len(parts) == 0 {
 		return nil
 	}
@@ -3649,26 +3652,9 @@ func hasPipeOutsideQuotes(line string) bool {
 }
 
 func tokenize(line string) []string {
-	var tokens []string
-	var current strings.Builder
-	inQuote := false
-
-	for i := 0; i < len(line); i++ {
-		ch := line[i]
-		switch {
-		case ch == '"':
-			inQuote = !inQuote
-		case ch == ' ' && !inQuote:
-			if current.Len() > 0 {
-				tokens = append(tokens, current.String())
-				current.Reset()
-			}
-		default:
-			current.WriteByte(ch)
-		}
-	}
-	if current.Len() > 0 {
-		tokens = append(tokens, current.String())
+	tokens, err := configcli.TokenizeCommand(line)
+	if err != nil {
+		return nil
 	}
 	return tokens
 }
