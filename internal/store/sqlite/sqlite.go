@@ -24,6 +24,10 @@ type Store struct {
 	legacyTextParser LegacyTextParserFunc
 }
 
+type commitHistoryCounter interface {
+	CountCommitHistory(ctx context.Context) (uint64, error)
+}
+
 // Option customizes Store construction.
 type Option func(*Store)
 
@@ -103,6 +107,24 @@ func (s *Store) GetLatestSnapshot(ctx context.Context) (*model.ConfigSnapshot, e
 }
 
 func (s *Store) latestSnapshotVersion(ctx context.Context) (uint64, error) {
+	if counter, ok := s.ds.(commitHistoryCounter); ok {
+		count, err := counter.CountCommitHistory(ctx)
+		if err != nil {
+			return 0, err
+		}
+		return snapshotVersionFromCommitCount(count), nil
+	}
+	return s.latestSnapshotVersionByPaging(ctx)
+}
+
+func snapshotVersionFromCommitCount(count uint64) uint64 {
+	if count == 0 {
+		return 1
+	}
+	return count
+}
+
+func (s *Store) latestSnapshotVersionByPaging(ctx context.Context) (uint64, error) {
 	const pageSize = 1000
 
 	offset := 0

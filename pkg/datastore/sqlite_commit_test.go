@@ -69,6 +69,19 @@ func TestListCommitHistoryCapsOversizedLimit(t *testing.T) {
 	}
 }
 
+func TestSQLiteCountCommitHistory(t *testing.T) {
+	ds := openSQLiteDatastoreForTest(t, filepath.Join(t.TempDir(), "config.db"))
+	insertCommitHistoryRows(t, ds, 3)
+
+	count, err := ds.CountCommitHistory(context.Background())
+	if err != nil {
+		t.Fatalf("CountCommitHistory() error = %v", err)
+	}
+	if count != 3 {
+		t.Fatalf("CountCommitHistory() = %d, want 3", count)
+	}
+}
+
 func TestSQLiteCommitReadsCandidateInsideTransaction(t *testing.T) {
 	ds := openSQLiteDatastoreForTest(t, filepath.Join(t.TempDir(), "config.db"))
 	ctx := context.Background()

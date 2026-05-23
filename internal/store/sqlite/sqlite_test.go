@@ -267,6 +267,30 @@ func TestGetLatestSnapshotRestoresVersionFromCommitHistory(t *testing.T) {
 	}
 }
 
+func TestGetLatestSnapshotUsesCommitHistoryCount(t *testing.T) {
+	ds := &snapshotVersionCountingDatastore{
+		running: &datastore.RunningConfig{
+			ConfigText: "set system host-name router1\n",
+		},
+		count: 1234,
+	}
+	st := New(ds, testLegacyTextParserOption())
+
+	latest, err := st.GetLatestSnapshot(context.Background())
+	if err != nil {
+		t.Fatalf("GetLatestSnapshot() error = %v", err)
+	}
+	if latest.Version != 1234 {
+		t.Fatalf("latest version = %d, want 1234", latest.Version)
+	}
+	if ds.countCalls != 1 {
+		t.Fatalf("CountCommitHistory calls = %d, want 1", ds.countCalls)
+	}
+	if ds.listCalls != 0 {
+		t.Fatalf("ListCommitHistory calls = %d, want 0", ds.listCalls)
+	}
+}
+
 func TestStoreUsesInstanceLegacyTextParser(t *testing.T) {
 	ctx := context.Background()
 	newStore := func(hostName string) *Store {
@@ -469,4 +493,26 @@ func testLegacyTextParserOption() Option {
 		}
 		return model.FromLegacyConfig(cfg), nil
 	})
+}
+
+type snapshotVersionCountingDatastore struct {
+	datastore.Datastore
+	running    *datastore.RunningConfig
+	count      uint64
+	countCalls int
+	listCalls  int
+}
+
+func (ds *snapshotVersionCountingDatastore) GetRunning(ctx context.Context) (*datastore.RunningConfig, error) {
+	return ds.running, nil
+}
+
+func (ds *snapshotVersionCountingDatastore) CountCommitHistory(ctx context.Context) (uint64, error) {
+	ds.countCalls++
+	return ds.count, nil
+}
+
+func (ds *snapshotVersionCountingDatastore) ListCommitHistory(ctx context.Context, opts *datastore.HistoryOptions) ([]*datastore.CommitHistoryEntry, error) {
+	ds.listCalls++
+	return nil, errors.New("ListCommitHistory should not be called when CountCommitHistory is available")
 }

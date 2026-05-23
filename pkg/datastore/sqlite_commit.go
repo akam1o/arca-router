@@ -225,6 +225,16 @@ func (ds *sqliteDatastore) Rollback(ctx context.Context, req *RollbackRequest) (
 	return newCommitID, nil
 }
 
+// CountCommitHistory returns the number of commit history entries.
+func (ds *sqliteDatastore) CountCommitHistory(ctx context.Context) (uint64, error) {
+	var count uint64
+	err := ds.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM commit_history`).Scan(&count)
+	if err != nil {
+		return 0, NewError(ErrCodeInternal, "failed to count commit history", err)
+	}
+	return count, nil
+}
+
 // ListCommitHistory retrieves commit history with optional filtering.
 func (ds *sqliteDatastore) ListCommitHistory(ctx context.Context, opts *HistoryOptions) ([]*CommitHistoryEntry, error) {
 	normalizedOpts := normalizeHistoryOptions(opts)
