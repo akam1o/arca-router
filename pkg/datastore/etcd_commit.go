@@ -330,10 +330,8 @@ func (ds *etcdDatastore) ListCommitHistory(ctx context.Context, opts *HistoryOpt
 	ctx, cancel := ds.withTimeout(ctx)
 	defer cancel()
 
-	// Set default options if nil
-	if opts == nil {
-		opts = &HistoryOptions{}
-	}
+	normalizedOpts := normalizeHistoryOptions(opts)
+	opts = &normalizedOpts
 
 	// Get commits from etcd with server-side pagination
 	commitsPrefix := ds.key("commits") + "/"
@@ -344,14 +342,10 @@ func (ds *etcdDatastore) ListCommitHistory(ctx context.Context, opts *HistoryOpt
 		clientv3.WithSort(clientv3.SortByKey, clientv3.SortDescend),
 	}
 
-	// Apply server-side limit if specified (more efficient than client-side filtering)
-	// Note: We fetch more than needed to account for filtering, then truncate
-	if opts.Limit > 0 {
-		// Fetch extra entries to account for client-side filtering
-		// Multiply by 2 to handle filtering overhead (conservative estimate)
-		fetchLimit := int64(opts.Limit * 2)
-		getOpts = append(getOpts, clientv3.WithLimit(fetchLimit))
-	}
+	// Apply a bounded server-side fetch limit and fetch extra entries to
+	// account for client-side filtering before truncating.
+	fetchLimit := int64(opts.Limit * 2)
+	getOpts = append(getOpts, clientv3.WithLimit(fetchLimit))
 
 	resp, err := ds.client.Get(ctx, commitsPrefix, getOpts...)
 	if err != nil {
@@ -407,7 +401,6 @@ func (ds *etcdDatastore) ListCommitHistory(ctx context.Context, opts *HistoryOpt
 		}
 		entries = entries[opts.Offset:]
 	}
-
 	if opts.Limit > 0 && opts.Limit < len(entries) {
 		entries = entries[:opts.Limit]
 	}

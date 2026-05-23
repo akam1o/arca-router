@@ -219,10 +219,8 @@ func (ds *sqliteDatastore) Rollback(ctx context.Context, req *RollbackRequest) (
 
 // ListCommitHistory retrieves commit history with optional filtering.
 func (ds *sqliteDatastore) ListCommitHistory(ctx context.Context, opts *HistoryOptions) ([]*CommitHistoryEntry, error) {
-	// Handle nil opts (use defaults)
-	if opts == nil {
-		opts = &HistoryOptions{}
-	}
+	normalizedOpts := normalizeHistoryOptions(opts)
+	opts = &normalizedOpts
 
 	// Build query with filters
 	query := `
@@ -255,12 +253,8 @@ func (ds *sqliteDatastore) ListCommitHistory(ctx context.Context, opts *HistoryO
 	query += " ORDER BY timestamp DESC"
 
 	// Apply limit and offset
-	if opts.Limit > 0 {
-		query += " LIMIT ?"
-		args = append(args, opts.Limit)
-	} else if opts.Offset > 0 {
-		query += " LIMIT -1"
-	}
+	query += " LIMIT ?"
+	args = append(args, opts.Limit)
 
 	if opts.Offset > 0 {
 		query += " OFFSET ?"
