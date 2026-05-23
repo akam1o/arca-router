@@ -291,6 +291,30 @@ func TestGetLatestSnapshotUsesCommitHistoryCount(t *testing.T) {
 	}
 }
 
+func TestStoreRequiresInstanceLegacyTextParser(t *testing.T) {
+	st, err := NewFromPath(filepath.Join(t.TempDir(), "config.db"))
+	if err != nil {
+		t.Fatalf("NewFromPath() error = %v", err)
+	}
+	t.Cleanup(func() { _ = st.Close() })
+
+	snap := model.NewSnapshot(&model.RouterConfig{
+		System:     &model.SystemConfig{HostName: "router1"},
+		Interfaces: map[string]*model.InterfaceConfig{},
+	}, 1, "alice", "test")
+	if _, err := st.SaveCommit(context.Background(), snap); err != nil {
+		t.Fatalf("SaveCommit() error = %v", err)
+	}
+
+	_, err = st.GetLatestSnapshot(context.Background())
+	if err == nil {
+		t.Fatal("GetLatestSnapshot() error = nil, want missing parser error")
+	}
+	if !strings.Contains(err.Error(), "legacy text parser not initialized") {
+		t.Fatalf("GetLatestSnapshot() error = %v, want missing parser error", err)
+	}
+}
+
 func TestStoreUsesInstanceLegacyTextParser(t *testing.T) {
 	ctx := context.Background()
 	newStore := func(hostName string) *Store {

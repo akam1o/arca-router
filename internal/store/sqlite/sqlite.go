@@ -44,8 +44,7 @@ func WithLegacyTextParser(parser LegacyTextParserFunc) Option {
 // New creates a new SQLite store, wrapping the legacy datastore.
 func New(ds datastore.Datastore, opts ...Option) *Store {
 	s := &Store{
-		ds:               ds,
-		legacyTextParser: LegacyTextParser,
+		ds: ds,
 	}
 	for _, opt := range opts {
 		opt(s)
@@ -375,20 +374,10 @@ func (s *Store) parseStoredConfig(text string) (*model.RouterConfig, error) {
 	return s.parseLegacyText(text)
 }
 
-// LegacyTextParser is a hook for parsing legacy set-command text.
-// It is set at initialization to break the circular dependency with pkg/config.
-//
-// Deprecated: use WithLegacyTextParser to bind a parser to each Store instance.
-var LegacyTextParser LegacyTextParserFunc
-
 // parseLegacyText parses set-command format text using the existing parser.
 func (s *Store) parseLegacyText(text string) (*model.RouterConfig, error) {
-	parser := s.legacyTextParser
-	if parser == nil {
-		parser = LegacyTextParser
-	}
-	if parser != nil {
-		return parser(text)
+	if s.legacyTextParser != nil {
+		return s.legacyTextParser(text)
 	}
 	return nil, fmt.Errorf("legacy text parser not initialized")
 }
