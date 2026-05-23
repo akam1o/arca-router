@@ -21,6 +21,7 @@ import (
 	sbvpp "github.com/akam1o/arca-router/internal/southbound/vpp"
 	"github.com/akam1o/arca-router/internal/store"
 	pkgconfig "github.com/akam1o/arca-router/pkg/config"
+	pkgdatastore "github.com/akam1o/arca-router/pkg/datastore"
 	pkgvpp "github.com/akam1o/arca-router/pkg/vpp"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/metadata"
@@ -54,6 +55,52 @@ func TestConfigEditStatusErrorClassifiesTypedErrors(t *testing.T) {
 	}
 	if got := status.Convert(unavailableErr).Message(); got != "commit history is unavailable" {
 		t.Fatalf("unavailable status message = %q, want commit history unavailable", got)
+	}
+
+	applyErr := configEditStatusError(&engine.ApplyError{
+		Plugin:            "vpp",
+		Phase:             "apply",
+		RollbackAttempted: true,
+		RollbackSucceeded: true,
+		Err:               errors.New("delete address failed with token=secret"),
+	})
+	if status.Code(applyErr) != codes.Aborted {
+		t.Fatalf("apply status = %v, want %v", status.Code(applyErr), codes.Aborted)
+	}
+	if got := status.Convert(applyErr).Message(); got != "configuration apply failed; rollback succeeded" {
+		t.Fatalf("apply status message = %q, want sanitized apply failure", got)
+	}
+
+	rollbackErr := configEditStatusError(&engine.ApplyError{
+		Plugin:            "vpp",
+		Phase:             "apply",
+		RollbackAttempted: true,
+		RollbackSucceeded: false,
+		Err:               errors.New("rollback failed with token=secret"),
+	})
+	if status.Code(rollbackErr) != codes.Aborted {
+		t.Fatalf("rollback status = %v, want %v", status.Code(rollbackErr), codes.Aborted)
+	}
+	if got := status.Convert(rollbackErr).Message(); got != "configuration apply failed; rollback failed" {
+		t.Fatalf("rollback status message = %q, want sanitized rollback failure", got)
+	}
+
+	datastoreConflict := configEditStatusError(fmt.Errorf("prepare commit persistence: %w",
+		pkgdatastore.NewError(pkgdatastore.ErrCodeConflict, "lock held by session secret-session", nil)))
+	if status.Code(datastoreConflict) != codes.FailedPrecondition {
+		t.Fatalf("datastore conflict status = %v, want %v", status.Code(datastoreConflict), codes.FailedPrecondition)
+	}
+	if got := status.Convert(datastoreConflict).Message(); got != "configuration persistence conflict" {
+		t.Fatalf("datastore conflict message = %q, want sanitized persistence conflict", got)
+	}
+
+	datastoreInternal := configEditStatusError(fmt.Errorf("prepare commit persistence: %w",
+		pkgdatastore.NewError(pkgdatastore.ErrCodeInternal, "open /var/lib/arca/config.db", errors.New("permission denied"))))
+	if status.Code(datastoreInternal) != codes.Unavailable {
+		t.Fatalf("datastore internal status = %v, want %v", status.Code(datastoreInternal), codes.Unavailable)
+	}
+	if got := status.Convert(datastoreInternal).Message(); got != "configuration persistence unavailable" {
+		t.Fatalf("datastore internal message = %q, want sanitized persistence unavailable", got)
 	}
 
 	internalErr := configEditStatusError(errors.New("persist commit /var/lib/arca/config.db failed"))
@@ -2308,22 +2355,24 @@ func TestListHistoryOmitsConfigText(t *testing.T) {
 	}
 }
 
-func TestCommitInfosFromProtoIncludesConfigText(t *testing.T) {
+func TestCommitInfosFromProtoReturnsMetadataOnly(t *testing.T) {
 	infos := commitInfosFromProto([]*apiv1.CommitEntry{
 		{
-			CommitId:   "commit-1",
-			User:       "alice",
-			Timestamp:  time.Date(2026, 5, 17, 12, 0, 0, 0, time.UTC).Format(time.RFC3339Nano),
-			Message:    "initial",
-			ConfigText: "set system host-name router1",
+			CommitId:  "commit-1",
+			User:      "alice",
+			Timestamp: time.Date(2026, 5, 17, 12, 0, 0, 0, time.UTC).Format(time.RFC3339Nano),
+			Message:   "initial",
 		},
 	})
 
 	if len(infos) != 1 {
 		t.Fatalf("commitInfosFromProto() entries = %d, want 1", len(infos))
 	}
-	if infos[0].ConfigText != "set system host-name router1" {
-		t.Fatalf("commitInfosFromProto() config text = %q, want archived set commands", infos[0].ConfigText)
+	if infos[0].CommitID != "commit-1" || infos[0].User != "alice" || infos[0].Message != "initial" {
+		t.Fatalf("commitInfosFromProto() metadata = %#v", infos[0])
+	}
+	if infos[0].ConfigText != "" {
+		t.Fatalf("commitInfosFromProto() config text = %q, want metadata-only entry", infos[0].ConfigText)
 	}
 }
 

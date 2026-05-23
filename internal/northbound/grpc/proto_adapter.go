@@ -10,6 +10,7 @@ import (
 	apiv1 "github.com/akam1o/arca-router/api/v1"
 	"github.com/akam1o/arca-router/internal/correlation"
 	"github.com/akam1o/arca-router/internal/engine"
+	"github.com/akam1o/arca-router/pkg/datastore"
 	grpcpkg "google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials"
@@ -132,7 +133,50 @@ func configEditStatusError(err error) error {
 	case errors.Is(err, context.Canceled):
 		return status.Error(codes.Canceled, "configuration operation canceled")
 	default:
+		if applyStatus := configApplyStatusError(err); applyStatus != nil {
+			return applyStatus
+		}
+		if datastoreStatus := datastoreStatusError(err); datastoreStatus != nil {
+			return datastoreStatus
+		}
 		return status.Error(codes.Internal, "internal server error")
+	}
+}
+
+func configApplyStatusError(err error) error {
+	var applyErr *engine.ApplyError
+	if !errors.As(err, &applyErr) {
+		return nil
+	}
+	if applyErr.RollbackAttempted && applyErr.RollbackSucceeded {
+		return status.Error(codes.Aborted, "configuration apply failed; rollback succeeded")
+	}
+	if applyErr.RollbackAttempted && !applyErr.RollbackSucceeded {
+		return status.Error(codes.Aborted, "configuration apply failed; rollback failed")
+	}
+	return status.Error(codes.Aborted, "configuration apply failed")
+}
+
+func datastoreStatusError(err error) error {
+	var datastoreErr *datastore.Error
+	if !errors.As(err, &datastoreErr) {
+		return nil
+	}
+	switch datastoreErr.Code {
+	case datastore.ErrCodeNotFound:
+		return status.Error(codes.NotFound, "configuration persistence record not found")
+	case datastore.ErrCodeConflict:
+		return status.Error(codes.FailedPrecondition, "configuration persistence conflict")
+	case datastore.ErrCodeValidation:
+		return status.Error(codes.InvalidArgument, "configuration persistence validation failed")
+	case datastore.ErrCodeTimeout:
+		return status.Error(codes.DeadlineExceeded, "configuration persistence timed out")
+	case datastore.ErrCodeUnauthorized:
+		return status.Error(codes.PermissionDenied, "configuration persistence permission denied")
+	case datastore.ErrCodeInternal:
+		return status.Error(codes.Unavailable, "configuration persistence unavailable")
+	default:
+		return status.Error(codes.Internal, "configuration persistence error")
 	}
 }
 
@@ -149,7 +193,6 @@ func (a *configServiceAdapter) ListHistory(ctx context.Context, req *apiv1.ListH
 			Timestamp:  entry.Timestamp.Format(time.RFC3339Nano),
 			Message:    entry.Message,
 			IsRollback: entry.IsRollback,
-			ConfigText: entry.ConfigText,
 		})
 	}
 	return resp, nil

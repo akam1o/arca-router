@@ -756,7 +756,6 @@ func commitInfosFromProto(entries []*apiv1.CommitEntry) []CommitInfo {
 			Timestamp:  timestamp,
 			Message:    entry.GetMessage(),
 			IsRollback: entry.GetIsRollback(),
-			ConfigText: entry.GetConfigText(),
 		})
 	}
 	return infos
