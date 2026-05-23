@@ -79,6 +79,42 @@ func TestNETCONFParserRejectsPortOutOfRange(t *testing.T) {
 	}
 }
 
+func TestSystemServiceParserRejectsInvalidCommonFields(t *testing.T) {
+	tests := []struct {
+		name    string
+		line    string
+		wantErr string
+	}{
+		{
+			name:    "web-ui port requires number",
+			line:    "set system services web-ui port not-a-number",
+			wantErr: "expected web-ui port",
+		},
+		{
+			name:    "prometheus listen address requires value",
+			line:    "set system services prometheus listen-address",
+			wantErr: "expected prometheus listen address",
+		},
+		{
+			name:    "snmp enabled requires boolean",
+			line:    "set system services snmp enabled maybe",
+			wantErr: "invalid boolean value",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := NewParser(strings.NewReader(tt.line)).Parse()
+			if err == nil {
+				t.Fatal("Parse() error = nil, want error")
+			}
+			if !strings.Contains(err.Error(), tt.wantErr) {
+				t.Fatalf("Parse() error = %v, want substring %q", err, tt.wantErr)
+			}
+		})
+	}
+}
+
 func TestSNMPValidationRejectsEnabledWithoutCommunity(t *testing.T) {
 	cfg := parseSetCommands(t,
 		"set system services snmp enabled true",

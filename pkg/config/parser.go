@@ -180,30 +180,17 @@ func (p *Parser) parseWebUIService(services *SystemServicesConfig) error {
 
 	switch param {
 	case "enabled":
-		enabled, err := p.parseBool()
-		if err != nil {
-			return err
-		}
-		web.Enabled = enabled
-		return nil
+		return p.parseServiceEnabled(func(enabled bool) {
+			web.Enabled = enabled
+		})
 	case "listen-address":
-		if p.current.Type != TokenWord && p.current.Type != TokenString {
-			return p.error("expected web-ui listen address")
-		}
-		web.ListenAddress = p.current.Value
-		p.nextToken()
-		return nil
+		return p.parseServiceListenAddress("web-ui", func(listenAddress string) {
+			web.ListenAddress = listenAddress
+		})
 	case "port":
-		if p.current.Type != TokenNumber {
-			return p.error("expected web-ui port")
-		}
-		port, err := strconv.Atoi(p.current.Value)
-		if err != nil {
-			return p.error(fmt.Sprintf("invalid web-ui port: %s", p.current.Value))
-		}
-		web.Port = port
-		p.nextToken()
-		return nil
+		return p.parseServicePort("web-ui", func(port int) {
+			web.Port = port
+		})
 	default:
 		return p.error(fmt.Sprintf("unsupported web-ui parameter: %s", param))
 	}
@@ -223,30 +210,17 @@ func (p *Parser) parsePrometheusService(services *SystemServicesConfig) error {
 
 	switch param {
 	case "enabled":
-		enabled, err := p.parseBool()
-		if err != nil {
-			return err
-		}
-		prometheus.Enabled = enabled
-		return nil
+		return p.parseServiceEnabled(func(enabled bool) {
+			prometheus.Enabled = enabled
+		})
 	case "listen-address":
-		if p.current.Type != TokenWord && p.current.Type != TokenString {
-			return p.error("expected prometheus listen address")
-		}
-		prometheus.ListenAddress = p.current.Value
-		p.nextToken()
-		return nil
+		return p.parseServiceListenAddress("prometheus", func(listenAddress string) {
+			prometheus.ListenAddress = listenAddress
+		})
 	case "port":
-		if p.current.Type != TokenNumber {
-			return p.error("expected prometheus port")
-		}
-		port, err := strconv.Atoi(p.current.Value)
-		if err != nil {
-			return p.error(fmt.Sprintf("invalid prometheus port: %s", p.current.Value))
-		}
-		prometheus.Port = port
-		p.nextToken()
-		return nil
+		return p.parseServicePort("prometheus", func(port int) {
+			prometheus.Port = port
+		})
 	default:
 		return p.error(fmt.Sprintf("unsupported prometheus parameter: %s", param))
 	}
@@ -266,30 +240,17 @@ func (p *Parser) parseSNMPService(services *SystemServicesConfig) error {
 
 	switch param {
 	case "enabled":
-		enabled, err := p.parseBool()
-		if err != nil {
-			return err
-		}
-		snmp.Enabled = enabled
-		return nil
+		return p.parseServiceEnabled(func(enabled bool) {
+			snmp.Enabled = enabled
+		})
 	case "listen-address":
-		if p.current.Type != TokenWord && p.current.Type != TokenString {
-			return p.error("expected snmp listen address")
-		}
-		snmp.ListenAddress = p.current.Value
-		p.nextToken()
-		return nil
+		return p.parseServiceListenAddress("snmp", func(listenAddress string) {
+			snmp.ListenAddress = listenAddress
+		})
 	case "port":
-		if p.current.Type != TokenNumber {
-			return p.error("expected snmp port")
-		}
-		port, err := strconv.Atoi(p.current.Value)
-		if err != nil {
-			return p.error(fmt.Sprintf("invalid snmp port: %s", p.current.Value))
-		}
-		snmp.Port = port
-		p.nextToken()
-		return nil
+		return p.parseServicePort("snmp", func(port int) {
+			snmp.Port = port
+		})
 	case "community":
 		if p.current.Type != TokenWord && p.current.Type != TokenString {
 			return p.error("expected snmp community")
@@ -300,6 +261,37 @@ func (p *Parser) parseSNMPService(services *SystemServicesConfig) error {
 	default:
 		return p.error(fmt.Sprintf("unsupported snmp parameter: %s", param))
 	}
+}
+
+func (p *Parser) parseServiceEnabled(set func(bool)) error {
+	enabled, err := p.parseBool()
+	if err != nil {
+		return err
+	}
+	set(enabled)
+	return nil
+}
+
+func (p *Parser) parseServiceListenAddress(serviceName string, set func(string)) error {
+	if p.current.Type != TokenWord && p.current.Type != TokenString {
+		return p.error(fmt.Sprintf("expected %s listen address", serviceName))
+	}
+	set(p.current.Value)
+	p.nextToken()
+	return nil
+}
+
+func (p *Parser) parseServicePort(serviceName string, set func(int)) error {
+	if p.current.Type != TokenNumber {
+		return p.error(fmt.Sprintf("expected %s port", serviceName))
+	}
+	port, err := strconv.Atoi(p.current.Value)
+	if err != nil {
+		return p.error(fmt.Sprintf("invalid %s port: %s", serviceName, p.current.Value))
+	}
+	set(port)
+	p.nextToken()
+	return nil
 }
 
 func (p *Parser) parseBool() (bool, error) {
