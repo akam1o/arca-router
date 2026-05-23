@@ -42,6 +42,73 @@ func TestUserDatabaseRejectsInsecureDatabaseDirectory(t *testing.T) {
 	}
 }
 
+func TestUserDatabaseRejectsSymlinkDatabaseFile(t *testing.T) {
+	dir := t.TempDir()
+	targetPath := filepath.Join(dir, "target-users.db")
+	dbPath := filepath.Join(dir, "users.db")
+	if err := os.WriteFile(targetPath, []byte{}, 0644); err != nil {
+		t.Fatalf("write target db: %v", err)
+	}
+	if err := os.Chmod(targetPath, 0644); err != nil {
+		t.Fatalf("chmod target db: %v", err)
+	}
+	if err := os.Symlink(targetPath, dbPath); err != nil {
+		t.Skipf("symlink not supported: %v", err)
+	}
+
+	userDB, err := NewUserDatabase(dbPath, logger.New("test", logger.DefaultConfig()))
+	if err == nil {
+		_ = userDB.Close()
+		t.Fatal("NewUserDatabase() error = nil, want symlink database rejection")
+	}
+	if !strings.Contains(err.Error(), "symbolic link") {
+		t.Fatalf("NewUserDatabase() error = %v, want symbolic link rejection", err)
+	}
+	assertUserDBFileMode(t, targetPath, 0644)
+}
+
+func TestUserDatabaseRejectsHardLinkedDatabaseFile(t *testing.T) {
+	dir := t.TempDir()
+	targetPath := filepath.Join(dir, "target-users.db")
+	dbPath := filepath.Join(dir, "users.db")
+	if err := os.WriteFile(targetPath, []byte{}, 0600); err != nil {
+		t.Fatalf("write target db: %v", err)
+	}
+	if err := os.Link(targetPath, dbPath); err != nil {
+		t.Skipf("hard links not supported: %v", err)
+	}
+
+	userDB, err := NewUserDatabase(dbPath, logger.New("test", logger.DefaultConfig()))
+	if err == nil {
+		_ = userDB.Close()
+		t.Fatal("NewUserDatabase() error = nil, want hard link database rejection")
+	}
+	if !strings.Contains(err.Error(), "multiple hard links") {
+		t.Fatalf("NewUserDatabase() error = %v, want hard link rejection", err)
+	}
+}
+
+func TestUserDatabaseRejectsSymlinkDatabaseDirectory(t *testing.T) {
+	root := t.TempDir()
+	targetDir := filepath.Join(root, "target")
+	dbDir := filepath.Join(root, "linked")
+	if err := os.Mkdir(targetDir, 0750); err != nil {
+		t.Fatalf("mkdir target: %v", err)
+	}
+	if err := os.Symlink(targetDir, dbDir); err != nil {
+		t.Skipf("symlink not supported: %v", err)
+	}
+
+	userDB, err := NewUserDatabase(filepath.Join(dbDir, "users.db"), logger.New("test", logger.DefaultConfig()))
+	if err == nil {
+		_ = userDB.Close()
+		t.Fatal("NewUserDatabase() error = nil, want symlink directory rejection")
+	}
+	if !strings.Contains(err.Error(), "symbolic link") {
+		t.Fatalf("NewUserDatabase() error = %v, want symbolic link rejection", err)
+	}
+}
+
 func TestUserDatabaseRejectsSQLiteDSNPaths(t *testing.T) {
 	tests := []struct {
 		name string
