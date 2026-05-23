@@ -985,6 +985,19 @@ func effectiveWebListen(flagValue string, snapshot *model.ConfigSnapshot) string
 	return net.JoinHostPort(addr, strconv.Itoa(port))
 }
 
+func webPlainHTTPListenAllowed(listenAddr string) bool {
+	host, _, err := net.SplitHostPort(strings.TrimSpace(listenAddr))
+	if err != nil {
+		return false
+	}
+	host = strings.TrimSpace(host)
+	if strings.EqualFold(host, "localhost") {
+		return true
+	}
+	ip := net.ParseIP(host)
+	return ip != nil && ip.IsLoopback()
+}
+
 func newWebAPITokenCache(path string, tokens map[string]webAPIToken) *webAPITokenCache {
 	path = strings.TrimSpace(path)
 	if path == "" {
@@ -1155,6 +1168,9 @@ func webAPITokenFingerprint(token webAPIToken) string {
 }
 
 func startWebServer(ctx context.Context, listenAddr string, source metricsSource, log *logger.Logger) (<-chan error, error) {
+	if !webPlainHTTPListenAllowed(listenAddr) {
+		return nil, fmt.Errorf("web endpoint serves plaintext HTTP and must listen on loopback, got %q", listenAddr)
+	}
 	lis, err := net.Listen("tcp", listenAddr)
 	if err != nil {
 		return nil, fmt.Errorf("listen web endpoint: %w", err)

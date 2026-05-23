@@ -76,6 +76,44 @@ func TestEffectiveWebListenUsesConfigDefaults(t *testing.T) {
 	}
 }
 
+func TestWebPlainHTTPListenAllowed(t *testing.T) {
+	tests := []struct {
+		listen string
+		want   bool
+	}{
+		{listen: "127.0.0.1:8080", want: true},
+		{listen: "localhost:8080", want: true},
+		{listen: "[::1]:8080", want: true},
+		{listen: ":8080"},
+		{listen: "0.0.0.0:8080"},
+		{listen: "[::]:8080"},
+		{listen: "192.0.2.10:8080"},
+		{listen: "not a listen address"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.listen, func(t *testing.T) {
+			if got := webPlainHTTPListenAllowed(tt.listen); got != tt.want {
+				t.Fatalf("webPlainHTTPListenAllowed(%q) = %v, want %v", tt.listen, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestStartWebServerRejectsRemotePlainHTTP(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	errCh, err := startWebServer(ctx, "0.0.0.0:0", metricsSource{}, nil)
+	if err == nil {
+		cancel()
+		<-errCh
+		t.Fatal("startWebServer() error = nil, want loopback restriction error")
+	}
+	if !strings.Contains(err.Error(), "must listen on loopback") {
+		t.Fatalf("startWebServer() error = %v, want loopback restriction", err)
+	}
+}
+
 func TestWebStatusEndpoint(t *testing.T) {
 	eng := engine.NewEngine(nil, slog.Default())
 	cfg := model.NewRouterConfig()
