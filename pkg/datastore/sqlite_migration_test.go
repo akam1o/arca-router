@@ -129,6 +129,46 @@ func TestSQLiteMigrationRejectsNewerSchemaVersion(t *testing.T) {
 	}
 }
 
+func TestSQLiteMigrationCreateBackupBindsBackupPath(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "config'; DROP TABLE sample; --.db")
+	db := openMigrationTestDB(t, dbPath)
+	defer closeDB(t, db)
+	mustExec(t, db, `
+		CREATE TABLE sample (
+			id INTEGER PRIMARY KEY,
+			value TEXT NOT NULL
+		);
+		INSERT INTO sample (value) VALUES ('kept');
+	`)
+
+	backupPath, err := NewSQLiteMigrationManager(db, dbPath).CreateBackup()
+	if err != nil {
+		t.Fatalf("CreateBackup() error = %v", err)
+	}
+	if backupPath == "" {
+		t.Fatal("CreateBackup() backupPath is empty, want backup file")
+	}
+	assertSQLiteFileMode(t, backupPath, secureSQLiteFilePerms)
+
+	var sourceValue string
+	if err := db.QueryRow(`SELECT value FROM sample WHERE id = 1`).Scan(&sourceValue); err != nil {
+		t.Fatalf("source query failed after CreateBackup(): %v", err)
+	}
+	if sourceValue != "kept" {
+		t.Fatalf("source value = %q, want kept", sourceValue)
+	}
+
+	backupDB := openMigrationTestDB(t, backupPath)
+	defer closeDB(t, backupDB)
+	var backupValue string
+	if err := backupDB.QueryRow(`SELECT value FROM sample WHERE id = 1`).Scan(&backupValue); err != nil {
+		t.Fatalf("backup query failed: %v", err)
+	}
+	if backupValue != "kept" {
+		t.Fatalf("backup value = %q, want kept", backupValue)
+	}
+}
+
 func openMigrationTestDB(t *testing.T, dbPath string) *sql.DB {
 	t.Helper()
 	db, err := sql.Open("sqlite3", dbPath)

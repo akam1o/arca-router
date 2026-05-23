@@ -192,29 +192,7 @@ func (m *sqliteMigrationManager) CreateBackup() (string, error) {
 	timestamp := time.Now().Format("20060102_150405")
 	backupPath := fmt.Sprintf("%s.backup.%s", m.dbPath, timestamp)
 
-	// Use VACUUM INTO for consistent backup
-	// This ensures the backup is transactionally consistent
-	// Use parameter binding to prevent SQL injection (SQLite supports ? for VACUUM INTO in some drivers)
-	// However, VACUUM INTO doesn't support parameter binding in go-sqlite3, so we sanitize the path
-	sanitizedPath := filepath.Clean(backupPath)
-	if sanitizedPath != backupPath {
-		return "", fmt.Errorf("invalid backup path (possible security risk): %s", backupPath)
-	}
-
-	// Escape single quotes in the path (double them for SQL string literal)
-	escapedPath := sanitizedPath
-	if len(escapedPath) > 0 {
-		escapedPath = ""
-		for _, c := range sanitizedPath {
-			if c == '\'' {
-				escapedPath += "''"
-			} else {
-				escapedPath += string(c)
-			}
-		}
-	}
-
-	_, err := m.db.Exec(fmt.Sprintf("VACUUM INTO '%s'", escapedPath))
+	_, err := m.db.Exec("VACUUM INTO ?", backupPath)
 	if err != nil {
 		return "", fmt.Errorf("failed to create database backup: %w", err)
 	}
