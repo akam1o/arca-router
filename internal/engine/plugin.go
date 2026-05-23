@@ -29,6 +29,7 @@ type Plugin interface {
 	ApplyChanges(ctx context.Context, diff *ConfigDiff) error
 
 	// RollbackChanges undoes previously applied changes.
-	// Called when a later plugin in the chain fails.
+	// Called when this plugin or a later plugin in the chain fails.
+	// Implementations must tolerate rollback after a partial or no-op apply.
 	RollbackChanges(ctx context.Context, diff *ConfigDiff) error
 }

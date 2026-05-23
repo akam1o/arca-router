@@ -197,6 +197,10 @@ func (e *Engine) Apply(ctx context.Context, candidate *model.RouterConfig, autho
 	for _, p := range e.plugins {
 		applyDiff := diff.Clone()
 		rollbackDiff := diff.Clone()
+		tx.applied = append(tx.applied, appliedPlugin{
+			plugin: p,
+			diff:   rollbackDiff,
+		})
 		if err := p.ApplyChanges(ctx, applyDiff); err != nil {
 			e.log.Error("Plugin apply failed, initiating rollback",
 				slog.String("plugin", p.Name()),
@@ -212,10 +216,6 @@ func (e *Engine) Apply(ctx context.Context, candidate *model.RouterConfig, autho
 				Err:                 err,
 			}
 		}
-		tx.applied = append(tx.applied, appliedPlugin{
-			plugin: p,
-			diff:   rollbackDiff,
-		})
 	}
 
 	// Phase 3: Commit — update running config
