@@ -363,6 +363,42 @@ func TestStoreUsesInstanceLegacyTextParser(t *testing.T) {
 	}
 }
 
+func TestParseStoredConfigRejectsUnknownJSONFields(t *testing.T) {
+	st := New(nil, testLegacyTextParserOption())
+
+	_, err := st.parseStoredConfig(`{"system":{"host-name":"router1"},"unexpected":true}`)
+	if err == nil {
+		t.Fatal("parseStoredConfig() error = nil, want unknown field rejection")
+	}
+	if !strings.Contains(err.Error(), "unknown field") {
+		t.Fatalf("parseStoredConfig() error = %v, want unknown field", err)
+	}
+}
+
+func TestParseStoredConfigValidatesJSONModel(t *testing.T) {
+	st := New(nil, testLegacyTextParserOption())
+
+	_, err := st.parseStoredConfig(`{"interfaces":{"bad0":{"units":{}}}}`)
+	if err == nil {
+		t.Fatal("parseStoredConfig() error = nil, want model validation error")
+	}
+	if !strings.Contains(err.Error(), "validate stored JSON config") {
+		t.Fatalf("parseStoredConfig() error = %v, want model validation context", err)
+	}
+}
+
+func TestParseStoredConfigFallsBackToLegacySetCommands(t *testing.T) {
+	st := New(nil, testLegacyTextParserOption())
+
+	cfg, err := st.parseStoredConfig("set system host-name router1\n")
+	if err != nil {
+		t.Fatalf("parseStoredConfig() error = %v", err)
+	}
+	if cfg.System == nil || cfg.System.HostName != "router1" {
+		t.Fatalf("parseStoredConfig() hostname = %#v, want router1", cfg.System)
+	}
+}
+
 func isDatastoreNotFound(err error) bool {
 	var dsErr *datastore.Error
 	return errors.As(err, &dsErr) && dsErr.Code == datastore.ErrCodeNotFound

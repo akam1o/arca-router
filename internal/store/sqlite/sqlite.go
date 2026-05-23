@@ -8,6 +8,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
+	"strings"
 	"time"
 
 	"github.com/akam1o/arca-router/internal/correlation"
@@ -365,13 +367,39 @@ func (s *Store) Close() error {
 // or falls back to set-command text (legacy format).
 func (s *Store) parseStoredConfig(text string) (*model.RouterConfig, error) {
 	// Try JSON first (new format)
-	var cfg model.RouterConfig
-	if err := json.Unmarshal([]byte(text), &cfg); err == nil {
-		return &cfg, nil
+	trimmed := strings.TrimSpace(text)
+	if isStoredJSONConfig(trimmed) {
+		cfg, err := parseStoredJSONConfig(trimmed)
+		if err != nil {
+			return nil, err
+		}
+		return cfg, nil
 	}
 
 	// Fall back to legacy set-command text parsing
 	return s.parseLegacyText(text)
+}
+
+func isStoredJSONConfig(text string) bool {
+	return strings.HasPrefix(text, "{") || strings.HasPrefix(text, "[")
+}
+
+func parseStoredJSONConfig(text string) (*model.RouterConfig, error) {
+	dec := json.NewDecoder(strings.NewReader(text))
+	dec.DisallowUnknownFields()
+
+	var cfg model.RouterConfig
+	if err := dec.Decode(&cfg); err != nil {
+		return nil, fmt.Errorf("decode stored JSON config: %w", err)
+	}
+	var trailing struct{}
+	if err := dec.Decode(&trailing); err != io.EOF {
+		return nil, fmt.Errorf("decode stored JSON config: trailing data")
+	}
+	if err := cfg.Validate(); err != nil {
+		return nil, fmt.Errorf("validate stored JSON config: %w", err)
+	}
+	return &cfg, nil
 }
 
 // parseLegacyText parses set-command format text using the existing parser.
