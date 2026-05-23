@@ -1661,6 +1661,58 @@ func TestWebConfigWriteEndpointRejectsTrailingJSON(t *testing.T) {
 	}
 }
 
+func TestWebConfigWriteEndpointNormalizesJSONDecodeErrors(t *testing.T) {
+	tests := []struct {
+		name      string
+		body      string
+		wantCode  string
+		wantError string
+	}{
+		{
+			name:      "unknown field",
+			body:      `{"config_text":"set system host-name edge02","unexpected":true}`,
+			wantCode:  "unknown_field",
+			wantError: "request contains unknown field",
+		},
+		{
+			name:      "malformed json",
+			body:      `{"config_text":`,
+			wantCode:  "invalid_json",
+			wantError: "malformed JSON request",
+		},
+		{
+			name:      "wrong field type",
+			body:      `{"config_text":123}`,
+			wantCode:  "invalid_json",
+			wantError: "invalid JSON value for config_text",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			source, eng := newWebConfigAPITestSource(t, "operator")
+			req := newWebJSONTestRequest(http.MethodPost, "/api/config/validate", tt.body)
+			req.SetBasicAuth("operator", "secret")
+			rec := httptest.NewRecorder()
+			source.handleWebConfigValidate(rec, req)
+
+			if rec.Code != http.StatusBadRequest {
+				t.Fatalf("status = %d, want %d: %s", rec.Code, http.StatusBadRequest, rec.Body.String())
+			}
+			var resp map[string]string
+			if err := json.NewDecoder(rec.Result().Body).Decode(&resp); err != nil {
+				t.Fatalf("Decode() error = %v", err)
+			}
+			if resp["code"] != tt.wantCode || resp["error"] != tt.wantError {
+				t.Fatalf("response = %#v, want code %q error %q", resp, tt.wantCode, tt.wantError)
+			}
+			if got := eng.Running().System.HostName; got != "edge01" {
+				t.Fatalf("running hostname = %q, want unchanged edge01", got)
+			}
+		})
+	}
+}
+
 func TestWebConfigWriteEndpointRejectsOversizedBody(t *testing.T) {
 	source, _ := newWebConfigAPITestSource(t, "operator")
 	body := `{"config_text":"` + strings.Repeat("x", webConfigEditBodyLimit) + `"}`
@@ -1672,6 +1724,13 @@ func TestWebConfigWriteEndpointRejectsOversizedBody(t *testing.T) {
 
 	if rec.Code != http.StatusRequestEntityTooLarge {
 		t.Fatalf("status = %d, want %d: %s", rec.Code, http.StatusRequestEntityTooLarge, rec.Body.String())
+	}
+	var resp map[string]string
+	if err := json.NewDecoder(rec.Result().Body).Decode(&resp); err != nil {
+		t.Fatalf("Decode() error = %v", err)
+	}
+	if resp["code"] != "request_body_too_large" || resp["error"] != "request body too large" {
+		t.Fatalf("response = %#v, want stable body-too-large error", resp)
 	}
 }
 
@@ -2049,6 +2108,49 @@ func TestWebAuditEndpointRejectsInvalidTimeRange(t *testing.T) {
 
 	if rec.Code != http.StatusBadRequest {
 		t.Fatalf("status = %d, want %d", rec.Code, http.StatusBadRequest)
+	}
+}
+
+func TestWebAuditEndpointRejectsInvalidFilters(t *testing.T) {
+	tests := []struct {
+		name      string
+		target    string
+		wantError string
+	}{
+		{
+			name:      "overlong user",
+			target:    "/api/audit?user=" + strings.Repeat("a", maxWebAuditFilterLength+1),
+			wantError: "user must be 128 characters or fewer",
+		},
+		{
+			name:      "action with control character",
+			target:    "/api/audit?action=com%0Amit",
+			wantError: "action contains unsupported characters",
+		},
+		{
+			name:      "result with non ascii character",
+			target:    "/api/audit?result=%E6%88%90%E5%8A%9F",
+			wantError: "result contains unsupported characters",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			source := newWebAuthTestSource(t, "admin", "secret", "admin")
+			source.configAPI = &webAuditTestAPI{}
+
+			req := httptest.NewRequest(http.MethodGet, tt.target, nil)
+			req.SetBasicAuth("admin", "secret")
+			rec := httptest.NewRecorder()
+			source.handleWebAudit(rec, req)
+
+			if rec.Code != http.StatusBadRequest {
+				t.Fatalf("status = %d, want %d: %s", rec.Code, http.StatusBadRequest, rec.Body.String())
+			}
+			if !strings.Contains(rec.Body.String(), tt.wantError) {
+				t.Fatalf("response body = %q, want %q", rec.Body.String(), tt.wantError)
+			}
+		})
 	}
 }
 

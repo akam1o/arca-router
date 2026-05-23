@@ -14,6 +14,8 @@ import (
 	nbgrpc "github.com/akam1o/arca-router/internal/northbound/grpc"
 )
 
+const maxWebAuditFilterLength = 128
+
 func writeWebAuthChallenge(w http.ResponseWriter) {
 	w.Header().Set("WWW-Authenticate", webAuthRealm)
 	http.Error(w, "authentication required", http.StatusUnauthorized)
@@ -82,12 +84,30 @@ func webJSONContentType(raw string) bool {
 }
 
 func writeWebJSONDecodeError(w http.ResponseWriter, err error) {
+	status, code, message := webJSONDecodeErrorResponse(err)
+	writeWebJSONErrorCode(w, status, code, message)
+}
+
+func webJSONDecodeErrorResponse(err error) (int, string, string) {
 	var maxBytesErr *http.MaxBytesError
 	if errors.As(err, &maxBytesErr) {
-		writeWebJSONError(w, http.StatusRequestEntityTooLarge, "decode request: request body too large")
-		return
+		return http.StatusRequestEntityTooLarge, "request_body_too_large", "request body too large"
 	}
-	writeWebJSONError(w, http.StatusBadRequest, "decode request: "+err.Error())
+	var unmarshalTypeErr *json.UnmarshalTypeError
+	if errors.As(err, &unmarshalTypeErr) {
+		if unmarshalTypeErr.Field != "" {
+			return http.StatusBadRequest, "invalid_json", fmt.Sprintf("invalid JSON value for %s", unmarshalTypeErr.Field)
+		}
+		return http.StatusBadRequest, "invalid_json", "invalid JSON value"
+	}
+	var syntaxErr *json.SyntaxError
+	if errors.As(err, &syntaxErr) || errors.Is(err, io.ErrUnexpectedEOF) || errors.Is(err, io.EOF) {
+		return http.StatusBadRequest, "invalid_json", "malformed JSON request"
+	}
+	if strings.HasPrefix(err.Error(), "json: unknown field ") {
+		return http.StatusBadRequest, "unknown_field", "request contains unknown field"
+	}
+	return http.StatusBadRequest, "invalid_json", "malformed JSON request"
 }
 
 func writeWebJSON(w http.ResponseWriter, status int, value any) {
@@ -98,6 +118,13 @@ func writeWebJSON(w http.ResponseWriter, status int, value any) {
 
 func writeWebJSONError(w http.ResponseWriter, status int, message string) {
 	writeWebJSON(w, status, map[string]string{"error": message})
+}
+
+func writeWebJSONErrorCode(w http.ResponseWriter, status int, code, message string) {
+	writeWebJSON(w, status, map[string]string{
+		"code":  code,
+		"error": message,
+	})
 }
 
 func webHistoryPaginationFromRequest(r *http.Request) (int, int, error) {
@@ -152,15 +179,43 @@ func webAuditOptionsFromRequest(r *http.Request) (nbgrpc.AuditLogOptions, error)
 	if !since.IsZero() && !until.IsZero() && since.After(until) {
 		return nbgrpc.AuditLogOptions{}, fmt.Errorf("since must be before until")
 	}
+	user, err := boundedWebAuditFilterQuery(query.Get("user"), "user")
+	if err != nil {
+		return nbgrpc.AuditLogOptions{}, err
+	}
+	action, err := boundedWebAuditFilterQuery(query.Get("action"), "action")
+	if err != nil {
+		return nbgrpc.AuditLogOptions{}, err
+	}
+	result, err := boundedWebAuditFilterQuery(query.Get("result"), "result")
+	if err != nil {
+		return nbgrpc.AuditLogOptions{}, err
+	}
 	return nbgrpc.AuditLogOptions{
 		Limit:     limit,
 		Offset:    offset,
 		StartTime: since,
 		EndTime:   until,
-		User:      strings.TrimSpace(query.Get("user")),
-		Action:    strings.TrimSpace(query.Get("action")),
-		Result:    strings.TrimSpace(query.Get("result")),
+		User:      user,
+		Action:    action,
+		Result:    result,
 	}, nil
+}
+
+func boundedWebAuditFilterQuery(raw, name string) (string, error) {
+	value := strings.TrimSpace(raw)
+	if value == "" {
+		return "", nil
+	}
+	for _, r := range value {
+		if r < 0x21 || r > 0x7e {
+			return "", fmt.Errorf("%s contains unsupported characters", name)
+		}
+	}
+	if len(value) > maxWebAuditFilterLength {
+		return "", fmt.Errorf("%s must be %d characters or fewer", name, maxWebAuditFilterLength)
+	}
+	return value, nil
 }
 
 func boundedWebIntQuery(raw string, defaultValue, minValue, maxValue int, name string) (int, error) {
