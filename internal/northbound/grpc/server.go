@@ -102,6 +102,7 @@ func (s *Server) Serve(lis net.Listener) error {
 // ServeWithOptions starts the gRPC server on the given listener with explicit
 // transport options.
 func (s *Server) ServeWithOptions(lis net.Listener, opts ...googlegrpc.ServerOption) error {
+	lis = wrapPeerCredentialListener(lis)
 	s.server = googlegrpc.NewServer(opts...)
 	apiv1.RegisterConfigServiceServer(s.server, &configServiceAdapter{server: s})
 	apiv1.RegisterSessionServiceServer(s.server, &sessionServiceAdapter{server: s})

@@ -136,6 +136,13 @@ type sessionServiceAdapter struct {
 }
 
 func grpcRequestUser(ctx context.Context, requested string) string {
+	if user := grpcAuthenticatedUser(ctx); user != "" {
+		return user
+	}
+	return strings.TrimSpace(requested)
+}
+
+func grpcAuthenticatedUser(ctx context.Context) string {
 	if p, ok := peer.FromContext(ctx); ok && p.AuthInfo != nil {
 		if tlsInfo, ok := p.AuthInfo.(credentials.TLSInfo); ok {
 			if user := grpcTLSUser(tlsInfo.State); user != "" {
@@ -143,7 +150,12 @@ func grpcRequestUser(ctx context.Context, requested string) string {
 			}
 		}
 	}
-	return strings.TrimSpace(requested)
+	if p, ok := peer.FromContext(ctx); ok && p.Addr != nil {
+		if addr, ok := p.Addr.(interface{ peerUsername() string }); ok {
+			return addr.peerUsername()
+		}
+	}
+	return ""
 }
 
 func grpcTLSUser(state tls.ConnectionState) string {
