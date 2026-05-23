@@ -91,13 +91,22 @@ func (c *RouterConfig) validateInterfaces() error {
 		if !junosIfacePattern.MatchString(name) {
 			return fmt.Errorf("invalid interface name %q: must be Junos format (e.g. ge-0/0/0, ae0, lo0, irb, fxp0)", name)
 		}
+		if iface == nil {
+			return fmt.Errorf("interface %s is nil", name)
+		}
 		for unitNum, unit := range iface.Units {
 			if unitNum < 0 {
 				return fmt.Errorf("interface %s: unit number must be non-negative, got %d", name, unitNum)
 			}
+			if unit == nil {
+				return fmt.Errorf("interface %s unit %d is nil", name, unitNum)
+			}
 			for familyName, family := range unit.Family {
 				if familyName != "inet" && familyName != "inet6" {
 					return fmt.Errorf("interface %s unit %d: unsupported family %q", name, unitNum, familyName)
+				}
+				if family == nil {
+					return fmt.Errorf("interface %s unit %d family %s is nil", name, unitNum, familyName)
 				}
 				for _, addr := range family.Addresses {
 					if _, _, err := net.ParseCIDR(addr); err != nil {
@@ -121,6 +130,9 @@ func (c *RouterConfig) validateRouting() error {
 		}
 	}
 	for _, route := range c.Routing.StaticRoutes {
+		if route == nil {
+			return fmt.Errorf("static route entry is nil")
+		}
 		_, prefixNet, err := net.ParseCIDR(route.Prefix)
 		if err != nil {
 			return fmt.Errorf("static route: invalid prefix %q: %w", route.Prefix, err)
@@ -493,6 +505,9 @@ func (c *RouterConfig) validateBGP(bgp *BGPConfig) error {
 		return fmt.Errorf("bgp: routing-options autonomous-system is required")
 	}
 	for groupName, group := range bgp.Groups {
+		if group == nil {
+			return fmt.Errorf("bgp group %s is nil", groupName)
+		}
 		if group.Type != "" && group.Type != "internal" && group.Type != "external" {
 			return fmt.Errorf("bgp group %s: type must be 'internal' or 'external', got %q",
 				groupName, group.Type)
@@ -500,6 +515,9 @@ func (c *RouterConfig) validateBGP(bgp *BGPConfig) error {
 		for ip, neighbor := range group.Neighbors {
 			if net.ParseIP(ip) == nil {
 				return fmt.Errorf("bgp group %s: invalid neighbor IP %q", groupName, ip)
+			}
+			if neighbor == nil {
+				return fmt.Errorf("bgp group %s neighbor %s is nil", groupName, ip)
 			}
 			if neighbor.PeerAS == 0 {
 				return fmt.Errorf("bgp group %s neighbor %s: peer-as is required", groupName, ip)
