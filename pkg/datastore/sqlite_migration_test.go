@@ -3,6 +3,7 @@ package datastore
 import (
 	"context"
 	"database/sql"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -156,6 +157,53 @@ func TestSQLiteMigrationCreateBackupBindsBackupPath(t *testing.T) {
 	}
 	if sourceValue != "kept" {
 		t.Fatalf("source value = %q, want kept", sourceValue)
+	}
+
+	backupDB := openMigrationTestDB(t, backupPath)
+	defer closeDB(t, backupDB)
+	var backupValue string
+	if err := backupDB.QueryRow(`SELECT value FROM sample WHERE id = 1`).Scan(&backupValue); err != nil {
+		t.Fatalf("backup query failed: %v", err)
+	}
+	if backupValue != "kept" {
+		t.Fatalf("backup value = %q, want kept", backupValue)
+	}
+}
+
+func TestSQLiteMigrationCreateBackupAvoidsExistingBackupPath(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "config.db")
+	db := openMigrationTestDB(t, dbPath)
+	defer closeDB(t, db)
+	mustExec(t, db, `
+		CREATE TABLE sample (
+			id INTEGER PRIMARY KEY,
+			value TEXT NOT NULL
+		);
+		INSERT INTO sample (value) VALUES ('kept');
+	`)
+
+	now := time.Date(2026, 5, 23, 10, 11, 12, 0, time.UTC)
+	timestamp := now.Format("20060102_150405")
+	firstBackupPath := sqliteBackupPath(dbPath, timestamp, 0)
+	if err := os.WriteFile(firstBackupPath, []byte("existing backup"), secureSQLiteFilePerms); err != nil {
+		t.Fatalf("WriteFile(%s) error = %v", firstBackupPath, err)
+	}
+
+	backupPath, err := NewSQLiteMigrationManager(db, dbPath).(*sqliteMigrationManager).createBackup(now)
+	if err != nil {
+		t.Fatalf("createBackup() error = %v", err)
+	}
+	if backupPath != sqliteBackupPath(dbPath, timestamp, 1) {
+		t.Fatalf("backupPath = %q, want suffixed collision-free path", backupPath)
+	}
+	assertSQLiteFileMode(t, backupPath, secureSQLiteFilePerms)
+
+	existing, err := os.ReadFile(firstBackupPath)
+	if err != nil {
+		t.Fatalf("ReadFile(%s) error = %v", firstBackupPath, err)
+	}
+	if string(existing) != "existing backup" {
+		t.Fatalf("existing backup content = %q, want unchanged", existing)
 	}
 
 	backupDB := openMigrationTestDB(t, backupPath)

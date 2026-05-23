@@ -18,6 +18,8 @@ import (
 //go:embed migrations/*.sql
 var migrationsFS embed.FS
 
+const maxSQLiteBackupPathAttempts = 100
+
 // sqliteMigrationManager implements MigrationManager for SQLite.
 type sqliteMigrationManager struct {
 	db     *sql.DB
@@ -177,6 +179,10 @@ func (m *sqliteMigrationManager) configLockColumns() (map[string]bool, error) {
 // CreateBackup creates a database backup before migrations.
 // Uses SQLite's VACUUM INTO for consistent backups.
 func (m *sqliteMigrationManager) CreateBackup() (string, error) {
+	return m.createBackup(time.Now())
+}
+
+func (m *sqliteMigrationManager) createBackup(now time.Time) (string, error) {
 	if m.dbPath == "" || m.dbPath == ":memory:" {
 		// In-memory database, no backup needed
 		return "", nil
@@ -189,10 +195,13 @@ func (m *sqliteMigrationManager) CreateBackup() (string, error) {
 	}
 
 	// Create backup filename with timestamp
-	timestamp := time.Now().Format("20060102_150405")
-	backupPath := fmt.Sprintf("%s.backup.%s", m.dbPath, timestamp)
+	timestamp := now.Format("20060102_150405")
+	backupPath, err := m.availableBackupPath(timestamp)
+	if err != nil {
+		return "", err
+	}
 
-	_, err := m.db.Exec("VACUUM INTO ?", backupPath)
+	_, err = m.db.Exec("VACUUM INTO ?", backupPath)
 	if err != nil {
 		return "", fmt.Errorf("failed to create database backup: %w", err)
 	}
@@ -203,6 +212,28 @@ func (m *sqliteMigrationManager) CreateBackup() (string, error) {
 	}
 
 	return backupPath, nil
+}
+
+func (m *sqliteMigrationManager) availableBackupPath(timestamp string) (string, error) {
+	for attempt := 0; attempt < maxSQLiteBackupPathAttempts; attempt++ {
+		backupPath := sqliteBackupPath(m.dbPath, timestamp, attempt)
+		if _, err := os.Stat(backupPath); err == nil {
+			continue
+		} else if os.IsNotExist(err) {
+			return backupPath, nil
+		} else {
+			return "", fmt.Errorf("failed to check database backup path: %w", err)
+		}
+	}
+	return "", fmt.Errorf("failed to choose unique database backup path after %d attempts", maxSQLiteBackupPathAttempts)
+}
+
+func sqliteBackupPath(dbPath, timestamp string, attempt int) string {
+	backupPath := fmt.Sprintf("%s.backup.%s", dbPath, timestamp)
+	if attempt == 0 {
+		return backupPath
+	}
+	return fmt.Sprintf("%s.%d", backupPath, attempt)
 }
 
 // migration represents a single migration file.
