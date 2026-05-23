@@ -89,7 +89,7 @@ func (c *VtyshMgmtClient) Apply(ctx context.Context, ops []MgmtOperation) error 
 }
 
 func runVtyshMgmtCommand(ctx context.Context, command string) ([]byte, error) {
-	vtyshPath, err := exec.LookPath("vtysh")
+	vtyshPath, err := lookupVtyshPath()
 	if err != nil {
 		if errors.Is(err, os.ErrPermission) {
 			return nil, NewPermissionDeniedError("find vtysh", err)

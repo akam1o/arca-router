@@ -69,8 +69,8 @@ func NewReloader() *Reloader {
 
 // ValidateConfig validates FRR configuration file using vtysh --check.
 func (r *Reloader) ValidateConfig(ctx context.Context, configPath string) error {
-	// Check if vtysh exists and get its path
-	vtyshPath, err := exec.LookPath("vtysh")
+	// Check if vtysh exists in a trusted system path and get its path.
+	vtyshPath, err := lookupVtyshPath()
 	if err != nil {
 		if errors.Is(err, os.ErrPermission) {
 			return NewPermissionDeniedError("find vtysh", err)
@@ -485,8 +485,8 @@ func (r *Reloader) applyWithFRRReload(ctx context.Context) error {
 
 // applyWithVtysh applies config using vtysh -f command.
 func (r *Reloader) applyWithVtysh(ctx context.Context) error {
-	// Check if vtysh exists and get its path
-	vtyshPath, err := exec.LookPath("vtysh")
+	// Check if vtysh exists in a trusted system path and get its path.
+	vtyshPath, err := lookupVtyshPath()
 	if err != nil {
 		if errors.Is(err, os.ErrPermission) {
 			return NewPermissionDeniedError("find vtysh", err)
@@ -541,7 +541,7 @@ func isFRRReloadAvailable() bool {
 
 // isVtyshAvailable checks if vtysh is available.
 func isVtyshAvailable() bool {
-	_, err := exec.LookPath("vtysh")
+	_, err := lookupVtyshPath()
 	return err == nil
 }
 
@@ -593,9 +593,12 @@ func (r *Reloader) CleanupOldBackups(keepCount int) error {
 
 // ShowRunningConfig retrieves the current running configuration from FRR.
 func ShowRunningConfig(ctx context.Context) (string, error) {
-	// Check if vtysh exists and get its path
-	vtyshPath, err := exec.LookPath("vtysh")
+	// Check if vtysh exists in a trusted system path and get its path.
+	vtyshPath, err := lookupVtyshPath()
 	if err != nil {
+		if errors.Is(err, os.ErrPermission) {
+			return "", NewPermissionDeniedError("find vtysh", err)
+		}
 		return "", NewToolNotFoundError("vtysh")
 	}
 
