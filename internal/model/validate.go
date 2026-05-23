@@ -7,6 +7,7 @@ import (
 	"strconv"
 	"strings"
 
+	pkgauth "github.com/akam1o/arca-router/pkg/auth"
 	"github.com/akam1o/arca-router/pkg/security"
 )
 
@@ -701,16 +702,81 @@ func (c *RouterConfig) validatePolicyStatementReference(context, policyName stri
 }
 
 func (c *RouterConfig) validateSecurity() error {
-	if c.Security == nil || c.Security.NETCONF == nil || c.Security.NETCONF.SSH == nil {
+	if c.Security == nil {
 		return nil
 	}
-	ssh := c.Security.NETCONF.SSH
-	if ssh.ListenAddress != "" && ssh.ListenAddress != "localhost" && net.ParseIP(ssh.ListenAddress) == nil {
-		return fmt.Errorf("security netconf ssh: invalid listen-address %q", ssh.ListenAddress)
+	if err := validateSecurityUsers(c.Security.Users); err != nil {
+		return err
 	}
-	port := ssh.Port
-	if port < 0 || port > 65535 {
-		return fmt.Errorf("security netconf ssh port must be 0-65535, got %d", port)
+	if err := validateSecurityRateLimit(c.Security.RateLimit); err != nil {
+		return err
+	}
+	if c.Security.NETCONF != nil && c.Security.NETCONF.SSH != nil {
+		ssh := c.Security.NETCONF.SSH
+		if ssh.ListenAddress != "" && ssh.ListenAddress != "localhost" && net.ParseIP(ssh.ListenAddress) == nil {
+			return fmt.Errorf("security netconf ssh: invalid listen-address %q", ssh.ListenAddress)
+		}
+		port := ssh.Port
+		if port < 0 || port > 65535 {
+			return fmt.Errorf("security netconf ssh port must be 0-65535, got %d", port)
+		}
+	}
+	return nil
+}
+
+func validateSecurityUsers(users map[string]*UserConfig) error {
+	for username, user := range users {
+		if strings.TrimSpace(username) == "" {
+			return fmt.Errorf("security users: username is required")
+		}
+		if user == nil {
+			return fmt.Errorf("security users user %q: config is nil", username)
+		}
+		if !validSecurityUserRole(user.Role) {
+			return fmt.Errorf("security users user %q: invalid role %q", username, user.Role)
+		}
+		if user.Password == "" && user.SSHKey == "" {
+			return fmt.Errorf("security users user %q: password or ssh-key is required", username)
+		}
+		if user.Password != "" {
+			if err := pkgauth.ValidatePasswordHash(user.Password); err != nil {
+				return fmt.Errorf("security users user %q: invalid password hash: %w", username, err)
+			}
+		}
+		if user.SSHKey != "" {
+			if _, err := pkgauth.ParsePublicKey(user.SSHKey); err != nil {
+				return fmt.Errorf("security users user %q: invalid ssh-key: %w", username, err)
+			}
+		}
+	}
+	return nil
+}
+
+func validSecurityUserRole(role string) bool {
+	switch role {
+	case "admin", "operator", "read-only":
+		return true
+	default:
+		return false
+	}
+}
+
+func validateSecurityRateLimit(rateLimit *RateLimitConfig) error {
+	if rateLimit == nil {
+		return nil
+	}
+	if err := validateSecurityRateLimitValue("per-ip", rateLimit.PerIP); err != nil {
+		return err
+	}
+	return validateSecurityRateLimitValue("per-user", rateLimit.PerUser)
+}
+
+func validateSecurityRateLimitValue(name string, value int) error {
+	if value == 0 {
+		return nil
+	}
+	if value < 1 || value > 1000 {
+		return fmt.Errorf("security rate-limit %s must be 1-1000, got %d", name, value)
 	}
 	return nil
 }

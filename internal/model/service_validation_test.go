@@ -144,3 +144,62 @@ func TestNETCONFValidationAllowsMaxSSHPort(t *testing.T) {
 		t.Fatalf("Validate() error = %v", err)
 	}
 }
+
+func TestSecurityValidationRejectsInvalidUserRole(t *testing.T) {
+	cfg := NewRouterConfig()
+	cfg.Security = &SecurityConfig{
+		Users: map[string]*UserConfig{
+			"alice": {
+				Role:     "superuser",
+				Password: "$argon2id$not-a-valid-hash",
+			},
+		},
+	}
+
+	if err := cfg.Validate(); err == nil {
+		t.Fatal("Validate() error = nil, want invalid user role error")
+	}
+}
+
+func TestSecurityValidationRejectsInvalidPasswordHash(t *testing.T) {
+	cfg := NewRouterConfig()
+	cfg.Security = &SecurityConfig{
+		Users: map[string]*UserConfig{
+			"alice": {
+				Role:     "admin",
+				Password: "plain-password",
+			},
+		},
+	}
+
+	if err := cfg.Validate(); err == nil {
+		t.Fatal("Validate() error = nil, want invalid password hash error")
+	}
+}
+
+func TestSecurityValidationRejectsInvalidSSHKey(t *testing.T) {
+	cfg := NewRouterConfig()
+	cfg.Security = &SecurityConfig{
+		Users: map[string]*UserConfig{
+			"alice": {
+				Role:   "read-only",
+				SSHKey: "not-a-public-key",
+			},
+		},
+	}
+
+	if err := cfg.Validate(); err == nil {
+		t.Fatal("Validate() error = nil, want invalid ssh-key error")
+	}
+}
+
+func TestSecurityValidationRejectsOutOfRangeRateLimit(t *testing.T) {
+	cfg := NewRouterConfig()
+	cfg.Security = &SecurityConfig{
+		RateLimit: &RateLimitConfig{PerIP: 1001},
+	}
+
+	if err := cfg.Validate(); err == nil {
+		t.Fatal("Validate() error = nil, want invalid rate-limit error")
+	}
+}
