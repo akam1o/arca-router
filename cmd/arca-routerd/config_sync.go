@@ -15,6 +15,13 @@ import (
 
 const defaultEtcdConfigSyncInterval = 2 * time.Second
 
+const (
+	configSyncEtcdStatusErrorMessage   = "failed to read etcd sync status"
+	configSyncSnapshotLoadErrorMessage = "failed to load latest running config"
+	configSyncSnapshotMissingMessage   = "running config snapshot is unavailable"
+	configSyncApplyErrorMessage        = "failed to apply synced running config"
+)
+
 type configSyncRuntimeSource interface {
 	ConfigSyncStatus() configSyncStatus
 }
@@ -110,7 +117,7 @@ func (s *etcdConfigSynchronizer) reconcile(ctx context.Context) error {
 	status, err := s.etcd.EtcdStatus(ctx)
 	if err != nil {
 		runtime.Healthy = false
-		runtime.LastError = err.Error()
+		runtime.LastError = configSyncEtcdStatusErrorMessage
 		s.setStatus(runtime, 0, false)
 		return err
 	}
@@ -129,14 +136,14 @@ func (s *etcdConfigSynchronizer) reconcile(ctx context.Context) error {
 	snap, err := s.store.GetLatestSnapshot(ctx)
 	if err != nil {
 		runtime.Healthy = false
-		runtime.LastError = fmt.Sprintf("load latest running config: %v", err)
+		runtime.LastError = configSyncSnapshotLoadErrorMessage
 		s.setStatus(runtime, 0, false)
 		return err
 	}
 	if snap == nil || snap.Config == nil {
 		err := fmt.Errorf("running config revision %d has no snapshot", status.RunningRevision)
 		runtime.Healthy = false
-		runtime.LastError = err.Error()
+		runtime.LastError = configSyncSnapshotMissingMessage
 		s.setStatus(runtime, 0, false)
 		return err
 	}
@@ -144,7 +151,7 @@ func (s *etcdConfigSynchronizer) reconcile(ctx context.Context) error {
 	if shouldApplySyncedSnapshot(s.engine.RunningSnapshot(), snap) {
 		if err := s.engine.Apply(ctx, snap.Config, "config-sync", "sync running config from etcd"); err != nil {
 			runtime.Healthy = false
-			runtime.LastError = fmt.Sprintf("apply synced running config: %v", err)
+			runtime.LastError = configSyncApplyErrorMessage
 			s.setStatus(runtime, 0, false)
 			return err
 		}
