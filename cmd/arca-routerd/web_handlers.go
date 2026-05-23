@@ -112,7 +112,7 @@ func (s metricsSource) handleWebConfig(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	cfg, err := s.runningConfig(true)
+	cfg, err := s.runningConfig(r.Context(), true)
 	if err != nil {
 		s.writeWebInternalError(w, "render config", err)
 		return
@@ -246,7 +246,7 @@ func (s metricsSource) handleWebIndex(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	status := newWebStatus(s.snapshot(time.Now()))
-	cfg, err := s.runningConfig(true)
+	cfg, err := s.runningConfig(r.Context(), true)
 	if err != nil {
 		s.writeWebInternalError(w, "render index config", err)
 		return
@@ -261,7 +261,7 @@ func (s metricsSource) handleWebIndex(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-func (s metricsSource) runningConfig(redactSecrets bool) (webConfig, error) {
+func (s metricsSource) runningConfig(ctx context.Context, redactSecrets bool) (webConfig, error) {
 	if s.configAPI != nil {
 		getRunning := s.configAPI.GetRunning
 		if !redactSecrets {
@@ -269,7 +269,7 @@ func (s metricsSource) runningConfig(redactSecrets bool) (webConfig, error) {
 				getRunning = api.GetRunningUnredacted
 			}
 		}
-		text, version, err := getRunning(context.Background())
+		text, version, err := getRunning(ctx)
 		if err != nil {
 			return webConfig{}, fmt.Errorf("get running config: %w", err)
 		}

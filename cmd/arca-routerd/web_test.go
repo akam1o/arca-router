@@ -1853,7 +1853,7 @@ func TestWebConfigCommitEndpointRedactsInternalErrors(t *testing.T) {
 
 func TestWebConfigCommitEndpointKeepsBadRequestForNoChanges(t *testing.T) {
 	source, _ := newWebConfigAPITestSource(t, "operator")
-	cfg, err := source.runningConfig(false)
+	cfg, err := source.runningConfig(context.Background(), false)
 	if err != nil {
 		t.Fatalf("runningConfig() error = %v", err)
 	}
@@ -1888,6 +1888,21 @@ func TestWebConfigCommitEndpointReportsUnavailableConfigAPI(t *testing.T) {
 	}
 	if !strings.Contains(rec.Body.String(), errWebConfigAPIUnavailable.Error()) {
 		t.Fatalf("response body = %q, want API unavailable message", rec.Body.String())
+	}
+}
+
+func TestRunningConfigUsesRequestContext(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	source := metricsSource{
+		configAPI: &webConfigEditErrorTestAPI{
+			requireCanceledGetRunningContext: true,
+		},
+	}
+
+	_, err := source.runningConfig(ctx, true)
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("runningConfig() error = %v, want context canceled", err)
 	}
 }
 
@@ -2183,6 +2198,20 @@ type webConfigEditErrorTestAPI struct {
 	diffErr             error
 	commitErr           error
 	commitCorrelationID string
+
+	requireCanceledGetRunningContext bool
+}
+
+func (a *webConfigEditErrorTestAPI) GetRunning(ctx context.Context) (string, uint64, error) {
+	if a.requireCanceledGetRunningContext {
+		select {
+		case <-ctx.Done():
+			return "", 0, ctx.Err()
+		default:
+			return "", 0, errors.New("running config request context was not canceled")
+		}
+	}
+	return "set system host-name edge01\n", 42, nil
 }
 
 func (a *webConfigEditErrorTestAPI) CreateSession(ctx context.Context, user string) (string, error) {
