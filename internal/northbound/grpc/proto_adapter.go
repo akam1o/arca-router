@@ -608,9 +608,27 @@ func (a *telemetryServiceAdapter) GetTelemetryCatalog(_ context.Context, req *ap
 
 func (a *telemetryServiceAdapter) SubscribeTelemetry(req *apiv1.SubscribeTelemetryRequest, stream apiv1.TelemetryService_SubscribeTelemetryServer) error {
 	interval := time.Duration(req.GetSampleIntervalMs()) * time.Millisecond
-	return a.server.SubscribeTelemetry(stream.Context(), req.GetPaths(), interval, req.GetOnce(), func(event TelemetryEvent) error {
+	if err := a.server.SubscribeTelemetry(stream.Context(), req.GetPaths(), interval, req.GetOnce(), func(event TelemetryEvent) error {
 		return stream.Send(telemetryEventToProto(event))
-	})
+	}); err != nil {
+		return telemetryStatusError(err)
+	}
+	return nil
+}
+
+func telemetryStatusError(err error) error {
+	switch {
+	case err == nil:
+		return nil
+	case strings.HasPrefix(err.Error(), "unsupported telemetry path "):
+		return status.Error(codes.InvalidArgument, err.Error())
+	case errors.Is(err, context.DeadlineExceeded):
+		return status.Error(codes.DeadlineExceeded, "telemetry subscription timed out")
+	case errors.Is(err, context.Canceled):
+		return status.Error(codes.Canceled, "telemetry subscription canceled")
+	default:
+		return status.Error(codes.Internal, "internal server error")
+	}
 }
 
 func telemetryCatalogToProto(catalog TelemetryCatalog) *apiv1.GetTelemetryCatalogResponse {

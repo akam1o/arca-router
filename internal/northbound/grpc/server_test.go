@@ -22,6 +22,7 @@ import (
 	pkgconfig "github.com/akam1o/arca-router/pkg/config"
 	pkgvpp "github.com/akam1o/arca-router/pkg/vpp"
 	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/status"
 )
 
@@ -846,6 +847,83 @@ func TestSubscribeTelemetryRejectsUnsupportedPath(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "unsupported telemetry path") {
 		t.Fatalf("SubscribeTelemetry() error = %v, want unsupported path", err)
 	}
+}
+
+func TestTelemetryAdapterClassifiesUnsupportedPath(t *testing.T) {
+	srv := NewServer(engine.NewEngine(nil, testLogger()), &fakeStore{}, testLogger())
+	adapter := &telemetryServiceAdapter{server: srv}
+	stream := &fakeTelemetrySubscribeStream{}
+
+	err := adapter.SubscribeTelemetry(&apiv1.SubscribeTelemetryRequest{
+		Paths: []string{"/unsupported"},
+	}, stream)
+	if status.Code(err) != codes.InvalidArgument {
+		t.Fatalf("SubscribeTelemetry() status = %v, want %v", status.Code(err), codes.InvalidArgument)
+	}
+	if got := status.Convert(err).Message(); !strings.Contains(got, "unsupported telemetry path") {
+		t.Fatalf("SubscribeTelemetry() message = %q, want unsupported path detail", got)
+	}
+}
+
+func TestTelemetryAdapterRedactsSendErrors(t *testing.T) {
+	srv := NewServer(engine.NewEngine(nil, testLogger()), &fakeStore{}, testLogger())
+	adapter := &telemetryServiceAdapter{server: srv}
+	stream := &fakeTelemetrySubscribeStream{
+		sendErr: errors.New("send over /tmp/arca-routerd.sock failed with session-secret"),
+	}
+
+	err := adapter.SubscribeTelemetry(&apiv1.SubscribeTelemetryRequest{
+		Paths: []string{"/system"},
+		Once:  true,
+	}, stream)
+	if status.Code(err) != codes.Internal {
+		t.Fatalf("SubscribeTelemetry() status = %v, want %v", status.Code(err), codes.Internal)
+	}
+	if got := status.Convert(err).Message(); got != "internal server error" {
+		t.Fatalf("SubscribeTelemetry() message = %q, want generic internal error", got)
+	}
+	if strings.Contains(err.Error(), "/tmp/arca-routerd.sock") || strings.Contains(err.Error(), "session-secret") {
+		t.Fatalf("SubscribeTelemetry() error leaked send detail: %v", err)
+	}
+}
+
+type fakeTelemetrySubscribeStream struct {
+	ctx     context.Context
+	sendErr error
+	events  []*apiv1.TelemetryEvent
+}
+
+func (s *fakeTelemetrySubscribeStream) Send(event *apiv1.TelemetryEvent) error {
+	if s.sendErr != nil {
+		return s.sendErr
+	}
+	s.events = append(s.events, event)
+	return nil
+}
+
+func (s *fakeTelemetrySubscribeStream) SetHeader(metadata.MD) error {
+	return nil
+}
+
+func (s *fakeTelemetrySubscribeStream) SendHeader(metadata.MD) error {
+	return nil
+}
+
+func (s *fakeTelemetrySubscribeStream) SetTrailer(metadata.MD) {}
+
+func (s *fakeTelemetrySubscribeStream) Context() context.Context {
+	if s.ctx != nil {
+		return s.ctx
+	}
+	return context.Background()
+}
+
+func (s *fakeTelemetrySubscribeStream) SendMsg(any) error {
+	return nil
+}
+
+func (s *fakeTelemetrySubscribeStream) RecvMsg(any) error {
+	return io.EOF
 }
 
 func TestTelemetryPathCatalog(t *testing.T) {
