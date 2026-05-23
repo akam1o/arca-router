@@ -145,6 +145,41 @@ func TestBackupConfig(t *testing.T) {
 	}
 }
 
+func TestBackupConfigAvoidsTimestampCollisions(t *testing.T) {
+	tmpDir := t.TempDir()
+	configPath := filepath.Join(tmpDir, "frr.conf")
+	r := &Reloader{
+		ConfigPath:    configPath,
+		BackupEnabled: true,
+	}
+	now := time.Date(2026, 5, 23, 12, 34, 56, 0, time.UTC)
+
+	if err := os.WriteFile(configPath, []byte("first config\n"), DefaultConfigMode); err != nil {
+		t.Fatalf("failed to create initial config: %v", err)
+	}
+	firstBackup, err := r.backupConfig(now)
+	if err != nil {
+		t.Fatalf("backupConfig(first) error = %v", err)
+	}
+
+	if err := os.WriteFile(configPath, []byte("second config\n"), DefaultConfigMode); err != nil {
+		t.Fatalf("failed to update config: %v", err)
+	}
+	secondBackup, err := r.backupConfig(now)
+	if err != nil {
+		t.Fatalf("backupConfig(second) error = %v", err)
+	}
+
+	if firstBackup == secondBackup {
+		t.Fatalf("backup paths collided: %s", firstBackup)
+	}
+	if secondBackup != firstBackup+".1" {
+		t.Fatalf("second backup path = %s, want %s.1", secondBackup, firstBackup)
+	}
+	assertFileContent(t, firstBackup, "first config\n")
+	assertFileContent(t, secondBackup, "second config\n")
+}
+
 // TestBackupConfigNoExisting tests backup when no config exists.
 func TestBackupConfigNoExisting(t *testing.T) {
 	tmpDir := t.TempDir()
@@ -162,6 +197,18 @@ func TestBackupConfigNoExisting(t *testing.T) {
 	}
 	if backupPath != "" {
 		t.Errorf("expected empty backup path, got %s", backupPath)
+	}
+}
+
+func assertFileContent(t *testing.T, path, want string) {
+	t.Helper()
+
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("failed to read %s: %v", path, err)
+	}
+	if string(data) != want {
+		t.Fatalf("%s content = %q, want %q", path, string(data), want)
 	}
 }
 

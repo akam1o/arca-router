@@ -24,6 +24,8 @@ const (
 
 	// BackupExtension is the extension for backup files
 	BackupExtension = ".bak"
+
+	maxFRRBackupPathAttempts = 100
 )
 
 // ApplyMode defines how to apply FRR configuration
@@ -95,6 +97,10 @@ func (r *Reloader) ValidateConfig(ctx context.Context, configPath string) error 
 
 // BackupConfig creates a backup of the current FRR configuration.
 func (r *Reloader) BackupConfig() (string, error) {
+	return r.backupConfig(time.Now())
+}
+
+func (r *Reloader) backupConfig(now time.Time) (string, error) {
 	// Check if config file exists
 	if _, err := os.Stat(r.ConfigPath); os.IsNotExist(err) {
 		// No config to backup (first time setup)
@@ -111,8 +117,7 @@ func (r *Reloader) BackupConfig() (string, error) {
 	}
 
 	// Create backup path with timestamp
-	timestamp := time.Now().Format("20060102-150405")
-	backupPath := fmt.Sprintf("%s%s.%s", r.ConfigPath, BackupExtension, timestamp)
+	timestamp := now.Format("20060102-150405")
 
 	// Read current config
 	data, err := os.ReadFile(r.ConfigPath)
@@ -123,15 +128,70 @@ func (r *Reloader) BackupConfig() (string, error) {
 		return "", NewBackupError("failed to read current config", err)
 	}
 
-	// Write backup file
-	if err := os.WriteFile(backupPath, data, DefaultConfigMode); err != nil {
-		if errors.Is(err, os.ErrPermission) {
-			return "", NewPermissionDeniedError("write FRR config backup", err)
+	return r.writeUniqueBackupFile(data, timestamp)
+}
+
+func (r *Reloader) writeUniqueBackupFile(data []byte, timestamp string) (string, error) {
+	for attempt := 0; attempt < maxFRRBackupPathAttempts; attempt++ {
+		backupPath := frrBackupPath(r.ConfigPath, timestamp, attempt)
+		if err := writeBackupFileExclusive(backupPath, data); err != nil {
+			if errors.Is(err, os.ErrExist) {
+				continue
+			}
+			if errors.Is(err, os.ErrPermission) {
+				return "", NewPermissionDeniedError("write FRR config backup", err)
+			}
+			return "", NewBackupError("failed to write backup file", err)
 		}
-		return "", NewBackupError("failed to write backup file", err)
+		return backupPath, nil
 	}
 
-	return backupPath, nil
+	return "", NewBackupError(
+		fmt.Sprintf("failed to choose unique FRR config backup path after %d attempts", maxFRRBackupPathAttempts),
+		nil,
+	)
+}
+
+func frrBackupPath(configPath, timestamp string, attempt int) string {
+	backupPath := fmt.Sprintf("%s%s.%s", configPath, BackupExtension, timestamp)
+	if attempt == 0 {
+		return backupPath
+	}
+	return fmt.Sprintf("%s.%d", backupPath, attempt)
+}
+
+func writeBackupFileExclusive(path string, data []byte) error {
+	file, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, DefaultConfigMode)
+	if err != nil {
+		return err
+	}
+	cleanup := true
+	closed := false
+	defer func() {
+		if !closed {
+			_ = file.Close()
+		}
+		if cleanup {
+			_ = os.Remove(path)
+		}
+	}()
+
+	if _, err := file.Write(data); err != nil {
+		return err
+	}
+	if err := file.Chmod(DefaultConfigMode); err != nil {
+		return err
+	}
+	if err := file.Sync(); err != nil {
+		return err
+	}
+	if err := file.Close(); err != nil {
+		closed = true
+		return err
+	}
+	closed = true
+	cleanup = false
+	return nil
 }
 
 // RestoreBackup restores FRR configuration from backup.
