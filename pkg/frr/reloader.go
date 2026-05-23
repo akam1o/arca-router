@@ -547,6 +547,10 @@ func isVtyshAvailable() bool {
 
 // CleanupOldBackups removes old backup files, keeping only the most recent N backups.
 func (r *Reloader) CleanupOldBackups(keepCount int) error {
+	if keepCount < 0 {
+		return fmt.Errorf("backup keep count must not be negative: %d", keepCount)
+	}
+
 	// Find all backup files
 	pattern := fmt.Sprintf("%s%s.*", r.ConfigPath, BackupExtension)
 	matches, err := filepath.Glob(pattern)

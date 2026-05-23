@@ -515,6 +515,18 @@ func TestCleanupOldBackups(t *testing.T) {
 	}
 }
 
+func TestCleanupOldBackupsRejectsNegativeKeepCount(t *testing.T) {
+	r := &Reloader{ConfigPath: filepath.Join(t.TempDir(), "frr.conf")}
+
+	err := r.CleanupOldBackups(-1)
+	if err == nil {
+		t.Fatal("CleanupOldBackups() error = nil, want invalid keep count error")
+	}
+	if !strings.Contains(err.Error(), "must not be negative") {
+		t.Fatalf("CleanupOldBackups() error = %v, want negative keep count error", err)
+	}
+}
+
 // TestShowRunningConfig tests running config retrieval.
 func TestShowRunningConfig(t *testing.T) {
 	// Skip if vtysh not available
