@@ -8,9 +8,12 @@ import (
 	"time"
 
 	apiv1 "github.com/akam1o/arca-router/api/v1"
+	"github.com/akam1o/arca-router/internal/correlation"
 	"github.com/akam1o/arca-router/internal/engine"
+	grpcpkg "google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials"
+	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/peer"
 	"google.golang.org/grpc/status"
 )
@@ -55,6 +58,7 @@ func (a *configServiceAdapter) ReplaceCandidate(ctx context.Context, req *apiv1.
 }
 
 func (a *configServiceAdapter) Commit(ctx context.Context, req *apiv1.CommitRequest) (*apiv1.CommitResponse, error) {
+	ctx = grpcCorrelationContext(ctx)
 	commitID, version, err := a.server.Commit(ctx, req.GetSessionId(), grpcRequestUser(ctx, req.GetUser()), req.GetMessage())
 	if err != nil {
 		return nil, configEditStatusError(err)
@@ -77,11 +81,32 @@ func (a *configServiceAdapter) Discard(ctx context.Context, req *apiv1.DiscardRe
 }
 
 func (a *configServiceAdapter) Rollback(ctx context.Context, req *apiv1.RollbackRequest) (*apiv1.RollbackResponse, error) {
+	ctx = grpcCorrelationContext(ctx)
 	commitID, version, err := a.server.Rollback(ctx, req.GetSessionId(), req.GetCommitId(), grpcRequestUser(ctx, req.GetUser()), req.GetMessage())
 	if err != nil {
 		return nil, configEditStatusError(err)
 	}
 	return &apiv1.RollbackResponse{NewCommitId: commitID, Version: version}, nil
+}
+
+func grpcCorrelationContext(ctx context.Context) context.Context {
+	if correlation.ID(ctx) != "" {
+		return ctx
+	}
+	if md, ok := metadata.FromIncomingContext(ctx); ok {
+		for _, key := range []string{correlation.MetadataKey, correlation.AlternateMetadataKey} {
+			for _, value := range md.Get(key) {
+				if id := correlation.Normalize(value); id != "" {
+					ctx = correlation.WithID(ctx, id)
+					_ = grpcpkg.SetHeader(ctx, metadata.Pairs(correlation.MetadataKey, id))
+					return ctx
+				}
+			}
+		}
+	}
+	ctx, id := correlation.EnsureID(ctx)
+	_ = grpcpkg.SetHeader(ctx, metadata.Pairs(correlation.MetadataKey, id))
+	return ctx
 }
 
 func (a *configServiceAdapter) Diff(ctx context.Context, req *apiv1.DiffRequest) (*apiv1.DiffResponse, error) {

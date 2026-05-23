@@ -14,6 +14,7 @@ import (
 	"time"
 
 	apiv1 "github.com/akam1o/arca-router/api/v1"
+	"github.com/akam1o/arca-router/internal/correlation"
 	"github.com/akam1o/arca-router/internal/engine"
 	"github.com/akam1o/arca-router/internal/model"
 	sbfrr "github.com/akam1o/arca-router/internal/southbound/frr"
@@ -202,19 +203,20 @@ func listenUnix(path string) (net.Listener, error) {
 }
 
 type fakeStore struct {
-	commitID     string
-	prepareErr   error
-	prepareFn    func()
-	commitErr    error
-	getCommitErr error
-	saved        *model.ConfigSnapshot
-	aborted      bool
-	commits      map[string]*store.CommitRecord
-	listRecords  []*store.CommitRecord
-	listErr      error
-	listCalls    int
-	listOpts     *store.ListOptions
-	auditOpts    *store.AuditOptions
+	commitID      string
+	prepareErr    error
+	prepareFn     func()
+	commitErr     error
+	getCommitErr  error
+	saved         *model.ConfigSnapshot
+	aborted       bool
+	commits       map[string]*store.CommitRecord
+	listRecords   []*store.CommitRecord
+	listErr       error
+	listCalls     int
+	listOpts      *store.ListOptions
+	auditOpts     *store.AuditOptions
+	correlationID string
 }
 
 type fakeInterfaceStateCollector struct {
@@ -280,6 +282,7 @@ func (f *fakeStore) PrepareCommit(ctx context.Context, snap *model.ConfigSnapsho
 		return nil, f.prepareErr
 	}
 	f.saved = snap
+	f.correlationID = correlation.ID(ctx)
 	if f.prepareFn != nil {
 		f.prepareFn()
 	}
@@ -615,6 +618,49 @@ func TestCommitUsesSessionUserForAudit(t *testing.T) {
 	}
 	if snap := eng.RunningSnapshot(); snap == nil || snap.Author != "alice" {
 		t.Fatalf("running snapshot author = %#v, want alice", snap)
+	}
+}
+
+func TestCommitPropagatesGRPCCorrelationID(t *testing.T) {
+	oldParser := ConfigTextParser
+	ConfigTextParser = func(text string) (*model.RouterConfig, error) {
+		cfg, err := pkgconfig.NewParser(strings.NewReader(text)).Parse()
+		if err != nil {
+			return nil, err
+		}
+		return model.FromLegacyConfig(cfg), nil
+	}
+	t.Cleanup(func() { ConfigTextParser = oldParser })
+
+	eng := engine.NewEngine(nil, testLogger())
+	eng.InitializeRunning(&model.RouterConfig{
+		System: &model.SystemConfig{HostName: "router1"},
+	}, 1)
+	st := &fakeStore{commitID: "commit-1"}
+	srv := NewServer(eng, st, testLogger())
+	ctx := context.Background()
+
+	sessionID, err := srv.CreateSession(ctx, "alice")
+	if err != nil {
+		t.Fatalf("CreateSession() error = %v", err)
+	}
+	if err := srv.AcquireLock(ctx, sessionID, "alice"); err != nil {
+		t.Fatalf("AcquireLock() error = %v", err)
+	}
+	if err := srv.ReplaceCandidate(ctx, sessionID, "set system host-name router2"); err != nil {
+		t.Fatalf("ReplaceCandidate() error = %v", err)
+	}
+
+	ctx = metadata.NewIncomingContext(ctx, metadata.Pairs(correlation.MetadataKey, "grpc-request-1"))
+	if _, err := (&configServiceAdapter{server: srv}).Commit(ctx, &apiv1.CommitRequest{
+		SessionId: sessionID,
+		User:      "alice",
+		Message:   "test",
+	}); err != nil {
+		t.Fatalf("Commit() error = %v", err)
+	}
+	if st.correlationID != "grpc-request-1" {
+		t.Fatalf("correlation ID = %q, want grpc-request-1", st.correlationID)
 	}
 }
 

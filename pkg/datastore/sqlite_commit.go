@@ -100,9 +100,9 @@ func (ds *sqliteDatastore) Commit(ctx context.Context, req *CommitRequest) (stri
 
 		// 6. Log audit event
 		_, err = tx.ExecContext(ctx, `
-			INSERT INTO audit_log (user, session_id, source_ip, action, result, details)
-			VALUES (?, ?, ?, 'commit', 'success', ?)
-		`, req.User, req.SessionID, req.SourceIP, fmt.Sprintf("commit_id: %s", commitID))
+			INSERT INTO audit_log (user, session_id, source_ip, correlation_id, action, result, details)
+			VALUES (?, ?, ?, ?, 'commit', 'success', ?)
+		`, req.User, req.SessionID, req.SourceIP, req.CorrelationID, fmt.Sprintf("commit_id: %s", commitID))
 		if err != nil {
 			return NewError(ErrCodeInternal, "failed to log audit event", err)
 		}
@@ -200,9 +200,9 @@ func (ds *sqliteDatastore) Rollback(ctx context.Context, req *RollbackRequest) (
 
 		// 5. Log audit event
 		_, err = tx.ExecContext(ctx, `
-			INSERT INTO audit_log (user, session_id, source_ip, action, result, details)
-			VALUES (?, ?, ?, 'rollback', 'success', ?)
-		`, req.User, req.SessionID, req.SourceIP, fmt.Sprintf("new_commit_id: %s, target_commit_id: %s", newCommitID, req.CommitID))
+			INSERT INTO audit_log (user, session_id, source_ip, correlation_id, action, result, details)
+			VALUES (?, ?, ?, ?, 'rollback', 'success', ?)
+		`, req.User, req.SessionID, req.SourceIP, req.CorrelationID, fmt.Sprintf("new_commit_id: %s, target_commit_id: %s", newCommitID, req.CommitID))
 		if err != nil {
 			return NewError(ErrCodeInternal, "failed to log audit event", err)
 		}

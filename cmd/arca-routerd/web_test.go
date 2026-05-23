@@ -16,6 +16,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/akam1o/arca-router/internal/correlation"
 	"github.com/akam1o/arca-router/internal/engine"
 	"github.com/akam1o/arca-router/internal/model"
 	nbgrpc "github.com/akam1o/arca-router/internal/northbound/grpc"
@@ -1576,6 +1577,28 @@ func TestWebConfigCommitEndpointAppliesConfig(t *testing.T) {
 	}
 }
 
+func TestWebConfigCommitEndpointPropagatesCorrelationID(t *testing.T) {
+	api := &webConfigEditErrorTestAPI{}
+	source := newWebAuthTestSource(t, "operator", "secret", "operator")
+	source.configAPI = api
+
+	req := newWebJSONTestRequest(http.MethodPost, "/api/config/commit", `{"config_text":"set system host-name edge02"}`)
+	req.Header.Set(correlation.HeaderName, "web-request-1")
+	req.SetBasicAuth("operator", "secret")
+	rec := httptest.NewRecorder()
+	source.handleWebConfigCommit(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d: %s", rec.Code, http.StatusOK, rec.Body.String())
+	}
+	if got := rec.Result().Header.Get(correlation.HeaderName); got != "web-request-1" {
+		t.Fatalf("%s response header = %q, want web-request-1", correlation.HeaderName, got)
+	}
+	if api.commitCorrelationID != "web-request-1" {
+		t.Fatalf("commit correlation ID = %q, want web-request-1", api.commitCorrelationID)
+	}
+}
+
 func TestWebConfigCommitEndpointReplacesFullConfig(t *testing.T) {
 	source, eng := newWebConfigAPITestSource(t, "operator")
 	hash, err := pkgconfig.NormalizePasswordForStorage("secret")
@@ -2138,12 +2161,13 @@ func newWebConfigAPITestSource(t *testing.T, role string) (metricsSource, *engin
 
 type webConfigEditErrorTestAPI struct {
 	webConfigAPI
-	createErr   error
-	acquireErr  error
-	replaceErr  error
-	validateErr error
-	diffErr     error
-	commitErr   error
+	createErr           error
+	acquireErr          error
+	replaceErr          error
+	validateErr         error
+	diffErr             error
+	commitErr           error
+	commitCorrelationID string
 }
 
 func (a *webConfigEditErrorTestAPI) CreateSession(ctx context.Context, user string) (string, error) {
@@ -2181,6 +2205,7 @@ func (a *webConfigEditErrorTestAPI) Diff(ctx context.Context, sessionID string) 
 }
 
 func (a *webConfigEditErrorTestAPI) Commit(ctx context.Context, sessionID, user, message string) (string, uint64, error) {
+	a.commitCorrelationID = correlation.ID(ctx)
 	if a.commitErr != nil {
 		return "", 0, a.commitErr
 	}

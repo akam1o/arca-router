@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/akam1o/arca-router/internal/correlation"
 	"github.com/akam1o/arca-router/internal/model"
 	"github.com/akam1o/arca-router/internal/store"
 	pkgconfig "github.com/akam1o/arca-router/pkg/config"
@@ -137,11 +138,13 @@ func (s *Store) PrepareCommit(ctx context.Context, snap *model.ConfigSnapshot) (
 	}
 
 	// Use the legacy commit mechanism
+	ctx, correlationID := correlation.EnsureID(ctx)
 	sessionID := "engine-" + uuid.NewString()
 	req := &datastore.CommitRequest{
-		SessionID: sessionID,
-		User:      snap.Author,
-		Message:   snap.Message,
+		SessionID:     sessionID,
+		User:          snap.Author,
+		Message:       snap.Message,
+		CorrelationID: correlationID,
 	}
 
 	if err := s.ds.AcquireLock(ctx, &datastore.LockRequest{
@@ -190,6 +193,7 @@ func (s *Store) PrepareRollback(ctx context.Context, snap *model.ConfigSnapshot,
 	}
 
 	sessionID := "engine-" + uuid.NewString()
+	ctx, correlationID := correlation.EnsureID(ctx)
 	if err := s.ds.AcquireLock(ctx, &datastore.LockRequest{
 		Target:    datastore.LockTargetCandidate,
 		SessionID: sessionID,
@@ -203,10 +207,11 @@ func (s *Store) PrepareRollback(ctx context.Context, snap *model.ConfigSnapshot,
 		ds:        s.ds,
 		sessionID: sessionID,
 		req: &datastore.RollbackRequest{
-			SessionID: sessionID,
-			CommitID:  targetCommitID,
-			User:      snap.Author,
-			Message:   snap.Message,
+			SessionID:     sessionID,
+			CommitID:      targetCommitID,
+			User:          snap.Author,
+			Message:       snap.Message,
+			CorrelationID: correlationID,
 		},
 	}, nil
 }

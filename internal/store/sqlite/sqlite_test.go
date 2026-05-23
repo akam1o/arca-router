@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/akam1o/arca-router/internal/correlation"
 	"github.com/akam1o/arca-router/internal/model"
 	pkgconfig "github.com/akam1o/arca-router/pkg/config"
 	"github.com/akam1o/arca-router/pkg/datastore"
@@ -145,6 +146,34 @@ func TestSaveCommitStoresSetCommands(t *testing.T) {
 	}
 	if commit == nil || commit.Config == nil || commit.Config.System == nil || commit.Config.System.HostName != "router1" {
 		t.Fatalf("commit = %#v, want parsed router1 config", commit)
+	}
+}
+
+func TestSaveCommitPropagatesCorrelationIDToAudit(t *testing.T) {
+	st, err := NewFromPath(filepath.Join(t.TempDir(), "config.db"))
+	if err != nil {
+		t.Fatalf("NewFromPath() error = %v", err)
+	}
+	t.Cleanup(func() { _ = st.Close() })
+
+	ctx := correlation.WithID(context.Background(), "request-123")
+	snap := model.NewSnapshot(&model.RouterConfig{
+		System:     &model.SystemConfig{HostName: "router1"},
+		Interfaces: map[string]*model.InterfaceConfig{},
+	}, 1, "alice", "test")
+	if _, err := st.SaveCommit(ctx, snap); err != nil {
+		t.Fatalf("SaveCommit() error = %v", err)
+	}
+
+	events, err := st.Legacy().ListAuditEvents(context.Background(), &datastore.AuditOptions{Action: "commit"})
+	if err != nil {
+		t.Fatalf("ListAuditEvents() error = %v", err)
+	}
+	if len(events) != 1 {
+		t.Fatalf("audit events = %d, want 1", len(events))
+	}
+	if events[0].CorrelationID != "request-123" {
+		t.Fatalf("CorrelationID = %q, want request-123", events[0].CorrelationID)
 	}
 }
 

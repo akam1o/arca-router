@@ -96,14 +96,15 @@ func (ds *etcdDatastore) Commit(ctx context.Context, req *CommitRequest) (string
 	// Prepare audit event
 	auditULID := generateULID()
 	auditEvent := &AuditEvent{
-		Key:       auditULID, // Set Key field for consistency
-		Timestamp: now,
-		User:      req.User,
-		SessionID: req.SessionID,
-		SourceIP:  req.SourceIP,
-		Action:    "commit",
-		Result:    "success",
-		Details:   fmt.Sprintf("commit_id=%s message=%q", commitID, req.Message),
+		Key:           auditULID, // Set Key field for consistency
+		Timestamp:     now,
+		User:          req.User,
+		SessionID:     req.SessionID,
+		SourceIP:      req.SourceIP,
+		CorrelationID: req.CorrelationID,
+		Action:        "commit",
+		Result:        "success",
+		Details:       fmt.Sprintf("commit_id=%s message=%q", commitID, req.Message),
 	}
 
 	auditJSON, err := json.Marshal(auditEvent)
@@ -250,14 +251,15 @@ func (ds *etcdDatastore) Rollback(ctx context.Context, req *RollbackRequest) (st
 	// Prepare audit event
 	auditULID := generateULID()
 	auditEvent := &AuditEvent{
-		Key:       auditULID, // Set Key field for consistency
-		Timestamp: now,
-		User:      req.User,
-		SessionID: req.SessionID,
-		SourceIP:  req.SourceIP,
-		Action:    "rollback",
-		Result:    "success",
-		Details:   fmt.Sprintf("rollback_commit_id=%s target_commit_id=%s message=%q", newCommitID, req.CommitID, req.Message),
+		Key:           auditULID, // Set Key field for consistency
+		Timestamp:     now,
+		User:          req.User,
+		SessionID:     req.SessionID,
+		SourceIP:      req.SourceIP,
+		CorrelationID: req.CorrelationID,
+		Action:        "rollback",
+		Result:        "success",
+		Details:       fmt.Sprintf("rollback_commit_id=%s target_commit_id=%s message=%q", newCommitID, req.CommitID, req.Message),
 	}
 
 	auditJSON, err := json.Marshal(auditEvent)

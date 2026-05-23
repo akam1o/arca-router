@@ -22,6 +22,7 @@ import (
 	"time"
 
 	"github.com/akam1o/arca-router/internal/compat"
+	"github.com/akam1o/arca-router/internal/correlation"
 	internalengine "github.com/akam1o/arca-router/internal/engine"
 	"github.com/akam1o/arca-router/internal/model"
 	nbgrpc "github.com/akam1o/arca-router/internal/northbound/grpc"
@@ -1418,7 +1419,9 @@ func (s metricsSource) handleWebConfigCommit(w http.ResponseWriter, r *http.Requ
 	if !ok {
 		return
 	}
-	commitID, version, err := s.commitWebConfig(r.Context(), username, req.ConfigText, req.Message)
+	ctx, correlationID := webCorrelationContext(r)
+	w.Header().Set(correlation.HeaderName, correlationID)
+	commitID, version, err := s.commitWebConfig(ctx, username, req.ConfigText, req.Message)
 	if err != nil {
 		s.writeWebConfigEditError(w, "commit config", err)
 		return
@@ -1556,6 +1559,17 @@ func (s metricsSource) commitWebConfig(ctx context.Context, username, configText
 		return "", 0, err
 	}
 	return api.Commit(ctx, sessionID, username, message)
+}
+
+func webCorrelationContext(r *http.Request) (context.Context, string) {
+	ctx := r.Context()
+	for _, key := range []string{correlation.HeaderName, correlation.MetadataKey, correlation.AlternateMetadataKey} {
+		if id := correlation.Normalize(r.Header.Get(key)); id != "" {
+			ctx = correlation.WithID(ctx, id)
+			return ctx, id
+		}
+	}
+	return correlation.EnsureID(ctx)
 }
 
 func (s metricsSource) configHistory(ctx context.Context, limit, offset int) ([]webCommitEntry, error) {
