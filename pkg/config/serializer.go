@@ -655,8 +655,17 @@ func writeSecurity(b *strings.Builder, sec *SecurityConfig, opts serializeOption
 	if sec == nil {
 		return nil
 	}
-	if sec.NETCONF != nil && sec.NETCONF.SSH != nil && sec.NETCONF.SSH.Port != 0 {
-		writeLine(b, "set security netconf ssh port %d", sec.NETCONF.SSH.Port)
+	if sec.NETCONF != nil && sec.NETCONF.SSH != nil {
+		ssh := sec.NETCONF.SSH
+		if ssh.Enabled {
+			writeLine(b, "set security netconf ssh enabled true")
+		}
+		if ssh.ListenAddress != "" {
+			writeLine(b, "set security netconf ssh listen-address %s", EscapeValue(ssh.ListenAddress))
+		}
+		if ssh.Port != 0 {
+			writeLine(b, "set security netconf ssh port %d", ssh.Port)
+		}
 	}
 	for _, username := range sortedKeys(sec.Users) {
 		user := sec.Users[username]

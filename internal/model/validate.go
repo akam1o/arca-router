@@ -704,7 +704,11 @@ func (c *RouterConfig) validateSecurity() error {
 	if c.Security == nil || c.Security.NETCONF == nil || c.Security.NETCONF.SSH == nil {
 		return nil
 	}
-	port := c.Security.NETCONF.SSH.Port
+	ssh := c.Security.NETCONF.SSH
+	if ssh.ListenAddress != "" && ssh.ListenAddress != "localhost" && net.ParseIP(ssh.ListenAddress) == nil {
+		return fmt.Errorf("security netconf ssh: invalid listen-address %q", ssh.ListenAddress)
+	}
+	port := ssh.Port
 	if port < 0 || port > 65535 {
 		return fmt.Errorf("security netconf ssh port must be 0-65535, got %d", port)
 	}

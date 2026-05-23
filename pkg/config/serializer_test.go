@@ -89,7 +89,7 @@ func TestToSetCommandsRoundTrip(t *testing.T) {
 			},
 		},
 		Security: &SecurityConfig{
-			NETCONF:   &NETCONFConfig{SSH: &NETCONFSSHConfig{Port: 830}},
+			NETCONF:   &NETCONFConfig{SSH: &NETCONFSSHConfig{Enabled: true, ListenAddress: "127.0.0.1", Port: 830}},
 			Users:     map[string]*UserConfig{"admin": {Username: "admin", Password: "secret", Role: "admin", SSHKey: "ssh-ed25519 AAAA test"}},
 			RateLimit: &RateLimitConfig{PerIP: 5, PerUser: 10},
 		},

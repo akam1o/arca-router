@@ -102,6 +102,12 @@ func (c *Config) Validate() error {
 		}
 	}
 
+	if c.Security != nil {
+		if err := validateSecurity(c.Security); err != nil {
+			return err
+		}
+	}
+
 	return nil
 }
 
@@ -303,6 +309,30 @@ func validateSNMP(snmp *SNMPConfig) error {
 			errors.ErrCodeConfigValidation,
 			fmt.Sprintf("Invalid snmp listen-address: %s", snmp.ListenAddress),
 			"SNMP listen-address must be an IP address or localhost",
+			"Use a valid listen address",
+		)
+	}
+	return nil
+}
+
+func validateSecurity(sec *SecurityConfig) error {
+	if sec.NETCONF == nil || sec.NETCONF.SSH == nil {
+		return nil
+	}
+	ssh := sec.NETCONF.SSH
+	if ssh.Port < 0 || ssh.Port > 65535 {
+		return errors.New(
+			errors.ErrCodeConfigValidation,
+			fmt.Sprintf("Invalid netconf ssh port: %d", ssh.Port),
+			"NETCONF SSH port must be between 0 and 65535",
+			"Use a valid TCP port",
+		)
+	}
+	if ssh.ListenAddress != "" && net.ParseIP(ssh.ListenAddress) == nil && ssh.ListenAddress != "localhost" {
+		return errors.New(
+			errors.ErrCodeConfigValidation,
+			fmt.Sprintf("Invalid netconf ssh listen-address: %s", ssh.ListenAddress),
+			"NETCONF SSH listen-address must be an IP address or localhost",
 			"Use a valid listen address",
 		)
 	}

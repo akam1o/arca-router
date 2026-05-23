@@ -1966,6 +1966,8 @@ func (p *Parser) parseCoSInterface(cos *ClassOfServiceConfig) error {
 // parseSecurity parses security configuration (Phase 3)
 // Syntax:
 //
+//	set security netconf ssh enabled <true|false>
+//	set security netconf ssh listen-address <address>
 //	set security netconf ssh port <port>
 //	set security users user <username> password <password>
 //	set security users user <username> role <role>
@@ -1993,7 +1995,11 @@ func (p *Parser) parseSecurity(config *Config) error {
 }
 
 // parseSecurityNETCONF parses NETCONF configuration
-// Syntax: set security netconf ssh port <port>
+// Syntax:
+//
+//	set security netconf ssh enabled <true|false>
+//	set security netconf ssh listen-address <address>
+//	set security netconf ssh port <port>
 func (p *Parser) parseSecurityNETCONF(config *Config) error {
 	if config.Security == nil {
 		config.Security = &SecurityConfig{}
@@ -2004,23 +2010,11 @@ func (p *Parser) parseSecurityNETCONF(config *Config) error {
 	}
 	p.nextToken()
 
-	if p.current.Type != TokenWord || p.current.Value != "port" {
-		return p.error("expected 'port' after 'ssh'")
+	if p.current.Type != TokenWord {
+		return p.error("expected netconf ssh parameter")
 	}
+	param := p.current.Value
 	p.nextToken()
-
-	if p.current.Type != TokenWord && p.current.Type != TokenNumber {
-		return p.error("expected port number")
-	}
-
-	port, err := strconv.Atoi(p.current.Value)
-	if err != nil {
-		return p.error(fmt.Sprintf("invalid port number: %s", p.current.Value))
-	}
-
-	if port < 1 || port > 65535 {
-		return p.error(fmt.Sprintf("port number out of range: %d", port))
-	}
 
 	if config.Security.NETCONF == nil {
 		config.Security.NETCONF = &NETCONFConfig{}
@@ -2028,10 +2022,40 @@ func (p *Parser) parseSecurityNETCONF(config *Config) error {
 	if config.Security.NETCONF.SSH == nil {
 		config.Security.NETCONF.SSH = &NETCONFSSHConfig{}
 	}
-	config.Security.NETCONF.SSH.Port = port
+	ssh := config.Security.NETCONF.SSH
 
-	p.nextToken()
-	return nil
+	switch param {
+	case "enabled":
+		enabled, err := p.parseBool()
+		if err != nil {
+			return err
+		}
+		ssh.Enabled = enabled
+		return nil
+	case "listen-address":
+		if p.current.Type != TokenWord && p.current.Type != TokenString {
+			return p.error("expected netconf ssh listen address")
+		}
+		ssh.ListenAddress = p.current.Value
+		p.nextToken()
+		return nil
+	case "port":
+		if p.current.Type != TokenWord && p.current.Type != TokenNumber {
+			return p.error("expected port number")
+		}
+		port, err := strconv.Atoi(p.current.Value)
+		if err != nil {
+			return p.error(fmt.Sprintf("invalid port number: %s", p.current.Value))
+		}
+		if port < 0 || port > 65535 {
+			return p.error(fmt.Sprintf("port number out of range: %d", port))
+		}
+		ssh.Port = port
+		p.nextToken()
+		return nil
+	default:
+		return p.error(fmt.Sprintf("unsupported netconf ssh parameter: %s", param))
+	}
 }
 
 // parseSecurityUsers parses user configuration

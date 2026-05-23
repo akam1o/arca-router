@@ -309,7 +309,9 @@ type NETCONFSecurityConfig struct {
 
 // NETCONFSSHConfig holds NETCONF SSH settings.
 type NETCONFSSHConfig struct {
-	Port int `json:"port,omitempty"`
+	Enabled       bool   `json:"enabled,omitempty"`
+	ListenAddress string `json:"listen-address,omitempty"`
+	Port          int    `json:"port,omitempty"`
 }
 
 // UserConfig represents a user account.

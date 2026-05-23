@@ -452,14 +452,7 @@ func TestBuildGRPCServerTLSConfigRejectsInsecureKeyPermissions(t *testing.T) {
 }
 
 func TestEffectiveNETCONFListenUsesFlagOverride(t *testing.T) {
-	cfg := model.NewRouterConfig()
-	cfg.Security = &model.SecurityConfig{
-		NETCONF: &model.NETCONFSecurityConfig{
-			SSH: &model.NETCONFSSHConfig{Port: 1830},
-		},
-	}
-
-	got := effectiveNETCONFListen(":2830", model.NewSnapshot(cfg, 1, "test", "test"))
+	got := effectiveNETCONFListen(":2830", nil)
 	if got != ":2830" {
 		t.Fatalf("effectiveNETCONFListen() = %q, want %q", got, ":2830")
 	}
@@ -520,19 +513,67 @@ func TestEffectiveNETCONFListenUsesConfigPort(t *testing.T) {
 	cfg := model.NewRouterConfig()
 	cfg.Security = &model.SecurityConfig{
 		NETCONF: &model.NETCONFSecurityConfig{
-			SSH: &model.NETCONFSSHConfig{Port: 1830},
+			SSH: &model.NETCONFSSHConfig{
+				Enabled: true,
+				Port:    1830,
+			},
 		},
 	}
 
 	got := effectiveNETCONFListen("", model.NewSnapshot(cfg, 1, "test", "test"))
-	if got != ":1830" {
-		t.Fatalf("effectiveNETCONFListen() = %q, want %q", got, ":1830")
+	if got != "127.0.0.1:1830" {
+		t.Fatalf("effectiveNETCONFListen() = %q, want %q", got, "127.0.0.1:1830")
 	}
 }
 
-func TestEffectiveNETCONFListenUsesDefault(t *testing.T) {
-	if got := effectiveNETCONFListen("", nil); got != ":830" {
-		t.Fatalf("effectiveNETCONFListen() = %q, want :830", got)
+func TestEffectiveNETCONFListenUsesConfigListenAddress(t *testing.T) {
+	cfg := model.NewRouterConfig()
+	cfg.Security = &model.SecurityConfig{
+		NETCONF: &model.NETCONFSecurityConfig{
+			SSH: &model.NETCONFSSHConfig{
+				Enabled:       true,
+				ListenAddress: "192.0.2.10",
+				Port:          1830,
+			},
+		},
+	}
+
+	got := effectiveNETCONFListen("", model.NewSnapshot(cfg, 1, "test", "test"))
+	if got != "192.0.2.10:1830" {
+		t.Fatalf("effectiveNETCONFListen() = %q, want %q", got, "192.0.2.10:1830")
+	}
+}
+
+func TestEffectiveNETCONFListenUsesEnabledDefault(t *testing.T) {
+	cfg := model.NewRouterConfig()
+	cfg.Security = &model.SecurityConfig{
+		NETCONF: &model.NETCONFSecurityConfig{
+			SSH: &model.NETCONFSSHConfig{Enabled: true},
+		},
+	}
+
+	got := effectiveNETCONFListen("", model.NewSnapshot(cfg, 1, "test", "test"))
+	if got != "127.0.0.1:830" {
+		t.Fatalf("effectiveNETCONFListen() = %q, want %q", got, "127.0.0.1:830")
+	}
+}
+
+func TestEffectiveNETCONFListenDisabledByDefault(t *testing.T) {
+	if got := effectiveNETCONFListen("", nil); got != "" {
+		t.Fatalf("effectiveNETCONFListen() = %q, want empty", got)
+	}
+}
+
+func TestEffectiveNETCONFListenIgnoresPortWhenDisabled(t *testing.T) {
+	cfg := model.NewRouterConfig()
+	cfg.Security = &model.SecurityConfig{
+		NETCONF: &model.NETCONFSecurityConfig{
+			SSH: &model.NETCONFSSHConfig{Port: 1830},
+		},
+	}
+
+	if got := effectiveNETCONFListen("", model.NewSnapshot(cfg, 1, "test", "test")); got != "" {
+		t.Fatalf("effectiveNETCONFListen() = %q, want empty", got)
 	}
 }
 

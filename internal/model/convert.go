@@ -230,7 +230,11 @@ func FromLegacyConfig(old *config.Config) *RouterConfig {
 		c.Security = &SecurityConfig{}
 		if old.Security.NETCONF != nil && old.Security.NETCONF.SSH != nil {
 			c.Security.NETCONF = &NETCONFSecurityConfig{
-				SSH: &NETCONFSSHConfig{Port: old.Security.NETCONF.SSH.Port},
+				SSH: &NETCONFSSHConfig{
+					Enabled:       old.Security.NETCONF.SSH.Enabled,
+					ListenAddress: old.Security.NETCONF.SSH.ListenAddress,
+					Port:          old.Security.NETCONF.SSH.Port,
+				},
 			}
 		}
 		if old.Security.Users != nil {
@@ -620,7 +624,9 @@ func (c *RouterConfig) ToLegacyConfig() *config.Config {
 			old.Security.NETCONF = &config.NETCONFConfig{}
 			if c.Security.NETCONF.SSH != nil {
 				old.Security.NETCONF.SSH = &config.NETCONFSSHConfig{
-					Port: c.Security.NETCONF.SSH.Port,
+					Enabled:       c.Security.NETCONF.SSH.Enabled,
+					ListenAddress: c.Security.NETCONF.SSH.ListenAddress,
+					Port:          c.Security.NETCONF.SSH.Port,
 				}
 			}
 		}

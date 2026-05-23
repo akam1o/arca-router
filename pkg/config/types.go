@@ -487,6 +487,12 @@ type NETCONFConfig struct {
 
 // NETCONFSSHConfig represents NETCONF SSH configuration
 type NETCONFSSHConfig struct {
+	// Enabled indicates whether the NETCONF/SSH service should be started
+	Enabled bool `json:"enabled,omitempty"`
+
+	// ListenAddress is the address to bind for NETCONF/SSH (default: 127.0.0.1)
+	ListenAddress string `json:"listen-address,omitempty"`
+
 	// Port is the TCP port for NETCONF/SSH (default: 830)
 	Port int `json:"port,omitempty"`
 }

@@ -15,6 +15,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"syscall"
@@ -46,7 +47,7 @@ var (
 	BuildDate = "unknown"
 )
 
-const defaultNETCONFListen = ":830"
+const defaultNETCONFPort = 830
 
 const (
 	secureGRPCSocketDirPerms  os.FileMode = 0750
@@ -165,7 +166,7 @@ func parseFlags() *daemonFlags {
 
 	// NETCONF flags
 	flag.StringVar(&f.netconfListen, "netconf-listen", "",
-		"NETCONF/SSH listen address (overrides security netconf ssh port; default: :830)")
+		"NETCONF/SSH listen address (overrides security netconf ssh listen-address/port and enables NETCONF)")
 	flag.BoolVar(&f.netconfXPath, "netconf-standard-xpath", true,
 		"Advertise the standard NETCONF :xpath capability (enabled by default; set false to suppress)")
 	flag.StringVar(&f.hostKeyPath, "host-key", "/var/lib/arca-router/ssh_host_ed25519_key",
@@ -416,7 +417,8 @@ func run(ctx context.Context, f *daemonFlags, log *logger.Logger) error {
 
 	// --- Step 8: Start NETCONF server ---
 	var netconfServer *netconf.SSHServer
-	if f.hostKeyPath != "" {
+	netconfListen := effectiveNETCONFListen(f.netconfListen, eng.RunningSnapshot())
+	if f.hostKeyPath != "" && netconfListen != "" {
 		netconfServer, err = startNETCONFServer(
 			ctx,
 			f,
@@ -424,7 +426,7 @@ func run(ctx context.Context, f *daemonFlags, log *logger.Logger) error {
 			eng,
 			newNETCONFOperationalStateProvider(vppPlugin, frrPlugin),
 			log,
-			effectiveNETCONFListen(f.netconfListen, eng.RunningSnapshot()),
+			netconfListen,
 		)
 		if err != nil {
 			return err
@@ -541,18 +543,27 @@ func effectiveNETCONFListen(flagValue string, snapshot *model.ConfigSnapshot) st
 	if listen := strings.TrimSpace(flagValue); listen != "" {
 		return listen
 	}
-	if port := snapshotNETCONFPort(snapshot); port != 0 {
-		return fmt.Sprintf(":%d", port)
+	ssh := snapshotNETCONFSSHConfig(snapshot)
+	if ssh == nil || !ssh.Enabled {
+		return ""
 	}
-	return defaultNETCONFListen
+	addr := strings.TrimSpace(ssh.ListenAddress)
+	if addr == "" {
+		addr = "127.0.0.1"
+	}
+	port := ssh.Port
+	if port == 0 {
+		port = defaultNETCONFPort
+	}
+	return net.JoinHostPort(addr, strconv.Itoa(port))
 }
 
-func snapshotNETCONFPort(snapshot *model.ConfigSnapshot) int {
+func snapshotNETCONFSSHConfig(snapshot *model.ConfigSnapshot) *model.NETCONFSSHConfig {
 	if snapshot == nil || snapshot.Config == nil || snapshot.Config.Security == nil ||
 		snapshot.Config.Security.NETCONF == nil || snapshot.Config.Security.NETCONF.SSH == nil {
-		return 0
+		return nil
 	}
-	return snapshot.Config.Security.NETCONF.SSH.Port
+	return snapshot.Config.Security.NETCONF.SSH
 }
 
 func startNETCONFServer(
