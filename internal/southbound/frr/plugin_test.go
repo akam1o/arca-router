@@ -724,6 +724,55 @@ func TestRollbackUsesFileBackendAfterFileFallback(t *testing.T) {
 	}
 }
 
+func TestApplyChangesRecordsRollbackBeforeApplyFailure(t *testing.T) {
+	newCfg := model.NewRouterConfig()
+	newCfg.Routing = &model.RoutingConfig{StaticRoutes: []*model.StaticRoute{
+		{Prefix: "203.0.113.0/24", NextHop: "192.0.2.1"},
+	}}
+	diff := engine.ComputeDiff(model.NewRouterConfig(), newCfg)
+	applier := &failOnceApplier{err: errors.New("apply failed")}
+	plugin := NewFRRPlugin(testLogger())
+	plugin.applier = applier
+
+	err := plugin.ApplyChanges(context.Background(), diff)
+	if err == nil {
+		t.Fatal("ApplyChanges() error = nil, want apply failure")
+	}
+	if !plugin.hasRollbackConfig {
+		t.Fatal("ApplyChanges() did not record rollback state before returning apply failure")
+	}
+
+	if err := plugin.RollbackChanges(context.Background(), diff); err != nil {
+		t.Fatalf("RollbackChanges() error = %v", err)
+	}
+	if applier.calls != 2 {
+		t.Fatalf("ApplyConfig calls = %d, want failed apply plus rollback", applier.calls)
+	}
+	if got := applier.configs[1]; got != plugin.currentConfig {
+		t.Fatalf("rollback config content = %q, want currentConfig %q", got, plugin.currentConfig)
+	}
+}
+
+func TestRollbackChangesAllowsEmptyRollbackConfig(t *testing.T) {
+	applier := &recordingApplier{}
+	plugin := NewFRRPlugin(testLogger())
+	plugin.applier = applier
+	plugin.rollbackConfig = ""
+	plugin.rollbackFRRConfig = &pkgfrr.Config{}
+	plugin.rollbackApplyMode = pkgfrr.BackendModeTransactional
+	plugin.hasRollbackConfig = true
+
+	if err := plugin.RollbackChanges(context.Background(), nil); err != nil {
+		t.Fatalf("RollbackChanges() error = %v", err)
+	}
+	if applier.calls != 1 {
+		t.Fatalf("ApplyConfig calls = %d, want 1", applier.calls)
+	}
+	if applier.configContent != "" {
+		t.Fatalf("rollback config content = %q, want empty config", applier.configContent)
+	}
+}
+
 func TestApplyChangesUsesConfiguredFileBackend(t *testing.T) {
 	newCfg := model.NewRouterConfig()
 	newCfg.Routing = &model.RoutingConfig{StaticRoutes: []*model.StaticRoute{
@@ -1010,6 +1059,27 @@ func (a *recordingApplier) ApplyConfig(ctx context.Context, configContent string
 	a.calls++
 	a.configContent = configContent
 	a.cfg = cfg
+	return nil
+}
+
+type failOnceApplier struct {
+	err           error
+	configContent string
+	cfg           *pkgfrr.Config
+	calls         int
+	configs       []string
+}
+
+func (a *failOnceApplier) ApplyConfig(ctx context.Context, configContent string, cfg *pkgfrr.Config) error {
+	a.calls++
+	a.configContent = configContent
+	a.cfg = cfg
+	a.configs = append(a.configs, configContent)
+	if a.err != nil {
+		err := a.err
+		a.err = nil
+		return err
+	}
 	return nil
 }
 

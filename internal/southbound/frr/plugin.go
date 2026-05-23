@@ -30,6 +30,7 @@ type FRRPlugin struct {
 
 	currentConfig     string
 	rollbackConfig    string
+	hasRollbackConfig bool
 	currentFRRConfig  *pkgfrr.Config
 	rollbackFRRConfig *pkgfrr.Config
 	currentApplyMode  pkgfrr.BackendMode
@@ -170,6 +171,7 @@ func (p *FRRPlugin) ApplyChanges(ctx context.Context, diff *engine.ConfigDiff) e
 	previousConfig := p.currentConfig
 	previousFRRConfig := p.currentFRRConfig
 	previousApplyMode := p.currentApplyMode
+	hasRollbackConfig := previousConfig != "" || previousFRRConfig != nil
 	if previousApplyMode == "" {
 		previousApplyMode = p.mode
 	}
@@ -178,8 +180,14 @@ func (p *FRRPlugin) ApplyChanges(ctx context.Context, diff *engine.ConfigDiff) e
 			previousConfig = oldConfigContent
 			previousFRRConfig = oldFRRConfig
 			previousApplyMode = p.applyModeForConfig(oldFRRConfig)
+			hasRollbackConfig = true
 		}
 	}
+
+	p.rollbackConfig = previousConfig
+	p.rollbackFRRConfig = previousFRRConfig
+	p.rollbackApplyMode = previousApplyMode
+	p.hasRollbackConfig = hasRollbackConfig
 
 	applier, applyMode := p.applierForConfig(frrConfig)
 	applied := false
@@ -198,9 +206,6 @@ func (p *FRRPlugin) ApplyChanges(ctx context.Context, diff *engine.ConfigDiff) e
 		}
 	}
 
-	p.rollbackConfig = previousConfig
-	p.rollbackFRRConfig = previousFRRConfig
-	p.rollbackApplyMode = previousApplyMode
 	p.currentConfig = configContent
 	p.currentFRRConfig = frrConfig
 	p.currentApplyMode = applyMode
@@ -253,14 +258,10 @@ func (p *FRRPlugin) RollbackChanges(ctx context.Context, diff *engine.ConfigDiff
 	p.mu.Lock()
 	defer p.mu.Unlock()
 
-	if p.rollbackConfig == "" {
-		p.log.Warn("No previous FRR config for rollback")
-		return nil
-	}
-
 	rollbackConfig := p.rollbackConfig
 	rollbackFRRConfig := p.rollbackFRRConfig
 	rollbackApplyMode := p.rollbackApplyMode
+	hasRollbackConfig := p.hasRollbackConfig
 	if rollbackFRRConfig == nil && diff != nil && diff.OldConfig != nil {
 		if oldFRRConfig, oldConfigContent, oldErr := generateFRRArtifacts(diff.OldConfig); oldErr == nil {
 			rollbackFRRConfig = oldFRRConfig
@@ -270,7 +271,12 @@ func (p *FRRPlugin) RollbackChanges(ctx context.Context, diff *engine.ConfigDiff
 			if rollbackApplyMode == "" {
 				rollbackApplyMode = p.applyModeForConfig(oldFRRConfig)
 			}
+			hasRollbackConfig = true
 		}
+	}
+	if !hasRollbackConfig {
+		p.log.Warn("No previous FRR config for rollback")
+		return nil
 	}
 
 	applier, applyMode := p.applierForRollback(rollbackFRRConfig, rollbackApplyMode)
