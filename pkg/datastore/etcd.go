@@ -99,6 +99,12 @@ func NewEtcdDatastore(cfg *Config) (Datastore, error) {
 		prefix:    prefix,
 		timeout:   timeout,
 	}
+	if err := ds.ensureCommitHistoryIndex(ctx); err != nil {
+		if closeErr := client.Close(); closeErr != nil {
+			_ = closeErr
+		}
+		return nil, fmt.Errorf("ensure commit history index: %w", err)
+	}
 
 	return ds, nil
 }

@@ -2,6 +2,8 @@ package datastore
 
 import (
 	"encoding/json"
+	"sort"
+	"strings"
 	"testing"
 	"time"
 
@@ -70,7 +72,77 @@ func TestEtcdCommitHistoryFiltersBeforeOffsetAndLimit(t *testing.T) {
 	}
 }
 
-func etcdCommitHistoryKV(t *testing.T, key string, entry commitEntry) *mvccpb.KeyValue {
+func TestEtcdCommitHistoryIndexKeysSortNewestFirst(t *testing.T) {
+	ds := &etcdDatastore{prefix: "/arca/"}
+	base := time.Date(2026, 5, 23, 12, 0, 0, 0, time.UTC)
+
+	keys := []string{
+		ds.commitHistoryIndexKey(commitEntry{CommitID: "old", Timestamp: base}),
+		ds.commitHistoryIndexKey(commitEntry{CommitID: "new", Timestamp: base.Add(2 * time.Minute)}),
+		ds.commitHistoryIndexKey(commitEntry{CommitID: "middle", Timestamp: base.Add(time.Minute)}),
+	}
+	sort.Strings(keys)
+
+	if !strings.HasSuffix(keys[0], "/new") || !strings.HasSuffix(keys[1], "/middle") || !strings.HasSuffix(keys[2], "/old") {
+		t.Fatalf("sorted index keys = %v, want newest to oldest", keys)
+	}
+}
+
+func TestEtcdCommitHistoryEntryFromIndexedKVAppliesFilters(t *testing.T) {
+	base := time.Date(2026, 5, 23, 12, 0, 0, 0, time.UTC)
+	kv := etcdCommitHistoryKV(t, "/arca/commit-history/index/alice", commitEntry{
+		CommitID:   "alice-new",
+		User:       "alice",
+		Timestamp:  base.Add(time.Minute),
+		IsRollback: false,
+	})
+
+	entry, ok := commitHistoryEntryFromEtcdKV(kv, &HistoryOptions{
+		User:             "alice",
+		StartTime:        base,
+		EndTime:          base.Add(2 * time.Minute),
+		ExcludeRollbacks: true,
+	})
+	if !ok || entry.CommitID != "alice-new" {
+		t.Fatalf("commitHistoryEntryFromEtcdKV() = %#v, %v; want alice-new", entry, ok)
+	}
+
+	if _, ok := commitHistoryEntryFromEtcdKV(kv, &HistoryOptions{User: "bob"}); ok {
+		t.Fatal("commitHistoryEntryFromEtcdKV() matched wrong user")
+	}
+}
+
+func BenchmarkEtcdCommitHistoryIndexedPageFiltering(b *testing.B) {
+	base := time.Date(2026, 5, 23, 12, 0, 0, 0, time.UTC)
+	kvs := make([]*mvccpb.KeyValue, 1000)
+	for i := range kvs {
+		user := "alice"
+		if i%2 == 0 {
+			user = "bob"
+		}
+		kvs[i] = etcdCommitHistoryKV(b, "/arca/commit-history/index", commitEntry{
+			CommitID:  "commit",
+			User:      user,
+			Timestamp: base.Add(time.Duration(i) * time.Second),
+		})
+	}
+	opts := &HistoryOptions{User: "alice"}
+
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		matches := 0
+		for _, kv := range kvs {
+			if _, ok := commitHistoryEntryFromEtcdKV(kv, opts); ok {
+				matches++
+			}
+		}
+		if matches == 0 {
+			b.Fatal("expected indexed history matches")
+		}
+	}
+}
+
+func etcdCommitHistoryKV(t testing.TB, key string, entry commitEntry) *mvccpb.KeyValue {
 	t.Helper()
 	data, err := json.Marshal(entry)
 	if err != nil {
