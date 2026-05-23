@@ -185,7 +185,7 @@ func parseFlags() *daemonFlags {
 	flag.StringVar(&f.grpcClientID, "grpc-client-identity", "",
 		"Comma-separated allowed gRPC client certificate identities (URI, CN, DNS, or email)")
 	flag.StringVar(&f.grpcClientRole, "grpc-client-role", "",
-		"Comma-separated gRPC client certificate identity=role mappings for method-level RBAC")
+		"Comma-separated gRPC client certificate identity=role mappings for method-level RBAC (required with --grpc-listen)")
 	flag.StringVar(&f.metricsListen, "metrics-listen", "",
 		"Prometheus metrics listen address (overrides system services prometheus config; disabled when empty and config disabled)")
 	flag.StringVar(&f.webListen, "web-listen", "",
@@ -636,12 +636,13 @@ func buildGRPCServerOptions(f *daemonFlags) ([]googlegrpc.ServerOption, error) {
 	if err != nil {
 		return nil, fmt.Errorf("parse gRPC client roles: %w", err)
 	}
-	if len(clientRoles) > 0 {
-		opts = append(opts,
-			googlegrpc.UnaryInterceptor(nbgrpc.NewTLSClientRoleUnaryInterceptor(clientRoles)),
-			googlegrpc.StreamInterceptor(nbgrpc.NewTLSClientRoleStreamInterceptor(clientRoles)),
-		)
+	if len(clientRoles) == 0 {
+		return nil, fmt.Errorf("--grpc-listen requires --grpc-client-role for gRPC authorization")
 	}
+	opts = append(opts,
+		googlegrpc.UnaryInterceptor(nbgrpc.NewTLSClientRoleUnaryInterceptor(clientRoles)),
+		googlegrpc.StreamInterceptor(nbgrpc.NewTLSClientRoleStreamInterceptor(clientRoles)),
+	)
 	return opts, nil
 }
 

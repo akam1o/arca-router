@@ -98,7 +98,7 @@ func isValidGRPCRole(role string) bool {
 }
 
 // NewTLSClientRoleUnaryInterceptor enforces method-level RBAC for TLS-authenticated
-// gRPC clients when role mappings are configured.
+// gRPC clients.
 func NewTLSClientRoleUnaryInterceptor(roles map[string]string) googlegrpc.UnaryServerInterceptor {
 	authorizer := internalauth.NewAuthorizer()
 	return func(ctx context.Context, req any, info *googlegrpc.UnaryServerInfo, handler googlegrpc.UnaryHandler) (any, error) {
@@ -110,7 +110,7 @@ func NewTLSClientRoleUnaryInterceptor(roles map[string]string) googlegrpc.UnaryS
 }
 
 // NewTLSClientRoleStreamInterceptor enforces method-level RBAC for streaming
-// gRPC methods when role mappings are configured.
+// gRPC methods.
 func NewTLSClientRoleStreamInterceptor(roles map[string]string) googlegrpc.StreamServerInterceptor {
 	authorizer := internalauth.NewAuthorizer()
 	return func(srv any, stream googlegrpc.ServerStream, info *googlegrpc.StreamServerInfo, handler googlegrpc.StreamHandler) error {
@@ -123,7 +123,7 @@ func NewTLSClientRoleStreamInterceptor(roles map[string]string) googlegrpc.Strea
 
 func authorizeGRPCMethod(ctx context.Context, method string, roles map[string]string, authorizer *internalauth.Authorizer) error {
 	if len(roles) == 0 {
-		return nil
+		return status.Error(codes.Unauthenticated, "gRPC client certificate role mapping is not configured")
 	}
 	operation, ok := grpcMethodOperations[method]
 	if !ok {

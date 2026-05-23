@@ -62,6 +62,27 @@ func TestTLSClientRoleUnaryInterceptorAllowsReadOnlyRead(t *testing.T) {
 	}
 }
 
+func TestTLSClientRoleUnaryInterceptorRejectsMissingRoleMappings(t *testing.T) {
+	interceptor := NewTLSClientRoleUnaryInterceptor(nil)
+	called := false
+
+	_, err := interceptor(
+		grpcAuthTestContext(t, grpcAuthTestCert{CommonName: "monitor"}),
+		nil,
+		&googlegrpc.UnaryServerInfo{FullMethod: "/arca.router.v1.ConfigService/GetRunning"},
+		func(context.Context, any) (any, error) {
+			called = true
+			return "ok", nil
+		},
+	)
+	if status.Code(err) != codes.Unauthenticated {
+		t.Fatalf("interceptor() status = %v, want Unauthenticated (err=%v)", status.Code(err), err)
+	}
+	if called {
+		t.Fatal("handler was called without role mappings")
+	}
+}
+
 func TestTLSClientRoleUnaryInterceptorRejectsReadOnlyWrite(t *testing.T) {
 	roles := map[string]string{"monitor": internalauth.RoleReadOnly}
 	interceptor := NewTLSClientRoleUnaryInterceptor(roles)

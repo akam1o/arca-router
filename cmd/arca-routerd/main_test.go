@@ -312,19 +312,19 @@ func TestBuildGRPCServerOptionsTCPRequiresClientCA(t *testing.T) {
 	}
 }
 
-func TestBuildGRPCServerOptionsTCPUsesTLSCredentials(t *testing.T) {
+func TestBuildGRPCServerOptionsTCPRequiresClientRole(t *testing.T) {
 	certFile, keyFile, caFile := writeTestCertificateFiles(t)
-	opts, err := buildGRPCServerOptions(&daemonFlags{
+	_, err := buildGRPCServerOptions(&daemonFlags{
 		grpcListen:   "127.0.0.1:0",
 		grpcTLSCert:  certFile,
 		grpcTLSKey:   keyFile,
 		grpcClientCA: caFile,
 	})
-	if err != nil {
-		t.Fatalf("buildGRPCServerOptions() error = %v", err)
+	if err == nil {
+		t.Fatal("buildGRPCServerOptions() error = nil, want missing client role error")
 	}
-	if len(opts) != 1 {
-		t.Fatalf("buildGRPCServerOptions() returned %d options, want 1", len(opts))
+	if !strings.Contains(err.Error(), "--grpc-client-role") {
+		t.Fatalf("buildGRPCServerOptions() error = %v, want client role error", err)
 	}
 }
 
