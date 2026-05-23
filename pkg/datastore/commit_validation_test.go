@@ -41,3 +41,36 @@ func TestCommitRejectsNilRequest(t *testing.T) {
 		})
 	}
 }
+
+func TestAcquireLockRejectsNilRequest(t *testing.T) {
+	tests := []struct {
+		name        string
+		acquireLock func(context.Context, *LockRequest) error
+	}{
+		{
+			name: "sqlite",
+			acquireLock: func(ctx context.Context, req *LockRequest) error {
+				return (&sqliteDatastore{}).AcquireLock(ctx, req)
+			},
+		},
+		{
+			name: "etcd",
+			acquireLock: func(ctx context.Context, req *LockRequest) error {
+				return (&etcdDatastore{}).AcquireLock(ctx, req)
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := tt.acquireLock(context.Background(), nil)
+			if err == nil {
+				t.Fatal("AcquireLock() error = nil, want validation error")
+			}
+			var dsErr *Error
+			if !errors.As(err, &dsErr) || dsErr.Code != ErrCodeValidation {
+				t.Fatalf("AcquireLock() error = %v, want ErrCodeValidation", err)
+			}
+		})
+	}
+}

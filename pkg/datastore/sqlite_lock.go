@@ -9,8 +9,7 @@ import (
 
 // AcquireLock attempts to acquire the exclusive config lock for a specific target datastore.
 func (ds *sqliteDatastore) AcquireLock(ctx context.Context, req *LockRequest) error {
-	// Validate target
-	if err := ValidateLockTarget(req.Target); err != nil {
+	if err := validateLockRequest(req); err != nil {
 		return err
 	}
 
