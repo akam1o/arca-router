@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"go.etcd.io/etcd/api/v3/mvccpb"
 	clientv3 "go.etcd.io/etcd/client/v3"
 )
 
@@ -333,28 +334,21 @@ func (ds *etcdDatastore) ListCommitHistory(ctx context.Context, opts *HistoryOpt
 	normalizedOpts := normalizeHistoryOptions(opts)
 	opts = &normalizedOpts
 
-	// Get commits from etcd with server-side pagination
+	// Fetch all commit records before applying history pagination. Commit keys
+	// are UUIDs, so server-side key pagination cannot preserve timestamp order.
 	commitsPrefix := ds.key("commits") + "/"
-
-	// Build options for etcd Get request
-	getOpts := []clientv3.OpOption{
-		clientv3.WithPrefix(),
-		clientv3.WithSort(clientv3.SortByKey, clientv3.SortDescend),
-	}
-
-	// Apply a bounded server-side fetch limit and fetch extra entries to
-	// account for client-side filtering before truncating.
-	fetchLimit := int64(opts.Limit * 2)
-	getOpts = append(getOpts, clientv3.WithLimit(fetchLimit))
-
-	resp, err := ds.client.Get(ctx, commitsPrefix, getOpts...)
+	resp, err := ds.client.Get(ctx, commitsPrefix, clientv3.WithPrefix())
 	if err != nil {
 		return nil, NewError(ErrCodeInternal, "failed to list commits", err)
 	}
 
+	return commitHistoryEntriesFromEtcdKVs(resp.Kvs, opts), nil
+}
+
+func commitHistoryEntriesFromEtcdKVs(kvs []*mvccpb.KeyValue, opts *HistoryOptions) []*CommitHistoryEntry {
 	var entries []*CommitHistoryEntry
 
-	for _, kv := range resp.Kvs {
+	for _, kv := range kvs {
 		var entry commitEntry
 		if err := json.Unmarshal(kv.Value, &entry); err != nil {
 			// Skip malformed entries
@@ -397,7 +391,7 @@ func (ds *etcdDatastore) ListCommitHistory(ctx context.Context, opts *HistoryOpt
 	// Apply offset and limit
 	if opts.Offset > 0 {
 		if opts.Offset >= len(entries) {
-			return []*CommitHistoryEntry{}, nil
+			return []*CommitHistoryEntry{}
 		}
 		entries = entries[opts.Offset:]
 	}
@@ -405,7 +399,7 @@ func (ds *etcdDatastore) ListCommitHistory(ctx context.Context, opts *HistoryOpt
 		entries = entries[:opts.Limit]
 	}
 
-	return entries, nil
+	return entries
 }
 
 // GetCommit retrieves a specific commit by ID.
