@@ -2049,6 +2049,21 @@ func TestWebAuditEndpointRedactsInternalErrors(t *testing.T) {
 	requireWebJSONInternalError(t, rec, "audit backend", "secret table")
 }
 
+func TestWebIndexTemplateAssetLoaded(t *testing.T) {
+	if !strings.HasPrefix(webIndexHTML, "<!doctype html>") {
+		t.Fatalf("webIndexHTML prefix = %q, want doctype", webIndexHTML[:min(32, len(webIndexHTML))])
+	}
+	for _, want := range []string{
+		`id="config-editor"`,
+		`id="commit-config"`,
+		"/api/config/commit",
+	} {
+		if !strings.Contains(webIndexHTML, want) {
+			t.Fatalf("webIndexHTML missing %q", want)
+		}
+	}
+}
+
 func TestWebIndexEndpoint(t *testing.T) {
 	eng := engine.NewEngine(nil, slog.Default())
 	cfg := model.NewRouterConfig()
