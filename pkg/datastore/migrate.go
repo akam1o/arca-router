@@ -188,10 +188,16 @@ func (m *sqliteMigrationManager) createBackup(now time.Time) (string, error) {
 		return "", nil
 	}
 
-	// Check if source file exists
-	if _, err := os.Stat(m.dbPath); os.IsNotExist(err) {
-		// Database file doesn't exist yet (first run)
-		return "", nil
+	sourceInfo, err := os.Lstat(m.dbPath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			// Database file doesn't exist yet (first run)
+			return "", nil
+		}
+		return "", fmt.Errorf("failed to stat database file %s: %w", m.dbPath, err)
+	}
+	if err := validateSQLiteFileInfo(m.dbPath, sourceInfo); err != nil {
+		return "", err
 	}
 
 	// Create backup filename with timestamp
@@ -206,9 +212,12 @@ func (m *sqliteMigrationManager) createBackup(now time.Time) (string, error) {
 		return "", fmt.Errorf("failed to create database backup: %w", err)
 	}
 
-	// Set backup file permissions to 0600
-	if err := os.Chmod(backupPath, 0600); err != nil {
-		return "", fmt.Errorf("failed to set backup file permissions: %w", err)
+	backupFile, err := openSecureSQLiteFile(backupPath, "database backup file", false)
+	if err != nil {
+		return "", err
+	}
+	if err := backupFile.Close(); err != nil {
+		return "", fmt.Errorf("failed to close database backup file: %w", err)
 	}
 
 	return backupPath, nil
@@ -217,7 +226,7 @@ func (m *sqliteMigrationManager) createBackup(now time.Time) (string, error) {
 func (m *sqliteMigrationManager) availableBackupPath(timestamp string) (string, error) {
 	for attempt := 0; attempt < maxSQLiteBackupPathAttempts; attempt++ {
 		backupPath := sqliteBackupPath(m.dbPath, timestamp, attempt)
-		if _, err := os.Stat(backupPath); err == nil {
+		if _, err := os.Lstat(backupPath); err == nil {
 			continue
 		} else if os.IsNotExist(err) {
 			return backupPath, nil
