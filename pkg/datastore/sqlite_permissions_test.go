@@ -4,6 +4,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -43,6 +44,38 @@ func TestSQLiteDatastoreRejectsInsecureDatabaseDirectory(t *testing.T) {
 	}
 }
 
+func TestSQLiteDatastoreRejectsDSNPaths(t *testing.T) {
+	tests := []struct {
+		name   string
+		dbPath string
+	}{
+		{
+			name:   "query parameters",
+			dbPath: filepath.Join(t.TempDir(), "config.db") + "?cache=shared",
+		},
+		{
+			name:   "sqlite uri",
+			dbPath: "file:" + filepath.Join(t.TempDir(), "config.db") + "?mode=rwc",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ds, err := NewSQLiteDatastore(&Config{
+				Backend:    BackendSQLite,
+				SQLitePath: tt.dbPath,
+			})
+			if err == nil {
+				_ = ds.Close()
+				t.Fatal("NewSQLiteDatastore() error = nil, want SQLite path validation error")
+			}
+			if !strings.Contains(err.Error(), "filesystem path") {
+				t.Fatalf("NewSQLiteDatastore() error = %v, want filesystem path validation error", err)
+			}
+		})
+	}
+}
+
 func TestAcquireSQLiteProcessLockExcludesSecondOwner(t *testing.T) {
 	dbPath := filepath.Join(t.TempDir(), "config.db")
 	first, err := AcquireSQLiteProcessLock(dbPath)
@@ -72,6 +105,19 @@ func TestAcquireSQLiteProcessLockExcludesSecondOwner(t *testing.T) {
 		t.Fatalf("third Close() error = %v", err)
 	}
 	assertSQLiteFileMode(t, dbPath+".process.lock", secureSQLiteFilePerms)
+}
+
+func TestAcquireSQLiteProcessLockRejectsDSNPath(t *testing.T) {
+	dbPath := "file:" + filepath.Join(t.TempDir(), "config.db") + "?mode=rwc"
+
+	lock, err := AcquireSQLiteProcessLock(dbPath)
+	if err == nil {
+		_ = lock.Close()
+		t.Fatal("AcquireSQLiteProcessLock() error = nil, want SQLite path validation error")
+	}
+	if !strings.Contains(err.Error(), "filesystem path") {
+		t.Fatalf("AcquireSQLiteProcessLock() error = %v, want filesystem path validation error", err)
+	}
 }
 
 func assertSQLiteFileModeIfExists(t *testing.T, path string, want os.FileMode) {

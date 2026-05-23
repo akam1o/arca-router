@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"syscall"
 	"time"
@@ -44,6 +45,9 @@ func NewSQLiteDatastore(cfg *Config) (Datastore, error) {
 	dbPath := cfg.SQLitePath
 	if dbPath == "" {
 		dbPath = "/var/lib/arca-router/config.db"
+	}
+	if err := validateSQLitePath(dbPath); err != nil {
+		return nil, err
 	}
 
 	// Create directory if it doesn't exist
@@ -124,6 +128,9 @@ func AcquireSQLiteProcessLock(dbPath string) (*ProcessLock, error) {
 	if dbPath == "" {
 		dbPath = "/var/lib/arca-router/config.db"
 	}
+	if err := validateSQLitePath(dbPath); err != nil {
+		return nil, err
+	}
 	if dbPath == ":memory:" {
 		return &ProcessLock{}, nil
 	}
@@ -162,6 +169,17 @@ func AcquireSQLiteProcessLock(dbPath string) (*ProcessLock, error) {
 		return nil, fmt.Errorf("failed to write datastore process lock: %w", err)
 	}
 	return &ProcessLock{file: file}, nil
+}
+
+func validateSQLitePath(dbPath string) error {
+	if dbPath == "" || dbPath == ":memory:" {
+		return nil
+	}
+	lowerPath := strings.ToLower(dbPath)
+	if strings.HasPrefix(lowerPath, "file:") || strings.Contains(dbPath, "?") {
+		return fmt.Errorf("sqlite path must be a filesystem path without URI parameters")
+	}
+	return nil
 }
 
 // Close releases the process lock.
