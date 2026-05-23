@@ -10,6 +10,7 @@ import (
 	"encoding/xml"
 	"errors"
 	"fmt"
+	"io"
 	"net"
 	"os"
 	"path/filepath"
@@ -164,6 +165,11 @@ func ensureHostKeyFilePermissions(path string) error {
 		return nil
 	} else if errors.Is(err, os.ErrNotExist) {
 		return nil
+	} else {
+		var permErr *auth.KeyPermissionError
+		if !errors.As(err, &permErr) {
+			return err
+		}
 	}
 
 	if err := os.Chmod(path, auth.ExpectedKeyFilePerms); err != nil {
@@ -680,6 +686,9 @@ func loadOrGenerateHostKey(path string, log *logger.Logger) (ssh.Signer, error) 
 		log.Info("Loaded existing host key", "path", path)
 		return signer, nil
 	}
+	if !errors.Is(err, os.ErrNotExist) {
+		return nil, fmt.Errorf("failed to read host key: %w", err)
+	}
 
 	// Generate new key
 	log.Info("Generating new ED25519 host key", "path", path)
@@ -707,13 +716,41 @@ func loadOrGenerateHostKey(path string, log *logger.Logger) (ssh.Signer, error) 
 		return nil, fmt.Errorf("failed to create directory: %w", err)
 	}
 
-	// Write key file with restricted permissions
-	if err := os.WriteFile(path, pem.EncodeToMemory(pemBytes), 0600); err != nil {
+	// Write key file with restricted permissions.
+	if err := writeHostKeyFile(path, pem.EncodeToMemory(pemBytes)); err != nil {
 		return nil, fmt.Errorf("failed to write host key: %w", err)
 	}
 
 	log.Info("Generated and saved new host key", "path", path)
 	return signer, nil
+}
+
+func writeHostKeyFile(path string, data []byte) error {
+	file, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, auth.ExpectedKeyFilePerms)
+	if err != nil {
+		return err
+	}
+	removeOnError := true
+	defer func() {
+		if removeOnError {
+			_ = os.Remove(path)
+		}
+	}()
+
+	n, err := file.Write(data)
+	if err != nil {
+		_ = file.Close()
+		return err
+	}
+	if n != len(data) {
+		_ = file.Close()
+		return io.ErrShortWrite
+	}
+	if err := file.Close(); err != nil {
+		return err
+	}
+	removeOnError = false
+	return nil
 }
 
 // ServerMetrics contains server health and performance metrics

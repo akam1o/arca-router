@@ -272,6 +272,68 @@ func TestNewSSHServerRestrictsExistingHostKeyPermissions(t *testing.T) {
 	}
 }
 
+func TestNewSSHServerRejectsSymlinkHostKeyWithoutChmodTarget(t *testing.T) {
+	cfg, _ := testSSHServerConfig(t, "127.0.0.1:0")
+	targetPath := filepath.Join(filepath.Dir(cfg.HostKeyPath), "target-key")
+
+	if err := os.WriteFile(targetPath, []byte("not-a-host-key"), 0o644); err != nil {
+		t.Fatalf("WriteFile(%s) error = %v", targetPath, err)
+	}
+	if err := os.Chmod(targetPath, 0o644); err != nil {
+		t.Fatalf("Chmod(%s) error = %v", targetPath, err)
+	}
+	if err := os.Symlink(targetPath, cfg.HostKeyPath); err != nil {
+		t.Skipf("symlink not supported: %v", err)
+	}
+
+	server, err := NewSSHServer(cfg)
+	if err == nil {
+		_ = server.Stop()
+		t.Fatal("NewSSHServer() error = nil, want symlink host key rejection")
+	}
+	if !strings.Contains(err.Error(), "symbolic link") {
+		t.Fatalf("NewSSHServer() error = %v, want symbolic link rejection", err)
+	}
+
+	info, statErr := os.Stat(targetPath)
+	if statErr != nil {
+		t.Fatalf("Stat(%s) error = %v", targetPath, statErr)
+	}
+	if got := info.Mode().Perm(); got != 0o644 {
+		t.Fatalf("target key mode = %04o, want unchanged 0644", got)
+	}
+}
+
+func TestWriteHostKeyFileRejectsExistingSymlink(t *testing.T) {
+	dir := t.TempDir()
+	targetPath := filepath.Join(dir, "target-key")
+	linkPath := filepath.Join(dir, "ssh_host_ed25519_key")
+	original := []byte("existing-key-data")
+
+	if err := os.WriteFile(targetPath, original, 0o600); err != nil {
+		t.Fatalf("WriteFile(%s) error = %v", targetPath, err)
+	}
+	if err := os.Symlink(targetPath, linkPath); err != nil {
+		t.Skipf("symlink not supported: %v", err)
+	}
+
+	err := writeHostKeyFile(linkPath, []byte("replacement-key-data"))
+	if err == nil {
+		t.Fatal("writeHostKeyFile() error = nil, want existing symlink rejection")
+	}
+
+	got, readErr := os.ReadFile(targetPath)
+	if readErr != nil {
+		t.Fatalf("ReadFile(%s) error = %v", targetPath, readErr)
+	}
+	if string(got) != string(original) {
+		t.Fatalf("target key content = %q, want unchanged %q", got, original)
+	}
+	if _, statErr := os.Lstat(linkPath); statErr != nil {
+		t.Fatalf("Lstat(%s) error = %v, want symlink preserved", linkPath, statErr)
+	}
+}
+
 func TestNewSSHServerCanDisableStandardXPath(t *testing.T) {
 	cfg, _ := testSSHServerConfig(t, "127.0.0.1:0")
 	cfg.DisableStandardXPath = true
