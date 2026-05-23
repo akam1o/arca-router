@@ -605,7 +605,7 @@ func TestBuildGRPCServerTLSConfigRejectsInsecureKeyPermissions(t *testing.T) {
 	if err == nil {
 		t.Fatal("buildGRPCServerTLSConfig() error = nil, want key permission error")
 	}
-	if !strings.Contains(err.Error(), "validate gRPC TLS key permissions") {
+	if !strings.Contains(err.Error(), "load gRPC server cert/key") || !strings.Contains(err.Error(), "insecure permissions") {
 		t.Fatalf("buildGRPCServerTLSConfig() error = %v, want key permission validation error", err)
 	}
 }

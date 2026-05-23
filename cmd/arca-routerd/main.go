@@ -769,18 +769,7 @@ func buildGRPCServerTLSConfig(f *daemonFlags) (*tls.Config, error) {
 	if err != nil {
 		return nil, err
 	}
-	if err := auth.ValidateKeyFilePermissions(f.grpcTLSKey, 0, 0); err != nil {
-		return nil, fmt.Errorf("validate gRPC TLS key permissions: %w", err)
-	}
-	certPEM, err := os.ReadFile(f.grpcTLSCert)
-	if err != nil {
-		return nil, fmt.Errorf("read gRPC server cert: %w", err)
-	}
-	keyPEM, err := auth.ReadSecretFile(f.grpcTLSKey)
-	if err != nil {
-		return nil, fmt.Errorf("read gRPC TLS key: %w", err)
-	}
-	cert, err := tls.X509KeyPair(certPEM, keyPEM)
+	cert, err := auth.LoadX509KeyPair(f.grpcTLSCert, f.grpcTLSKey)
 	if err != nil {
 		return nil, fmt.Errorf("load gRPC server cert/key: %w", err)
 	}

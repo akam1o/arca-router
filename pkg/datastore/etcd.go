@@ -14,6 +14,7 @@ import (
 
 	clientv3 "go.etcd.io/etcd/client/v3"
 
+	"github.com/akam1o/arca-router/pkg/auth"
 	"github.com/akam1o/arca-router/pkg/security"
 )
 
@@ -132,7 +133,7 @@ func etcdEndpointUsesTLS(endpoint string) bool {
 // buildTLSConfig creates a TLS configuration from the provided TLSConfig.
 func buildTLSConfig(cfg *TLSConfig) (*tls.Config, error) {
 	// Load client certificate and key
-	cert, err := tls.LoadX509KeyPair(cfg.CertFile, cfg.KeyFile)
+	cert, err := auth.LoadX509KeyPair(cfg.CertFile, cfg.KeyFile)
 	if err != nil {
 		return nil, fmt.Errorf("failed to load client cert/key: %w", err)
 	}

@@ -1,6 +1,7 @@
 package auth
 
 import (
+	"crypto/tls"
 	"fmt"
 	"io"
 	"os"
@@ -138,6 +139,24 @@ func ReadSecretFile(path string) ([]byte, error) {
 	return readCheckedSecretFile(path, func(path string, info os.FileInfo) error {
 		return validateKeyFileInfo(path, info, 0, 0)
 	})
+}
+
+// LoadX509KeyPair loads a certificate and a private key after applying the
+// same private-key file validation used for other local secrets.
+func LoadX509KeyPair(certFile, keyFile string) (tls.Certificate, error) {
+	certPEM, err := os.ReadFile(certFile)
+	if err != nil {
+		return tls.Certificate{}, fmt.Errorf("read certificate file: %w", err)
+	}
+	keyPEM, err := ReadSecretFile(keyFile)
+	if err != nil {
+		return tls.Certificate{}, fmt.Errorf("read private key file: %w", err)
+	}
+	cert, err := tls.X509KeyPair(certPEM, keyPEM)
+	if err != nil {
+		return tls.Certificate{}, fmt.Errorf("parse certificate/key pair: %w", err)
+	}
+	return cert, nil
 }
 
 func readEnvSecretFile(path string) ([]byte, error) {

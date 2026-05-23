@@ -13,6 +13,7 @@ import (
 	"time"
 
 	apiv1 "github.com/akam1o/arca-router/api/v1"
+	"github.com/akam1o/arca-router/pkg/auth"
 	"github.com/akam1o/arca-router/pkg/security"
 	googlegrpc "google.golang.org/grpc"
 	"google.golang.org/grpc/connectivity"
@@ -99,7 +100,7 @@ func buildClientTLSConfig(opts TLSClientOptions) (*tls.Config, error) {
 		if clientCertFile == "" || clientKeyFile == "" {
 			return nil, fmt.Errorf("gRPC client TLS requires both client cert and key")
 		}
-		cert, err := tls.LoadX509KeyPair(clientCertFile, clientKeyFile)
+		cert, err := auth.LoadX509KeyPair(clientCertFile, clientKeyFile)
 		if err != nil {
 			return nil, fmt.Errorf("load gRPC client cert/key: %w", err)
 		}
