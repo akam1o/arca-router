@@ -1159,11 +1159,11 @@ func TestCheckVersionCompatibility(t *testing.T) {
 			wantErr: false,
 		},
 		{
-			name:        "version mismatch - major",
-			version:     "25.10.0",
+			name:        "version mismatch - newer release series",
+			version:     "25.02.0",
 			retval:      0,
 			wantErr:     true,
-			errContains: "incompatible",
+			errContains: "certified VPP versions: 24.10.x",
 		},
 		{
 			name:        "version mismatch - minor",
@@ -1266,8 +1266,8 @@ func TestVPPVersionCompatibilityMatrix(t *testing.T) {
 		})
 	}
 
-	if got := supportedVPPVersionList(); !strings.Contains(got, "24.10") {
-		t.Fatalf("supportedVPPVersionList() = %q, want 24.10", got)
+	if got := supportedVPPVersionList(); !strings.Contains(got, "24.10.x") {
+		t.Fatalf("supportedVPPVersionList() = %q, want 24.10.x", got)
 	}
 }
 

@@ -8,13 +8,13 @@
 
 ## Overview
 
-This document describes the compatibility verification between govpp (Go bindings for VPP) and VPP 24.10 for the arca-router project.
+This document describes the compatibility verification between govpp (Go bindings for VPP) and the certified VPP 24.10 release series for the arca-router project.
 
 ## Target Versions
 
 | Component | Version | Repository |
 |-----------|---------|------------|
-| **VPP** | 24.10 | https://github.com/FDio/vpp |
+| **VPP** | 24.10 release series | https://github.com/FDio/vpp |
 | **govpp** | v0.13.0 | https://github.com/FDio/govpp |
 | **Go** | 1.25.5+ | - |
 
@@ -103,11 +103,13 @@ To regenerate binapi (after VPP version update):
 
 The script uses VPP 24.10 `.api.json` files stored in `vpp-api-json/` directory.
 
+arca-router treats VPP support as a certified release-series matrix. The packaged dependency range is pinned to `>= 24.10` and `< 25.0`; support for VPP 25.x or later requires regenerating binapi from that release, updating `supportedVPPVersions`, and recording compatibility evidence before widening package metadata.
+
 ---
 
 ## Runtime Verification
 
-govpp compatibility should be verified in an environment where VPP 24.10 is installed and `/run/vpp/api.sock` is accessible by the test user.
+govpp compatibility should be verified in an environment where the VPP 24.10 release series is installed and `/run/vpp/api.sock` is accessible by the test user.
 
 **Verification Goals**:
 - Connect to VPP via socket (`/run/vpp/api.sock`)
@@ -164,8 +166,8 @@ Phase 2 Task 1.0 requirements:
 - [x] binapi source determined (VPP 24.10 `.api.json` files from `/usr/share/vpp/api`)
 - [x] binapi generation reproducibility established (`scripts/generate-binapi.sh`)
 - [ ] Binapi included in repository (requires VPP 24.10 environment to generate)
-- [ ] Runtime VPP compatibility verified in a VPP 24.10 environment
-- [ ] VPP API compatibility verified (requires VPP 24.10 environment to execute)
+- [ ] Runtime VPP compatibility verified in a VPP 24.10 release-series environment
+- [ ] VPP API compatibility verified (requires VPP 24.10 release-series environment to execute)
 - [x] Connection/disconnection logic covered by VPP client implementation review
 
 **Note**: Items marked as requiring VPP 24.10 environment will be completed during Task 1.3 implementation or in a VPP-enabled CI/CD environment.

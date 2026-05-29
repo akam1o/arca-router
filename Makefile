@@ -268,6 +268,10 @@ package-lint: ## Validate package metadata and current service expectations
 	fi
 	@grep -q 'observability/grafana/arca-routerd-dashboard.json' $(NFPM_CONFIG)
 	@grep -q '/usr/share/arca-router/grafana/arca-routerd-dashboard.json' $(NFPM_CONFIG)
+	@grep -Fq 'vpp < 25.0' $(NFPM_CONFIG)
+	@grep -Fq 'vpp (<< 25.0)' $(NFPM_CONFIG)
+	@grep -Fq 'vpp-plugin-core < 25.0' $(NFPM_CONFIG)
+	@grep -Fq 'vpp-plugin-core (<< 25.0)' $(NFPM_CONFIG)
 	@grep -q 'dst: /usr/bin/arca' $(NFPM_CONFIG)
 	@if grep -q 'dst: /usr/bin/arca-cli' $(NFPM_CONFIG); then \
 		echo "Error: package must not ship legacy arca-cli command"; \

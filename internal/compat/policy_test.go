@@ -46,8 +46,8 @@ func TestComponentMatrixIncludesDataplaneAndSchemaGuards(t *testing.T) {
 		t.Fatalf("NETCONF notes = %q/%q, want standard :xpath default and startup non-support policy",
 			byComponent["NETCONF"].Required, byComponent["NETCONF"].Notes)
 	}
-	if byComponent["VPP"].Supported != "24.10+" || byComponent["FRR"].Supported != "8.0+" {
-		t.Fatalf("support matrix VPP/FRR = %q/%q, want 24.10+/8.0+",
+	if byComponent["VPP"].Supported != "24.10 release series" || byComponent["FRR"].Supported != "8.0+" {
+		t.Fatalf("support matrix VPP/FRR = %q/%q, want 24.10 release series/8.0+",
 			byComponent["VPP"].Supported, byComponent["FRR"].Supported)
 	}
 }

@@ -43,7 +43,7 @@ Current capabilities:
 
 ### Required Software
 
-- **VPP 24.10+**: Vector Packet Processing framework
+- **VPP 24.10 release series**: Vector Packet Processing framework
   - See [VPP Setup Guide (Debian)](docs/vpp-setup-debian.md) and [VPP Setup Guide (RHEL9)](docs/vpp-setup-rhel9.md)
 
 - **FRR 8.0+**: Free Range Routing for dynamic routing protocols
@@ -56,7 +56,7 @@ Current capabilities:
 
 ## Quick Start
 
-Requires VPP 24.10+ and FRR 8.0+ with the standard arca-router FRR daemon set enabled.
+Requires the VPP 24.10 release series and FRR 8.0+ with the standard arca-router FRR daemon set enabled.
 
 ### 1. Install Prerequisites
 

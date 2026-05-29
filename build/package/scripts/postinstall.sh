@@ -43,7 +43,7 @@ if command -v systemctl >/dev/null 2>&1; then
     echo ""
     echo "Verifying VPP/FRR installation..."
     if ! systemctl list-unit-files 2>/dev/null | grep -q vpp.service; then
-        echo "WARNING: VPP service not found. arca-router requires VPP 24.10+"
+        echo "WARNING: VPP service not found. arca-router requires the VPP 24.10 release series"
         echo "Install VPP (Debian): https://packagecloud.io/fdio/2410"
         echo "Install VPP (RHEL): sudo dnf install vpp vpp-plugin-core"
     fi
@@ -81,7 +81,7 @@ if [ "$1" = "1" ]; then
     echo "ARCA Router v0.6 unified daemon has been installed."
     echo ""
     echo "Prerequisites:"
-    echo "- VPP 24.10+ with linux-cp plugin enabled"
+    echo "- VPP 24.10 release series with linux-cp plugin enabled"
     echo "- FRR 8.0+ (bgpd, ospfd, zebra, staticd, mgmtd, vrrpd, bfdd)"
     echo ""
     echo "Next steps:"

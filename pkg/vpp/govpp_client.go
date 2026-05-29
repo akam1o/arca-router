@@ -280,7 +280,7 @@ func (c *govppClient) checkVersionCompatibility() error {
 	}
 
 	if !isSupportedVPPVersion(major, minor) {
-		return fmt.Errorf("VPP version incompatible: got %d.%d, supported versions: %s (full version: %s)",
+		return fmt.Errorf("VPP version incompatible: got %d.%d, certified VPP versions: %s (full version: %s; regenerate binapi and update compatibility evidence before enabling newer VPP releases)",
 			major, minor, supportedVPPVersionList(), version)
 	}
 
@@ -299,7 +299,7 @@ func isSupportedVPPVersion(major, minor int) bool {
 func supportedVPPVersionList() string {
 	versions := make([]string, 0, len(supportedVPPVersions))
 	for _, supported := range supportedVPPVersions {
-		versions = append(versions, fmt.Sprintf("%d.%d", supported.Major, supported.Minor))
+		versions = append(versions, fmt.Sprintf("%d.%d.x", supported.Major, supported.Minor))
 	}
 	return strings.Join(versions, ", ")
 }
