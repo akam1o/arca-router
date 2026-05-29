@@ -9,6 +9,7 @@ import (
 	"crypto/x509/pkix"
 	"encoding/pem"
 	"errors"
+	"flag"
 	"log/slog"
 	"math/big"
 	"net"
@@ -506,6 +507,49 @@ func TestVPPClientOptionsFromFlagsAllowsDefaults(t *testing.T) {
 	}
 	if opts.StatsSocketPath != pkgvpp.DefaultStatsSocketPath() {
 		t.Fatalf("StatsSocketPath = %q, want %q", opts.StatsSocketPath, pkgvpp.DefaultStatsSocketPath())
+	}
+}
+
+func TestRegisterVPPFlagsUsesEnvironmentDefaults(t *testing.T) {
+	t.Setenv("VPP_API_SOCKET_PATH", "/env/vpp-api.sock")
+	t.Setenv("VPP_STATS_SOCKET_PATH", "/env/vpp-stats.sock")
+
+	flags := flag.NewFlagSet("test", flag.ContinueOnError)
+	f := &daemonFlags{}
+	registerVPPFlags(flags, f)
+	if err := flags.Parse(nil); err != nil {
+		t.Fatalf("Parse() error = %v", err)
+	}
+
+	opts := vppClientOptionsFromFlags(f)
+	if opts.SocketPath != "/env/vpp-api.sock" {
+		t.Fatalf("SocketPath = %q, want /env/vpp-api.sock", opts.SocketPath)
+	}
+	if opts.StatsSocketPath != "/env/vpp-stats.sock" {
+		t.Fatalf("StatsSocketPath = %q, want /env/vpp-stats.sock", opts.StatsSocketPath)
+	}
+}
+
+func TestRegisterVPPFlagsAllowsExplicitSocketOverrides(t *testing.T) {
+	t.Setenv("VPP_API_SOCKET_PATH", "/env/vpp-api.sock")
+	t.Setenv("VPP_STATS_SOCKET_PATH", "/env/vpp-stats.sock")
+
+	flags := flag.NewFlagSet("test", flag.ContinueOnError)
+	f := &daemonFlags{}
+	registerVPPFlags(flags, f)
+	if err := flags.Parse([]string{
+		"--vpp-api-socket=/flag/vpp-api.sock",
+		"--vpp-stats-socket=/flag/vpp-stats.sock",
+	}); err != nil {
+		t.Fatalf("Parse() error = %v", err)
+	}
+
+	opts := vppClientOptionsFromFlags(f)
+	if opts.SocketPath != "/flag/vpp-api.sock" {
+		t.Fatalf("SocketPath = %q, want /flag/vpp-api.sock", opts.SocketPath)
+	}
+	if opts.StatsSocketPath != "/flag/vpp-stats.sock" {
+		t.Fatalf("StatsSocketPath = %q, want /flag/vpp-stats.sock", opts.StatsSocketPath)
 	}
 }
 

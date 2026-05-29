@@ -170,10 +170,7 @@ func parseFlags() *daemonFlags {
 		"Print version information and exit")
 	flag.BoolVar(&f.mockVPP, "mock-vpp", false,
 		"Use mock VPP client for testing")
-	flag.StringVar(&f.vppAPISocket, "vpp-api-socket", pkgvpp.DefaultAPISocketPath,
-		"Path to VPP binary API socket")
-	flag.StringVar(&f.vppStatsSocket, "vpp-stats-socket", pkgvpp.DefaultStatsSocketPath(),
-		"Path to VPP stats socket")
+	registerVPPFlags(flag.CommandLine, f)
 
 	// NETCONF flags
 	flag.StringVar(&f.netconfListen, "netconf-listen", "",
@@ -213,6 +210,14 @@ func parseFlags() *daemonFlags {
 
 	flag.Parse()
 	return f
+}
+
+func registerVPPFlags(flags *flag.FlagSet, f *daemonFlags) {
+	defaults := pkgvpp.DefaultGovppClientOptions()
+	flags.StringVar(&f.vppAPISocket, "vpp-api-socket", defaults.SocketPath,
+		"Path to VPP binary API socket (or VPP_API_SOCKET_PATH)")
+	flags.StringVar(&f.vppStatsSocket, "vpp-stats-socket", defaults.StatsSocketPath,
+		"Path to VPP stats socket (or VPP_STATS_SOCKET_PATH)")
 }
 
 func parseLogLevel(level string) slog.Level {

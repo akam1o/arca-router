@@ -83,12 +83,25 @@ func DefaultStatsSocketPath() string {
 	return statsclient.DefaultSocketName
 }
 
+// DefaultGovppClientOptions returns the effective govpp defaults, including
+// environment socket overrides.
+func DefaultGovppClientOptions() GovppClientOptions {
+	return GovppClientOptions{
+		SocketPath:      socketPathFromEnv(apiSocketPathEnv, DefaultAPISocketPath),
+		StatsSocketPath: socketPathFromEnv(statsSocketPathEnv, DefaultStatsSocketPath()),
+	}
+}
+
+func socketPathFromEnv(name, fallback string) string {
+	if path := strings.TrimSpace(os.Getenv(name)); path != "" {
+		return path
+	}
+	return fallback
+}
+
 // NewGovppClient creates a new govpp-based VPP client
 func NewGovppClient() Client {
-	return NewGovppClientWithOptions(GovppClientOptions{
-		SocketPath:      os.Getenv(apiSocketPathEnv),
-		StatsSocketPath: os.Getenv(statsSocketPathEnv),
-	})
+	return NewGovppClientWithOptions(DefaultGovppClientOptions())
 }
 
 // NewGovppClientWithOptions creates a new govpp-based VPP client with explicit socket paths.
