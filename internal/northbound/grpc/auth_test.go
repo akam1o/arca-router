@@ -134,6 +134,38 @@ func TestTLSClientRoleUnaryInterceptorRejectsReadOnlyWrite(t *testing.T) {
 	}
 }
 
+func TestTLSClientRoleUnaryInterceptorRejectsReadOnlySensitiveConfigAccess(t *testing.T) {
+	roles := map[string]string{"monitor": internalauth.RoleReadOnly}
+	interceptor := NewTLSClientRoleUnaryInterceptor(roles)
+	methods := []string{
+		"/arca.router.v1.ConfigService/GetRunningUnredacted",
+		"/arca.router.v1.ConfigService/GetCandidate",
+		"/arca.router.v1.ConfigService/GetCommit",
+		"/arca.router.v1.SessionService/CreateSession",
+	}
+
+	for _, method := range methods {
+		t.Run(method, func(t *testing.T) {
+			called := false
+			_, err := interceptor(
+				grpcAuthTestContext(t, grpcAuthTestCert{CommonName: "monitor"}),
+				nil,
+				&googlegrpc.UnaryServerInfo{FullMethod: method},
+				func(context.Context, any) (any, error) {
+					called = true
+					return nil, nil
+				},
+			)
+			if status.Code(err) != codes.PermissionDenied {
+				t.Fatalf("interceptor() status = %v, want PermissionDenied (err=%v)", status.Code(err), err)
+			}
+			if called {
+				t.Fatal("handler was called for denied request")
+			}
+		})
+	}
+}
+
 func TestTLSClientRoleUnaryInterceptorAllowsOperatorWrite(t *testing.T) {
 	roles := map[string]string{"router-operator": internalauth.RoleOperator}
 	interceptor := NewTLSClientRoleUnaryInterceptor(roles)
@@ -148,6 +180,33 @@ func TestTLSClientRoleUnaryInterceptorAllowsOperatorWrite(t *testing.T) {
 	)
 	if err != nil {
 		t.Fatalf("interceptor() error = %v", err)
+	}
+}
+
+func TestTLSClientRoleUnaryInterceptorAllowsOperatorSensitiveConfigAccess(t *testing.T) {
+	roles := map[string]string{"router-operator": internalauth.RoleOperator}
+	interceptor := NewTLSClientRoleUnaryInterceptor(roles)
+	methods := []string{
+		"/arca.router.v1.ConfigService/GetRunningUnredacted",
+		"/arca.router.v1.ConfigService/GetCandidate",
+		"/arca.router.v1.ConfigService/GetCommit",
+		"/arca.router.v1.SessionService/CreateSession",
+	}
+
+	for _, method := range methods {
+		t.Run(method, func(t *testing.T) {
+			_, err := interceptor(
+				grpcAuthTestContext(t, grpcAuthTestCert{CommonName: "router-operator"}),
+				nil,
+				&googlegrpc.UnaryServerInfo{FullMethod: method},
+				func(context.Context, any) (any, error) {
+					return "ok", nil
+				},
+			)
+			if err != nil {
+				t.Fatalf("interceptor() error = %v", err)
+			}
+		})
 	}
 }
 

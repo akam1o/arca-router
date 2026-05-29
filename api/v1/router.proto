@@ -11,6 +11,9 @@ service ConfigService {
   // GetRunning returns the current running configuration.
   rpc GetRunning(GetRunningRequest) returns (GetRunningResponse);
 
+  // GetRunningUnredacted returns the current running configuration including secrets.
+  rpc GetRunningUnredacted(GetRunningRequest) returns (GetRunningResponse);
+
   // GetCandidate returns the candidate configuration for a session.
   rpc GetCandidate(GetCandidateRequest) returns (GetCandidateResponse);
 

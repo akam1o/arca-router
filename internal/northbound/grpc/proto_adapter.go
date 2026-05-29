@@ -36,6 +36,18 @@ func (a *configServiceAdapter) GetRunning(ctx context.Context, _ *apiv1.GetRunni
 	}, nil
 }
 
+func (a *configServiceAdapter) GetRunningUnredacted(ctx context.Context, _ *apiv1.GetRunningRequest) (*apiv1.GetRunningResponse, error) {
+	configText, version, err := a.server.GetRunningUnredacted(ctx)
+	if err != nil {
+		return nil, configEditStatusError(err)
+	}
+	return &apiv1.GetRunningResponse{
+		ConfigText: configText,
+		Version:    version,
+		CommitId:   a.server.latestRunningCommitID(ctx),
+	}, nil
+}
+
 func (a *configServiceAdapter) GetCandidate(ctx context.Context, req *apiv1.GetCandidateRequest) (*apiv1.GetCandidateResponse, error) {
 	configText, err := a.server.GetCandidate(ctx, req.GetSessionId())
 	if err != nil {

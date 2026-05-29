@@ -676,6 +676,22 @@ func TestGetRunningRedactsCredentialMaterial(t *testing.T) {
 	if strings.Count(text, "<redacted>") != 2 {
 		t.Fatalf("GetRunning() =\n%s\nwant two redacted markers", text)
 	}
+
+	unredacted, version, err := srv.GetRunningUnredacted(context.Background())
+	if err != nil {
+		t.Fatalf("GetRunningUnredacted() error = %v", err)
+	}
+	if version != 1 {
+		t.Fatalf("GetRunningUnredacted() version = %d, want 1", version)
+	}
+	for _, secret := range []string{"private-community", "$argon2id$"} {
+		if !strings.Contains(unredacted, secret) {
+			t.Fatalf("GetRunningUnredacted() missing %q:\n%s", secret, unredacted)
+		}
+	}
+	if strings.Contains(unredacted, "<redacted>") {
+		t.Fatalf("GetRunningUnredacted() unexpectedly redacted secrets:\n%s", unredacted)
+	}
 }
 
 func TestCommitUsesSessionUserForAudit(t *testing.T) {

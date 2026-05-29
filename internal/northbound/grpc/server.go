@@ -181,8 +181,7 @@ func (s *Server) GetRunning(ctx context.Context) (configText string, version uin
 }
 
 // GetRunningUnredacted returns the current running configuration including
-// credential material. It is intentionally not exposed through the public gRPC
-// protobuf service.
+// credential material.
 func (s *Server) GetRunningUnredacted(ctx context.Context) (configText string, version uint64, err error) {
 	return s.runningText(false)
 }

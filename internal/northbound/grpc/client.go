@@ -154,6 +154,17 @@ func (c *Client) GetRunning(ctx context.Context) (configText string, version uin
 	return resp.GetConfigText(), resp.GetVersion(), nil
 }
 
+// GetRunningUnredacted returns the running configuration including credential material.
+func (c *Client) GetRunningUnredacted(ctx context.Context) (configText string, version uint64, err error) {
+	ctx, cancel := contextWithDefaultTimeout(ctx)
+	defer cancel()
+	resp, err := c.config.GetRunningUnredacted(ctx, &apiv1.GetRunningRequest{})
+	if err != nil {
+		return "", 0, err
+	}
+	return resp.GetConfigText(), resp.GetVersion(), nil
+}
+
 // GetCandidate returns a session's candidate configuration text.
 func (c *Client) GetCandidate(ctx context.Context, sessionID string) (string, error) {
 	ctx, cancel := contextWithDefaultTimeout(ctx)

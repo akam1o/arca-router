@@ -19,17 +19,18 @@ import (
 const _ = grpc.SupportPackageIsVersion9
 
 const (
-	ConfigService_GetRunning_FullMethodName        = "/arca.router.v1.ConfigService/GetRunning"
-	ConfigService_GetCandidate_FullMethodName      = "/arca.router.v1.ConfigService/GetCandidate"
-	ConfigService_EditCandidate_FullMethodName     = "/arca.router.v1.ConfigService/EditCandidate"
-	ConfigService_ReplaceCandidate_FullMethodName  = "/arca.router.v1.ConfigService/ReplaceCandidate"
-	ConfigService_Commit_FullMethodName            = "/arca.router.v1.ConfigService/Commit"
-	ConfigService_ValidateCandidate_FullMethodName = "/arca.router.v1.ConfigService/ValidateCandidate"
-	ConfigService_Discard_FullMethodName           = "/arca.router.v1.ConfigService/Discard"
-	ConfigService_Rollback_FullMethodName          = "/arca.router.v1.ConfigService/Rollback"
-	ConfigService_Diff_FullMethodName              = "/arca.router.v1.ConfigService/Diff"
-	ConfigService_ListHistory_FullMethodName       = "/arca.router.v1.ConfigService/ListHistory"
-	ConfigService_GetCommit_FullMethodName         = "/arca.router.v1.ConfigService/GetCommit"
+	ConfigService_GetRunning_FullMethodName           = "/arca.router.v1.ConfigService/GetRunning"
+	ConfigService_GetRunningUnredacted_FullMethodName = "/arca.router.v1.ConfigService/GetRunningUnredacted"
+	ConfigService_GetCandidate_FullMethodName         = "/arca.router.v1.ConfigService/GetCandidate"
+	ConfigService_EditCandidate_FullMethodName        = "/arca.router.v1.ConfigService/EditCandidate"
+	ConfigService_ReplaceCandidate_FullMethodName     = "/arca.router.v1.ConfigService/ReplaceCandidate"
+	ConfigService_Commit_FullMethodName               = "/arca.router.v1.ConfigService/Commit"
+	ConfigService_ValidateCandidate_FullMethodName    = "/arca.router.v1.ConfigService/ValidateCandidate"
+	ConfigService_Discard_FullMethodName              = "/arca.router.v1.ConfigService/Discard"
+	ConfigService_Rollback_FullMethodName             = "/arca.router.v1.ConfigService/Rollback"
+	ConfigService_Diff_FullMethodName                 = "/arca.router.v1.ConfigService/Diff"
+	ConfigService_ListHistory_FullMethodName          = "/arca.router.v1.ConfigService/ListHistory"
+	ConfigService_GetCommit_FullMethodName            = "/arca.router.v1.ConfigService/GetCommit"
 )
 
 // ConfigServiceClient is the client API for ConfigService service.
@@ -42,6 +43,8 @@ const (
 type ConfigServiceClient interface {
 	// GetRunning returns the current running configuration.
 	GetRunning(ctx context.Context, in *GetRunningRequest, opts ...grpc.CallOption) (*GetRunningResponse, error)
+	// GetRunningUnredacted returns the current running configuration including secrets.
+	GetRunningUnredacted(ctx context.Context, in *GetRunningRequest, opts ...grpc.CallOption) (*GetRunningResponse, error)
 	// GetCandidate returns the candidate configuration for a session.
 	GetCandidate(ctx context.Context, in *GetCandidateRequest, opts ...grpc.CallOption) (*GetCandidateResponse, error)
 	// EditCandidate modifies the candidate configuration.
@@ -76,6 +79,16 @@ func (c *configServiceClient) GetRunning(ctx context.Context, in *GetRunningRequ
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(GetRunningResponse)
 	err := c.cc.Invoke(ctx, ConfigService_GetRunning_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *configServiceClient) GetRunningUnredacted(ctx context.Context, in *GetRunningRequest, opts ...grpc.CallOption) (*GetRunningResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(GetRunningResponse)
+	err := c.cc.Invoke(ctx, ConfigService_GetRunningUnredacted_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
 	}
@@ -192,6 +205,8 @@ func (c *configServiceClient) GetCommit(ctx context.Context, in *GetCommitReques
 type ConfigServiceServer interface {
 	// GetRunning returns the current running configuration.
 	GetRunning(context.Context, *GetRunningRequest) (*GetRunningResponse, error)
+	// GetRunningUnredacted returns the current running configuration including secrets.
+	GetRunningUnredacted(context.Context, *GetRunningRequest) (*GetRunningResponse, error)
 	// GetCandidate returns the candidate configuration for a session.
 	GetCandidate(context.Context, *GetCandidateRequest) (*GetCandidateResponse, error)
 	// EditCandidate modifies the candidate configuration.
@@ -224,6 +239,9 @@ type UnimplementedConfigServiceServer struct{}
 
 func (UnimplementedConfigServiceServer) GetRunning(context.Context, *GetRunningRequest) (*GetRunningResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method GetRunning not implemented")
+}
+func (UnimplementedConfigServiceServer) GetRunningUnredacted(context.Context, *GetRunningRequest) (*GetRunningResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method GetRunningUnredacted not implemented")
 }
 func (UnimplementedConfigServiceServer) GetCandidate(context.Context, *GetCandidateRequest) (*GetCandidateResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method GetCandidate not implemented")
@@ -290,6 +308,24 @@ func _ConfigService_GetRunning_Handler(srv interface{}, ctx context.Context, dec
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
 		return srv.(ConfigServiceServer).GetRunning(ctx, req.(*GetRunningRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _ConfigService_GetRunningUnredacted_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(GetRunningRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ConfigServiceServer).GetRunningUnredacted(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: ConfigService_GetRunningUnredacted_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ConfigServiceServer).GetRunningUnredacted(ctx, req.(*GetRunningRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
@@ -484,6 +520,10 @@ var ConfigService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "GetRunning",
 			Handler:    _ConfigService_GetRunning_Handler,
+		},
+		{
+			MethodName: "GetRunningUnredacted",
+			Handler:    _ConfigService_GetRunningUnredacted_Handler,
 		},
 		{
 			MethodName: "GetCandidate",
