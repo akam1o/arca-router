@@ -1281,6 +1281,39 @@ func TestWebEndpointFailsClosedWhenCachedAPITokenFilePermissionsChange(t *testin
 	requireWebAPITokenUnavailable(t, rec, tokenFile, "permissions")
 }
 
+func TestWebEndpointFailsClosedWhenCachedAPITokenPathBecomesSymlink(t *testing.T) {
+	dir := t.TempDir()
+	tokenFile := filepath.Join(dir, "tokens")
+	if err := os.WriteFile(tokenFile, []byte("robot:read-only:"+hashedWebAPITestToken(validWebAPITestToken)+"\n"), 0600); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+
+	source := newCachedWebAPITokenTestSource(t, tokenFile)
+	rec := requestWebStatusWithBearer(source, validWebAPITestToken)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status before symlink replacement = %d, want %d: %s", rec.Code, http.StatusOK, rec.Body.String())
+	}
+
+	targetFile := filepath.Join(dir, "tokens.target")
+	if err := os.Rename(tokenFile, targetFile); err != nil {
+		t.Fatalf("Rename() error = %v", err)
+	}
+	if err := os.Symlink(targetFile, tokenFile); err != nil {
+		t.Skipf("Symlink() not available: %v", err)
+	}
+
+	tokens, err := source.webAPITokenCache.tokensForRequest()
+	if err == nil {
+		t.Fatalf("tokensForRequest() = %#v, nil error; want symlink rejection", tokens)
+	}
+	if !strings.Contains(err.Error(), "symbolic link") {
+		t.Fatalf("tokensForRequest() error = %v, want symbolic link rejection", err)
+	}
+
+	rec = requestWebStatusWithBearer(source, validWebAPITestToken)
+	requireWebAPITokenUnavailable(t, rec, tokenFile)
+}
+
 func TestLoadWebAPITokensParsesHashedTokenNotAfter(t *testing.T) {
 	tokenFile := filepath.Join(t.TempDir(), "tokens")
 	notAfter := time.Now().UTC().Add(time.Hour).Truncate(time.Second)

@@ -79,6 +79,9 @@ func (c *webAPITokenCache) tokensForRequest() (map[string]webAPIToken, error) {
 		return nil, fmt.Errorf("stat token file %s: %w", c.path, err)
 	}
 	if sameWebAPITokenFile(c.fileInfo, info) {
+		if err := validateWebAPITokenFile(c.path); err != nil {
+			return nil, err
+		}
 		if c.loadErr != nil {
 			return nil, c.loadErr
 		}
@@ -112,8 +115,8 @@ func loadWebAPITokens(path string) (map[string]webAPIToken, error) {
 	if path == "" {
 		return nil, nil
 	}
-	if err := auth.ValidateKeyFilePermissions(path, 0, 0); err != nil {
-		return nil, fmt.Errorf("validate token file permissions: %w", err)
+	if err := validateWebAPITokenFile(path); err != nil {
+		return nil, err
 	}
 	data, err := auth.ReadSecretFile(path)
 	if err != nil {
@@ -143,6 +146,13 @@ func loadWebAPITokens(path string) (map[string]webAPIToken, error) {
 		return nil, fmt.Errorf("web API token file %s does not contain any tokens", path)
 	}
 	return tokens, nil
+}
+
+func validateWebAPITokenFile(path string) error {
+	if err := auth.ValidateKeyFilePermissions(path, 0, 0); err != nil {
+		return fmt.Errorf("validate token file permissions: %w", err)
+	}
+	return nil
 }
 
 func parseWebAPITokenLine(rawLine string, lineNo int) (webAPIToken, bool, error) {
