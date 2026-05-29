@@ -754,7 +754,7 @@ func validateSecurityUsers(users map[string]*UserConfig) error {
 
 func validSecurityUserRole(role string) bool {
 	switch role {
-	case "admin", "operator", "read-only":
+	case "", "admin", "operator", "read-only":
 		return true
 	default:
 		return false

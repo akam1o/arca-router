@@ -104,3 +104,20 @@ func TestAdvancedConfigConversionAndClone(t *testing.T) {
 		t.Fatalf("netconf ssh port = %d", got)
 	}
 }
+
+func TestSecurityUserWithoutRoleConvertsAndValidates(t *testing.T) {
+	text := `set security users user monitor ssh-key "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOMW3vXcGYNmJnPqF8pGdN6TuQvJJJqKJJJ5JJJJ5JJJ monitor@example.com"`
+	legacy, err := config.NewParser(strings.NewReader(text)).Parse()
+	if err != nil {
+		t.Fatalf("Parse() error = %v", err)
+	}
+
+	cfg := FromLegacyConfig(legacy)
+	if err := cfg.Validate(); err != nil {
+		t.Fatalf("Validate() error = %v", err)
+	}
+
+	if got := cfg.Security.Users["monitor"].Role; got != "" {
+		t.Fatalf("role = %q, want unset", got)
+	}
+}
