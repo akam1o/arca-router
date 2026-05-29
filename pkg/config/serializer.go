@@ -700,6 +700,8 @@ func writeSecurity(b *strings.Builder, sec *SecurityConfig, opts serializeOption
 		ssh := sec.NETCONF.SSH
 		if ssh.Enabled {
 			writeLine(b, "set security netconf ssh enabled true")
+		} else if ssh.EnabledSet {
+			writeLine(b, "set security netconf ssh enabled false")
 		}
 		if ssh.ListenAddress != "" {
 			writeLine(b, "set security netconf ssh listen-address %s", EscapeValue(ssh.ListenAddress))

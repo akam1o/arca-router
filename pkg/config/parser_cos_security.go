@@ -193,6 +193,7 @@ func (p *Parser) parseSecurityNETCONF(config *Config) error {
 			return err
 		}
 		ssh.Enabled = enabled
+		ssh.EnabledSet = true
 		return nil
 	case "listen-address":
 		if p.current.Type != TokenWord && p.current.Type != TokenString {

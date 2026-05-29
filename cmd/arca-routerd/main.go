@@ -673,7 +673,13 @@ func effectiveNETCONFListen(flagValue string, snapshot *model.ConfigSnapshot) st
 		return listen
 	}
 	ssh := snapshotNETCONFSSHConfig(snapshot)
-	if ssh == nil || !ssh.Enabled {
+	if ssh == nil {
+		return ""
+	}
+	if ssh.EnabledSet && !ssh.Enabled {
+		return ""
+	}
+	if !ssh.Enabled && strings.TrimSpace(ssh.ListenAddress) == "" && ssh.Port == 0 {
 		return ""
 	}
 	addr := strings.TrimSpace(ssh.ListenAddress)

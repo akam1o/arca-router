@@ -810,8 +810,7 @@ func TestEffectiveNETCONFListenUsesConfigPort(t *testing.T) {
 	cfg.Security = &model.SecurityConfig{
 		NETCONF: &model.NETCONFSecurityConfig{
 			SSH: &model.NETCONFSSHConfig{
-				Enabled: true,
-				Port:    1830,
+				Port: 1830,
 			},
 		},
 	}
@@ -844,7 +843,7 @@ func TestEffectiveNETCONFListenUsesEnabledDefault(t *testing.T) {
 	cfg := model.NewRouterConfig()
 	cfg.Security = &model.SecurityConfig{
 		NETCONF: &model.NETCONFSecurityConfig{
-			SSH: &model.NETCONFSSHConfig{Enabled: true},
+			SSH: &model.NETCONFSSHConfig{Enabled: true, EnabledSet: true},
 		},
 	}
 
@@ -864,8 +863,22 @@ func TestEffectiveNETCONFListenIgnoresPortWhenDisabled(t *testing.T) {
 	cfg := model.NewRouterConfig()
 	cfg.Security = &model.SecurityConfig{
 		NETCONF: &model.NETCONFSecurityConfig{
-			SSH: &model.NETCONFSSHConfig{Port: 1830},
+			SSH: &model.NETCONFSSHConfig{
+				EnabledSet: true,
+				Port:       1830,
+			},
 		},
+	}
+
+	if got := effectiveNETCONFListen("", model.NewSnapshot(cfg, 1, "test", "test")); got != "" {
+		t.Fatalf("effectiveNETCONFListen() = %q, want empty", got)
+	}
+}
+
+func TestEffectiveNETCONFListenIgnoresEmptySSHConfig(t *testing.T) {
+	cfg := model.NewRouterConfig()
+	cfg.Security = &model.SecurityConfig{
+		NETCONF: &model.NETCONFSecurityConfig{SSH: &model.NETCONFSSHConfig{}},
 	}
 
 	if got := effectiveNETCONFListen("", model.NewSnapshot(cfg, 1, "test", "test")); got != "" {

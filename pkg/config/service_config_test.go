@@ -38,6 +38,9 @@ func TestServiceConfigRoundTrip(t *testing.T) {
 	if !cfg.Security.NETCONF.SSH.Enabled {
 		t.Fatal("netconf ssh enabled = false, want true")
 	}
+	if !cfg.Security.NETCONF.SSH.EnabledSet {
+		t.Fatal("netconf ssh enabled set = false, want true")
+	}
 	if got := cfg.Security.NETCONF.SSH.ListenAddress; got != "127.0.0.1" {
 		t.Fatalf("netconf ssh listen-address = %q, want 127.0.0.1", got)
 	}
@@ -45,6 +48,32 @@ func TestServiceConfigRoundTrip(t *testing.T) {
 		t.Fatalf("netconf ssh port = %d", got)
 	}
 	assertSetCommandRoundTrip(t, cfg)
+}
+
+func TestNETCONFParserRecordsExplicitDisabled(t *testing.T) {
+	cfg := parseSetCommands(t,
+		"set security netconf ssh enabled false",
+		"set security netconf ssh port 1830",
+	)
+
+	if cfg.Security.NETCONF.SSH.Enabled {
+		t.Fatal("netconf ssh enabled = true, want false")
+	}
+	if !cfg.Security.NETCONF.SSH.EnabledSet {
+		t.Fatal("netconf ssh enabled set = false, want true")
+	}
+	assertSetCommandRoundTrip(t, cfg)
+}
+
+func TestNETCONFParserLeavesPortOnlyImplicit(t *testing.T) {
+	cfg := parseSetCommands(t, "set security netconf ssh port 1830")
+
+	if cfg.Security.NETCONF.SSH.EnabledSet {
+		t.Fatal("netconf ssh enabled set = true, want false")
+	}
+	if got := cfg.Security.NETCONF.SSH.Port; got != 1830 {
+		t.Fatalf("netconf ssh port = %d", got)
+	}
 }
 
 func TestNETCONFValidationRejectsInvalidListenAddress(t *testing.T) {

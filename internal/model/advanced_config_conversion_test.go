@@ -94,6 +94,9 @@ func TestAdvancedConfigConversionAndClone(t *testing.T) {
 	if !roundTrip.Security.NETCONF.SSH.Enabled {
 		t.Fatal("netconf ssh enabled = false, want true")
 	}
+	if !roundTrip.Security.NETCONF.SSH.EnabledSet {
+		t.Fatal("netconf ssh enabled set = false, want true")
+	}
 	if got := roundTrip.Security.NETCONF.SSH.ListenAddress; got != "127.0.0.1" {
 		t.Fatalf("netconf ssh listen-address = %q, want 127.0.0.1", got)
 	}

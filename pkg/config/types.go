@@ -490,6 +490,9 @@ type NETCONFSSHConfig struct {
 	// Enabled indicates whether the NETCONF/SSH service should be started
 	Enabled bool `json:"enabled,omitempty"`
 
+	// EnabledSet records whether enabled was explicitly configured.
+	EnabledSet bool `json:"-"`
+
 	// ListenAddress is the address to bind for NETCONF/SSH (default: 127.0.0.1)
 	ListenAddress string `json:"listen-address,omitempty"`
 
