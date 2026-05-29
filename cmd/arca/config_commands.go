@@ -18,7 +18,7 @@ func (sh *interactiveShell) cmdBackup(ctx context.Context, args []string) error 
 		if sh.mode == modeConfiguration {
 			text, err = sh.client.GetCandidate(ctx, sh.sessionID)
 		} else {
-			text, _, err = sh.client.GetRunning(ctx)
+			text, err = runningConfigurationBackupText(ctx, sh.client)
 		}
 		if err != nil {
 			return err
@@ -31,7 +31,7 @@ func (sh *interactiveShell) cmdBackup(ctx context.Context, args []string) error 
 		if err != nil {
 			return err
 		}
-		text, err := sh.archivedConfiguration(ctx, rollbackNum)
+		text, err := archivedConfigurationBackupText(ctx, sh.client, rollbackNum)
 		if err != nil {
 			return err
 		}
@@ -51,7 +51,7 @@ func (sh *interactiveShell) cmdRestore(ctx context.Context, args []string) error
 			return fmt.Errorf("read configuration backup: %w", err)
 		}
 		text := string(data)
-		if err := validateConfigurationText(text); err != nil {
+		if err := validateRestorableConfigurationText(text); err != nil {
 			return fmt.Errorf("validate configuration backup: %w", err)
 		}
 		if err := sh.client.ReplaceCandidate(ctx, sh.sessionID, text); err != nil {
@@ -65,11 +65,11 @@ func (sh *interactiveShell) cmdRestore(ctx context.Context, args []string) error
 		if err != nil {
 			return err
 		}
-		text, err := sh.archivedConfiguration(ctx, rollbackNum)
+		text, err := archivedConfigurationBackupText(ctx, sh.client, rollbackNum)
 		if err != nil {
 			return err
 		}
-		if err := validateConfigurationText(text); err != nil {
+		if err := validateRestorableConfigurationText(text); err != nil {
 			return fmt.Errorf("validate rollback configuration: %w", err)
 		}
 		if err := sh.client.ReplaceCandidate(ctx, sh.sessionID, text); err != nil {
@@ -93,6 +93,26 @@ func writeConfigBackupFile(path, text string) error {
 	return pkgconfig.WriteConfigBackupFile(path, text)
 }
 
+type unredactedRunningClient interface {
+	GetRunningUnredacted(context.Context) (string, uint64, error)
+}
+
+func runningConfigurationBackupText(ctx context.Context, client showClient) (string, error) {
+	if unredacted, ok := client.(unredactedRunningClient); ok {
+		text, _, err := unredacted.GetRunningUnredacted(ctx)
+		return text, err
+	}
+	text, _, err := client.GetRunning(ctx)
+	return text, err
+}
+
+func archivedConfigurationBackupText(ctx context.Context, client showClient, rollbackNum int) (string, error) {
+	if rollbackNum == 0 {
+		return runningConfigurationBackupText(ctx, client)
+	}
+	return archivedConfigurationText(ctx, client, rollbackNum)
+}
+
 func validateConfigurationText(text string) error {
 	cfg, err := pkgconfig.NewParser(strings.NewReader(text)).Parse()
 	if err != nil {
@@ -105,6 +125,13 @@ func validateConfigurationText(text string) error {
 		return fmt.Errorf("validate model: %w", err)
 	}
 	return nil
+}
+
+func validateRestorableConfigurationText(text string) error {
+	if pkgconfig.ContainsRedactedSecretValue(text) {
+		return fmt.Errorf("redacted configuration text cannot be restored")
+	}
+	return validateConfigurationText(text)
 }
 
 func (sh *interactiveShell) cmdSet(ctx context.Context, args []string) error {

@@ -151,6 +151,15 @@ func TestToSetCommandsRedactedWithErrorRedactsCredentials(t *testing.T) {
 	}
 }
 
+func TestContainsRedactedSecretValue(t *testing.T) {
+	if !ContainsRedactedSecretValue("set system services snmp community <redacted>\n") {
+		t.Fatal("ContainsRedactedSecretValue() = false, want true")
+	}
+	if ContainsRedactedSecretValue("set system host-name edge01\n") {
+		t.Fatal("ContainsRedactedSecretValue() = true, want false")
+	}
+}
+
 func TestEscapeValue(t *testing.T) {
 	got := EscapeValue("line \"one\"\nnext")
 	want := `"line \"one\"\nnext"`

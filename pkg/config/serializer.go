@@ -9,6 +9,12 @@ import (
 
 const redactedSecretValue = "<redacted>"
 
+// ContainsRedactedSecretValue reports whether serialized config text contains
+// the reserved marker used in place of credential material.
+func ContainsRedactedSecretValue(text string) bool {
+	return strings.Contains(text, redactedSecretValue)
+}
+
 type serializeOptions struct {
 	RedactSecrets bool
 }

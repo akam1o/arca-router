@@ -260,7 +260,7 @@ func oneShotBackup(ctx context.Context, client showClient, args []string) int {
 	var text, path string
 	var err error
 	if len(args) == 2 && args[0] == "configuration" {
-		text, _, err = client.GetRunning(ctx)
+		text, err = runningConfigurationBackupText(ctx, client)
 		path = args[1]
 	} else if len(args) == 4 && args[0] == "configuration" && args[1] == "rollback" {
 		rollbackNum, parseErr := parseRollbackNumber(args[2])
@@ -268,7 +268,7 @@ func oneShotBackup(ctx context.Context, client showClient, args []string) int {
 			fmt.Fprintf(os.Stderr, "Error: %v\n", parseErr)
 			return ExitUsageError
 		}
-		text, err = archivedConfigurationText(ctx, client, rollbackNum)
+		text, err = archivedConfigurationBackupText(ctx, client, rollbackNum)
 		path = args[3]
 	} else {
 		fmt.Fprintln(os.Stderr, "Error: usage: backup configuration [rollback <N>] <path>")

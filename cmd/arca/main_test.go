@@ -25,46 +25,47 @@ func TestDialGRPCRejectsTLSFlagsWithoutAddress(t *testing.T) {
 }
 
 type fakeInteractiveClient struct {
-	acquireLockErr   error
-	commitErr        error
-	discardErr       error
-	releaseLockErr   error
-	replaceErr       error
-	history          []grpcclient.CommitInfo
-	commitDetails    map[string]grpcclient.CommitInfo
-	listHistoryErr   error
-	getCommitErr     error
-	runningText      string
-	runningVersion   uint64
-	candidateText    string
-	routeText        string
-	routeProtocol    string
-	routeFamily      string
-	routePrefix      string
-	routeStateProto  string
-	routes           []grpcclient.RouteInfo
-	routingInstances []grpcclient.RoutingInstanceInfo
-	bgpNeighbors     []grpcclient.BGPNeighborInfo
-	bgpSummaryText   string
-	bgpNeighborText  string
-	ospfNeighbors    []grpcclient.OSPFNeighborInfo
-	ospfText         string
-	ospfFamily       string
-	vrrpText         string
-	bfdText          string
-	bfdInfo          *grpcclient.BFDStatusInfo
-	bfdPeerAddress   string
-	bfdBrief         bool
-	bfdCounters      bool
-	lcpInfo          *grpcclient.LCPReconciliationInfo
-	haInfo           *grpcclient.HAStatusInfo
-	cosInfo          *grpcclient.ClassOfServiceInfo
-	cosErr           error
-	telemetryCatalog grpcclient.TelemetryCatalog
-	telemetryEvents  []*grpcclient.TelemetryEvent
-	diffText         string
-	diffHasChanges   bool
-	diffErr          error
+	acquireLockErr        error
+	commitErr             error
+	discardErr            error
+	releaseLockErr        error
+	replaceErr            error
+	history               []grpcclient.CommitInfo
+	commitDetails         map[string]grpcclient.CommitInfo
+	listHistoryErr        error
+	getCommitErr          error
+	runningText           string
+	runningUnredactedText string
+	runningVersion        uint64
+	candidateText         string
+	routeText             string
+	routeProtocol         string
+	routeFamily           string
+	routePrefix           string
+	routeStateProto       string
+	routes                []grpcclient.RouteInfo
+	routingInstances      []grpcclient.RoutingInstanceInfo
+	bgpNeighbors          []grpcclient.BGPNeighborInfo
+	bgpSummaryText        string
+	bgpNeighborText       string
+	ospfNeighbors         []grpcclient.OSPFNeighborInfo
+	ospfText              string
+	ospfFamily            string
+	vrrpText              string
+	bfdText               string
+	bfdInfo               *grpcclient.BFDStatusInfo
+	bfdPeerAddress        string
+	bfdBrief              bool
+	bfdCounters           bool
+	lcpInfo               *grpcclient.LCPReconciliationInfo
+	haInfo                *grpcclient.HAStatusInfo
+	cosInfo               *grpcclient.ClassOfServiceInfo
+	cosErr                error
+	telemetryCatalog      grpcclient.TelemetryCatalog
+	telemetryEvents       []*grpcclient.TelemetryEvent
+	diffText              string
+	diffHasChanges        bool
+	diffErr               error
 
 	acquireLockCalls              int
 	discardCalls                  int
@@ -83,6 +84,7 @@ type fakeInteractiveClient struct {
 	getCommitCalls                int
 	getCommitID                   string
 	getRunningCalls               int
+	getRunningUnredactedCalls     int
 	getCandidateCalls             int
 	rollbackCalls                 int
 	telemetryCatalogCalls         int
@@ -103,6 +105,14 @@ type fakeInteractiveClient struct {
 
 func (f *fakeInteractiveClient) GetRunning(ctx context.Context) (string, uint64, error) {
 	f.getRunningCalls++
+	return f.runningText, f.runningVersion, nil
+}
+
+func (f *fakeInteractiveClient) GetRunningUnredacted(ctx context.Context) (string, uint64, error) {
+	f.getRunningUnredactedCalls++
+	if f.runningUnredactedText != "" {
+		return f.runningUnredactedText, f.runningVersion, nil
+	}
 	return f.runningText, f.runningVersion, nil
 }
 
@@ -1495,7 +1505,10 @@ func TestShowConfigurationRollbackRejectsMissingArchive(t *testing.T) {
 func TestBackupConfigurationWritesRunningConfig(t *testing.T) {
 	ctx := context.Background()
 	backupPath := t.TempDir() + "/running.conf"
-	client := &fakeInteractiveClient{runningText: "set system host-name running"}
+	client := &fakeInteractiveClient{
+		runningText:           "set system host-name running\nset system services snmp community <redacted>",
+		runningUnredactedText: "set system host-name running\nset system services snmp community secret-community",
+	}
 	sh := &interactiveShell{
 		client:    client,
 		hostname:  "router",
@@ -1510,11 +1523,11 @@ func TestBackupConfigurationWritesRunningConfig(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ReadFile() error = %v", err)
 	}
-	if string(data) != "set system host-name running\n" {
-		t.Fatalf("backup content = %q, want running config with trailing newline", string(data))
+	if string(data) != "set system host-name running\nset system services snmp community secret-community\n" {
+		t.Fatalf("backup content = %q, want unredacted running config with trailing newline", string(data))
 	}
-	if client.getRunningCalls != 1 || client.getCandidateCalls != 0 {
-		t.Fatalf("running/candidate calls = %d/%d, want 1/0", client.getRunningCalls, client.getCandidateCalls)
+	if client.getRunningUnredactedCalls != 1 || client.getRunningCalls != 0 || client.getCandidateCalls != 0 {
+		t.Fatalf("unredacted/running/candidate calls = %d/%d/%d, want 1/0/0", client.getRunningUnredactedCalls, client.getRunningCalls, client.getCandidateCalls)
 	}
 }
 
@@ -1575,6 +1588,36 @@ func TestBackupConfigurationWritesArchivedRollbackConfig(t *testing.T) {
 	}
 	if client.listHistoryCalls != 1 || client.listHistoryLimit != 2 {
 		t.Fatalf("ListHistory calls/limit = %d/%d, want 1/2", client.listHistoryCalls, client.listHistoryLimit)
+	}
+}
+
+func TestBackupConfigurationRollbackZeroUsesUnredactedRunningConfig(t *testing.T) {
+	ctx := context.Background()
+	backupPath := t.TempDir() + "/rollback-zero.conf"
+	client := &fakeInteractiveClient{
+		history:               []grpcclient.CommitInfo{{CommitID: "commit-current"}},
+		runningText:           "set system host-name running\nset system services snmp community <redacted>",
+		runningUnredactedText: "set system host-name running\nset system services snmp community secret-community",
+	}
+	sh := &interactiveShell{
+		client:    client,
+		hostname:  "router",
+		mode:      modeOperational,
+		sessionID: "session-1",
+	}
+
+	if err := sh.cmdBackup(ctx, []string{"configuration", "rollback", "0", backupPath}); err != nil {
+		t.Fatalf("cmdBackup(configuration rollback 0) error = %v", err)
+	}
+	data, err := os.ReadFile(backupPath)
+	if err != nil {
+		t.Fatalf("ReadFile() error = %v", err)
+	}
+	if string(data) != "set system host-name running\nset system services snmp community secret-community\n" {
+		t.Fatalf("backup content = %q, want unredacted running config", string(data))
+	}
+	if client.getRunningUnredactedCalls != 1 || client.getRunningCalls != 0 {
+		t.Fatalf("unredacted/running calls = %d/%d, want 1/0", client.getRunningUnredactedCalls, client.getRunningCalls)
 	}
 }
 
@@ -1642,6 +1685,29 @@ func TestRestoreConfigurationBackupValidatesBeforeReplace(t *testing.T) {
 	}
 }
 
+func TestRestoreConfigurationBackupRejectsRedactedSecrets(t *testing.T) {
+	ctx := context.Background()
+	backupPath := t.TempDir() + "/backup.conf"
+	if err := os.WriteFile(backupPath, []byte("set system host-name restored\nset system services snmp community <redacted>\n"), 0o600); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+	client := &fakeInteractiveClient{}
+	sh := &interactiveShell{
+		client:    client,
+		hostname:  "router",
+		mode:      modeConfiguration,
+		sessionID: "session-1",
+	}
+
+	err := sh.cmdRestore(ctx, []string{"configuration", backupPath})
+	if err == nil || !strings.Contains(err.Error(), "redacted configuration text cannot be restored") {
+		t.Fatalf("cmdRestore(configuration) error = %v, want redacted config rejection", err)
+	}
+	if len(client.replaceTexts) != 0 {
+		t.Fatalf("ReplaceCandidate texts = %#v, want none for redacted backup", client.replaceTexts)
+	}
+}
+
 func TestRestoreConfigurationRollbackReplacesCandidate(t *testing.T) {
 	ctx := context.Background()
 	client := &fakeInteractiveClient{
@@ -1698,6 +1764,36 @@ func TestRestoreConfigurationRollbackValidatesBeforeReplace(t *testing.T) {
 	}
 }
 
+func TestRestoreConfigurationRollbackRejectsRedactedSecrets(t *testing.T) {
+	ctx := context.Background()
+	client := &fakeInteractiveClient{
+		history: []grpcclient.CommitInfo{
+			{CommitID: "commit-new"},
+			{CommitID: "commit-old"},
+		},
+		commitDetails: map[string]grpcclient.CommitInfo{
+			"commit-old": {
+				CommitID:   "commit-old",
+				ConfigText: "set system host-name old\nset system services snmp community <redacted>",
+			},
+		},
+	}
+	sh := &interactiveShell{
+		client:    client,
+		hostname:  "router",
+		mode:      modeConfiguration,
+		sessionID: "session-1",
+	}
+
+	err := sh.cmdRestore(ctx, []string{"configuration", "rollback", "1"})
+	if err == nil || !strings.Contains(err.Error(), "redacted configuration text cannot be restored") {
+		t.Fatalf("cmdRestore(configuration rollback 1) error = %v, want redacted config rejection", err)
+	}
+	if len(client.replaceTexts) != 0 {
+		t.Fatalf("ReplaceCandidate texts = %#v, want none for redacted rollback archive", client.replaceTexts)
+	}
+}
+
 func TestRestoreConfigurationRequiresConfigurationMode(t *testing.T) {
 	ctx := context.Background()
 	backupPath := t.TempDir() + "/backup.conf"
@@ -1737,7 +1833,10 @@ func TestRestoreConfigurationRejectsInvalidUsage(t *testing.T) {
 
 func TestOneShotBackupConfigurationWritesRunningConfig(t *testing.T) {
 	backupPath := t.TempDir() + "/running.conf"
-	client := &fakeInteractiveClient{runningText: "set system host-name running"}
+	client := &fakeInteractiveClient{
+		runningText:           "set system host-name running\nset system services snmp community <redacted>",
+		runningUnredactedText: "set system host-name running\nset system services snmp community secret-community",
+	}
 
 	code := oneShotBackup(context.Background(), client, []string{"configuration", backupPath})
 	if code != ExitSuccess {
@@ -1747,11 +1846,11 @@ func TestOneShotBackupConfigurationWritesRunningConfig(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ReadFile() error = %v", err)
 	}
-	if string(data) != "set system host-name running\n" {
-		t.Fatalf("backup content = %q, want running config", string(data))
+	if string(data) != "set system host-name running\nset system services snmp community secret-community\n" {
+		t.Fatalf("backup content = %q, want unredacted running config", string(data))
 	}
-	if client.getRunningCalls != 1 {
-		t.Fatalf("GetRunning calls = %d, want 1", client.getRunningCalls)
+	if client.getRunningUnredactedCalls != 1 || client.getRunningCalls != 0 {
+		t.Fatalf("unredacted/running calls = %d/%d, want 1/0", client.getRunningUnredactedCalls, client.getRunningCalls)
 	}
 }
 
