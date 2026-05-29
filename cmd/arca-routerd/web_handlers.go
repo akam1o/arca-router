@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"sort"
 	"strings"
 	"time"
 
@@ -416,7 +417,105 @@ func (s metricsSource) validateWebConfig(ctx context.Context, username, configTe
 	if err := api.ValidateCandidate(ctx, sessionID); err != nil {
 		return "", false, err
 	}
-	return api.Diff(ctx, sessionID)
+	return s.redactedWebConfigDiff(ctx, configText)
+}
+
+func (s metricsSource) redactedWebConfigDiff(ctx context.Context, configText string) (string, bool, error) {
+	runningRedacted, err := s.runningConfig(ctx, true)
+	if err != nil {
+		return "", false, err
+	}
+	runningUnredacted, err := s.runningConfig(ctx, false)
+	if err != nil {
+		return "", false, err
+	}
+	if runningRedacted.Version != runningUnredacted.Version {
+		return "", false, errWebRedactedConfigText
+	}
+	candidateUnredacted, candidateRedacted, err := webConfigDiffTexts(configText)
+	if err != nil {
+		return "", false, err
+	}
+	diff, ok := webConfigRedactedLineDiff(
+		runningUnredacted.ConfigText,
+		runningRedacted.ConfigText,
+		candidateUnredacted,
+		candidateRedacted,
+	)
+	if !ok {
+		return "", false, errWebRedactedConfigText
+	}
+	return diff, diff != "", nil
+}
+
+func webConfigDiffTexts(configText string) (string, string, error) {
+	cfg, err := pkgconfig.NewParser(strings.NewReader(configText)).Parse()
+	if err != nil {
+		return "", "", fmt.Errorf("parse candidate config: %w", err)
+	}
+	unredacted, err := pkgconfig.ToSetCommandsWithError(cfg)
+	if err != nil {
+		return "", "", fmt.Errorf("serialize candidate config: %w", err)
+	}
+	redacted, err := pkgconfig.ToSetCommandsRedactedWithError(cfg)
+	if err != nil {
+		return "", "", fmt.Errorf("serialize redacted candidate config: %w", err)
+	}
+	return unredacted, redacted, nil
+}
+
+func webConfigRedactedLineDiff(oldText, oldRedactedText, newText, newRedactedText string) (string, bool) {
+	oldLines, ok := webConfigDiffLineMap(oldText, oldRedactedText)
+	if !ok {
+		return "", false
+	}
+	newLines, ok := webConfigDiffLineMap(newText, newRedactedText)
+	if !ok {
+		return "", false
+	}
+
+	var out []string
+	for line, redactedLine := range oldLines {
+		if _, ok := newLines[line]; !ok {
+			out = append(out, "- "+redactedLine)
+		}
+	}
+	for line, redactedLine := range newLines {
+		if _, ok := oldLines[line]; !ok {
+			out = append(out, "+ "+redactedLine)
+		}
+	}
+	sort.Strings(out)
+	return strings.Join(out, "\n"), true
+}
+
+func webConfigDiffLineMap(text, redactedText string) (map[string]string, bool) {
+	lines := normalizedWebConfigDiffLines(text)
+	redactedLines := normalizedWebConfigDiffLines(redactedText)
+	if len(lines) != len(redactedLines) {
+		return nil, false
+	}
+	lineMap := make(map[string]string, len(lines))
+	for i, line := range lines {
+		redactedLine := redactedLines[i]
+		if existing, ok := lineMap[line]; ok && existing != redactedLine {
+			return nil, false
+		}
+		lineMap[line] = redactedLine
+	}
+	return lineMap, true
+}
+
+func normalizedWebConfigDiffLines(text string) []string {
+	var lines []string
+	for _, line := range strings.Split(text, "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		lines = append(lines, line)
+	}
+	return lines
 }
 
 func (s metricsSource) commitWebConfig(ctx context.Context, username, configText, message string, expectedBaseVersion uint64) (string, uint64, error) {

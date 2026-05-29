@@ -1730,6 +1730,115 @@ func TestWebConfigValidateEndpointPreservesRedactedSecrets(t *testing.T) {
 	}
 }
 
+func TestWebConfigValidateEndpointRedactsDeletedSecretDiff(t *testing.T) {
+	source, _ := newWebConfigAPITestSource(t, "operator")
+	cfg, err := source.runningConfig(context.Background(), true)
+	if err != nil {
+		t.Fatalf("runningConfig() error = %v", err)
+	}
+	secretLine := webRedactedConfigTestLineContaining(t, cfg.ConfigText, "set security users user operator password")
+	edited := removeWebConfigTestLinesContaining(cfg.ConfigText, "set security users user operator ")
+	body, err := json.Marshal(webConfigEditRequest{
+		ConfigText:          edited,
+		ExpectedBaseVersion: cfg.Version,
+	})
+	if err != nil {
+		t.Fatalf("Marshal() error = %v", err)
+	}
+
+	req := newWebJSONTestRequest(http.MethodPost, "/api/config/validate", string(body))
+	req.SetBasicAuth("operator", "secret")
+	rec := httptest.NewRecorder()
+	source.handleWebConfigValidate(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d: %s", rec.Code, http.StatusOK, rec.Body.String())
+	}
+	var resp webConfigValidateResponse
+	if err := json.NewDecoder(rec.Result().Body).Decode(&resp); err != nil {
+		t.Fatalf("Decode() error = %v", err)
+	}
+	if !resp.Valid || !resp.HasChanges {
+		t.Fatalf("validate response = %#v, want valid with changes", resp)
+	}
+	if want := "- " + secretLine; !strings.Contains(resp.DiffText, want) {
+		t.Fatalf("DiffText missing redacted deletion %q:\n%s", want, resp.DiffText)
+	}
+	if strings.Contains(resp.DiffText, "$argon2id$") {
+		t.Fatalf("DiffText leaked password hash:\n%s", resp.DiffText)
+	}
+}
+
+func TestWebConfigValidateEndpointRedactsChangedSecretDiff(t *testing.T) {
+	source, _ := newWebConfigAPITestSource(t, "operator")
+	cfg, err := source.runningConfig(context.Background(), true)
+	if err != nil {
+		t.Fatalf("runningConfig() error = %v", err)
+	}
+	secretLine := webRedactedConfigTestLine(t, cfg.ConfigText)
+	editedLine := strings.Replace(secretLine, webRedactedSecretMarker, "new-secret-password", 1)
+	edited := strings.Replace(cfg.ConfigText, secretLine, editedLine, 1)
+	body, err := json.Marshal(webConfigEditRequest{
+		ConfigText:          edited,
+		ExpectedBaseVersion: cfg.Version,
+	})
+	if err != nil {
+		t.Fatalf("Marshal() error = %v", err)
+	}
+
+	req := newWebJSONTestRequest(http.MethodPost, "/api/config/validate", string(body))
+	req.SetBasicAuth("operator", "secret")
+	rec := httptest.NewRecorder()
+	source.handleWebConfigValidate(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d: %s", rec.Code, http.StatusOK, rec.Body.String())
+	}
+	var resp webConfigValidateResponse
+	if err := json.NewDecoder(rec.Result().Body).Decode(&resp); err != nil {
+		t.Fatalf("Decode() error = %v", err)
+	}
+	if !resp.Valid || !resp.HasChanges {
+		t.Fatalf("validate response = %#v, want valid with secret change", resp)
+	}
+	for _, want := range []string{"- " + secretLine, "+ " + secretLine} {
+		if !strings.Contains(resp.DiffText, want) {
+			t.Fatalf("DiffText missing redacted secret change %q:\n%s", want, resp.DiffText)
+		}
+	}
+	for _, leaked := range []string{"new-secret-password", "$argon2id$"} {
+		if strings.Contains(resp.DiffText, leaked) {
+			t.Fatalf("DiffText leaked %q:\n%s", leaked, resp.DiffText)
+		}
+	}
+}
+
+func webRedactedConfigTestLine(t *testing.T, configText string) string {
+	return webRedactedConfigTestLineContaining(t, configText, "")
+}
+
+func webRedactedConfigTestLineContaining(t *testing.T, configText, needle string) string {
+	t.Helper()
+	for _, line := range webConfigTextLines(configText) {
+		if strings.Contains(line, webRedactedSecretMarker) && strings.Contains(line, needle) {
+			return line
+		}
+	}
+	t.Fatalf("config text =\n%s\nwant redacted secret line", configText)
+	return ""
+}
+
+func removeWebConfigTestLinesContaining(configText, needle string) string {
+	var kept []string
+	for _, line := range strings.Split(configText, "\n") {
+		if strings.Contains(line, needle) {
+			continue
+		}
+		kept = append(kept, line)
+	}
+	return strings.Join(kept, "\n")
+}
+
 func TestWebConfigCommitEndpointPreservesRedactedSecrets(t *testing.T) {
 	source, eng := newWebConfigAPITestSource(t, "operator")
 	beforePassword := eng.Running().Security.Users["operator"].Password
