@@ -1763,6 +1763,44 @@ func TestWebConfigValidateEndpointPreservesRedactedSecrets(t *testing.T) {
 	}
 }
 
+func TestWebConfigValidateEndpointAllowsRedactedMarkerInDescription(t *testing.T) {
+	source, _ := newWebConfigAPITestSource(t, "operator")
+	cfg, err := source.runningConfig(context.Background(), true)
+	if err != nil {
+		t.Fatalf("runningConfig() error = %v", err)
+	}
+	edited := strings.TrimSpace(cfg.ConfigText) + "\nset interfaces ge-0/0/0 description \"<redacted>\"\n"
+	body, err := json.Marshal(webConfigEditRequest{
+		ConfigText:          edited,
+		ExpectedBaseVersion: cfg.Version,
+	})
+	if err != nil {
+		t.Fatalf("Marshal() error = %v", err)
+	}
+
+	req := newWebJSONTestRequest(http.MethodPost, "/api/config/validate", string(body))
+	req.SetBasicAuth("operator", "secret")
+	rec := httptest.NewRecorder()
+	source.handleWebConfigValidate(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d: %s", rec.Code, http.StatusOK, rec.Body.String())
+	}
+	var resp webConfigValidateResponse
+	if err := json.NewDecoder(rec.Result().Body).Decode(&resp); err != nil {
+		t.Fatalf("Decode() error = %v", err)
+	}
+	if !resp.Valid || !resp.HasChanges {
+		t.Fatalf("validate response = %#v, want valid with changes", resp)
+	}
+	if want := "+ set interfaces ge-0/0/0 description \"<redacted>\""; !strings.Contains(resp.DiffText, want) {
+		t.Fatalf("DiffText missing literal marker description %q:\n%s", want, resp.DiffText)
+	}
+	if strings.Contains(resp.DiffText, "$argon2id$") {
+		t.Fatalf("DiffText leaked password hash:\n%s", resp.DiffText)
+	}
+}
+
 func TestWebConfigValidateEndpointRedactsDeletedSecretDiff(t *testing.T) {
 	source, _ := newWebConfigAPITestSource(t, "operator")
 	cfg, err := source.runningConfig(context.Background(), true)
@@ -2023,7 +2061,9 @@ func TestWebConfigWriteEndpointRejectsRedactedConfig(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			source, eng := newWebConfigAPITestSource(t, "operator")
-			body := `{"config_text":"set security users operator password ` + webRedactedSecretMarker + `"}`
+			body := `{"config_text":"` +
+				`set security users user intruder password \"` + webRedactedSecretMarker + `\"\n` +
+				`set security users user intruder role operator"}`
 			req := newWebJSONTestRequest(http.MethodPost, tt.path, body)
 			req.SetBasicAuth("operator", "secret")
 			rec := httptest.NewRecorder()

@@ -12,7 +12,42 @@ const redactedSecretValue = "<redacted>"
 // ContainsRedactedSecretValue reports whether serialized config text contains
 // the reserved marker used in place of credential material.
 func ContainsRedactedSecretValue(text string) bool {
-	return strings.Contains(text, redactedSecretValue)
+	for _, line := range strings.Split(text, "\n") {
+		if IsRedactedSecretLine(line) {
+			return true
+		}
+	}
+	return false
+}
+
+// IsRedactedSecretLine reports whether a serialized set-command line contains
+// the reserved redacted marker in a secret-bearing field.
+func IsRedactedSecretLine(line string) bool {
+	fields := strings.Fields(strings.TrimSpace(strings.TrimSuffix(line, "\r")))
+	if len(fields) == 0 || !isRedactedSecretToken(fields[len(fields)-1]) {
+		return false
+	}
+	if len(fields) == 6 &&
+		fields[0] == "set" &&
+		fields[1] == "system" &&
+		fields[2] == "services" &&
+		fields[3] == "snmp" &&
+		fields[4] == "community" {
+		return true
+	}
+	if len(fields) == 7 &&
+		fields[0] == "set" &&
+		fields[1] == "security" &&
+		fields[2] == "users" &&
+		fields[3] == "user" &&
+		fields[5] == "password" {
+		return true
+	}
+	return false
+}
+
+func isRedactedSecretToken(token string) bool {
+	return strings.Trim(token, `"'`) == redactedSecretValue
 }
 
 type serializeOptions struct {

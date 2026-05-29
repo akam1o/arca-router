@@ -152,11 +152,17 @@ func TestToSetCommandsRedactedWithErrorRedactsCredentials(t *testing.T) {
 }
 
 func TestContainsRedactedSecretValue(t *testing.T) {
-	if !ContainsRedactedSecretValue("set system services snmp community <redacted>\n") {
+	if !ContainsRedactedSecretValue("set system services snmp community \"<redacted>\"\n") {
 		t.Fatal("ContainsRedactedSecretValue() = false, want true")
+	}
+	if !ContainsRedactedSecretValue("set security users user operator password \"<redacted>\"\n") {
+		t.Fatal("ContainsRedactedSecretValue() = false, want true for user password")
 	}
 	if ContainsRedactedSecretValue("set system host-name edge01\n") {
 		t.Fatal("ContainsRedactedSecretValue() = true, want false")
+	}
+	if ContainsRedactedSecretValue("set interfaces ge-0/0/0 description \"<redacted>\"\n") {
+		t.Fatal("ContainsRedactedSecretValue() = true for non-secret marker, want false")
 	}
 }
 

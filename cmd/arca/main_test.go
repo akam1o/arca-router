@@ -1756,6 +1756,29 @@ func TestRestoreConfigurationBackupRejectsRedactedSecrets(t *testing.T) {
 	}
 }
 
+func TestRestoreConfigurationBackupAllowsRedactedMarkerInDescription(t *testing.T) {
+	ctx := context.Background()
+	backupPath := t.TempDir() + "/backup.conf"
+	backupText := "set system host-name restored\nset interfaces ge-0/0/0 description \"<redacted>\"\n"
+	if err := os.WriteFile(backupPath, []byte(backupText), 0o600); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+	client := &fakeInteractiveClient{}
+	sh := &interactiveShell{
+		client:    client,
+		hostname:  "router",
+		mode:      modeConfiguration,
+		sessionID: "session-1",
+	}
+
+	if err := sh.cmdRestore(ctx, []string{"configuration", backupPath}); err != nil {
+		t.Fatalf("cmdRestore(configuration) error = %v", err)
+	}
+	if len(client.replaceTexts) != 1 || client.replaceTexts[0] != backupText {
+		t.Fatalf("ReplaceCandidate texts = %#v, want backup content", client.replaceTexts)
+	}
+}
+
 func TestRestoreConfigurationRollbackReplacesCandidate(t *testing.T) {
 	ctx := context.Background()
 	client := &fakeInteractiveClient{

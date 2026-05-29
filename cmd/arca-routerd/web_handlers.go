@@ -316,7 +316,7 @@ func (s metricsSource) runningConfig(ctx context.Context, redactSecrets bool) (w
 }
 
 func (s metricsSource) resolveWebConfigEditText(ctx context.Context, configText string) (string, error) {
-	if !strings.Contains(configText, webRedactedSecretMarker) {
+	if !pkgconfig.ContainsRedactedSecretValue(configText) {
 		return configText, nil
 	}
 	redacted, err := s.runningConfig(ctx, true)
@@ -349,11 +349,11 @@ func webRedactedLineReplacements(redactedText, unredactedText string) (map[strin
 	}
 	replacements := make(map[string]string)
 	for i, redactedLine := range redactedLines {
-		if !strings.Contains(redactedLine, webRedactedSecretMarker) {
+		if !pkgconfig.IsRedactedSecretLine(redactedLine) {
 			continue
 		}
 		unredactedLine := unredactedLines[i]
-		if redactedLine == unredactedLine || strings.Contains(unredactedLine, webRedactedSecretMarker) {
+		if redactedLine == unredactedLine || pkgconfig.IsRedactedSecretLine(unredactedLine) {
 			return nil, false
 		}
 		if existing, ok := replacements[redactedLine]; ok && existing != unredactedLine {
@@ -368,11 +368,11 @@ func replaceWebRedactedLines(configText string, replacements map[string]string) 
 	lines := strings.Split(configText, "\n")
 	for i, line := range lines {
 		content := strings.TrimSuffix(line, "\r")
-		if !strings.Contains(content, webRedactedSecretMarker) {
+		if !pkgconfig.IsRedactedSecretLine(content) {
 			continue
 		}
 		replacement, ok := replacements[content]
-		if !ok || strings.Contains(replacement, webRedactedSecretMarker) {
+		if !ok || pkgconfig.IsRedactedSecretLine(replacement) {
 			return "", false
 		}
 		if strings.HasSuffix(line, "\r") {
