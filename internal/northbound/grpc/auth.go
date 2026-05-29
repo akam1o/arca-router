@@ -28,7 +28,7 @@ var grpcMethodOperations = map[string]string{
 	"/arca.router.v1.ConfigService/ValidateCandidate":    "validate",
 	"/arca.router.v1.ConfigService/Discard":              "discard-changes",
 	"/arca.router.v1.ConfigService/Rollback":             "commit",
-	"/arca.router.v1.ConfigService/Diff":                 "get-config",
+	"/arca.router.v1.ConfigService/Diff":                 "copy-config",
 	"/arca.router.v1.ConfigService/ListHistory":          "get-config",
 	"/arca.router.v1.ConfigService/GetCommit":            "copy-config",
 

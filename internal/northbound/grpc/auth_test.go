@@ -141,6 +141,7 @@ func TestTLSClientRoleUnaryInterceptorRejectsReadOnlySensitiveConfigAccess(t *te
 		"/arca.router.v1.ConfigService/GetRunningUnredacted",
 		"/arca.router.v1.ConfigService/GetCandidate",
 		"/arca.router.v1.ConfigService/GetCommit",
+		"/arca.router.v1.ConfigService/Diff",
 		"/arca.router.v1.SessionService/CreateSession",
 	}
 
@@ -190,6 +191,7 @@ func TestTLSClientRoleUnaryInterceptorAllowsOperatorSensitiveConfigAccess(t *tes
 		"/arca.router.v1.ConfigService/GetRunningUnredacted",
 		"/arca.router.v1.ConfigService/GetCandidate",
 		"/arca.router.v1.ConfigService/GetCommit",
+		"/arca.router.v1.ConfigService/Diff",
 		"/arca.router.v1.SessionService/CreateSession",
 	}
 
