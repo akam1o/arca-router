@@ -26,10 +26,13 @@ func TestDialGRPCRejectsTLSFlagsWithoutAddress(t *testing.T) {
 
 type fakeInteractiveClient struct {
 	acquireLockErr        error
+	createSessionErr      error
 	commitErr             error
 	discardErr            error
+	closeSessionErr       error
 	releaseLockErr        error
 	replaceErr            error
+	createSessionID       string
 	history               []grpcclient.CommitInfo
 	commitDetails         map[string]grpcclient.CommitInfo
 	listHistoryErr        error
@@ -67,6 +70,8 @@ type fakeInteractiveClient struct {
 	diffHasChanges        bool
 	diffErr               error
 
+	createSessionCalls            int
+	closeSessionCalls             int
 	acquireLockCalls              int
 	discardCalls                  int
 	releaseLockCalls              int
@@ -101,6 +106,22 @@ type fakeInteractiveClient struct {
 	telemetryPaths                []string
 	telemetryInterval             time.Duration
 	telemetryOnce                 bool
+}
+
+func (f *fakeInteractiveClient) CreateSession(ctx context.Context, user string) (string, error) {
+	f.createSessionCalls++
+	if f.createSessionErr != nil {
+		return "", f.createSessionErr
+	}
+	if f.createSessionID != "" {
+		return f.createSessionID, nil
+	}
+	return "session-1", nil
+}
+
+func (f *fakeInteractiveClient) CloseSession(ctx context.Context, sessionID string) error {
+	f.closeSessionCalls++
+	return f.closeSessionErr
 }
 
 func (f *fakeInteractiveClient) GetRunning(ctx context.Context) (string, uint64, error) {
@@ -385,9 +406,9 @@ func evpnTelemetryTestEvent() *grpcclient.TelemetryEvent {
 	}
 }
 
-func TestCmdConfigureRequiresSession(t *testing.T) {
+func TestCmdConfigureCreatesSessionLazily(t *testing.T) {
 	ctx := context.Background()
-	client := &fakeInteractiveClient{}
+	client := &fakeInteractiveClient{createSessionID: "session-2"}
 	sh := &interactiveShell{
 		client:   client,
 		hostname: "router",
@@ -395,8 +416,35 @@ func TestCmdConfigureRequiresSession(t *testing.T) {
 	}
 
 	err := sh.cmdConfigure(ctx)
-	if err == nil || !strings.Contains(err.Error(), "configuration session is not available") {
-		t.Fatalf("cmdConfigure() error = %v, want missing session", err)
+	if err != nil {
+		t.Fatalf("cmdConfigure() error = %v", err)
+	}
+	if sh.sessionID != "session-2" {
+		t.Fatalf("sessionID = %q, want session-2", sh.sessionID)
+	}
+	if sh.mode != modeConfiguration {
+		t.Fatalf("mode = %v, want configuration", sh.mode)
+	}
+	if client.createSessionCalls != 1 {
+		t.Fatalf("CreateSession calls = %d, want 1", client.createSessionCalls)
+	}
+	if client.acquireLockCalls != 1 {
+		t.Fatalf("AcquireLock calls = %d, want 1", client.acquireLockCalls)
+	}
+}
+
+func TestCmdConfigureStopsOnSessionCreateFailure(t *testing.T) {
+	ctx := context.Background()
+	client := &fakeInteractiveClient{createSessionErr: errors.New("permission denied")}
+	sh := &interactiveShell{
+		client:   client,
+		hostname: "router",
+		mode:     modeOperational,
+	}
+
+	err := sh.cmdConfigure(ctx)
+	if err == nil || !strings.Contains(err.Error(), "failed to create configuration session") {
+		t.Fatalf("cmdConfigure() error = %v, want session create failure", err)
 	}
 	if sh.mode != modeOperational {
 		t.Fatalf("mode = %v, want operational", sh.mode)

@@ -20,6 +20,7 @@ type interactiveShell struct {
 	client    interactiveClient
 	rl        *readline.Instance
 	hostname  string
+	username  string
 	mode      cliMode
 	sessionID string
 	hasLock   bool
@@ -29,6 +30,8 @@ type interactiveShell struct {
 
 type interactiveClient interface {
 	showClient
+	CreateSession(context.Context, string) (string, error)
+	CloseSession(context.Context, string) error
 	GetCandidate(context.Context, string) (string, error)
 	EditCandidate(context.Context, string, string) error
 	ReplaceCandidate(context.Context, string, string) error
@@ -94,6 +97,7 @@ func runInteractive(ctx context.Context, f *cliFlags) int {
 	sh := &interactiveShell{
 		client:   client,
 		hostname: hostname,
+		username: username,
 		mode:     modeOperational,
 		flags:    f,
 	}
@@ -115,19 +119,10 @@ func runInteractive(ctx context.Context, f *cliFlags) int {
 	sh.rl = rl
 	defer func() { _ = rl.Close() }()
 
-	// Create a session with the daemon
-	sessionID, err := client.CreateSession(ctx, username)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error: failed to create configuration session: %v\n", err)
-		return ExitOperationError
-	}
-	if sessionID == "" {
-		fmt.Fprintln(os.Stderr, "Error: daemon returned empty configuration session ID")
-		return ExitOperationError
-	}
-	sh.sessionID = sessionID
 	defer func() {
-		_ = client.CloseSession(ctx, sh.sessionID)
+		if sh.sessionID != "" {
+			_ = client.CloseSession(ctx, sh.sessionID)
+		}
 	}()
 
 	// Handle Ctrl+C
@@ -171,6 +166,25 @@ func (sh *interactiveShell) buildPrompt() string {
 		return fmt.Sprintf("%s# [edit %s] ", sh.hostname, strings.Join(sh.editPath, " "))
 	}
 	return fmt.Sprintf("%s# ", sh.hostname)
+}
+
+func (sh *interactiveShell) ensureConfigurationSession(ctx context.Context) error {
+	if sh.sessionID != "" {
+		return nil
+	}
+	username := sh.username
+	if username == "" {
+		username = currentUsername()
+	}
+	sessionID, err := sh.client.CreateSession(ctx, username)
+	if err != nil {
+		return fmt.Errorf("failed to create configuration session: %w", err)
+	}
+	if sessionID == "" {
+		return fmt.Errorf("daemon returned empty configuration session ID")
+	}
+	sh.sessionID = sessionID
+	return nil
 }
 
 func (sh *interactiveShell) processCommand(ctx context.Context, line string) error {
@@ -256,8 +270,8 @@ func (sh *interactiveShell) cmdConfigure(ctx context.Context) error {
 		fmt.Println("Already in configuration mode")
 		return nil
 	}
-	if sh.sessionID == "" {
-		return fmt.Errorf("configuration session is not available")
+	if err := sh.ensureConfigurationSession(ctx); err != nil {
+		return err
 	}
 
 	// Acquire candidate lock via gRPC
