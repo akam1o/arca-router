@@ -706,8 +706,7 @@ func (p *Parser) parseOSPFArea(ospf *OSPFConfig) error {
 				p.nextToken()
 			}
 		default:
-			// Not an OSPF interface parameter, break the loop
-			return nil
+			return p.error(fmt.Sprintf("unsupported OSPF interface parameter: %s", param))
 		}
 	}
 
