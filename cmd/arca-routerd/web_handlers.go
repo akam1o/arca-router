@@ -189,7 +189,12 @@ func (s metricsSource) handleWebConfigValidate(w http.ResponseWriter, r *http.Re
 	if !ok {
 		return
 	}
-	diff, hasChanges, err := s.validateWebConfig(r.Context(), username, req.ConfigText, req.ExpectedBaseVersion)
+	configText, err := s.resolveWebConfigEditText(r.Context(), req.ConfigText)
+	if err != nil {
+		s.writeWebConfigEditError(w, "resolve redacted config", err)
+		return
+	}
+	diff, hasChanges, err := s.validateWebConfig(r.Context(), username, configText, req.ExpectedBaseVersion)
 	if err != nil {
 		s.writeWebConfigEditError(w, "validate config", err)
 		return
@@ -214,9 +219,14 @@ func (s metricsSource) handleWebConfigCommit(w http.ResponseWriter, r *http.Requ
 	if !ok {
 		return
 	}
+	configText, err := s.resolveWebConfigEditText(r.Context(), req.ConfigText)
+	if err != nil {
+		s.writeWebConfigEditError(w, "resolve redacted config", err)
+		return
+	}
 	ctx, correlationID := webCorrelationContext(r)
 	w.Header().Set(correlation.HeaderName, correlationID)
-	commitID, version, err := s.commitWebConfig(ctx, username, req.ConfigText, req.Message, req.ExpectedBaseVersion)
+	commitID, version, err := s.commitWebConfig(ctx, username, configText, req.Message, req.ExpectedBaseVersion)
 	if err != nil {
 		s.writeWebConfigEditError(w, "commit config", err)
 		return
@@ -302,6 +312,85 @@ func (s metricsSource) runningConfig(ctx context.Context, redactSecrets bool) (w
 		ConfigText: text,
 		Version:    snap.Version,
 	}, nil
+}
+
+func (s metricsSource) resolveWebConfigEditText(ctx context.Context, configText string) (string, error) {
+	if !strings.Contains(configText, webRedactedSecretMarker) {
+		return configText, nil
+	}
+	redacted, err := s.runningConfig(ctx, true)
+	if err != nil {
+		return "", err
+	}
+	unredacted, err := s.runningConfig(ctx, false)
+	if err != nil {
+		return "", err
+	}
+	if redacted.Version != unredacted.Version {
+		return "", errWebRedactedConfigText
+	}
+	replacements, ok := webRedactedLineReplacements(redacted.ConfigText, unredacted.ConfigText)
+	if !ok {
+		return "", errWebRedactedConfigText
+	}
+	resolved, ok := replaceWebRedactedLines(configText, replacements)
+	if !ok {
+		return "", errWebRedactedConfigText
+	}
+	return resolved, nil
+}
+
+func webRedactedLineReplacements(redactedText, unredactedText string) (map[string]string, bool) {
+	redactedLines := webConfigTextLines(redactedText)
+	unredactedLines := webConfigTextLines(unredactedText)
+	if len(redactedLines) != len(unredactedLines) {
+		return nil, false
+	}
+	replacements := make(map[string]string)
+	for i, redactedLine := range redactedLines {
+		if !strings.Contains(redactedLine, webRedactedSecretMarker) {
+			continue
+		}
+		unredactedLine := unredactedLines[i]
+		if redactedLine == unredactedLine || strings.Contains(unredactedLine, webRedactedSecretMarker) {
+			return nil, false
+		}
+		if existing, ok := replacements[redactedLine]; ok && existing != unredactedLine {
+			return nil, false
+		}
+		replacements[redactedLine] = unredactedLine
+	}
+	return replacements, true
+}
+
+func replaceWebRedactedLines(configText string, replacements map[string]string) (string, bool) {
+	lines := strings.Split(configText, "\n")
+	for i, line := range lines {
+		content := strings.TrimSuffix(line, "\r")
+		if !strings.Contains(content, webRedactedSecretMarker) {
+			continue
+		}
+		replacement, ok := replacements[content]
+		if !ok || strings.Contains(replacement, webRedactedSecretMarker) {
+			return "", false
+		}
+		if strings.HasSuffix(line, "\r") {
+			replacement += "\r"
+		}
+		lines[i] = replacement
+	}
+	return strings.Join(lines, "\n"), true
+}
+
+func webConfigTextLines(configText string) []string {
+	lines := strings.Split(configText, "\n")
+	if len(lines) > 0 && lines[len(lines)-1] == "" {
+		lines = lines[:len(lines)-1]
+	}
+	for i, line := range lines {
+		lines[i] = strings.TrimSuffix(line, "\r")
+	}
+	return lines
 }
 
 func (s metricsSource) validateWebConfig(ctx context.Context, username, configText string, expectedBaseVersion uint64) (string, bool, error) {

@@ -47,6 +47,9 @@ func webConfigEditErrorResponse(err error) (int, string) {
 	if errors.Is(err, errWebConfigAPIUnavailable) {
 		return http.StatusServiceUnavailable, errWebConfigAPIUnavailable.Error()
 	}
+	if errors.Is(err, errWebRedactedConfigText) {
+		return http.StatusBadRequest, errWebRedactedConfigText.Error()
+	}
 	if errors.Is(err, context.DeadlineExceeded) || errors.Is(err, context.Canceled) {
 		return http.StatusGatewayTimeout, "configuration operation timed out"
 	}

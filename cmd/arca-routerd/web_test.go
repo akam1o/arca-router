@@ -1687,6 +1687,83 @@ func TestWebConfigCommitEndpointReplacesFullConfig(t *testing.T) {
 	}
 }
 
+func TestWebConfigValidateEndpointPreservesRedactedSecrets(t *testing.T) {
+	source, _ := newWebConfigAPITestSource(t, "operator")
+	cfg, err := source.runningConfig(context.Background(), true)
+	if err != nil {
+		t.Fatalf("runningConfig() error = %v", err)
+	}
+	if !strings.Contains(cfg.ConfigText, webRedactedSecretMarker) {
+		t.Fatalf("redacted running config =\n%s\nwant redacted marker", cfg.ConfigText)
+	}
+	edited := strings.Replace(cfg.ConfigText, "set system host-name edge01", "set system host-name edge02", 1)
+	body, err := json.Marshal(webConfigEditRequest{
+		ConfigText:          edited,
+		ExpectedBaseVersion: cfg.Version,
+	})
+	if err != nil {
+		t.Fatalf("Marshal() error = %v", err)
+	}
+
+	req := newWebJSONTestRequest(http.MethodPost, "/api/config/validate", string(body))
+	req.SetBasicAuth("operator", "secret")
+	rec := httptest.NewRecorder()
+	source.handleWebConfigValidate(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d: %s", rec.Code, http.StatusOK, rec.Body.String())
+	}
+	var resp webConfigValidateResponse
+	if err := json.NewDecoder(rec.Result().Body).Decode(&resp); err != nil {
+		t.Fatalf("Decode() error = %v", err)
+	}
+	if !resp.Valid || !resp.HasChanges {
+		t.Fatalf("validate response = %#v, want valid with changes", resp)
+	}
+	for _, want := range []string{"- set system host-name edge01", "+ set system host-name edge02"} {
+		if !strings.Contains(resp.DiffText, want) {
+			t.Fatalf("DiffText missing %q:\n%s", want, resp.DiffText)
+		}
+	}
+	if strings.Contains(resp.DiffText, "$argon2id$") || strings.Contains(resp.DiffText, webRedactedSecretMarker) {
+		t.Fatalf("DiffText leaked or retained secret placeholder:\n%s", resp.DiffText)
+	}
+}
+
+func TestWebConfigCommitEndpointPreservesRedactedSecrets(t *testing.T) {
+	source, eng := newWebConfigAPITestSource(t, "operator")
+	beforePassword := eng.Running().Security.Users["operator"].Password
+	cfg, err := source.runningConfig(context.Background(), true)
+	if err != nil {
+		t.Fatalf("runningConfig() error = %v", err)
+	}
+	edited := strings.Replace(cfg.ConfigText, "set system host-name edge01", "set system host-name edge02", 1)
+	body, err := json.Marshal(webConfigCommitRequest{
+		ConfigText:          edited,
+		Message:             "web update",
+		ExpectedBaseVersion: cfg.Version,
+	})
+	if err != nil {
+		t.Fatalf("Marshal() error = %v", err)
+	}
+
+	req := newWebJSONTestRequest(http.MethodPost, "/api/config/commit", string(body))
+	req.SetBasicAuth("operator", "secret")
+	rec := httptest.NewRecorder()
+	source.handleWebConfigCommit(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d: %s", rec.Code, http.StatusOK, rec.Body.String())
+	}
+	running := eng.Running()
+	if got := running.System.HostName; got != "edge02" {
+		t.Fatalf("running hostname = %q, want edge02", got)
+	}
+	if got := running.Security.Users["operator"].Password; got != beforePassword {
+		t.Fatalf("operator password = %q, want preserved %q", got, beforePassword)
+	}
+}
+
 func TestWebConfigWriteEndpointRejectsTrailingJSON(t *testing.T) {
 	source, eng := newWebConfigAPITestSource(t, "operator")
 

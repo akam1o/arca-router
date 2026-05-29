@@ -44,6 +44,7 @@ var (
 	errNMSTelemetrySnapshotTooLarge      = errors.New("nms telemetry snapshot payload budget exceeded")
 	errNMSTelemetrySnapshotTooManyEvents = errors.New("nms telemetry snapshot event budget exceeded")
 	errWebConfigAPIUnavailable           = errors.New("configuration API is unavailable")
+	errWebRedactedConfigText             = errors.New("redacted config text cannot be validated or committed")
 )
 
 type webConfigAPI interface {

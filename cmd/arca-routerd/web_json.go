@@ -48,10 +48,6 @@ func validateWebConfigTextForEdit(w http.ResponseWriter, configText string) bool
 		writeWebJSONError(w, http.StatusBadRequest, "config_text is required")
 		return false
 	}
-	if strings.Contains(configText, webRedactedSecretMarker) {
-		writeWebJSONError(w, http.StatusBadRequest, "redacted config text cannot be validated or committed")
-		return false
-	}
 	return true
 }
 
