@@ -2,6 +2,7 @@ package datastore
 
 import (
 	"encoding/json"
+	"errors"
 	"sort"
 	"strings"
 	"testing"
@@ -109,6 +110,27 @@ func TestEtcdCommitHistoryEntryFromIndexedKVAppliesFilters(t *testing.T) {
 
 	if _, ok := commitHistoryEntryFromEtcdKV(kv, &HistoryOptions{User: "bob"}); ok {
 		t.Fatal("commitHistoryEntryFromEtcdKV() matched wrong user")
+	}
+}
+
+func TestEtcdRollbackTargetCommitLookupErrorPreservesInternalError(t *testing.T) {
+	internalErr := NewError(ErrCodeInternal, "failed to get commit", nil)
+
+	err := rollbackTargetCommitLookupError(internalErr)
+	if err != internalErr {
+		t.Fatalf("rollbackTargetCommitLookupError() = %v, want original internal error", err)
+	}
+}
+
+func TestEtcdRollbackTargetCommitLookupErrorMapsNotFound(t *testing.T) {
+	err := rollbackTargetCommitLookupError(NewError(ErrCodeNotFound, "commit not found", nil))
+
+	var dsErr *Error
+	if !errors.As(err, &dsErr) || dsErr.Code != ErrCodeNotFound {
+		t.Fatalf("rollbackTargetCommitLookupError() = %v, want ErrCodeNotFound", err)
+	}
+	if !strings.Contains(err.Error(), "target commit not found") {
+		t.Fatalf("rollbackTargetCommitLookupError() = %v, want target context", err)
 	}
 }
 

@@ -42,6 +42,42 @@ func TestCommitRejectsNilRequest(t *testing.T) {
 	}
 }
 
+func TestRollbackRejectsNilRequest(t *testing.T) {
+	tests := []struct {
+		name     string
+		rollback func(context.Context, *RollbackRequest) (string, error)
+	}{
+		{
+			name: "sqlite",
+			rollback: func(ctx context.Context, req *RollbackRequest) (string, error) {
+				return (&sqliteDatastore{}).Rollback(ctx, req)
+			},
+		},
+		{
+			name: "etcd",
+			rollback: func(ctx context.Context, req *RollbackRequest) (string, error) {
+				return (&etcdDatastore{}).Rollback(ctx, req)
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			commitID, err := tt.rollback(context.Background(), nil)
+			if err == nil {
+				t.Fatal("Rollback() error = nil, want validation error")
+			}
+			if commitID != "" {
+				t.Fatalf("Rollback() commitID = %q, want empty", commitID)
+			}
+			var dsErr *Error
+			if !errors.As(err, &dsErr) || dsErr.Code != ErrCodeValidation {
+				t.Fatalf("Rollback() error = %v, want ErrCodeValidation", err)
+			}
+		})
+	}
+}
+
 func TestAcquireLockRejectsNilRequest(t *testing.T) {
 	tests := []struct {
 		name        string

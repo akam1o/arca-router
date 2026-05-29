@@ -6,3 +6,10 @@ func validateCommitRequest(req *CommitRequest) error {
 	}
 	return nil
 }
+
+func validateRollbackRequest(req *RollbackRequest) error {
+	if req == nil {
+		return NewError(ErrCodeValidation, "rollback request is nil", nil)
+	}
+	return nil
+}

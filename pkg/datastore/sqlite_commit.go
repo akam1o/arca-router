@@ -127,6 +127,10 @@ func (ds *sqliteDatastore) Commit(ctx context.Context, req *CommitRequest) (stri
 
 // Rollback rolls back to a previous commit.
 func (ds *sqliteDatastore) Rollback(ctx context.Context, req *RollbackRequest) (string, error) {
+	if err := validateRollbackRequest(req); err != nil {
+		return "", err
+	}
+
 	// Generate new commit ID for the rollback commit
 	newCommitID := uuid.New().String()
 	now := time.Now()

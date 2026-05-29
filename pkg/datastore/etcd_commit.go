@@ -3,6 +3,7 @@ package datastore
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"math"
 	"sort"
@@ -203,6 +204,10 @@ func (ds *etcdDatastore) Commit(ctx context.Context, req *CommitRequest) (string
 
 // Rollback reverts to a previous commit.
 func (ds *etcdDatastore) Rollback(ctx context.Context, req *RollbackRequest) (string, error) {
+	if err := validateRollbackRequest(req); err != nil {
+		return "", err
+	}
+
 	ctx, cancel := ds.withTimeout(ctx)
 	defer cancel()
 
@@ -214,7 +219,7 @@ func (ds *etcdDatastore) Rollback(ctx context.Context, req *RollbackRequest) (st
 	// Get target commit
 	targetCommit, err := ds.GetCommit(ctx, req.CommitID)
 	if err != nil {
-		return "", NewError(ErrCodeNotFound, "target commit not found", err)
+		return "", rollbackTargetCommitLookupError(err)
 	}
 
 	// Generate new commit ID for the rollback
@@ -338,6 +343,14 @@ func (ds *etcdDatastore) Rollback(ctx context.Context, req *RollbackRequest) (st
 	}
 
 	return newCommitID, nil
+}
+
+func rollbackTargetCommitLookupError(err error) error {
+	var dsErr *Error
+	if errors.As(err, &dsErr) && dsErr.Code == ErrCodeNotFound {
+		return NewError(ErrCodeNotFound, "target commit not found", err)
+	}
+	return err
 }
 
 // ListCommitHistory retrieves commit history with optional filtering.
