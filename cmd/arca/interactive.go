@@ -44,6 +44,7 @@ type interactiveClient interface {
 type showClient interface {
 	GetRunning(context.Context) (string, uint64, error)
 	ListHistory(context.Context, int, int) ([]grpcclient.CommitInfo, error)
+	GetCommit(context.Context, string) (grpcclient.CommitInfo, error)
 	GetInterfaces(context.Context, string) ([]grpcclient.InterfaceInfo, error)
 	GetRoutingInstances(context.Context) ([]grpcclient.RoutingInstanceInfo, error)
 	GetRoutes(context.Context, string, string) ([]grpcclient.RouteInfo, error)
@@ -631,15 +632,22 @@ func archivedConfigurationText(ctx context.Context, client showClient, rollbackN
 	}
 
 	entry := history[rollbackNum]
-	if entry.ConfigText == "" {
-		if rollbackNum == 0 {
-			text, _, err := client.GetRunning(ctx)
-			if err != nil {
-				return "", err
-			}
-			return text, nil
+	if rollbackNum == 0 {
+		text, _, err := client.GetRunning(ctx)
+		if err != nil {
+			return "", err
 		}
+		return text, nil
+	}
+	if strings.TrimSpace(entry.CommitID) == "" {
 		return "", fmt.Errorf("archived config text unavailable for rollback %d", rollbackNum)
 	}
-	return entry.ConfigText, nil
+	detail, err := client.GetCommit(ctx, entry.CommitID)
+	if err != nil {
+		return "", fmt.Errorf("failed to load rollback archive %d: %w", rollbackNum, err)
+	}
+	if detail.ConfigText == "" {
+		return "", fmt.Errorf("archived config text unavailable for rollback %d", rollbackNum)
+	}
+	return detail.ConfigText, nil
 }

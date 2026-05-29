@@ -256,6 +256,7 @@ func (s *Store) GetCommit(ctx context.Context, commitID string) (*store.CommitRe
 	return &store.CommitRecord{
 		CommitID:   entry.CommitID,
 		Config:     cfg,
+		ConfigText: entry.ConfigText,
 		Author:     entry.User,
 		Message:    entry.Message,
 		Timestamp:  entry.Timestamp,

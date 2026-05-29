@@ -148,6 +148,9 @@ func TestSaveCommitStoresSetCommands(t *testing.T) {
 	if commit == nil || commit.Config == nil || commit.Config.System == nil || commit.Config.System.HostName != "router1" {
 		t.Fatalf("commit = %#v, want parsed router1 config", commit)
 	}
+	if !strings.Contains(commit.ConfigText, "set system host-name router1") {
+		t.Fatalf("commit config text = %q, want archived set-command text", commit.ConfigText)
+	}
 }
 
 func TestSaveCommitPropagatesCorrelationIDToAudit(t *testing.T) {

@@ -37,6 +37,9 @@ service ConfigService {
 
   // ListHistory returns commit history.
   rpc ListHistory(ListHistoryRequest) returns (ListHistoryResponse);
+
+  // GetCommit returns one archived commit, including configuration text.
+  rpc GetCommit(GetCommitRequest) returns (GetCommitResponse);
 }
 
 // SessionService manages configuration sessions with lock semantics.
@@ -613,4 +616,21 @@ message ClassOfServiceCapabilities {
   string last_check = 5;
   string last_error = 6;
   repeated string diagnostics = 7;
+}
+
+message GetCommitRequest {
+  string commit_id = 1;
+}
+
+message GetCommitResponse {
+  CommitDetail commit = 1;
+}
+
+message CommitDetail {
+  string commit_id = 1;
+  string user = 2;
+  string timestamp = 3;
+  string message = 4;
+  bool is_rollback = 5;
+  string config_text = 6;
 }

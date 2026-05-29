@@ -29,6 +29,7 @@ var grpcMethodOperations = map[string]string{
 	"/arca.router.v1.ConfigService/Rollback":          "commit",
 	"/arca.router.v1.ConfigService/Diff":              "get-config",
 	"/arca.router.v1.ConfigService/ListHistory":       "get-config",
+	"/arca.router.v1.ConfigService/GetCommit":         "get-config",
 
 	"/arca.router.v1.SessionService/CreateSession": "get",
 	"/arca.router.v1.SessionService/CloseSession":  "close-session",

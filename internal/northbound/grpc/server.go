@@ -533,6 +533,51 @@ func (s *Server) ListHistory(ctx context.Context, limit, offset int) ([]CommitIn
 	return entries, nil
 }
 
+// GetCommit returns one persisted commit, including archived configuration text.
+func (s *Server) GetCommit(ctx context.Context, commitID string) (CommitInfo, error) {
+	commitID = strings.TrimSpace(commitID)
+	if commitID == "" {
+		return CommitInfo{}, newConfigInputErrorf("commit ID is required")
+	}
+	if s.store == nil {
+		return CommitInfo{}, fmt.Errorf("%w: commit history is unavailable", ErrCommitHistoryUnavailable)
+	}
+
+	record, err := s.store.GetCommit(ctx, commitID)
+	if err != nil {
+		return CommitInfo{}, err
+	}
+	if record == nil {
+		return CommitInfo{}, newConfigInputErrorf("commit %s not found", commitID)
+	}
+
+	configText, err := commitRecordConfigText(record)
+	if err != nil {
+		return CommitInfo{}, fmt.Errorf("serialize commit config: %w", err)
+	}
+	return CommitInfo{
+		CommitID:   record.CommitID,
+		User:       record.Author,
+		Timestamp:  record.Timestamp,
+		Message:    record.Message,
+		IsRollback: record.IsRollback,
+		ConfigText: configText,
+	}, nil
+}
+
+func commitRecordConfigText(record *store.CommitRecord) (string, error) {
+	if record == nil {
+		return "", nil
+	}
+	if record.ConfigText != "" {
+		return record.ConfigText, nil
+	}
+	if record.Config == nil {
+		return "", nil
+	}
+	return pkgconfig.ToSetCommandsWithError(record.Config.ToLegacyConfig())
+}
+
 // ListAuditEvents returns persisted audit events for export.
 func (s *Server) ListAuditEvents(ctx context.Context, opts AuditLogOptions) ([]AuditEventInfo, error) {
 	boundedLimit, err := boundedListLimit("audit", opts.Limit, maxListAuditEventsLimit)

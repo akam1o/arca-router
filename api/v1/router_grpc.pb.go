@@ -29,6 +29,7 @@ const (
 	ConfigService_Rollback_FullMethodName          = "/arca.router.v1.ConfigService/Rollback"
 	ConfigService_Diff_FullMethodName              = "/arca.router.v1.ConfigService/Diff"
 	ConfigService_ListHistory_FullMethodName       = "/arca.router.v1.ConfigService/ListHistory"
+	ConfigService_GetCommit_FullMethodName         = "/arca.router.v1.ConfigService/GetCommit"
 )
 
 // ConfigServiceClient is the client API for ConfigService service.
@@ -59,6 +60,8 @@ type ConfigServiceClient interface {
 	Diff(ctx context.Context, in *DiffRequest, opts ...grpc.CallOption) (*DiffResponse, error)
 	// ListHistory returns commit history.
 	ListHistory(ctx context.Context, in *ListHistoryRequest, opts ...grpc.CallOption) (*ListHistoryResponse, error)
+	// GetCommit returns one archived commit, including configuration text.
+	GetCommit(ctx context.Context, in *GetCommitRequest, opts ...grpc.CallOption) (*GetCommitResponse, error)
 }
 
 type configServiceClient struct {
@@ -169,6 +172,16 @@ func (c *configServiceClient) ListHistory(ctx context.Context, in *ListHistoryRe
 	return out, nil
 }
 
+func (c *configServiceClient) GetCommit(ctx context.Context, in *GetCommitRequest, opts ...grpc.CallOption) (*GetCommitResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(GetCommitResponse)
+	err := c.cc.Invoke(ctx, ConfigService_GetCommit_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // ConfigServiceServer is the server API for ConfigService service.
 // All implementations must embed UnimplementedConfigServiceServer
 // for forward compatibility.
@@ -197,6 +210,8 @@ type ConfigServiceServer interface {
 	Diff(context.Context, *DiffRequest) (*DiffResponse, error)
 	// ListHistory returns commit history.
 	ListHistory(context.Context, *ListHistoryRequest) (*ListHistoryResponse, error)
+	// GetCommit returns one archived commit, including configuration text.
+	GetCommit(context.Context, *GetCommitRequest) (*GetCommitResponse, error)
 	mustEmbedUnimplementedConfigServiceServer()
 }
 
@@ -236,6 +251,9 @@ func (UnimplementedConfigServiceServer) Diff(context.Context, *DiffRequest) (*Di
 }
 func (UnimplementedConfigServiceServer) ListHistory(context.Context, *ListHistoryRequest) (*ListHistoryResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method ListHistory not implemented")
+}
+func (UnimplementedConfigServiceServer) GetCommit(context.Context, *GetCommitRequest) (*GetCommitResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method GetCommit not implemented")
 }
 func (UnimplementedConfigServiceServer) mustEmbedUnimplementedConfigServiceServer() {}
 func (UnimplementedConfigServiceServer) testEmbeddedByValue()                       {}
@@ -438,6 +456,24 @@ func _ConfigService_ListHistory_Handler(srv interface{}, ctx context.Context, de
 	return interceptor(ctx, in, info, handler)
 }
 
+func _ConfigService_GetCommit_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(GetCommitRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ConfigServiceServer).GetCommit(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: ConfigService_GetCommit_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ConfigServiceServer).GetCommit(ctx, req.(*GetCommitRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // ConfigService_ServiceDesc is the grpc.ServiceDesc for ConfigService service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -484,6 +520,10 @@ var ConfigService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "ListHistory",
 			Handler:    _ConfigService_ListHistory_Handler,
+		},
+		{
+			MethodName: "GetCommit",
+			Handler:    _ConfigService_GetCommit_Handler,
 		},
 	},
 	Streams:  []grpc.StreamDesc{},

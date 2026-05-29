@@ -50,16 +50,16 @@ func upgradePreflightLinesWithOptions(ctx context.Context, client showClient, op
 	}
 	lines = append(lines, upgradeCompatibilityPreflightLines()...)
 
-	history, err := client.ListHistory(ctx, 1, 0)
+	rollbackCommitID, rollbackConfigText, ok, err := latestRollbackArchiveText(ctx, client)
 	if err != nil {
 		lines, warnings = appendUpgradePreflightWarning(lines, warnings, "rollback archive check failed: "+err.Error())
-	} else if len(history) == 0 {
+	} else if !ok {
 		lines, warnings = appendUpgradePreflightWarning(lines, warnings, "no rollback archive entries available")
-	} else if strings.TrimSpace(history[0].ConfigText) == "" {
+	} else if strings.TrimSpace(rollbackConfigText) == "" {
 		lines, warnings = appendUpgradePreflightWarning(lines, warnings, "latest rollback archive has no config text")
 	} else {
-		lines = append(lines, fmt.Sprintf("  rollback archive: latest commit %s available", shortCommitID(history[0].CommitID)))
-		if err := validateConfigurationText(history[0].ConfigText); err != nil {
+		lines = append(lines, fmt.Sprintf("  rollback archive: latest commit %s available", shortCommitID(rollbackCommitID)))
+		if err := validateConfigurationText(rollbackConfigText); err != nil {
 			lines, warnings = appendUpgradePreflightWarning(lines, warnings, "latest rollback archive validation failed: "+err.Error())
 		} else {
 			lines = append(lines, "  rollback archive validation: ok")
@@ -237,18 +237,38 @@ func appendUpgradeBackupPathCheck(lines []string, warnings int, path string) ([]
 }
 
 func commitRollbackArchiveWarnings(ctx context.Context, client showClient) []string {
-	history, err := client.ListHistory(ctx, 1, 0)
+	_, configText, ok, err := latestRollbackArchiveText(ctx, client)
 	if err != nil {
 		return []string{"commit safety warning: rollback archive check failed: " + err.Error()}
 	}
-	if len(history) == 0 {
+	if !ok {
 		return []string{"commit safety warning: no rollback archive entry is available before commit"}
 	}
-	if strings.TrimSpace(history[0].ConfigText) == "" {
+	if strings.TrimSpace(configText) == "" {
 		return []string{"commit safety warning: latest rollback archive has no config text"}
 	}
-	if err := validateConfigurationText(history[0].ConfigText); err != nil {
+	if err := validateConfigurationText(configText); err != nil {
 		return []string{"commit safety warning: latest rollback archive validation failed: " + err.Error()}
 	}
 	return nil
+}
+
+func latestRollbackArchiveText(ctx context.Context, client showClient) (commitID, configText string, ok bool, err error) {
+	history, err := client.ListHistory(ctx, 1, 0)
+	if err != nil {
+		return "", "", false, err
+	}
+	if len(history) == 0 {
+		return "", "", false, nil
+	}
+	entry := history[0]
+	detail, err := client.GetCommit(ctx, entry.CommitID)
+	if err != nil {
+		return "", "", true, err
+	}
+	commitID = detail.CommitID
+	if commitID == "" {
+		commitID = entry.CommitID
+	}
+	return commitID, detail.ConfigText, true, nil
 }

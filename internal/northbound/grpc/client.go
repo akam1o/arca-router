@@ -263,6 +263,17 @@ func (c *Client) ListHistory(ctx context.Context, limit, offset int) ([]CommitIn
 	return commitInfosFromProto(resp.GetEntries()), nil
 }
 
+// GetCommit returns one archived commit, including configuration text.
+func (c *Client) GetCommit(ctx context.Context, commitID string) (CommitInfo, error) {
+	ctx, cancel := contextWithDefaultTimeout(ctx)
+	defer cancel()
+	resp, err := c.config.GetCommit(ctx, &apiv1.GetCommitRequest{CommitId: commitID})
+	if err != nil {
+		return CommitInfo{}, err
+	}
+	return commitInfoFromProtoDetail(resp.GetCommit()), nil
+}
+
 // --- Session operations ---
 
 // CreateSession creates a new configuration session.
@@ -753,19 +764,37 @@ func durationMillisUint32(duration time.Duration) uint32 {
 func commitInfosFromProto(entries []*apiv1.CommitEntry) []CommitInfo {
 	infos := make([]CommitInfo, 0, len(entries))
 	for _, entry := range entries {
-		timestamp, err := time.Parse(time.RFC3339Nano, entry.GetTimestamp())
-		if err != nil {
-			timestamp = time.Time{}
-		}
 		infos = append(infos, CommitInfo{
 			CommitID:   entry.GetCommitId(),
 			User:       entry.GetUser(),
-			Timestamp:  timestamp,
+			Timestamp:  parseProtoTimestamp(entry.GetTimestamp()),
 			Message:    entry.GetMessage(),
 			IsRollback: entry.GetIsRollback(),
 		})
 	}
 	return infos
+}
+
+func commitInfoFromProtoDetail(entry *apiv1.CommitDetail) CommitInfo {
+	if entry == nil {
+		return CommitInfo{}
+	}
+	return CommitInfo{
+		CommitID:   entry.GetCommitId(),
+		User:       entry.GetUser(),
+		Timestamp:  parseProtoTimestamp(entry.GetTimestamp()),
+		Message:    entry.GetMessage(),
+		IsRollback: entry.GetIsRollback(),
+		ConfigText: entry.GetConfigText(),
+	}
+}
+
+func parseProtoTimestamp(raw string) time.Time {
+	timestamp, err := time.Parse(time.RFC3339Nano, raw)
+	if err != nil {
+		return time.Time{}
+	}
+	return timestamp
 }
 
 func interfaceInfosFromProto(interfaces []*apiv1.InterfaceState) []InterfaceInfo {

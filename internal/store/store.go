@@ -57,6 +57,7 @@ type CommitRecord struct {
 	CommitID   string              `json:"commit_id"`
 	Version    uint64              `json:"version"`
 	Config     *model.RouterConfig `json:"config"`
+	ConfigText string              `json:"config_text,omitempty"`
 	Author     string              `json:"author"`
 	Message    string              `json:"message,omitempty"`
 	Timestamp  time.Time           `json:"timestamp"`

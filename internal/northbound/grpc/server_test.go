@@ -8,6 +8,7 @@ import (
 	"io"
 	"log/slog"
 	"net"
+	"os"
 	"strings"
 	"sync"
 	"testing"
@@ -432,7 +433,8 @@ func TestClientServerConfigFlow(t *testing.T) {
 		Interfaces: map[string]*model.InterfaceConfig{},
 	}, 1)
 
-	socketPath := t.TempDir() + "/routerd.sock"
+	socketPath := fmt.Sprintf("/tmp/arca-gc-%d.sock", time.Now().UnixNano())
+	t.Cleanup(func() { _ = os.Remove(socketPath) })
 	lis, err := listenUnix(socketPath)
 	if err != nil {
 		t.Fatalf("listenUnix() error = %v", err)
@@ -2352,6 +2354,87 @@ func TestListHistoryOmitsConfigText(t *testing.T) {
 	}
 	if entries[0].ConfigText != "" {
 		t.Fatalf("ListHistory() config text = %q, want metadata-only history entry", entries[0].ConfigText)
+	}
+}
+
+func TestGetCommitReturnsArchivedConfigText(t *testing.T) {
+	eng := engine.NewEngine(nil, testLogger())
+	st := &fakeStore{
+		commits: map[string]*store.CommitRecord{
+			"commit-1": {
+				CommitID:   "commit-1",
+				Author:     "alice",
+				Message:    "initial",
+				Timestamp:  time.Date(2026, 5, 17, 12, 0, 0, 0, time.UTC),
+				IsRollback: true,
+				ConfigText: "set system host-name router1\n",
+			},
+		},
+	}
+	srv := NewServer(eng, st, testLogger())
+
+	entry, err := srv.GetCommit(context.Background(), "commit-1")
+	if err != nil {
+		t.Fatalf("GetCommit() error = %v", err)
+	}
+	if entry.CommitID != "commit-1" || entry.User != "alice" || entry.Message != "initial" || !entry.IsRollback {
+		t.Fatalf("GetCommit() metadata = %#v", entry)
+	}
+	if entry.ConfigText != "set system host-name router1\n" {
+		t.Fatalf("GetCommit() config text = %q, want archived config text", entry.ConfigText)
+	}
+}
+
+func TestClientGetCommitReturnsArchiveDetail(t *testing.T) {
+	eng := engine.NewEngine(nil, testLogger())
+	st := &fakeStore{
+		commits: map[string]*store.CommitRecord{
+			"commit-old": {
+				CommitID:   "commit-old",
+				Author:     "alice",
+				Message:    "old config",
+				Timestamp:  time.Date(2026, 5, 17, 12, 0, 0, 0, time.UTC),
+				ConfigText: "set system host-name old\n",
+			},
+		},
+	}
+
+	socketPath := fmt.Sprintf("/tmp/arca-gc-detail-%d.sock", time.Now().UnixNano())
+	t.Cleanup(func() { _ = os.Remove(socketPath) })
+	lis, err := listenUnix(socketPath)
+	if err != nil {
+		t.Fatalf("listenUnix() error = %v", err)
+	}
+
+	srv := NewServer(eng, st, testLogger())
+	errCh := make(chan error, 1)
+	go func() {
+		errCh <- srv.Serve(lis)
+	}()
+	t.Cleanup(func() {
+		srv.Stop()
+		select {
+		case <-errCh:
+		case <-time.After(time.Second):
+			t.Fatal("server did not stop")
+		}
+	})
+
+	client, err := Dial(socketPath)
+	if err != nil {
+		t.Fatalf("Dial() error = %v", err)
+	}
+	defer func() { _ = client.Close() }()
+
+	entry, err := client.GetCommit(context.Background(), "commit-old")
+	if err != nil {
+		t.Fatalf("GetCommit() error = %v", err)
+	}
+	if entry.CommitID != "commit-old" || entry.User != "alice" || entry.Message != "old config" {
+		t.Fatalf("GetCommit() metadata = %#v", entry)
+	}
+	if entry.ConfigText != "set system host-name old\n" {
+		t.Fatalf("GetCommit() config text = %q, want archived config text", entry.ConfigText)
 	}
 }
 

@@ -198,6 +198,25 @@ func (a *configServiceAdapter) ListHistory(ctx context.Context, req *apiv1.ListH
 	return resp, nil
 }
 
+func (a *configServiceAdapter) GetCommit(ctx context.Context, req *apiv1.GetCommitRequest) (*apiv1.GetCommitResponse, error) {
+	entry, err := a.server.GetCommit(ctx, req.GetCommitId())
+	if err != nil {
+		return nil, configEditStatusError(err)
+	}
+	return &apiv1.GetCommitResponse{Commit: commitDetailFromInfo(entry)}, nil
+}
+
+func commitDetailFromInfo(entry CommitInfo) *apiv1.CommitDetail {
+	return &apiv1.CommitDetail{
+		CommitId:   entry.CommitID,
+		User:       entry.User,
+		Timestamp:  entry.Timestamp.Format(time.RFC3339Nano),
+		Message:    entry.Message,
+		IsRollback: entry.IsRollback,
+		ConfigText: entry.ConfigText,
+	}
+}
+
 type sessionServiceAdapter struct {
 	apiv1.UnimplementedSessionServiceServer
 	server *Server
