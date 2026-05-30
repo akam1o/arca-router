@@ -197,7 +197,8 @@ sudo journalctl -u arca-routerd -f
 `/etc/arca-router/arca-router.conf` を編集し、NETCONF を有効化してユーザを作成します。
 
 ```
-# Enable NETCONF on port 830
+# Enable NETCONF on loopback port 830
+set security netconf ssh enabled true
 set security netconf ssh port 830
 
 # Create admin user
@@ -213,7 +214,7 @@ set security rate-limit per-ip 10
 set security rate-limit per-user 20
 ```
 
-> NETCONF は `arca-routerd` に統合されています。別プロセスの NETCONF デーモンは不要です。`--netconf-listen` を省略した場合、デーモンは設定された NETCONF ポートで待ち受け、未設定時は `:830` を使用します。
+> NETCONF は `arca-routerd` に統合されています。別プロセスの NETCONF デーモンは不要です。`--netconf-listen` を省略した場合、`security netconf ssh enabled true`、または NETCONF SSH の listen address/port が設定されるまで NETCONF は無効のままです。有効化された NETCONF は、`listen-address` または `port` を設定しない限り `127.0.0.1:830` で待ち受けます。
 
 Standard NETCONF `:xpath` capability advertisement は default で有効です。
 advertised XPath filter を扱えない client との互換性確認が必要な場合のみ、

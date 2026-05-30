@@ -623,18 +623,23 @@ VNI values must be between `1` and `16777215`. `type l2` requires `bridge-domain
 
 **Syntax**:
 ```
+set security netconf ssh enabled true
+set security netconf ssh listen-address <address>
 set security netconf ssh port <port>
 ```
 
 **Parameters**:
+- `enabled`: enables the embedded NETCONF/SSH server when set to `true`
+- `<address>`: IP address or `localhost` to bind (default when enabled: `127.0.0.1`)
 - `<port>`: TCP port number (1-65535, default: 830)
 
 **Example**:
 ```
+set security netconf ssh enabled true
 set security netconf ssh port 830
 ```
 
-**Note**: The NETCONF server is built into `arca-routerd`. When `--netconf-listen` is omitted, the daemon listens on the configured `security netconf ssh port`; if that is also unset, it uses `:830`. `--netconf-listen` remains the explicit runtime override and can include a listen address.
+**Note**: The NETCONF server is built into `arca-routerd`. When `--netconf-listen` is omitted, NETCONF remains disabled until `security netconf ssh enabled true` or a configured `security netconf ssh listen-address` / `port` is present. Enabled NETCONF binds to `127.0.0.1:830` by default unless `listen-address` or `port` is configured. `--netconf-listen` remains the explicit runtime override and enables NETCONF for that daemon process.
 
 NETCONF XML get-config/edit-config supports the v0.6 management-plane model for `system services`, `chassis cluster`, `protocols mpls`, `protocols vrrp`, `routing-instances`, `class-of-service`, the v0.8 `protocols evpn` VNI intent model, and non-sensitive `security netconf` / `security rate-limit` settings. Security user secrets are intentionally not emitted in NETCONF XML replies.
 
@@ -951,6 +956,7 @@ set protocols ospf router-id 198.51.100.1
 set protocols ospf area 0.0.0.0 interface ge-0/0/1 passive
 
 # Security configuration
+set security netconf ssh enabled true
 set security netconf ssh port 830
 
 set security users user admin password AdminPass123
@@ -994,7 +1000,7 @@ Common options:
 --grpc-client-identity <value>
                            Comma-separated allowed gRPC client certificate identities
 --grpc-client-role <value> Comma-separated gRPC client certificate identity=role mappings
---netconf-listen <addr>    NETCONF/SSH listen address; overrides security netconf ssh port (default: :830)
+--netconf-listen <addr>    NETCONF/SSH listen address; overrides security netconf ssh listen-address/port and enables NETCONF
 --host-key <path>          NETCONF SSH host key path
 --user-db <path>           NETCONF user database path
 --frr-apply-mode <mode>    FRR backend: transactional or file (default: transactional)

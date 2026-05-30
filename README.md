@@ -197,7 +197,8 @@ sudo journalctl -u arca-routerd -f
 Edit `/etc/arca-router/arca-router.conf` to enable NETCONF and create users:
 
 ```
-# Enable NETCONF on port 830
+# Enable NETCONF on loopback port 830
+set security netconf ssh enabled true
 set security netconf ssh port 830
 
 # Create admin user
@@ -213,7 +214,7 @@ set security rate-limit per-ip 10
 set security rate-limit per-user 20
 ```
 
-> NETCONF is built into `arca-routerd`; no separate NETCONF daemon is needed. When `--netconf-listen` is omitted, the daemon listens on the configured NETCONF port and falls back to `:830`.
+> NETCONF is built into `arca-routerd`; no separate NETCONF daemon is needed. When `--netconf-listen` is omitted, NETCONF remains disabled until `security netconf ssh enabled true` or a configured NETCONF SSH listen address/port is present. Enabled NETCONF binds to `127.0.0.1:830` by default unless `listen-address` or `port` is configured.
 
 Standard NETCONF `:xpath` capability advertisement is enabled by default. Use
 `arca-routerd --netconf-standard-xpath=false` only for compatibility testing
