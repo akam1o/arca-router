@@ -115,11 +115,11 @@ jobs:
         include:
           - rpm_release: 1.el9
             artifact_name: rpm-el9
-            preferred_image: rocky:9
+            preferred_image: rockylinux/rockylinux:9
             fallback_image: almalinux:9
           - rpm_release: 1.el10
             artifact_name: rpm-el10
-            preferred_image: rocky:10
+            preferred_image: rockylinux/rockylinux:10
             fallback_image: almalinux:10
 
     steps:
@@ -149,7 +149,7 @@ jobs:
             set -euo pipefail
 
             dnf -y --setopt=install_weak_deps=False --setopt=tsflags=nodocs install \
-              ca-certificates coreutils curl-minimal gcc git make tar gzip xz findutils >/dev/null
+              ca-certificates curl-minimal file gcc git make tar gzip xz findutils >/dev/null
             git config --global --add safe.directory /work
 
             GO_SHA256="2b2cfc7148493da5e73981bffbf3353af381d5f93e789c82c79aff64962eb556"
