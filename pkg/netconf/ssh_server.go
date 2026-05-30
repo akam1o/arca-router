@@ -63,6 +63,9 @@ func NewSSHServer(config *SSHConfig) (*SSHServer, error) {
 
 	log := logger.New("netconf-ssh", logger.DefaultConfig())
 
+	if err := ensureHostKeyDirectoryPermissions(config.HostKeyPath); err != nil {
+		return nil, fmt.Errorf("secure host key directory: %w", err)
+	}
 	if err := ensureHostKeyFilePermissions(config.HostKeyPath); err != nil {
 		return nil, fmt.Errorf("secure host key permissions: %w", err)
 	}
@@ -178,6 +181,29 @@ func ensureHostKeyFilePermissions(path string) error {
 		return fmt.Errorf("restrict %s to %04o: %w", path, auth.ExpectedKeyFilePerms, err)
 	}
 	if err := auth.ValidateKeyFilePermissions(path, 0, 0); err != nil {
+		return err
+	}
+	return nil
+}
+
+func ensureHostKeyDirectoryPermissions(path string) error {
+	dir := filepath.Dir(path)
+	if err := os.MkdirAll(dir, auth.ExpectedKeyDirPerms); err != nil {
+		return fmt.Errorf("create %s: %w", dir, err)
+	}
+	if err := auth.ValidateKeyDirectoryPermissions(dir, 0, 0); err == nil {
+		return nil
+	} else {
+		var permErr *auth.KeyPermissionError
+		if !errors.As(err, &permErr) {
+			return err
+		}
+	}
+
+	if err := os.Chmod(dir, auth.ExpectedKeyDirPerms); err != nil {
+		return fmt.Errorf("restrict %s to %04o: %w", dir, auth.ExpectedKeyDirPerms, err)
+	}
+	if err := auth.ValidateKeyDirectoryPermissions(dir, 0, 0); err != nil {
 		return err
 	}
 	return nil
@@ -690,6 +716,10 @@ func extractIP(addr net.Addr) string {
 
 // loadOrGenerateHostKey loads or generates an ED25519 host key
 func loadOrGenerateHostKey(path string, log *logger.Logger) (ssh.Signer, error) {
+	if err := ensureHostKeyDirectoryPermissions(path); err != nil {
+		return nil, err
+	}
+
 	// Try to load existing key
 	data, err := auth.ReadSecretFile(path)
 	if err == nil {
@@ -723,12 +753,6 @@ func loadOrGenerateHostKey(path string, log *logger.Logger) (ssh.Signer, error) 
 	pemBytes, err := ssh.MarshalPrivateKey(privateKey, "")
 	if err != nil {
 		return nil, fmt.Errorf("failed to marshal private key: %w", err)
-	}
-
-	// Create directory if needed
-	dir := filepath.Dir(path)
-	if err := os.MkdirAll(dir, 0750); err != nil {
-		return nil, fmt.Errorf("failed to create directory: %w", err)
 	}
 
 	// Write key file with restricted permissions.

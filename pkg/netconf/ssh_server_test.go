@@ -350,6 +350,55 @@ func TestNewSSHServerRejectsSymlinkHostKeyWithoutChmodTarget(t *testing.T) {
 	}
 }
 
+func TestNewSSHServerRejectsSymlinkHostKeyDirectory(t *testing.T) {
+	cfg, _ := testSSHServerConfig(t, "127.0.0.1:0")
+	dir := t.TempDir()
+	targetDir := filepath.Join(dir, "target")
+	linkDir := filepath.Join(dir, "keys")
+	cfg.HostKeyPath = filepath.Join(linkDir, "ssh_host_ed25519_key")
+
+	if err := os.Mkdir(targetDir, 0o700); err != nil {
+		t.Fatalf("Mkdir(%s) error = %v", targetDir, err)
+	}
+	if err := os.Symlink(targetDir, linkDir); err != nil {
+		t.Skipf("symlink not supported: %v", err)
+	}
+
+	server, err := NewSSHServer(cfg)
+	if err == nil {
+		_ = server.Stop()
+		t.Fatal("NewSSHServer() error = nil, want symlink host key directory rejection")
+	}
+	if !strings.Contains(err.Error(), "symbolic link") {
+		t.Fatalf("NewSSHServer() error = %v, want symbolic link rejection", err)
+	}
+	if _, statErr := os.Stat(filepath.Join(targetDir, "ssh_host_ed25519_key")); !os.IsNotExist(statErr) {
+		t.Fatalf("generated host key stat error = %v, want not exist", statErr)
+	}
+}
+
+func TestNewSSHServerRestrictsExistingHostKeyDirectoryPermissions(t *testing.T) {
+	cfg, _ := testSSHServerConfig(t, "127.0.0.1:0")
+	hostKeyDir := filepath.Dir(cfg.HostKeyPath)
+	if err := os.Chmod(hostKeyDir, 0o777); err != nil {
+		t.Fatalf("Chmod(%s) error = %v", hostKeyDir, err)
+	}
+
+	server, err := NewSSHServer(cfg)
+	if err != nil {
+		t.Fatalf("NewSSHServer() error = %v", err)
+	}
+	t.Cleanup(func() { _ = server.Stop() })
+
+	info, err := os.Stat(hostKeyDir)
+	if err != nil {
+		t.Fatalf("Stat(%s) error = %v", hostKeyDir, err)
+	}
+	if got := info.Mode().Perm(); got != 0o750 {
+		t.Fatalf("host key directory mode = %04o, want 0750", got)
+	}
+}
+
 func TestWriteHostKeyFileRejectsExistingSymlink(t *testing.T) {
 	dir := t.TempDir()
 	targetPath := filepath.Join(dir, "target-key")
