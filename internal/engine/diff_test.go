@@ -208,3 +208,44 @@ func TestComputeDiffDetectsStaticRouteBFDChanges(t *testing.T) {
 		t.Fatalf("Static route BFD change not detected: %#v", diff)
 	}
 }
+
+func TestComputeDiffHandlesNilInterfaceEntries(t *testing.T) {
+	oldCfg := model.NewRouterConfig()
+	oldCfg.Interfaces["ge-0/0/0"] = nil
+	oldCfg.Interfaces["ge-0/0/1"] = &model.InterfaceConfig{
+		Units: map[int]*model.Unit{
+			0: nil,
+			1: {Family: map[string]*model.AddressFamily{"inet": nil}},
+		},
+	}
+
+	newCfg := model.NewRouterConfig()
+	newCfg.Interfaces["ge-0/0/0"] = &model.InterfaceConfig{Description: "uplink"}
+	newCfg.Interfaces["ge-0/0/1"] = &model.InterfaceConfig{
+		Units: map[int]*model.Unit{
+			0: {Family: map[string]*model.AddressFamily{
+				"inet": {Addresses: []string{"192.0.2.1/24"}},
+			}},
+		},
+	}
+
+	diff := ComputeDiff(oldCfg, newCfg)
+	change := diff.InterfacesChanged["ge-0/0/0"]
+	if change == nil || !change.DescriptionChanged || change.NewDescription != "uplink" {
+		t.Fatalf("interface description change = %#v, want nil-safe description change", change)
+	}
+	change = diff.InterfacesChanged["ge-0/0/1"]
+	if change == nil || len(change.AddressesAdded) != 1 {
+		t.Fatalf("interface address change = %#v, want nil-safe address addition", change)
+	}
+}
+
+func TestConfigDiffCloneHandlesNilConfigs(t *testing.T) {
+	diff := (&ConfigDiff{}).Clone()
+	if diff == nil {
+		t.Fatal("ConfigDiff.Clone() = nil, want empty diff")
+	}
+	if diff.OldConfig == nil || diff.NewConfig == nil {
+		t.Fatalf("ConfigDiff.Clone() configs = old %#v new %#v, want initialized configs", diff.OldConfig, diff.NewConfig)
+	}
+}

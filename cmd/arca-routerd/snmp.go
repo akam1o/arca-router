@@ -15,6 +15,7 @@ import (
 	snmpserver "github.com/slayercat/GoSNMPServer"
 
 	"github.com/akam1o/arca-router/pkg/logger"
+	"github.com/akam1o/arca-router/pkg/security"
 )
 
 const (
@@ -74,8 +75,7 @@ const (
 	snmpOIDCoSCapabilityErr  = arcaSNMPBaseOID + ".48.0"
 	snmpOIDCoSCapabilityLast = arcaSNMPBaseOID + ".49.0"
 
-	defaultSNMPPort      = 161
-	defaultSNMPCommunity = "public"
+	defaultSNMPPort = 161
 )
 
 func effectiveSNMPListen(flagValue string, snapshot *model.ConfigSnapshot) string {
@@ -104,7 +104,7 @@ func effectiveSNMPCommunity(flagValue string, snapshot *model.ConfigSnapshot) st
 	if snmp := snapshotSNMPConfig(snapshot); snmp != nil && strings.TrimSpace(snmp.Community) != "" {
 		return strings.TrimSpace(snmp.Community)
 	}
-	return defaultSNMPCommunity
+	return ""
 }
 
 func snapshotSNMPConfig(snapshot *model.ConfigSnapshot) *model.SNMPConfig {
@@ -116,13 +116,22 @@ func snapshotSNMPConfig(snapshot *model.ConfigSnapshot) *model.SNMPConfig {
 }
 
 func startSNMPServer(ctx context.Context, listenAddr, community string, source metricsSource, log *logger.Logger) (<-chan error, error) {
-	if community == "" {
-		return nil, fmt.Errorf("SNMP community must not be empty")
+	errCh, _, err := startSNMPServerWithShutdown(ctx, listenAddr, community, source, log)
+	return errCh, err
+}
+
+func startSNMPServerWithShutdown(ctx context.Context, listenAddr, community string, source metricsSource, log *logger.Logger) (<-chan error, func(context.Context) error, error) {
+	if err := security.ValidateSNMPCommunity(community); err != nil {
+		return nil, nil, fmt.Errorf("validate SNMP community: %w", err)
 	}
 
 	server := newSNMPServer(source, community)
 	if err := server.ListenUDP("udp", listenAddr); err != nil {
-		return nil, fmt.Errorf("listen SNMP endpoint: %w", err)
+		return nil, nil, fmt.Errorf("listen SNMP endpoint: %w", err)
+	}
+	shutdown := func(context.Context) error {
+		server.Shutdown()
+		return nil
 	}
 
 	errCh := make(chan error, 1)
@@ -135,10 +144,10 @@ func startSNMPServer(ctx context.Context, listenAddr, community string, source m
 
 	go func() {
 		<-ctx.Done()
-		server.Shutdown()
+		_ = shutdown(context.Background())
 	}()
 
-	return errCh, nil
+	return errCh, shutdown, nil
 }
 
 func newSNMPServer(source metricsSource, community string) *snmpserver.SNMPServer {

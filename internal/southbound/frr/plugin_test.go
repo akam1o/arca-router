@@ -724,6 +724,55 @@ func TestRollbackUsesFileBackendAfterFileFallback(t *testing.T) {
 	}
 }
 
+func TestApplyChangesRecordsRollbackBeforeApplyFailure(t *testing.T) {
+	newCfg := model.NewRouterConfig()
+	newCfg.Routing = &model.RoutingConfig{StaticRoutes: []*model.StaticRoute{
+		{Prefix: "203.0.113.0/24", NextHop: "192.0.2.1"},
+	}}
+	diff := engine.ComputeDiff(model.NewRouterConfig(), newCfg)
+	applier := &failOnceApplier{err: errors.New("apply failed")}
+	plugin := NewFRRPlugin(testLogger())
+	plugin.applier = applier
+
+	err := plugin.ApplyChanges(context.Background(), diff)
+	if err == nil {
+		t.Fatal("ApplyChanges() error = nil, want apply failure")
+	}
+	if !plugin.hasRollbackConfig {
+		t.Fatal("ApplyChanges() did not record rollback state before returning apply failure")
+	}
+
+	if err := plugin.RollbackChanges(context.Background(), diff); err != nil {
+		t.Fatalf("RollbackChanges() error = %v", err)
+	}
+	if applier.calls != 2 {
+		t.Fatalf("ApplyConfig calls = %d, want failed apply plus rollback", applier.calls)
+	}
+	if got := applier.configs[1]; got != plugin.currentConfig {
+		t.Fatalf("rollback config content = %q, want currentConfig %q", got, plugin.currentConfig)
+	}
+}
+
+func TestRollbackChangesAllowsEmptyRollbackConfig(t *testing.T) {
+	applier := &recordingApplier{}
+	plugin := NewFRRPlugin(testLogger())
+	plugin.applier = applier
+	plugin.rollbackConfig = ""
+	plugin.rollbackFRRConfig = &pkgfrr.Config{}
+	plugin.rollbackApplyMode = pkgfrr.BackendModeTransactional
+	plugin.hasRollbackConfig = true
+
+	if err := plugin.RollbackChanges(context.Background(), nil); err != nil {
+		t.Fatalf("RollbackChanges() error = %v", err)
+	}
+	if applier.calls != 1 {
+		t.Fatalf("ApplyConfig calls = %d, want 1", applier.calls)
+	}
+	if applier.configContent != "" {
+		t.Fatalf("rollback config content = %q, want empty config", applier.configContent)
+	}
+}
+
 func TestApplyChangesUsesConfiguredFileBackend(t *testing.T) {
 	newCfg := model.NewRouterConfig()
 	newCfg.Routing = &model.RoutingConfig{StaticRoutes: []*model.StaticRoute{
@@ -747,6 +796,65 @@ func TestApplyChangesUsesConfiguredFileBackend(t *testing.T) {
 	}
 	if plugin.currentApplyMode != pkgfrr.BackendModeFile {
 		t.Fatalf("currentApplyMode = %q, want file", plugin.currentApplyMode)
+	}
+}
+
+func TestApplyChangesUsesTransactionalDiffForStaticRouteOnlyChange(t *testing.T) {
+	oldCfg := model.NewRouterConfig()
+	oldCfg.Routing = &model.RoutingConfig{StaticRoutes: []*model.StaticRoute{
+		{Prefix: "203.0.113.0/24", NextHop: "192.0.2.1"},
+	}}
+	newCfg := oldCfg.Clone()
+	newCfg.Routing.StaticRoutes = append(newCfg.Routing.StaticRoutes, &model.StaticRoute{
+		Prefix: "198.51.100.0/24", NextHop: "192.0.2.254",
+	})
+	diff := engine.ComputeDiff(oldCfg, newCfg)
+	applier := &recordingDiffApplier{diffApplied: true}
+	plugin := NewFRRPlugin(testLogger())
+	plugin.applier = applier
+
+	if err := plugin.ApplyChanges(context.Background(), diff); err != nil {
+		t.Fatalf("ApplyChanges() error = %v", err)
+	}
+	if applier.diffCalls != 1 {
+		t.Fatalf("ApplyConfigDiff calls = %d, want 1", applier.diffCalls)
+	}
+	if applier.calls != 0 {
+		t.Fatalf("ApplyConfig calls = %d, want 0", applier.calls)
+	}
+	if applier.oldCfg == nil || len(applier.oldCfg.StaticRoutes) != 1 {
+		t.Fatalf("diff old config = %#v, want one static route", applier.oldCfg)
+	}
+	if applier.newCfg == nil || len(applier.newCfg.StaticRoutes) != 2 {
+		t.Fatalf("diff new config = %#v, want two static routes", applier.newCfg)
+	}
+}
+
+func TestApplyChangesFallsBackWhenTransactionalDiffUnsupported(t *testing.T) {
+	oldCfg := model.NewRouterConfig()
+	oldCfg.Routing = &model.RoutingConfig{AutonomousSystem: 65000, RouterID: "192.0.2.1"}
+	newCfg := oldCfg.Clone()
+	newCfg.Protocols = &model.ProtocolsConfig{
+		BGP: &model.BGPConfig{Groups: map[string]*model.BGPGroup{
+			"external": {
+				Type:      "external",
+				Neighbors: map[string]*model.BGPNeighbor{"192.0.2.2": {PeerAS: 65001}},
+			},
+		}},
+	}
+	diff := engine.ComputeDiff(oldCfg, newCfg)
+	applier := &recordingDiffApplier{}
+	plugin := NewFRRPlugin(testLogger())
+	plugin.applier = applier
+
+	if err := plugin.ApplyChanges(context.Background(), diff); err != nil {
+		t.Fatalf("ApplyChanges() error = %v", err)
+	}
+	if applier.diffCalls != 1 {
+		t.Fatalf("ApplyConfigDiff calls = %d, want 1", applier.diffCalls)
+	}
+	if applier.calls != 1 {
+		t.Fatalf("ApplyConfig calls = %d, want 1 fallback", applier.calls)
 	}
 }
 
@@ -782,18 +890,91 @@ func TestCheckVRRPOperationalStatusReportsMissingGroup(t *testing.T) {
 	}
 }
 
+func TestHealthCheckReportsBackendError(t *testing.T) {
+	plugin := NewFRRPlugin(testLogger())
+	plugin.healthCheck = func(ctx context.Context) error {
+		return errors.New("vtysh unavailable")
+	}
+
+	err := plugin.HealthCheck(context.Background())
+	if err == nil {
+		t.Fatal("HealthCheck() error = nil, want backend error")
+	}
+	if !strings.Contains(err.Error(), "check FRR backend") {
+		t.Fatalf("HealthCheck() error = %v, want backend context", err)
+	}
+}
+
+func TestHealthCheckReportsOperationalStatusIssues(t *testing.T) {
+	plugin := NewFRRPlugin(testLogger())
+	plugin.healthCheck = func(ctx context.Context) error { return nil }
+	plugin.statusReader = fakeVRRPStatusReader{status: &pkgfrr.VRRPStatus{}}
+	plugin.currentFRRConfig = &pkgfrr.Config{
+		VRRP: &pkgfrr.VRRPConfig{Groups: []pkgfrr.VRRPGroup{
+			{ID: 10, Interface: "ge0-0-0", VirtualAddress: "192.0.2.254"},
+		}},
+	}
+
+	err := plugin.HealthCheck(context.Background())
+	if err == nil {
+		t.Fatal("HealthCheck() error = nil, want VRRP status issue")
+	}
+	if !strings.Contains(err.Error(), "check FRR VRRP status") {
+		t.Fatalf("HealthCheck() error = %v, want VRRP status context", err)
+	}
+	status := plugin.VRRPOperationalStatus()
+	if len(status.Issues) != 1 || status.Groups[0].State != "missing" {
+		t.Fatalf("VRRPOperationalStatus() = %#v, want recorded missing group", status)
+	}
+}
+
+func TestHealthCheckPassesWhenBackendAndOperationalStatusConverge(t *testing.T) {
+	plugin := NewFRRPlugin(testLogger())
+	plugin.healthCheck = func(ctx context.Context) error { return nil }
+	plugin.statusReader = fakeVRRPStatusReader{status: &pkgfrr.VRRPStatus{
+		Groups: []pkgfrr.VRRPRouterStatus{{Interface: "ge0-0-0", VRID: 10, State: "master"}},
+	}}
+	plugin.currentFRRConfig = &pkgfrr.Config{
+		VRRP: &pkgfrr.VRRPConfig{Groups: []pkgfrr.VRRPGroup{
+			{ID: 10, Interface: "ge0-0-0", VirtualAddress: "192.0.2.254"},
+		}},
+	}
+
+	if err := plugin.HealthCheck(context.Background()); err != nil {
+		t.Fatalf("HealthCheck() error = %v, want nil", err)
+	}
+}
+
 func TestCheckVRRPOperationalStatusRecordsReaderError(t *testing.T) {
 	plugin := NewFRRPlugin(testLogger())
-	plugin.statusReader = fakeVRRPStatusReader{err: errors.New("vtysh failed")}
+	plugin.statusReader = fakeVRRPStatusReader{err: errors.New("open /var/run/frr/vtysh.sock: permission denied")}
 
 	status := plugin.checkVRRPOperationalStatus(context.Background(), &pkgfrr.Config{
 		VRRP: &pkgfrr.VRRPConfig{Groups: []pkgfrr.VRRPGroup{
 			{ID: 10, Interface: "ge0-0-0", VirtualAddress: "192.0.2.254"},
 		}},
 	})
-	if status.LastError == "" || len(status.Issues) != 1 {
-		t.Fatalf("checkVRRPOperationalStatus() = %#v, want reader error issue", status)
+	if status.LastError != frrVRRPStatusReadErrorMessage || len(status.Issues) != 1 ||
+		status.Issues[0] != frrVRRPStatusReadErrorMessage {
+		t.Fatalf("checkVRRPOperationalStatus() = %#v, want redacted reader error issue", status)
 	}
+	assertOperationalStatusErrorRedacted(t, status.LastError, status.Issues)
+}
+
+func TestCheckBFDOperationalStatusRecordsReaderError(t *testing.T) {
+	plugin := NewFRRPlugin(testLogger())
+	plugin.bfdStatusReader = fakeBFDStatusReader{err: errors.New("dial /var/lib/frr/bfdd.sock with secret token failed")}
+
+	status := plugin.checkBFDOperationalStatus(context.Background(), &pkgfrr.Config{
+		BFD: &pkgfrr.BFDConfig{Peers: []pkgfrr.BFDPeer{
+			{Address: "192.0.2.2", LocalAddress: "192.0.2.1", Interface: "ge0-0-0"},
+		}},
+	})
+	if status.LastError != frrBFDStatusReadErrorMessage || len(status.Issues) != 1 ||
+		status.Issues[0] != frrBFDStatusReadErrorMessage {
+		t.Fatalf("checkBFDOperationalStatus() = %#v, want redacted reader error issue", status)
+	}
+	assertOperationalStatusErrorRedacted(t, status.LastError, status.Issues)
 }
 
 func TestCheckBFDOperationalStatusReportsMissingPeer(t *testing.T) {
@@ -858,6 +1039,16 @@ func TestCheckBFDOperationalStatusConverged(t *testing.T) {
 	}
 }
 
+func assertOperationalStatusErrorRedacted(t *testing.T, lastError string, issues []string) {
+	t.Helper()
+	combined := lastError + " " + strings.Join(issues, " ")
+	for _, leaked := range []string{"/var/run/frr", "/var/lib/frr", "permission denied", "secret"} {
+		if strings.Contains(combined, leaked) {
+			t.Fatalf("operational status error leaked %q in %q", leaked, combined)
+		}
+	}
+}
+
 type recordingApplier struct {
 	configContent string
 	cfg           *pkgfrr.Config
@@ -869,6 +1060,42 @@ func (a *recordingApplier) ApplyConfig(ctx context.Context, configContent string
 	a.configContent = configContent
 	a.cfg = cfg
 	return nil
+}
+
+type failOnceApplier struct {
+	err           error
+	configContent string
+	cfg           *pkgfrr.Config
+	calls         int
+	configs       []string
+}
+
+func (a *failOnceApplier) ApplyConfig(ctx context.Context, configContent string, cfg *pkgfrr.Config) error {
+	a.calls++
+	a.configContent = configContent
+	a.cfg = cfg
+	a.configs = append(a.configs, configContent)
+	if a.err != nil {
+		err := a.err
+		a.err = nil
+		return err
+	}
+	return nil
+}
+
+type recordingDiffApplier struct {
+	recordingApplier
+	oldCfg      *pkgfrr.Config
+	newCfg      *pkgfrr.Config
+	diffCalls   int
+	diffApplied bool
+}
+
+func (a *recordingDiffApplier) ApplyConfigDiff(ctx context.Context, oldCfg, newCfg *pkgfrr.Config) (bool, error) {
+	a.diffCalls++
+	a.oldCfg = oldCfg
+	a.newCfg = newCfg
+	return a.diffApplied, nil
 }
 
 type fakeVRRPStatusReader struct {

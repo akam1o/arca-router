@@ -18,6 +18,8 @@ import (
 //go:embed migrations/*.sql
 var migrationsFS embed.FS
 
+const maxSQLiteBackupPathAttempts = 100
+
 // sqliteMigrationManager implements MigrationManager for SQLite.
 type sqliteMigrationManager struct {
 	db     *sql.DB
@@ -177,54 +179,70 @@ func (m *sqliteMigrationManager) configLockColumns() (map[string]bool, error) {
 // CreateBackup creates a database backup before migrations.
 // Uses SQLite's VACUUM INTO for consistent backups.
 func (m *sqliteMigrationManager) CreateBackup() (string, error) {
+	return m.createBackup(time.Now())
+}
+
+func (m *sqliteMigrationManager) createBackup(now time.Time) (string, error) {
 	if m.dbPath == "" || m.dbPath == ":memory:" {
 		// In-memory database, no backup needed
 		return "", nil
 	}
 
-	// Check if source file exists
-	if _, err := os.Stat(m.dbPath); os.IsNotExist(err) {
-		// Database file doesn't exist yet (first run)
-		return "", nil
+	sourceInfo, err := os.Lstat(m.dbPath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			// Database file doesn't exist yet (first run)
+			return "", nil
+		}
+		return "", fmt.Errorf("failed to stat database file %s: %w", m.dbPath, err)
+	}
+	if err := validateSQLiteFileInfo(m.dbPath, sourceInfo); err != nil {
+		return "", err
 	}
 
 	// Create backup filename with timestamp
-	timestamp := time.Now().Format("20060102_150405")
-	backupPath := fmt.Sprintf("%s.backup.%s", m.dbPath, timestamp)
-
-	// Use VACUUM INTO for consistent backup
-	// This ensures the backup is transactionally consistent
-	// Use parameter binding to prevent SQL injection (SQLite supports ? for VACUUM INTO in some drivers)
-	// However, VACUUM INTO doesn't support parameter binding in go-sqlite3, so we sanitize the path
-	sanitizedPath := filepath.Clean(backupPath)
-	if sanitizedPath != backupPath {
-		return "", fmt.Errorf("invalid backup path (possible security risk): %s", backupPath)
+	timestamp := now.Format("20060102_150405")
+	backupPath, err := m.availableBackupPath(timestamp)
+	if err != nil {
+		return "", err
 	}
 
-	// Escape single quotes in the path (double them for SQL string literal)
-	escapedPath := sanitizedPath
-	if len(escapedPath) > 0 {
-		escapedPath = ""
-		for _, c := range sanitizedPath {
-			if c == '\'' {
-				escapedPath += "''"
-			} else {
-				escapedPath += string(c)
-			}
-		}
-	}
-
-	_, err := m.db.Exec(fmt.Sprintf("VACUUM INTO '%s'", escapedPath))
+	_, err = m.db.Exec("VACUUM INTO ?", backupPath)
 	if err != nil {
 		return "", fmt.Errorf("failed to create database backup: %w", err)
 	}
 
-	// Set backup file permissions to 0600
-	if err := os.Chmod(backupPath, 0600); err != nil {
-		return "", fmt.Errorf("failed to set backup file permissions: %w", err)
+	backupFile, err := openSecureSQLiteFile(backupPath, "database backup file", false)
+	if err != nil {
+		return "", err
+	}
+	if err := backupFile.Close(); err != nil {
+		return "", fmt.Errorf("failed to close database backup file: %w", err)
 	}
 
 	return backupPath, nil
+}
+
+func (m *sqliteMigrationManager) availableBackupPath(timestamp string) (string, error) {
+	for attempt := 0; attempt < maxSQLiteBackupPathAttempts; attempt++ {
+		backupPath := sqliteBackupPath(m.dbPath, timestamp, attempt)
+		if _, err := os.Lstat(backupPath); err == nil {
+			continue
+		} else if os.IsNotExist(err) {
+			return backupPath, nil
+		} else {
+			return "", fmt.Errorf("failed to check database backup path: %w", err)
+		}
+	}
+	return "", fmt.Errorf("failed to choose unique database backup path after %d attempts", maxSQLiteBackupPathAttempts)
+}
+
+func sqliteBackupPath(dbPath, timestamp string, attempt int) string {
+	backupPath := fmt.Sprintf("%s.backup.%s", dbPath, timestamp)
+	if attempt == 0 {
+		return backupPath
+	}
+	return fmt.Sprintf("%s.%d", backupPath, attempt)
 }
 
 // migration represents a single migration file.

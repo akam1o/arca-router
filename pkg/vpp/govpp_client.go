@@ -32,8 +32,11 @@ import (
 )
 
 const (
-	// Default VPP API socket path
-	defaultSocketPath = "/run/vpp/api.sock"
+	// DefaultAPISocketPath is the default VPP binary API socket path.
+	DefaultAPISocketPath = "/run/vpp/api.sock"
+
+	// Environment override for the VPP API socket path.
+	apiSocketPathEnv = "VPP_API_SOCKET_PATH"
 
 	// Environment override for the VPP stats socket path.
 	statsSocketPathEnv = "VPP_STATS_SOCKET_PATH"
@@ -49,11 +52,16 @@ const (
 
 	// Exponential backoff base duration
 	retryBackoff = 1 * time.Second
-
-	// Expected VPP version (major.minor)
-	expectedVPPMajor = 24
-	expectedVPPMinor = 10
 )
+
+type vppVersion struct {
+	Major int
+	Minor int
+}
+
+var supportedVPPVersions = []vppVersion{
+	{Major: 24, Minor: 10},
+}
 
 // govppClient is the production VPP client using govpp
 type govppClient struct {
@@ -64,15 +72,47 @@ type govppClient struct {
 	ch              api.Channel
 }
 
+// GovppClientOptions configures the production govpp-backed VPP client.
+type GovppClientOptions struct {
+	SocketPath      string
+	StatsSocketPath string
+}
+
+// DefaultStatsSocketPath returns the default VPP stats socket path used by govpp.
+func DefaultStatsSocketPath() string {
+	return statsclient.DefaultSocketName
+}
+
+// DefaultGovppClientOptions returns the effective govpp defaults, including
+// environment socket overrides.
+func DefaultGovppClientOptions() GovppClientOptions {
+	return GovppClientOptions{
+		SocketPath:      socketPathFromEnv(apiSocketPathEnv, DefaultAPISocketPath),
+		StatsSocketPath: socketPathFromEnv(statsSocketPathEnv, DefaultStatsSocketPath()),
+	}
+}
+
+func socketPathFromEnv(name, fallback string) string {
+	if path := strings.TrimSpace(os.Getenv(name)); path != "" {
+		return path
+	}
+	return fallback
+}
+
 // NewGovppClient creates a new govpp-based VPP client
 func NewGovppClient() Client {
-	socketPath := os.Getenv("VPP_API_SOCKET_PATH")
+	return NewGovppClientWithOptions(DefaultGovppClientOptions())
+}
+
+// NewGovppClientWithOptions creates a new govpp-based VPP client with explicit socket paths.
+func NewGovppClientWithOptions(opts GovppClientOptions) Client {
+	socketPath := strings.TrimSpace(opts.SocketPath)
 	if socketPath == "" {
-		socketPath = defaultSocketPath
+		socketPath = DefaultAPISocketPath
 	}
-	statsSocketPath := os.Getenv(statsSocketPathEnv)
+	statsSocketPath := strings.TrimSpace(opts.StatsSocketPath)
 	if statsSocketPath == "" {
-		statsSocketPath = statsclient.DefaultSocketName
+		statsSocketPath = DefaultStatsSocketPath()
 	}
 
 	return &govppClient{
@@ -252,13 +292,29 @@ func (c *govppClient) checkVersionCompatibility() error {
 		return fmt.Errorf("invalid VPP minor version in '%s': %s", version, parts[1])
 	}
 
-	// Check version compatibility (major.minor must match)
-	if major != expectedVPPMajor || minor != expectedVPPMinor {
-		return fmt.Errorf("VPP version incompatible: got %d.%d, expected %d.%d (full version: %s)",
-			major, minor, expectedVPPMajor, expectedVPPMinor, version)
+	if !isSupportedVPPVersion(major, minor) {
+		return fmt.Errorf("VPP version incompatible: got %d.%d, certified VPP versions: %s (full version: %s; regenerate binapi and update compatibility evidence before enabling newer VPP releases)",
+			major, minor, supportedVPPVersionList(), version)
 	}
 
 	return nil
+}
+
+func isSupportedVPPVersion(major, minor int) bool {
+	for _, supported := range supportedVPPVersions {
+		if major == supported.Major && minor == supported.Minor {
+			return true
+		}
+	}
+	return false
+}
+
+func supportedVPPVersionList() string {
+	versions := make([]string, 0, len(supportedVPPVersions))
+	for _, supported := range supportedVPPVersions {
+		versions = append(versions, fmt.Sprintf("%d.%d.x", supported.Major, supported.Minor))
+	}
+	return strings.Join(versions, ", ")
 }
 
 // Close closes the VPP connection

@@ -177,10 +177,12 @@ func diffInterface(name string, old, new *model.InterfaceConfig) *InterfaceChang
 	change := &InterfaceChange{Name: name}
 	hasChange := false
 
-	if old.Description != new.Description {
+	oldDescription := interfaceDescription(old)
+	newDescription := interfaceDescription(new)
+	if oldDescription != newDescription {
 		change.DescriptionChanged = true
-		change.OldDescription = old.Description
-		change.NewDescription = new.Description
+		change.OldDescription = oldDescription
+		change.NewDescription = newDescription
 		hasChange = true
 	}
 
@@ -207,10 +209,26 @@ func diffInterface(name string, old, new *model.InterfaceConfig) *InterfaceChang
 	return change
 }
 
+func interfaceDescription(iface *model.InterfaceConfig) string {
+	if iface == nil {
+		return ""
+	}
+	return iface.Description
+}
+
 func collectAddresses(ic *model.InterfaceConfig) []UnitAddress {
 	var result []UnitAddress
+	if ic == nil {
+		return result
+	}
 	for unitNum, unit := range ic.Units {
+		if unit == nil {
+			continue
+		}
 		for familyName, family := range unit.Family {
+			if family == nil {
+				continue
+			}
 			for _, addr := range family.Addresses {
 				result = append(result, UnitAddress{
 					UnitNum: unitNum,

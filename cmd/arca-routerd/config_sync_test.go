@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"strings"
 	"testing"
 
 	"github.com/akam1o/arca-router/internal/engine"
@@ -126,6 +127,48 @@ func TestEtcdConfigSynchronizerDoesNotReloadUnchangedRevision(t *testing.T) {
 	}
 }
 
+func TestEtcdConfigSynchronizerRedactsEtcdStatusError(t *testing.T) {
+	eng := engine.NewEngine(nil, slog.Default())
+	eng.InitializeRunning(testSyncConfig("edge-old"), 1)
+	syncer := newEtcdConfigSynchronizer(&configSyncTestStore{}, eng, configSyncTestEtcdStatus{
+		err: fmt.Errorf("dial etcd https://10.0.0.1:2379 with password=secret failed"),
+	}, 0, slog.Default())
+
+	if err := syncer.reconcile(context.Background()); err == nil {
+		t.Fatal("reconcile() error = nil, want etcd status error")
+	}
+	status := syncer.ConfigSyncStatus()
+	if status.Healthy {
+		t.Fatalf("ConfigSyncStatus().Healthy = true, want false")
+	}
+	if status.LastError != configSyncEtcdStatusErrorMessage {
+		t.Fatalf("ConfigSyncStatus().LastError = %q, want redacted etcd status error", status.LastError)
+	}
+	assertConfigSyncStatusErrorDoesNotLeak(t, status.LastError, "10.0.0.1", "password=secret")
+}
+
+func TestEtcdConfigSynchronizerRedactsSnapshotLoadError(t *testing.T) {
+	eng := engine.NewEngine(nil, slog.Default())
+	eng.InitializeRunning(testSyncConfig("edge-old"), 1)
+	syncer := newEtcdConfigSynchronizer(&configSyncTestStore{
+		err: fmt.Errorf("open /var/lib/arca-router/config.db: permission denied"),
+	}, eng, configSyncTestEtcdStatus{
+		status: &datastore.EtcdStatus{Revision: 11, RunningRevision: 10},
+	}, 0, slog.Default())
+
+	if err := syncer.reconcile(context.Background()); err == nil {
+		t.Fatal("reconcile() error = nil, want snapshot load error")
+	}
+	status := syncer.ConfigSyncStatus()
+	if status.Healthy {
+		t.Fatalf("ConfigSyncStatus().Healthy = true, want false")
+	}
+	if status.LastError != configSyncSnapshotLoadErrorMessage {
+		t.Fatalf("ConfigSyncStatus().LastError = %q, want redacted snapshot load error", status.LastError)
+	}
+	assertConfigSyncStatusErrorDoesNotLeak(t, status.LastError, "/var/lib/arca-router/config.db", "permission denied")
+}
+
 func TestEtcdConfigSynchronizerKeepsRevisionPendingAfterApplyError(t *testing.T) {
 	eng := engine.NewEngine([]engine.Plugin{rejectingSyncPlugin{}}, slog.Default())
 	eng.InitializeRunning(testSyncConfig("edge-old"), 1)
@@ -143,6 +186,10 @@ func TestEtcdConfigSynchronizerKeepsRevisionPendingAfterApplyError(t *testing.T)
 	if status.Healthy || status.LastError == "" {
 		t.Fatalf("ConfigSyncStatus() = %#v, want unhealthy error", status)
 	}
+	if status.LastError != configSyncApplyErrorMessage {
+		t.Fatalf("ConfigSyncStatus().LastError = %q, want redacted apply error", status.LastError)
+	}
+	assertConfigSyncStatusErrorDoesNotLeak(t, status.LastError, "reject synced config")
 
 	eng = engine.NewEngine(nil, slog.Default())
 	eng.InitializeRunning(testSyncConfig("edge-old"), 1)
@@ -152,6 +199,15 @@ func TestEtcdConfigSynchronizerKeepsRevisionPendingAfterApplyError(t *testing.T)
 	}
 	if got := eng.Running().System.HostName; got != "edge-new" {
 		t.Fatalf("running hostname after retry = %q, want edge-new", got)
+	}
+}
+
+func assertConfigSyncStatusErrorDoesNotLeak(t *testing.T, message string, forbidden ...string) {
+	t.Helper()
+	for _, value := range forbidden {
+		if strings.Contains(message, value) {
+			t.Fatalf("ConfigSyncStatus().LastError leaked %q: %q", value, message)
+		}
 	}
 }
 

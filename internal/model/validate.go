@@ -6,6 +6,9 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+
+	pkgauth "github.com/akam1o/arca-router/pkg/auth"
+	"github.com/akam1o/arca-router/pkg/security"
 )
 
 // junosIfacePattern matches the legacy config parser's supported Junos-style
@@ -69,6 +72,11 @@ func (c *RouterConfig) validateSystem() error {
 		}
 	}
 	if snmp := c.System.Services.SNMP; snmp != nil {
+		if snmp.Enabled {
+			if err := security.ValidateSNMPCommunity(snmp.Community); err != nil {
+				return fmt.Errorf("system services snmp: %w", err)
+			}
+		}
 		if snmp.Port < 0 || snmp.Port > 65535 {
 			return fmt.Errorf("system services snmp: port must be 0-65535, got %d", snmp.Port)
 		}
@@ -84,13 +92,22 @@ func (c *RouterConfig) validateInterfaces() error {
 		if !junosIfacePattern.MatchString(name) {
 			return fmt.Errorf("invalid interface name %q: must be Junos format (e.g. ge-0/0/0, ae0, lo0, irb, fxp0)", name)
 		}
+		if iface == nil {
+			return fmt.Errorf("interface %s is nil", name)
+		}
 		for unitNum, unit := range iface.Units {
 			if unitNum < 0 {
 				return fmt.Errorf("interface %s: unit number must be non-negative, got %d", name, unitNum)
 			}
+			if unit == nil {
+				return fmt.Errorf("interface %s unit %d is nil", name, unitNum)
+			}
 			for familyName, family := range unit.Family {
 				if familyName != "inet" && familyName != "inet6" {
 					return fmt.Errorf("interface %s unit %d: unsupported family %q", name, unitNum, familyName)
+				}
+				if family == nil {
+					return fmt.Errorf("interface %s unit %d family %s is nil", name, unitNum, familyName)
 				}
 				for _, addr := range family.Addresses {
 					if _, _, err := net.ParseCIDR(addr); err != nil {
@@ -114,6 +131,9 @@ func (c *RouterConfig) validateRouting() error {
 		}
 	}
 	for _, route := range c.Routing.StaticRoutes {
+		if route == nil {
+			return fmt.Errorf("static route entry is nil")
+		}
 		_, prefixNet, err := net.ParseCIDR(route.Prefix)
 		if err != nil {
 			return fmt.Errorf("static route: invalid prefix %q: %w", route.Prefix, err)
@@ -486,6 +506,9 @@ func (c *RouterConfig) validateBGP(bgp *BGPConfig) error {
 		return fmt.Errorf("bgp: routing-options autonomous-system is required")
 	}
 	for groupName, group := range bgp.Groups {
+		if group == nil {
+			return fmt.Errorf("bgp group %s is nil", groupName)
+		}
 		if group.Type != "" && group.Type != "internal" && group.Type != "external" {
 			return fmt.Errorf("bgp group %s: type must be 'internal' or 'external', got %q",
 				groupName, group.Type)
@@ -493,6 +516,9 @@ func (c *RouterConfig) validateBGP(bgp *BGPConfig) error {
 		for ip, neighbor := range group.Neighbors {
 			if net.ParseIP(ip) == nil {
 				return fmt.Errorf("bgp group %s: invalid neighbor IP %q", groupName, ip)
+			}
+			if neighbor == nil {
+				return fmt.Errorf("bgp group %s neighbor %s is nil", groupName, ip)
 			}
 			if neighbor.PeerAS == 0 {
 				return fmt.Errorf("bgp group %s neighbor %s: peer-as is required", groupName, ip)
@@ -676,12 +702,81 @@ func (c *RouterConfig) validatePolicyStatementReference(context, policyName stri
 }
 
 func (c *RouterConfig) validateSecurity() error {
-	if c.Security == nil || c.Security.NETCONF == nil || c.Security.NETCONF.SSH == nil {
+	if c.Security == nil {
 		return nil
 	}
-	port := c.Security.NETCONF.SSH.Port
-	if port < 0 || port > 65535 {
-		return fmt.Errorf("security netconf ssh port must be 0-65535, got %d", port)
+	if err := validateSecurityUsers(c.Security.Users); err != nil {
+		return err
+	}
+	if err := validateSecurityRateLimit(c.Security.RateLimit); err != nil {
+		return err
+	}
+	if c.Security.NETCONF != nil && c.Security.NETCONF.SSH != nil {
+		ssh := c.Security.NETCONF.SSH
+		if ssh.ListenAddress != "" && ssh.ListenAddress != "localhost" && net.ParseIP(ssh.ListenAddress) == nil {
+			return fmt.Errorf("security netconf ssh: invalid listen-address %q", ssh.ListenAddress)
+		}
+		port := ssh.Port
+		if port < 0 || port > 65535 {
+			return fmt.Errorf("security netconf ssh port must be 0-65535, got %d", port)
+		}
+	}
+	return nil
+}
+
+func validateSecurityUsers(users map[string]*UserConfig) error {
+	for username, user := range users {
+		if strings.TrimSpace(username) == "" {
+			return fmt.Errorf("security users: username is required")
+		}
+		if user == nil {
+			return fmt.Errorf("security users user %q: config is nil", username)
+		}
+		if !validSecurityUserRole(user.Role) {
+			return fmt.Errorf("security users user %q: invalid role %q", username, user.Role)
+		}
+		if user.Password == "" && user.SSHKey == "" {
+			return fmt.Errorf("security users user %q: password or ssh-key is required", username)
+		}
+		if user.Password != "" {
+			if err := pkgauth.ValidatePasswordHash(user.Password); err != nil {
+				return fmt.Errorf("security users user %q: invalid password hash: %w", username, err)
+			}
+		}
+		if user.SSHKey != "" {
+			if _, err := pkgauth.ParsePublicKey(user.SSHKey); err != nil {
+				return fmt.Errorf("security users user %q: invalid ssh-key: %w", username, err)
+			}
+		}
+	}
+	return nil
+}
+
+func validSecurityUserRole(role string) bool {
+	switch role {
+	case "", "admin", "operator", "read-only":
+		return true
+	default:
+		return false
+	}
+}
+
+func validateSecurityRateLimit(rateLimit *RateLimitConfig) error {
+	if rateLimit == nil {
+		return nil
+	}
+	if err := validateSecurityRateLimitValue("per-ip", rateLimit.PerIP); err != nil {
+		return err
+	}
+	return validateSecurityRateLimitValue("per-user", rateLimit.PerUser)
+}
+
+func validateSecurityRateLimitValue(name string, value int) error {
+	if value == 0 {
+		return nil
+	}
+	if value < 1 || value > 1000 {
+		return fmt.Errorf("security rate-limit %s must be 1-1000, got %d", name, value)
 	}
 	return nil
 }

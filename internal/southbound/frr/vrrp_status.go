@@ -10,7 +10,10 @@ import (
 	pkgfrr "github.com/akam1o/arca-router/pkg/frr"
 )
 
-const defaultVRRPStatusInterval = 5 * time.Second
+const (
+	defaultVRRPStatusInterval     = 5 * time.Second
+	frrVRRPStatusReadErrorMessage = "read FRR VRRP status failed"
+)
 
 // VRRPOperationalStatus is the latest FRR VRRP runtime state observed by arca-routerd.
 type VRRPOperationalStatus struct {
@@ -72,8 +75,8 @@ func (p *FRRPlugin) checkVRRPOperationalStatus(ctx context.Context, cfg *pkgfrr.
 	}
 	observed, err := p.statusReader.ReadVRRPStatus(ctx)
 	if err != nil {
-		status.LastError = err.Error()
-		status.Issues = []string{"read FRR VRRP status failed"}
+		status.LastError = frrVRRPStatusReadErrorMessage
+		status.Issues = []string{frrVRRPStatusReadErrorMessage}
 		return status
 	}
 	fillVRRPConvergenceStatus(&status, cfg, observed)

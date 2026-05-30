@@ -2,6 +2,7 @@ package datastore
 
 import (
 	"context"
+	"fmt"
 	"path/filepath"
 	"testing"
 	"time"
@@ -44,5 +45,49 @@ func TestSQLiteListAuditEventsFiltersAndPaginates(t *testing.T) {
 	}
 	if len(got) != 1 || got[0].Action != "access_denied" {
 		t.Fatalf("ListAuditEvents(offset 1 limit 1) = %#v, want second-newest access_denied", got)
+	}
+}
+
+func TestSQLiteListAuditEventsAppliesDefaultLimit(t *testing.T) {
+	ds := openSQLiteDatastoreForTest(t, filepath.Join(t.TempDir(), "config.db"))
+	insertAuditLogRows(t, ds, defaultAuditEventsLimit+5)
+
+	events, err := ds.ListAuditEvents(context.Background(), nil)
+	if err != nil {
+		t.Fatalf("ListAuditEvents() error = %v", err)
+	}
+	if len(events) != defaultAuditEventsLimit {
+		t.Fatalf("events length = %d, want %d", len(events), defaultAuditEventsLimit)
+	}
+}
+
+func TestSQLiteListAuditEventsCapsOversizedLimit(t *testing.T) {
+	ds := openSQLiteDatastoreForTest(t, filepath.Join(t.TempDir(), "config.db"))
+	insertAuditLogRows(t, ds, maxAuditEventsLimit+5)
+
+	events, err := ds.ListAuditEvents(context.Background(), &AuditOptions{Limit: maxAuditEventsLimit + 50})
+	if err != nil {
+		t.Fatalf("ListAuditEvents() error = %v", err)
+	}
+	if len(events) != maxAuditEventsLimit {
+		t.Fatalf("events length = %d, want %d", len(events), maxAuditEventsLimit)
+	}
+}
+
+func insertAuditLogRows(t *testing.T, ds *sqliteDatastore, count int) {
+	t.Helper()
+
+	base := time.Unix(1000, 0).UTC()
+	for i := 0; i < count; i++ {
+		mustExec(t, ds.db, `
+			INSERT INTO audit_log (timestamp, user, action, result, details)
+			VALUES (?, ?, ?, ?, ?)
+		`,
+			base.Add(time.Duration(i)*time.Minute),
+			"alice",
+			fmt.Sprintf("action-%04d", i),
+			"success",
+			"{}",
+		)
 	}
 }

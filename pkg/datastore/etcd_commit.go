@@ -3,11 +3,14 @@ package datastore
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"math"
 	"sort"
 	"time"
 
 	"github.com/google/uuid"
+	"go.etcd.io/etcd/api/v3/mvccpb"
 	clientv3 "go.etcd.io/etcd/client/v3"
 )
 
@@ -22,8 +25,19 @@ type commitEntry struct {
 	SourceIP   string    `json:"source_ip"`
 }
 
+const commitHistoryIndexPageSize = 1000
+
+const (
+	commitHistoryIndexBatchSize = 128
+	commitHistoryIndexVersion   = "1"
+)
+
 // Commit promotes a candidate configuration to running configuration.
 func (ds *etcdDatastore) Commit(ctx context.Context, req *CommitRequest) (string, error) {
+	if err := validateCommitRequest(req); err != nil {
+		return "", err
+	}
+
 	ctx, cancel := ds.withTimeout(ctx)
 	defer cancel()
 
@@ -83,14 +97,15 @@ func (ds *etcdDatastore) Commit(ctx context.Context, req *CommitRequest) (string
 	// Prepare audit event
 	auditULID := generateULID()
 	auditEvent := &AuditEvent{
-		Key:       auditULID, // Set Key field for consistency
-		Timestamp: now,
-		User:      req.User,
-		SessionID: req.SessionID,
-		SourceIP:  req.SourceIP,
-		Action:    "commit",
-		Result:    "success",
-		Details:   fmt.Sprintf("commit_id=%s message=%q", commitID, req.Message),
+		Key:           auditULID, // Set Key field for consistency
+		Timestamp:     now,
+		User:          req.User,
+		SessionID:     req.SessionID,
+		SourceIP:      req.SourceIP,
+		CorrelationID: req.CorrelationID,
+		Action:        "commit",
+		Result:        "success",
+		Details:       fmt.Sprintf("commit_id=%s message=%q", commitID, req.Message),
 	}
 
 	auditJSON, err := json.Marshal(auditEvent)
@@ -103,6 +118,7 @@ func (ds *etcdDatastore) Commit(ctx context.Context, req *CommitRequest) (string
 	runningMetadataKey := ds.key("running", "current")
 	runningConfigKey := ds.key("running", "config")
 	commitKey := ds.key("commits", commitID)
+	commitIndexKey := ds.commitHistoryIndexKey(entry)
 	auditKey := ds.key("audit", auditULID)
 
 	// Check for legacy lock (fail-closed)
@@ -160,6 +176,7 @@ func (ds *etcdDatastore) Commit(ctx context.Context, req *CommitRequest) (string
 			clientv3.OpPut(runningMetadataKey, string(metadataJSON)),
 			clientv3.OpPut(runningConfigKey, candidateData.ConfigText),
 			clientv3.OpPut(commitKey, string(entryJSON)),
+			clientv3.OpPut(commitIndexKey, string(entryJSON)),
 			clientv3.OpDelete(candidateKey),
 			clientv3.OpDelete(lockKey),
 			clientv3.OpPut(auditKey, string(auditJSON)),
@@ -187,6 +204,10 @@ func (ds *etcdDatastore) Commit(ctx context.Context, req *CommitRequest) (string
 
 // Rollback reverts to a previous commit.
 func (ds *etcdDatastore) Rollback(ctx context.Context, req *RollbackRequest) (string, error) {
+	if err := validateRollbackRequest(req); err != nil {
+		return "", err
+	}
+
 	ctx, cancel := ds.withTimeout(ctx)
 	defer cancel()
 
@@ -198,7 +219,7 @@ func (ds *etcdDatastore) Rollback(ctx context.Context, req *RollbackRequest) (st
 	// Get target commit
 	targetCommit, err := ds.GetCommit(ctx, req.CommitID)
 	if err != nil {
-		return "", NewError(ErrCodeNotFound, "target commit not found", err)
+		return "", rollbackTargetCommitLookupError(err)
 	}
 
 	// Generate new commit ID for the rollback
@@ -235,14 +256,15 @@ func (ds *etcdDatastore) Rollback(ctx context.Context, req *RollbackRequest) (st
 	// Prepare audit event
 	auditULID := generateULID()
 	auditEvent := &AuditEvent{
-		Key:       auditULID, // Set Key field for consistency
-		Timestamp: now,
-		User:      req.User,
-		SessionID: req.SessionID,
-		SourceIP:  req.SourceIP,
-		Action:    "rollback",
-		Result:    "success",
-		Details:   fmt.Sprintf("rollback_commit_id=%s target_commit_id=%s message=%q", newCommitID, req.CommitID, req.Message),
+		Key:           auditULID, // Set Key field for consistency
+		Timestamp:     now,
+		User:          req.User,
+		SessionID:     req.SessionID,
+		SourceIP:      req.SourceIP,
+		CorrelationID: req.CorrelationID,
+		Action:        "rollback",
+		Result:        "success",
+		Details:       fmt.Sprintf("rollback_commit_id=%s target_commit_id=%s message=%q", newCommitID, req.CommitID, req.Message),
 	}
 
 	auditJSON, err := json.Marshal(auditEvent)
@@ -255,6 +277,7 @@ func (ds *etcdDatastore) Rollback(ctx context.Context, req *RollbackRequest) (st
 	runningMetadataKey := ds.key("running", "current")
 	runningConfigKey := ds.key("running", "config")
 	commitKey := ds.key("commits", newCommitID)
+	commitIndexKey := ds.commitHistoryIndexKey(entry)
 	auditKey := ds.key("audit", auditULID)
 
 	// Check for legacy lock (fail-closed)
@@ -299,6 +322,7 @@ func (ds *etcdDatastore) Rollback(ctx context.Context, req *RollbackRequest) (st
 			clientv3.OpPut(runningMetadataKey, string(metadataJSON)),
 			clientv3.OpPut(runningConfigKey, targetCommit.ConfigText),
 			clientv3.OpPut(commitKey, string(entryJSON)),
+			clientv3.OpPut(commitIndexKey, string(entryJSON)),
 			clientv3.OpDelete(lockKey),
 			clientv3.OpPut(auditKey, string(auditJSON)),
 		).
@@ -321,74 +345,93 @@ func (ds *etcdDatastore) Rollback(ctx context.Context, req *RollbackRequest) (st
 	return newCommitID, nil
 }
 
+func rollbackTargetCommitLookupError(err error) error {
+	var dsErr *Error
+	if errors.As(err, &dsErr) && dsErr.Code == ErrCodeNotFound {
+		return NewError(ErrCodeNotFound, "target commit not found", err)
+	}
+	return err
+}
+
 // ListCommitHistory retrieves commit history with optional filtering.
 func (ds *etcdDatastore) ListCommitHistory(ctx context.Context, opts *HistoryOptions) ([]*CommitHistoryEntry, error) {
 	ctx, cancel := ds.withTimeout(ctx)
 	defer cancel()
 
-	// Set default options if nil
-	if opts == nil {
-		opts = &HistoryOptions{}
+	normalizedOpts := normalizeHistoryOptions(opts)
+	opts = &normalizedOpts
+
+	entries, indexed, err := ds.listCommitHistoryFromIndex(ctx, opts)
+	if err != nil {
+		return nil, err
+	}
+	if indexed {
+		return entries, nil
 	}
 
-	// Get commits from etcd with server-side pagination
+	// Legacy fallback for stores created before the timestamp index existed.
 	commitsPrefix := ds.key("commits") + "/"
-
-	// Build options for etcd Get request
-	getOpts := []clientv3.OpOption{
-		clientv3.WithPrefix(),
-		clientv3.WithSort(clientv3.SortByKey, clientv3.SortDescend),
-	}
-
-	// Apply server-side limit if specified (more efficient than client-side filtering)
-	// Note: We fetch more than needed to account for filtering, then truncate
-	if opts.Limit > 0 {
-		// Fetch extra entries to account for client-side filtering
-		// Multiply by 2 to handle filtering overhead (conservative estimate)
-		fetchLimit := int64(opts.Limit * 2)
-		getOpts = append(getOpts, clientv3.WithLimit(fetchLimit))
-	}
-
-	resp, err := ds.client.Get(ctx, commitsPrefix, getOpts...)
+	resp, err := ds.client.Get(ctx, commitsPrefix, clientv3.WithPrefix())
 	if err != nil {
 		return nil, NewError(ErrCodeInternal, "failed to list commits", err)
 	}
 
+	return commitHistoryEntriesFromEtcdKVs(resp.Kvs, opts), nil
+}
+
+func (ds *etcdDatastore) listCommitHistoryFromIndex(ctx context.Context, opts *HistoryOptions) ([]*CommitHistoryEntry, bool, error) {
+	prefix := ds.commitHistoryIndexPrefix()
+	rangeEnd := clientv3.GetPrefixRangeEnd(prefix)
+	startKey := prefix
+	remainingOffset := opts.Offset
+	entries := make([]*CommitHistoryEntry, 0, opts.Limit)
+	indexed := false
+
+	for len(entries) < opts.Limit {
+		resp, err := ds.client.Get(ctx, startKey,
+			clientv3.WithRange(rangeEnd),
+			clientv3.WithLimit(commitHistoryIndexPageSize),
+			clientv3.WithSort(clientv3.SortByKey, clientv3.SortAscend),
+		)
+		if err != nil {
+			return nil, false, NewError(ErrCodeInternal, "failed to list commit history index", err)
+		}
+		if len(resp.Kvs) == 0 {
+			break
+		}
+		indexed = true
+
+		for _, kv := range resp.Kvs {
+			entry, ok := commitHistoryEntryFromEtcdKV(kv, opts)
+			if !ok {
+				continue
+			}
+			if remainingOffset > 0 {
+				remainingOffset--
+				continue
+			}
+			entries = append(entries, entry)
+			if len(entries) >= opts.Limit {
+				break
+			}
+		}
+		if !resp.More {
+			break
+		}
+		startKey = nextEtcdRangeKey(resp.Kvs[len(resp.Kvs)-1].Key)
+	}
+
+	return entries, indexed, nil
+}
+
+func commitHistoryEntriesFromEtcdKVs(kvs []*mvccpb.KeyValue, opts *HistoryOptions) []*CommitHistoryEntry {
 	var entries []*CommitHistoryEntry
 
-	for _, kv := range resp.Kvs {
-		var entry commitEntry
-		if err := json.Unmarshal(kv.Value, &entry); err != nil {
-			// Skip malformed entries
-			continue
+	for _, kv := range kvs {
+		entry, ok := commitHistoryEntryFromEtcdKV(kv, opts)
+		if ok {
+			entries = append(entries, entry)
 		}
-
-		// Apply filters (client-side for complex predicates)
-		if opts.ExcludeRollbacks && entry.IsRollback {
-			continue
-		}
-
-		if opts.User != "" && entry.User != opts.User {
-			continue
-		}
-
-		if !opts.StartTime.IsZero() && entry.Timestamp.Before(opts.StartTime) {
-			continue
-		}
-
-		if !opts.EndTime.IsZero() && entry.Timestamp.After(opts.EndTime) {
-			continue
-		}
-
-		entries = append(entries, &CommitHistoryEntry{
-			CommitID:   entry.CommitID,
-			User:       entry.User,
-			Timestamp:  entry.Timestamp,
-			Message:    entry.Message,
-			ConfigText: entry.ConfigText,
-			IsRollback: entry.IsRollback,
-			SourceIP:   entry.SourceIP,
-		})
 	}
 
 	// Sort by timestamp descending (newest first)
@@ -399,16 +442,111 @@ func (ds *etcdDatastore) ListCommitHistory(ctx context.Context, opts *HistoryOpt
 	// Apply offset and limit
 	if opts.Offset > 0 {
 		if opts.Offset >= len(entries) {
-			return []*CommitHistoryEntry{}, nil
+			return []*CommitHistoryEntry{}
 		}
 		entries = entries[opts.Offset:]
 	}
-
 	if opts.Limit > 0 && opts.Limit < len(entries) {
 		entries = entries[:opts.Limit]
 	}
 
-	return entries, nil
+	return entries
+}
+
+func commitHistoryEntryFromEtcdKV(kv *mvccpb.KeyValue, opts *HistoryOptions) (*CommitHistoryEntry, bool) {
+	var entry commitEntry
+	if err := json.Unmarshal(kv.Value, &entry); err != nil {
+		return nil, false
+	}
+
+	if opts.ExcludeRollbacks && entry.IsRollback {
+		return nil, false
+	}
+	if opts.User != "" && entry.User != opts.User {
+		return nil, false
+	}
+	if !opts.StartTime.IsZero() && entry.Timestamp.Before(opts.StartTime) {
+		return nil, false
+	}
+	if !opts.EndTime.IsZero() && entry.Timestamp.After(opts.EndTime) {
+		return nil, false
+	}
+
+	return &CommitHistoryEntry{
+		CommitID:   entry.CommitID,
+		User:       entry.User,
+		Timestamp:  entry.Timestamp,
+		Message:    entry.Message,
+		ConfigText: entry.ConfigText,
+		IsRollback: entry.IsRollback,
+		SourceIP:   entry.SourceIP,
+	}, true
+}
+
+func (ds *etcdDatastore) commitHistoryIndexPrefix() string {
+	return ds.key("commit-history") + "/"
+}
+
+func (ds *etcdDatastore) commitHistoryIndexKey(entry commitEntry) string {
+	return ds.key("commit-history", commitHistoryIndexTimestampSegment(entry.Timestamp), entry.CommitID)
+}
+
+func commitHistoryIndexTimestampSegment(ts time.Time) string {
+	ns := ts.UnixNano()
+	if ns < 0 {
+		ns = 0
+	}
+	return fmt.Sprintf("%019d", int64(math.MaxInt64)-ns)
+}
+
+func nextEtcdRangeKey(key []byte) string {
+	next := append(append([]byte(nil), key...), 0)
+	return string(next)
+}
+
+func (ds *etcdDatastore) ensureCommitHistoryIndex(ctx context.Context) error {
+	versionKey := ds.key("metadata", "commit-history-index-version")
+	versionResp, err := ds.client.Get(ctx, versionKey)
+	if err != nil {
+		return NewError(ErrCodeInternal, "failed to get commit history index version", err)
+	}
+	if len(versionResp.Kvs) > 0 && string(versionResp.Kvs[0].Value) == commitHistoryIndexVersion {
+		return nil
+	}
+
+	commitsPrefix := ds.key("commits") + "/"
+	resp, err := ds.client.Get(ctx, commitsPrefix, clientv3.WithPrefix())
+	if err != nil {
+		return NewError(ErrCodeInternal, "failed to scan commits for history index", err)
+	}
+
+	ops := make([]clientv3.Op, 0, commitHistoryIndexBatchSize)
+	flush := func() error {
+		if len(ops) == 0 {
+			return nil
+		}
+		if _, err := ds.client.Txn(ctx).Then(ops...).Commit(); err != nil {
+			return NewError(ErrCodeInternal, "failed to write commit history index", err)
+		}
+		ops = ops[:0]
+		return nil
+	}
+
+	for _, kv := range resp.Kvs {
+		var entry commitEntry
+		if err := json.Unmarshal(kv.Value, &entry); err != nil || entry.CommitID == "" {
+			continue
+		}
+		ops = append(ops, clientv3.OpPut(ds.commitHistoryIndexKey(entry), string(kv.Value)))
+		if len(ops) >= commitHistoryIndexBatchSize {
+			if err := flush(); err != nil {
+				return err
+			}
+		}
+	}
+
+	ops = append(ops, clientv3.OpPut(versionKey, commitHistoryIndexVersion))
+	return flush()
 }
 
 // GetCommit retrieves a specific commit by ID.

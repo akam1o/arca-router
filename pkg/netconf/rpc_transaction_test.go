@@ -161,7 +161,7 @@ func TestValidateStartupDatastoreRejected(t *testing.T) {
 
 func TestValidateRunningDatastoreReadError(t *testing.T) {
 	reply := validateRPC(t, &validateDatastore{
-		runningErr: errors.New("backend unavailable"),
+		runningErr: errors.New("sqlite /var/lib/arca-router/config.db unavailable"),
 	}, "<source><running/></source>")
 
 	if len(reply.Errors) != 1 {
@@ -169,6 +169,12 @@ func TestValidateRunningDatastoreReadError(t *testing.T) {
 	}
 	if reply.Errors[0].ErrorTag != ErrorTagOperationFailed {
 		t.Fatalf("validate running read error tag = %s, want %s", reply.Errors[0].ErrorTag, ErrorTagOperationFailed)
+	}
+	if got := reply.Errors[0].ErrorMessage; got != "failed to retrieve running config for validate" {
+		t.Fatalf("validate running read message = %q, want redacted datastore failure", got)
+	}
+	if strings.Contains(reply.Errors[0].ErrorMessage, "/var/lib/arca-router/config.db") {
+		t.Fatalf("validate running read message leaked backend path: %q", reply.Errors[0].ErrorMessage)
 	}
 }
 
@@ -239,7 +245,7 @@ func TestCommitConfirmedOptionsRejectedAsUnsupported(t *testing.T) {
 
 func TestCommitCandidateReadErrorReturnsDatastoreError(t *testing.T) {
 	reply := commitRPC(t, &validateDatastore{
-		candidateErr: errors.New("backend unavailable"),
+		candidateErr: errors.New("sqlite /var/lib/arca-router/config.db unavailable"),
 		lockInfo: &datastore.LockInfo{
 			IsLocked:  true,
 			SessionID: "session-1",
@@ -256,8 +262,11 @@ func TestCommitCandidateReadErrorReturnsDatastoreError(t *testing.T) {
 	if err.ErrorAppTag != "datastore-error" {
 		t.Fatalf("commit candidate read app-tag = %q, want datastore-error", err.ErrorAppTag)
 	}
-	if !strings.Contains(err.ErrorMessage, "failed to read candidate config") {
-		t.Fatalf("commit candidate read message = %q, want read failure detail", err.ErrorMessage)
+	if err.ErrorMessage != "failed to read candidate config" {
+		t.Fatalf("commit candidate read message = %q, want redacted read failure", err.ErrorMessage)
+	}
+	if strings.Contains(err.ErrorMessage, "/var/lib/arca-router/config.db") {
+		t.Fatalf("commit candidate read message leaked backend path: %q", err.ErrorMessage)
 	}
 }
 
@@ -281,8 +290,43 @@ func TestCommitDatastoreFailureReturnsDatastoreError(t *testing.T) {
 	if err.ErrorAppTag != "datastore-error" {
 		t.Fatalf("commit datastore app-tag = %q, want datastore-error", err.ErrorAppTag)
 	}
-	if !strings.Contains(err.ErrorMessage, "failed to insert commit history") {
-		t.Fatalf("commit datastore message = %q, want datastore failure detail", err.ErrorMessage)
+	if err.ErrorMessage != "commit failed" {
+		t.Fatalf("commit datastore message = %q, want redacted datastore failure", err.ErrorMessage)
+	}
+	if strings.Contains(err.ErrorMessage, "disk full") {
+		t.Fatalf("commit datastore message leaked backend detail: %q", err.ErrorMessage)
+	}
+}
+
+func TestCommitBackendFailureRedactsDetails(t *testing.T) {
+	ds := &validateDatastore{
+		candidate: &datastore.CandidateConfig{ConfigText: "set system host-name router1\n"},
+		lockInfo: &datastore.LockInfo{
+			IsLocked:  true,
+			SessionID: "session-1",
+		},
+	}
+	srv := NewServer(ds, nil)
+	srv.SetCommitHook(func(ctx context.Context, req *CommitHookRequest, persist func(context.Context) (string, error)) (string, error) {
+		return "", errors.New("vtysh /var/run/frr/zserv.api apply failed")
+	})
+
+	reply := handleCommitRPC(t, srv, "")
+	if len(reply.Errors) != 1 {
+		t.Fatalf("commit backend errors = %d, want 1", len(reply.Errors))
+	}
+	err := reply.Errors[0]
+	if err.ErrorTag != ErrorTagInvalidValue {
+		t.Fatalf("commit backend error tag = %s, want %s", err.ErrorTag, ErrorTagInvalidValue)
+	}
+	if err.ErrorAppTag != "backend-validation-failed" {
+		t.Fatalf("commit backend app-tag = %q, want backend-validation-failed", err.ErrorAppTag)
+	}
+	if err.ErrorMessage != "commit failed" {
+		t.Fatalf("commit backend message = %q, want redacted commit failure", err.ErrorMessage)
+	}
+	if strings.Contains(err.ErrorMessage, "/var/run/frr/zserv.api") || strings.Contains(err.ErrorMessage, "vtysh") {
+		t.Fatalf("commit backend message leaked backend detail: %q", err.ErrorMessage)
 	}
 }
 
@@ -299,7 +343,28 @@ func validateRPC(t *testing.T, ds datastore.Datastore, content string) *RPCReply
 func validateParsedRPC(t *testing.T, ds datastore.Datastore, rpcXML string) *RPCReply {
 	t.Helper()
 
-	srv := NewServer(ds, nil)
+	return handleParsedRPC(t, NewServer(ds, nil), rpcXML)
+}
+
+func commitRPC(t *testing.T, ds datastore.Datastore, content string) *RPCReply {
+	t.Helper()
+
+	return handleCommitRPC(t, NewServer(ds, nil), content)
+}
+
+func handleCommitRPC(t *testing.T, srv *Server, content string) *RPCReply {
+	t.Helper()
+
+	return handleParsedRPC(t, srv, `<rpc message-id="101" xmlns="urn:ietf:params:xml:ns:netconf:base:1.0">
+		<commit>
+			`+content+`
+		</commit>
+	</rpc>`)
+}
+
+func handleParsedRPC(t *testing.T, srv *Server, rpcXML string) *RPCReply {
+	t.Helper()
+
 	sess := &Session{
 		ID:             "session-1",
 		NumericID:      1,
@@ -313,16 +378,6 @@ func validateParsedRPC(t *testing.T, ds datastore.Datastore, rpcXML string) *RPC
 		t.Fatalf("ParseRPC() error = %v", err)
 	}
 	return srv.HandleRPC(context.Background(), sess, rpc)
-}
-
-func commitRPC(t *testing.T, ds datastore.Datastore, content string) *RPCReply {
-	t.Helper()
-
-	return validateParsedRPC(t, ds, `<rpc message-id="101" xmlns="urn:ietf:params:xml:ns:netconf:base:1.0">
-		<commit>
-			`+content+`
-		</commit>
-	</rpc>`)
 }
 
 func assertConfirmedCommitUnsupported(t *testing.T, reply *RPCReply, element string) {

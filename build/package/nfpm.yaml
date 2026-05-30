@@ -19,8 +19,27 @@ description: |
 # VPP and FRR dependencies
 depends:
   - vpp >= 24.10
+  - vpp < 25.0
   - vpp-plugin-core >= 24.10
+  - vpp-plugin-core < 25.0
   - frr >= 8.0
+
+# Format-specific dependency syntax keeps VPP pinned to the certified 24.10 API series.
+overrides:
+  deb:
+    depends:
+      - vpp (>= 24.10)
+      - vpp (<< 25.0)
+      - vpp-plugin-core (>= 24.10)
+      - vpp-plugin-core (<< 25.0)
+      - frr (>= 8.0)
+  rpm:
+    depends:
+      - vpp >= 24.10
+      - vpp < 25.0
+      - vpp-plugin-core >= 24.10
+      - vpp-plugin-core < 25.0
+      - frr >= 8.0
 
 contents:
   # Daemon binary

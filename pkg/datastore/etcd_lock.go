@@ -47,8 +47,7 @@ func (ds *etcdDatastore) checkLegacyLock(ctx context.Context) error {
 
 // AcquireLock attempts to acquire the exclusive configuration lock for a specific target.
 func (ds *etcdDatastore) AcquireLock(ctx context.Context, req *LockRequest) error {
-	// Validate target
-	if err := ValidateLockTarget(req.Target); err != nil {
+	if err := validateLockRequest(req); err != nil {
 		return err
 	}
 

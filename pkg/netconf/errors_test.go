@@ -2,6 +2,8 @@ package netconf
 
 import (
 	"encoding/xml"
+	"errors"
+	"fmt"
 	"strings"
 	"testing"
 )
@@ -87,6 +89,43 @@ func TestRPCErrorChainHelpersNilReceiver(t *testing.T) {
 	}
 	if got := err.WithAppTag("custom"); got != nil {
 		t.Fatalf("WithAppTag() = %#v, want nil", got)
+	}
+}
+
+func TestRPCErrorFromErrorPreservesRPCError(t *testing.T) {
+	want := ErrInvalidTarget("lock", "startup")
+
+	got := rpcErrorFromError(fmt.Errorf("wrapped: %w", want))
+	if got != want {
+		t.Fatalf("rpcErrorFromError() = %#v, want %#v", got, want)
+	}
+}
+
+func TestRPCErrorFromErrorRedactsUnexpectedError(t *testing.T) {
+	got := rpcErrorFromError(errors.New("open /tmp/arca-router/secret-token/config.xml: permission denied"))
+
+	if got.ErrorType != ErrorTypeApplication {
+		t.Fatalf("ErrorType = %s, want %s", got.ErrorType, ErrorTypeApplication)
+	}
+	if got.ErrorTag != ErrorTagOperationFailed {
+		t.Fatalf("ErrorTag = %s, want %s", got.ErrorTag, ErrorTagOperationFailed)
+	}
+	if got.ErrorMessage != unexpectedRPCErrorMessage {
+		t.Fatalf("ErrorMessage = %q, want %q", got.ErrorMessage, unexpectedRPCErrorMessage)
+	}
+	if strings.Contains(got.Error(), "secret-token") || strings.Contains(got.Error(), "/tmp/arca-router") {
+		t.Fatalf("unexpected error detail leaked in %q", got.Error())
+	}
+}
+
+func TestRPCErrorFromErrorHandlesNil(t *testing.T) {
+	got := rpcErrorFromError(nil)
+
+	if got.ErrorTag != ErrorTagOperationFailed {
+		t.Fatalf("ErrorTag = %s, want %s", got.ErrorTag, ErrorTagOperationFailed)
+	}
+	if got.ErrorMessage != unexpectedRPCErrorMessage {
+		t.Fatalf("ErrorMessage = %q, want %q", got.ErrorMessage, unexpectedRPCErrorMessage)
 	}
 }
 

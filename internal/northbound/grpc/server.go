@@ -37,6 +37,7 @@ type Server struct {
 	sessions       *SessionManager
 	log            *slog.Logger
 	server         *googlegrpc.Server
+	configParser   ConfigTextParserFunc
 	stateCollector interfaceStateCollector
 	lcpSource      lcpReconciliationSource
 	haSource       haStatusSource
@@ -57,6 +58,8 @@ var (
 const (
 	classOfServiceEnforcementIntentOnly    = "intent-only"
 	classOfServiceEnforcementNotConfigured = "not configured"
+	maxListHistoryLimit                    = 1000
+	maxListAuditEventsLimit                = 1000
 )
 
 type interfaceStateCollector interface {
@@ -82,14 +85,20 @@ type qosCapabilitySource interface {
 // NewServer creates a new gRPC server.
 func NewServer(eng *engine.Engine, st store.ConfigStore, log *slog.Logger) *Server {
 	return &Server{
-		engine:      eng,
-		store:       st,
-		sessions:    NewSessionManager(),
-		log:         log.With("component", "grpc"),
-		routeReader: newOperationalRouteStatusReader(),
-		bgpReader:   newOperationalBGPSummaryStatusReader(),
-		ospfReader:  newOperationalOSPFNeighborStatusReader(),
+		engine:       eng,
+		store:        st,
+		sessions:     NewSessionManager(),
+		log:          log.With("component", "grpc"),
+		configParser: ConfigTextParser,
+		routeReader:  newOperationalRouteStatusReader(),
+		bgpReader:    newOperationalBGPSummaryStatusReader(),
+		ospfReader:   newOperationalOSPFNeighborStatusReader(),
 	}
+}
+
+// SetConfigTextParser injects the parser used for set-command configuration text.
+func (s *Server) SetConfigTextParser(parser ConfigTextParserFunc) {
+	s.configParser = parser
 }
 
 // Serve starts the gRPC server on the given listener.
@@ -100,10 +109,13 @@ func (s *Server) Serve(lis net.Listener) error {
 // ServeWithOptions starts the gRPC server on the given listener with explicit
 // transport options.
 func (s *Server) ServeWithOptions(lis net.Listener, opts ...googlegrpc.ServerOption) error {
+	lis = wrapPeerCredentialListener(lis)
 	s.server = googlegrpc.NewServer(opts...)
 	apiv1.RegisterConfigServiceServer(s.server, &configServiceAdapter{server: s})
 	apiv1.RegisterSessionServiceServer(s.server, &sessionServiceAdapter{server: s})
-	apiv1.RegisterStateServiceServer(s.server, &stateServiceAdapter{server: s})
+	stateAdapter := &stateServiceAdapter{server: s}
+	apiv1.RegisterStateServiceServer(s.server, stateAdapter)
+	apiv1.RegisterDiagnosticServiceServer(s.server, stateAdapter)
 	apiv1.RegisterTelemetryServiceServer(s.server, &telemetryServiceAdapter{server: s})
 	s.log.Info("gRPC server starting", slog.String("address", lis.Addr().String()))
 	return s.server.Serve(lis)
@@ -165,7 +177,13 @@ func runOperationalVtyshBytesCommand(ctx context.Context, command string) ([]byt
 
 // GetRunning returns the current running configuration.
 func (s *Server) GetRunning(ctx context.Context) (configText string, version uint64, err error) {
-	return s.runningText()
+	return s.runningText(true)
+}
+
+// GetRunningUnredacted returns the current running configuration including
+// credential material.
+func (s *Server) GetRunningUnredacted(ctx context.Context) (configText string, version uint64, err error) {
+	return s.runningText(false)
 }
 
 // GetCandidate returns the session candidate configuration.
@@ -189,7 +207,7 @@ func (s *Server) EditCandidate(ctx context.Context, sessionID, configText string
 	session.mu.Lock()
 	defer session.mu.Unlock()
 	if !session.HasLock {
-		return fmt.Errorf("session %s does not hold the candidate lock", sessionID)
+		return newCandidateConflictErrorf("session %s does not hold the candidate lock", sessionID)
 	}
 	if err := s.ensureCandidateBaseCurrentLocked(session); err != nil {
 		return err
@@ -197,7 +215,7 @@ func (s *Server) EditCandidate(ctx context.Context, sessionID, configText string
 
 	updated, err := applyCandidateCommand(session.CandidateText, configText)
 	if err != nil {
-		return err
+		return wrapConfigInputErrorf(err, "edit candidate config")
 	}
 	session.CandidateText = updated
 	return nil
@@ -205,6 +223,13 @@ func (s *Server) EditCandidate(ctx context.Context, sessionID, configText string
 
 // ReplaceCandidate replaces a session's candidate config with validated set-command text.
 func (s *Server) ReplaceCandidate(ctx context.Context, sessionID, configText string) error {
+	return s.ReplaceCandidateWithBase(ctx, sessionID, configText, 0)
+}
+
+// ReplaceCandidateWithBase replaces a session's candidate config only when the
+// running config still matches the caller's expected base version. A zero
+// expected version preserves the legacy unconditional replacement behavior.
+func (s *Server) ReplaceCandidateWithBase(ctx context.Context, sessionID, configText string, expectedBaseVersion uint64) error {
 	session, err := s.sessions.Get(sessionID)
 	if err != nil {
 		return err
@@ -213,15 +238,18 @@ func (s *Server) ReplaceCandidate(ctx context.Context, sessionID, configText str
 	session.mu.Lock()
 	defer session.mu.Unlock()
 	if !session.HasLock {
-		return fmt.Errorf("session %s does not hold the candidate lock", sessionID)
+		return newCandidateConflictErrorf("session %s does not hold the candidate lock", sessionID)
+	}
+	if err := s.ensureExpectedRunningVersion(expectedBaseVersion); err != nil {
+		return err
 	}
 	if err := s.ensureCandidateBaseCurrentLocked(session); err != nil {
 		return err
 	}
 
-	cfg, err := parseConfigText(configText)
+	cfg, err := s.parseConfigText(configText)
 	if err != nil {
-		return fmt.Errorf("parse replacement config: %w", err)
+		return wrapConfigInputErrorf(err, "parse replacement config")
 	}
 	if err := s.engine.Validate(ctx, cfg); err != nil {
 		return err
@@ -247,29 +275,30 @@ func (s *Server) Commit(ctx context.Context, sessionID, user, message string) (s
 	session.mu.Lock()
 	defer session.mu.Unlock()
 	if !session.HasLock {
-		return "", 0, fmt.Errorf("session %s does not hold the candidate lock", sessionID)
+		return "", 0, newCandidateConflictErrorf("session %s does not hold the candidate lock", sessionID)
 	}
+	user = sessionAuditUser(session, user)
 
 	// Parse the candidate config text using the existing pkg/config parser
 	candidateText := session.CandidateText
 
 	if !session.CandidateBaseSet {
-		return "", 0, fmt.Errorf("no candidate configuration to commit")
+		return "", 0, newConfigInputErrorf("no candidate configuration to commit")
 	}
 	if err := s.ensureCandidateBaseCurrentLocked(session); err != nil {
 		return "", 0, err
 	}
 
 	// Parse candidate text into new config model
-	newCfg, err := parseConfigText(candidateText)
+	newCfg, err := s.parseConfigText(candidateText)
 	if err != nil {
-		return "", 0, fmt.Errorf("parse candidate config: %w", err)
+		return "", 0, wrapConfigInputErrorf(err, "parse candidate config")
 	}
 	if err := s.engine.Validate(ctx, newCfg); err != nil {
 		return "", 0, err
 	}
 	if !s.hasCandidateChanges(newCfg) {
-		return "", 0, fmt.Errorf("no configuration changes to commit")
+		return "", 0, newConfigInputErrorf("no configuration changes to commit")
 	}
 
 	var prepared store.PreparedCommit
@@ -294,7 +323,7 @@ func (s *Server) Commit(ctx context.Context, sessionID, user, message string) (s
 			if abortErr != nil {
 				return "", 0, fmt.Errorf("no configuration changes to commit (abort failed: %v)", abortErr)
 			}
-			return "", 0, fmt.Errorf("no configuration changes to commit")
+			return "", 0, newConfigInputErrorf("no configuration changes to commit")
 		}
 	}
 
@@ -341,14 +370,14 @@ func (s *Server) ValidateCandidate(ctx context.Context, sessionID string) error 
 	staleErr := s.ensureCandidateBaseCurrentLocked(session)
 	session.mu.RUnlock()
 	if !hasCandidate {
-		return fmt.Errorf("no candidate configuration to validate")
+		return newConfigInputErrorf("no candidate configuration to validate")
 	}
 	if staleErr != nil {
 		return staleErr
 	}
-	cfg, err := parseConfigText(candidateText)
+	cfg, err := s.parseConfigText(candidateText)
 	if err != nil {
-		return fmt.Errorf("parse candidate config: %w", err)
+		return wrapConfigInputErrorf(err, "parse candidate config")
 	}
 	return s.engine.Validate(ctx, cfg)
 }
@@ -365,10 +394,10 @@ func (s *Server) Discard(ctx context.Context, sessionID string) error {
 // Rollback reverts running configuration to a previous commit.
 func (s *Server) Rollback(ctx context.Context, sessionID, commitID, user, message string) (string, uint64, error) {
 	if s.store == nil {
-		return "", 0, fmt.Errorf("commit history is unavailable")
+		return "", 0, fmt.Errorf("%w: commit history is unavailable", ErrCommitHistoryUnavailable)
 	}
 	if commitID == "" {
-		return "", 0, fmt.Errorf("commit ID is required")
+		return "", 0, newConfigInputErrorf("commit ID is required")
 	}
 	session, err := s.sessions.Get(sessionID)
 	if err != nil {
@@ -378,14 +407,12 @@ func (s *Server) Rollback(ctx context.Context, sessionID, commitID, user, messag
 	session.mu.Lock()
 	defer session.mu.Unlock()
 	if !session.HasLock {
-		return "", 0, fmt.Errorf("session %s does not hold the candidate lock", sessionID)
+		return "", 0, newCandidateConflictErrorf("session %s does not hold the candidate lock", sessionID)
 	}
 	if err := s.ensureCandidateBaseCurrentLocked(session); err != nil {
 		return "", 0, err
 	}
-	if user == "" {
-		user = session.User
-	}
+	user = sessionAuditUser(session, user)
 	if message == "" {
 		message = fmt.Sprintf("rollback to commit %s", commitID)
 	}
@@ -395,14 +422,14 @@ func (s *Server) Rollback(ctx context.Context, sessionID, commitID, user, messag
 		return "", 0, fmt.Errorf("load rollback commit: %w", err)
 	}
 	if record == nil || record.Config == nil {
-		return "", 0, fmt.Errorf("commit %s has no configuration", commitID)
+		return "", 0, newConfigInputErrorf("commit %s has no configuration", commitID)
 	}
 	newCfg := record.Config
 	if err := s.engine.Validate(ctx, newCfg); err != nil {
 		return "", 0, err
 	}
 	if !s.hasCandidateChanges(newCfg) {
-		return "", 0, fmt.Errorf("rollback target matches running configuration")
+		return "", 0, newConfigInputErrorf("rollback target matches running configuration")
 	}
 
 	version := uint64(1)
@@ -431,7 +458,7 @@ func (s *Server) Rollback(ctx context.Context, sessionID, commitID, user, messag
 		if abortErr != nil {
 			return "", 0, fmt.Errorf("rollback target matches running configuration (abort failed: %v)", abortErr)
 		}
-		return "", 0, fmt.Errorf("rollback target matches running configuration")
+		return "", 0, newConfigInputErrorf("rollback target matches running configuration")
 	}
 
 	beforeSnap := s.engine.RunningSnapshot()
@@ -465,7 +492,7 @@ func (s *Server) Diff(ctx context.Context, sessionID string) (string, bool, erro
 	if err != nil {
 		return "", false, err
 	}
-	running, _, err := s.runningText()
+	running, _, err := s.runningText(false)
 	if err != nil {
 		return "", false, err
 	}
@@ -478,50 +505,92 @@ func (s *Server) Diff(ctx context.Context, sessionID string) (string, bool, erro
 
 // ListHistory returns persisted commit history.
 func (s *Server) ListHistory(ctx context.Context, limit, offset int) ([]CommitInfo, error) {
-	if limit < 0 {
-		return nil, fmt.Errorf("invalid history limit: %d", limit)
+	boundedLimit, err := boundedListLimit("history", limit, maxListHistoryLimit)
+	if err != nil {
+		return nil, err
 	}
 	if offset < 0 {
-		return nil, fmt.Errorf("invalid history offset: %d", offset)
+		return nil, newConfigInputErrorf("invalid history offset: %d", offset)
 	}
 	if s.store == nil {
 		return nil, nil
 	}
-	records, err := s.store.ListCommits(ctx, &store.ListOptions{Limit: limit, Offset: offset})
+	records, err := s.store.ListCommits(ctx, &store.ListOptions{Limit: boundedLimit, Offset: offset})
 	if err != nil {
 		return nil, err
 	}
 	entries := make([]CommitInfo, 0, len(records))
 	for _, r := range records {
-		configText, err := commitRecordConfigText(r)
-		if err != nil {
-			return nil, err
-		}
 		entries = append(entries, CommitInfo{
 			CommitID:   r.CommitID,
 			User:       r.Author,
 			Timestamp:  r.Timestamp,
 			Message:    r.Message,
 			IsRollback: r.IsRollback,
-			ConfigText: configText,
 		})
 	}
 	return entries, nil
 }
 
+// GetCommit returns one persisted commit, including archived configuration text.
+func (s *Server) GetCommit(ctx context.Context, commitID string) (CommitInfo, error) {
+	commitID = strings.TrimSpace(commitID)
+	if commitID == "" {
+		return CommitInfo{}, newConfigInputErrorf("commit ID is required")
+	}
+	if s.store == nil {
+		return CommitInfo{}, fmt.Errorf("%w: commit history is unavailable", ErrCommitHistoryUnavailable)
+	}
+
+	record, err := s.store.GetCommit(ctx, commitID)
+	if err != nil {
+		return CommitInfo{}, err
+	}
+	if record == nil {
+		return CommitInfo{}, newConfigInputErrorf("commit %s not found", commitID)
+	}
+
+	configText, err := commitRecordConfigText(record)
+	if err != nil {
+		return CommitInfo{}, fmt.Errorf("serialize commit config: %w", err)
+	}
+	return CommitInfo{
+		CommitID:   record.CommitID,
+		User:       record.Author,
+		Timestamp:  record.Timestamp,
+		Message:    record.Message,
+		IsRollback: record.IsRollback,
+		ConfigText: configText,
+	}, nil
+}
+
+func commitRecordConfigText(record *store.CommitRecord) (string, error) {
+	if record == nil {
+		return "", nil
+	}
+	if record.ConfigText != "" {
+		return record.ConfigText, nil
+	}
+	if record.Config == nil {
+		return "", nil
+	}
+	return pkgconfig.ToSetCommandsWithError(record.Config.ToLegacyConfig())
+}
+
 // ListAuditEvents returns persisted audit events for export.
 func (s *Server) ListAuditEvents(ctx context.Context, opts AuditLogOptions) ([]AuditEventInfo, error) {
-	if opts.Limit < 0 {
-		return nil, fmt.Errorf("invalid audit limit: %d", opts.Limit)
+	boundedLimit, err := boundedListLimit("audit", opts.Limit, maxListAuditEventsLimit)
+	if err != nil {
+		return nil, err
 	}
 	if opts.Offset < 0 {
-		return nil, fmt.Errorf("invalid audit offset: %d", opts.Offset)
+		return nil, newConfigInputErrorf("invalid audit offset: %d", opts.Offset)
 	}
 	if s.store == nil {
 		return nil, nil
 	}
 	events, err := s.store.ListAuditEvents(ctx, &store.AuditOptions{
-		Limit:     opts.Limit,
+		Limit:     boundedLimit,
 		Offset:    opts.Offset,
 		StartTime: opts.StartTime,
 		EndTime:   opts.EndTime,
@@ -555,15 +624,14 @@ func (s *Server) ListAuditEvents(ctx context.Context, opts AuditLogOptions) ([]A
 	return result, nil
 }
 
-func commitRecordConfigText(record *store.CommitRecord) (string, error) {
-	if record == nil || record.Config == nil {
-		return "", nil
+func boundedListLimit(name string, limit, max int) (int, error) {
+	if limit < 0 {
+		return 0, newConfigInputErrorf("invalid %s limit: %d", name, limit)
 	}
-	text, err := pkgconfig.ToSetCommandsWithError(record.Config.ToLegacyConfig())
-	if err != nil {
-		return "", fmt.Errorf("serialize commit %s config: %w", record.CommitID, err)
+	if limit == 0 || limit > max {
+		return max, nil
 	}
-	return text, nil
+	return limit, nil
 }
 
 // --- SessionService implementation ---
@@ -1348,16 +1416,43 @@ func runVtyshCommandReal(ctx context.Context, command string) (string, error) {
 	return stdout.String(), nil
 }
 
-func (s *Server) runningText() (string, uint64, error) {
+func (s *Server) runningText(redactSecrets bool) (string, uint64, error) {
 	snap := s.engine.RunningSnapshot()
 	if snap == nil || snap.Config == nil {
 		return "", 0, nil
 	}
-	text, err := pkgconfig.ToSetCommandsWithError(snap.Config.ToLegacyConfig())
+	legacyCfg := snap.Config.ToLegacyConfig()
+	var (
+		text string
+		err  error
+	)
+	if redactSecrets {
+		text, err = pkgconfig.ToSetCommandsRedactedWithError(legacyCfg)
+	} else {
+		text, err = pkgconfig.ToSetCommandsWithError(legacyCfg)
+	}
 	if err != nil {
 		return "", 0, fmt.Errorf("serialize running config: %w", err)
 	}
 	return text, snap.Version, nil
+}
+
+func (s *Server) latestRunningCommitID(ctx context.Context) string {
+	if s.store == nil {
+		return ""
+	}
+	records, err := s.store.ListCommits(ctx, &store.ListOptions{Limit: 1})
+	if err != nil || len(records) == 0 || records[0] == nil {
+		return ""
+	}
+	return records[0].CommitID
+}
+
+func sessionAuditUser(session *Session, requestedUser string) string {
+	if session != nil && strings.TrimSpace(session.User) != "" {
+		return session.User
+	}
+	return requestedUser
 }
 
 func (s *Server) resetSessionCandidate(session *Session) error {
@@ -1405,7 +1500,21 @@ func (s *Server) ensureCandidateBaseCurrentLocked(session *Session) error {
 		hash = snap.Hash
 	}
 	if session.CandidateBaseVersion != version || session.CandidateBaseHash != hash {
-		return fmt.Errorf("candidate configuration is stale: running configuration changed from version %d to %d; discard or reload the candidate before editing", session.CandidateBaseVersion, version)
+		return newCandidateConflictErrorf("candidate configuration is stale: running configuration changed from version %d to %d; discard or reload the candidate before editing", session.CandidateBaseVersion, version)
+	}
+	return nil
+}
+
+func (s *Server) ensureExpectedRunningVersion(expectedBaseVersion uint64) error {
+	if expectedBaseVersion == 0 {
+		return nil
+	}
+	var version uint64
+	if snap := s.engine.RunningSnapshot(); snap != nil {
+		version = snap.Version
+	}
+	if expectedBaseVersion != version {
+		return newCandidateConflictErrorf("candidate configuration is stale: running configuration changed from version %d to %d; discard or reload the candidate before editing", expectedBaseVersion, version)
 	}
 	return nil
 }
@@ -1747,9 +1856,19 @@ func lineDiff(oldText, newText string) string {
 	return strings.Join(out, "\n")
 }
 
-// ConfigTextParser is a hook for parsing set-command text into legacy config.
+// ConfigTextParserFunc parses set-command text into the canonical config model.
+type ConfigTextParserFunc func(text string) (*model.RouterConfig, error)
+
+// ConfigTextParser is a deprecated fallback hook for parsing set-command text.
 // Set at initialization to break circular dependency with pkg/config.
-var ConfigTextParser func(text string) (*model.RouterConfig, error)
+var ConfigTextParser ConfigTextParserFunc
+
+func (s *Server) parseConfigText(text string) (*model.RouterConfig, error) {
+	if s != nil && s.configParser != nil {
+		return s.configParser(text)
+	}
+	return parseConfigText(text)
+}
 
 // parseConfigText parses set-command text into the new config model.
 func parseConfigText(text string) (*model.RouterConfig, error) {
@@ -1760,6 +1879,8 @@ func parseConfigText(text string) (*model.RouterConfig, error) {
 }
 
 // --- Session Management ---
+
+const defaultSessionTTL = 30 * time.Minute
 
 // Session represents an active configuration session.
 type Session struct {
@@ -1772,6 +1893,7 @@ type Session struct {
 	CandidateBaseHash    [32]byte
 	CandidateBaseSet     bool
 	CreatedAt            time.Time
+	LastActiveAt         time.Time
 }
 
 // SessionManager manages active sessions with exclusive locking.
@@ -1779,12 +1901,23 @@ type SessionManager struct {
 	mu       sync.Mutex
 	sessions map[string]*Session
 	lockHeld string // session ID holding the candidate lock
+	ttl      time.Duration
+	now      func() time.Time
 }
 
 // NewSessionManager creates a new session manager.
 func NewSessionManager() *SessionManager {
+	return newSessionManager(defaultSessionTTL, time.Now)
+}
+
+func newSessionManager(ttl time.Duration, now func() time.Time) *SessionManager {
+	if now == nil {
+		now = time.Now
+	}
 	return &SessionManager{
 		sessions: make(map[string]*Session),
+		ttl:      ttl,
+		now:      now,
 	}
 }
 
@@ -1793,11 +1926,14 @@ func (m *SessionManager) Create(user string) (string, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
+	now := m.now()
+	m.expireLocked(now)
 	id := uuid.New().String()
 	m.sessions[id] = &Session{
-		ID:        id,
-		User:      user,
-		CreatedAt: time.Now(),
+		ID:           id,
+		User:         user,
+		CreatedAt:    now,
+		LastActiveAt: now,
 	}
 	return id, nil
 }
@@ -1807,10 +1943,13 @@ func (m *SessionManager) Get(id string) (*Session, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
+	now := m.now()
+	m.expireLocked(now)
 	s, ok := m.sessions[id]
 	if !ok {
-		return nil, fmt.Errorf("session %s not found", id)
+		return nil, newSessionNotFoundErrorf("session %s not found", id)
 	}
+	s.LastActiveAt = now
 	return s, nil
 }
 
@@ -1819,9 +1958,11 @@ func (m *SessionManager) Close(id string) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
+	now := m.now()
+	m.expireLocked(now)
 	s, ok := m.sessions[id]
 	if !ok {
-		return fmt.Errorf("session %s not found", id)
+		return newSessionNotFoundErrorf("session %s not found", id)
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -1838,16 +1979,19 @@ func (m *SessionManager) AcquireLock(id string) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
+	now := m.now()
+	m.expireLocked(now)
 	s, ok := m.sessions[id]
 	if !ok {
-		return fmt.Errorf("session %s not found", id)
+		return newSessionNotFoundErrorf("session %s not found", id)
 	}
 	if m.lockHeld != "" && m.lockHeld != id {
-		return fmt.Errorf("candidate lock held by session %s", m.lockHeld)
+		return newCandidateConflictErrorf("candidate lock held by session %s", m.lockHeld)
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.HasLock = true
+	s.LastActiveAt = now
 	m.lockHeld = id
 	return nil
 }
@@ -1857,16 +2001,43 @@ func (m *SessionManager) ReleaseLock(id string) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
+	now := m.now()
+	m.expireLocked(now)
 	s, ok := m.sessions[id]
 	if !ok {
-		return fmt.Errorf("session %s not found", id)
+		return newSessionNotFoundErrorf("session %s not found", id)
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if !s.HasLock {
-		return fmt.Errorf("session %s does not hold the candidate lock", id)
+		return newCandidateConflictErrorf("session %s does not hold the candidate lock", id)
 	}
 	s.HasLock = false
+	s.LastActiveAt = now
 	m.lockHeld = ""
 	return nil
+}
+
+func (m *SessionManager) expireLocked(now time.Time) {
+	if m.ttl <= 0 {
+		return
+	}
+	for id, session := range m.sessions {
+		lastActive := session.LastActiveAt
+		if lastActive.IsZero() {
+			lastActive = session.CreatedAt
+		}
+		if !lastActive.IsZero() && now.Sub(lastActive) <= m.ttl {
+			continue
+		}
+		session.mu.Lock()
+		if session.HasLock {
+			session.HasLock = false
+			if m.lockHeld == id {
+				m.lockHeld = ""
+			}
+		}
+		session.mu.Unlock()
+		delete(m.sessions, id)
+	}
 }

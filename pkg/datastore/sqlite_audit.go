@@ -43,14 +43,8 @@ func (ds *sqliteDatastore) LogAuditEvent(ctx context.Context, event *AuditEvent)
 
 // ListAuditEvents returns audit events in newest-first order.
 func (ds *sqliteDatastore) ListAuditEvents(ctx context.Context, opts *AuditOptions) ([]*AuditEvent, error) {
-	if opts == nil {
-		opts = &AuditOptions{}
-	}
-	limit := opts.Limit
-	offset := opts.Offset
-	if offset < 0 {
-		offset = 0
-	}
+	normalizedOpts := normalizeAuditOptions(opts)
+	opts = &normalizedOpts
 
 	query := `
 		SELECT id, timestamp, user, session_id, source_ip, correlation_id,
@@ -82,15 +76,11 @@ func (ds *sqliteDatastore) ListAuditEvents(ctx context.Context, opts *AuditOptio
 	}
 
 	query += " ORDER BY timestamp DESC, id DESC"
-	if limit > 0 {
-		query += " LIMIT ?"
-		args = append(args, limit)
-	} else if offset > 0 {
-		query += " LIMIT -1"
-	}
-	if offset > 0 {
+	query += " LIMIT ?"
+	args = append(args, opts.Limit)
+	if opts.Offset > 0 {
 		query += " OFFSET ?"
-		args = append(args, offset)
+		args = append(args, opts.Offset)
 	}
 
 	rows, err := ds.db.QueryContext(ctx, query, args...)

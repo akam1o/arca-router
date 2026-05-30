@@ -4,6 +4,7 @@ import (
 	"log/slog"
 	"net"
 	"strconv"
+	"strings"
 	"testing"
 	"time"
 
@@ -84,9 +85,9 @@ func TestEffectiveSNMPCommunityUsesConfig(t *testing.T) {
 	}
 }
 
-func TestEffectiveSNMPCommunityUsesDefault(t *testing.T) {
-	if got := effectiveSNMPCommunity("", nil); got != "public" {
-		t.Fatalf("effectiveSNMPCommunity() = %q, want public", got)
+func TestEffectiveSNMPCommunityRequiresExplicitCommunity(t *testing.T) {
+	if got := effectiveSNMPCommunity("", nil); got != "" {
+		t.Fatalf("effectiveSNMPCommunity() = %q, want empty community", got)
 	}
 }
 
@@ -414,6 +415,16 @@ func TestSNMPEndpointExportsRouterMetrics(t *testing.T) {
 func TestStartSNMPServerRejectsEmptyCommunity(t *testing.T) {
 	if _, err := startSNMPServer(t.Context(), "127.0.0.1:0", "", metricsSource{}, nil); err == nil {
 		t.Fatal("startSNMPServer() error = nil, want empty community error")
+	}
+}
+
+func TestStartSNMPServerRejectsWeakCommunity(t *testing.T) {
+	_, err := startSNMPServer(t.Context(), "127.0.0.1:0", "public", metricsSource{}, nil)
+	if err == nil {
+		t.Fatal("startSNMPServer() error = nil, want weak community error")
+	}
+	if strings.Contains(err.Error(), "public") {
+		t.Fatalf("startSNMPServer() error leaked community: %v", err)
 	}
 }
 

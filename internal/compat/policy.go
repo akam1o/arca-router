@@ -52,9 +52,9 @@ func ComponentMatrix() []ComponentSupport {
 	return []ComponentSupport{
 		{
 			Component: "VPP",
-			Supported: "24.10+",
+			Supported: "24.10 release series",
 			Required:  "vpp, vpp-plugin-core, linux-cp plugin",
-			Notes:     "QoS scheduler, policer, and counter enforcement stay capability-gated; lab soak/restart evidence is deferred to v0.11",
+			Notes:     "certified against the 24.10 binapi surface; newer VPP release series require regenerated binapi and compatibility evidence before support",
 		},
 		{
 			Component: "FRR",

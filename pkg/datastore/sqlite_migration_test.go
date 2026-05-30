@@ -3,6 +3,7 @@ package datastore
 import (
 	"context"
 	"database/sql"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -126,6 +127,196 @@ func TestSQLiteMigrationRejectsNewerSchemaVersion(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "newer than supported version") {
 		t.Fatalf("NewSQLiteDatastore() error = %v, want newer schema version rejection", err)
+	}
+}
+
+func TestSQLiteMigrationCreateBackupBindsBackupPath(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "config'; DROP TABLE sample; --.db")
+	db := openMigrationTestDB(t, dbPath)
+	defer closeDB(t, db)
+	mustExec(t, db, `
+		CREATE TABLE sample (
+			id INTEGER PRIMARY KEY,
+			value TEXT NOT NULL
+		);
+		INSERT INTO sample (value) VALUES ('kept');
+	`)
+
+	backupPath, err := NewSQLiteMigrationManager(db, dbPath).CreateBackup()
+	if err != nil {
+		t.Fatalf("CreateBackup() error = %v", err)
+	}
+	if backupPath == "" {
+		t.Fatal("CreateBackup() backupPath is empty, want backup file")
+	}
+	assertSQLiteFileMode(t, backupPath, secureSQLiteFilePerms)
+
+	var sourceValue string
+	if err := db.QueryRow(`SELECT value FROM sample WHERE id = 1`).Scan(&sourceValue); err != nil {
+		t.Fatalf("source query failed after CreateBackup(): %v", err)
+	}
+	if sourceValue != "kept" {
+		t.Fatalf("source value = %q, want kept", sourceValue)
+	}
+
+	backupDB := openMigrationTestDB(t, backupPath)
+	defer closeDB(t, backupDB)
+	var backupValue string
+	if err := backupDB.QueryRow(`SELECT value FROM sample WHERE id = 1`).Scan(&backupValue); err != nil {
+		t.Fatalf("backup query failed: %v", err)
+	}
+	if backupValue != "kept" {
+		t.Fatalf("backup value = %q, want kept", backupValue)
+	}
+}
+
+func TestSQLiteMigrationCreateBackupAvoidsExistingBackupPath(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "config.db")
+	db := openMigrationTestDB(t, dbPath)
+	defer closeDB(t, db)
+	mustExec(t, db, `
+		CREATE TABLE sample (
+			id INTEGER PRIMARY KEY,
+			value TEXT NOT NULL
+		);
+		INSERT INTO sample (value) VALUES ('kept');
+	`)
+
+	now := time.Date(2026, 5, 23, 10, 11, 12, 0, time.UTC)
+	timestamp := now.Format("20060102_150405")
+	firstBackupPath := sqliteBackupPath(dbPath, timestamp, 0)
+	if err := os.WriteFile(firstBackupPath, []byte("existing backup"), secureSQLiteFilePerms); err != nil {
+		t.Fatalf("WriteFile(%s) error = %v", firstBackupPath, err)
+	}
+
+	backupPath, err := NewSQLiteMigrationManager(db, dbPath).(*sqliteMigrationManager).createBackup(now)
+	if err != nil {
+		t.Fatalf("createBackup() error = %v", err)
+	}
+	if backupPath != sqliteBackupPath(dbPath, timestamp, 1) {
+		t.Fatalf("backupPath = %q, want suffixed collision-free path", backupPath)
+	}
+	assertSQLiteFileMode(t, backupPath, secureSQLiteFilePerms)
+
+	existing, err := os.ReadFile(firstBackupPath)
+	if err != nil {
+		t.Fatalf("ReadFile(%s) error = %v", firstBackupPath, err)
+	}
+	if string(existing) != "existing backup" {
+		t.Fatalf("existing backup content = %q, want unchanged", existing)
+	}
+
+	backupDB := openMigrationTestDB(t, backupPath)
+	defer closeDB(t, backupDB)
+	var backupValue string
+	if err := backupDB.QueryRow(`SELECT value FROM sample WHERE id = 1`).Scan(&backupValue); err != nil {
+		t.Fatalf("backup query failed: %v", err)
+	}
+	if backupValue != "kept" {
+		t.Fatalf("backup value = %q, want kept", backupValue)
+	}
+}
+
+func TestSQLiteMigrationCreateBackupAvoidsBrokenSymlinkBackupPath(t *testing.T) {
+	dir := t.TempDir()
+	dbPath := filepath.Join(dir, "config.db")
+	db := openMigrationTestDB(t, dbPath)
+	defer closeDB(t, db)
+	mustExec(t, db, `
+		CREATE TABLE sample (
+			id INTEGER PRIMARY KEY,
+			value TEXT NOT NULL
+		);
+		INSERT INTO sample (value) VALUES ('kept');
+	`)
+
+	now := time.Date(2026, 5, 23, 10, 11, 12, 0, time.UTC)
+	timestamp := now.Format("20060102_150405")
+	firstBackupPath := sqliteBackupPath(dbPath, timestamp, 0)
+	missingTargetPath := filepath.Join(dir, "missing-backup-target")
+	if err := os.Symlink(missingTargetPath, firstBackupPath); err != nil {
+		t.Skipf("symlink not supported: %v", err)
+	}
+
+	backupPath, err := NewSQLiteMigrationManager(db, dbPath).(*sqliteMigrationManager).createBackup(now)
+	if err != nil {
+		t.Fatalf("createBackup() error = %v", err)
+	}
+	if backupPath != sqliteBackupPath(dbPath, timestamp, 1) {
+		t.Fatalf("backupPath = %q, want suffixed collision-free path", backupPath)
+	}
+	if _, err := os.Lstat(firstBackupPath); err != nil {
+		t.Fatalf("Lstat(%s) error = %v, want symlink preserved", firstBackupPath, err)
+	}
+	if _, err := os.Stat(missingTargetPath); !os.IsNotExist(err) {
+		t.Fatalf("Stat(%s) error = %v, want missing symlink target", missingTargetPath, err)
+	}
+	assertSQLiteFileMode(t, backupPath, secureSQLiteFilePerms)
+
+	backupDB := openMigrationTestDB(t, backupPath)
+	defer closeDB(t, backupDB)
+	var backupValue string
+	if err := backupDB.QueryRow(`SELECT value FROM sample WHERE id = 1`).Scan(&backupValue); err != nil {
+		t.Fatalf("backup query failed: %v", err)
+	}
+	if backupValue != "kept" {
+		t.Fatalf("backup value = %q, want kept", backupValue)
+	}
+}
+
+func TestSQLiteMigrationCreateBackupRejectsSymlinkSource(t *testing.T) {
+	dir := t.TempDir()
+	targetPath := filepath.Join(dir, "target-config.db")
+	dbPath := filepath.Join(dir, "config.db")
+	targetDB := openMigrationTestDB(t, targetPath)
+	mustExec(t, targetDB, `
+		CREATE TABLE sample (
+			id INTEGER PRIMARY KEY,
+			value TEXT NOT NULL
+		);
+		INSERT INTO sample (value) VALUES ('kept');
+	`)
+	closeDB(t, targetDB)
+	if err := os.Symlink(targetPath, dbPath); err != nil {
+		t.Skipf("symlink not supported: %v", err)
+	}
+
+	db := openMigrationTestDB(t, dbPath)
+	defer closeDB(t, db)
+	backupPath, err := NewSQLiteMigrationManager(db, dbPath).CreateBackup()
+	if err == nil {
+		t.Fatalf("CreateBackup() error = nil, backupPath = %q, want symlink source rejection", backupPath)
+	}
+	if !strings.Contains(err.Error(), "symbolic link") {
+		t.Fatalf("CreateBackup() error = %v, want symbolic link rejection", err)
+	}
+}
+
+func TestSQLiteMigrationCreateBackupRejectsHardLinkedSource(t *testing.T) {
+	dir := t.TempDir()
+	targetPath := filepath.Join(dir, "target-config.db")
+	dbPath := filepath.Join(dir, "config.db")
+	targetDB := openMigrationTestDB(t, targetPath)
+	mustExec(t, targetDB, `
+		CREATE TABLE sample (
+			id INTEGER PRIMARY KEY,
+			value TEXT NOT NULL
+		);
+		INSERT INTO sample (value) VALUES ('kept');
+	`)
+	closeDB(t, targetDB)
+	if err := os.Link(targetPath, dbPath); err != nil {
+		t.Skipf("hard links not supported: %v", err)
+	}
+
+	db := openMigrationTestDB(t, dbPath)
+	defer closeDB(t, db)
+	backupPath, err := NewSQLiteMigrationManager(db, dbPath).CreateBackup()
+	if err == nil {
+		t.Fatalf("CreateBackup() error = nil, backupPath = %q, want hard link source rejection", backupPath)
+	}
+	if !strings.Contains(err.Error(), "multiple hard links") {
+		t.Fatalf("CreateBackup() error = %v, want hard link rejection", err)
 	}
 }
 

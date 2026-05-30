@@ -3,7 +3,7 @@ version: "2"
 run:
   timeout: 5m
   tests: true
-  go: "1.25"
+  go: "1.26.3"
 
 linters:
   default: none
@@ -14,14 +14,6 @@ linters:
     - misspell
     - staticcheck
     - unused
-  settings:
-    gocritic:
-      enabled-tags:
-        - diagnostic
-        - experimental
-        - opinionated
-        - performance
-        - style
   exclusions:
     paths:
       - vendor

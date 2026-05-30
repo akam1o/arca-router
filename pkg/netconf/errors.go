@@ -2,6 +2,7 @@ package netconf
 
 import (
 	"encoding/xml"
+	"errors"
 	"fmt"
 )
 
@@ -143,6 +144,21 @@ func (e *RPCError) Error() string {
 		return "unknown NETCONF RPC error"
 	}
 	return fmt.Sprintf("NETCONF error [%s/%s]: %s", e.ErrorType, e.ErrorTag, e.ErrorMessage)
+}
+
+const unexpectedRPCErrorMessage = "request processing failed"
+
+func rpcErrorFromError(err error) *RPCError {
+	if err == nil {
+		return ErrOperationFailed(unexpectedRPCErrorMessage)
+	}
+
+	var rpcErr *RPCError
+	if errors.As(err, &rpcErr) && rpcErr != nil {
+		return rpcErr
+	}
+
+	return ErrOperationFailed(unexpectedRPCErrorMessage)
 }
 
 // Common error constructors following the design document error mapping table

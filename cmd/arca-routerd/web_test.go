@@ -2,7 +2,10 @@ package main
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"io"
 	"log/slog"
 	"net/http"
@@ -13,6 +16,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/akam1o/arca-router/internal/correlation"
 	"github.com/akam1o/arca-router/internal/engine"
 	"github.com/akam1o/arca-router/internal/model"
 	nbgrpc "github.com/akam1o/arca-router/internal/northbound/grpc"
@@ -70,6 +74,44 @@ func TestEffectiveWebListenUsesConfigDefaults(t *testing.T) {
 	got := effectiveWebListen("", model.NewSnapshot(cfg, 1, "test", "test"))
 	if got != "127.0.0.1:8080" {
 		t.Fatalf("effectiveWebListen() = %q, want %q", got, "127.0.0.1:8080")
+	}
+}
+
+func TestWebPlainHTTPListenAllowed(t *testing.T) {
+	tests := []struct {
+		listen string
+		want   bool
+	}{
+		{listen: "127.0.0.1:8080", want: true},
+		{listen: "localhost:8080", want: true},
+		{listen: "[::1]:8080", want: true},
+		{listen: ":8080"},
+		{listen: "0.0.0.0:8080"},
+		{listen: "[::]:8080"},
+		{listen: "192.0.2.10:8080"},
+		{listen: "not a listen address"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.listen, func(t *testing.T) {
+			if got := webPlainHTTPListenAllowed(tt.listen); got != tt.want {
+				t.Fatalf("webPlainHTTPListenAllowed(%q) = %v, want %v", tt.listen, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestStartWebServerRejectsRemotePlainHTTP(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	errCh, err := startWebServer(ctx, "0.0.0.0:0", metricsSource{}, nil)
+	if err == nil {
+		cancel()
+		<-errCh
+		t.Fatal("startWebServer() error = nil, want loopback restriction error")
+	}
+	if !strings.Contains(err.Error(), "must listen on loopback") {
+		t.Fatalf("startWebServer() error = %v, want loopback restriction", err)
 	}
 }
 
@@ -779,6 +821,19 @@ func TestNMSTelemetrySnapshotEndpointRejectsEmptyCatalogFilter(t *testing.T) {
 	}
 }
 
+func TestNMSTelemetrySnapshotEndpointRedactsInternalErrors(t *testing.T) {
+	source := metricsSource{
+		telemetryAPI: &webTelemetryTestAPI{err: errors.New("vpp socket /run/vpp/api.sock failed")},
+		webLog:       slog.New(slog.NewTextHandler(io.Discard, nil)),
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/api/nms/v1/telemetry/snapshot", nil)
+	rec := httptest.NewRecorder()
+	source.handleNMSTelemetrySnapshot(rec, req)
+
+	requireWebJSONInternalError(t, rec, "vpp socket", "/run/vpp/api.sock")
+}
+
 func TestNMSTelemetrySnapshotEndpointRejectsOversizedPayload(t *testing.T) {
 	telemetry := &webTelemetryTestAPI{events: []nbgrpc.TelemetryEvent{
 		{
@@ -871,7 +926,15 @@ func TestNMSTelemetrySnapshotEndpointRejectsInvalidMaxEvents(t *testing.T) {
 func TestWebConfigEndpoint(t *testing.T) {
 	eng := engine.NewEngine(nil, slog.Default())
 	cfg := model.NewRouterConfig()
-	cfg.System = &model.SystemConfig{HostName: "edge01"}
+	cfg.System = &model.SystemConfig{
+		HostName: "edge01",
+		Services: &model.SystemServicesConfig{
+			SNMP: &model.SNMPConfig{
+				Enabled:   true,
+				Community: "private-community",
+			},
+		},
+	}
 	eng.InitializeRunning(cfg, 42)
 
 	req := httptest.NewRequest(http.MethodGet, "/api/config", nil)
@@ -893,6 +956,14 @@ func TestWebConfigEndpoint(t *testing.T) {
 	}
 	if !strings.Contains(cfgResp.ConfigText, "set system host-name edge01") {
 		t.Fatalf("ConfigText missing hostname:\n%s", cfgResp.ConfigText)
+	}
+	for _, secret := range []string{"private-community"} {
+		if strings.Contains(cfgResp.ConfigText, secret) {
+			t.Fatalf("ConfigText leaked %q:\n%s", secret, cfgResp.ConfigText)
+		}
+	}
+	if strings.Count(cfgResp.ConfigText, "<redacted>") != 1 {
+		t.Fatalf("ConfigText =\n%s\nwant one redacted marker", cfgResp.ConfigText)
 	}
 }
 
@@ -929,11 +1000,120 @@ func TestWebEndpointAcceptsReadOnlyBasicAuth(t *testing.T) {
 	if !strings.Contains(cfgResp.ConfigText, "set system host-name edge01") {
 		t.Fatalf("ConfigText missing hostname:\n%s", cfgResp.ConfigText)
 	}
+	if strings.Contains(cfgResp.ConfigText, "$argon2id$") || !strings.Contains(cfgResp.ConfigText, "<redacted>") {
+		t.Fatalf("read-only ConfigText =\n%s\nwant redacted security password", cfgResp.ConfigText)
+	}
+}
+
+func TestWebConfigEndpointRedactsWriterRole(t *testing.T) {
+	source := newWebAuthTestSource(t, "operator", "secret", "operator")
+
+	req := httptest.NewRequest(http.MethodGet, "/api/config", nil)
+	req.SetBasicAuth("operator", "secret")
+	rec := httptest.NewRecorder()
+	source.handleWebConfig(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d: %s", rec.Code, http.StatusOK, rec.Body.String())
+	}
+	var cfgResp webConfig
+	if err := json.NewDecoder(rec.Result().Body).Decode(&cfgResp); err != nil {
+		t.Fatalf("Decode() error = %v", err)
+	}
+	if strings.Contains(cfgResp.ConfigText, "$argon2id$") || !strings.Contains(cfgResp.ConfigText, webRedactedSecretMarker) {
+		t.Fatalf("writer ConfigText =\n%s\nwant redacted security password", cfgResp.ConfigText)
+	}
+}
+
+func TestWebIndexEndpointRedactsWriterRole(t *testing.T) {
+	source := newWebAuthTestSource(t, "operator", "secret", "operator")
+
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	req.SetBasicAuth("operator", "secret")
+	rec := httptest.NewRecorder()
+	source.handleWebIndex(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d: %s", rec.Code, http.StatusOK, rec.Body.String())
+	}
+	body := rec.Body.String()
+	if strings.Contains(body, "$argon2id$") || !strings.Contains(body, "redacted") {
+		t.Fatalf("writer index body leaked or omitted redaction:\n%s", body)
+	}
+}
+
+const validWebAPITestToken = "0123456789abcdef0123456789ABCDEF"
+const rotatedWebAPITestToken = "fedcba9876543210FEDCBA9876543210"
+
+func hashedWebAPITestToken(token string) string {
+	tokenSHA256 := sha256.Sum256([]byte(token))
+	return webAPITokenSHA256Prefix + hex.EncodeToString(tokenSHA256[:])
+}
+
+func hashedWebAPITestTokenNotAfter(token string, notAfter time.Time) string {
+	return hashedWebAPITestToken(token) + webAPITokenNotAfterPrefix + notAfter.UTC().Format(time.RFC3339)
+}
+
+func newCachedWebAPITokenTestSource(t *testing.T, tokenFile string) metricsSource {
+	t.Helper()
+	tokens, err := loadWebAPITokens(tokenFile)
+	if err != nil {
+		t.Fatalf("loadWebAPITokens() error = %v", err)
+	}
+	source := newWebAuthTestSource(t, "monitor", "secret", "read-only")
+	source.webAPITokens = tokens
+	source.webAPITokenFile = tokenFile
+	source.webAPITokenCache = newWebAPITokenCache(tokenFile, tokens)
+	return source
+}
+
+func requestWebStatusWithBearer(source metricsSource, token string) *httptest.ResponseRecorder {
+	req := httptest.NewRequest(http.MethodGet, "/api/status", nil)
+	req.Header.Set("Authorization", "Bearer "+token)
+	rec := httptest.NewRecorder()
+	source.handleWebStatus(rec, req)
+	return rec
+}
+
+func requireWebAPITokenUnavailable(t *testing.T, rec *httptest.ResponseRecorder, leakedValues ...string) {
+	t.Helper()
+	if rec.Code != http.StatusInternalServerError {
+		t.Fatalf("status = %d, want %d", rec.Code, http.StatusInternalServerError)
+	}
+	body := rec.Body.String()
+	if !strings.Contains(body, webAPITokenUnavailableMessage) {
+		t.Fatalf("response body = %q, want generic token unavailable message", body)
+	}
+	for _, leaked := range leakedValues {
+		if leaked != "" && strings.Contains(body, leaked) {
+			t.Fatalf("response body leaked %q: %q", leaked, body)
+		}
+	}
+}
+
+func requireWebJSONInternalError(t *testing.T, rec *httptest.ResponseRecorder, leakedValues ...string) {
+	t.Helper()
+	if rec.Code != http.StatusInternalServerError {
+		t.Fatalf("status = %d, want %d: %s", rec.Code, http.StatusInternalServerError, rec.Body.String())
+	}
+	var body map[string]string
+	if err := json.NewDecoder(rec.Result().Body).Decode(&body); err != nil {
+		t.Fatalf("Decode() error = %v", err)
+	}
+	if body["error"] != webInternalServerErrorMessage {
+		t.Fatalf("error = %q, want generic internal server error", body["error"])
+	}
+	rawBody := rec.Body.String()
+	for _, leaked := range leakedValues {
+		if leaked != "" && strings.Contains(rawBody, leaked) {
+			t.Fatalf("response body leaked %q: %q", leaked, rawBody)
+		}
+	}
 }
 
 func TestLoadWebAPITokensParsesTokenFile(t *testing.T) {
 	tokenFile := filepath.Join(t.TempDir(), "tokens")
-	if err := os.WriteFile(tokenFile, []byte("# comment\nrobot:operator:secret-token\n"), 0600); err != nil {
+	if err := os.WriteFile(tokenFile, []byte("# comment\nrobot:operator:"+validWebAPITestToken+"\n"), 0600); err != nil {
 		t.Fatalf("WriteFile() error = %v", err)
 	}
 
@@ -942,14 +1122,353 @@ func TestLoadWebAPITokensParsesTokenFile(t *testing.T) {
 		t.Fatalf("loadWebAPITokens() error = %v", err)
 	}
 	token := tokens["robot"]
-	if token.Name != "robot" || token.Role != "operator" || token.Token != "secret-token" {
+	if token.Name != "robot" || token.Role != "operator" || token.Token != validWebAPITestToken {
 		t.Fatalf("token = %#v, want parsed robot operator token", token)
+	}
+	if len(token.TokenSHA256) != sha256.Size {
+		t.Fatalf("len(token.TokenSHA256) = %d, want %d", len(token.TokenSHA256), sha256.Size)
+	}
+}
+
+func TestLoadWebAPITokensParsesHashedTokenFile(t *testing.T) {
+	tokenFile := filepath.Join(t.TempDir(), "tokens")
+	if err := os.WriteFile(tokenFile, []byte("robot:operator:"+hashedWebAPITestToken(validWebAPITestToken)+"\n"), 0600); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+
+	tokens, err := loadWebAPITokens(tokenFile)
+	if err != nil {
+		t.Fatalf("loadWebAPITokens() error = %v", err)
+	}
+	token := tokens["robot"]
+	if token.Name != "robot" || token.Role != "operator" || token.Token != "" || len(token.TokenSHA256) != sha256.Size {
+		t.Fatalf("token = %#v, want parsed robot operator SHA-256 token", token)
+	}
+
+	source := newWebAuthTestSource(t, "monitor", "secret", "read-only")
+	source.webAPITokens = tokens
+	req := httptest.NewRequest(http.MethodGet, "/api/status", nil)
+	req.Header.Set("Authorization", "Bearer "+validWebAPITestToken)
+	rec := httptest.NewRecorder()
+	source.handleWebStatus(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d: %s", rec.Code, http.StatusOK, rec.Body.String())
+	}
+}
+
+func TestWebEndpointReloadsAPITokenFile(t *testing.T) {
+	tokenFile := filepath.Join(t.TempDir(), "tokens")
+	if err := os.WriteFile(tokenFile, []byte("robot:read-only:"+hashedWebAPITestToken(validWebAPITestToken)+"\n"), 0600); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+
+	source := newWebAuthTestSource(t, "monitor", "secret", "read-only")
+	source.webAPITokenFile = tokenFile
+
+	req := httptest.NewRequest(http.MethodGet, "/api/status", nil)
+	req.Header.Set("Authorization", "Bearer "+validWebAPITestToken)
+	rec := httptest.NewRecorder()
+	source.handleWebStatus(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status before rotation = %d, want %d: %s", rec.Code, http.StatusOK, rec.Body.String())
+	}
+
+	if err := os.WriteFile(tokenFile, []byte("robot:read-only:"+hashedWebAPITestToken(rotatedWebAPITestToken)+"\n"), 0600); err != nil {
+		t.Fatalf("WriteFile(rotated) error = %v", err)
+	}
+
+	req = httptest.NewRequest(http.MethodGet, "/api/status", nil)
+	req.Header.Set("Authorization", "Bearer "+validWebAPITestToken)
+	rec = httptest.NewRecorder()
+	source.handleWebStatus(rec, req)
+	if rec.Code != http.StatusUnauthorized {
+		t.Fatalf("status for old token = %d, want %d", rec.Code, http.StatusUnauthorized)
+	}
+
+	req = httptest.NewRequest(http.MethodGet, "/api/status", nil)
+	req.Header.Set("Authorization", "Bearer "+rotatedWebAPITestToken)
+	rec = httptest.NewRecorder()
+	source.handleWebStatus(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status after rotation = %d, want %d: %s", rec.Code, http.StatusOK, rec.Body.String())
+	}
+}
+
+func TestWebEndpointFailsClosedWhenReloadedAPITokenFileIsInvalid(t *testing.T) {
+	tokenFile := filepath.Join(t.TempDir(), "tokens")
+	if err := os.WriteFile(tokenFile, []byte("robot:read-only:"+hashedWebAPITestToken(validWebAPITestToken)+"\n"), 0600); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+
+	source := newWebAuthTestSource(t, "monitor", "secret", "read-only")
+	source.webAPITokenFile = tokenFile
+
+	if err := os.WriteFile(tokenFile, []byte("robot:read-only:sha256:not-hex\n"), 0600); err != nil {
+		t.Fatalf("WriteFile(invalid) error = %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/api/status", nil)
+	req.Header.Set("Authorization", "Bearer "+validWebAPITestToken)
+	rec := httptest.NewRecorder()
+	source.handleWebStatus(rec, req)
+	requireWebAPITokenUnavailable(t, rec, tokenFile, "not-hex", "robot")
+}
+
+func TestWebEndpointReloadsCachedAPITokenFileWhenMetadataChanges(t *testing.T) {
+	tokenFile := filepath.Join(t.TempDir(), "tokens")
+	if err := os.WriteFile(tokenFile, []byte("robot:read-only:"+hashedWebAPITestToken(validWebAPITestToken)+"\n"), 0600); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+
+	source := newCachedWebAPITokenTestSource(t, tokenFile)
+	rec := requestWebStatusWithBearer(source, validWebAPITestToken)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status before rotation = %d, want %d: %s", rec.Code, http.StatusOK, rec.Body.String())
+	}
+
+	if err := os.WriteFile(tokenFile, []byte("# rotated\nrobot:read-only:"+hashedWebAPITestToken(rotatedWebAPITestToken)+"\n"), 0600); err != nil {
+		t.Fatalf("WriteFile(rotated) error = %v", err)
+	}
+
+	rec = requestWebStatusWithBearer(source, validWebAPITestToken)
+	if rec.Code != http.StatusUnauthorized {
+		t.Fatalf("status for old token = %d, want %d", rec.Code, http.StatusUnauthorized)
+	}
+
+	rec = requestWebStatusWithBearer(source, rotatedWebAPITestToken)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status after rotation = %d, want %d: %s", rec.Code, http.StatusOK, rec.Body.String())
+	}
+}
+
+func TestWebEndpointFailsClosedWhenCachedAPITokenReloadIsInvalid(t *testing.T) {
+	tokenFile := filepath.Join(t.TempDir(), "tokens")
+	if err := os.WriteFile(tokenFile, []byte("robot:read-only:"+hashedWebAPITestToken(validWebAPITestToken)+"\n"), 0600); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+
+	source := newCachedWebAPITokenTestSource(t, tokenFile)
+	if err := os.WriteFile(tokenFile, []byte("robot:read-only:sha256:not-hex\n# invalid\n"), 0600); err != nil {
+		t.Fatalf("WriteFile(invalid) error = %v", err)
+	}
+
+	rec := requestWebStatusWithBearer(source, validWebAPITestToken)
+	requireWebAPITokenUnavailable(t, rec, tokenFile, "not-hex", "robot")
+
+	if err := os.WriteFile(tokenFile, []byte("# recovered\nrobot:read-only:"+hashedWebAPITestToken(rotatedWebAPITestToken)+"\n"), 0600); err != nil {
+		t.Fatalf("WriteFile(recovered) error = %v", err)
+	}
+
+	rec = requestWebStatusWithBearer(source, rotatedWebAPITestToken)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status after recovery = %d, want %d: %s", rec.Code, http.StatusOK, rec.Body.String())
+	}
+}
+
+func TestWebEndpointFailsClosedWhenCachedAPITokenFilePermissionsChange(t *testing.T) {
+	tokenFile := filepath.Join(t.TempDir(), "tokens")
+	if err := os.WriteFile(tokenFile, []byte("robot:read-only:"+hashedWebAPITestToken(validWebAPITestToken)+"\n"), 0600); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+
+	source := newCachedWebAPITokenTestSource(t, tokenFile)
+	if err := os.Chmod(tokenFile, 0644); err != nil {
+		t.Fatalf("Chmod() error = %v", err)
+	}
+
+	rec := requestWebStatusWithBearer(source, validWebAPITestToken)
+	requireWebAPITokenUnavailable(t, rec, tokenFile, "permissions")
+}
+
+func TestWebEndpointFailsClosedWhenCachedAPITokenPathBecomesSymlink(t *testing.T) {
+	dir := t.TempDir()
+	tokenFile := filepath.Join(dir, "tokens")
+	if err := os.WriteFile(tokenFile, []byte("robot:read-only:"+hashedWebAPITestToken(validWebAPITestToken)+"\n"), 0600); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+
+	source := newCachedWebAPITokenTestSource(t, tokenFile)
+	rec := requestWebStatusWithBearer(source, validWebAPITestToken)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status before symlink replacement = %d, want %d: %s", rec.Code, http.StatusOK, rec.Body.String())
+	}
+
+	targetFile := filepath.Join(dir, "tokens.target")
+	if err := os.Rename(tokenFile, targetFile); err != nil {
+		t.Fatalf("Rename() error = %v", err)
+	}
+	if err := os.Symlink(targetFile, tokenFile); err != nil {
+		t.Skipf("Symlink() not available: %v", err)
+	}
+
+	tokens, err := source.webAPITokenCache.tokensForRequest()
+	if err == nil {
+		t.Fatalf("tokensForRequest() = %#v, nil error; want symlink rejection", tokens)
+	}
+	if !strings.Contains(err.Error(), "symbolic link") {
+		t.Fatalf("tokensForRequest() error = %v, want symbolic link rejection", err)
+	}
+
+	rec = requestWebStatusWithBearer(source, validWebAPITestToken)
+	requireWebAPITokenUnavailable(t, rec, tokenFile)
+}
+
+func TestLoadWebAPITokensParsesHashedTokenNotAfter(t *testing.T) {
+	tokenFile := filepath.Join(t.TempDir(), "tokens")
+	notAfter := time.Now().UTC().Add(time.Hour).Truncate(time.Second)
+	if err := os.WriteFile(tokenFile, []byte("robot:operator:"+hashedWebAPITestTokenNotAfter(validWebAPITestToken, notAfter)+"\n"), 0600); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+
+	tokens, err := loadWebAPITokens(tokenFile)
+	if err != nil {
+		t.Fatalf("loadWebAPITokens() error = %v", err)
+	}
+	token := tokens["robot"]
+	if !token.NotAfter.Equal(notAfter) {
+		t.Fatalf("token.NotAfter = %s, want %s", token.NotAfter, notAfter)
+	}
+
+	source := newWebAuthTestSource(t, "monitor", "secret", "read-only")
+	source.webAPITokens = tokens
+	req := httptest.NewRequest(http.MethodGet, "/api/status", nil)
+	req.Header.Set("Authorization", "Bearer "+validWebAPITestToken)
+	rec := httptest.NewRecorder()
+	source.handleWebStatus(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d: %s", rec.Code, http.StatusOK, rec.Body.String())
+	}
+}
+
+func TestWebEndpointRejectsExpiredHashedToken(t *testing.T) {
+	tokenFile := filepath.Join(t.TempDir(), "tokens")
+	notAfter := time.Now().UTC().Add(-time.Hour)
+	if err := os.WriteFile(tokenFile, []byte("robot:operator:"+hashedWebAPITestTokenNotAfter(validWebAPITestToken, notAfter)+"\n"), 0600); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+	tokens, err := loadWebAPITokens(tokenFile)
+	if err != nil {
+		t.Fatalf("loadWebAPITokens() error = %v", err)
+	}
+
+	source := newWebAuthTestSource(t, "monitor", "secret", "read-only")
+	source.webAPITokens = tokens
+	req := httptest.NewRequest(http.MethodGet, "/api/status", nil)
+	req.Header.Set("Authorization", "Bearer "+validWebAPITestToken)
+	rec := httptest.NewRecorder()
+	source.handleWebStatus(rec, req)
+
+	if rec.Code != http.StatusUnauthorized {
+		t.Fatalf("status = %d, want %d", rec.Code, http.StatusUnauthorized)
+	}
+}
+
+func TestLoadWebAPITokensRejectsDuplicateTokenValue(t *testing.T) {
+	tokenFile := filepath.Join(t.TempDir(), "tokens")
+	data := []byte("readonly:read-only:" + validWebAPITestToken + "\nadmin:admin:" + validWebAPITestToken + "\n")
+	if err := os.WriteFile(tokenFile, data, 0600); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+
+	_, err := loadWebAPITokens(tokenFile)
+	if err == nil {
+		t.Fatal("loadWebAPITokens() error = nil, want duplicate token value error")
+	}
+	if !strings.Contains(err.Error(), "duplicate web API token value") {
+		t.Fatalf("loadWebAPITokens() error = %v, want duplicate token value error", err)
+	}
+	if strings.Contains(err.Error(), validWebAPITestToken) {
+		t.Fatalf("loadWebAPITokens() error leaked token value: %v", err)
+	}
+}
+
+func TestLoadWebAPITokensRejectsDuplicateHashedTokenValue(t *testing.T) {
+	tokenFile := filepath.Join(t.TempDir(), "tokens")
+	data := []byte("readonly:read-only:" + validWebAPITestToken + "\nadmin:admin:" + hashedWebAPITestToken(validWebAPITestToken) + "\n")
+	if err := os.WriteFile(tokenFile, data, 0600); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+
+	_, err := loadWebAPITokens(tokenFile)
+	if err == nil {
+		t.Fatal("loadWebAPITokens() error = nil, want duplicate token value error")
+	}
+	if !strings.Contains(err.Error(), "duplicate web API token value") {
+		t.Fatalf("loadWebAPITokens() error = %v, want duplicate token value error", err)
+	}
+	if strings.Contains(err.Error(), validWebAPITestToken) {
+		t.Fatalf("loadWebAPITokens() error leaked token value: %v", err)
+	}
+}
+
+func TestLoadWebAPITokensRejectsWeakTokenValue(t *testing.T) {
+	tokenFile := filepath.Join(t.TempDir(), "tokens")
+	if err := os.WriteFile(tokenFile, []byte("robot:operator:secret-token\n"), 0600); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+
+	_, err := loadWebAPITokens(tokenFile)
+	if err == nil {
+		t.Fatal("loadWebAPITokens() error = nil, want weak token value error")
+	}
+	if !strings.Contains(err.Error(), "web API token") {
+		t.Fatalf("loadWebAPITokens() error = %v, want token validation error", err)
+	}
+	if strings.Contains(err.Error(), "secret-token") {
+		t.Fatalf("loadWebAPITokens() error leaked token value: %v", err)
+	}
+}
+
+func TestLoadWebAPITokensRejectsMalformedHashedTokenValue(t *testing.T) {
+	tokenFile := filepath.Join(t.TempDir(), "tokens")
+	if err := os.WriteFile(tokenFile, []byte("robot:operator:sha256:not-hex\n"), 0600); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+
+	_, err := loadWebAPITokens(tokenFile)
+	if err == nil {
+		t.Fatal("loadWebAPITokens() error = nil, want malformed hash error")
+	}
+	if !strings.Contains(err.Error(), "sha256:64 hex characters") {
+		t.Fatalf("loadWebAPITokens() error = %v, want malformed hash error", err)
+	}
+}
+
+func TestLoadWebAPITokensRejectsMalformedHashedTokenNotAfter(t *testing.T) {
+	tokenFile := filepath.Join(t.TempDir(), "tokens")
+	if err := os.WriteFile(tokenFile, []byte("robot:operator:"+hashedWebAPITestToken(validWebAPITestToken)+webAPITokenNotAfterPrefix+"not-a-time\n"), 0600); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+
+	_, err := loadWebAPITokens(tokenFile)
+	if err == nil {
+		t.Fatal("loadWebAPITokens() error = nil, want malformed not-after error")
+	}
+	if !strings.Contains(err.Error(), "not-after must be RFC3339") {
+		t.Fatalf("loadWebAPITokens() error = %v, want malformed not-after error", err)
+	}
+}
+
+func TestLoadWebAPITokensRejectsUnknownHashedTokenSuffix(t *testing.T) {
+	tokenFile := filepath.Join(t.TempDir(), "tokens")
+	if err := os.WriteFile(tokenFile, []byte("robot:operator:"+hashedWebAPITestToken(validWebAPITestToken)+":expires=2026-01-01T00:00:00Z\n"), 0600); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+
+	_, err := loadWebAPITokens(tokenFile)
+	if err == nil {
+		t.Fatal("loadWebAPITokens() error = nil, want unknown suffix error")
+	}
+	if !strings.Contains(err.Error(), "hash suffix") {
+		t.Fatalf("loadWebAPITokens() error = %v, want unknown suffix error", err)
 	}
 }
 
 func TestLoadWebAPITokensRejectsInsecurePermissions(t *testing.T) {
 	tokenFile := filepath.Join(t.TempDir(), "tokens")
-	if err := os.WriteFile(tokenFile, []byte("robot:operator:secret-token\n"), 0600); err != nil {
+	if err := os.WriteFile(tokenFile, []byte("robot:operator:"+validWebAPITestToken+"\n"), 0600); err != nil {
 		t.Fatalf("WriteFile() error = %v", err)
 	}
 	if err := os.Chmod(tokenFile, 0644); err != nil {
@@ -997,6 +1516,17 @@ func TestWebEndpointAcceptsAPIKeyHeader(t *testing.T) {
 	}
 }
 
+func TestConstantTimeWebTokenEqual(t *testing.T) {
+	if !constantTimeWebTokenEqual("secret-token", "secret-token") {
+		t.Fatal("constantTimeWebTokenEqual() = false, want true")
+	}
+	for _, candidate := range []string{"secret-token-extra", "secret", ""} {
+		if constantTimeWebTokenEqual("secret-token", candidate) {
+			t.Fatalf("constantTimeWebTokenEqual() matched %q, want false", candidate)
+		}
+	}
+}
+
 func TestWebEndpointRequiresAuthWhenOnlyTokensConfigured(t *testing.T) {
 	eng := engine.NewEngine(nil, slog.Default())
 	cfg := model.NewRouterConfig()
@@ -1035,7 +1565,7 @@ func TestWebEndpointRejectsInvalidRole(t *testing.T) {
 func TestWebConfigValidateEndpointUsesConfigAPI(t *testing.T) {
 	source, _ := newWebConfigAPITestSource(t, "operator")
 
-	req := httptest.NewRequest(http.MethodPost, "/api/config/validate", strings.NewReader(`{"config_text":"set system host-name edge02"}`))
+	req := newWebJSONTestRequest(http.MethodPost, "/api/config/validate", `{"config_text":"set system host-name edge02"}`)
 	req.SetBasicAuth("operator", "secret")
 	rec := httptest.NewRecorder()
 	source.handleWebConfigValidate(rec, req)
@@ -1057,10 +1587,28 @@ func TestWebConfigValidateEndpointUsesConfigAPI(t *testing.T) {
 	}
 }
 
+func TestWebConfigValidateEndpointPassesExpectedBaseVersion(t *testing.T) {
+	api := &webConfigEditErrorTestAPI{}
+	source := newWebAuthTestSource(t, "operator", "secret", "operator")
+	source.configAPI = api
+
+	req := newWebJSONTestRequest(http.MethodPost, "/api/config/validate", `{"config_text":"set system host-name edge02","expected_base_version":42}`)
+	req.SetBasicAuth("operator", "secret")
+	rec := httptest.NewRecorder()
+	source.handleWebConfigValidate(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d: %s", rec.Code, http.StatusOK, rec.Body.String())
+	}
+	if api.expectedBaseVersion != 42 {
+		t.Fatalf("expected base version = %d, want 42", api.expectedBaseVersion)
+	}
+}
+
 func TestWebConfigCommitEndpointAppliesConfig(t *testing.T) {
 	source, eng := newWebConfigAPITestSource(t, "operator")
 
-	req := httptest.NewRequest(http.MethodPost, "/api/config/commit", strings.NewReader(`{"config_text":"set system host-name edge02","message":"web update"}`))
+	req := newWebJSONTestRequest(http.MethodPost, "/api/config/commit", `{"config_text":"set system host-name edge02","message":"web update"}`)
 	req.SetBasicAuth("operator", "secret")
 	rec := httptest.NewRecorder()
 	source.handleWebConfigCommit(rec, req)
@@ -1080,10 +1628,539 @@ func TestWebConfigCommitEndpointAppliesConfig(t *testing.T) {
 	}
 }
 
+func TestWebConfigCommitEndpointRejectsStaleExpectedBaseVersion(t *testing.T) {
+	source, eng := newWebConfigAPITestSource(t, "operator")
+	updated := eng.Running()
+	updated.System.HostName = "edge03"
+	if err := eng.Apply(context.Background(), updated, "other", "external update"); err != nil {
+		t.Fatalf("Apply() external update error = %v", err)
+	}
+
+	req := newWebJSONTestRequest(http.MethodPost, "/api/config/commit", `{"config_text":"set system host-name edge02","expected_base_version":42}`)
+	req.SetBasicAuth("operator", "secret")
+	rec := httptest.NewRecorder()
+	source.handleWebConfigCommit(rec, req)
+
+	if rec.Code != http.StatusConflict {
+		t.Fatalf("status = %d, want %d: %s", rec.Code, http.StatusConflict, rec.Body.String())
+	}
+	if !strings.Contains(rec.Body.String(), "configuration candidate is unavailable") {
+		t.Fatalf("response body = %q, want candidate conflict", rec.Body.String())
+	}
+	if got := eng.Running().System.HostName; got != "edge03" {
+		t.Fatalf("running hostname = %q, want unchanged edge03", got)
+	}
+}
+
+func TestWebConfigCommitEndpointPropagatesCorrelationID(t *testing.T) {
+	api := &webConfigEditErrorTestAPI{}
+	source := newWebAuthTestSource(t, "operator", "secret", "operator")
+	source.configAPI = api
+
+	req := newWebJSONTestRequest(http.MethodPost, "/api/config/commit", `{"config_text":"set system host-name edge02","expected_base_version":42}`)
+	req.Header.Set(correlation.HeaderName, "web-request-1")
+	req.SetBasicAuth("operator", "secret")
+	rec := httptest.NewRecorder()
+	source.handleWebConfigCommit(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d: %s", rec.Code, http.StatusOK, rec.Body.String())
+	}
+	if got := rec.Result().Header.Get(correlation.HeaderName); got != "web-request-1" {
+		t.Fatalf("%s response header = %q, want web-request-1", correlation.HeaderName, got)
+	}
+	if api.commitCorrelationID != "web-request-1" {
+		t.Fatalf("commit correlation ID = %q, want web-request-1", api.commitCorrelationID)
+	}
+	if api.expectedBaseVersion != 42 {
+		t.Fatalf("expected base version = %d, want 42", api.expectedBaseVersion)
+	}
+}
+
+func TestWebConfigCommitEndpointReplacesFullConfig(t *testing.T) {
+	source, eng := newWebConfigAPITestSource(t, "operator")
+	hash, err := pkgconfig.NormalizePasswordForStorage("secret")
+	if err != nil {
+		t.Fatalf("NormalizePasswordForStorage() error = %v", err)
+	}
+	eng.InitializeRunning(&model.RouterConfig{
+		System: &model.SystemConfig{
+			HostName: "edge01",
+			Services: &model.SystemServicesConfig{
+				SNMP: &model.SNMPConfig{
+					Enabled:   true,
+					Community: "private-community",
+				},
+			},
+		},
+		Security: &model.SecurityConfig{
+			Users: map[string]*model.UserConfig{
+				"operator": {
+					Password: hash,
+					Role:     "operator",
+				},
+			},
+		},
+	}, 42)
+
+	req := newWebJSONTestRequest(http.MethodPost, "/api/config/commit", `{"config_text":"set system host-name edge02","message":"replace full config"}`)
+	req.SetBasicAuth("operator", "secret")
+	rec := httptest.NewRecorder()
+	source.handleWebConfigCommit(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d: %s", rec.Code, http.StatusOK, rec.Body.String())
+	}
+	running := eng.Running()
+	if got := running.System.HostName; got != "edge02" {
+		t.Fatalf("running hostname = %q, want edge02", got)
+	}
+	if running.System.Services != nil && running.System.Services.SNMP != nil {
+		t.Fatalf("SNMP config remained after full replacement: %#v", running.System.Services.SNMP)
+	}
+}
+
+func TestWebConfigValidateEndpointPreservesRedactedSecrets(t *testing.T) {
+	source, _ := newWebConfigAPITestSource(t, "operator")
+	cfg, err := source.runningConfig(context.Background(), true)
+	if err != nil {
+		t.Fatalf("runningConfig() error = %v", err)
+	}
+	if !strings.Contains(cfg.ConfigText, webRedactedSecretMarker) {
+		t.Fatalf("redacted running config =\n%s\nwant redacted marker", cfg.ConfigText)
+	}
+	edited := strings.Replace(cfg.ConfigText, "set system host-name edge01", "set system host-name edge02", 1)
+	body, err := json.Marshal(webConfigEditRequest{
+		ConfigText:          edited,
+		ExpectedBaseVersion: cfg.Version,
+	})
+	if err != nil {
+		t.Fatalf("Marshal() error = %v", err)
+	}
+
+	req := newWebJSONTestRequest(http.MethodPost, "/api/config/validate", string(body))
+	req.SetBasicAuth("operator", "secret")
+	rec := httptest.NewRecorder()
+	source.handleWebConfigValidate(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d: %s", rec.Code, http.StatusOK, rec.Body.String())
+	}
+	var resp webConfigValidateResponse
+	if err := json.NewDecoder(rec.Result().Body).Decode(&resp); err != nil {
+		t.Fatalf("Decode() error = %v", err)
+	}
+	if !resp.Valid || !resp.HasChanges {
+		t.Fatalf("validate response = %#v, want valid with changes", resp)
+	}
+	for _, want := range []string{"- set system host-name edge01", "+ set system host-name edge02"} {
+		if !strings.Contains(resp.DiffText, want) {
+			t.Fatalf("DiffText missing %q:\n%s", want, resp.DiffText)
+		}
+	}
+	if strings.Contains(resp.DiffText, "$argon2id$") || strings.Contains(resp.DiffText, webRedactedSecretMarker) {
+		t.Fatalf("DiffText leaked or retained secret placeholder:\n%s", resp.DiffText)
+	}
+}
+
+func TestWebConfigValidateEndpointAllowsRedactedMarkerInDescription(t *testing.T) {
+	source, _ := newWebConfigAPITestSource(t, "operator")
+	cfg, err := source.runningConfig(context.Background(), true)
+	if err != nil {
+		t.Fatalf("runningConfig() error = %v", err)
+	}
+	edited := strings.TrimSpace(cfg.ConfigText) + "\nset interfaces ge-0/0/0 description \"<redacted>\"\n"
+	body, err := json.Marshal(webConfigEditRequest{
+		ConfigText:          edited,
+		ExpectedBaseVersion: cfg.Version,
+	})
+	if err != nil {
+		t.Fatalf("Marshal() error = %v", err)
+	}
+
+	req := newWebJSONTestRequest(http.MethodPost, "/api/config/validate", string(body))
+	req.SetBasicAuth("operator", "secret")
+	rec := httptest.NewRecorder()
+	source.handleWebConfigValidate(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d: %s", rec.Code, http.StatusOK, rec.Body.String())
+	}
+	var resp webConfigValidateResponse
+	if err := json.NewDecoder(rec.Result().Body).Decode(&resp); err != nil {
+		t.Fatalf("Decode() error = %v", err)
+	}
+	if !resp.Valid || !resp.HasChanges {
+		t.Fatalf("validate response = %#v, want valid with changes", resp)
+	}
+	if want := "+ set interfaces ge-0/0/0 description \"<redacted>\""; !strings.Contains(resp.DiffText, want) {
+		t.Fatalf("DiffText missing literal marker description %q:\n%s", want, resp.DiffText)
+	}
+	if strings.Contains(resp.DiffText, "$argon2id$") {
+		t.Fatalf("DiffText leaked password hash:\n%s", resp.DiffText)
+	}
+}
+
+func TestWebConfigValidateEndpointRedactsDeletedSecretDiff(t *testing.T) {
+	source, _ := newWebConfigAPITestSource(t, "operator")
+	cfg, err := source.runningConfig(context.Background(), true)
+	if err != nil {
+		t.Fatalf("runningConfig() error = %v", err)
+	}
+	secretLine := webRedactedConfigTestLineContaining(t, cfg.ConfigText, "set security users user operator password")
+	edited := removeWebConfigTestLinesContaining(cfg.ConfigText, "set security users user operator ")
+	body, err := json.Marshal(webConfigEditRequest{
+		ConfigText:          edited,
+		ExpectedBaseVersion: cfg.Version,
+	})
+	if err != nil {
+		t.Fatalf("Marshal() error = %v", err)
+	}
+
+	req := newWebJSONTestRequest(http.MethodPost, "/api/config/validate", string(body))
+	req.SetBasicAuth("operator", "secret")
+	rec := httptest.NewRecorder()
+	source.handleWebConfigValidate(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d: %s", rec.Code, http.StatusOK, rec.Body.String())
+	}
+	var resp webConfigValidateResponse
+	if err := json.NewDecoder(rec.Result().Body).Decode(&resp); err != nil {
+		t.Fatalf("Decode() error = %v", err)
+	}
+	if !resp.Valid || !resp.HasChanges {
+		t.Fatalf("validate response = %#v, want valid with changes", resp)
+	}
+	if want := "- " + secretLine; !strings.Contains(resp.DiffText, want) {
+		t.Fatalf("DiffText missing redacted deletion %q:\n%s", want, resp.DiffText)
+	}
+	if strings.Contains(resp.DiffText, "$argon2id$") {
+		t.Fatalf("DiffText leaked password hash:\n%s", resp.DiffText)
+	}
+}
+
+func TestWebConfigValidateEndpointRedactsChangedSecretDiff(t *testing.T) {
+	source, _ := newWebConfigAPITestSource(t, "operator")
+	cfg, err := source.runningConfig(context.Background(), true)
+	if err != nil {
+		t.Fatalf("runningConfig() error = %v", err)
+	}
+	secretLine := webRedactedConfigTestLine(t, cfg.ConfigText)
+	editedLine := strings.Replace(secretLine, webRedactedSecretMarker, "new-secret-password", 1)
+	edited := strings.Replace(cfg.ConfigText, secretLine, editedLine, 1)
+	body, err := json.Marshal(webConfigEditRequest{
+		ConfigText:          edited,
+		ExpectedBaseVersion: cfg.Version,
+	})
+	if err != nil {
+		t.Fatalf("Marshal() error = %v", err)
+	}
+
+	req := newWebJSONTestRequest(http.MethodPost, "/api/config/validate", string(body))
+	req.SetBasicAuth("operator", "secret")
+	rec := httptest.NewRecorder()
+	source.handleWebConfigValidate(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d: %s", rec.Code, http.StatusOK, rec.Body.String())
+	}
+	var resp webConfigValidateResponse
+	if err := json.NewDecoder(rec.Result().Body).Decode(&resp); err != nil {
+		t.Fatalf("Decode() error = %v", err)
+	}
+	if !resp.Valid || !resp.HasChanges {
+		t.Fatalf("validate response = %#v, want valid with secret change", resp)
+	}
+	for _, want := range []string{"- " + secretLine, "+ " + secretLine} {
+		if !strings.Contains(resp.DiffText, want) {
+			t.Fatalf("DiffText missing redacted secret change %q:\n%s", want, resp.DiffText)
+		}
+	}
+	for _, leaked := range []string{"new-secret-password", "$argon2id$"} {
+		if strings.Contains(resp.DiffText, leaked) {
+			t.Fatalf("DiffText leaked %q:\n%s", leaked, resp.DiffText)
+		}
+	}
+}
+
+func webRedactedConfigTestLine(t *testing.T, configText string) string {
+	return webRedactedConfigTestLineContaining(t, configText, "")
+}
+
+func webRedactedConfigTestLineContaining(t *testing.T, configText, needle string) string {
+	t.Helper()
+	for _, line := range webConfigTextLines(configText) {
+		if strings.Contains(line, webRedactedSecretMarker) && strings.Contains(line, needle) {
+			return line
+		}
+	}
+	t.Fatalf("config text =\n%s\nwant redacted secret line", configText)
+	return ""
+}
+
+func removeWebConfigTestLinesContaining(configText, needle string) string {
+	var kept []string
+	for _, line := range strings.Split(configText, "\n") {
+		if strings.Contains(line, needle) {
+			continue
+		}
+		kept = append(kept, line)
+	}
+	return strings.Join(kept, "\n")
+}
+
+func TestWebConfigCommitEndpointPreservesRedactedSecrets(t *testing.T) {
+	source, eng := newWebConfigAPITestSource(t, "operator")
+	beforePassword := eng.Running().Security.Users["operator"].Password
+	cfg, err := source.runningConfig(context.Background(), true)
+	if err != nil {
+		t.Fatalf("runningConfig() error = %v", err)
+	}
+	edited := strings.Replace(cfg.ConfigText, "set system host-name edge01", "set system host-name edge02", 1)
+	body, err := json.Marshal(webConfigCommitRequest{
+		ConfigText:          edited,
+		Message:             "web update",
+		ExpectedBaseVersion: cfg.Version,
+	})
+	if err != nil {
+		t.Fatalf("Marshal() error = %v", err)
+	}
+
+	req := newWebJSONTestRequest(http.MethodPost, "/api/config/commit", string(body))
+	req.SetBasicAuth("operator", "secret")
+	rec := httptest.NewRecorder()
+	source.handleWebConfigCommit(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d: %s", rec.Code, http.StatusOK, rec.Body.String())
+	}
+	running := eng.Running()
+	if got := running.System.HostName; got != "edge02" {
+		t.Fatalf("running hostname = %q, want edge02", got)
+	}
+	if got := running.Security.Users["operator"].Password; got != beforePassword {
+		t.Fatalf("operator password = %q, want preserved %q", got, beforePassword)
+	}
+}
+
+func TestWebConfigWriteEndpointRejectsTrailingJSON(t *testing.T) {
+	source, eng := newWebConfigAPITestSource(t, "operator")
+
+	req := newWebJSONTestRequest(http.MethodPost, "/api/config/commit", `{"config_text":"set system host-name edge02"}{"config_text":"set system host-name edge03"}`)
+	req.SetBasicAuth("operator", "secret")
+	rec := httptest.NewRecorder()
+	source.handleWebConfigCommit(rec, req)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want %d: %s", rec.Code, http.StatusBadRequest, rec.Body.String())
+	}
+	if got := eng.Running().System.HostName; got != "edge01" {
+		t.Fatalf("running hostname = %q, want unchanged edge01", got)
+	}
+	if !strings.Contains(rec.Body.String(), "unexpected trailing JSON value") {
+		t.Fatalf("response body = %q, want trailing JSON error", rec.Body.String())
+	}
+}
+
+func TestWebConfigWriteEndpointNormalizesJSONDecodeErrors(t *testing.T) {
+	tests := []struct {
+		name      string
+		body      string
+		wantCode  string
+		wantError string
+	}{
+		{
+			name:      "unknown field",
+			body:      `{"config_text":"set system host-name edge02","unexpected":true}`,
+			wantCode:  "unknown_field",
+			wantError: "request contains unknown field",
+		},
+		{
+			name:      "malformed json",
+			body:      `{"config_text":`,
+			wantCode:  "invalid_json",
+			wantError: "malformed JSON request",
+		},
+		{
+			name:      "wrong field type",
+			body:      `{"config_text":123}`,
+			wantCode:  "invalid_json",
+			wantError: "invalid JSON value for config_text",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			source, eng := newWebConfigAPITestSource(t, "operator")
+			req := newWebJSONTestRequest(http.MethodPost, "/api/config/validate", tt.body)
+			req.SetBasicAuth("operator", "secret")
+			rec := httptest.NewRecorder()
+			source.handleWebConfigValidate(rec, req)
+
+			if rec.Code != http.StatusBadRequest {
+				t.Fatalf("status = %d, want %d: %s", rec.Code, http.StatusBadRequest, rec.Body.String())
+			}
+			var resp map[string]string
+			if err := json.NewDecoder(rec.Result().Body).Decode(&resp); err != nil {
+				t.Fatalf("Decode() error = %v", err)
+			}
+			if resp["code"] != tt.wantCode || resp["error"] != tt.wantError {
+				t.Fatalf("response = %#v, want code %q error %q", resp, tt.wantCode, tt.wantError)
+			}
+			if got := eng.Running().System.HostName; got != "edge01" {
+				t.Fatalf("running hostname = %q, want unchanged edge01", got)
+			}
+		})
+	}
+}
+
+func TestWebConfigWriteEndpointRejectsOversizedBody(t *testing.T) {
+	source, _ := newWebConfigAPITestSource(t, "operator")
+	body := `{"config_text":"` + strings.Repeat("x", webConfigEditBodyLimit) + `"}`
+
+	req := newWebJSONTestRequest(http.MethodPost, "/api/config/validate", body)
+	req.SetBasicAuth("operator", "secret")
+	rec := httptest.NewRecorder()
+	source.handleWebConfigValidate(rec, req)
+
+	if rec.Code != http.StatusRequestEntityTooLarge {
+		t.Fatalf("status = %d, want %d: %s", rec.Code, http.StatusRequestEntityTooLarge, rec.Body.String())
+	}
+	var resp map[string]string
+	if err := json.NewDecoder(rec.Result().Body).Decode(&resp); err != nil {
+		t.Fatalf("Decode() error = %v", err)
+	}
+	if resp["code"] != "request_body_too_large" || resp["error"] != "request body too large" {
+		t.Fatalf("response = %#v, want stable body-too-large error", resp)
+	}
+}
+
+func TestWebConfigWriteEndpointRejectsRedactedConfig(t *testing.T) {
+	tests := []struct {
+		name   string
+		path   string
+		handle func(metricsSource, http.ResponseWriter, *http.Request)
+	}{
+		{
+			name: "validate",
+			path: "/api/config/validate",
+			handle: func(source metricsSource, w http.ResponseWriter, r *http.Request) {
+				source.handleWebConfigValidate(w, r)
+			},
+		},
+		{
+			name: "commit",
+			path: "/api/config/commit",
+			handle: func(source metricsSource, w http.ResponseWriter, r *http.Request) {
+				source.handleWebConfigCommit(w, r)
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			source, eng := newWebConfigAPITestSource(t, "operator")
+			body := `{"config_text":"` +
+				`set security users user intruder password \"` + webRedactedSecretMarker + `\"\n` +
+				`set security users user intruder role operator"}`
+			req := newWebJSONTestRequest(http.MethodPost, tt.path, body)
+			req.SetBasicAuth("operator", "secret")
+			rec := httptest.NewRecorder()
+			tt.handle(source, rec, req)
+
+			if rec.Code != http.StatusBadRequest {
+				t.Fatalf("status = %d, want %d: %s", rec.Code, http.StatusBadRequest, rec.Body.String())
+			}
+			if !strings.Contains(rec.Body.String(), "redacted config text cannot be validated or committed") {
+				t.Fatalf("response body = %q, want redacted config rejection", rec.Body.String())
+			}
+			if got := eng.Running().System.HostName; got != "edge01" {
+				t.Fatalf("running hostname = %q, want unchanged edge01", got)
+			}
+		})
+	}
+}
+
+func TestWebConfigWriteEndpointRequiresJSONContentType(t *testing.T) {
+	tests := []struct {
+		name        string
+		contentType string
+	}{
+		{name: "missing"},
+		{name: "text plain", contentType: "text/plain"},
+		{name: "form", contentType: "application/x-www-form-urlencoded"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			source, eng := newWebConfigAPITestSource(t, "operator")
+			req := httptest.NewRequest(http.MethodPost, "/api/config/commit", strings.NewReader(`{"config_text":"set system host-name edge02"}`))
+			if tt.contentType != "" {
+				req.Header.Set("Content-Type", tt.contentType)
+			}
+			req.SetBasicAuth("operator", "secret")
+			rec := httptest.NewRecorder()
+			source.handleWebConfigCommit(rec, req)
+
+			if rec.Code != http.StatusUnsupportedMediaType {
+				t.Fatalf("status = %d, want %d: %s", rec.Code, http.StatusUnsupportedMediaType, rec.Body.String())
+			}
+			if got := eng.Running().System.HostName; got != "edge01" {
+				t.Fatalf("running hostname = %q, want unchanged edge01", got)
+			}
+		})
+	}
+}
+
+func TestWebConfigWriteEndpointRejectsCrossOriginHeaders(t *testing.T) {
+	tests := []struct {
+		name   string
+		header string
+		value  string
+	}{
+		{name: "origin", header: "Origin", value: "https://evil.example"},
+		{name: "referer", header: "Referer", value: "https://evil.example/config"},
+		{name: "malformed origin", header: "Origin", value: "://bad"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			source, eng := newWebConfigAPITestSource(t, "operator")
+			req := newWebJSONTestRequest(http.MethodPost, "/api/config/commit", `{"config_text":"set system host-name edge02"}`)
+			req.Header.Set(tt.header, tt.value)
+			req.SetBasicAuth("operator", "secret")
+			rec := httptest.NewRecorder()
+			source.handleWebConfigCommit(rec, req)
+
+			if rec.Code != http.StatusForbidden {
+				t.Fatalf("status = %d, want %d: %s", rec.Code, http.StatusForbidden, rec.Body.String())
+			}
+			if got := eng.Running().System.HostName; got != "edge01" {
+				t.Fatalf("running hostname = %q, want unchanged edge01", got)
+			}
+		})
+	}
+}
+
+func TestWebConfigWriteEndpointAllowsSameOriginHeader(t *testing.T) {
+	source, eng := newWebConfigAPITestSource(t, "operator")
+	req := newWebJSONTestRequest(http.MethodPost, "/api/config/commit", `{"config_text":"set system host-name edge02"}`)
+	req.Header.Set("Origin", "http://example.com")
+	req.SetBasicAuth("operator", "secret")
+	rec := httptest.NewRecorder()
+	source.handleWebConfigCommit(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d: %s", rec.Code, http.StatusOK, rec.Body.String())
+	}
+	if got := eng.Running().System.HostName; got != "edge02" {
+		t.Fatalf("running hostname = %q, want edge02", got)
+	}
+}
+
 func TestWebConfigWriteEndpointRejectsReadOnlyRole(t *testing.T) {
 	source, _ := newWebConfigAPITestSource(t, "read-only")
 
-	req := httptest.NewRequest(http.MethodPost, "/api/config/validate", strings.NewReader(`{"config_text":"set system host-name edge02"}`))
+	req := newWebJSONTestRequest(http.MethodPost, "/api/config/validate", `{"config_text":"set system host-name edge02"}`)
 	req.SetBasicAuth("read-only", "secret")
 	rec := httptest.NewRecorder()
 	source.handleWebConfigValidate(rec, req)
@@ -1099,13 +2176,96 @@ func TestWebConfigWriteEndpointRejectsReadOnlyToken(t *testing.T) {
 		"robot": {Name: "robot", Role: "read-only", Token: "secret-token"},
 	}
 
-	req := httptest.NewRequest(http.MethodPost, "/api/config/validate", strings.NewReader(`{"config_text":"set system host-name edge02"}`))
+	req := newWebJSONTestRequest(http.MethodPost, "/api/config/validate", `{"config_text":"set system host-name edge02"}`)
 	req.Header.Set("Authorization", "Bearer secret-token")
 	rec := httptest.NewRecorder()
 	source.handleWebConfigValidate(rec, req)
 
 	if rec.Code != http.StatusForbidden {
 		t.Fatalf("status = %d, want %d", rec.Code, http.StatusForbidden)
+	}
+}
+
+func TestWebConfigValidateEndpointRedactsInternalErrors(t *testing.T) {
+	source := newWebAuthTestSource(t, "operator", "secret", "operator")
+	source.configAPI = &webConfigEditErrorTestAPI{
+		createErr: errors.New("session store /var/lib/arca/session.db failed"),
+	}
+
+	req := newWebJSONTestRequest(http.MethodPost, "/api/config/validate", `{"config_text":"set system host-name edge02"}`)
+	req.SetBasicAuth("operator", "secret")
+	rec := httptest.NewRecorder()
+	source.handleWebConfigValidate(rec, req)
+
+	requireWebJSONInternalError(t, rec, "session store", "/var/lib/arca/session.db")
+}
+
+func TestWebConfigCommitEndpointRedactsInternalErrors(t *testing.T) {
+	source := newWebAuthTestSource(t, "operator", "secret", "operator")
+	source.configAPI = &webConfigEditErrorTestAPI{
+		commitErr: errors.New("persist commit /var/lib/arca/config.db failed"),
+	}
+
+	req := newWebJSONTestRequest(http.MethodPost, "/api/config/commit", `{"config_text":"set system host-name edge02"}`)
+	req.SetBasicAuth("operator", "secret")
+	rec := httptest.NewRecorder()
+	source.handleWebConfigCommit(rec, req)
+
+	requireWebJSONInternalError(t, rec, "persist commit", "/var/lib/arca/config.db")
+}
+
+func TestWebConfigCommitEndpointKeepsBadRequestForNoChanges(t *testing.T) {
+	source, _ := newWebConfigAPITestSource(t, "operator")
+	cfg, err := source.runningConfig(context.Background(), false)
+	if err != nil {
+		t.Fatalf("runningConfig() error = %v", err)
+	}
+	body, err := json.Marshal(webConfigCommitRequest{ConfigText: cfg.ConfigText})
+	if err != nil {
+		t.Fatalf("Marshal() error = %v", err)
+	}
+
+	req := newWebJSONTestRequest(http.MethodPost, "/api/config/commit", string(body))
+	req.SetBasicAuth("operator", "secret")
+	rec := httptest.NewRecorder()
+	source.handleWebConfigCommit(rec, req)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want %d: %s", rec.Code, http.StatusBadRequest, rec.Body.String())
+	}
+	if !strings.Contains(rec.Body.String(), "no configuration changes to commit") {
+		t.Fatalf("response body = %q, want no-changes message", rec.Body.String())
+	}
+}
+
+func TestWebConfigCommitEndpointReportsUnavailableConfigAPI(t *testing.T) {
+	source := newWebAuthTestSource(t, "operator", "secret", "operator")
+
+	req := newWebJSONTestRequest(http.MethodPost, "/api/config/commit", `{"config_text":"set system host-name edge02"}`)
+	req.SetBasicAuth("operator", "secret")
+	rec := httptest.NewRecorder()
+	source.handleWebConfigCommit(rec, req)
+
+	if rec.Code != http.StatusServiceUnavailable {
+		t.Fatalf("status = %d, want %d: %s", rec.Code, http.StatusServiceUnavailable, rec.Body.String())
+	}
+	if !strings.Contains(rec.Body.String(), errWebConfigAPIUnavailable.Error()) {
+		t.Fatalf("response body = %q, want API unavailable message", rec.Body.String())
+	}
+}
+
+func TestRunningConfigUsesRequestContext(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	source := metricsSource{
+		configAPI: &webConfigEditErrorTestAPI{
+			requireCanceledGetRunningContext: true,
+		},
+	}
+
+	_, err := source.runningConfig(ctx, true)
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("runningConfig() error = %v, want context canceled", err)
 	}
 }
 
@@ -1142,6 +2302,42 @@ func TestWebConfigHistoryEndpointUsesConfigAPI(t *testing.T) {
 	if entry.Timestamp != "2026-05-13T09:10:11Z" {
 		t.Fatalf("Timestamp = %q, want RFC3339 UTC", entry.Timestamp)
 	}
+}
+
+func TestWebConfigHistoryEndpointRejectsInvalidPagination(t *testing.T) {
+	tests := []string{
+		"/api/config/history?limit=abc",
+		"/api/config/history?limit=0",
+		"/api/config/history?offset=-1",
+		"/api/config/history?offset=abc",
+	}
+	for _, target := range tests {
+		t.Run(target, func(t *testing.T) {
+			source := newWebAuthTestSource(t, "monitor", "secret", "read-only")
+			source.configAPI = webHistoryTestAPI{}
+
+			req := httptest.NewRequest(http.MethodGet, target, nil)
+			req.SetBasicAuth("monitor", "secret")
+			rec := httptest.NewRecorder()
+			source.handleWebConfigHistory(rec, req)
+
+			if rec.Code != http.StatusBadRequest {
+				t.Fatalf("status = %d, want %d: %s", rec.Code, http.StatusBadRequest, rec.Body.String())
+			}
+		})
+	}
+}
+
+func TestWebConfigHistoryEndpointRedactsInternalErrors(t *testing.T) {
+	source := newWebAuthTestSource(t, "monitor", "secret", "read-only")
+	source.configAPI = webHistoryTestAPI{err: errors.New("sqlite backend /var/lib/arca/history.db failed")}
+
+	req := httptest.NewRequest(http.MethodGet, "/api/config/history", nil)
+	req.SetBasicAuth("monitor", "secret")
+	rec := httptest.NewRecorder()
+	source.handleWebConfigHistory(rec, req)
+
+	requireWebJSONInternalError(t, rec, "sqlite backend", "/var/lib/arca/history.db")
 }
 
 func TestWebAuditEndpointRequiresAdminRole(t *testing.T) {
@@ -1205,6 +2401,24 @@ func TestWebAuditEndpointExportsFilteredEvents(t *testing.T) {
 	}
 }
 
+func TestWebAuditEndpointClampsOverLimit(t *testing.T) {
+	source := newWebAuthTestSource(t, "admin", "secret", "admin")
+	auditAPI := &webAuditTestAPI{}
+	source.configAPI = auditAPI
+
+	req := httptest.NewRequest(http.MethodGet, "/api/audit?limit=1001", nil)
+	req.SetBasicAuth("admin", "secret")
+	rec := httptest.NewRecorder()
+	source.handleWebAudit(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d: %s", rec.Code, http.StatusOK, rec.Body.String())
+	}
+	if auditAPI.opts.Limit != 1000 {
+		t.Fatalf("audit limit = %d, want clamped 1000", auditAPI.opts.Limit)
+	}
+}
+
 func TestWebAuditEndpointRejectsInvalidTimeRange(t *testing.T) {
 	source := newWebAuthTestSource(t, "admin", "secret", "admin")
 	source.configAPI = &webAuditTestAPI{}
@@ -1216,6 +2430,76 @@ func TestWebAuditEndpointRejectsInvalidTimeRange(t *testing.T) {
 
 	if rec.Code != http.StatusBadRequest {
 		t.Fatalf("status = %d, want %d", rec.Code, http.StatusBadRequest)
+	}
+}
+
+func TestWebAuditEndpointRejectsInvalidFilters(t *testing.T) {
+	tests := []struct {
+		name      string
+		target    string
+		wantError string
+	}{
+		{
+			name:      "overlong user",
+			target:    "/api/audit?user=" + strings.Repeat("a", maxWebAuditFilterLength+1),
+			wantError: "user must be 128 characters or fewer",
+		},
+		{
+			name:      "action with control character",
+			target:    "/api/audit?action=com%0Amit",
+			wantError: "action contains unsupported characters",
+		},
+		{
+			name:      "result with non ascii character",
+			target:    "/api/audit?result=%E6%88%90%E5%8A%9F",
+			wantError: "result contains unsupported characters",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			source := newWebAuthTestSource(t, "admin", "secret", "admin")
+			source.configAPI = &webAuditTestAPI{}
+
+			req := httptest.NewRequest(http.MethodGet, tt.target, nil)
+			req.SetBasicAuth("admin", "secret")
+			rec := httptest.NewRecorder()
+			source.handleWebAudit(rec, req)
+
+			if rec.Code != http.StatusBadRequest {
+				t.Fatalf("status = %d, want %d: %s", rec.Code, http.StatusBadRequest, rec.Body.String())
+			}
+			if !strings.Contains(rec.Body.String(), tt.wantError) {
+				t.Fatalf("response body = %q, want %q", rec.Body.String(), tt.wantError)
+			}
+		})
+	}
+}
+
+func TestWebAuditEndpointRedactsInternalErrors(t *testing.T) {
+	source := newWebAuthTestSource(t, "admin", "secret", "admin")
+	source.configAPI = &webAuditTestAPI{err: errors.New("audit backend secret table failed")}
+
+	req := httptest.NewRequest(http.MethodGet, "/api/audit", nil)
+	req.SetBasicAuth("admin", "secret")
+	rec := httptest.NewRecorder()
+	source.handleWebAudit(rec, req)
+
+	requireWebJSONInternalError(t, rec, "audit backend", "secret table")
+}
+
+func TestWebIndexTemplateAssetLoaded(t *testing.T) {
+	if !strings.HasPrefix(webIndexHTML, "<!doctype html>") {
+		t.Fatalf("webIndexHTML prefix = %q, want doctype", webIndexHTML[:min(32, len(webIndexHTML))])
+	}
+	for _, want := range []string{
+		`id="config-editor"`,
+		`id="commit-config"`,
+		"/api/config/commit",
+	} {
+		if !strings.Contains(webIndexHTML, want) {
+			t.Fatalf("webIndexHTML missing %q", want)
+		}
 	}
 }
 
@@ -1264,6 +2548,8 @@ func TestWebIndexEndpoint(t *testing.T) {
 		"/api/config/commit",
 		"validate-config",
 		"commit-config",
+		"let configVersion =",
+		"expected_base_version",
 	} {
 		if !strings.Contains(text, want) {
 			t.Fatalf("index missing %q:\n%s", want, text)
@@ -1292,12 +2578,18 @@ func newWebAuthTestSource(t *testing.T, username, password, role string) metrics
 	return metricsSource{
 		startedAt: time.Now().Add(-2 * time.Minute),
 		engine:    eng,
+		webLog:    slog.New(slog.NewTextHandler(io.Discard, nil)),
 	}
+}
+
+func newWebJSONTestRequest(method, target, body string) *http.Request {
+	req := httptest.NewRequest(method, target, strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	return req
 }
 
 func newWebConfigAPITestSource(t *testing.T, role string) (metricsSource, *engine.Engine) {
 	t.Helper()
-	installParserHooks()
 	eng := engine.NewEngine(nil, slog.Default())
 	cfg := model.NewRouterConfig()
 	cfg.System = &model.SystemConfig{HostName: "edge01"}
@@ -1315,6 +2607,7 @@ func newWebConfigAPITestSource(t *testing.T, role string) (metricsSource, *engin
 	}
 	eng.InitializeRunning(cfg, 42)
 	configAPI := nbgrpc.NewServer(eng, nil, slog.Default())
+	configAPI.SetConfigTextParser(parseLegacyRouterConfigText)
 	return metricsSource{
 		startedAt: time.Now().Add(-2 * time.Minute),
 		engine:    eng,
@@ -1322,12 +2615,89 @@ func newWebConfigAPITestSource(t *testing.T, role string) (metricsSource, *engin
 	}, eng
 }
 
+type webConfigEditErrorTestAPI struct {
+	webConfigAPI
+	createErr           error
+	acquireErr          error
+	replaceErr          error
+	validateErr         error
+	diffErr             error
+	commitErr           error
+	commitCorrelationID string
+	expectedBaseVersion uint64
+
+	requireCanceledGetRunningContext bool
+}
+
+func (a *webConfigEditErrorTestAPI) GetRunning(ctx context.Context) (string, uint64, error) {
+	if a.requireCanceledGetRunningContext {
+		select {
+		case <-ctx.Done():
+			return "", 0, ctx.Err()
+		default:
+			return "", 0, errors.New("running config request context was not canceled")
+		}
+	}
+	return "set system host-name edge01\n", 42, nil
+}
+
+func (a *webConfigEditErrorTestAPI) CreateSession(ctx context.Context, user string) (string, error) {
+	if a.createErr != nil {
+		return "", a.createErr
+	}
+	return "session-1", nil
+}
+
+func (a *webConfigEditErrorTestAPI) CloseSession(ctx context.Context, sessionID string) error {
+	return nil
+}
+
+func (a *webConfigEditErrorTestAPI) AcquireLock(ctx context.Context, sessionID, user string) error {
+	return a.acquireErr
+}
+
+func (a *webConfigEditErrorTestAPI) ReleaseLock(ctx context.Context, sessionID string) error {
+	return nil
+}
+
+func (a *webConfigEditErrorTestAPI) ReplaceCandidate(ctx context.Context, sessionID, configText string) error {
+	return a.replaceErr
+}
+
+func (a *webConfigEditErrorTestAPI) ReplaceCandidateWithBase(ctx context.Context, sessionID, configText string, expectedBaseVersion uint64) error {
+	a.expectedBaseVersion = expectedBaseVersion
+	return a.ReplaceCandidate(ctx, sessionID, configText)
+}
+
+func (a *webConfigEditErrorTestAPI) ValidateCandidate(ctx context.Context, sessionID string) error {
+	return a.validateErr
+}
+
+func (a *webConfigEditErrorTestAPI) Diff(ctx context.Context, sessionID string) (string, bool, error) {
+	if a.diffErr != nil {
+		return "", false, a.diffErr
+	}
+	return "- set system host-name edge01\n+ set system host-name edge02\n", true, nil
+}
+
+func (a *webConfigEditErrorTestAPI) Commit(ctx context.Context, sessionID, user, message string) (string, uint64, error) {
+	a.commitCorrelationID = correlation.ID(ctx)
+	if a.commitErr != nil {
+		return "", 0, a.commitErr
+	}
+	return "commit-1", 43, nil
+}
+
 type webHistoryTestAPI struct {
 	webConfigAPI
 	history []nbgrpc.CommitInfo
+	err     error
 }
 
 func (a webHistoryTestAPI) ListHistory(ctx context.Context, limit, offset int) ([]nbgrpc.CommitInfo, error) {
+	if a.err != nil {
+		return nil, a.err
+	}
 	if offset >= len(a.history) {
 		return nil, nil
 	}
@@ -1342,10 +2712,14 @@ type webAuditTestAPI struct {
 	webConfigAPI
 	events []nbgrpc.AuditEventInfo
 	opts   nbgrpc.AuditLogOptions
+	err    error
 }
 
 func (a *webAuditTestAPI) ListAuditEvents(ctx context.Context, opts nbgrpc.AuditLogOptions) ([]nbgrpc.AuditEventInfo, error) {
 	a.opts = opts
+	if a.err != nil {
+		return nil, a.err
+	}
 	return a.events, nil
 }
 

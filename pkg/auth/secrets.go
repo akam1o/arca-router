@@ -1,7 +1,9 @@
 package auth
 
 import (
+	"crypto/tls"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"syscall"
@@ -54,11 +56,22 @@ func (e *KeyPermissionError) Error() string {
 // It checks:
 // - File permissions are 0600 (owner read/write only)
 // - File is not world-readable or group-writable
+// - File is not exposed through multiple hard links
 // - Optionally validates ownership (if expectedUID/GID are > 0)
 func ValidateKeyFilePermissions(path string, expectedUID, expectedGID uint32) error {
-	info, err := os.Stat(path)
+	info, err := os.Lstat(path)
 	if err != nil {
 		return fmt.Errorf("failed to stat key file %s: %w", path, err)
+	}
+	return validateKeyFileInfo(path, info, expectedUID, expectedGID)
+}
+
+func validateKeyFileInfo(path string, info os.FileInfo, expectedUID, expectedGID uint32) error {
+	if err := validateRegularSecretFile(path, info); err != nil {
+		return err
+	}
+	if err := validateSingleLinkSecretFile(path, info); err != nil {
+		return err
 	}
 
 	// Get file permissions
@@ -120,12 +133,89 @@ func ValidateKeyFilePermissions(path string, expectedUID, expectedGID uint32) er
 	return nil
 }
 
+// ReadSecretFile reads a 0600 regular secret file after validating the opened
+// file still matches the path that was checked.
+func ReadSecretFile(path string) ([]byte, error) {
+	return readCheckedSecretFile(path, func(path string, info os.FileInfo) error {
+		return validateKeyFileInfo(path, info, 0, 0)
+	})
+}
+
+// LoadX509KeyPair loads a certificate and a private key after applying the
+// same private-key file validation used for other local secrets.
+func LoadX509KeyPair(certFile, keyFile string) (tls.Certificate, error) {
+	certPEM, err := os.ReadFile(certFile)
+	if err != nil {
+		return tls.Certificate{}, fmt.Errorf("read certificate file: %w", err)
+	}
+	keyPEM, err := ReadSecretFile(keyFile)
+	if err != nil {
+		return tls.Certificate{}, fmt.Errorf("read private key file: %w", err)
+	}
+	cert, err := tls.X509KeyPair(certPEM, keyPEM)
+	if err != nil {
+		return tls.Certificate{}, fmt.Errorf("parse certificate/key pair: %w", err)
+	}
+	return cert, nil
+}
+
+func readEnvSecretFile(path string) ([]byte, error) {
+	return readCheckedSecretFile(path, validateLinkedSecretFile)
+}
+
+func readCheckedSecretFile(path string, validate func(string, os.FileInfo) error) ([]byte, error) {
+	info, err := os.Lstat(path)
+	if err != nil {
+		return nil, fmt.Errorf("failed to stat secret file %s: %w", path, err)
+	}
+	if err := validate(path, info); err != nil {
+		return nil, err
+	}
+
+	file, err := os.Open(path)
+	if err != nil {
+		return nil, fmt.Errorf("failed to open secret file %s: %w", path, err)
+	}
+	defer func() { _ = file.Close() }()
+
+	openedInfo, err := file.Stat()
+	if err != nil {
+		return nil, fmt.Errorf("failed to stat open secret file %s: %w", path, err)
+	}
+	if err := validate(path, openedInfo); err != nil {
+		return nil, err
+	}
+	if !os.SameFile(info, openedInfo) {
+		return nil, fmt.Errorf("refusing to read secret file %s: file changed before read", path)
+	}
+
+	currentInfo, err := os.Lstat(path)
+	if err != nil {
+		return nil, fmt.Errorf("failed to stat secret file before read %s: %w", path, err)
+	}
+	if err := validate(path, currentInfo); err != nil {
+		return nil, err
+	}
+	if !os.SameFile(info, currentInfo) {
+		return nil, fmt.Errorf("refusing to read secret file %s: file changed before read", path)
+	}
+
+	data, err := io.ReadAll(file)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read secret file %s: %w", path, err)
+	}
+	return data, nil
+}
+
 // ValidateKeyDirectoryPermissions verifies that a directory containing keys has secure permissions
 // Directory should be 0750 or more restrictive (e.g., 0700)
 func ValidateKeyDirectoryPermissions(path string, expectedUID, expectedGID uint32) error {
-	info, err := os.Stat(path)
+	info, err := os.Lstat(path)
 	if err != nil {
 		return fmt.Errorf("failed to stat directory %s: %w", path, err)
+	}
+	if info.Mode()&os.ModeSymlink != 0 {
+		return fmt.Errorf("directory %s must not be a symbolic link", path)
 	}
 
 	if !info.IsDir() {
@@ -227,9 +317,15 @@ func ValidateSecrets(config *SecretConfig) error {
 // Note: This may not be effective on journaling filesystems or SSDs with wear leveling
 func SecurelyRemoveFile(path string) error {
 	// Get file size
-	info, err := os.Stat(path)
+	info, err := os.Lstat(path)
 	if err != nil {
 		return fmt.Errorf("failed to stat file: %w", err)
+	}
+	if err := validateRegularSecretFile(path, info); err != nil {
+		return err
+	}
+	if err := validateSingleLinkSecretFile(path, info); err != nil {
+		return err
 	}
 
 	// Open file for writing
@@ -242,6 +338,19 @@ func SecurelyRemoveFile(path string) error {
 			_ = file.Close()
 		}
 	}()
+	openedInfo, err := file.Stat()
+	if err != nil {
+		return fmt.Errorf("failed to stat open file: %w", err)
+	}
+	if err := validateRegularSecretFile(path, openedInfo); err != nil {
+		return err
+	}
+	if err := validateSingleLinkSecretFile(path, openedInfo); err != nil {
+		return err
+	}
+	if !os.SameFile(info, openedInfo) {
+		return fmt.Errorf("refusing to overwrite %s: file changed before removal", path)
+	}
 
 	// Overwrite with zeros in chunks to avoid large allocations
 	const chunkSize = 4096
@@ -258,6 +367,9 @@ func SecurelyRemoveFile(path string) error {
 		if err != nil {
 			return fmt.Errorf("failed to overwrite file: %w", err)
 		}
+		if n == 0 {
+			return fmt.Errorf("failed to overwrite file: %w", io.ErrShortWrite)
+		}
 		remaining -= int64(n)
 	}
 
@@ -272,11 +384,43 @@ func SecurelyRemoveFile(path string) error {
 	}
 	file = nil
 
+	currentInfo, err := os.Lstat(path)
+	if err != nil {
+		return fmt.Errorf("failed to stat file before removal: %w", err)
+	}
+	if !os.SameFile(info, currentInfo) {
+		return fmt.Errorf("refusing to remove %s: file changed before removal", path)
+	}
+
 	// Remove file
 	if err := os.Remove(path); err != nil {
 		return fmt.Errorf("failed to remove file: %w", err)
 	}
 
+	return nil
+}
+
+func validateRegularSecretFile(path string, info os.FileInfo) error {
+	if info.Mode()&os.ModeSymlink != 0 {
+		return fmt.Errorf("secret file %s must not be a symbolic link", path)
+	}
+	if !info.Mode().IsRegular() {
+		return fmt.Errorf("secret file %s is not a regular file", path)
+	}
+	return nil
+}
+
+func validateLinkedSecretFile(path string, info os.FileInfo) error {
+	if err := validateRegularSecretFile(path, info); err != nil {
+		return err
+	}
+	return validateSingleLinkSecretFile(path, info)
+}
+
+func validateSingleLinkSecretFile(path string, info os.FileInfo) error {
+	if stat, ok := info.Sys().(*syscall.Stat_t); ok && stat.Nlink > 1 {
+		return fmt.Errorf("secret file %s must not have multiple hard links", path)
+	}
 	return nil
 }
 
@@ -294,7 +438,7 @@ func GetSecretFromEnv(envVar string) (string, error) {
 	// Try _FILE variant
 	fileEnvVar := envVar + "_FILE"
 	if filePath := os.Getenv(fileEnvVar); filePath != "" {
-		data, err := os.ReadFile(filePath)
+		data, err := readEnvSecretFile(filePath)
 		if err != nil {
 			return "", fmt.Errorf("failed to read secret from %s: %w", filePath, err)
 		}

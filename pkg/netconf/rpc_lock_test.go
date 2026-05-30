@@ -16,7 +16,7 @@ type lockFailureDatastore struct {
 }
 
 func (d *lockFailureDatastore) AcquireLock(context.Context, *datastore.LockRequest) error {
-	return errors.New("backend unavailable")
+	return errors.New("sqlite /var/lib/arca-router/config.db unavailable")
 }
 
 func (d *lockFailureDatastore) GetLockInfo(context.Context, string) (*datastore.LockInfo, error) {
@@ -47,6 +47,9 @@ func TestLockFailureWithInactiveLockInfoReturnsOperationFailed(t *testing.T) {
 	}
 	if reply.Errors[0].ErrorTag != ErrorTagOperationFailed {
 		t.Fatalf("lock error tag = %s, want %s", reply.Errors[0].ErrorTag, ErrorTagOperationFailed)
+	}
+	if got := reply.Errors[0].ErrorMessage; got != "failed to acquire lock on candidate" {
+		t.Fatalf("lock error message = %q, want redacted datastore failure", got)
 	}
 }
 

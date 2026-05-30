@@ -15,11 +15,26 @@ import (
 	"github.com/akam1o/arca-router/internal/model"
 )
 
+var ErrConfigValidation = errors.New("configuration validation error")
+
+type configValidationError struct {
+	cause error
+}
+
+func (e configValidationError) Error() string {
+	return fmt.Sprintf("config validation failed: %v", e.cause)
+}
+
+func (e configValidationError) Unwrap() []error {
+	return []error{ErrConfigValidation, e.cause}
+}
+
 // Engine is the central configuration engine. It holds the current running
 // configuration and coordinates diff computation and atomic application
 // of changes across all southbound plugins.
 type Engine struct {
 	mu      sync.RWMutex
+	applyMu sync.Mutex
 	running *model.ConfigSnapshot
 	plugins []Plugin
 	log     *slog.Logger
@@ -107,7 +122,7 @@ func (e *Engine) Validate(ctx context.Context, candidate *model.RouterConfig) er
 		return fmt.Errorf("configuration is nil")
 	}
 	if err := candidate.Validate(); err != nil {
-		return fmt.Errorf("config validation failed: %w", err)
+		return configValidationError{cause: err}
 	}
 
 	e.mu.RLock()
@@ -131,9 +146,6 @@ func (e *Engine) Validate(ctx context.Context, candidate *model.RouterConfig) er
 // It computes the diff from the current running config, validates through all
 // plugins, and applies changes transactionally (rollback on failure).
 func (e *Engine) Apply(ctx context.Context, candidate *model.RouterConfig, author, message string) error {
-	e.mu.Lock()
-	defer e.mu.Unlock()
-
 	if candidate == nil {
 		return fmt.Errorf("configuration is nil")
 	}
@@ -141,14 +153,21 @@ func (e *Engine) Apply(ctx context.Context, candidate *model.RouterConfig, autho
 
 	// Validate the candidate config
 	if err := candidate.Validate(); err != nil {
-		return fmt.Errorf("config validation failed: %w", err)
+		return configValidationError{cause: err}
 	}
+
+	e.applyMu.Lock()
+	defer e.applyMu.Unlock()
 
 	// Compute diff from running → candidate
 	var oldCfg *model.RouterConfig
+	e.mu.RLock()
 	if e.running != nil {
 		oldCfg = e.running.Config.Clone()
 	}
+	plugins := append([]Plugin(nil), e.plugins...)
+	e.mu.RUnlock()
+
 	diff := ComputeDiff(oldCfg, candidate.Clone())
 
 	if !diff.HasChanges() {
@@ -168,7 +187,7 @@ func (e *Engine) Apply(ctx context.Context, candidate *model.RouterConfig, autho
 	)
 
 	// Phase 1: Validate across all plugins (dry-run)
-	for _, p := range e.plugins {
+	for _, p := range plugins {
 		if err := p.ValidateChanges(ctx, diff.Clone()); err != nil {
 			return fmt.Errorf("plugin %s validation failed: %w", p.Name(), err)
 		}
@@ -176,13 +195,17 @@ func (e *Engine) Apply(ctx context.Context, candidate *model.RouterConfig, autho
 
 	// Phase 2: Apply with rollback-on-failure
 	tx := &transaction{
-		applied: make([]appliedPlugin, 0, len(e.plugins)),
+		applied: make([]appliedPlugin, 0, len(plugins)),
 		log:     e.log,
 	}
 
-	for _, p := range e.plugins {
+	for _, p := range plugins {
 		applyDiff := diff.Clone()
 		rollbackDiff := diff.Clone()
+		tx.applied = append(tx.applied, appliedPlugin{
+			plugin: p,
+			diff:   rollbackDiff,
+		})
 		if err := p.ApplyChanges(ctx, applyDiff); err != nil {
 			e.log.Error("Plugin apply failed, initiating rollback",
 				slog.String("plugin", p.Name()),
@@ -198,13 +221,11 @@ func (e *Engine) Apply(ctx context.Context, candidate *model.RouterConfig, autho
 				Err:                 err,
 			}
 		}
-		tx.applied = append(tx.applied, appliedPlugin{
-			plugin: p,
-			diff:   rollbackDiff,
-		})
 	}
 
 	// Phase 3: Commit — update running config
+	e.mu.Lock()
+	defer e.mu.Unlock()
 	e.version++
 	e.running = model.NewSnapshot(candidate, e.version, author, message)
 
@@ -219,6 +240,8 @@ func (e *Engine) Apply(ctx context.Context, candidate *model.RouterConfig, autho
 // InitializeRunning sets the initial running configuration without applying a diff.
 // Used at startup when loading from datastore.
 func (e *Engine) InitializeRunning(cfg *model.RouterConfig, version uint64) {
+	e.applyMu.Lock()
+	defer e.applyMu.Unlock()
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	e.version = version

@@ -76,6 +76,48 @@ func TestValidateKeyFilePermissions(t *testing.T) {
 	}
 }
 
+func TestValidateKeyFilePermissionsRejectsSymlink(t *testing.T) {
+	tmpDir := t.TempDir()
+	targetPath := filepath.Join(tmpDir, "target-key")
+	linkPath := filepath.Join(tmpDir, "linked-key")
+
+	if err := os.WriteFile(targetPath, []byte("test-key-data"), 0600); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+	if err := os.Symlink(targetPath, linkPath); err != nil {
+		t.Skipf("symlink not supported: %v", err)
+	}
+
+	err := ValidateKeyFilePermissions(linkPath, 0, 0)
+	if err == nil {
+		t.Fatal("ValidateKeyFilePermissions() error = nil, want symlink rejection")
+	}
+	if !contains(err.Error(), "symbolic link") {
+		t.Fatalf("ValidateKeyFilePermissions() error = %v, want symbolic link rejection", err)
+	}
+}
+
+func TestValidateKeyFilePermissionsRejectsHardLink(t *testing.T) {
+	tmpDir := t.TempDir()
+	targetPath := filepath.Join(tmpDir, "target-key")
+	linkPath := filepath.Join(tmpDir, "hard-linked-key")
+
+	if err := os.WriteFile(targetPath, []byte("test-key-data"), 0600); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+	if err := os.Link(targetPath, linkPath); err != nil {
+		t.Skipf("hard links not supported: %v", err)
+	}
+
+	err := ValidateKeyFilePermissions(linkPath, 0, 0)
+	if err == nil {
+		t.Fatal("ValidateKeyFilePermissions() error = nil, want hard link rejection")
+	}
+	if !contains(err.Error(), "multiple hard links") {
+		t.Fatalf("ValidateKeyFilePermissions() error = %v, want hard link rejection", err)
+	}
+}
+
 func TestValidateKeyFileOwnership(t *testing.T) {
 	tmpDir := t.TempDir()
 
@@ -117,6 +159,66 @@ func TestValidateKeyFileOwnership(t *testing.T) {
 				t.Errorf("Expected owner %d in error, got %d", wrongUID, permErr.ExpectedOwner)
 			}
 		}
+	}
+}
+
+func TestReadSecretFileReadsSecureFile(t *testing.T) {
+	tmpDir := t.TempDir()
+	filePath := filepath.Join(tmpDir, "secret")
+	want := []byte("secret-value")
+
+	if err := os.WriteFile(filePath, want, 0600); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+
+	got, err := ReadSecretFile(filePath)
+	if err != nil {
+		t.Fatalf("ReadSecretFile() error = %v", err)
+	}
+	if string(got) != string(want) {
+		t.Fatalf("ReadSecretFile() = %q, want %q", got, want)
+	}
+}
+
+func TestReadSecretFileRejectsSymlink(t *testing.T) {
+	tmpDir := t.TempDir()
+	targetPath := filepath.Join(tmpDir, "target-secret")
+	linkPath := filepath.Join(tmpDir, "linked-secret")
+
+	if err := os.WriteFile(targetPath, []byte("secret-value"), 0600); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+	if err := os.Symlink(targetPath, linkPath); err != nil {
+		t.Skipf("symlink not supported: %v", err)
+	}
+
+	_, err := ReadSecretFile(linkPath)
+	if err == nil {
+		t.Fatal("ReadSecretFile() error = nil, want symlink rejection")
+	}
+	if !contains(err.Error(), "symbolic link") {
+		t.Fatalf("ReadSecretFile() error = %v, want symbolic link rejection", err)
+	}
+}
+
+func TestReadSecretFileRejectsHardLink(t *testing.T) {
+	tmpDir := t.TempDir()
+	targetPath := filepath.Join(tmpDir, "target-secret")
+	linkPath := filepath.Join(tmpDir, "hard-linked-secret")
+
+	if err := os.WriteFile(targetPath, []byte("secret-value"), 0600); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+	if err := os.Link(targetPath, linkPath); err != nil {
+		t.Skipf("hard links not supported: %v", err)
+	}
+
+	_, err := ReadSecretFile(linkPath)
+	if err == nil {
+		t.Fatal("ReadSecretFile() error = nil, want hard link rejection")
+	}
+	if !contains(err.Error(), "multiple hard links") {
+		t.Fatalf("ReadSecretFile() error = %v, want hard link rejection", err)
 	}
 }
 
@@ -187,6 +289,27 @@ func TestValidateKeyDirectoryPermissions(t *testing.T) {
 	}
 }
 
+func TestValidateKeyDirectoryPermissionsRejectsSymlink(t *testing.T) {
+	tmpDir := t.TempDir()
+	targetDir := filepath.Join(tmpDir, "target-dir")
+	linkDir := filepath.Join(tmpDir, "linked-dir")
+
+	if err := os.Mkdir(targetDir, 0700); err != nil {
+		t.Fatalf("Mkdir() error = %v", err)
+	}
+	if err := os.Symlink(targetDir, linkDir); err != nil {
+		t.Skipf("symlink not supported: %v", err)
+	}
+
+	err := ValidateKeyDirectoryPermissions(linkDir, 0, 0)
+	if err == nil {
+		t.Fatal("ValidateKeyDirectoryPermissions() error = nil, want symlink rejection")
+	}
+	if !contains(err.Error(), "symbolic link") {
+		t.Fatalf("ValidateKeyDirectoryPermissions() error = %v, want symbolic link rejection", err)
+	}
+}
+
 func TestValidateSecrets(t *testing.T) {
 	tmpDir := t.TempDir()
 
@@ -243,6 +366,66 @@ func TestSecurelyRemoveFile(t *testing.T) {
 	}
 }
 
+func TestSecurelyRemoveFileRejectsSymlink(t *testing.T) {
+	tmpDir := t.TempDir()
+	targetPath := filepath.Join(tmpDir, "sensitive-data")
+	linkPath := filepath.Join(tmpDir, "linked-sensitive-data")
+	sensitiveData := []byte("super-secret-password-12345")
+
+	if err := os.WriteFile(targetPath, sensitiveData, 0600); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+	if err := os.Symlink(targetPath, linkPath); err != nil {
+		t.Skipf("symlink not supported: %v", err)
+	}
+
+	err := SecurelyRemoveFile(linkPath)
+	if err == nil {
+		t.Fatal("SecurelyRemoveFile() error = nil, want symlink rejection")
+	}
+
+	got, readErr := os.ReadFile(targetPath)
+	if readErr != nil {
+		t.Fatalf("ReadFile(target) error = %v", readErr)
+	}
+	if string(got) != string(sensitiveData) {
+		t.Fatalf("target file content = %q, want unchanged %q", got, sensitiveData)
+	}
+	if _, statErr := os.Lstat(linkPath); statErr != nil {
+		t.Fatalf("Lstat(link) error = %v, want link preserved", statErr)
+	}
+}
+
+func TestSecurelyRemoveFileRejectsHardLink(t *testing.T) {
+	tmpDir := t.TempDir()
+	targetPath := filepath.Join(tmpDir, "sensitive-data")
+	linkPath := filepath.Join(tmpDir, "hard-linked-sensitive-data")
+	sensitiveData := []byte("super-secret-password-12345")
+
+	if err := os.WriteFile(targetPath, sensitiveData, 0600); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+	if err := os.Link(targetPath, linkPath); err != nil {
+		t.Skipf("hard links not supported: %v", err)
+	}
+
+	err := SecurelyRemoveFile(linkPath)
+	if err == nil {
+		t.Fatal("SecurelyRemoveFile() error = nil, want hard link rejection")
+	}
+
+	got, readErr := os.ReadFile(targetPath)
+	if readErr != nil {
+		t.Fatalf("ReadFile(target) error = %v", readErr)
+	}
+	if string(got) != string(sensitiveData) {
+		t.Fatalf("target file content = %q, want unchanged %q", got, sensitiveData)
+	}
+	if _, statErr := os.Lstat(linkPath); statErr != nil {
+		t.Fatalf("Lstat(hard link) error = %v, want link preserved", statErr)
+	}
+}
+
 func TestGetSecretFromEnv(t *testing.T) {
 	// Test direct environment variable
 	envVar := "TEST_SECRET_VALUE"
@@ -295,6 +478,73 @@ func TestGetSecretFromEnv(t *testing.T) {
 	_, err = GetSecretFromEnv("NONEXISTENT_SECRET")
 	if err == nil {
 		t.Error("GetSecretFromEnv should fail for nonexistent variable")
+	}
+}
+
+func TestGetSecretFromEnvFileAllowsReadOnlyFile(t *testing.T) {
+	tmpDir := t.TempDir()
+	secretFilePath := filepath.Join(tmpDir, "secret.txt")
+	if err := os.WriteFile(secretFilePath, []byte("file-secret-value\n"), 0600); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+	if err := os.Chmod(secretFilePath, 0400); err != nil {
+		t.Fatalf("Chmod() error = %v", err)
+	}
+
+	t.Setenv("TEST_READ_ONLY_SECRET_FILE_FILE", secretFilePath)
+
+	value, err := GetSecretFromEnv("TEST_READ_ONLY_SECRET_FILE")
+	if err != nil {
+		t.Fatalf("GetSecretFromEnv() error = %v", err)
+	}
+	if value != "file-secret-value" {
+		t.Fatalf("GetSecretFromEnv() = %q, want %q", value, "file-secret-value")
+	}
+}
+
+func TestGetSecretFromEnvFileRejectsSymlink(t *testing.T) {
+	tmpDir := t.TempDir()
+	targetPath := filepath.Join(tmpDir, "target-secret")
+	linkPath := filepath.Join(tmpDir, "linked-secret")
+
+	if err := os.WriteFile(targetPath, []byte("file-secret-value\n"), 0600); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+	if err := os.Symlink(targetPath, linkPath); err != nil {
+		t.Skipf("symlink not supported: %v", err)
+	}
+
+	t.Setenv("TEST_SYMLINK_SECRET_FILE_FILE", linkPath)
+
+	_, err := GetSecretFromEnv("TEST_SYMLINK_SECRET_FILE")
+	if err == nil {
+		t.Fatal("GetSecretFromEnv() error = nil, want symlink rejection")
+	}
+	if !contains(err.Error(), "symbolic link") {
+		t.Fatalf("GetSecretFromEnv() error = %v, want symbolic link rejection", err)
+	}
+}
+
+func TestGetSecretFromEnvFileRejectsHardLink(t *testing.T) {
+	tmpDir := t.TempDir()
+	targetPath := filepath.Join(tmpDir, "target-secret")
+	linkPath := filepath.Join(tmpDir, "hard-linked-secret")
+
+	if err := os.WriteFile(targetPath, []byte("file-secret-value\n"), 0600); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+	if err := os.Link(targetPath, linkPath); err != nil {
+		t.Skipf("hard links not supported: %v", err)
+	}
+
+	t.Setenv("TEST_HARD_LINK_SECRET_FILE_FILE", linkPath)
+
+	_, err := GetSecretFromEnv("TEST_HARD_LINK_SECRET_FILE")
+	if err == nil {
+		t.Fatal("GetSecretFromEnv() error = nil, want hard link rejection")
+	}
+	if !contains(err.Error(), "multiple hard links") {
+		t.Fatalf("GetSecretFromEnv() error = %v, want hard link rejection", err)
 	}
 }
 

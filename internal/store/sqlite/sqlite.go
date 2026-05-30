@@ -8,8 +8,11 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
+	"strings"
 	"time"
 
+	"github.com/akam1o/arca-router/internal/correlation"
 	"github.com/akam1o/arca-router/internal/model"
 	"github.com/akam1o/arca-router/internal/store"
 	pkgconfig "github.com/akam1o/arca-router/pkg/config"
@@ -19,16 +22,40 @@ import (
 
 // Store implements store.ConfigStore using the legacy datastore.
 type Store struct {
-	ds datastore.Datastore
+	ds               datastore.Datastore
+	legacyTextParser LegacyTextParserFunc
+}
+
+type commitHistoryCounter interface {
+	CountCommitHistory(ctx context.Context) (uint64, error)
+}
+
+// Option customizes Store construction.
+type Option func(*Store)
+
+// LegacyTextParserFunc parses legacy set-command text into the canonical model.
+type LegacyTextParserFunc func(text string) (*model.RouterConfig, error)
+
+// WithLegacyTextParser sets the parser used for legacy set-command text.
+func WithLegacyTextParser(parser LegacyTextParserFunc) Option {
+	return func(s *Store) {
+		s.legacyTextParser = parser
+	}
 }
 
 // New creates a new SQLite store, wrapping the legacy datastore.
-func New(ds datastore.Datastore) *Store {
-	return &Store{ds: ds}
+func New(ds datastore.Datastore, opts ...Option) *Store {
+	s := &Store{
+		ds: ds,
+	}
+	for _, opt := range opts {
+		opt(s)
+	}
+	return s
 }
 
 // NewFromPath creates a new SQLite store from a file path.
-func NewFromPath(path string) (*Store, error) {
+func NewFromPath(path string, opts ...Option) (*Store, error) {
 	ds, err := datastore.NewDatastore(&datastore.Config{
 		Backend:    datastore.BackendSQLite,
 		SQLitePath: path,
@@ -36,7 +63,7 @@ func NewFromPath(path string) (*Store, error) {
 	if err != nil {
 		return nil, fmt.Errorf("open sqlite datastore: %w", err)
 	}
-	return &Store{ds: ds}, nil
+	return New(ds, opts...), nil
 }
 
 // CleanupEphemeralState removes lock and candidate rows left by a previous
@@ -65,14 +92,60 @@ func (s *Store) GetLatestSnapshot(ctx context.Context) (*model.ConfigSnapshot, e
 	}
 
 	// Parse the stored config text into the new model
-	cfg, err := parseStoredConfig(running.ConfigText)
+	cfg, err := s.parseStoredConfig(running.ConfigText)
 	if err != nil {
 		return nil, fmt.Errorf("parse stored config: %w", err)
 	}
 
-	snap := model.NewSnapshot(cfg, 1, "system", "loaded from datastore")
+	version, err := s.latestSnapshotVersion(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("load snapshot version: %w", err)
+	}
+
+	snap := model.NewSnapshot(cfg, version, "system", "loaded from datastore")
 	snap.CreatedAt = running.Timestamp
 	return snap, nil
+}
+
+func (s *Store) latestSnapshotVersion(ctx context.Context) (uint64, error) {
+	if counter, ok := s.ds.(commitHistoryCounter); ok {
+		count, err := counter.CountCommitHistory(ctx)
+		if err != nil {
+			return 0, err
+		}
+		return snapshotVersionFromCommitCount(count), nil
+	}
+	return s.latestSnapshotVersionByPaging(ctx)
+}
+
+func snapshotVersionFromCommitCount(count uint64) uint64 {
+	if count == 0 {
+		return 1
+	}
+	return count
+}
+
+func (s *Store) latestSnapshotVersionByPaging(ctx context.Context) (uint64, error) {
+	const pageSize = 1000
+
+	offset := 0
+	for {
+		entries, err := s.ds.ListCommitHistory(ctx, &datastore.HistoryOptions{
+			Limit:  pageSize,
+			Offset: offset,
+		})
+		if err != nil {
+			return 0, err
+		}
+		offset += len(entries)
+		if len(entries) < pageSize {
+			break
+		}
+	}
+	if offset == 0 {
+		return 1, nil
+	}
+	return uint64(offset), nil
 }
 
 func (s *Store) PrepareCommit(ctx context.Context, snap *model.ConfigSnapshot) (store.PreparedCommit, error) {
@@ -88,11 +161,13 @@ func (s *Store) PrepareCommit(ctx context.Context, snap *model.ConfigSnapshot) (
 	}
 
 	// Use the legacy commit mechanism
+	ctx, correlationID := correlation.EnsureID(ctx)
 	sessionID := "engine-" + uuid.NewString()
 	req := &datastore.CommitRequest{
-		SessionID: sessionID,
-		User:      snap.Author,
-		Message:   snap.Message,
+		SessionID:     sessionID,
+		User:          snap.Author,
+		Message:       snap.Message,
+		CorrelationID: correlationID,
 	}
 
 	if err := s.ds.AcquireLock(ctx, &datastore.LockRequest{
@@ -141,6 +216,7 @@ func (s *Store) PrepareRollback(ctx context.Context, snap *model.ConfigSnapshot,
 	}
 
 	sessionID := "engine-" + uuid.NewString()
+	ctx, correlationID := correlation.EnsureID(ctx)
 	if err := s.ds.AcquireLock(ctx, &datastore.LockRequest{
 		Target:    datastore.LockTargetCandidate,
 		SessionID: sessionID,
@@ -154,10 +230,11 @@ func (s *Store) PrepareRollback(ctx context.Context, snap *model.ConfigSnapshot,
 		ds:        s.ds,
 		sessionID: sessionID,
 		req: &datastore.RollbackRequest{
-			SessionID: sessionID,
-			CommitID:  targetCommitID,
-			User:      snap.Author,
-			Message:   snap.Message,
+			SessionID:     sessionID,
+			CommitID:      targetCommitID,
+			User:          snap.Author,
+			Message:       snap.Message,
+			CorrelationID: correlationID,
 		},
 	}, nil
 }
@@ -171,7 +248,7 @@ func (s *Store) GetCommit(ctx context.Context, commitID string) (*store.CommitRe
 		return nil, nil
 	}
 
-	cfg, err := parseStoredConfig(entry.ConfigText)
+	cfg, err := s.parseStoredConfig(entry.ConfigText)
 	if err != nil {
 		return nil, fmt.Errorf("parse commit config: %w", err)
 	}
@@ -179,6 +256,7 @@ func (s *Store) GetCommit(ctx context.Context, commitID string) (*store.CommitRe
 	return &store.CommitRecord{
 		CommitID:   entry.CommitID,
 		Config:     cfg,
+		ConfigText: entry.ConfigText,
 		Author:     entry.User,
 		Message:    entry.Message,
 		Timestamp:  entry.Timestamp,
@@ -213,7 +291,10 @@ func (s *Store) ListCommits(ctx context.Context, opts *store.ListOptions) ([]*st
 }
 
 func (s *Store) AuditLog(ctx context.Context, event *store.AuditEvent) error {
-	detailsJSON, _ := json.Marshal(event.Details)
+	detailsJSON, err := json.Marshal(event.Details)
+	if err != nil {
+		return fmt.Errorf("marshal audit details: %w", err)
+	}
 
 	return s.ds.LogAuditEvent(ctx, &datastore.AuditEvent{
 		Timestamp:     event.Timestamp,
@@ -285,26 +366,47 @@ func (s *Store) Close() error {
 
 // parseStoredConfig attempts to parse stored config as JSON (new format)
 // or falls back to set-command text (legacy format).
-func parseStoredConfig(text string) (*model.RouterConfig, error) {
+func (s *Store) parseStoredConfig(text string) (*model.RouterConfig, error) {
 	// Try JSON first (new format)
-	var cfg model.RouterConfig
-	if err := json.Unmarshal([]byte(text), &cfg); err == nil {
-		return &cfg, nil
+	trimmed := strings.TrimSpace(text)
+	if isStoredJSONConfig(trimmed) {
+		cfg, err := parseStoredJSONConfig(trimmed)
+		if err != nil {
+			return nil, err
+		}
+		return cfg, nil
 	}
 
 	// Fall back to legacy set-command text parsing
-	// This uses the existing pkg/config parser via the hook
-	return parseLegacyText(text)
+	return s.parseLegacyText(text)
 }
 
-// LegacyTextParser is a hook for parsing legacy set-command text.
-// It is set at initialization to break the circular dependency with pkg/config.
-var LegacyTextParser func(text string) (*model.RouterConfig, error)
+func isStoredJSONConfig(text string) bool {
+	return strings.HasPrefix(text, "{") || strings.HasPrefix(text, "[")
+}
+
+func parseStoredJSONConfig(text string) (*model.RouterConfig, error) {
+	dec := json.NewDecoder(strings.NewReader(text))
+	dec.DisallowUnknownFields()
+
+	var cfg model.RouterConfig
+	if err := dec.Decode(&cfg); err != nil {
+		return nil, fmt.Errorf("decode stored JSON config: %w", err)
+	}
+	var trailing struct{}
+	if err := dec.Decode(&trailing); err != io.EOF {
+		return nil, fmt.Errorf("decode stored JSON config: trailing data")
+	}
+	if err := cfg.Validate(); err != nil {
+		return nil, fmt.Errorf("validate stored JSON config: %w", err)
+	}
+	return &cfg, nil
+}
 
 // parseLegacyText parses set-command format text using the existing parser.
-func parseLegacyText(text string) (*model.RouterConfig, error) {
-	if LegacyTextParser != nil {
-		return LegacyTextParser(text)
+func (s *Store) parseLegacyText(text string) (*model.RouterConfig, error) {
+	if s.legacyTextParser != nil {
+		return s.legacyTextParser(text)
 	}
 	return nil, fmt.Errorf("legacy text parser not initialized")
 }

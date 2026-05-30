@@ -9,8 +9,7 @@ import (
 
 // AcquireLock attempts to acquire the exclusive config lock for a specific target datastore.
 func (ds *sqliteDatastore) AcquireLock(ctx context.Context, req *LockRequest) error {
-	// Validate target
-	if err := ValidateLockTarget(req.Target); err != nil {
+	if err := validateLockRequest(req); err != nil {
 		return err
 	}
 
@@ -129,7 +128,10 @@ func (ds *sqliteDatastore) ReleaseLock(ctx context.Context, target string, sessi
 		// Check if lock has expired (treat as if no lock exists)
 		if time.Now().Unix() > expiresAt.Unix() {
 			// Lock is expired - delete it and return success
-			_, _ = tx.ExecContext(ctx, `DELETE FROM config_locks WHERE target = ?`, target)
+			_, err = tx.ExecContext(ctx, `DELETE FROM config_locks WHERE target = ?`, target)
+			if err != nil {
+				return NewError(ErrCodeInternal, fmt.Sprintf("failed to delete expired %s lock", target), err)
+			}
 			return nil
 		}
 

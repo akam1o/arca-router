@@ -2,9 +2,21 @@ package grpc
 
 import (
 	"context"
+	"crypto/tls"
+	"errors"
+	"strings"
 	"time"
 
 	apiv1 "github.com/akam1o/arca-router/api/v1"
+	"github.com/akam1o/arca-router/internal/correlation"
+	"github.com/akam1o/arca-router/internal/engine"
+	"github.com/akam1o/arca-router/pkg/datastore"
+	grpcpkg "google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/credentials"
+	"google.golang.org/grpc/metadata"
+	"google.golang.org/grpc/peer"
+	"google.golang.org/grpc/status"
 )
 
 type configServiceAdapter struct {
@@ -15,78 +27,175 @@ type configServiceAdapter struct {
 func (a *configServiceAdapter) GetRunning(ctx context.Context, _ *apiv1.GetRunningRequest) (*apiv1.GetRunningResponse, error) {
 	configText, version, err := a.server.GetRunning(ctx)
 	if err != nil {
-		return nil, err
+		return nil, configEditStatusError(err)
 	}
 	return &apiv1.GetRunningResponse{
 		ConfigText: configText,
 		Version:    version,
+		CommitId:   a.server.latestRunningCommitID(ctx),
+	}, nil
+}
+
+func (a *configServiceAdapter) GetRunningUnredacted(ctx context.Context, _ *apiv1.GetRunningRequest) (*apiv1.GetRunningResponse, error) {
+	configText, version, err := a.server.GetRunningUnredacted(ctx)
+	if err != nil {
+		return nil, configEditStatusError(err)
+	}
+	return &apiv1.GetRunningResponse{
+		ConfigText: configText,
+		Version:    version,
+		CommitId:   a.server.latestRunningCommitID(ctx),
 	}, nil
 }
 
 func (a *configServiceAdapter) GetCandidate(ctx context.Context, req *apiv1.GetCandidateRequest) (*apiv1.GetCandidateResponse, error) {
 	configText, err := a.server.GetCandidate(ctx, req.GetSessionId())
 	if err != nil {
-		return nil, err
+		return nil, configEditStatusError(err)
 	}
 	return &apiv1.GetCandidateResponse{ConfigText: configText}, nil
 }
 
 func (a *configServiceAdapter) EditCandidate(ctx context.Context, req *apiv1.EditCandidateRequest) (*apiv1.EditCandidateResponse, error) {
 	if err := a.server.EditCandidate(ctx, req.GetSessionId(), req.GetConfigText()); err != nil {
-		return nil, err
+		return nil, configEditStatusError(err)
 	}
 	return &apiv1.EditCandidateResponse{}, nil
 }
 
 func (a *configServiceAdapter) ReplaceCandidate(ctx context.Context, req *apiv1.ReplaceCandidateRequest) (*apiv1.ReplaceCandidateResponse, error) {
-	if err := a.server.ReplaceCandidate(ctx, req.GetSessionId(), req.GetConfigText()); err != nil {
-		return nil, err
+	if err := a.server.ReplaceCandidateWithBase(ctx, req.GetSessionId(), req.GetConfigText(), req.GetExpectedBaseVersion()); err != nil {
+		return nil, configEditStatusError(err)
 	}
 	return &apiv1.ReplaceCandidateResponse{}, nil
 }
 
 func (a *configServiceAdapter) Commit(ctx context.Context, req *apiv1.CommitRequest) (*apiv1.CommitResponse, error) {
-	commitID, version, err := a.server.Commit(ctx, req.GetSessionId(), req.GetUser(), req.GetMessage())
+	ctx = grpcCorrelationContext(ctx)
+	commitID, version, err := a.server.Commit(ctx, req.GetSessionId(), grpcRequestUser(ctx, req.GetUser()), req.GetMessage())
 	if err != nil {
-		return nil, err
+		return nil, configEditStatusError(err)
 	}
 	return &apiv1.CommitResponse{CommitId: commitID, Version: version}, nil
 }
 
 func (a *configServiceAdapter) ValidateCandidate(ctx context.Context, req *apiv1.ValidateCandidateRequest) (*apiv1.ValidateCandidateResponse, error) {
 	if err := a.server.ValidateCandidate(ctx, req.GetSessionId()); err != nil {
-		return nil, err
+		return nil, configEditStatusError(err)
 	}
 	return &apiv1.ValidateCandidateResponse{}, nil
 }
 
 func (a *configServiceAdapter) Discard(ctx context.Context, req *apiv1.DiscardRequest) (*apiv1.DiscardResponse, error) {
 	if err := a.server.Discard(ctx, req.GetSessionId()); err != nil {
-		return nil, err
+		return nil, configEditStatusError(err)
 	}
 	return &apiv1.DiscardResponse{}, nil
 }
 
 func (a *configServiceAdapter) Rollback(ctx context.Context, req *apiv1.RollbackRequest) (*apiv1.RollbackResponse, error) {
-	commitID, version, err := a.server.Rollback(ctx, req.GetSessionId(), req.GetCommitId(), req.GetUser(), req.GetMessage())
+	ctx = grpcCorrelationContext(ctx)
+	commitID, version, err := a.server.Rollback(ctx, req.GetSessionId(), req.GetCommitId(), grpcRequestUser(ctx, req.GetUser()), req.GetMessage())
 	if err != nil {
-		return nil, err
+		return nil, configEditStatusError(err)
 	}
 	return &apiv1.RollbackResponse{NewCommitId: commitID, Version: version}, nil
+}
+
+func grpcCorrelationContext(ctx context.Context) context.Context {
+	if correlation.ID(ctx) != "" {
+		return ctx
+	}
+	if md, ok := metadata.FromIncomingContext(ctx); ok {
+		for _, key := range []string{correlation.MetadataKey, correlation.AlternateMetadataKey} {
+			for _, value := range md.Get(key) {
+				if id := correlation.Normalize(value); id != "" {
+					ctx = correlation.WithID(ctx, id)
+					_ = grpcpkg.SetHeader(ctx, metadata.Pairs(correlation.MetadataKey, id))
+					return ctx
+				}
+			}
+		}
+	}
+	ctx, id := correlation.EnsureID(ctx)
+	_ = grpcpkg.SetHeader(ctx, metadata.Pairs(correlation.MetadataKey, id))
+	return ctx
 }
 
 func (a *configServiceAdapter) Diff(ctx context.Context, req *apiv1.DiffRequest) (*apiv1.DiffResponse, error) {
 	diffText, hasChanges, err := a.server.Diff(ctx, req.GetSessionId())
 	if err != nil {
-		return nil, err
+		return nil, configEditStatusError(err)
 	}
 	return &apiv1.DiffResponse{DiffText: diffText, HasChanges: hasChanges}, nil
+}
+
+func configEditStatusError(err error) error {
+	switch {
+	case errors.Is(err, ErrConfigInput), errors.Is(err, engine.ErrConfigValidation):
+		return status.Error(codes.InvalidArgument, err.Error())
+	case errors.Is(err, ErrSessionNotFound):
+		return status.Error(codes.NotFound, "configuration session not found")
+	case errors.Is(err, ErrCandidateConflict):
+		return status.Error(codes.FailedPrecondition, "configuration candidate is unavailable")
+	case errors.Is(err, ErrCommitHistoryUnavailable):
+		return status.Error(codes.Unavailable, "commit history is unavailable")
+	case errors.Is(err, context.DeadlineExceeded):
+		return status.Error(codes.DeadlineExceeded, "configuration operation timed out")
+	case errors.Is(err, context.Canceled):
+		return status.Error(codes.Canceled, "configuration operation canceled")
+	default:
+		if applyStatus := configApplyStatusError(err); applyStatus != nil {
+			return applyStatus
+		}
+		if datastoreStatus := datastoreStatusError(err); datastoreStatus != nil {
+			return datastoreStatus
+		}
+		return status.Error(codes.Internal, "internal server error")
+	}
+}
+
+func configApplyStatusError(err error) error {
+	var applyErr *engine.ApplyError
+	if !errors.As(err, &applyErr) {
+		return nil
+	}
+	if applyErr.RollbackAttempted && applyErr.RollbackSucceeded {
+		return status.Error(codes.Aborted, "configuration apply failed; rollback succeeded")
+	}
+	if applyErr.RollbackAttempted && !applyErr.RollbackSucceeded {
+		return status.Error(codes.Aborted, "configuration apply failed; rollback failed")
+	}
+	return status.Error(codes.Aborted, "configuration apply failed")
+}
+
+func datastoreStatusError(err error) error {
+	var datastoreErr *datastore.Error
+	if !errors.As(err, &datastoreErr) {
+		return nil
+	}
+	switch datastoreErr.Code {
+	case datastore.ErrCodeNotFound:
+		return status.Error(codes.NotFound, "configuration persistence record not found")
+	case datastore.ErrCodeConflict:
+		return status.Error(codes.FailedPrecondition, "configuration persistence conflict")
+	case datastore.ErrCodeValidation:
+		return status.Error(codes.InvalidArgument, "configuration persistence validation failed")
+	case datastore.ErrCodeTimeout:
+		return status.Error(codes.DeadlineExceeded, "configuration persistence timed out")
+	case datastore.ErrCodeUnauthorized:
+		return status.Error(codes.PermissionDenied, "configuration persistence permission denied")
+	case datastore.ErrCodeInternal:
+		return status.Error(codes.Unavailable, "configuration persistence unavailable")
+	default:
+		return status.Error(codes.Internal, "configuration persistence error")
+	}
 }
 
 func (a *configServiceAdapter) ListHistory(ctx context.Context, req *apiv1.ListHistoryRequest) (*apiv1.ListHistoryResponse, error) {
 	entries, err := a.server.ListHistory(ctx, int(req.GetLimit()), int(req.GetOffset()))
 	if err != nil {
-		return nil, err
+		return nil, configEditStatusError(err)
 	}
 	resp := &apiv1.ListHistoryResponse{Entries: make([]*apiv1.CommitEntry, 0, len(entries))}
 	for _, entry := range entries {
@@ -96,10 +205,28 @@ func (a *configServiceAdapter) ListHistory(ctx context.Context, req *apiv1.ListH
 			Timestamp:  entry.Timestamp.Format(time.RFC3339Nano),
 			Message:    entry.Message,
 			IsRollback: entry.IsRollback,
-			ConfigText: entry.ConfigText,
 		})
 	}
 	return resp, nil
+}
+
+func (a *configServiceAdapter) GetCommit(ctx context.Context, req *apiv1.GetCommitRequest) (*apiv1.GetCommitResponse, error) {
+	entry, err := a.server.GetCommit(ctx, req.GetCommitId())
+	if err != nil {
+		return nil, configEditStatusError(err)
+	}
+	return &apiv1.GetCommitResponse{Commit: commitDetailFromInfo(entry)}, nil
+}
+
+func commitDetailFromInfo(entry CommitInfo) *apiv1.CommitDetail {
+	return &apiv1.CommitDetail{
+		CommitId:   entry.CommitID,
+		User:       entry.User,
+		Timestamp:  entry.Timestamp.Format(time.RFC3339Nano),
+		Message:    entry.Message,
+		IsRollback: entry.IsRollback,
+		ConfigText: entry.ConfigText,
+	}
 }
 
 type sessionServiceAdapter struct {
@@ -107,44 +234,112 @@ type sessionServiceAdapter struct {
 	server *Server
 }
 
+func grpcRequestUser(ctx context.Context, requested string) string {
+	if user := grpcAuthenticatedUser(ctx); user != "" {
+		return user
+	}
+	return strings.TrimSpace(requested)
+}
+
+func grpcAuthenticatedUser(ctx context.Context) string {
+	if p, ok := peer.FromContext(ctx); ok && p.AuthInfo != nil {
+		if tlsInfo, ok := p.AuthInfo.(credentials.TLSInfo); ok {
+			if user := grpcTLSUser(tlsInfo.State); user != "" {
+				return user
+			}
+		}
+	}
+	if p, ok := peer.FromContext(ctx); ok && p.Addr != nil {
+		if addr, ok := p.Addr.(interface{ peerUsername() string }); ok {
+			return addr.peerUsername()
+		}
+	}
+	return ""
+}
+
+func grpcTLSUser(state tls.ConnectionState) string {
+	identities := grpcTLSIdentities(state)
+	if len(identities) == 0 {
+		return ""
+	}
+	return identities[0]
+}
+
+func grpcTLSIdentities(state tls.ConnectionState) []string {
+	if len(state.VerifiedChains) == 0 || len(state.VerifiedChains[0]) == 0 {
+		return nil
+	}
+	cert := state.VerifiedChains[0][0]
+	identities := make([]string, 0, len(cert.URIs)+len(cert.DNSNames)+len(cert.EmailAddresses)+1)
+	if len(cert.URIs) > 0 {
+		for _, uri := range cert.URIs {
+			if uri != nil && uri.String() != "" {
+				identities = append(identities, uri.String())
+			}
+		}
+	}
+	if cert.Subject.CommonName != "" {
+		identities = append(identities, cert.Subject.CommonName)
+	}
+	identities = append(identities, cert.DNSNames...)
+	identities = append(identities, cert.EmailAddresses...)
+	return identities
+}
+
 func (a *sessionServiceAdapter) CreateSession(ctx context.Context, req *apiv1.CreateSessionRequest) (*apiv1.CreateSessionResponse, error) {
-	sessionID, err := a.server.CreateSession(ctx, req.GetUser())
+	sessionID, err := a.server.CreateSession(ctx, grpcRequestUser(ctx, req.GetUser()))
 	if err != nil {
-		return nil, err
+		return nil, sessionStatusError(err)
 	}
 	return &apiv1.CreateSessionResponse{SessionId: sessionID}, nil
 }
 
 func (a *sessionServiceAdapter) CloseSession(ctx context.Context, req *apiv1.CloseSessionRequest) (*apiv1.CloseSessionResponse, error) {
 	if err := a.server.CloseSession(ctx, req.GetSessionId()); err != nil {
-		return nil, err
+		return nil, sessionStatusError(err)
 	}
 	return &apiv1.CloseSessionResponse{}, nil
 }
 
 func (a *sessionServiceAdapter) AcquireLock(ctx context.Context, req *apiv1.AcquireLockRequest) (*apiv1.AcquireLockResponse, error) {
-	if err := a.server.AcquireLock(ctx, req.GetSessionId(), req.GetUser()); err != nil {
-		return nil, err
+	if err := a.server.AcquireLock(ctx, req.GetSessionId(), grpcRequestUser(ctx, req.GetUser())); err != nil {
+		return nil, sessionStatusError(err)
 	}
 	return &apiv1.AcquireLockResponse{}, nil
 }
 
 func (a *sessionServiceAdapter) ReleaseLock(ctx context.Context, req *apiv1.ReleaseLockRequest) (*apiv1.ReleaseLockResponse, error) {
 	if err := a.server.ReleaseLock(ctx, req.GetSessionId()); err != nil {
-		return nil, err
+		return nil, sessionStatusError(err)
 	}
 	return &apiv1.ReleaseLockResponse{}, nil
 }
 
+func sessionStatusError(err error) error {
+	switch {
+	case errors.Is(err, ErrSessionNotFound):
+		return status.Error(codes.NotFound, "configuration session not found")
+	case errors.Is(err, ErrCandidateConflict):
+		return status.Error(codes.FailedPrecondition, "configuration candidate is unavailable")
+	case errors.Is(err, context.DeadlineExceeded):
+		return status.Error(codes.DeadlineExceeded, "session operation timed out")
+	case errors.Is(err, context.Canceled):
+		return status.Error(codes.Canceled, "session operation canceled")
+	default:
+		return status.Error(codes.Internal, "internal server error")
+	}
+}
+
 type stateServiceAdapter struct {
 	apiv1.UnimplementedStateServiceServer
+	apiv1.UnimplementedDiagnosticServiceServer
 	server *Server
 }
 
 func (a *stateServiceAdapter) GetInterfaces(ctx context.Context, req *apiv1.GetInterfacesRequest) (*apiv1.GetInterfacesResponse, error) {
 	interfaces, err := a.server.GetInterfaces(ctx, req.GetNameFilter())
 	if err != nil {
-		return nil, err
+		return nil, stateStatusError(err)
 	}
 	resp := &apiv1.GetInterfacesResponse{Interfaces: make([]*apiv1.InterfaceState, 0, len(interfaces))}
 	for _, iface := range interfaces {
@@ -198,7 +393,7 @@ func txQueuesToProto(queues []InterfaceTxQueueInfo) []*apiv1.InterfaceTxQueue {
 func (a *stateServiceAdapter) GetRoutes(ctx context.Context, req *apiv1.GetRoutesRequest) (*apiv1.GetRoutesResponse, error) {
 	routes, err := a.server.GetRoutes(ctx, req.GetPrefixFilter(), req.GetProtocolFilter())
 	if err != nil {
-		return nil, err
+		return nil, stateStatusError(err)
 	}
 	resp := &apiv1.GetRoutesResponse{Routes: make([]*apiv1.RouteEntry, 0, len(routes))}
 	for _, route := range routes {
@@ -217,7 +412,7 @@ func (a *stateServiceAdapter) GetRoutes(ctx context.Context, req *apiv1.GetRoute
 func (a *stateServiceAdapter) GetBGPNeighbors(ctx context.Context, _ *apiv1.GetBGPNeighborsRequest) (*apiv1.GetBGPNeighborsResponse, error) {
 	neighbors, err := a.server.GetBGPNeighbors(ctx)
 	if err != nil {
-		return nil, err
+		return nil, stateStatusError(err)
 	}
 	resp := &apiv1.GetBGPNeighborsResponse{Neighbors: make([]*apiv1.BGPNeighborState, 0, len(neighbors))}
 	for _, neighbor := range neighbors {
@@ -236,7 +431,7 @@ func (a *stateServiceAdapter) GetBGPNeighbors(ctx context.Context, _ *apiv1.GetB
 func (a *stateServiceAdapter) GetOSPFNeighbors(ctx context.Context, req *apiv1.GetOSPFNeighborsRequest) (*apiv1.GetOSPFNeighborsResponse, error) {
 	neighbors, err := a.server.GetOSPFNeighbors(ctx, req.GetAddressFamily())
 	if err != nil {
-		return nil, err
+		return nil, stateStatusError(err)
 	}
 	resp := &apiv1.GetOSPFNeighborsResponse{Neighbors: make([]*apiv1.OSPFNeighborState, 0, len(neighbors))}
 	for _, neighbor := range neighbors {
@@ -257,7 +452,7 @@ func (a *stateServiceAdapter) GetOSPFNeighbors(ctx context.Context, req *apiv1.G
 func (a *stateServiceAdapter) GetRouteText(ctx context.Context, req *apiv1.GetRouteTextRequest) (*apiv1.GetRouteTextResponse, error) {
 	output, err := a.server.GetRouteText(ctx, req.GetProtocolFilter(), req.GetAddressFamily())
 	if err != nil {
-		return nil, err
+		return nil, stateStatusError(err)
 	}
 	return &apiv1.GetRouteTextResponse{Output: output}, nil
 }
@@ -265,7 +460,7 @@ func (a *stateServiceAdapter) GetRouteText(ctx context.Context, req *apiv1.GetRo
 func (a *stateServiceAdapter) GetBGPSummaryText(ctx context.Context, _ *apiv1.GetBGPSummaryTextRequest) (*apiv1.GetBGPSummaryTextResponse, error) {
 	output, err := a.server.GetBGPSummaryText(ctx)
 	if err != nil {
-		return nil, err
+		return nil, stateStatusError(err)
 	}
 	return &apiv1.GetBGPSummaryTextResponse{Output: output}, nil
 }
@@ -273,7 +468,7 @@ func (a *stateServiceAdapter) GetBGPSummaryText(ctx context.Context, _ *apiv1.Ge
 func (a *stateServiceAdapter) GetBGPNeighborText(ctx context.Context, req *apiv1.GetBGPNeighborTextRequest) (*apiv1.GetBGPNeighborTextResponse, error) {
 	output, err := a.server.GetBGPNeighborText(ctx, req.GetPeerAddress())
 	if err != nil {
-		return nil, err
+		return nil, stateStatusError(err)
 	}
 	return &apiv1.GetBGPNeighborTextResponse{Output: output}, nil
 }
@@ -281,7 +476,7 @@ func (a *stateServiceAdapter) GetBGPNeighborText(ctx context.Context, req *apiv1
 func (a *stateServiceAdapter) GetOSPFNeighborsText(ctx context.Context, req *apiv1.GetOSPFNeighborsTextRequest) (*apiv1.GetOSPFNeighborsTextResponse, error) {
 	output, err := a.server.GetOSPFNeighborsText(ctx, req.GetAddressFamily())
 	if err != nil {
-		return nil, err
+		return nil, stateStatusError(err)
 	}
 	return &apiv1.GetOSPFNeighborsTextResponse{Output: output}, nil
 }
@@ -289,7 +484,7 @@ func (a *stateServiceAdapter) GetOSPFNeighborsText(ctx context.Context, req *api
 func (a *stateServiceAdapter) GetVRRPText(ctx context.Context, _ *apiv1.GetVRRPTextRequest) (*apiv1.GetVRRPTextResponse, error) {
 	output, err := a.server.GetVRRPText(ctx)
 	if err != nil {
-		return nil, err
+		return nil, stateStatusError(err)
 	}
 	return &apiv1.GetVRRPTextResponse{Output: output}, nil
 }
@@ -297,7 +492,7 @@ func (a *stateServiceAdapter) GetVRRPText(ctx context.Context, _ *apiv1.GetVRRPT
 func (a *stateServiceAdapter) GetBFDText(ctx context.Context, req *apiv1.GetBFDTextRequest) (*apiv1.GetBFDTextResponse, error) {
 	output, err := a.server.GetBFDText(ctx, req.GetPeerAddress(), req.GetBrief(), req.GetCounters())
 	if err != nil {
-		return nil, err
+		return nil, stateStatusError(err)
 	}
 	return &apiv1.GetBFDTextResponse{Output: output}, nil
 }
@@ -305,7 +500,7 @@ func (a *stateServiceAdapter) GetBFDText(ctx context.Context, req *apiv1.GetBFDT
 func (a *stateServiceAdapter) GetBFDStatus(ctx context.Context, _ *apiv1.GetBFDStatusRequest) (*apiv1.GetBFDStatusResponse, error) {
 	info, err := a.server.GetBFDStatus(ctx)
 	if err != nil {
-		return nil, err
+		return nil, stateStatusError(err)
 	}
 	resp := &apiv1.GetBFDStatusResponse{
 		ConfiguredPeers:   uint32(info.ConfiguredPeers),
@@ -341,7 +536,7 @@ func (a *stateServiceAdapter) GetBFDStatus(ctx context.Context, _ *apiv1.GetBFDS
 func (a *stateServiceAdapter) GetLCPReconciliation(ctx context.Context, _ *apiv1.GetLCPReconciliationRequest) (*apiv1.GetLCPReconciliationResponse, error) {
 	info, err := a.server.GetLCPReconciliation(ctx)
 	if err != nil {
-		return nil, err
+		return nil, stateStatusError(err)
 	}
 	resp := &apiv1.GetLCPReconciliationResponse{
 		PairCount:       uint32(info.PairCount),
@@ -357,7 +552,7 @@ func (a *stateServiceAdapter) GetLCPReconciliation(ctx context.Context, _ *apiv1
 func (a *stateServiceAdapter) GetHAStatus(ctx context.Context, _ *apiv1.GetHAStatusRequest) (*apiv1.GetHAStatusResponse, error) {
 	info, err := a.server.GetHAStatus(ctx)
 	if err != nil {
-		return nil, err
+		return nil, stateStatusError(err)
 	}
 	resp := &apiv1.GetHAStatusResponse{
 		Configured:              info.Configured,
@@ -398,7 +593,7 @@ func (a *stateServiceAdapter) GetHAStatus(ctx context.Context, _ *apiv1.GetHASta
 func (a *stateServiceAdapter) GetRoutingInstances(ctx context.Context, _ *apiv1.GetRoutingInstancesRequest) (*apiv1.GetRoutingInstancesResponse, error) {
 	instances, err := a.server.GetRoutingInstances(ctx)
 	if err != nil {
-		return nil, err
+		return nil, stateStatusError(err)
 	}
 	resp := &apiv1.GetRoutingInstancesResponse{Instances: make([]*apiv1.RoutingInstanceState, 0, len(instances))}
 	for _, instance := range instances {
@@ -421,7 +616,7 @@ func (a *stateServiceAdapter) GetRoutingInstances(ctx context.Context, _ *apiv1.
 func (a *stateServiceAdapter) GetClassOfService(ctx context.Context, _ *apiv1.GetClassOfServiceRequest) (*apiv1.GetClassOfServiceResponse, error) {
 	info, err := a.server.GetClassOfService(ctx)
 	if err != nil {
-		return nil, err
+		return nil, stateStatusError(err)
 	}
 	resp := &apiv1.GetClassOfServiceResponse{
 		EnforcementStatus: info.EnforcementStatus,
@@ -470,13 +665,39 @@ func (a *stateServiceAdapter) GetClassOfService(ctx context.Context, _ *apiv1.Ge
 func (a *stateServiceAdapter) GetSystemInfo(ctx context.Context, _ *apiv1.GetSystemInfoRequest) (*apiv1.GetSystemInfoResponse, error) {
 	info, err := a.server.GetSystemInfo(ctx)
 	if err != nil {
-		return nil, err
+		return nil, stateStatusError(err)
 	}
 	return &apiv1.GetSystemInfoResponse{
 		Hostname:   info.Hostname,
 		Version:    info.Version,
 		UptimeSecs: info.UptimeSecs,
 	}, nil
+}
+
+func stateStatusError(err error) error {
+	switch {
+	case isStateInputError(err):
+		return status.Error(codes.InvalidArgument, err.Error())
+	case errors.Is(err, context.DeadlineExceeded):
+		return status.Error(codes.DeadlineExceeded, "state operation timed out")
+	case errors.Is(err, context.Canceled):
+		return status.Error(codes.Canceled, "state operation canceled")
+	default:
+		return status.Error(codes.Internal, "internal server error")
+	}
+}
+
+func isStateInputError(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := err.Error()
+	return strings.HasPrefix(msg, "invalid route prefix filter") ||
+		strings.HasPrefix(msg, "invalid route protocol") ||
+		strings.HasPrefix(msg, "invalid address family") ||
+		strings.HasPrefix(msg, "invalid BGP neighbor address") ||
+		strings.HasPrefix(msg, "invalid BFD peer address") ||
+		strings.Contains(msg, "does not support brief")
 }
 
 type telemetryServiceAdapter struct {
@@ -500,9 +721,27 @@ func (a *telemetryServiceAdapter) GetTelemetryCatalog(_ context.Context, req *ap
 
 func (a *telemetryServiceAdapter) SubscribeTelemetry(req *apiv1.SubscribeTelemetryRequest, stream apiv1.TelemetryService_SubscribeTelemetryServer) error {
 	interval := time.Duration(req.GetSampleIntervalMs()) * time.Millisecond
-	return a.server.SubscribeTelemetry(stream.Context(), req.GetPaths(), interval, req.GetOnce(), func(event TelemetryEvent) error {
+	if err := a.server.SubscribeTelemetry(stream.Context(), req.GetPaths(), interval, req.GetOnce(), func(event TelemetryEvent) error {
 		return stream.Send(telemetryEventToProto(event))
-	})
+	}); err != nil {
+		return telemetryStatusError(err)
+	}
+	return nil
+}
+
+func telemetryStatusError(err error) error {
+	switch {
+	case err == nil:
+		return nil
+	case strings.HasPrefix(err.Error(), "unsupported telemetry path "):
+		return status.Error(codes.InvalidArgument, err.Error())
+	case errors.Is(err, context.DeadlineExceeded):
+		return status.Error(codes.DeadlineExceeded, "telemetry subscription timed out")
+	case errors.Is(err, context.Canceled):
+		return status.Error(codes.Canceled, "telemetry subscription canceled")
+	default:
+		return status.Error(codes.Internal, "internal server error")
+	}
 }
 
 func telemetryCatalogToProto(catalog TelemetryCatalog) *apiv1.GetTelemetryCatalogResponse {

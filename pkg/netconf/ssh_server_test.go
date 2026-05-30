@@ -2,15 +2,23 @@ package netconf
 
 import (
 	"context"
+	"crypto/ed25519"
+	"crypto/rand"
+	"encoding/pem"
 	"encoding/xml"
+	"io"
 	"net"
+	"os"
 	"path/filepath"
 	"slices"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/akam1o/arca-router/pkg/datastore"
+	"github.com/akam1o/arca-router/pkg/logger"
+	"golang.org/x/crypto/ssh"
 )
 
 func TestSSHServerStopBeforeStartReleasesProcessLock(t *testing.T) {
@@ -84,6 +92,49 @@ func TestSSHServerStopClosesIdlePreAuthConnection(t *testing.T) {
 		}
 	case <-time.After(2 * time.Second):
 		t.Fatal("Stop() did not return with idle pre-auth connection")
+	}
+}
+
+func TestHandleConnectionSetsHandshakeDeadline(t *testing.T) {
+	server := newTestConnectionSSHServer(t, 100)
+	conn := &deadlineRecordingConn{}
+
+	server.wg.Add(1)
+	server.handleConnection(context.Background(), conn)
+
+	if len(conn.deadlines) < 2 {
+		t.Fatalf("deadlines recorded = %d, want set and clear", len(conn.deadlines))
+	}
+	if conn.deadlines[0].IsZero() {
+		t.Fatal("first deadline is zero, want handshake deadline")
+	}
+	if !conn.deadlines[len(conn.deadlines)-1].IsZero() {
+		t.Fatalf("last deadline = %s, want zero clear deadline", conn.deadlines[len(conn.deadlines)-1])
+	}
+	if conn.reads == 0 {
+		t.Fatal("connection was not read during SSH handshake")
+	}
+	if got := atomic.LoadUint64(&server.failedHandshakes); got != 1 {
+		t.Fatalf("failed handshakes = %d, want 1", got)
+	}
+}
+
+func TestHandleConnectionRejectsWhenActiveConnectionsReachLimit(t *testing.T) {
+	server := newTestConnectionSSHServer(t, 1)
+	atomic.StoreInt32(&server.activeConnections, 1)
+	conn := &deadlineRecordingConn{}
+
+	server.wg.Add(1)
+	server.handleConnection(context.Background(), conn)
+
+	if conn.reads != 0 {
+		t.Fatalf("connection reads = %d, want rejection before SSH handshake", conn.reads)
+	}
+	if got := atomic.LoadInt32(&server.activeConnections); got != 1 {
+		t.Fatalf("active connections = %d, want restored pre-existing count", got)
+	}
+	if got := atomic.LoadUint64(&server.failedHandshakes); got != 1 {
+		t.Fatalf("failed handshakes = %d, want 1", got)
 	}
 }
 
@@ -248,6 +299,154 @@ func TestNewSSHServerDefaultsPartialConfig(t *testing.T) {
 	}
 }
 
+func TestNewSSHServerRestrictsExistingHostKeyPermissions(t *testing.T) {
+	cfg, _ := testSSHServerConfig(t, "127.0.0.1:0")
+	writeTestHostKey(t, cfg.HostKeyPath, 0o644)
+
+	server, err := NewSSHServer(cfg)
+	if err != nil {
+		t.Fatalf("NewSSHServer() error = %v", err)
+	}
+	t.Cleanup(func() { _ = server.Stop() })
+
+	info, err := os.Stat(cfg.HostKeyPath)
+	if err != nil {
+		t.Fatalf("Stat(%s) error = %v", cfg.HostKeyPath, err)
+	}
+	if got := info.Mode().Perm(); got != 0o600 {
+		t.Fatalf("host key mode = %04o, want 0600", got)
+	}
+}
+
+func TestNewSSHServerRejectsSymlinkHostKeyWithoutChmodTarget(t *testing.T) {
+	cfg, _ := testSSHServerConfig(t, "127.0.0.1:0")
+	targetPath := filepath.Join(filepath.Dir(cfg.HostKeyPath), "target-key")
+
+	if err := os.WriteFile(targetPath, []byte("not-a-host-key"), 0o644); err != nil {
+		t.Fatalf("WriteFile(%s) error = %v", targetPath, err)
+	}
+	if err := os.Chmod(targetPath, 0o644); err != nil {
+		t.Fatalf("Chmod(%s) error = %v", targetPath, err)
+	}
+	if err := os.Symlink(targetPath, cfg.HostKeyPath); err != nil {
+		t.Skipf("symlink not supported: %v", err)
+	}
+
+	server, err := NewSSHServer(cfg)
+	if err == nil {
+		_ = server.Stop()
+		t.Fatal("NewSSHServer() error = nil, want symlink host key rejection")
+	}
+	if !strings.Contains(err.Error(), "symbolic link") {
+		t.Fatalf("NewSSHServer() error = %v, want symbolic link rejection", err)
+	}
+
+	info, statErr := os.Stat(targetPath)
+	if statErr != nil {
+		t.Fatalf("Stat(%s) error = %v", targetPath, statErr)
+	}
+	if got := info.Mode().Perm(); got != 0o644 {
+		t.Fatalf("target key mode = %04o, want unchanged 0644", got)
+	}
+}
+
+func TestNewSSHServerRejectsSymlinkHostKeyDirectory(t *testing.T) {
+	cfg, _ := testSSHServerConfig(t, "127.0.0.1:0")
+	dir := t.TempDir()
+	targetDir := filepath.Join(dir, "target")
+	linkDir := filepath.Join(dir, "keys")
+	cfg.HostKeyPath = filepath.Join(linkDir, "ssh_host_ed25519_key")
+
+	if err := os.Mkdir(targetDir, 0o700); err != nil {
+		t.Fatalf("Mkdir(%s) error = %v", targetDir, err)
+	}
+	if err := os.Symlink(targetDir, linkDir); err != nil {
+		t.Skipf("symlink not supported: %v", err)
+	}
+
+	server, err := NewSSHServer(cfg)
+	if err == nil {
+		_ = server.Stop()
+		t.Fatal("NewSSHServer() error = nil, want symlink host key directory rejection")
+	}
+	if !strings.Contains(err.Error(), "symbolic link") {
+		t.Fatalf("NewSSHServer() error = %v, want symbolic link rejection", err)
+	}
+	if _, statErr := os.Stat(filepath.Join(targetDir, "ssh_host_ed25519_key")); !os.IsNotExist(statErr) {
+		t.Fatalf("generated host key stat error = %v, want not exist", statErr)
+	}
+}
+
+func TestNewSSHServerRestrictsExistingHostKeyDirectoryPermissions(t *testing.T) {
+	cfg, _ := testSSHServerConfig(t, "127.0.0.1:0")
+	hostKeyDir := filepath.Dir(cfg.HostKeyPath)
+	if err := os.Chmod(hostKeyDir, 0o777); err != nil {
+		t.Fatalf("Chmod(%s) error = %v", hostKeyDir, err)
+	}
+
+	server, err := NewSSHServer(cfg)
+	if err != nil {
+		t.Fatalf("NewSSHServer() error = %v", err)
+	}
+	t.Cleanup(func() { _ = server.Stop() })
+
+	info, err := os.Stat(hostKeyDir)
+	if err != nil {
+		t.Fatalf("Stat(%s) error = %v", hostKeyDir, err)
+	}
+	if got := info.Mode().Perm(); got != 0o750 {
+		t.Fatalf("host key directory mode = %04o, want 0750", got)
+	}
+}
+
+func TestWriteHostKeyFileRejectsExistingSymlink(t *testing.T) {
+	dir := t.TempDir()
+	targetPath := filepath.Join(dir, "target-key")
+	linkPath := filepath.Join(dir, "ssh_host_ed25519_key")
+	original := []byte("existing-key-data")
+
+	if err := os.WriteFile(targetPath, original, 0o600); err != nil {
+		t.Fatalf("WriteFile(%s) error = %v", targetPath, err)
+	}
+	if err := os.Symlink(targetPath, linkPath); err != nil {
+		t.Skipf("symlink not supported: %v", err)
+	}
+
+	err := writeHostKeyFile(linkPath, []byte("replacement-key-data"))
+	if err == nil {
+		t.Fatal("writeHostKeyFile() error = nil, want existing symlink rejection")
+	}
+
+	got, readErr := os.ReadFile(targetPath)
+	if readErr != nil {
+		t.Fatalf("ReadFile(%s) error = %v", targetPath, readErr)
+	}
+	if string(got) != string(original) {
+		t.Fatalf("target key content = %q, want unchanged %q", got, original)
+	}
+	if _, statErr := os.Lstat(linkPath); statErr != nil {
+		t.Fatalf("Lstat(%s) error = %v, want symlink preserved", linkPath, statErr)
+	}
+}
+
+func TestLoadOrGenerateHostKeyRejectsHardLinkedExistingKey(t *testing.T) {
+	dir := t.TempDir()
+	targetPath := filepath.Join(dir, "target-key")
+	linkPath := filepath.Join(dir, "hard-linked-key")
+	writeTestHostKey(t, targetPath, 0o600)
+	if err := os.Link(targetPath, linkPath); err != nil {
+		t.Skipf("hard links not supported: %v", err)
+	}
+
+	_, err := loadOrGenerateHostKey(linkPath, logger.New("test", logger.DefaultConfig()))
+	if err == nil {
+		t.Fatal("loadOrGenerateHostKey() error = nil, want hard link rejection")
+	}
+	if !strings.Contains(err.Error(), "multiple hard links") {
+		t.Fatalf("loadOrGenerateHostKey() error = %v, want hard link rejection", err)
+	}
+}
+
 func TestNewSSHServerCanDisableStandardXPath(t *testing.T) {
 	cfg, _ := testSSHServerConfig(t, "127.0.0.1:0")
 	cfg.DisableStandardXPath = true
@@ -308,6 +507,77 @@ func TestSSHServerHookSettersNilReceiver(t *testing.T) {
 	server.SetOperationalStateProvider(nil)
 }
 
+func newTestConnectionSSHServer(t *testing.T, maxSessions int) *SSHServer {
+	t.Helper()
+
+	cfg := DefaultSSHConfig()
+	cfg.MaxSessions = maxSessions
+	log := logger.New("test", logger.DefaultConfig())
+	_, privateKey, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatalf("GenerateKey() error = %v", err)
+	}
+	signer, err := ssh.NewSignerFromKey(privateKey)
+	if err != nil {
+		t.Fatalf("NewSignerFromKey() error = %v", err)
+	}
+	sshConfig := &ssh.ServerConfig{NoClientAuth: true}
+	sshConfig.AddHostKey(signer)
+	return &SSHServer{
+		config:      cfg,
+		sessionMgr:  NewSessionManager(cfg, nil, log),
+		sshConfig:   sshConfig,
+		activeConns: make(map[net.Conn]struct{}),
+		log:         log,
+	}
+}
+
+type deadlineRecordingConn struct {
+	reads     int
+	closed    bool
+	deadlines []time.Time
+}
+
+func (c *deadlineRecordingConn) Read([]byte) (int, error) {
+	c.reads++
+	return 0, io.EOF
+}
+
+func (c *deadlineRecordingConn) Write(b []byte) (int, error) {
+	return len(b), nil
+}
+
+func (c *deadlineRecordingConn) Close() error {
+	c.closed = true
+	return nil
+}
+
+func (c *deadlineRecordingConn) LocalAddr() net.Addr {
+	return testConnAddr("local")
+}
+
+func (c *deadlineRecordingConn) RemoteAddr() net.Addr {
+	return testConnAddr("remote")
+}
+
+func (c *deadlineRecordingConn) SetDeadline(t time.Time) error {
+	c.deadlines = append(c.deadlines, t)
+	return nil
+}
+
+func (c *deadlineRecordingConn) SetReadDeadline(time.Time) error {
+	return nil
+}
+
+func (c *deadlineRecordingConn) SetWriteDeadline(time.Time) error {
+	return nil
+}
+
+type testConnAddr string
+
+func (a testConnAddr) Network() string { return "tcp" }
+func (a testConnAddr) String() string  { return string(a) }
+
 func testSSHServerConfig(t *testing.T, listenAddr string) (*SSHConfig, string) {
 	t.Helper()
 
@@ -319,6 +589,25 @@ func testSSHServerConfig(t *testing.T, listenAddr string) (*SSHConfig, string) {
 	cfg.DatastorePath = filepath.Join(dir, "config.db")
 
 	return cfg, cfg.DatastorePath
+}
+
+func writeTestHostKey(t *testing.T, path string, mode os.FileMode) {
+	t.Helper()
+
+	_, privateKey, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatalf("GenerateKey() error = %v", err)
+	}
+	pemBlock, err := ssh.MarshalPrivateKey(privateKey, "")
+	if err != nil {
+		t.Fatalf("MarshalPrivateKey() error = %v", err)
+	}
+	if err := os.WriteFile(path, pem.EncodeToMemory(pemBlock), mode); err != nil {
+		t.Fatalf("WriteFile(%s) error = %v", path, err)
+	}
+	if err := os.Chmod(path, mode); err != nil {
+		t.Fatalf("Chmod(%s) error = %v", path, err)
+	}
 }
 
 func testSSHServerListenAddr(t *testing.T, server *SSHServer) string {

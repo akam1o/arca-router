@@ -18,7 +18,9 @@ func TestAdvancedConfigConversionAndClone(t *testing.T) {
 		"set system services snmp enabled true",
 		"set system services snmp listen-address 127.0.0.1",
 		"set system services snmp port 1161",
-		"set system services snmp community public",
+		"set system services snmp community monitoring",
+		"set security netconf ssh enabled true",
+		"set security netconf ssh listen-address 127.0.0.1",
 		"set security netconf ssh port 1830",
 		"set chassis cluster node node0 address 192.0.2.10",
 		"set interfaces ge-0/0/0 unit 0 family inet address 192.0.2.1/24",
@@ -86,10 +88,36 @@ func TestAdvancedConfigConversionAndClone(t *testing.T) {
 	if got := roundTrip.System.Services.Prometheus.Port; got != 9090 {
 		t.Fatalf("prometheus port = %d", got)
 	}
-	if got := roundTrip.System.Services.SNMP.Community; got != "public" {
+	if got := roundTrip.System.Services.SNMP.Community; got != "monitoring" {
 		t.Fatalf("snmp community = %q", got)
+	}
+	if !roundTrip.Security.NETCONF.SSH.Enabled {
+		t.Fatal("netconf ssh enabled = false, want true")
+	}
+	if !roundTrip.Security.NETCONF.SSH.EnabledSet {
+		t.Fatal("netconf ssh enabled set = false, want true")
+	}
+	if got := roundTrip.Security.NETCONF.SSH.ListenAddress; got != "127.0.0.1" {
+		t.Fatalf("netconf ssh listen-address = %q, want 127.0.0.1", got)
 	}
 	if got := roundTrip.Security.NETCONF.SSH.Port; got != 1830 {
 		t.Fatalf("netconf ssh port = %d", got)
+	}
+}
+
+func TestSecurityUserWithoutRoleConvertsAndValidates(t *testing.T) {
+	text := `set security users user monitor ssh-key "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOMW3vXcGYNmJnPqF8pGdN6TuQvJJJqKJJJ5JJJJ5JJJ monitor@example.com"`
+	legacy, err := config.NewParser(strings.NewReader(text)).Parse()
+	if err != nil {
+		t.Fatalf("Parse() error = %v", err)
+	}
+
+	cfg := FromLegacyConfig(legacy)
+	if err := cfg.Validate(); err != nil {
+		t.Fatalf("Validate() error = %v", err)
+	}
+
+	if got := cfg.Security.Users["monitor"].Role; got != "" {
+		t.Fatalf("role = %q, want unset", got)
 	}
 }

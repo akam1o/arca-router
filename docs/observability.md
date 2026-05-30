@@ -179,11 +179,11 @@ An HTTP-only collector example is included in `examples/nms`. It decodes catalog
 
 HA convergence is evaluated when chassis clustering is enabled and at least one VRRP group is configured. The status is converged only when there are at least two cluster nodes, etcd cluster sync is configured and aligned with the daemon datastore, the etcd config synchronizer is healthy, FRR VRRP operational state reports every configured group as active, and VPP LCP reconciliation has run without errors or inconsistencies.
 
-When the running configuration contains password-backed `security users`, the Web UI requires HTTP Basic authentication. Automation can also use `arca-routerd --web-api-token-file=<path>` with a `0600` file containing one `name:role:token` entry per line. Web API tokens are accepted as `Authorization: Bearer <token>` or `X-API-Key: <token>`. The `read-only`, `operator`, and `admin` roles can access the read-only dashboard and API endpoints.
+When the running configuration contains password-backed `security users`, the Web UI requires HTTP Basic authentication. Automation can also use `arca-routerd --web-api-token-file=<path>` with a `0600` file containing one `name:role:token` or `name:role:sha256:<hex>[:not-after=<RFC3339>]` entry per line. Plain token values must be at least 32 characters, must not contain whitespace, and should be generated from random bytes, for example `openssl rand -base64 32`. Prefer storing `sha256:<hex>` token hashes in the file, with `not-after` for bounded rotation windows; clients still present the original token as `Authorization: Bearer <token>` or `X-API-Key: <token>`. During request authentication the daemon checks token file metadata and reloads the file when it changes, so atomic file replacement can rotate or revoke tokens without restarting the daemon. The `read-only`, `operator`, and `admin` roles can access the read-only dashboard and API endpoints.
 
 ```bash
 curl -u monitor:ReadOnly789 http://127.0.0.1:8080/api/status
-curl -H 'Authorization: Bearer nms-token' http://127.0.0.1:8080/api/status
+curl -H "Authorization: Bearer ${NMS_TOKEN}" http://127.0.0.1:8080/api/status
 curl -u monitor:ReadOnly789 http://127.0.0.1:8080/api/nms/v1/status
 curl -u monitor:ReadOnly789 http://127.0.0.1:8080/api/nms/v1/telemetry/paths
 curl -u monitor:ReadOnly789 'http://127.0.0.1:8080/api/nms/v1/telemetry/schemas?path=/evpn'
@@ -205,7 +205,7 @@ curl -u operator:OpPass456 \
   -d '{"config_text":"set system host-name edge02","message":"web update"}' \
   http://127.0.0.1:8080/api/config/commit
 
-curl -H 'Authorization: Bearer operator-token' \
+curl -H "Authorization: Bearer ${OPERATOR_TOKEN}" \
   -H 'Content-Type: application/json' \
   -d '{"config_text":"set system host-name edge02","message":"automation update"}' \
   http://127.0.0.1:8080/api/config/commit
@@ -216,7 +216,7 @@ curl -H 'Authorization: Bearer operator-token' \
 Start the daemon with an SNMP listen address:
 
 ```bash
-arca-routerd --snmp-listen=:1161 --snmp-community=public
+arca-routerd --snmp-listen=:1161 --snmp-community=<read-only-community>
 ```
 
 SNMP can also be enabled from running configuration:
@@ -225,7 +225,7 @@ SNMP can also be enabled from running configuration:
 set system services snmp enabled true
 set system services snmp listen-address 127.0.0.1
 set system services snmp port 1161
-set system services snmp community public
+set system services snmp community <read-only-community>
 ```
 
 For the standard port 161, the packaged systemd unit already grants `CAP_NET_BIND_SERVICE`:
@@ -234,7 +234,7 @@ For the standard port 161, the packaged systemd unit already grants `CAP_NET_BIN
 arca-routerd --snmp-listen=:161 --snmp-community=<read-only-community>
 ```
 
-SNMP support is read-only SNMPv2c and is intended for monitoring only. Do not expose it on untrusted networks.
+SNMP support is read-only SNMPv2c and is intended for monitoring only. The well-known default communities `public` and `private` are rejected. Do not expose SNMP on untrusted networks.
 
 Standard MIB-II OIDs:
 
@@ -302,6 +302,6 @@ arca-router custom OIDs currently use the provisional experimental base `1.3.6.1
 Example:
 
 ```bash
-snmpget -v 2c -c public 127.0.0.1:1161 1.3.6.1.3.9950.1.3.0
-snmpwalk -v 2c -c public 127.0.0.1:1161 1.3.6.1.3.9950.1
+snmpget -v 2c -c <read-only-community> 127.0.0.1:1161 1.3.6.1.3.9950.1.3.0
+snmpwalk -v 2c -c <read-only-community> 127.0.0.1:1161 1.3.6.1.3.9950.1
 ```

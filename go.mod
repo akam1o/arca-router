@@ -1,6 +1,6 @@
 module github.com/akam1o/arca-router
 
-go 1.25.5
+go 1.26.3
 
 require (
 	github.com/antchfx/xmlquery v1.5.1
@@ -13,11 +13,12 @@ require (
 	github.com/openconfig/goyang v1.6.3
 	github.com/sergi/go-diff v1.4.0
 	github.com/slayercat/GoSNMPServer v0.5.2
+	go.etcd.io/etcd/api/v3 v3.6.7
 	go.etcd.io/etcd/client/v3 v3.6.7
 	go.fd.io/govpp v0.13.0
-	golang.org/x/crypto v0.46.0
-	google.golang.org/grpc v1.71.1
-	google.golang.org/protobuf v1.36.5
+	golang.org/x/crypto v0.52.0
+	google.golang.org/grpc v1.81.1
+	google.golang.org/protobuf v1.36.11
 	gopkg.in/yaml.v3 v3.0.1
 )
 
@@ -42,13 +43,12 @@ require (
 	github.com/tklauser/go-sysconf v0.3.12 // indirect
 	github.com/tklauser/numcpus v0.6.1 // indirect
 	github.com/yusufpapurcu/wmi v1.2.3 // indirect
-	go.etcd.io/etcd/api/v3 v3.6.7 // indirect
 	go.etcd.io/etcd/client/pkg/v3 v3.6.7 // indirect
 	go.uber.org/multierr v1.11.0 // indirect
 	go.uber.org/zap v1.27.0 // indirect
-	golang.org/x/net v0.47.0 // indirect
-	golang.org/x/sys v0.39.0 // indirect
-	golang.org/x/text v0.32.0 // indirect
-	google.golang.org/genproto/googleapis/api v0.0.0-20250303144028-a0af3efb3deb // indirect
-	google.golang.org/genproto/googleapis/rpc v0.0.0-20250303144028-a0af3efb3deb // indirect
+	golang.org/x/net v0.55.0 // indirect
+	golang.org/x/sys v0.45.0 // indirect
+	golang.org/x/text v0.37.0 // indirect
+	google.golang.org/genproto/googleapis/api v0.0.0-20260226221140-a57be14db171 // indirect
+	google.golang.org/genproto/googleapis/rpc v0.0.0-20260226221140-a57be14db171 // indirect
 )

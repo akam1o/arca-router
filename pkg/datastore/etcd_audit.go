@@ -47,11 +47,11 @@ func (ds *etcdDatastore) LogAuditEvent(ctx context.Context, event *AuditEvent) e
 
 // ListAuditEvents returns audit events in newest-first order.
 func (ds *etcdDatastore) ListAuditEvents(ctx context.Context, opts *AuditOptions) ([]*AuditEvent, error) {
-	if opts == nil {
-		opts = &AuditOptions{}
-	}
 	ctx, cancel := ds.withTimeout(ctx)
 	defer cancel()
+
+	normalizedOpts := normalizeAuditOptions(opts)
+	opts = &normalizedOpts
 
 	prefix := ds.key("audit", "")
 	resp, err := ds.client.Get(ctx, prefix, clientv3.WithPrefix())
@@ -88,9 +88,9 @@ func (ds *etcdDatastore) ListAuditEvents(ctx context.Context, opts *AuditOptions
 	if start >= len(events) {
 		return nil, nil
 	}
-	end := len(events)
-	if opts.Limit > 0 && start+opts.Limit < end {
-		end = start + opts.Limit
+	end := start + opts.Limit
+	if end > len(events) {
+		end = len(events)
 	}
 	return events[start:end], nil
 }

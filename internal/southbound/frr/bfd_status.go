@@ -9,7 +9,10 @@ import (
 	pkgfrr "github.com/akam1o/arca-router/pkg/frr"
 )
 
-const defaultBFDStatusInterval = 5 * time.Second
+const (
+	defaultBFDStatusInterval     = 5 * time.Second
+	frrBFDStatusReadErrorMessage = "read FRR BFD status failed"
+)
 
 // BFDOperationalStatus is the latest FRR BFD runtime state observed by arca-routerd.
 type BFDOperationalStatus struct {
@@ -88,8 +91,8 @@ func (p *FRRPlugin) checkBFDOperationalStatus(ctx context.Context, cfg *pkgfrr.C
 	}
 	observed, err := p.bfdStatusReader.ReadBFDStatus(ctx)
 	if err != nil {
-		status.LastError = err.Error()
-		status.Issues = []string{"read FRR BFD status failed"}
+		status.LastError = frrBFDStatusReadErrorMessage
+		status.Issues = []string{frrBFDStatusReadErrorMessage}
 		return status
 	}
 	fillBFDConvergenceStatus(&status, expected, observed)

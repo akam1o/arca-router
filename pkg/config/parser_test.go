@@ -541,6 +541,14 @@ set routing-options static route 0.0.0.0/0 next-hop 10.0.0.2`,
 			name:  "OSPF without area",
 			input: `set protocols ospf interface ge-0/0/0`,
 		},
+		{
+			name:  "unknown OSPF interface option",
+			input: `set protocols ospf area 0.0.0.0 interface ge-0/0/0 bogus`,
+		},
+		{
+			name:  "unknown OSPF3 interface option",
+			input: `set protocols ospf3 area 0.0.0.0 interface ge-0/0/0 bogus`,
+		},
 	}
 
 	for _, tt := range tests {

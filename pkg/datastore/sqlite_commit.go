@@ -13,18 +13,16 @@ import (
 // This operation is atomic within the database, but VPP/FRR application
 // happens outside the transaction (see docs/datastore-design.md for details).
 func (ds *sqliteDatastore) Commit(ctx context.Context, req *CommitRequest) (string, error) {
+	if err := validateCommitRequest(req); err != nil {
+		return "", err
+	}
+
 	// Generate commit ID
 	commitID := uuid.New().String()
 	now := time.Now()
 
-	// Load candidate config
-	candidate, err := ds.GetCandidate(ctx, req.SessionID)
-	if err != nil {
-		return "", err // Already wrapped by GetCandidate
-	}
-
 	// Execute commit transaction
-	err = ds.withTx(ctx, false, func(tx *sql.Tx) error {
+	err := ds.withTx(ctx, false, func(tx *sql.Tx) error {
 		// 0. Verify the session holds a valid (non-expired) candidate lock (enforces exclusive access)
 		var lockSessionID string
 		var expiresAt sqliteUnixTime
@@ -50,6 +48,20 @@ func (ds *sqliteDatastore) Commit(ctx context.Context, req *CommitRequest) (stri
 			return NewError(ErrCodeConflict,
 				fmt.Sprintf("cannot commit: config lock is held by another session (%s)", lockSessionID), nil)
 		}
+
+		var candidate CandidateConfig
+		err = tx.QueryRowContext(ctx, `
+				SELECT config_text, created_at, updated_at
+				FROM candidate_configs
+				WHERE session_id = ?
+			`, req.SessionID).Scan(&candidate.ConfigText, &candidate.CreatedAt, &candidate.UpdatedAt)
+		if err == sql.ErrNoRows {
+			return NewError(ErrCodeNotFound, "no candidate configuration found for session", nil)
+		}
+		if err != nil {
+			return NewError(ErrCodeInternal, "failed to get candidate config", err)
+		}
+		candidate.SessionID = req.SessionID
 
 		// 1. Update all running_config rows to is_current = 0
 		_, err = tx.ExecContext(ctx, `
@@ -96,9 +108,9 @@ func (ds *sqliteDatastore) Commit(ctx context.Context, req *CommitRequest) (stri
 
 		// 6. Log audit event
 		_, err = tx.ExecContext(ctx, `
-			INSERT INTO audit_log (user, session_id, source_ip, action, result, details)
-			VALUES (?, ?, ?, 'commit', 'success', ?)
-		`, req.User, req.SessionID, req.SourceIP, fmt.Sprintf("commit_id: %s", commitID))
+			INSERT INTO audit_log (user, session_id, source_ip, correlation_id, action, result, details)
+			VALUES (?, ?, ?, ?, 'commit', 'success', ?)
+		`, req.User, req.SessionID, req.SourceIP, req.CorrelationID, fmt.Sprintf("commit_id: %s", commitID))
 		if err != nil {
 			return NewError(ErrCodeInternal, "failed to log audit event", err)
 		}
@@ -115,6 +127,10 @@ func (ds *sqliteDatastore) Commit(ctx context.Context, req *CommitRequest) (stri
 
 // Rollback rolls back to a previous commit.
 func (ds *sqliteDatastore) Rollback(ctx context.Context, req *RollbackRequest) (string, error) {
+	if err := validateRollbackRequest(req); err != nil {
+		return "", err
+	}
+
 	// Generate new commit ID for the rollback commit
 	newCommitID := uuid.New().String()
 	now := time.Now()
@@ -196,9 +212,9 @@ func (ds *sqliteDatastore) Rollback(ctx context.Context, req *RollbackRequest) (
 
 		// 5. Log audit event
 		_, err = tx.ExecContext(ctx, `
-			INSERT INTO audit_log (user, session_id, source_ip, action, result, details)
-			VALUES (?, ?, ?, 'rollback', 'success', ?)
-		`, req.User, req.SessionID, req.SourceIP, fmt.Sprintf("new_commit_id: %s, target_commit_id: %s", newCommitID, req.CommitID))
+			INSERT INTO audit_log (user, session_id, source_ip, correlation_id, action, result, details)
+			VALUES (?, ?, ?, ?, 'rollback', 'success', ?)
+		`, req.User, req.SessionID, req.SourceIP, req.CorrelationID, fmt.Sprintf("new_commit_id: %s, target_commit_id: %s", newCommitID, req.CommitID))
 		if err != nil {
 			return NewError(ErrCodeInternal, "failed to log audit event", err)
 		}
@@ -213,12 +229,20 @@ func (ds *sqliteDatastore) Rollback(ctx context.Context, req *RollbackRequest) (
 	return newCommitID, nil
 }
 
+// CountCommitHistory returns the number of commit history entries.
+func (ds *sqliteDatastore) CountCommitHistory(ctx context.Context) (uint64, error) {
+	var count uint64
+	err := ds.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM commit_history`).Scan(&count)
+	if err != nil {
+		return 0, NewError(ErrCodeInternal, "failed to count commit history", err)
+	}
+	return count, nil
+}
+
 // ListCommitHistory retrieves commit history with optional filtering.
 func (ds *sqliteDatastore) ListCommitHistory(ctx context.Context, opts *HistoryOptions) ([]*CommitHistoryEntry, error) {
-	// Handle nil opts (use defaults)
-	if opts == nil {
-		opts = &HistoryOptions{}
-	}
+	normalizedOpts := normalizeHistoryOptions(opts)
+	opts = &normalizedOpts
 
 	// Build query with filters
 	query := `
@@ -251,12 +275,8 @@ func (ds *sqliteDatastore) ListCommitHistory(ctx context.Context, opts *HistoryO
 	query += " ORDER BY timestamp DESC"
 
 	// Apply limit and offset
-	if opts.Limit > 0 {
-		query += " LIMIT ?"
-		args = append(args, opts.Limit)
-	} else if opts.Offset > 0 {
-		query += " LIMIT -1"
-	}
+	query += " LIMIT ?"
+	args = append(args, opts.Limit)
 
 	if opts.Offset > 0 {
 		query += " OFFSET ?"

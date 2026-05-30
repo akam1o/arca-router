@@ -8,7 +8,9 @@ import (
 	"encoding/binary"
 	"encoding/pem"
 	"encoding/xml"
+	"errors"
 	"fmt"
+	"io"
 	"net"
 	"os"
 	"path/filepath"
@@ -23,6 +25,8 @@ import (
 	"github.com/akam1o/arca-router/pkg/datastore"
 	"github.com/akam1o/arca-router/pkg/logger"
 )
+
+const sshHandshakeTimeout = 30 * time.Second
 
 // SSHServer manages SSH connections for NETCONF
 // Note: This server is not designed to be restarted after Stop() is called.
@@ -59,20 +63,20 @@ func NewSSHServer(config *SSHConfig) (*SSHServer, error) {
 
 	log := logger.New("netconf-ssh", logger.DefaultConfig())
 
+	if err := ensureHostKeyDirectoryPermissions(config.HostKeyPath); err != nil {
+		return nil, fmt.Errorf("secure host key directory: %w", err)
+	}
+	if err := ensureHostKeyFilePermissions(config.HostKeyPath); err != nil {
+		return nil, fmt.Errorf("secure host key permissions: %w", err)
+	}
+
 	// Load or generate host key
 	hostKey, err := loadOrGenerateHostKey(config.HostKeyPath, log)
 	if err != nil {
 		return nil, fmt.Errorf("failed to load host key: %w", err)
 	}
-
-	// Validate host key permissions for security
-	// This ensures the key file has 0600 permissions (owner read/write only)
-	if err := auth.ValidateKeyFilePermissions(config.HostKeyPath, 0, 0); err != nil {
-		log.Warn("Host key has insecure permissions - startup allowed but should be fixed",
-			"path", config.HostKeyPath,
-			"error", err)
-		// Note: We warn but don't fail startup to avoid breaking existing deployments
-		// In production, consider making this a hard failure
+	if err := ensureHostKeyFilePermissions(config.HostKeyPath); err != nil {
+		return nil, fmt.Errorf("secure host key permissions: %w", err)
 	}
 
 	// Create user database
@@ -159,6 +163,50 @@ func NewSSHServer(config *SSHConfig) (*SSHServer, error) {
 	srv.sshConfig = sshConfig
 
 	return srv, nil
+}
+
+func ensureHostKeyFilePermissions(path string) error {
+	if err := auth.ValidateKeyFilePermissions(path, 0, 0); err == nil {
+		return nil
+	} else if errors.Is(err, os.ErrNotExist) {
+		return nil
+	} else {
+		var permErr *auth.KeyPermissionError
+		if !errors.As(err, &permErr) {
+			return err
+		}
+	}
+
+	if err := os.Chmod(path, auth.ExpectedKeyFilePerms); err != nil {
+		return fmt.Errorf("restrict %s to %04o: %w", path, auth.ExpectedKeyFilePerms, err)
+	}
+	if err := auth.ValidateKeyFilePermissions(path, 0, 0); err != nil {
+		return err
+	}
+	return nil
+}
+
+func ensureHostKeyDirectoryPermissions(path string) error {
+	dir := filepath.Dir(path)
+	if err := os.MkdirAll(dir, auth.ExpectedKeyDirPerms); err != nil {
+		return fmt.Errorf("create %s: %w", dir, err)
+	}
+	if err := auth.ValidateKeyDirectoryPermissions(dir, 0, 0); err == nil {
+		return nil
+	} else {
+		var permErr *auth.KeyPermissionError
+		if !errors.As(err, &permErr) {
+			return err
+		}
+	}
+
+	if err := os.Chmod(dir, auth.ExpectedKeyDirPerms); err != nil {
+		return fmt.Errorf("restrict %s to %04o: %w", dir, auth.ExpectedKeyDirPerms, err)
+	}
+	if err := auth.ValidateKeyDirectoryPermissions(dir, 0, 0); err != nil {
+		return err
+	}
+	return nil
 }
 
 func netconfDatastoreConfig(config *SSHConfig) *datastore.Config {
@@ -422,17 +470,30 @@ func (s *SSHServer) handleConnection(ctx context.Context, conn net.Conn) {
 
 	// Update metrics
 	atomic.AddUint64(&s.totalConnections, 1)
-	atomic.AddInt32(&s.activeConnections, 1)
+	activeConnections := atomic.AddInt32(&s.activeConnections, 1)
 	defer atomic.AddInt32(&s.activeConnections, -1)
+
+	if int(activeConnections) > s.config.MaxSessions {
+		atomic.AddUint64(&s.failedHandshakes, 1)
+		s.log.Warn("Max active connections reached, rejecting connection", "remote", conn.RemoteAddr())
+		return
+	}
 
 	// Check max sessions
 	if s.sessionMgr.Count() >= s.config.MaxSessions {
+		atomic.AddUint64(&s.failedHandshakes, 1)
 		s.log.Warn("Max sessions reached, rejecting connection", "remote", conn.RemoteAddr())
 		return
 	}
 
 	// Perform SSH handshake
+	if err := conn.SetDeadline(time.Now().Add(sshHandshakeTimeout)); err != nil {
+		s.log.Warn("Failed to set SSH handshake deadline", "remote", conn.RemoteAddr(), "error", err)
+	}
 	sshConn, chans, reqs, err := ssh.NewServerConn(conn, s.sshConfig)
+	if deadlineErr := conn.SetDeadline(time.Time{}); deadlineErr != nil {
+		s.log.Warn("Failed to clear SSH handshake deadline", "remote", conn.RemoteAddr(), "error", deadlineErr)
+	}
 	if err != nil {
 		atomic.AddUint64(&s.failedHandshakes, 1)
 		s.log.Error("SSH handshake failed", "remote", conn.RemoteAddr(), "error", err)
@@ -655,8 +716,12 @@ func extractIP(addr net.Addr) string {
 
 // loadOrGenerateHostKey loads or generates an ED25519 host key
 func loadOrGenerateHostKey(path string, log *logger.Logger) (ssh.Signer, error) {
+	if err := ensureHostKeyDirectoryPermissions(path); err != nil {
+		return nil, err
+	}
+
 	// Try to load existing key
-	data, err := os.ReadFile(path)
+	data, err := auth.ReadSecretFile(path)
 	if err == nil {
 		// Parse existing key
 		signer, err := ssh.ParsePrivateKey(data)
@@ -665,6 +730,9 @@ func loadOrGenerateHostKey(path string, log *logger.Logger) (ssh.Signer, error) 
 		}
 		log.Info("Loaded existing host key", "path", path)
 		return signer, nil
+	}
+	if !errors.Is(err, os.ErrNotExist) {
+		return nil, fmt.Errorf("failed to read host key: %w", err)
 	}
 
 	// Generate new key
@@ -687,19 +755,41 @@ func loadOrGenerateHostKey(path string, log *logger.Logger) (ssh.Signer, error) 
 		return nil, fmt.Errorf("failed to marshal private key: %w", err)
 	}
 
-	// Create directory if needed
-	dir := filepath.Dir(path)
-	if err := os.MkdirAll(dir, 0750); err != nil {
-		return nil, fmt.Errorf("failed to create directory: %w", err)
-	}
-
-	// Write key file with restricted permissions
-	if err := os.WriteFile(path, pem.EncodeToMemory(pemBytes), 0600); err != nil {
+	// Write key file with restricted permissions.
+	if err := writeHostKeyFile(path, pem.EncodeToMemory(pemBytes)); err != nil {
 		return nil, fmt.Errorf("failed to write host key: %w", err)
 	}
 
 	log.Info("Generated and saved new host key", "path", path)
 	return signer, nil
+}
+
+func writeHostKeyFile(path string, data []byte) error {
+	file, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, auth.ExpectedKeyFilePerms)
+	if err != nil {
+		return err
+	}
+	removeOnError := true
+	defer func() {
+		if removeOnError {
+			_ = os.Remove(path)
+		}
+	}()
+
+	n, err := file.Write(data)
+	if err != nil {
+		_ = file.Close()
+		return err
+	}
+	if n != len(data) {
+		_ = file.Close()
+		return io.ErrShortWrite
+	}
+	if err := file.Close(); err != nil {
+		return err
+	}
+	removeOnError = false
+	return nil
 }
 
 // ServerMetrics contains server health and performance metrics

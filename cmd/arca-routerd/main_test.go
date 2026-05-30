@@ -6,11 +6,14 @@ import (
 	"crypto/rsa"
 	"crypto/tls"
 	"crypto/x509"
+	"crypto/x509/pkix"
 	"encoding/pem"
 	"errors"
+	"flag"
 	"log/slog"
 	"math/big"
 	"net"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -23,6 +26,7 @@ import (
 	"github.com/akam1o/arca-router/pkg/datastore"
 	"github.com/akam1o/arca-router/pkg/logger"
 	"github.com/akam1o/arca-router/pkg/netconf"
+	pkgvpp "github.com/akam1o/arca-router/pkg/vpp"
 )
 
 type initialConfigStore struct {
@@ -94,6 +98,134 @@ func testDaemonLogger() *logger.Logger {
 	return logger.New("test", &logger.Config{Level: slog.LevelError})
 }
 
+type lifecycleTestPlugin struct {
+	name     string
+	closeLog *[]string
+}
+
+func (p lifecycleTestPlugin) Name() string {
+	return p.name
+}
+
+func (p lifecycleTestPlugin) Init(ctx context.Context) error {
+	return nil
+}
+
+func (p lifecycleTestPlugin) ValidateChanges(ctx context.Context, diff *engine.ConfigDiff) error {
+	return nil
+}
+
+func (p lifecycleTestPlugin) ApplyChanges(ctx context.Context, diff *engine.ConfigDiff) error {
+	return nil
+}
+
+func (p lifecycleTestPlugin) RollbackChanges(ctx context.Context, diff *engine.ConfigDiff) error {
+	return nil
+}
+
+func (p lifecycleTestPlugin) Close() error {
+	*p.closeLog = append(*p.closeLog, p.name)
+	return nil
+}
+
+func (p lifecycleTestPlugin) HealthCheck(ctx context.Context) error {
+	return nil
+}
+
+type initialApplyRecorderPlugin struct {
+	applyCount int
+	lastDiff   *engine.ConfigDiff
+}
+
+func (p *initialApplyRecorderPlugin) Name() string {
+	return "initial-recorder"
+}
+
+func (p *initialApplyRecorderPlugin) Init(ctx context.Context) error {
+	return nil
+}
+
+func (p *initialApplyRecorderPlugin) ValidateChanges(ctx context.Context, diff *engine.ConfigDiff) error {
+	return nil
+}
+
+func (p *initialApplyRecorderPlugin) ApplyChanges(ctx context.Context, diff *engine.ConfigDiff) error {
+	p.applyCount++
+	p.lastDiff = diff.Clone()
+	return nil
+}
+
+func (p *initialApplyRecorderPlugin) RollbackChanges(ctx context.Context, diff *engine.ConfigDiff) error {
+	return nil
+}
+
+func (p *initialApplyRecorderPlugin) Close() error {
+	return nil
+}
+
+func (p *initialApplyRecorderPlugin) HealthCheck(ctx context.Context) error {
+	return nil
+}
+
+func TestDaemonRuntimeCloseClosesPluginsInReverseInitOrder(t *testing.T) {
+	var closeLog []string
+	runtime := &daemonRuntime{
+		plugins: []engine.Plugin{
+			lifecycleTestPlugin{name: "first", closeLog: &closeLog},
+			lifecycleTestPlugin{name: "second", closeLog: &closeLog},
+		},
+	}
+
+	runtime.Close(testDaemonLogger())
+
+	if got := strings.Join(closeLog, ","); got != "second,first" {
+		t.Fatalf("close order = %q, want second,first", got)
+	}
+}
+
+func TestDaemonManagementPlaneWaitReturnsOnContextCancel(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	if err := (&daemonManagementPlane{}).Wait(ctx, testDaemonLogger()); err != nil {
+		t.Fatalf("Wait() error = %v, want nil", err)
+	}
+}
+
+func TestDaemonManagementPlaneWaitPropagatesEndpointError(t *testing.T) {
+	metricsErr := make(chan error, 1)
+	metricsErr <- errors.New("listen failed")
+
+	err := (&daemonManagementPlane{metricsErr: metricsErr}).Wait(context.Background(), testDaemonLogger())
+	if err == nil {
+		t.Fatal("Wait() error = nil, want metrics endpoint error")
+	}
+	if !strings.Contains(err.Error(), "metrics endpoint stopped") {
+		t.Fatalf("Wait() error = %v, want metrics endpoint stopped", err)
+	}
+}
+
+func TestDaemonManagementPlaneStopStopsAuxiliaryEndpoints(t *testing.T) {
+	var stopped []string
+	recordStop := func(name string) func(context.Context) error {
+		return func(context.Context) error {
+			stopped = append(stopped, name)
+			return nil
+		}
+	}
+
+	plane := &daemonManagementPlane{
+		metricsStop: recordStop("metrics"),
+		webStop:     recordStop("web"),
+		snmpStop:    recordStop("snmp"),
+	}
+	plane.Stop(testDaemonLogger())
+
+	if got := strings.Join(stopped, ","); got != "metrics,web,snmp" {
+		t.Fatalf("stopped endpoints = %q, want metrics,web,snmp", got)
+	}
+}
+
 func TestLoadInitialConfigPrefersDatastore(t *testing.T) {
 	configPath := filepath.Join(t.TempDir(), "arca-router.conf")
 	if err := os.WriteFile(configPath, []byte("set system host-name file-router\n"), 0600); err != nil {
@@ -145,7 +277,8 @@ func TestLoadInitialConfigRejectsConfigOpenError(t *testing.T) {
 }
 
 func TestApplyInitialConfigPersistsFileStartupConfig(t *testing.T) {
-	eng := engine.NewEngine(nil, slog.Default())
+	recorder := &initialApplyRecorderPlugin{}
+	eng := engine.NewEngine([]engine.Plugin{recorder}, slog.Default())
 	st := &initialConfigStore{}
 	snap := model.NewSnapshot(&model.RouterConfig{
 		System:     &model.SystemConfig{HostName: "file-router"},
@@ -163,6 +296,12 @@ func TestApplyInitialConfigPersistsFileStartupConfig(t *testing.T) {
 	}
 	if got := eng.Running().System.HostName; got != "file-router" {
 		t.Fatalf("engine hostname = %q, want file-router", got)
+	}
+	if recorder.applyCount != 1 {
+		t.Fatalf("plugin apply count = %d, want 1", recorder.applyCount)
+	}
+	if recorder.lastDiff == nil || !recorder.lastDiff.SystemChanged {
+		t.Fatalf("plugin diff = %#v, want system change", recorder.lastDiff)
 	}
 }
 
@@ -183,9 +322,13 @@ func TestApplyInitialConfigPersistsEmptyStartupConfigAndCreatesSnapshot(t *testi
 }
 
 func TestApplyInitialConfigDoesNotPersistDatastoreStartupConfig(t *testing.T) {
-	eng := engine.NewEngine(nil, slog.Default())
+	recorder := &initialApplyRecorderPlugin{}
+	eng := engine.NewEngine([]engine.Plugin{recorder}, slog.Default())
 	st := &initialConfigStore{}
-	snap := model.NewSnapshot(model.NewRouterConfig(), 7, "system", "loaded from datastore")
+	snap := model.NewSnapshot(&model.RouterConfig{
+		System:     &model.SystemConfig{HostName: "stored-router"},
+		Interfaces: map[string]*model.InterfaceConfig{},
+	}, 7, "system", "loaded from datastore")
 
 	if err := applyInitialConfig(context.Background(), eng, st, snap, "datastore"); err != nil {
 		t.Fatalf("applyInitialConfig() error = %v", err)
@@ -195,6 +338,12 @@ func TestApplyInitialConfigDoesNotPersistDatastoreStartupConfig(t *testing.T) {
 	}
 	if running := eng.RunningSnapshot(); running == nil || running.Version != 7 {
 		t.Fatalf("running snapshot = %#v, want datastore version 7", running)
+	}
+	if got := eng.Running().System.HostName; got != "stored-router" {
+		t.Fatalf("engine hostname = %q, want stored-router", got)
+	}
+	if recorder.applyCount != 0 {
+		t.Fatalf("plugin apply count = %d, want 0", recorder.applyCount)
 	}
 }
 
@@ -237,6 +386,138 @@ func TestBuildDatastoreConfigEtcd(t *testing.T) {
 	}
 }
 
+func TestBuildDatastoreConfigEtcdPasswordFile(t *testing.T) {
+	passwordFile := filepath.Join(t.TempDir(), "etcd-password")
+	if err := os.WriteFile(passwordFile, []byte("secret-from-file\n"), 0600); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+
+	cfg, err := buildDatastoreConfig(&daemonFlags{
+		datastoreMode:    "etcd",
+		etcdEndpoints:    "http://127.0.0.1:2379",
+		etcdUsername:     "arca",
+		etcdPasswordFile: passwordFile,
+	})
+	if err != nil {
+		t.Fatalf("buildDatastoreConfig() error = %v", err)
+	}
+	if cfg.EtcdPassword != "secret-from-file" {
+		t.Fatalf("EtcdPassword = %q, want secret-from-file", cfg.EtcdPassword)
+	}
+}
+
+func TestBuildDatastoreConfigEtcdPasswordFileFromEnv(t *testing.T) {
+	passwordFile := filepath.Join(t.TempDir(), "etcd-password")
+	if err := os.WriteFile(passwordFile, []byte("secret-from-env\n"), 0600); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+	t.Setenv(etcdPasswordFileEnv, passwordFile)
+
+	cfg, err := buildDatastoreConfig(&daemonFlags{
+		datastoreMode: "etcd",
+		etcdEndpoints: "http://127.0.0.1:2379",
+		etcdUsername:  "arca",
+	})
+	if err != nil {
+		t.Fatalf("buildDatastoreConfig() error = %v", err)
+	}
+	if cfg.EtcdPassword != "secret-from-env" {
+		t.Fatalf("EtcdPassword = %q, want secret-from-env", cfg.EtcdPassword)
+	}
+}
+
+func TestBuildDatastoreConfigEtcdPasswordFileRequiresSecureFile(t *testing.T) {
+	t.Run("rejects insecure mode", func(t *testing.T) {
+		passwordFile := filepath.Join(t.TempDir(), "etcd-password")
+		if err := os.WriteFile(passwordFile, []byte("secret\n"), 0600); err != nil {
+			t.Fatalf("WriteFile() error = %v", err)
+		}
+		if err := os.Chmod(passwordFile, 0644); err != nil {
+			t.Fatalf("Chmod() error = %v", err)
+		}
+
+		_, err := buildDatastoreConfig(&daemonFlags{
+			datastoreMode:    "etcd",
+			etcdEndpoints:    "http://127.0.0.1:2379",
+			etcdPasswordFile: passwordFile,
+		})
+		if err == nil {
+			t.Fatal("buildDatastoreConfig() error = nil, want insecure mode rejection")
+		}
+		if !strings.Contains(err.Error(), "insecure permissions") {
+			t.Fatalf("buildDatastoreConfig() error = %v, want insecure permissions", err)
+		}
+	})
+
+	t.Run("rejects symlink", func(t *testing.T) {
+		dir := t.TempDir()
+		passwordFile := filepath.Join(dir, "etcd-password")
+		linkFile := filepath.Join(dir, "etcd-password-link")
+		if err := os.WriteFile(passwordFile, []byte("secret\n"), 0600); err != nil {
+			t.Fatalf("WriteFile() error = %v", err)
+		}
+		if err := os.Symlink(passwordFile, linkFile); err != nil {
+			t.Skipf("Symlink() not available: %v", err)
+		}
+
+		_, err := buildDatastoreConfig(&daemonFlags{
+			datastoreMode:    "etcd",
+			etcdEndpoints:    "http://127.0.0.1:2379",
+			etcdPasswordFile: linkFile,
+		})
+		if err == nil {
+			t.Fatal("buildDatastoreConfig() error = nil, want symlink rejection")
+		}
+		if !strings.Contains(err.Error(), "symbolic link") {
+			t.Fatalf("buildDatastoreConfig() error = %v, want symbolic link rejection", err)
+		}
+	})
+
+	t.Run("rejects hardlink", func(t *testing.T) {
+		dir := t.TempDir()
+		passwordFile := filepath.Join(dir, "etcd-password")
+		linkFile := filepath.Join(dir, "etcd-password-hardlink")
+		if err := os.WriteFile(passwordFile, []byte("secret\n"), 0600); err != nil {
+			t.Fatalf("WriteFile() error = %v", err)
+		}
+		if err := os.Link(passwordFile, linkFile); err != nil {
+			t.Skipf("Link() not available: %v", err)
+		}
+
+		_, err := buildDatastoreConfig(&daemonFlags{
+			datastoreMode:    "etcd",
+			etcdEndpoints:    "http://127.0.0.1:2379",
+			etcdPasswordFile: linkFile,
+		})
+		if err == nil {
+			t.Fatal("buildDatastoreConfig() error = nil, want hardlink rejection")
+		}
+		if !strings.Contains(err.Error(), "multiple hard links") {
+			t.Fatalf("buildDatastoreConfig() error = %v, want hardlink rejection", err)
+		}
+	})
+}
+
+func TestBuildDatastoreConfigEtcdRejectsPasswordAndPasswordFile(t *testing.T) {
+	passwordFile := filepath.Join(t.TempDir(), "etcd-password")
+	if err := os.WriteFile(passwordFile, []byte("secret-from-file\n"), 0600); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+
+	_, err := buildDatastoreConfig(&daemonFlags{
+		datastoreMode:    "etcd",
+		etcdEndpoints:    "http://127.0.0.1:2379",
+		etcdPassword:     "secret",
+		etcdPasswordFile: passwordFile,
+	})
+	if err == nil {
+		t.Fatal("buildDatastoreConfig() error = nil, want password source conflict")
+	}
+	if !strings.Contains(err.Error(), "--etcd-password") {
+		t.Fatalf("buildDatastoreConfig() error = %v, want password source conflict", err)
+	}
+}
+
 func TestBuildDatastoreConfigEtcdRequiresEndpoints(t *testing.T) {
 	_, err := buildDatastoreConfig(&daemonFlags{datastoreMode: "etcd"})
 	if err == nil {
@@ -255,10 +536,99 @@ func TestBuildDatastoreConfigEtcdRejectsPartialTLS(t *testing.T) {
 	}
 }
 
+func TestVPPClientOptionsFromFlags(t *testing.T) {
+	opts := vppClientOptionsFromFlags(&daemonFlags{
+		vppAPISocket:   "/tmp/daemon-vpp-api.sock",
+		vppStatsSocket: "/tmp/daemon-vpp-stats.sock",
+	})
+	if opts.SocketPath != "/tmp/daemon-vpp-api.sock" {
+		t.Fatalf("SocketPath = %q, want /tmp/daemon-vpp-api.sock", opts.SocketPath)
+	}
+	if opts.StatsSocketPath != "/tmp/daemon-vpp-stats.sock" {
+		t.Fatalf("StatsSocketPath = %q, want /tmp/daemon-vpp-stats.sock", opts.StatsSocketPath)
+	}
+}
+
+func TestVPPClientOptionsFromFlagsAllowsDefaults(t *testing.T) {
+	opts := vppClientOptionsFromFlags(&daemonFlags{
+		vppAPISocket:   pkgvpp.DefaultAPISocketPath,
+		vppStatsSocket: pkgvpp.DefaultStatsSocketPath(),
+	})
+	if opts.SocketPath != pkgvpp.DefaultAPISocketPath {
+		t.Fatalf("SocketPath = %q, want %q", opts.SocketPath, pkgvpp.DefaultAPISocketPath)
+	}
+	if opts.StatsSocketPath != pkgvpp.DefaultStatsSocketPath() {
+		t.Fatalf("StatsSocketPath = %q, want %q", opts.StatsSocketPath, pkgvpp.DefaultStatsSocketPath())
+	}
+}
+
+func TestRegisterVPPFlagsUsesEnvironmentDefaults(t *testing.T) {
+	t.Setenv("VPP_API_SOCKET_PATH", "/env/vpp-api.sock")
+	t.Setenv("VPP_STATS_SOCKET_PATH", "/env/vpp-stats.sock")
+
+	flags := flag.NewFlagSet("test", flag.ContinueOnError)
+	f := &daemonFlags{}
+	registerVPPFlags(flags, f)
+	if err := flags.Parse(nil); err != nil {
+		t.Fatalf("Parse() error = %v", err)
+	}
+
+	opts := vppClientOptionsFromFlags(f)
+	if opts.SocketPath != "/env/vpp-api.sock" {
+		t.Fatalf("SocketPath = %q, want /env/vpp-api.sock", opts.SocketPath)
+	}
+	if opts.StatsSocketPath != "/env/vpp-stats.sock" {
+		t.Fatalf("StatsSocketPath = %q, want /env/vpp-stats.sock", opts.StatsSocketPath)
+	}
+}
+
+func TestRegisterVPPFlagsAllowsExplicitSocketOverrides(t *testing.T) {
+	t.Setenv("VPP_API_SOCKET_PATH", "/env/vpp-api.sock")
+	t.Setenv("VPP_STATS_SOCKET_PATH", "/env/vpp-stats.sock")
+
+	flags := flag.NewFlagSet("test", flag.ContinueOnError)
+	f := &daemonFlags{}
+	registerVPPFlags(flags, f)
+	if err := flags.Parse([]string{
+		"--vpp-api-socket=/flag/vpp-api.sock",
+		"--vpp-stats-socket=/flag/vpp-stats.sock",
+	}); err != nil {
+		t.Fatalf("Parse() error = %v", err)
+	}
+
+	opts := vppClientOptionsFromFlags(f)
+	if opts.SocketPath != "/flag/vpp-api.sock" {
+		t.Fatalf("SocketPath = %q, want /flag/vpp-api.sock", opts.SocketPath)
+	}
+	if opts.StatsSocketPath != "/flag/vpp-stats.sock" {
+		t.Fatalf("StatsSocketPath = %q, want /flag/vpp-stats.sock", opts.StatsSocketPath)
+	}
+}
+
 func TestBuildGRPCServerOptionsUnixRejectsTLSFlags(t *testing.T) {
 	_, err := buildGRPCServerOptions(&daemonFlags{grpcTLSCert: "/cert.pem"})
 	if err == nil {
 		t.Fatal("buildGRPCServerOptions() error = nil, want TLS flags without listen error")
+	}
+	if !strings.Contains(err.Error(), "--grpc-listen") {
+		t.Fatalf("buildGRPCServerOptions() error = %v, want --grpc-listen", err)
+	}
+}
+
+func TestBuildGRPCServerOptionsUnixRejectsClientIdentityFlag(t *testing.T) {
+	_, err := buildGRPCServerOptions(&daemonFlags{grpcClientID: "spiffe://arca-router/nms"})
+	if err == nil {
+		t.Fatal("buildGRPCServerOptions() error = nil, want client identity without listen error")
+	}
+	if !strings.Contains(err.Error(), "--grpc-listen") {
+		t.Fatalf("buildGRPCServerOptions() error = %v, want --grpc-listen", err)
+	}
+}
+
+func TestBuildGRPCServerOptionsUnixRejectsClientRoleFlag(t *testing.T) {
+	_, err := buildGRPCServerOptions(&daemonFlags{grpcClientRole: "spiffe://arca-router/nms=read-only"})
+	if err == nil {
+		t.Fatal("buildGRPCServerOptions() error = nil, want client role without listen error")
 	}
 	if !strings.Contains(err.Error(), "--grpc-listen") {
 		t.Fatalf("buildGRPCServerOptions() error = %v, want --grpc-listen", err)
@@ -275,18 +645,68 @@ func TestBuildGRPCServerOptionsTCPRequiresTLSKeyPair(t *testing.T) {
 	}
 }
 
-func TestBuildGRPCServerOptionsTCPUsesTLSCredentials(t *testing.T) {
+func TestBuildGRPCServerOptionsTCPRequiresClientCA(t *testing.T) {
 	certFile, keyFile, _ := writeTestCertificateFiles(t)
-	opts, err := buildGRPCServerOptions(&daemonFlags{
+	_, err := buildGRPCServerOptions(&daemonFlags{
 		grpcListen:  "127.0.0.1:0",
 		grpcTLSCert: certFile,
 		grpcTLSKey:  keyFile,
 	})
+	if err == nil {
+		t.Fatal("buildGRPCServerOptions() error = nil, want missing client CA error")
+	}
+	if !strings.Contains(err.Error(), "--grpc-client-ca") {
+		t.Fatalf("buildGRPCServerOptions() error = %v, want client CA error", err)
+	}
+}
+
+func TestBuildGRPCServerOptionsTCPRequiresClientRole(t *testing.T) {
+	certFile, keyFile, caFile := writeTestCertificateFiles(t)
+	_, err := buildGRPCServerOptions(&daemonFlags{
+		grpcListen:   "127.0.0.1:0",
+		grpcTLSCert:  certFile,
+		grpcTLSKey:   keyFile,
+		grpcClientCA: caFile,
+	})
+	if err == nil {
+		t.Fatal("buildGRPCServerOptions() error = nil, want missing client role error")
+	}
+	if !strings.Contains(err.Error(), "--grpc-client-role") {
+		t.Fatalf("buildGRPCServerOptions() error = %v, want client role error", err)
+	}
+}
+
+func TestBuildGRPCServerOptionsTCPUsesClientRoleInterceptors(t *testing.T) {
+	certFile, keyFile, caFile := writeTestCertificateFiles(t)
+	opts, err := buildGRPCServerOptions(&daemonFlags{
+		grpcListen:     "127.0.0.1:0",
+		grpcTLSCert:    certFile,
+		grpcTLSKey:     keyFile,
+		grpcClientCA:   caFile,
+		grpcClientRole: "spiffe://arca-router/nms=read-only,router-operator=operator",
+	})
 	if err != nil {
 		t.Fatalf("buildGRPCServerOptions() error = %v", err)
 	}
-	if len(opts) != 1 {
-		t.Fatalf("buildGRPCServerOptions() returned %d options, want 1", len(opts))
+	if len(opts) != 3 {
+		t.Fatalf("buildGRPCServerOptions() returned %d options, want TLS credentials plus unary and stream interceptors", len(opts))
+	}
+}
+
+func TestBuildGRPCServerOptionsTCPRejectsInvalidClientRole(t *testing.T) {
+	certFile, keyFile, caFile := writeTestCertificateFiles(t)
+	_, err := buildGRPCServerOptions(&daemonFlags{
+		grpcListen:     "127.0.0.1:0",
+		grpcTLSCert:    certFile,
+		grpcTLSKey:     keyFile,
+		grpcClientCA:   caFile,
+		grpcClientRole: "router-operator=superuser",
+	})
+	if err == nil {
+		t.Fatal("buildGRPCServerOptions() error = nil, want invalid client role error")
+	}
+	if !strings.Contains(err.Error(), "parse gRPC client roles") {
+		t.Fatalf("buildGRPCServerOptions() error = %v, want client role parse error", err)
 	}
 }
 
@@ -311,15 +731,76 @@ func TestBuildGRPCServerTLSConfigEnablesMTLS(t *testing.T) {
 	}
 }
 
-func TestEffectiveNETCONFListenUsesFlagOverride(t *testing.T) {
-	cfg := model.NewRouterConfig()
-	cfg.Security = &model.SecurityConfig{
-		NETCONF: &model.NETCONFSecurityConfig{
-			SSH: &model.NETCONFSSHConfig{Port: 1830},
-		},
+func TestBuildGRPCServerTLSConfigRestrictsClientIdentity(t *testing.T) {
+	certFile, keyFile, caFile := writeTestCertificateFiles(t)
+	cfg, err := buildGRPCServerTLSConfig(&daemonFlags{
+		grpcTLSCert:  certFile,
+		grpcTLSKey:   keyFile,
+		grpcClientCA: caFile,
+		grpcClientID: "spiffe://arca-router/nms,router-operator",
+	})
+	if err != nil {
+		t.Fatalf("buildGRPCServerTLSConfig() error = %v", err)
+	}
+	if cfg.VerifyConnection == nil {
+		t.Fatal("VerifyConnection = nil, want client identity verifier")
 	}
 
-	got := effectiveNETCONFListen(":2830", model.NewSnapshot(cfg, 1, "test", "test"))
+	allowedURI := mustParseURL(t, "spiffe://arca-router/nms")
+	if err := cfg.VerifyConnection(tls.ConnectionState{VerifiedChains: [][]*x509.Certificate{{
+		{URIs: []*url.URL{allowedURI}},
+	}}}); err != nil {
+		t.Fatalf("VerifyConnection(allowed URI) error = %v", err)
+	}
+	if err := cfg.VerifyConnection(tls.ConnectionState{VerifiedChains: [][]*x509.Certificate{{
+		{Subject: pkix.Name{CommonName: "router-operator"}},
+	}}}); err != nil {
+		t.Fatalf("VerifyConnection(allowed CN) error = %v", err)
+	}
+	if err := cfg.VerifyConnection(tls.ConnectionState{VerifiedChains: [][]*x509.Certificate{{
+		{DNSNames: []string{"untrusted.example.net"}},
+	}}}); err == nil {
+		t.Fatal("VerifyConnection(untrusted DNS) error = nil, want authorization error")
+	}
+}
+
+func TestBuildGRPCServerTLSConfigRejectsEmptyClientIdentity(t *testing.T) {
+	certFile, keyFile, caFile := writeTestCertificateFiles(t)
+	_, err := buildGRPCServerTLSConfig(&daemonFlags{
+		grpcTLSCert:  certFile,
+		grpcTLSKey:   keyFile,
+		grpcClientCA: caFile,
+		grpcClientID: "spiffe://arca-router/nms,,router-operator",
+	})
+	if err == nil {
+		t.Fatal("buildGRPCServerTLSConfig() error = nil, want empty client identity error")
+	}
+	if !strings.Contains(err.Error(), "--grpc-client-identity") {
+		t.Fatalf("buildGRPCServerTLSConfig() error = %v, want client identity validation error", err)
+	}
+}
+
+func TestBuildGRPCServerTLSConfigRejectsInsecureKeyPermissions(t *testing.T) {
+	certFile, keyFile, caFile := writeTestCertificateFiles(t)
+	if err := os.Chmod(keyFile, 0644); err != nil {
+		t.Fatalf("Chmod() error = %v", err)
+	}
+
+	_, err := buildGRPCServerTLSConfig(&daemonFlags{
+		grpcTLSCert:  certFile,
+		grpcTLSKey:   keyFile,
+		grpcClientCA: caFile,
+	})
+	if err == nil {
+		t.Fatal("buildGRPCServerTLSConfig() error = nil, want key permission error")
+	}
+	if !strings.Contains(err.Error(), "load gRPC server cert/key") || !strings.Contains(err.Error(), "insecure permissions") {
+		t.Fatalf("buildGRPCServerTLSConfig() error = %v, want key permission validation error", err)
+	}
+}
+
+func TestEffectiveNETCONFListenUsesFlagOverride(t *testing.T) {
+	got := effectiveNETCONFListen(":2830", nil)
 	if got != ":2830" {
 		t.Fatalf("effectiveNETCONFListen() = %q, want %q", got, ":2830")
 	}
@@ -366,23 +847,94 @@ func writeTestCertificateFiles(t *testing.T) (certFile, keyFile, caFile string) 
 	return certFile, keyFile, caFile
 }
 
+func mustParseURL(t *testing.T, raw string) *url.URL {
+	t.Helper()
+
+	parsed, err := url.Parse(raw)
+	if err != nil {
+		t.Fatalf("Parse(%q) error = %v", raw, err)
+	}
+	return parsed
+}
+
 func TestEffectiveNETCONFListenUsesConfigPort(t *testing.T) {
 	cfg := model.NewRouterConfig()
 	cfg.Security = &model.SecurityConfig{
 		NETCONF: &model.NETCONFSecurityConfig{
-			SSH: &model.NETCONFSSHConfig{Port: 1830},
+			SSH: &model.NETCONFSSHConfig{
+				Port: 1830,
+			},
 		},
 	}
 
 	got := effectiveNETCONFListen("", model.NewSnapshot(cfg, 1, "test", "test"))
-	if got != ":1830" {
-		t.Fatalf("effectiveNETCONFListen() = %q, want %q", got, ":1830")
+	if got != "127.0.0.1:1830" {
+		t.Fatalf("effectiveNETCONFListen() = %q, want %q", got, "127.0.0.1:1830")
 	}
 }
 
-func TestEffectiveNETCONFListenUsesDefault(t *testing.T) {
-	if got := effectiveNETCONFListen("", nil); got != ":830" {
-		t.Fatalf("effectiveNETCONFListen() = %q, want :830", got)
+func TestEffectiveNETCONFListenUsesConfigListenAddress(t *testing.T) {
+	cfg := model.NewRouterConfig()
+	cfg.Security = &model.SecurityConfig{
+		NETCONF: &model.NETCONFSecurityConfig{
+			SSH: &model.NETCONFSSHConfig{
+				Enabled:       true,
+				ListenAddress: "192.0.2.10",
+				Port:          1830,
+			},
+		},
+	}
+
+	got := effectiveNETCONFListen("", model.NewSnapshot(cfg, 1, "test", "test"))
+	if got != "192.0.2.10:1830" {
+		t.Fatalf("effectiveNETCONFListen() = %q, want %q", got, "192.0.2.10:1830")
+	}
+}
+
+func TestEffectiveNETCONFListenUsesEnabledDefault(t *testing.T) {
+	cfg := model.NewRouterConfig()
+	cfg.Security = &model.SecurityConfig{
+		NETCONF: &model.NETCONFSecurityConfig{
+			SSH: &model.NETCONFSSHConfig{Enabled: true, EnabledSet: true},
+		},
+	}
+
+	got := effectiveNETCONFListen("", model.NewSnapshot(cfg, 1, "test", "test"))
+	if got != "127.0.0.1:830" {
+		t.Fatalf("effectiveNETCONFListen() = %q, want %q", got, "127.0.0.1:830")
+	}
+}
+
+func TestEffectiveNETCONFListenDisabledByDefault(t *testing.T) {
+	if got := effectiveNETCONFListen("", nil); got != "" {
+		t.Fatalf("effectiveNETCONFListen() = %q, want empty", got)
+	}
+}
+
+func TestEffectiveNETCONFListenIgnoresPortWhenDisabled(t *testing.T) {
+	cfg := model.NewRouterConfig()
+	cfg.Security = &model.SecurityConfig{
+		NETCONF: &model.NETCONFSecurityConfig{
+			SSH: &model.NETCONFSSHConfig{
+				EnabledSet: true,
+				Port:       1830,
+			},
+		},
+	}
+
+	if got := effectiveNETCONFListen("", model.NewSnapshot(cfg, 1, "test", "test")); got != "" {
+		t.Fatalf("effectiveNETCONFListen() = %q, want empty", got)
+	}
+}
+
+func TestEffectiveNETCONFListenIgnoresEmptySSHConfig(t *testing.T) {
+	cfg := model.NewRouterConfig()
+	cfg.Security = &model.SecurityConfig{
+		NETCONF: &model.NETCONFSecurityConfig{SSH: &model.NETCONFSSHConfig{}},
+	}
+
+	if got := effectiveNETCONFListen("", model.NewSnapshot(cfg, 1, "test", "test")); got != "" {
+		t.Fatalf("effectiveNETCONFListen() = %q, want empty", got)
 	}
 }
 
@@ -398,6 +950,26 @@ func TestPrepareGRPCSocketPathRejectsInsecureDirectory(t *testing.T) {
 	err := prepareGRPCSocketPath(filepath.Join(dir, "routerd.sock"))
 	if err == nil {
 		t.Fatal("prepareGRPCSocketPath() error = nil, want insecure directory error")
+	}
+}
+
+func TestPrepareGRPCSocketPathRejectsSymlinkDirectory(t *testing.T) {
+	root := t.TempDir()
+	targetDir := filepath.Join(root, "target")
+	socketDir := filepath.Join(root, "linked")
+	if err := os.Mkdir(targetDir, secureGRPCSocketDirPerms); err != nil {
+		t.Fatalf("Mkdir(target) error = %v", err)
+	}
+	if err := os.Symlink(targetDir, socketDir); err != nil {
+		t.Skipf("symlink not supported: %v", err)
+	}
+
+	err := prepareGRPCSocketPath(filepath.Join(socketDir, "routerd.sock"))
+	if err == nil {
+		t.Fatal("prepareGRPCSocketPath() error = nil, want symlink directory rejection")
+	}
+	if !strings.Contains(err.Error(), "symbolic link") {
+		t.Fatalf("prepareGRPCSocketPath() error = %v, want symbolic link rejection", err)
 	}
 }
 
@@ -443,6 +1015,36 @@ func TestRestrictGRPCSocketPermissions(t *testing.T) {
 	}
 	if got := info.Mode().Perm(); got != secureGRPCSocketFilePerms {
 		t.Fatalf("socket mode = %04o, want %04o", got, secureGRPCSocketFilePerms)
+	}
+}
+
+func TestRestrictGRPCSocketPermissionsRejectsSymlinkPath(t *testing.T) {
+	dir := t.TempDir()
+	targetPath := filepath.Join(dir, "target")
+	socketPath := filepath.Join(dir, "routerd.sock")
+	if err := os.WriteFile(targetPath, []byte("not a socket"), 0644); err != nil {
+		t.Fatalf("WriteFile(target) error = %v", err)
+	}
+	if err := os.Chmod(targetPath, 0644); err != nil {
+		t.Fatalf("Chmod(target) error = %v", err)
+	}
+	if err := os.Symlink(targetPath, socketPath); err != nil {
+		t.Skipf("symlink not supported: %v", err)
+	}
+
+	err := restrictGRPCSocketPermissions(socketPath)
+	if err == nil {
+		t.Fatal("restrictGRPCSocketPermissions() error = nil, want symlink rejection")
+	}
+	if !strings.Contains(err.Error(), "symbolic link") {
+		t.Fatalf("restrictGRPCSocketPermissions() error = %v, want symbolic link rejection", err)
+	}
+	info, statErr := os.Stat(targetPath)
+	if statErr != nil {
+		t.Fatalf("Stat(target) error = %v", statErr)
+	}
+	if got := info.Mode().Perm(); got != 0644 {
+		t.Fatalf("target mode = %04o, want unchanged 0644", got)
 	}
 }
 

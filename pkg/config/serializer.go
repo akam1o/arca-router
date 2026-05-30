@@ -7,6 +7,53 @@ import (
 	"unicode"
 )
 
+const redactedSecretValue = "<redacted>"
+
+// ContainsRedactedSecretValue reports whether serialized config text contains
+// the reserved marker used in place of credential material.
+func ContainsRedactedSecretValue(text string) bool {
+	for _, line := range strings.Split(text, "\n") {
+		if IsRedactedSecretLine(line) {
+			return true
+		}
+	}
+	return false
+}
+
+// IsRedactedSecretLine reports whether a serialized set-command line contains
+// the reserved redacted marker in a secret-bearing field.
+func IsRedactedSecretLine(line string) bool {
+	fields := strings.Fields(strings.TrimSpace(strings.TrimSuffix(line, "\r")))
+	if len(fields) == 0 || !isRedactedSecretToken(fields[len(fields)-1]) {
+		return false
+	}
+	if len(fields) == 6 &&
+		fields[0] == "set" &&
+		fields[1] == "system" &&
+		fields[2] == "services" &&
+		fields[3] == "snmp" &&
+		fields[4] == "community" {
+		return true
+	}
+	if len(fields) == 7 &&
+		fields[0] == "set" &&
+		fields[1] == "security" &&
+		fields[2] == "users" &&
+		fields[3] == "user" &&
+		fields[5] == "password" {
+		return true
+	}
+	return false
+}
+
+func isRedactedSecretToken(token string) bool {
+	return strings.Trim(token, `"'`) == redactedSecretValue
+}
+
+type serializeOptions struct {
+	RedactSecrets bool
+}
+
 // EscapeValue escapes a scalar value for safe use in set-command text.
 func EscapeValue(s string) string {
 	if s == "" || needsQuotedValue(s) {
@@ -42,6 +89,16 @@ func ToSetCommands(cfg *Config) string {
 // ToSetCommandsWithError serializes Config into deterministic Junos-style set
 // commands and reports sensitive value protection failures.
 func ToSetCommandsWithError(cfg *Config) (string, error) {
+	return toSetCommandsWithError(cfg, serializeOptions{})
+}
+
+// ToSetCommandsRedactedWithError serializes Config into deterministic set
+// commands with credential material replaced by a non-round-trippable marker.
+func ToSetCommandsRedactedWithError(cfg *Config) (string, error) {
+	return toSetCommandsWithError(cfg, serializeOptions{RedactSecrets: true})
+}
+
+func toSetCommandsWithError(cfg *Config, opts serializeOptions) (string, error) {
 	if cfg == nil {
 		return "", nil
 	}
@@ -51,7 +108,7 @@ func ToSetCommandsWithError(cfg *Config) (string, error) {
 	if cfg.System != nil && cfg.System.HostName != "" {
 		writeLine(&b, "set system host-name %s", EscapeValue(cfg.System.HostName))
 	}
-	writeSystemServices(&b, cfg.System)
+	writeSystemServices(&b, cfg.System, opts)
 
 	writeChassis(&b, cfg.Chassis)
 	writeInterfaces(&b, cfg.Interfaces)
@@ -60,14 +117,14 @@ func ToSetCommandsWithError(cfg *Config) (string, error) {
 	writeProtocols(&b, cfg.Protocols)
 	writePolicyOptions(&b, cfg.PolicyOptions)
 	writeClassOfService(&b, cfg.ClassOfService)
-	if err := writeSecurity(&b, cfg.Security); err != nil {
+	if err := writeSecurity(&b, cfg.Security, opts); err != nil {
 		return "", err
 	}
 
 	return b.String(), nil
 }
 
-func writeSystemServices(b *strings.Builder, system *SystemConfig) {
+func writeSystemServices(b *strings.Builder, system *SystemConfig, opts serializeOptions) {
 	if system == nil || system.Services == nil {
 		return
 	}
@@ -104,7 +161,11 @@ func writeSystemServices(b *strings.Builder, system *SystemConfig) {
 			writeLine(b, "set system services snmp port %d", snmp.Port)
 		}
 		if snmp.Community != "" {
-			writeLine(b, "set system services snmp community %s", EscapeValue(snmp.Community))
+			community := snmp.Community
+			if opts.RedactSecrets {
+				community = redactedSecretValue
+			}
+			writeLine(b, "set system services snmp community %s", EscapeValue(community))
 		}
 	}
 }
@@ -631,12 +692,23 @@ func writeClassOfService(b *strings.Builder, cos *ClassOfServiceConfig) {
 	}
 }
 
-func writeSecurity(b *strings.Builder, sec *SecurityConfig) error {
+func writeSecurity(b *strings.Builder, sec *SecurityConfig, opts serializeOptions) error {
 	if sec == nil {
 		return nil
 	}
-	if sec.NETCONF != nil && sec.NETCONF.SSH != nil && sec.NETCONF.SSH.Port != 0 {
-		writeLine(b, "set security netconf ssh port %d", sec.NETCONF.SSH.Port)
+	if sec.NETCONF != nil && sec.NETCONF.SSH != nil {
+		ssh := sec.NETCONF.SSH
+		if ssh.Enabled {
+			writeLine(b, "set security netconf ssh enabled true")
+		} else if ssh.EnabledSet {
+			writeLine(b, "set security netconf ssh enabled false")
+		}
+		if ssh.ListenAddress != "" {
+			writeLine(b, "set security netconf ssh listen-address %s", EscapeValue(ssh.ListenAddress))
+		}
+		if ssh.Port != 0 {
+			writeLine(b, "set security netconf ssh port %d", ssh.Port)
+		}
 	}
 	for _, username := range sortedKeys(sec.Users) {
 		user := sec.Users[username]
@@ -644,11 +716,14 @@ func writeSecurity(b *strings.Builder, sec *SecurityConfig) error {
 			continue
 		}
 		if user.Password != "" {
-			password, err := NormalizePasswordForStorage(user.Password)
-			if err != nil {
-				return fmt.Errorf("protect password for user %s: %w", username, err)
+			password := redactedSecretValue
+			if !opts.RedactSecrets {
+				var err error
+				password, err = NormalizePasswordForStorage(user.Password)
+				if err != nil {
+					return fmt.Errorf("protect password for user %s: %w", username, err)
+				}
 			}
-			user.Password = password
 			writeLine(b, "set security users user %s password %s", username, EscapeValue(password))
 		}
 		if user.Role != "" {

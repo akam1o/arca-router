@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
+	"syscall"
 	"time"
 
 	_ "github.com/mattn/go-sqlite3"
@@ -57,6 +59,9 @@ func NewUserDatabase(path string, log *logger.Logger) (*UserDatabase, error) {
 		log = logger.New("netconf-userdb", logger.DefaultConfig())
 	}
 
+	if err := validateUserDatabasePath(path); err != nil {
+		return nil, err
+	}
 	if err := prepareSecureUserDatabaseFile(path); err != nil {
 		return nil, err
 	}
@@ -111,6 +116,17 @@ func NewUserDatabase(path string, log *logger.Logger) (*UserDatabase, error) {
 	return udb, nil
 }
 
+func validateUserDatabasePath(path string) error {
+	if path == "" {
+		return fmt.Errorf("user database path is required")
+	}
+	lowerPath := strings.ToLower(path)
+	if path == ":memory:" || strings.HasPrefix(lowerPath, "file:") || strings.Contains(path, "?") {
+		return fmt.Errorf("user database path must be a filesystem path without SQLite URI parameters")
+	}
+	return nil
+}
+
 func prepareSecureUserDatabaseFile(path string) error {
 	dir := filepath.Dir(path)
 	if err := os.MkdirAll(dir, userDBDirPerms); err != nil {
@@ -119,23 +135,52 @@ func prepareSecureUserDatabaseFile(path string) error {
 	if err := validateUserDatabaseDirectoryPermissions(dir); err != nil {
 		return err
 	}
-	file, err := os.OpenFile(path, os.O_RDWR|os.O_CREATE, userDBFilePerms)
+	if err := validateUserDatabaseFilePath(path); err != nil {
+		return err
+	}
+	file, err := os.OpenFile(path, os.O_RDWR|os.O_CREATE|syscall.O_NOFOLLOW, userDBFilePerms)
 	if err != nil {
 		return fmt.Errorf("failed to create user database file: %w", err)
+	}
+	defer func() {
+		if file != nil {
+			_ = file.Close()
+		}
+	}()
+	openedInfo, err := file.Stat()
+	if err != nil {
+		return fmt.Errorf("failed to stat user database file: %w", err)
+	}
+	if err := validateUserDatabaseFileInfo(path, openedInfo); err != nil {
+		return err
+	}
+	if err := file.Chmod(userDBFilePerms); err != nil {
+		return fmt.Errorf("failed to restrict user database file permissions: %w", err)
 	}
 	if closeErr := file.Close(); closeErr != nil {
 		return fmt.Errorf("failed to close user database file: %w", closeErr)
 	}
-	if err := os.Chmod(path, userDBFilePerms); err != nil {
-		return fmt.Errorf("failed to restrict user database file permissions: %w", err)
+	file = nil
+	currentInfo, err := os.Lstat(path)
+	if err != nil {
+		return fmt.Errorf("failed to stat user database file: %w", err)
+	}
+	if err := validateUserDatabaseFileInfo(path, currentInfo); err != nil {
+		return err
+	}
+	if !os.SameFile(openedInfo, currentInfo) {
+		return fmt.Errorf("refusing to use user database file %s: file changed during preparation", path)
 	}
 	return nil
 }
 
 func validateUserDatabaseDirectoryPermissions(dir string) error {
-	info, err := os.Stat(dir)
+	info, err := os.Lstat(dir)
 	if err != nil {
 		return fmt.Errorf("failed to stat user database directory: %w", err)
+	}
+	if info.Mode()&os.ModeSymlink != 0 {
+		return fmt.Errorf("user database directory %s must not be a symbolic link", dir)
 	}
 	if !info.IsDir() {
 		return fmt.Errorf("user database parent path is not a directory: %s", dir)
@@ -147,16 +192,65 @@ func validateUserDatabaseDirectoryPermissions(dir string) error {
 	return nil
 }
 
+func validateUserDatabaseFilePath(path string) error {
+	info, err := os.Lstat(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return fmt.Errorf("failed to stat user database file %s: %w", path, err)
+	}
+	return validateUserDatabaseFileInfo(path, info)
+}
+
+func validateUserDatabaseFileInfo(path string, info os.FileInfo) error {
+	if info.Mode()&os.ModeSymlink != 0 {
+		return fmt.Errorf("user database file %s must not be a symbolic link", path)
+	}
+	if !info.Mode().IsRegular() {
+		return fmt.Errorf("user database file %s is not a regular file", path)
+	}
+	if stat, ok := info.Sys().(*syscall.Stat_t); ok && stat.Nlink > 1 {
+		return fmt.Errorf("user database file %s must not have multiple hard links", path)
+	}
+	return nil
+}
+
 func restrictUserDatabaseFiles(path string) error {
 	for _, filePath := range []string{path, path + "-wal", path + "-shm"} {
-		if _, err := os.Stat(filePath); err != nil {
+		info, err := os.Lstat(filePath)
+		if err != nil {
 			if os.IsNotExist(err) {
 				continue
 			}
 			return fmt.Errorf("failed to stat user database file %s: %w", filePath, err)
 		}
-		if err := os.Chmod(filePath, userDBFilePerms); err != nil {
+		if err := validateUserDatabaseFileInfo(filePath, info); err != nil {
+			return err
+		}
+		file, err := os.OpenFile(filePath, os.O_RDWR|syscall.O_NOFOLLOW, userDBFilePerms)
+		if err != nil {
+			return fmt.Errorf("failed to open user database file %s: %w", filePath, err)
+		}
+		openedInfo, statErr := file.Stat()
+		if statErr != nil {
+			_ = file.Close()
+			return fmt.Errorf("failed to stat user database file %s: %w", filePath, statErr)
+		}
+		if err := validateUserDatabaseFileInfo(filePath, openedInfo); err != nil {
+			_ = file.Close()
+			return err
+		}
+		if !os.SameFile(info, openedInfo) {
+			_ = file.Close()
+			return fmt.Errorf("refusing to restrict user database file %s: file changed during permission update", filePath)
+		}
+		if err := file.Chmod(userDBFilePerms); err != nil {
+			_ = file.Close()
 			return fmt.Errorf("failed to restrict user database file permissions for %s: %w", filePath, err)
+		}
+		if err := file.Close(); err != nil {
+			return fmt.Errorf("failed to close user database file %s: %w", filePath, err)
 		}
 	}
 	return nil

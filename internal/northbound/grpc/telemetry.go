@@ -14,6 +14,8 @@ const (
 	telemetryEventTypeSnapshot     = "snapshot"
 	telemetryEventTypeError        = "error"
 	telemetryEncodingJSON          = "json"
+	telemetryPayloadErrorMessage   = "telemetry payload unavailable"
+	telemetryEncodingErrorMessage  = "telemetry payload serialization failed"
 	defaultTelemetrySampleInterval = 30 * time.Second
 	minTelemetrySampleInterval     = time.Second
 	maxTelemetrySampleInterval     = time.Hour
@@ -464,12 +466,12 @@ func (s *Server) collectTelemetryEvents(ctx context.Context, paths []string, now
 		payload, err := s.telemetryPayload(ctx, path)
 		if err != nil {
 			eventType = telemetryEventTypeError
-			payload = telemetryErrorPayload{Error: err.Error()}
+			payload = telemetryErrorPayload{Error: telemetryPayloadErrorMessage}
 		}
 		rawPayload, err := json.Marshal(payload)
 		if err != nil {
 			eventType = telemetryEventTypeError
-			rawPayload, _ = json.Marshal(telemetryErrorPayload{Error: err.Error()})
+			rawPayload, _ = json.Marshal(telemetryErrorPayload{Error: telemetryEncodingErrorMessage})
 		}
 
 		jsonPayload := string(rawPayload)
@@ -503,7 +505,7 @@ func (s *Server) telemetryPayload(ctx context.Context, path string) (any, error)
 			UptimeSecs: info.UptimeSecs,
 		}, nil
 	case "/config/running":
-		text, version, err := s.runningText()
+		text, version, err := s.runningText(true)
 		if err != nil {
 			return nil, err
 		}

@@ -13,7 +13,7 @@ type PhysicalInterface struct {
 	// PCI is the PCI address (e.g., "0000:03:00.0")
 	PCI string `yaml:"pci" json:"pci"`
 
-	// Driver is the driver type: "avf", "rdma", or "dpdk"
+	// Driver is the driver type: "avf" or "rdma"
 	Driver string `yaml:"driver" json:"driver"`
 
 	// Description is a human-readable description
@@ -36,12 +36,11 @@ func (p *PhysicalInterface) Validate() error {
 	validDrivers := map[string]bool{
 		"avf":  true,
 		"rdma": true,
-		"dpdk": true,
 	}
 	if !validDrivers[p.Driver] {
 		return &ValidationError{
 			Field:   "driver",
-			Message: "driver must be one of: avf, rdma, dpdk",
+			Message: "driver must be one of: avf, rdma",
 		}
 	}
 

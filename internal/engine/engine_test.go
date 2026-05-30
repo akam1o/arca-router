@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/akam1o/arca-router/internal/model"
 )
@@ -68,6 +69,30 @@ func TestValidateDiffDoesNotExposeRunningOrCandidate(t *testing.T) {
 	}
 	if got := candidate.System.HostName; got != "router2" {
 		t.Fatalf("candidate hostname = %q, want router2", got)
+	}
+}
+
+func TestValidateClassifiesModelValidationErrors(t *testing.T) {
+	eng := NewEngine(nil, slog.Default())
+	cfg := model.NewRouterConfig()
+	cfg.System = &model.SystemConfig{
+		Services: &model.SystemServicesConfig{
+			WebUI: &model.WebUIConfig{
+				Enabled:       true,
+				ListenAddress: "not an address",
+			},
+		},
+	}
+
+	err := eng.Validate(context.Background(), cfg)
+	if err == nil {
+		t.Fatal("Validate() error = nil, want validation error")
+	}
+	if !errors.Is(err, ErrConfigValidation) {
+		t.Fatalf("Validate() error = %v, want ErrConfigValidation", err)
+	}
+	if !strings.Contains(err.Error(), "config validation failed:") {
+		t.Fatalf("Validate() error = %v, want existing validation prefix", err)
 	}
 }
 
@@ -170,8 +195,8 @@ func TestApplyErrorReportsRollbackSucceeded(t *testing.T) {
 	if !strings.Contains(err.Error(), "rollback succeeded") || !strings.Contains(err.Error(), "apply boom") {
 		t.Fatalf("Apply() error = %v, want rollback success and apply cause", err)
 	}
-	if first.rollbackCalls != 1 || second.rollbackCalls != 0 {
-		t.Fatalf("rollback calls first/second = %d/%d, want 1/0", first.rollbackCalls, second.rollbackCalls)
+	if first.rollbackCalls != 1 || second.rollbackCalls != 1 {
+		t.Fatalf("rollback calls first/second = %d/%d, want 1/1", first.rollbackCalls, second.rollbackCalls)
 	}
 	if got := eng.Running().System.HostName; got != "router1" {
 		t.Fatalf("engine running hostname = %q, want unchanged router1", got)
@@ -204,6 +229,61 @@ func TestApplyErrorReportsRollbackFailure(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "rollback failed") || !strings.Contains(err.Error(), "undo failed") {
 		t.Fatalf("Apply() error = %v, want rollback failure detail", err)
+	}
+	if first.rollbackCalls != 1 || second.rollbackCalls != 1 {
+		t.Fatalf("rollback calls first/second = %d/%d, want 1/1", first.rollbackCalls, second.rollbackCalls)
+	}
+}
+
+func TestApplyDoesNotBlockRunningSnapshotDuringPluginApply(t *testing.T) {
+	started := make(chan struct{})
+	release := make(chan struct{})
+	plugin := &blockingApplyPlugin{started: started, release: release}
+	eng := NewEngine([]Plugin{plugin}, slog.Default())
+	eng.InitializeRunning(&model.RouterConfig{
+		System:     &model.SystemConfig{HostName: "router1"},
+		Interfaces: map[string]*model.InterfaceConfig{},
+	}, 1)
+	candidate := &model.RouterConfig{
+		System:     &model.SystemConfig{HostName: "router2"},
+		Interfaces: map[string]*model.InterfaceConfig{},
+	}
+
+	errCh := make(chan error, 1)
+	go func() {
+		errCh <- eng.Apply(context.Background(), candidate, "alice", "test")
+	}()
+
+	select {
+	case <-started:
+	case <-time.After(time.Second):
+		t.Fatal("ApplyChanges() did not start")
+	}
+
+	readCh := make(chan *model.ConfigSnapshot, 1)
+	go func() {
+		readCh <- eng.RunningSnapshot()
+	}()
+	select {
+	case snap := <-readCh:
+		if snap == nil || snap.Config.System.HostName != "router1" || snap.Version != 1 {
+			t.Fatalf("RunningSnapshot() during apply = %#v, want current committed router1 version 1", snap)
+		}
+	case <-time.After(200 * time.Millisecond):
+		t.Fatal("RunningSnapshot() blocked while plugin ApplyChanges was running")
+	}
+
+	close(release)
+	select {
+	case err := <-errCh:
+		if err != nil {
+			t.Fatalf("Apply() error = %v", err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("Apply() did not finish after release")
+	}
+	if got := eng.Running().System.HostName; got != "router2" {
+		t.Fatalf("engine running hostname = %q, want router2", got)
 	}
 }
 
@@ -312,3 +392,30 @@ func (p *scriptedPlugin) RollbackChanges(context.Context, *ConfigDiff) error {
 	p.rollbackCalls++
 	return p.rollbackErr
 }
+
+type blockingApplyPlugin struct {
+	started chan<- struct{}
+	release <-chan struct{}
+}
+
+func (p *blockingApplyPlugin) Name() string { return "blocking" }
+
+func (p *blockingApplyPlugin) Init(context.Context) error { return nil }
+
+func (p *blockingApplyPlugin) Close() error { return nil }
+
+func (p *blockingApplyPlugin) HealthCheck(context.Context) error { return nil }
+
+func (p *blockingApplyPlugin) ValidateChanges(context.Context, *ConfigDiff) error { return nil }
+
+func (p *blockingApplyPlugin) ApplyChanges(ctx context.Context, diff *ConfigDiff) error {
+	close(p.started)
+	select {
+	case <-p.release:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}
+
+func (p *blockingApplyPlugin) RollbackChanges(context.Context, *ConfigDiff) error { return nil }

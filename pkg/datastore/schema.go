@@ -71,19 +71,21 @@ type CandidateConfig struct {
 
 // CommitRequest contains parameters for a commit operation.
 type CommitRequest struct {
-	SessionID string // Session holding the candidate config
-	User      string // Username performing the commit
-	Message   string // Optional commit message
-	SourceIP  string // Source IP address of the user (for audit)
+	SessionID     string // Session holding the candidate config
+	User          string // Username performing the commit
+	Message       string // Optional commit message
+	SourceIP      string // Source IP address of the user (for audit)
+	CorrelationID string // Correlation ID for tracing related audit/log records
 }
 
 // RollbackRequest contains parameters for a rollback operation.
 type RollbackRequest struct {
-	SessionID string // Session holding the candidate config lock
-	CommitID  string // Target commit ID to rollback to
-	User      string // Username performing the rollback
-	Message   string // Optional rollback reason
-	SourceIP  string // Source IP address of the user (for audit)
+	SessionID     string // Session holding the candidate config lock
+	CommitID      string // Target commit ID to rollback to
+	User          string // Username performing the rollback
+	Message       string // Optional rollback reason
+	SourceIP      string // Source IP address of the user (for audit)
+	CorrelationID string // Correlation ID for tracing related audit/log records
 }
 
 // HistoryOptions contains filtering options for commit history queries.

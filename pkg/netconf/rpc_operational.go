@@ -37,17 +37,17 @@ func (r *GetRequest) SetInheritedNamespaceAttrs(attrs []xml.Attr) {
 func (s *Server) handleGet(ctx context.Context, sess *Session, rpc *RPC) *RPCReply {
 	var req GetRequest
 	if err := rpc.UnmarshalOperation(&req); err != nil {
-		return NewErrorReply(rpc.MessageID, err.(*RPCError))
+		return NewErrorReply(rpc.MessageID, rpcErrorFromError(err))
 	}
 
 	// Validate filter
 	if err := req.Filter.Validate("get"); err != nil {
-		return NewErrorReply(rpc.MessageID, err.(*RPCError))
+		return NewErrorReply(rpc.MessageID, rpcErrorFromError(err))
 	}
 
 	// Validate filter depth and size limits
 	if err := ValidateFilterDepthAndSize("get", req.Filter); err != nil {
-		return NewErrorReply(rpc.MessageID, err.(*RPCError))
+		return NewErrorReply(rpc.MessageID, rpcErrorFromError(err))
 	}
 
 	operationalData, err := s.getOperationalData(ctx, req.Filter)
@@ -56,7 +56,7 @@ func (s *Server) handleGet(ctx context.Context, sess *Session, rpc *RPC) *RPCRep
 		if rpcErr, ok := err.(*RPCError); ok {
 			return NewErrorReply(rpc.MessageID, rpcErr)
 		}
-		return NewErrorReply(rpc.MessageID, ErrOperationFailed(fmt.Sprintf("failed to retrieve operational data: %v", err)))
+		return NewErrorReply(rpc.MessageID, ErrOperationFailed("failed to retrieve operational data"))
 	}
 
 	return NewDataReply(rpc.MessageID, operationalData)

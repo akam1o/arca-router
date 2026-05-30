@@ -20,6 +20,7 @@ type FRRPlugin struct {
 	fileApplier pkgfrr.Applier
 	mode        pkgfrr.BackendMode
 	log         *slog.Logger
+	healthCheck func(context.Context) error
 
 	statusReader    pkgfrr.VRRPStatusReader
 	bfdStatusReader pkgfrr.BFDStatusReader
@@ -29,6 +30,7 @@ type FRRPlugin struct {
 
 	currentConfig     string
 	rollbackConfig    string
+	hasRollbackConfig bool
 	currentFRRConfig  *pkgfrr.Config
 	rollbackFRRConfig *pkgfrr.Config
 	currentApplyMode  pkgfrr.BackendMode
@@ -47,6 +49,7 @@ func NewFRRPluginWithApplyMode(log *slog.Logger, mode pkgfrr.BackendMode) *FRRPl
 		fileApplier:     pkgfrr.NewApplier(pkgfrr.BackendModeFile),
 		mode:            mode,
 		log:             log.With("plugin", "frr", "apply_mode", string(mode)),
+		healthCheck:     defaultFRRHealthCheck,
 		statusReader:    pkgfrr.NewVtyshVRRPStatusReader(),
 		bfdStatusReader: pkgfrr.NewVtyshBFDStatusReader(),
 	}
@@ -77,7 +80,49 @@ func (p *FRRPlugin) Close() error {
 }
 
 func (p *FRRPlugin) HealthCheck(ctx context.Context) error {
-	// Could check if FRR daemons are running
+	p.mu.Lock()
+	healthCheck := p.healthCheck
+	cfg := p.currentFRRConfig
+	p.mu.Unlock()
+
+	if healthCheck == nil {
+		healthCheck = defaultFRRHealthCheck
+	}
+	if err := healthCheck(ctx); err != nil {
+		return fmt.Errorf("check FRR backend: %w", err)
+	}
+	if cfg == nil {
+		return nil
+	}
+
+	vrrpStatus := p.checkVRRPOperationalStatus(ctx, cfg)
+	bfdStatus := p.checkBFDOperationalStatus(ctx, cfg)
+	p.mu.Lock()
+	p.vrrpStatus = vrrpStatus
+	p.bfdStatus = bfdStatus
+	p.mu.Unlock()
+
+	if err := frrHealthStatusError("VRRP", vrrpStatus.LastError, vrrpStatus.Issues); err != nil {
+		return err
+	}
+	if err := frrHealthStatusError("BFD", bfdStatus.LastError, bfdStatus.Issues); err != nil {
+		return err
+	}
+	return nil
+}
+
+func defaultFRRHealthCheck(ctx context.Context) error {
+	_, err := pkgfrr.ShowRunningConfig(ctx)
+	return err
+}
+
+func frrHealthStatusError(name, lastError string, issues []string) error {
+	if lastError != "" {
+		return fmt.Errorf("check FRR %s status: %s", name, lastError)
+	}
+	if len(issues) > 0 {
+		return fmt.Errorf("check FRR %s status: %s", name, issues[0])
+	}
 	return nil
 }
 
@@ -126,6 +171,7 @@ func (p *FRRPlugin) ApplyChanges(ctx context.Context, diff *engine.ConfigDiff) e
 	previousConfig := p.currentConfig
 	previousFRRConfig := p.currentFRRConfig
 	previousApplyMode := p.currentApplyMode
+	hasRollbackConfig := previousConfig != "" || previousFRRConfig != nil
 	if previousApplyMode == "" {
 		previousApplyMode = p.mode
 	}
@@ -134,17 +180,32 @@ func (p *FRRPlugin) ApplyChanges(ctx context.Context, diff *engine.ConfigDiff) e
 			previousConfig = oldConfigContent
 			previousFRRConfig = oldFRRConfig
 			previousApplyMode = p.applyModeForConfig(oldFRRConfig)
+			hasRollbackConfig = true
 		}
-	}
-
-	applier, applyMode := p.applierForConfig(frrConfig)
-	if err := applier.ApplyConfig(ctx, configContent, frrConfig); err != nil {
-		return fmt.Errorf("apply FRR config: %w", err)
 	}
 
 	p.rollbackConfig = previousConfig
 	p.rollbackFRRConfig = previousFRRConfig
 	p.rollbackApplyMode = previousApplyMode
+	p.hasRollbackConfig = hasRollbackConfig
+
+	applier, applyMode := p.applierForConfig(frrConfig)
+	applied := false
+	if applyMode == pkgfrr.BackendModeTransactional && previousFRRConfig != nil {
+		if diffApplier, ok := applier.(pkgfrr.DifferentialApplier); ok {
+			diffApplied, err := diffApplier.ApplyConfigDiff(ctx, previousFRRConfig, frrConfig)
+			if err != nil {
+				return fmt.Errorf("apply FRR config diff: %w", err)
+			}
+			applied = diffApplied
+		}
+	}
+	if !applied {
+		if err := applier.ApplyConfig(ctx, configContent, frrConfig); err != nil {
+			return fmt.Errorf("apply FRR config: %w", err)
+		}
+	}
+
 	p.currentConfig = configContent
 	p.currentFRRConfig = frrConfig
 	p.currentApplyMode = applyMode
@@ -197,14 +258,10 @@ func (p *FRRPlugin) RollbackChanges(ctx context.Context, diff *engine.ConfigDiff
 	p.mu.Lock()
 	defer p.mu.Unlock()
 
-	if p.rollbackConfig == "" {
-		p.log.Warn("No previous FRR config for rollback")
-		return nil
-	}
-
 	rollbackConfig := p.rollbackConfig
 	rollbackFRRConfig := p.rollbackFRRConfig
 	rollbackApplyMode := p.rollbackApplyMode
+	hasRollbackConfig := p.hasRollbackConfig
 	if rollbackFRRConfig == nil && diff != nil && diff.OldConfig != nil {
 		if oldFRRConfig, oldConfigContent, oldErr := generateFRRArtifacts(diff.OldConfig); oldErr == nil {
 			rollbackFRRConfig = oldFRRConfig
@@ -214,7 +271,12 @@ func (p *FRRPlugin) RollbackChanges(ctx context.Context, diff *engine.ConfigDiff
 			if rollbackApplyMode == "" {
 				rollbackApplyMode = p.applyModeForConfig(oldFRRConfig)
 			}
+			hasRollbackConfig = true
 		}
+	}
+	if !hasRollbackConfig {
+		p.log.Warn("No previous FRR config for rollback")
+		return nil
 	}
 
 	applier, applyMode := p.applierForRollback(rollbackFRRConfig, rollbackApplyMode)

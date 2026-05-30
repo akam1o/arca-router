@@ -2,6 +2,7 @@ package frr
 
 import (
 	"context"
+	"strconv"
 	"strings"
 	"testing"
 )
@@ -997,6 +998,74 @@ func TestBuildMgmtOperationsStaticRouteBFD(t *testing.T) {
 	}
 }
 
+func TestBuildMgmtDiffOperationsStaticRoutesOnly(t *testing.T) {
+	oldCfg := &Config{
+		BGP: &BGPConfig{ASN: 65000, RouterID: "192.0.2.1"},
+		StaticRoutes: []StaticRoute{
+			{Prefix: "203.0.113.0/24", NextHop: "192.0.2.1", Distance: 10},
+			{Prefix: "198.51.100.0/24", NextHop: "192.0.2.2"},
+		},
+	}
+	newCfg := &Config{
+		BGP: &BGPConfig{ASN: 65000, RouterID: "192.0.2.1"},
+		StaticRoutes: []StaticRoute{
+			{Prefix: "203.0.113.0/24", NextHop: "192.0.2.1", Distance: 20},
+			{Prefix: "192.0.2.0/24", NextHop: "192.0.2.254"},
+		},
+	}
+
+	ops, ok, err := BuildMgmtDiffOperations(oldCfg, newCfg)
+	if err != nil {
+		t.Fatalf("BuildMgmtDiffOperations() error = %v", err)
+	}
+	if !ok {
+		t.Fatal("BuildMgmtDiffOperations() ok = false, want static route diff support")
+	}
+	commands := commandsFromOps(ops)
+	for _, want := range []string{
+		"mgmt delete-config /frr-routing:routing/control-plane-protocols/control-plane-protocol[type='frr-staticd:staticd'][name='staticd'][vrf='default']/frr-staticd:staticd/route-list[prefix='198.51.100.0/24'][src-prefix='::/0'][afi-safi='frr-routing:ipv4-unicast']",
+		"mgmt delete-config /frr-routing:routing/control-plane-protocols/control-plane-protocol[type='frr-staticd:staticd'][name='staticd'][vrf='default']/frr-staticd:staticd/route-list[prefix='203.0.113.0/24'][src-prefix='::/0'][afi-safi='frr-routing:ipv4-unicast']/path-list[table-id='0'][nh-type='ip4'][vrf='default'][gateway='192.0.2.1'][interface='']",
+		"mgmt set-config /frr-routing:routing/control-plane-protocols/control-plane-protocol[type='frr-staticd:staticd'][name='staticd'][vrf='default']/frr-staticd:staticd/route-list[prefix='203.0.113.0/24'][src-prefix='::/0'][afi-safi='frr-routing:ipv4-unicast']/path-list[table-id='0'][nh-type='ip4'][vrf='default'][gateway='192.0.2.1'][interface='']/distance 20",
+		"mgmt set-config /frr-routing:routing/control-plane-protocols/control-plane-protocol[type='frr-staticd:staticd'][name='staticd'][vrf='default']/frr-staticd:staticd/route-list[prefix='192.0.2.0/24'][src-prefix='::/0'][afi-safi='frr-routing:ipv4-unicast']/path-list[table-id='0'][nh-type='ip4'][vrf='default'][gateway='192.0.2.254'][interface='']/distance 1",
+	} {
+		if !strings.Contains(commands, want) {
+			t.Fatalf("commands missing %q:\n%s", want, commands)
+		}
+	}
+	if strings.Contains(commands, "type='frr-bgp:bgp'") {
+		t.Fatalf("commands include BGP subtree operations for static route diff:\n%s", commands)
+	}
+}
+
+func TestBuildMgmtDiffOperationsFallsBackForNonStaticChanges(t *testing.T) {
+	oldCfg := &Config{BGP: &BGPConfig{ASN: 65000, RouterID: "192.0.2.1"}}
+	newCfg := &Config{BGP: &BGPConfig{ASN: 65001, RouterID: "192.0.2.1"}}
+
+	ops, ok, err := BuildMgmtDiffOperations(oldCfg, newCfg)
+	if err != nil {
+		t.Fatalf("BuildMgmtDiffOperations() error = %v", err)
+	}
+	if ok || len(ops) != 0 {
+		t.Fatalf("BuildMgmtDiffOperations() = (%#v, %v), want fallback", ops, ok)
+	}
+}
+
+func TestBuildMgmtDiffOperationsDeletesStaticProtocolWhenAllRoutesRemoved(t *testing.T) {
+	ops, ok, err := BuildMgmtDiffOperations(
+		&Config{StaticRoutes: []StaticRoute{{Prefix: "203.0.113.0/24", NextHop: "192.0.2.1"}}},
+		&Config{},
+	)
+	if err != nil {
+		t.Fatalf("BuildMgmtDiffOperations() error = %v", err)
+	}
+	if !ok {
+		t.Fatal("BuildMgmtDiffOperations() ok = false, want static route diff support")
+	}
+	if got, want := commandsFromOps(ops), "mgmt delete-config "+staticProtocolBase(); got != want {
+		t.Fatalf("commands = %q, want %q", got, want)
+	}
+}
+
 func TestBuildMgmtOperationsRejectsUnknownStaticRouteBFDProfile(t *testing.T) {
 	_, err := BuildMgmtOperations(&Config{
 		StaticRoutes: []StaticRoute{
@@ -1077,4 +1146,32 @@ func commandsFromOps(ops []MgmtOperation) string {
 		commands = append(commands, op.Command())
 	}
 	return strings.Join(commands, "\n")
+}
+
+func BenchmarkBuildMgmtDiffOperationsStaticRoutes(b *testing.B) {
+	oldCfg := benchmarkStaticRouteConfig(10000)
+	newCfg := benchmarkStaticRouteConfig(10000)
+	newCfg.StaticRoutes[len(newCfg.StaticRoutes)-1].Distance = 42
+
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		ops, ok, err := BuildMgmtDiffOperations(oldCfg, newCfg)
+		if err != nil {
+			b.Fatalf("BuildMgmtDiffOperations() error = %v", err)
+		}
+		if !ok || len(ops) == 0 {
+			b.Fatalf("BuildMgmtDiffOperations() = (%d ops, %v), want static diff ops", len(ops), ok)
+		}
+	}
+}
+
+func benchmarkStaticRouteConfig(count int) *Config {
+	routes := make([]StaticRoute, 0, count)
+	for i := 0; i < count; i++ {
+		routes = append(routes, StaticRoute{
+			Prefix:  "10." + strconv.Itoa(i/256) + "." + strconv.Itoa(i%256) + ".0/24",
+			NextHop: "192.0.2.1",
+		})
+	}
+	return &Config{StaticRoutes: routes}
 }

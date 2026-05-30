@@ -75,23 +75,23 @@ func (s *Server) checkLockOwnership(ctx context.Context, sess *Session, target, 
 func (s *Server) handleGetConfig(ctx context.Context, sess *Session, rpc *RPC) *RPCReply {
 	var req GetConfigRequest
 	if err := rpc.UnmarshalOperation(&req); err != nil {
-		return NewErrorReply(rpc.MessageID, err.(*RPCError))
+		return NewErrorReply(rpc.MessageID, rpcErrorFromError(err))
 	}
 
 	// Get datastore name
 	source, err := req.Source.GetDatastore()
 	if err != nil {
-		return NewErrorReply(rpc.MessageID, err.(*RPCError))
+		return NewErrorReply(rpc.MessageID, rpcErrorFromError(err))
 	}
 
 	// Validate filter
 	if err := req.Filter.Validate("get-config"); err != nil {
-		return NewErrorReply(rpc.MessageID, err.(*RPCError))
+		return NewErrorReply(rpc.MessageID, rpcErrorFromError(err))
 	}
 
 	// Validate filter depth and size limits
 	if err := ValidateFilterDepthAndSize("get-config", req.Filter); err != nil {
-		return NewErrorReply(rpc.MessageID, err.(*RPCError))
+		return NewErrorReply(rpc.MessageID, rpcErrorFromError(err))
 	}
 
 	// Get configuration text from datastore
@@ -126,7 +126,7 @@ func (s *Server) handleGetConfig(ctx context.Context, sess *Session, rpc *RPC) *
 	cfg, err := TextToConfig(textCfg)
 	if err != nil {
 		log.Printf("[NETCONF] Text to config conversion error: %v", err)
-		return NewErrorReply(rpc.MessageID, ErrDatastoreError(fmt.Sprintf("failed to parse %s config: %v", source, err)))
+		return NewErrorReply(rpc.MessageID, ErrDatastoreError(fmt.Sprintf("failed to parse %s config", source)))
 	}
 
 	// Convert config to XML. Experimental XPath filters are evaluated after
@@ -348,13 +348,13 @@ func writeXMLAttribute(buf *bytes.Buffer, name, value string) {
 func (s *Server) handleEditConfig(ctx context.Context, sess *Session, rpc *RPC) *RPCReply {
 	var req EditConfigRequest
 	if err := rpc.UnmarshalOperation(&req); err != nil {
-		return NewErrorReply(rpc.MessageID, err.(*RPCError))
+		return NewErrorReply(rpc.MessageID, rpcErrorFromError(err))
 	}
 
 	// Get target datastore
 	target, err := req.Target.GetDatastore()
 	if err != nil {
-		return NewErrorReply(rpc.MessageID, err.(*RPCError))
+		return NewErrorReply(rpc.MessageID, rpcErrorFromError(err))
 	}
 
 	// Only candidate is writable (writable-running not supported)
@@ -419,7 +419,7 @@ func (s *Server) handleEditConfig(ctx context.Context, sess *Session, rpc *RPC) 
 	// Parse config XML to internal config structure
 	configXML, err := req.Config.XML()
 	if err != nil {
-		return NewErrorReply(rpc.MessageID, err.(*RPCError))
+		return NewErrorReply(rpc.MessageID, rpcErrorFromError(err))
 	}
 	newCfg, err := XMLToConfig(configXML, defaultOp)
 	if err != nil {
@@ -477,7 +477,7 @@ func (s *Server) handleEditConfig(ctx context.Context, sess *Session, rpc *RPC) 
 	// Save merged config to candidate
 	if err := s.datastore.SaveCandidate(ctx, sess.ID, mergedTextCfg); err != nil {
 		log.Printf("[NETCONF] Failed to save candidate: %v", err)
-		return NewErrorReply(rpc.MessageID, ErrDatastoreError(fmt.Sprintf("failed to save candidate: %v", err)))
+		return NewErrorReply(rpc.MessageID, ErrDatastoreError("failed to save candidate"))
 	}
 
 	return NewOKReply(rpc.MessageID)
@@ -503,13 +503,13 @@ func (r *CopyConfigRequest) SetInheritedNamespaceAttrs(attrs []xml.Attr) {
 func (s *Server) handleCopyConfig(ctx context.Context, sess *Session, rpc *RPC) *RPCReply {
 	var req CopyConfigRequest
 	if err := rpc.UnmarshalOperation(&req); err != nil {
-		return NewErrorReply(rpc.MessageID, err.(*RPCError))
+		return NewErrorReply(rpc.MessageID, rpcErrorFromError(err))
 	}
 
 	// Get target datastore
 	target, err := req.Target.GetDatastore()
 	if err != nil {
-		return NewErrorReply(rpc.MessageID, err.(*RPCError))
+		return NewErrorReply(rpc.MessageID, rpcErrorFromError(err))
 	}
 
 	// Only candidate is writable as target
@@ -534,7 +534,7 @@ func (s *Server) handleCopyConfig(ctx context.Context, sess *Session, rpc *RPC) 
 	if req.Source.Config != nil {
 		configXML, err := req.Source.Config.XML()
 		if err != nil {
-			return NewErrorReply(rpc.MessageID, err.(*RPCError))
+			return NewErrorReply(rpc.MessageID, rpcErrorFromError(err))
 		}
 		srcCfg, err = XMLToConfig(configXML, DefaultOpMerge)
 		if err != nil {
@@ -552,7 +552,7 @@ func (s *Server) handleCopyConfig(ctx context.Context, sess *Session, rpc *RPC) 
 	} else {
 		source, err := req.Source.GetDatastore()
 		if err != nil {
-			return NewErrorReply(rpc.MessageID, err.(*RPCError))
+			return NewErrorReply(rpc.MessageID, rpcErrorFromError(err))
 		}
 		switch source {
 		case DatastoreRunning:
@@ -594,7 +594,7 @@ func (s *Server) handleCopyConfig(ctx context.Context, sess *Session, rpc *RPC) 
 	// Save to candidate
 	if err := s.datastore.SaveCandidate(ctx, sess.ID, srcTextCfg); err != nil {
 		log.Printf("[NETCONF] CopyConfig target write error: %v", err)
-		return NewErrorReply(rpc.MessageID, ErrDatastoreError(fmt.Sprintf("failed to write target %s: %v", target, err)))
+		return NewErrorReply(rpc.MessageID, ErrDatastoreError(fmt.Sprintf("failed to write target %s", target)))
 	}
 
 	return NewOKReply(rpc.MessageID)
@@ -621,7 +621,7 @@ func (s *Server) readCandidateConfigText(ctx context.Context, sessionID, failure
 		if isDatastoreNotFound(err) {
 			return "", false, nil
 		}
-		return "", false, ErrDatastoreError(fmt.Sprintf("%s: %v", failureMessage, err))
+		return "", false, ErrDatastoreError(failureMessage)
 	}
 	if candidate == nil {
 		return "", false, nil
@@ -642,7 +642,7 @@ func (s *Server) readRunningConfigText(ctx context.Context, emptyOnMissing bool,
 			}
 			return "", ErrOperationFailed(missingMessage)
 		}
-		return "", ErrDatastoreError(fmt.Sprintf("%s: %v", failureMessage, err))
+		return "", ErrDatastoreError(failureMessage)
 	}
 	if running == nil {
 		if emptyOnMissing {
@@ -668,13 +668,13 @@ type DeleteConfigRequest struct {
 func (s *Server) handleDeleteConfig(ctx context.Context, sess *Session, rpc *RPC) *RPCReply {
 	var req DeleteConfigRequest
 	if err := rpc.UnmarshalOperation(&req); err != nil {
-		return NewErrorReply(rpc.MessageID, err.(*RPCError))
+		return NewErrorReply(rpc.MessageID, rpcErrorFromError(err))
 	}
 
 	// Get target datastore
 	target, err := req.Target.GetDatastore()
 	if err != nil {
-		return NewErrorReply(rpc.MessageID, err.(*RPCError))
+		return NewErrorReply(rpc.MessageID, rpcErrorFromError(err))
 	}
 
 	// Only candidate can be deleted
@@ -696,7 +696,7 @@ func (s *Server) handleDeleteConfig(ctx context.Context, sess *Session, rpc *RPC
 	// Delete candidate (idempotent)
 	if err := s.datastore.DeleteCandidate(ctx, sess.ID); err != nil {
 		log.Printf("[NETCONF] DeleteConfig error: %v", err)
-		return NewErrorReply(rpc.MessageID, ErrDatastoreError(fmt.Sprintf("failed to delete candidate: %v", err)))
+		return NewErrorReply(rpc.MessageID, ErrDatastoreError("failed to delete candidate"))
 	}
 
 	return NewOKReply(rpc.MessageID)

@@ -520,10 +520,10 @@ set system services web-ui port 8080
 set system services snmp enabled true
 set system services snmp listen-address 127.0.0.1
 set system services snmp port 1161
-set system services snmp community public
+set system services snmp community <read-only-community>
 ```
 
-`listen-address` must be an IP address or `localhost`. When enabled without an explicit port, the daemon uses the standard UDP port `161`. When enabled without a community, the daemon uses `public`.
+`listen-address` must be an IP address or `localhost`. When enabled without an explicit port, the daemon uses the standard UDP port `161`. SNMPv2c requires an explicit community when enabled, and the well-known default communities `public` and `private` are rejected.
 
 ### Multi-chassis and VRRP
 
@@ -623,18 +623,23 @@ VNI values must be between `1` and `16777215`. `type l2` requires `bridge-domain
 
 **Syntax**:
 ```
+set security netconf ssh enabled true
+set security netconf ssh listen-address <address>
 set security netconf ssh port <port>
 ```
 
 **Parameters**:
+- `enabled`: enables the embedded NETCONF/SSH server when set to `true`
+- `<address>`: IP address or `localhost` to bind (default when enabled: `127.0.0.1`)
 - `<port>`: TCP port number (1-65535, default: 830)
 
 **Example**:
 ```
+set security netconf ssh enabled true
 set security netconf ssh port 830
 ```
 
-**Note**: The NETCONF server is built into `arca-routerd`. When `--netconf-listen` is omitted, the daemon listens on the configured `security netconf ssh port`; if that is also unset, it uses `:830`. `--netconf-listen` remains the explicit runtime override and can include a listen address.
+**Note**: The NETCONF server is built into `arca-routerd`. When `--netconf-listen` is omitted, NETCONF remains disabled until `security netconf ssh enabled true` or a configured `security netconf ssh listen-address` / `port` is present. Enabled NETCONF binds to `127.0.0.1:830` by default unless `listen-address` or `port` is configured. `--netconf-listen` remains the explicit runtime override and enables NETCONF for that daemon process.
 
 NETCONF XML get-config/edit-config supports the v0.6 management-plane model for `system services`, `chassis cluster`, `protocols mpls`, `protocols vrrp`, `routing-instances`, `class-of-service`, the v0.8 `protocols evpn` VNI intent model, and non-sensitive `security netconf` / `security rate-limit` settings. Security user secrets are intentionally not emitted in NETCONF XML replies.
 
@@ -951,6 +956,7 @@ set protocols ospf router-id 198.51.100.1
 set protocols ospf area 0.0.0.0 interface ge-0/0/1 passive
 
 # Security configuration
+set security netconf ssh enabled true
 set security netconf ssh port 830
 
 set security users user admin password AdminPass123
@@ -987,14 +993,23 @@ Common options:
 --etcd-key <path>          etcd TLS client key
 --etcd-ca <path>           etcd TLS CA certificate
 --grpc-socket <path>       Internal gRPC Unix socket (default: /run/arca-router/routerd.sock)
---netconf-listen <addr>    NETCONF/SSH listen address; overrides security netconf ssh port (default: :830)
+--grpc-listen <addr>       TCP/TLS gRPC listen address
+--grpc-tls-cert <path>     gRPC server TLS certificate
+--grpc-tls-key <path>      gRPC server TLS private key
+--grpc-client-ca <path>    CA certificate for verifying gRPC client certificates
+--grpc-client-identity <value>
+                           Comma-separated allowed gRPC client certificate identities
+--grpc-client-role <value> Comma-separated gRPC client certificate identity=role mappings
+--netconf-listen <addr>    NETCONF/SSH listen address; overrides security netconf ssh listen-address/port and enables NETCONF
 --host-key <path>          NETCONF SSH host key path
 --user-db <path>           NETCONF user database path
 --frr-apply-mode <mode>    FRR backend: transactional or file (default: transactional)
 --metrics-listen <addr>    Prometheus listen address; overrides system services prometheus config
 --web-listen <addr>        Web UI listen address; overrides system services web-ui config
+--web-api-token-file <path>
+                           Web/NMS API token file (name:role:token or name:role:sha256:<hex>[:not-after=<RFC3339>])
 --snmp-listen <addr>       SNMPv2c UDP listen address; disabled when empty
---snmp-community <value>   SNMPv2c read-only community; overrides system services snmp config (default: public)
+--snmp-community <value>   SNMPv2c read-only community; overrides system services snmp config; required when SNMP is enabled
 --mock-vpp                 Use mock VPP client for tests
 ```
 
@@ -1100,7 +1115,7 @@ Configuration writes require `operator` or `admin`. The dashboard editor calls `
 Start the read-only SNMPv2c endpoint with:
 
 ```bash
-arca-routerd --snmp-listen=:1161 --snmp-community=public
+arca-routerd --snmp-listen=:1161 --snmp-community=<read-only-community>
 ```
 
 It can also be enabled from running configuration:
@@ -1109,10 +1124,10 @@ It can also be enabled from running configuration:
 set system services snmp enabled true
 set system services snmp listen-address 127.0.0.1
 set system services snmp port 1161
-set system services snmp community public
+set system services snmp community <read-only-community>
 ```
 
-The packaged systemd unit grants `CAP_NET_BIND_SERVICE`, so the standard UDP port 161 can be used when configured:
+The packaged systemd unit grants `CAP_NET_BIND_SERVICE`, so the standard UDP port 161 can be used when configured. The well-known default communities `public` and `private` are rejected:
 
 ```bash
 arca-routerd --snmp-listen=:161 --snmp-community=<read-only-community>
@@ -1289,7 +1304,7 @@ curl http://127.0.0.1:8080/api/status
 curl http://127.0.0.1:8080/api/config
 
 # SNMP, when --snmp-listen or system services snmp is enabled
-snmpget -v 2c -c public 127.0.0.1:1161 1.3.6.1.3.9950.1.3.0
+snmpget -v 2c -c <read-only-community> 127.0.0.1:1161 1.3.6.1.3.9950.1.3.0
 ```
 
 ### Verify Interface Mapping

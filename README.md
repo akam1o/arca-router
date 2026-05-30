@@ -43,7 +43,7 @@ Current capabilities:
 
 ### Required Software
 
-- **VPP 24.10+**: Vector Packet Processing framework
+- **VPP 24.10 release series**: Vector Packet Processing framework
   - See [VPP Setup Guide (Debian)](docs/vpp-setup-debian.md) and [VPP Setup Guide (RHEL9)](docs/vpp-setup-rhel9.md)
 
 - **FRR 8.0+**: Free Range Routing for dynamic routing protocols
@@ -56,7 +56,7 @@ Current capabilities:
 
 ## Quick Start
 
-Requires VPP 24.10+ and FRR 8.0+ with the standard arca-router FRR daemon set enabled.
+Requires the VPP 24.10 release series and FRR 8.0+ with the standard arca-router FRR daemon set enabled.
 
 ### 1. Install Prerequisites
 
@@ -197,7 +197,8 @@ sudo journalctl -u arca-routerd -f
 Edit `/etc/arca-router/arca-router.conf` to enable NETCONF and create users:
 
 ```
-# Enable NETCONF on port 830
+# Enable NETCONF on loopback port 830
+set security netconf ssh enabled true
 set security netconf ssh port 830
 
 # Create admin user
@@ -213,14 +214,14 @@ set security rate-limit per-ip 10
 set security rate-limit per-user 20
 ```
 
-> NETCONF is built into `arca-routerd`; no separate NETCONF daemon is needed. When `--netconf-listen` is omitted, the daemon listens on the configured NETCONF port and falls back to `:830`.
+> NETCONF is built into `arca-routerd`; no separate NETCONF daemon is needed. When `--netconf-listen` is omitted, NETCONF remains disabled until `security netconf ssh enabled true` or a configured NETCONF SSH listen address/port is present. Enabled NETCONF binds to `127.0.0.1:830` by default unless `listen-address` or `port` is configured.
 
 Standard NETCONF `:xpath` capability advertisement is enabled by default. Use
 `arca-routerd --netconf-standard-xpath=false` only for compatibility testing
 against clients that cannot handle advertised XPath filters. The NETCONF
 `startup` datastore is intentionally unsupported and is not advertised.
 
-For automation against the Web/NMS API, provide a `0600` token file with one `name:role:token` entry per line and start the daemon with `--web-api-token-file=/etc/arca-router/web-api-tokens`. Tokens can use `Authorization: Bearer <token>` or `X-API-Key: <token>` and reuse the `read-only`, `operator`, and `admin` RBAC roles.
+For automation against the Web/NMS API, provide a `0600` token file with one `name:role:token` or `name:role:sha256:<hex>[:not-after=<RFC3339>]` entry per line and start the daemon with `--web-api-token-file=/etc/arca-router/web-api-tokens`. Plain token values must be at least 32 characters, must not contain whitespace, and should be generated from random bytes, for example `openssl rand -base64 32`. Prefer storing `sha256:<hex>` token hashes in the file, with `not-after` for bounded rotation windows; clients still present the original token through `Authorization: Bearer <token>` or `X-API-Key: <token>` and reuse the `read-only`, `operator`, and `admin` RBAC roles. During request authentication the daemon checks token file metadata and reloads the file when it changes, so atomic file replacement can rotate or revoke tokens without restarting the daemon.
 
 **Test NETCONF connection**:
 

@@ -25,19 +25,26 @@ const defaultPrometheusPort = 9090
 const (
 	classOfServiceIntentOnlyStatus    = "intent-only"
 	classOfServiceNotConfiguredStatus = "not configured"
+	observabilityReadHeaderTimeout    = 5 * time.Second
+	observabilityReadTimeout          = 15 * time.Second
+	observabilityWriteTimeout         = 30 * time.Second
+	observabilityIdleTimeout          = 60 * time.Second
 )
 
 type metricsSource struct {
-	startedAt     time.Time
-	engine        *engine.Engine
-	netconfServer *netconf.SSHServer
-	datastore     *datastore.Config
-	configAPI     webConfigAPI
-	telemetryAPI  webTelemetryAPI
-	webAPITokens  map[string]webAPIToken
-	configSync    configSyncRuntimeSource
-	frr           frrVRRPSource
-	vpp           vppReconciliationSource
+	startedAt        time.Time
+	engine           *engine.Engine
+	netconfServer    *netconf.SSHServer
+	datastore        *datastore.Config
+	configAPI        webConfigAPI
+	telemetryAPI     webTelemetryAPI
+	webAPITokens     map[string]webAPIToken
+	webAPITokenFile  string
+	webAPITokenCache *webAPITokenCache
+	webLog           *slog.Logger
+	configSync       configSyncRuntimeSource
+	frr              frrVRRPSource
+	vpp              vppReconciliationSource
 }
 
 type frrVRRPSource interface {
@@ -416,20 +423,18 @@ func snapshotPrometheusConfig(snapshot *model.ConfigSnapshot) *model.PrometheusC
 	return snapshot.Config.System.Services.Prometheus
 }
 
-func startMetricsServer(ctx context.Context, listenAddr string, source metricsSource, log *logger.Logger) (<-chan error, error) {
+func startMetricsServerWithShutdown(ctx context.Context, listenAddr string, source metricsSource, log *logger.Logger) (<-chan error, func(context.Context) error, error) {
 	lis, err := net.Listen("tcp", listenAddr)
 	if err != nil {
-		return nil, fmt.Errorf("listen metrics endpoint: %w", err)
+		return nil, nil, fmt.Errorf("listen metrics endpoint: %w", err)
 	}
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("/metrics", source.handleMetrics)
 	mux.HandleFunc("/healthz", source.handleHealthz)
 
-	srv := &http.Server{
-		Handler:           mux,
-		ReadHeaderTimeout: 5 * time.Second,
-	}
+	srv := newObservabilityHTTPServer(mux)
+	shutdown := srv.Shutdown
 
 	errCh := make(chan error, 1)
 	go func() {
@@ -445,12 +450,22 @@ func startMetricsServer(ctx context.Context, listenAddr string, source metricsSo
 		<-ctx.Done()
 		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
-		if err := srv.Shutdown(shutdownCtx); err != nil {
+		if err := shutdown(shutdownCtx); err != nil {
 			log.Error("Metrics endpoint shutdown failed", slog.Any("error", err))
 		}
 	}()
 
-	return errCh, nil
+	return errCh, shutdown, nil
+}
+
+func newObservabilityHTTPServer(handler http.Handler) *http.Server {
+	return &http.Server{
+		Handler:           handler,
+		ReadHeaderTimeout: observabilityReadHeaderTimeout,
+		ReadTimeout:       observabilityReadTimeout,
+		WriteTimeout:      observabilityWriteTimeout,
+		IdleTimeout:       observabilityIdleTimeout,
+	}
 }
 
 func (s metricsSource) handleHealthz(w http.ResponseWriter, r *http.Request) {

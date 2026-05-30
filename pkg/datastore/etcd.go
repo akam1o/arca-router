@@ -6,6 +6,7 @@ import (
 	"crypto/x509"
 	"encoding/json"
 	"fmt"
+	"net/url"
 	"os"
 	"strings"
 	"sync"
@@ -13,6 +14,7 @@ import (
 
 	clientv3 "go.etcd.io/etcd/client/v3"
 
+	"github.com/akam1o/arca-router/pkg/auth"
 	"github.com/akam1o/arca-router/pkg/security"
 )
 
@@ -27,12 +29,18 @@ type etcdDatastore struct {
 
 // NewEtcdDatastore creates a new etcd-backed datastore.
 func NewEtcdDatastore(cfg *Config) (Datastore, error) {
+	if cfg == nil {
+		return nil, fmt.Errorf("datastore config cannot be nil")
+	}
 	if cfg.Backend != BackendEtcd {
 		return nil, fmt.Errorf("invalid backend type: %s (expected %s)", cfg.Backend, BackendEtcd)
 	}
 
 	if len(cfg.EtcdEndpoints) == 0 {
 		return nil, fmt.Errorf("etcd endpoints cannot be empty")
+	}
+	if err := validateEtcdCredentialTransport(cfg); err != nil {
+		return nil, err
 	}
 
 	// Set default prefix if not specified
@@ -92,14 +100,40 @@ func NewEtcdDatastore(cfg *Config) (Datastore, error) {
 		prefix:    prefix,
 		timeout:   timeout,
 	}
+	if err := ds.ensureCommitHistoryIndex(ctx); err != nil {
+		if closeErr := client.Close(); closeErr != nil {
+			_ = closeErr
+		}
+		return nil, fmt.Errorf("ensure commit history index: %w", err)
+	}
 
 	return ds, nil
+}
+
+func validateEtcdCredentialTransport(cfg *Config) error {
+	if strings.TrimSpace(cfg.EtcdUsername) == "" && cfg.EtcdPassword == "" {
+		return nil
+	}
+	for _, endpoint := range cfg.EtcdEndpoints {
+		if !etcdEndpointUsesTLS(endpoint) {
+			return fmt.Errorf("etcd credentials require TLS; endpoint %q must use https", endpoint)
+		}
+	}
+	return nil
+}
+
+func etcdEndpointUsesTLS(endpoint string) bool {
+	parsed, err := url.Parse(strings.TrimSpace(endpoint))
+	if err != nil {
+		return false
+	}
+	return strings.EqualFold(parsed.Scheme, "https")
 }
 
 // buildTLSConfig creates a TLS configuration from the provided TLSConfig.
 func buildTLSConfig(cfg *TLSConfig) (*tls.Config, error) {
 	// Load client certificate and key
-	cert, err := tls.LoadX509KeyPair(cfg.CertFile, cfg.KeyFile)
+	cert, err := auth.LoadX509KeyPair(cfg.CertFile, cfg.KeyFile)
 	if err != nil {
 		return nil, fmt.Errorf("failed to load client cert/key: %w", err)
 	}

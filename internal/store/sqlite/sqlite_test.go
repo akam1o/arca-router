@@ -7,7 +7,9 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/akam1o/arca-router/internal/correlation"
 	"github.com/akam1o/arca-router/internal/model"
+	"github.com/akam1o/arca-router/internal/store"
 	pkgconfig "github.com/akam1o/arca-router/pkg/config"
 	"github.com/akam1o/arca-router/pkg/datastore"
 )
@@ -97,9 +99,7 @@ func TestCleanupEphemeralStateRemovesLocksAndCandidates(t *testing.T) {
 }
 
 func TestSaveCommitStoresSetCommands(t *testing.T) {
-	installLegacyTextParser(t)
-
-	st, err := NewFromPath(filepath.Join(t.TempDir(), "config.db"))
+	st, err := NewFromPath(filepath.Join(t.TempDir(), "config.db"), testLegacyTextParserOption())
 	if err != nil {
 		t.Fatalf("NewFromPath() error = %v", err)
 	}
@@ -148,6 +148,258 @@ func TestSaveCommitStoresSetCommands(t *testing.T) {
 	if commit == nil || commit.Config == nil || commit.Config.System == nil || commit.Config.System.HostName != "router1" {
 		t.Fatalf("commit = %#v, want parsed router1 config", commit)
 	}
+	if !strings.Contains(commit.ConfigText, "set system host-name router1") {
+		t.Fatalf("commit config text = %q, want archived set-command text", commit.ConfigText)
+	}
+}
+
+func TestSaveCommitPropagatesCorrelationIDToAudit(t *testing.T) {
+	st, err := NewFromPath(filepath.Join(t.TempDir(), "config.db"))
+	if err != nil {
+		t.Fatalf("NewFromPath() error = %v", err)
+	}
+	t.Cleanup(func() { _ = st.Close() })
+
+	ctx := correlation.WithID(context.Background(), "request-123")
+	snap := model.NewSnapshot(&model.RouterConfig{
+		System:     &model.SystemConfig{HostName: "router1"},
+		Interfaces: map[string]*model.InterfaceConfig{},
+	}, 1, "alice", "test")
+	if _, err := st.SaveCommit(ctx, snap); err != nil {
+		t.Fatalf("SaveCommit() error = %v", err)
+	}
+
+	events, err := st.Legacy().ListAuditEvents(context.Background(), &datastore.AuditOptions{Action: "commit"})
+	if err != nil {
+		t.Fatalf("ListAuditEvents() error = %v", err)
+	}
+	if len(events) != 1 {
+		t.Fatalf("audit events = %d, want 1", len(events))
+	}
+	if events[0].CorrelationID != "request-123" {
+		t.Fatalf("CorrelationID = %q, want request-123", events[0].CorrelationID)
+	}
+}
+
+func TestAuditLogRejectsUnmarshalableDetails(t *testing.T) {
+	st, err := NewFromPath(filepath.Join(t.TempDir(), "config.db"))
+	if err != nil {
+		t.Fatalf("NewFromPath() error = %v", err)
+	}
+	t.Cleanup(func() { _ = st.Close() })
+
+	err = st.AuditLog(context.Background(), &store.AuditEvent{
+		User:    "alice",
+		Action:  "test",
+		Result:  "failure",
+		Details: map[string]any{"bad": func() {}},
+	})
+	if err == nil {
+		t.Fatal("AuditLog() error = nil, want marshal error")
+	}
+	if !strings.Contains(err.Error(), "marshal audit details") {
+		t.Fatalf("AuditLog() error = %v, want marshal audit details", err)
+	}
+}
+
+func TestGetLatestSnapshotRestoresVersionFromCommitHistory(t *testing.T) {
+	ctx := context.Background()
+	dbPath := filepath.Join(t.TempDir(), "config.db")
+	st, err := NewFromPath(dbPath, testLegacyTextParserOption())
+	if err != nil {
+		t.Fatalf("NewFromPath() error = %v", err)
+	}
+
+	saveSnapshot := func(st *Store, version uint64, hostName, message string) {
+		t.Helper()
+		snap := model.NewSnapshot(&model.RouterConfig{
+			System:     &model.SystemConfig{HostName: hostName},
+			Interfaces: map[string]*model.InterfaceConfig{},
+		}, version, "alice", message)
+		if _, err := st.SaveCommit(ctx, snap); err != nil {
+			t.Fatalf("SaveCommit(%s) error = %v", hostName, err)
+		}
+	}
+
+	saveSnapshot(st, 1, "router1", "first")
+	saveSnapshot(st, 2, "router2", "second")
+	if err := st.Close(); err != nil {
+		t.Fatalf("Close() error = %v", err)
+	}
+
+	reopened, err := NewFromPath(dbPath, testLegacyTextParserOption())
+	if err != nil {
+		t.Fatalf("NewFromPath(reopen) error = %v", err)
+	}
+	latest, err := reopened.GetLatestSnapshot(ctx)
+	if err != nil {
+		t.Fatalf("GetLatestSnapshot() after reopen error = %v", err)
+	}
+	if latest == nil || latest.Config == nil || latest.Config.System == nil {
+		t.Fatalf("latest snapshot after reopen = %#v, want config", latest)
+	}
+	if latest.Version != 2 {
+		t.Fatalf("latest snapshot version after reopen = %d, want 2", latest.Version)
+	}
+	if latest.Config.System.HostName != "router2" {
+		t.Fatalf("latest hostname after reopen = %q, want router2", latest.Config.System.HostName)
+	}
+
+	saveSnapshot(reopened, latest.Version+1, "router3", "third")
+	if err := reopened.Close(); err != nil {
+		t.Fatalf("Close(reopened) error = %v", err)
+	}
+
+	reopenedAgain, err := NewFromPath(dbPath, testLegacyTextParserOption())
+	if err != nil {
+		t.Fatalf("NewFromPath(reopen again) error = %v", err)
+	}
+	t.Cleanup(func() { _ = reopenedAgain.Close() })
+	latestAgain, err := reopenedAgain.GetLatestSnapshot(ctx)
+	if err != nil {
+		t.Fatalf("GetLatestSnapshot() after second reopen error = %v", err)
+	}
+	if latestAgain == nil || latestAgain.Config == nil || latestAgain.Config.System == nil {
+		t.Fatalf("latest snapshot after second reopen = %#v, want config", latestAgain)
+	}
+	if latestAgain.Version != 3 {
+		t.Fatalf("latest snapshot version after second reopen = %d, want 3", latestAgain.Version)
+	}
+	if latestAgain.Config.System.HostName != "router3" {
+		t.Fatalf("latest hostname after second reopen = %q, want router3", latestAgain.Config.System.HostName)
+	}
+}
+
+func TestGetLatestSnapshotUsesCommitHistoryCount(t *testing.T) {
+	ds := &snapshotVersionCountingDatastore{
+		running: &datastore.RunningConfig{
+			ConfigText: "set system host-name router1\n",
+		},
+		count: 1234,
+	}
+	st := New(ds, testLegacyTextParserOption())
+
+	latest, err := st.GetLatestSnapshot(context.Background())
+	if err != nil {
+		t.Fatalf("GetLatestSnapshot() error = %v", err)
+	}
+	if latest.Version != 1234 {
+		t.Fatalf("latest version = %d, want 1234", latest.Version)
+	}
+	if ds.countCalls != 1 {
+		t.Fatalf("CountCommitHistory calls = %d, want 1", ds.countCalls)
+	}
+	if ds.listCalls != 0 {
+		t.Fatalf("ListCommitHistory calls = %d, want 0", ds.listCalls)
+	}
+}
+
+func TestStoreRequiresInstanceLegacyTextParser(t *testing.T) {
+	st, err := NewFromPath(filepath.Join(t.TempDir(), "config.db"))
+	if err != nil {
+		t.Fatalf("NewFromPath() error = %v", err)
+	}
+	t.Cleanup(func() { _ = st.Close() })
+
+	snap := model.NewSnapshot(&model.RouterConfig{
+		System:     &model.SystemConfig{HostName: "router1"},
+		Interfaces: map[string]*model.InterfaceConfig{},
+	}, 1, "alice", "test")
+	if _, err := st.SaveCommit(context.Background(), snap); err != nil {
+		t.Fatalf("SaveCommit() error = %v", err)
+	}
+
+	_, err = st.GetLatestSnapshot(context.Background())
+	if err == nil {
+		t.Fatal("GetLatestSnapshot() error = nil, want missing parser error")
+	}
+	if !strings.Contains(err.Error(), "legacy text parser not initialized") {
+		t.Fatalf("GetLatestSnapshot() error = %v, want missing parser error", err)
+	}
+}
+
+func TestStoreUsesInstanceLegacyTextParser(t *testing.T) {
+	ctx := context.Background()
+	newStore := func(hostName string) *Store {
+		t.Helper()
+		st, err := NewFromPath(filepath.Join(t.TempDir(), "config.db"), WithLegacyTextParser(
+			func(text string) (*model.RouterConfig, error) {
+				if text == "" {
+					t.Fatal("legacy parser received empty config text")
+				}
+				return &model.RouterConfig{
+					System:     &model.SystemConfig{HostName: hostName},
+					Interfaces: map[string]*model.InterfaceConfig{},
+				}, nil
+			},
+		))
+		if err != nil {
+			t.Fatalf("NewFromPath() error = %v", err)
+		}
+		t.Cleanup(func() { _ = st.Close() })
+		snap := model.NewSnapshot(&model.RouterConfig{
+			System:     &model.SystemConfig{HostName: "stored"},
+			Interfaces: map[string]*model.InterfaceConfig{},
+		}, 1, "alice", "test")
+		if _, err := st.SaveCommit(ctx, snap); err != nil {
+			t.Fatalf("SaveCommit() error = %v", err)
+		}
+		return st
+	}
+
+	first := newStore("parser-one")
+	second := newStore("parser-two")
+
+	firstLatest, err := first.GetLatestSnapshot(ctx)
+	if err != nil {
+		t.Fatalf("first GetLatestSnapshot() error = %v", err)
+	}
+	secondLatest, err := second.GetLatestSnapshot(ctx)
+	if err != nil {
+		t.Fatalf("second GetLatestSnapshot() error = %v", err)
+	}
+	if firstLatest.Config.System.HostName != "parser-one" {
+		t.Fatalf("first hostname = %q, want parser-one", firstLatest.Config.System.HostName)
+	}
+	if secondLatest.Config.System.HostName != "parser-two" {
+		t.Fatalf("second hostname = %q, want parser-two", secondLatest.Config.System.HostName)
+	}
+}
+
+func TestParseStoredConfigRejectsUnknownJSONFields(t *testing.T) {
+	st := New(nil, testLegacyTextParserOption())
+
+	_, err := st.parseStoredConfig(`{"system":{"host-name":"router1"},"unexpected":true}`)
+	if err == nil {
+		t.Fatal("parseStoredConfig() error = nil, want unknown field rejection")
+	}
+	if !strings.Contains(err.Error(), "unknown field") {
+		t.Fatalf("parseStoredConfig() error = %v, want unknown field", err)
+	}
+}
+
+func TestParseStoredConfigValidatesJSONModel(t *testing.T) {
+	st := New(nil, testLegacyTextParserOption())
+
+	_, err := st.parseStoredConfig(`{"interfaces":{"bad0":{"units":{}}}}`)
+	if err == nil {
+		t.Fatal("parseStoredConfig() error = nil, want model validation error")
+	}
+	if !strings.Contains(err.Error(), "validate stored JSON config") {
+		t.Fatalf("parseStoredConfig() error = %v, want model validation context", err)
+	}
+}
+
+func TestParseStoredConfigFallsBackToLegacySetCommands(t *testing.T) {
+	st := New(nil, testLegacyTextParserOption())
+
+	cfg, err := st.parseStoredConfig("set system host-name router1\n")
+	if err != nil {
+		t.Fatalf("parseStoredConfig() error = %v", err)
+	}
+	if cfg.System == nil || cfg.System.HostName != "router1" {
+		t.Fatalf("parseStoredConfig() hostname = %#v, want router1", cfg.System)
+	}
 }
 
 func isDatastoreNotFound(err error) bool {
@@ -156,9 +408,7 @@ func isDatastoreNotFound(err error) bool {
 }
 
 func TestSaveCommitPreservesOSPFPriorityZero(t *testing.T) {
-	installLegacyTextParser(t)
-
-	st, err := NewFromPath(filepath.Join(t.TempDir(), "config.db"))
+	st, err := NewFromPath(filepath.Join(t.TempDir(), "config.db"), testLegacyTextParserOption())
 	if err != nil {
 		t.Fatalf("NewFromPath() error = %v", err)
 	}
@@ -203,9 +453,7 @@ func TestSaveCommitPreservesOSPFPriorityZero(t *testing.T) {
 }
 
 func TestPrepareRollbackConflictsWithExistingDatastoreLock(t *testing.T) {
-	installLegacyTextParser(t)
-
-	st, err := NewFromPath(filepath.Join(t.TempDir(), "config.db"))
+	st, err := NewFromPath(filepath.Join(t.TempDir(), "config.db"), testLegacyTextParserOption())
 	if err != nil {
 		t.Fatalf("NewFromPath() error = %v", err)
 	}
@@ -243,9 +491,7 @@ func TestPrepareRollbackConflictsWithExistingDatastoreLock(t *testing.T) {
 }
 
 func TestPrepareRollbackPersistsRollbackHistory(t *testing.T) {
-	installLegacyTextParser(t)
-
-	st, err := NewFromPath(filepath.Join(t.TempDir(), "config.db"))
+	st, err := NewFromPath(filepath.Join(t.TempDir(), "config.db"), testLegacyTextParserOption())
 	if err != nil {
 		t.Fatalf("NewFromPath() error = %v", err)
 	}
@@ -302,15 +548,34 @@ func TestPrepareRollbackPersistsRollbackHistory(t *testing.T) {
 	}
 }
 
-func installLegacyTextParser(t *testing.T) {
-	t.Helper()
-	oldParser := LegacyTextParser
-	LegacyTextParser = func(text string) (*model.RouterConfig, error) {
+func testLegacyTextParserOption() Option {
+	return WithLegacyTextParser(func(text string) (*model.RouterConfig, error) {
 		cfg, err := pkgconfig.NewParser(strings.NewReader(text)).Parse()
 		if err != nil {
 			return nil, err
 		}
 		return model.FromLegacyConfig(cfg), nil
-	}
-	t.Cleanup(func() { LegacyTextParser = oldParser })
+	})
+}
+
+type snapshotVersionCountingDatastore struct {
+	datastore.Datastore
+	running    *datastore.RunningConfig
+	count      uint64
+	countCalls int
+	listCalls  int
+}
+
+func (ds *snapshotVersionCountingDatastore) GetRunning(ctx context.Context) (*datastore.RunningConfig, error) {
+	return ds.running, nil
+}
+
+func (ds *snapshotVersionCountingDatastore) CountCommitHistory(ctx context.Context) (uint64, error) {
+	ds.countCalls++
+	return ds.count, nil
+}
+
+func (ds *snapshotVersionCountingDatastore) ListCommitHistory(ctx context.Context, opts *datastore.HistoryOptions) ([]*datastore.CommitHistoryEntry, error) {
+	ds.listCalls++
+	return nil, errors.New("ListCommitHistory should not be called when CountCommitHistory is available")
 }

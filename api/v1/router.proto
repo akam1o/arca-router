@@ -11,6 +11,9 @@ service ConfigService {
   // GetRunning returns the current running configuration.
   rpc GetRunning(GetRunningRequest) returns (GetRunningResponse);
 
+  // GetRunningUnredacted returns the current running configuration including secrets.
+  rpc GetRunningUnredacted(GetRunningRequest) returns (GetRunningResponse);
+
   // GetCandidate returns the candidate configuration for a session.
   rpc GetCandidate(GetCandidateRequest) returns (GetCandidateResponse);
 
@@ -37,6 +40,9 @@ service ConfigService {
 
   // ListHistory returns commit history.
   rpc ListHistory(ListHistoryRequest) returns (ListHistoryResponse);
+
+  // GetCommit returns one archived commit, including configuration text.
+  rpc GetCommit(GetCommitRequest) returns (GetCommitResponse);
 }
 
 // SessionService manages configuration sessions with lock semantics.
@@ -68,23 +74,41 @@ service StateService {
   // GetOSPFNeighbors returns OSPFv2 or OSPFv3 neighbor state.
   rpc GetOSPFNeighbors(GetOSPFNeighborsRequest) returns (GetOSPFNeighborsResponse);
 
-  // GetRouteText returns FRR route output for CLI display.
-  rpc GetRouteText(GetRouteTextRequest) returns (GetRouteTextResponse);
+  // GetRouteText returns FRR route output for legacy CLI display.
+  // Deprecated: use DiagnosticService.GetRouteText for raw text diagnostics.
+  rpc GetRouteText(GetRouteTextRequest) returns (GetRouteTextResponse) {
+    option deprecated = true;
+  }
 
-  // GetBGPSummaryText returns FRR BGP summary output for CLI display.
-  rpc GetBGPSummaryText(GetBGPSummaryTextRequest) returns (GetBGPSummaryTextResponse);
+  // GetBGPSummaryText returns FRR BGP summary output for legacy CLI display.
+  // Deprecated: use DiagnosticService.GetBGPSummaryText for raw text diagnostics.
+  rpc GetBGPSummaryText(GetBGPSummaryTextRequest) returns (GetBGPSummaryTextResponse) {
+    option deprecated = true;
+  }
 
-  // GetBGPNeighborText returns FRR BGP neighbor detail output for CLI display.
-  rpc GetBGPNeighborText(GetBGPNeighborTextRequest) returns (GetBGPNeighborTextResponse);
+  // GetBGPNeighborText returns FRR BGP neighbor detail output for legacy CLI display.
+  // Deprecated: use DiagnosticService.GetBGPNeighborText for raw text diagnostics.
+  rpc GetBGPNeighborText(GetBGPNeighborTextRequest) returns (GetBGPNeighborTextResponse) {
+    option deprecated = true;
+  }
 
-  // GetOSPFNeighborsText returns FRR OSPF neighbor output for CLI display.
-  rpc GetOSPFNeighborsText(GetOSPFNeighborsTextRequest) returns (GetOSPFNeighborsTextResponse);
+  // GetOSPFNeighborsText returns FRR OSPF neighbor output for legacy CLI display.
+  // Deprecated: use DiagnosticService.GetOSPFNeighborsText for raw text diagnostics.
+  rpc GetOSPFNeighborsText(GetOSPFNeighborsTextRequest) returns (GetOSPFNeighborsTextResponse) {
+    option deprecated = true;
+  }
 
-  // GetVRRPText returns FRR VRRP output for CLI display.
-  rpc GetVRRPText(GetVRRPTextRequest) returns (GetVRRPTextResponse);
+  // GetVRRPText returns FRR VRRP output for legacy CLI display.
+  // Deprecated: use DiagnosticService.GetVRRPText for raw text diagnostics.
+  rpc GetVRRPText(GetVRRPTextRequest) returns (GetVRRPTextResponse) {
+    option deprecated = true;
+  }
 
-  // GetBFDText returns FRR BFD output for CLI display.
-  rpc GetBFDText(GetBFDTextRequest) returns (GetBFDTextResponse);
+  // GetBFDText returns FRR BFD output for legacy CLI display.
+  // Deprecated: use DiagnosticService.GetBFDText for raw text diagnostics.
+  rpc GetBFDText(GetBFDTextRequest) returns (GetBFDTextResponse) {
+    option deprecated = true;
+  }
 
   // GetBFDStatus returns cached FRR BFD operational state.
   rpc GetBFDStatus(GetBFDStatusRequest) returns (GetBFDStatusResponse);
@@ -103,6 +127,29 @@ service StateService {
 
   // GetSystemInfo returns system information.
   rpc GetSystemInfo(GetSystemInfoRequest) returns (GetSystemInfoResponse);
+}
+
+// DiagnosticService provides raw diagnostic outputs intended for operator
+// troubleshooting and CLI display. Normal automation clients should prefer
+// typed StateService RPCs where available.
+service DiagnosticService {
+  // GetRouteText returns FRR route output for diagnostic display.
+  rpc GetRouteText(GetRouteTextRequest) returns (GetRouteTextResponse);
+
+  // GetBGPSummaryText returns FRR BGP summary output for diagnostic display.
+  rpc GetBGPSummaryText(GetBGPSummaryTextRequest) returns (GetBGPSummaryTextResponse);
+
+  // GetBGPNeighborText returns FRR BGP neighbor detail output for diagnostic display.
+  rpc GetBGPNeighborText(GetBGPNeighborTextRequest) returns (GetBGPNeighborTextResponse);
+
+  // GetOSPFNeighborsText returns FRR OSPF neighbor output for diagnostic display.
+  rpc GetOSPFNeighborsText(GetOSPFNeighborsTextRequest) returns (GetOSPFNeighborsTextResponse);
+
+  // GetVRRPText returns FRR VRRP output for diagnostic display.
+  rpc GetVRRPText(GetVRRPTextRequest) returns (GetVRRPTextResponse);
+
+  // GetBFDText returns FRR BFD output for diagnostic display.
+  rpc GetBFDText(GetBFDTextRequest) returns (GetBFDTextResponse);
 }
 
 // TelemetryService provides structured streaming telemetry snapshots.
@@ -142,6 +189,7 @@ message EditCandidateResponse {}
 message ReplaceCandidateRequest {
   string session_id = 1;
   string config_text = 2;  // full set-command configuration
+  uint64 expected_base_version = 3;  // optional running version the replacement was edited from
 }
 
 message ReplaceCandidateResponse {}
@@ -205,7 +253,7 @@ message CommitEntry {
   string timestamp = 3;
   string message = 4;
   bool is_rollback = 5;
-  string config_text = 6;
+  string config_text = 6 [deprecated = true];  // metadata list responses do not include config text
 }
 
 // --- Session messages ---
@@ -571,4 +619,21 @@ message ClassOfServiceCapabilities {
   string last_check = 5;
   string last_error = 6;
   repeated string diagnostics = 7;
+}
+
+message GetCommitRequest {
+  string commit_id = 1;
+}
+
+message GetCommitResponse {
+  CommitDetail commit = 1;
+}
+
+message CommitDetail {
+  string commit_id = 1;
+  string user = 2;
+  string timestamp = 3;
+  string message = 4;
+  bool is_rollback = 5;
+  string config_text = 6;
 }

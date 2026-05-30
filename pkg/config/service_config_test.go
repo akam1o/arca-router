@@ -1,6 +1,9 @@
 package config
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 func TestServiceConfigRoundTrip(t *testing.T) {
 	cfg := parseSetCommands(t,
@@ -14,7 +17,9 @@ func TestServiceConfigRoundTrip(t *testing.T) {
 		"set system services snmp enabled true",
 		"set system services snmp listen-address 127.0.0.1",
 		"set system services snmp port 1161",
-		"set system services snmp community public",
+		"set system services snmp community monitoring",
+		"set security netconf ssh enabled true",
+		"set security netconf ssh listen-address 127.0.0.1",
 		"set security netconf ssh port 1830",
 	)
 	if err := cfg.Validate(); err != nil {
@@ -30,8 +35,136 @@ func TestServiceConfigRoundTrip(t *testing.T) {
 	if got := cfg.System.Services.SNMP.Port; got != 1161 {
 		t.Fatalf("snmp port = %d", got)
 	}
+	if !cfg.Security.NETCONF.SSH.Enabled {
+		t.Fatal("netconf ssh enabled = false, want true")
+	}
+	if !cfg.Security.NETCONF.SSH.EnabledSet {
+		t.Fatal("netconf ssh enabled set = false, want true")
+	}
+	if got := cfg.Security.NETCONF.SSH.ListenAddress; got != "127.0.0.1" {
+		t.Fatalf("netconf ssh listen-address = %q, want 127.0.0.1", got)
+	}
 	if got := cfg.Security.NETCONF.SSH.Port; got != 1830 {
 		t.Fatalf("netconf ssh port = %d", got)
 	}
 	assertSetCommandRoundTrip(t, cfg)
+}
+
+func TestNETCONFParserRecordsExplicitDisabled(t *testing.T) {
+	cfg := parseSetCommands(t,
+		"set security netconf ssh enabled false",
+		"set security netconf ssh port 1830",
+	)
+
+	if cfg.Security.NETCONF.SSH.Enabled {
+		t.Fatal("netconf ssh enabled = true, want false")
+	}
+	if !cfg.Security.NETCONF.SSH.EnabledSet {
+		t.Fatal("netconf ssh enabled set = false, want true")
+	}
+	assertSetCommandRoundTrip(t, cfg)
+}
+
+func TestNETCONFParserLeavesPortOnlyImplicit(t *testing.T) {
+	cfg := parseSetCommands(t, "set security netconf ssh port 1830")
+
+	if cfg.Security.NETCONF.SSH.EnabledSet {
+		t.Fatal("netconf ssh enabled set = true, want false")
+	}
+	if got := cfg.Security.NETCONF.SSH.Port; got != 1830 {
+		t.Fatalf("netconf ssh port = %d", got)
+	}
+}
+
+func TestNETCONFValidationRejectsInvalidListenAddress(t *testing.T) {
+	cfg := parseSetCommands(t,
+		"set security netconf ssh enabled true",
+		"set security netconf ssh listen-address not-an-address",
+	)
+
+	if err := cfg.Validate(); err == nil {
+		t.Fatal("Validate() error = nil, want invalid netconf ssh listen-address error")
+	}
+}
+
+func TestNETCONFValidationAllowsPortZero(t *testing.T) {
+	cfg := parseSetCommands(t,
+		"set security netconf ssh enabled true",
+		"set security netconf ssh port 0",
+	)
+
+	if err := cfg.Validate(); err != nil {
+		t.Fatalf("Validate() error = %v", err)
+	}
+	if got := cfg.Security.NETCONF.SSH.Port; got != 0 {
+		t.Fatalf("netconf ssh port = %d, want 0", got)
+	}
+}
+
+func TestNETCONFParserRejectsPortOutOfRange(t *testing.T) {
+	_, err := NewParser(strings.NewReader("set security netconf ssh port 65536")).Parse()
+	if err == nil {
+		t.Fatal("Parse() error = nil, want out-of-range netconf ssh port error")
+	}
+}
+
+func TestSystemServiceParserRejectsInvalidCommonFields(t *testing.T) {
+	tests := []struct {
+		name    string
+		line    string
+		wantErr string
+	}{
+		{
+			name:    "web-ui port requires number",
+			line:    "set system services web-ui port not-a-number",
+			wantErr: "expected web-ui port",
+		},
+		{
+			name:    "prometheus listen address requires value",
+			line:    "set system services prometheus listen-address",
+			wantErr: "expected prometheus listen address",
+		},
+		{
+			name:    "snmp enabled requires boolean",
+			line:    "set system services snmp enabled maybe",
+			wantErr: "invalid boolean value",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := NewParser(strings.NewReader(tt.line)).Parse()
+			if err == nil {
+				t.Fatal("Parse() error = nil, want error")
+			}
+			if !strings.Contains(err.Error(), tt.wantErr) {
+				t.Fatalf("Parse() error = %v, want substring %q", err, tt.wantErr)
+			}
+		})
+	}
+}
+
+func TestSNMPValidationRejectsEnabledWithoutCommunity(t *testing.T) {
+	cfg := parseSetCommands(t,
+		"set system services snmp enabled true",
+		"set system services snmp listen-address 127.0.0.1",
+		"set system services snmp port 1161",
+	)
+
+	if err := cfg.Validate(); err == nil {
+		t.Fatal("Validate() error = nil, want missing snmp community error")
+	}
+}
+
+func TestSNMPValidationRejectsWeakCommunity(t *testing.T) {
+	cfg := parseSetCommands(t,
+		"set system services snmp enabled true",
+		"set system services snmp listen-address 127.0.0.1",
+		"set system services snmp port 1161",
+		"set system services snmp community public",
+	)
+
+	if err := cfg.Validate(); err == nil {
+		t.Fatal("Validate() error = nil, want weak snmp community error")
+	}
 }

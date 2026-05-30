@@ -3,6 +3,7 @@ package frr
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"hash/crc32"
 	"net"
@@ -283,9 +284,12 @@ func isArcaVRRPInterfaceName(name string) bool {
 }
 
 func runIPCommand(ctx context.Context, args ...string) ([]byte, error) {
-	ipPath, err := exec.LookPath("ip")
+	ipPath, err := lookupIPPath()
 	if err != nil {
-		return nil, err
+		if errors.Is(err, os.ErrPermission) {
+			return nil, NewPermissionDeniedError("find ip", err)
+		}
+		return nil, NewToolNotFoundError("ip")
 	}
 	cmd := exec.CommandContext(ctx, ipPath, args...)
 	output, err := cmd.CombinedOutput()

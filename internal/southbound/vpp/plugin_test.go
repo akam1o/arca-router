@@ -19,6 +19,22 @@ func testLogger() *slog.Logger {
 	return slog.New(slog.NewTextHandler(io.Discard, nil))
 }
 
+func TestNewVPPPluginDefaultsNilLoggerAndHardwareConfig(t *testing.T) {
+	plugin := NewVPPPlugin(pkgvpp.NewMockClient(), nil, nil)
+	if plugin.log == nil {
+		t.Fatal("NewVPPPlugin() left log nil")
+	}
+	if plugin.hwConfig == nil {
+		t.Fatal("NewVPPPlugin() left hwConfig nil")
+	}
+	if plugin.hasHardwareConfig("ge-0/0/0") {
+		t.Fatal("hasHardwareConfig() = true for nil hardware config")
+	}
+	if got := plugin.getHardwareConfig("ge-0/0/0"); got != nil {
+		t.Fatalf("getHardwareConfig() = %#v, want nil", got)
+	}
+}
+
 func TestInitRecordsQoSCapabilities(t *testing.T) {
 	ctx := context.Background()
 	client := pkgvpp.NewMockClient()
@@ -46,6 +62,23 @@ func TestInitRecordsQoSCapabilities(t *testing.T) {
 	if len(status.Capabilities.Diagnostics) != 1 || status.Capabilities.Diagnostics[0] != "scheduler api unavailable" {
 		t.Fatalf("QoSCapabilityStatus().Diagnostics = %#v", status.Capabilities.Diagnostics)
 	}
+}
+
+func TestInitRecordsRedactedQoSCapabilityError(t *testing.T) {
+	ctx := context.Background()
+	client := pkgvpp.NewMockClient()
+	client.GetQoSCapabilitiesError = errors.New("connect /run/vpp/api.sock: permission denied with token=secret")
+	plugin := NewVPPPlugin(client, &device.HardwareConfig{}, testLogger())
+	if err := plugin.Init(ctx); err != nil {
+		t.Fatalf("Init() error = %v", err)
+	}
+	t.Cleanup(func() { _ = plugin.Close() })
+
+	status := plugin.QoSCapabilityStatus()
+	if status.LastError != vppQoSCapabilityErrorMessage {
+		t.Fatalf("QoSCapabilityStatus().LastError = %q, want redacted capability error", status.LastError)
+	}
+	assertVPPStatusErrorRedacted(t, status.LastError)
 }
 
 func TestApplyChangesPreservesInterfaceAddressHostIP(t *testing.T) {
@@ -89,6 +122,58 @@ func TestApplyChangesPreservesInterfaceAddressHostIP(t *testing.T) {
 	}
 }
 
+func TestApplyChangesFailsOnAddressDeleteFailure(t *testing.T) {
+	ctx := context.Background()
+	client := pkgvpp.NewMockClient()
+	plugin := NewVPPPlugin(client, &device.HardwareConfig{
+		Interfaces: []device.PhysicalInterface{
+			{Name: "ge-0/0/0", PCI: "0000:03:00.0", Driver: "avf"},
+		},
+	}, testLogger())
+	if err := plugin.Init(ctx); err != nil {
+		t.Fatalf("Init() error = %v", err)
+	}
+	t.Cleanup(func() { _ = plugin.Close() })
+
+	oldCfg := model.NewRouterConfig()
+	oldCfg.Interfaces["ge-0/0/0"] = &model.InterfaceConfig{
+		Units: map[int]*model.Unit{
+			0: {Family: map[string]*model.AddressFamily{"inet": {Addresses: []string{"192.0.2.1/24"}}}},
+		},
+	}
+	if err := plugin.ApplyChanges(ctx, engine.ComputeDiff(model.NewRouterConfig(), oldCfg)); err != nil {
+		t.Fatalf("initial ApplyChanges() error = %v", err)
+	}
+	idx, ok := plugin.GetInterfaceIndex("ge-0/0/0")
+	if !ok {
+		t.Fatal("initial ApplyChanges() did not add interface index")
+	}
+
+	newCfg := model.NewRouterConfig()
+	newCfg.Interfaces["ge-0/0/0"] = &model.InterfaceConfig{
+		Units: map[int]*model.Unit{
+			0: {Family: map[string]*model.AddressFamily{"inet": {}}},
+		},
+	}
+	client.DeleteInterfaceAddressError = errors.New("delete address failed")
+	err := plugin.ApplyChanges(ctx, engine.ComputeDiff(oldCfg, newCfg))
+	if err == nil {
+		t.Fatal("ApplyChanges() error = nil, want address delete failure")
+	}
+	for _, want := range []string{"update interface ge-0/0/0", "delete address 192.0.2.1/24", "delete address failed"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Fatalf("ApplyChanges() error = %v, want substring %q", err, want)
+		}
+	}
+	iface, err := client.GetInterface(ctx, idx)
+	if err != nil {
+		t.Fatalf("GetInterface() error = %v", err)
+	}
+	if len(iface.Addresses) != 1 {
+		t.Fatalf("addresses after failed deletion = %d, want original address retained", len(iface.Addresses))
+	}
+}
+
 func TestApplyChangesRollsBackInterfaceIndexOnAddressFailure(t *testing.T) {
 	ctx := context.Background()
 	client := pkgvpp.NewMockClient()
@@ -118,6 +203,106 @@ func TestApplyChangesRollsBackInterfaceIndexOnAddressFailure(t *testing.T) {
 	}
 	if _, ok := plugin.GetInterfaceIndex("ge-0/0/0"); ok {
 		t.Fatal("ApplyChanges() left rolled-back interface in index")
+	}
+}
+
+func TestApplyChangesReturnsRollbackErrors(t *testing.T) {
+	ctx := context.Background()
+	client := pkgvpp.NewMockClient()
+	plugin := NewVPPPlugin(client, &device.HardwareConfig{
+		Interfaces: []device.PhysicalInterface{
+			{Name: "ge-0/0/0", PCI: "0000:03:00.0", Driver: "avf"},
+		},
+	}, testLogger())
+	if err := plugin.Init(ctx); err != nil {
+		t.Fatalf("Init() error = %v", err)
+	}
+	t.Cleanup(func() { _ = plugin.Close() })
+
+	client.SetInterfaceAddressError = errors.New("address failed")
+	client.SetInterfaceDownError = errors.New("down failed")
+	diff := engine.ComputeDiff(model.NewRouterConfig(), &model.RouterConfig{
+		Interfaces: map[string]*model.InterfaceConfig{
+			"ge-0/0/0": {
+				Units: map[int]*model.Unit{
+					0: {Family: map[string]*model.AddressFamily{"inet": {Addresses: []string{"192.0.2.1/24"}}}},
+				},
+			},
+		},
+	})
+
+	err := plugin.ApplyChanges(ctx, diff)
+	if err == nil {
+		t.Fatal("ApplyChanges() error = nil, want apply and rollback errors")
+	}
+	for _, want := range []string{
+		"apply interface ge-0/0/0 addresses",
+		"address failed",
+		"rollback failed",
+		"set interface ge-0/0/0 down",
+		"down failed",
+	} {
+		if !strings.Contains(err.Error(), want) {
+			t.Fatalf("ApplyChanges() error = %v, want substring %q", err, want)
+		}
+	}
+}
+
+func TestEngineRollbackSkipsAlreadyRolledBackVPPApplyFailure(t *testing.T) {
+	ctx := context.Background()
+	client := pkgvpp.NewMockClient()
+	plugin := NewVPPPlugin(client, &device.HardwareConfig{
+		Interfaces: []device.PhysicalInterface{
+			{Name: "ge-0/0/0", PCI: "0000:03:00.0", Driver: "avf"},
+		},
+	}, testLogger())
+	if err := plugin.Init(ctx); err != nil {
+		t.Fatalf("Init() error = %v", err)
+	}
+	t.Cleanup(func() { _ = plugin.Close() })
+
+	oldCfg := model.NewRouterConfig()
+	oldCfg.Interfaces["ge-0/0/0"] = &model.InterfaceConfig{
+		Units: map[int]*model.Unit{
+			0: {Family: map[string]*model.AddressFamily{"inet": {Addresses: []string{"192.0.2.1/24"}}}},
+		},
+	}
+	if err := plugin.ApplyChanges(ctx, engine.ComputeDiff(model.NewRouterConfig(), oldCfg)); err != nil {
+		t.Fatalf("initial ApplyChanges() error = %v", err)
+	}
+	idx, ok := plugin.GetInterfaceIndex("ge-0/0/0")
+	if !ok {
+		t.Fatal("initial ApplyChanges() did not add interface index")
+	}
+
+	eng := engine.NewEngine([]engine.Plugin{plugin}, testLogger())
+	eng.InitializeRunning(oldCfg, 1)
+
+	newCfg := model.NewRouterConfig()
+	newCfg.Interfaces["ge-0/0/0"] = &model.InterfaceConfig{
+		Units: map[int]*model.Unit{
+			0: {Family: map[string]*model.AddressFamily{"inet": {Addresses: []string{"192.0.2.1/24", "192.0.2.2/24"}}}},
+		},
+	}
+	client.SetInterfaceAddressError = errors.New("address failed")
+
+	err := eng.Apply(ctx, newCfg, "test", "add address")
+	if err == nil {
+		t.Fatal("Apply() error = nil, want address failure")
+	}
+	var applyErr *engine.ApplyError
+	if !errors.As(err, &applyErr) {
+		t.Fatalf("Apply() error = %T, want *engine.ApplyError", err)
+	}
+	if !applyErr.RollbackAttempted || !applyErr.RollbackSucceeded {
+		t.Fatalf("rollback status attempted=%v succeeded=%v diagnostics=%v", applyErr.RollbackAttempted, applyErr.RollbackSucceeded, applyErr.RollbackDiagnostics)
+	}
+	iface, err := client.GetInterface(ctx, idx)
+	if err != nil {
+		t.Fatalf("GetInterface() error = %v", err)
+	}
+	if len(iface.Addresses) != 1 || !iface.Addresses[0].IP.Equal(net.ParseIP("192.0.2.1").To4()) {
+		t.Fatalf("addresses after rollback = %#v, want only 192.0.2.1/24", iface.Addresses)
 	}
 }
 
@@ -163,6 +348,48 @@ func TestRollbackChangesRemovesAddedInterfaceIndex(t *testing.T) {
 	}
 	if len(iface.Addresses) != 0 {
 		t.Fatalf("RollbackChanges() left addresses on added interface: %#v", iface.Addresses)
+	}
+}
+
+func TestRollbackChangesReturnsAddedInterfaceCleanupErrors(t *testing.T) {
+	ctx := context.Background()
+	client := pkgvpp.NewMockClient()
+	plugin := NewVPPPlugin(client, &device.HardwareConfig{
+		Interfaces: []device.PhysicalInterface{
+			{Name: "ge-0/0/0", PCI: "0000:03:00.0", Driver: "avf"},
+		},
+	}, testLogger())
+	if err := plugin.Init(ctx); err != nil {
+		t.Fatalf("Init() error = %v", err)
+	}
+	t.Cleanup(func() { _ = plugin.Close() })
+
+	diff := engine.ComputeDiff(model.NewRouterConfig(), &model.RouterConfig{
+		Interfaces: map[string]*model.InterfaceConfig{
+			"ge-0/0/0": {
+				Units: map[int]*model.Unit{
+					0: {Family: map[string]*model.AddressFamily{"inet": {Addresses: []string{"192.0.2.1/24"}}}},
+				},
+			},
+		},
+	})
+	if err := plugin.ApplyChanges(ctx, diff); err != nil {
+		t.Fatalf("ApplyChanges() error = %v", err)
+	}
+
+	client.DeleteInterfaceAddressError = errors.New("delete address failed")
+	err := plugin.RollbackChanges(ctx, diff)
+	if err == nil {
+		t.Fatal("RollbackChanges() error = nil, want cleanup error")
+	}
+	for _, want := range []string{
+		"remove configured addresses for interface ge-0/0/0",
+		"delete address 192.0.2.1/24",
+		"delete address failed",
+	} {
+		if !strings.Contains(err.Error(), want) {
+			t.Fatalf("RollbackChanges() error = %v, want substring %q", err, want)
+		}
 	}
 }
 
@@ -334,6 +561,23 @@ func TestInitRecordsLCPReconciliationStatus(t *testing.T) {
 	}
 }
 
+func TestInitRecordsRedactedLCPReconciliationError(t *testing.T) {
+	ctx := context.Background()
+	client := pkgvpp.NewMockClient()
+	client.ListLCPInterfacesError = errors.New("list /run/vpp/lcp.sock: permission denied with token=secret")
+	plugin := NewVPPPlugin(client, &device.HardwareConfig{}, testLogger())
+	if err := plugin.Init(ctx); err != nil {
+		t.Fatalf("Init() error = %v", err)
+	}
+	t.Cleanup(func() { _ = plugin.Close() })
+
+	status := plugin.LCPReconciliationStatus()
+	if status.LastError != vppLCPReconciliationErrorMessage {
+		t.Fatalf("LCPReconciliationStatus().LastError = %q, want redacted reconciliation error", status.LastError)
+	}
+	assertVPPStatusErrorRedacted(t, status.LastError)
+}
+
 func TestValidateChangesAllowsMPLSConfig(t *testing.T) {
 	plugin := NewVPPPlugin(pkgvpp.NewMockClient(), &device.HardwareConfig{}, testLogger())
 	newCfg := model.NewRouterConfig()
@@ -344,6 +588,15 @@ func TestValidateChangesAllowsMPLSConfig(t *testing.T) {
 
 	if err := plugin.ValidateChanges(context.Background(), diff); err != nil {
 		t.Fatalf("ValidateChanges() error = %v, want nil", err)
+	}
+}
+
+func assertVPPStatusErrorRedacted(t *testing.T, msg string) {
+	t.Helper()
+	for _, leaked := range []string{"/run/vpp", "api.sock", "lcp.sock", "permission denied", "secret"} {
+		if strings.Contains(msg, leaked) {
+			t.Fatalf("VPP status error leaked %q in %q", leaked, msg)
+		}
 	}
 }
 

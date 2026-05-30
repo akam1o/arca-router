@@ -8,23 +8,276 @@ import (
 	"io"
 	"log/slog"
 	"net"
+	"os"
 	"strings"
 	"sync"
 	"testing"
 	"time"
 
 	apiv1 "github.com/akam1o/arca-router/api/v1"
+	"github.com/akam1o/arca-router/internal/correlation"
 	"github.com/akam1o/arca-router/internal/engine"
 	"github.com/akam1o/arca-router/internal/model"
 	sbfrr "github.com/akam1o/arca-router/internal/southbound/frr"
 	sbvpp "github.com/akam1o/arca-router/internal/southbound/vpp"
 	"github.com/akam1o/arca-router/internal/store"
 	pkgconfig "github.com/akam1o/arca-router/pkg/config"
+	pkgdatastore "github.com/akam1o/arca-router/pkg/datastore"
 	pkgvpp "github.com/akam1o/arca-router/pkg/vpp"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/metadata"
+	"google.golang.org/grpc/status"
 )
 
 func testLogger() *slog.Logger {
 	return slog.New(slog.NewTextHandler(io.Discard, nil))
+}
+
+func TestConfigEditStatusErrorClassifiesTypedErrors(t *testing.T) {
+	inputErr := configEditStatusError(newConfigInputErrorf("no configuration changes to commit"))
+	if status.Code(inputErr) != codes.InvalidArgument {
+		t.Fatalf("input status = %v, want %v", status.Code(inputErr), codes.InvalidArgument)
+	}
+	if got := status.Convert(inputErr).Message(); got != "no configuration changes to commit" {
+		t.Fatalf("input status message = %q, want no-changes message", got)
+	}
+
+	conflictErr := configEditStatusError(newCandidateConflictErrorf("candidate lock held by session session-1"))
+	if status.Code(conflictErr) != codes.FailedPrecondition {
+		t.Fatalf("conflict status = %v, want %v", status.Code(conflictErr), codes.FailedPrecondition)
+	}
+	if got := status.Convert(conflictErr).Message(); got != "configuration candidate is unavailable" {
+		t.Fatalf("conflict status message = %q, want generic candidate message", got)
+	}
+
+	unavailableErr := configEditStatusError(fmt.Errorf("%w: commit history is unavailable", ErrCommitHistoryUnavailable))
+	if status.Code(unavailableErr) != codes.Unavailable {
+		t.Fatalf("unavailable status = %v, want %v", status.Code(unavailableErr), codes.Unavailable)
+	}
+	if got := status.Convert(unavailableErr).Message(); got != "commit history is unavailable" {
+		t.Fatalf("unavailable status message = %q, want commit history unavailable", got)
+	}
+
+	applyErr := configEditStatusError(&engine.ApplyError{
+		Plugin:            "vpp",
+		Phase:             "apply",
+		RollbackAttempted: true,
+		RollbackSucceeded: true,
+		Err:               errors.New("delete address failed with token=secret"),
+	})
+	if status.Code(applyErr) != codes.Aborted {
+		t.Fatalf("apply status = %v, want %v", status.Code(applyErr), codes.Aborted)
+	}
+	if got := status.Convert(applyErr).Message(); got != "configuration apply failed; rollback succeeded" {
+		t.Fatalf("apply status message = %q, want sanitized apply failure", got)
+	}
+
+	rollbackErr := configEditStatusError(&engine.ApplyError{
+		Plugin:            "vpp",
+		Phase:             "apply",
+		RollbackAttempted: true,
+		RollbackSucceeded: false,
+		Err:               errors.New("rollback failed with token=secret"),
+	})
+	if status.Code(rollbackErr) != codes.Aborted {
+		t.Fatalf("rollback status = %v, want %v", status.Code(rollbackErr), codes.Aborted)
+	}
+	if got := status.Convert(rollbackErr).Message(); got != "configuration apply failed; rollback failed" {
+		t.Fatalf("rollback status message = %q, want sanitized rollback failure", got)
+	}
+
+	datastoreConflict := configEditStatusError(fmt.Errorf("prepare commit persistence: %w",
+		pkgdatastore.NewError(pkgdatastore.ErrCodeConflict, "lock held by session secret-session", nil)))
+	if status.Code(datastoreConflict) != codes.FailedPrecondition {
+		t.Fatalf("datastore conflict status = %v, want %v", status.Code(datastoreConflict), codes.FailedPrecondition)
+	}
+	if got := status.Convert(datastoreConflict).Message(); got != "configuration persistence conflict" {
+		t.Fatalf("datastore conflict message = %q, want sanitized persistence conflict", got)
+	}
+
+	datastoreInternal := configEditStatusError(fmt.Errorf("prepare commit persistence: %w",
+		pkgdatastore.NewError(pkgdatastore.ErrCodeInternal, "open /var/lib/arca/config.db", errors.New("permission denied"))))
+	if status.Code(datastoreInternal) != codes.Unavailable {
+		t.Fatalf("datastore internal status = %v, want %v", status.Code(datastoreInternal), codes.Unavailable)
+	}
+	if got := status.Convert(datastoreInternal).Message(); got != "configuration persistence unavailable" {
+		t.Fatalf("datastore internal message = %q, want sanitized persistence unavailable", got)
+	}
+
+	internalErr := configEditStatusError(errors.New("persist commit /var/lib/arca/config.db failed"))
+	if status.Code(internalErr) != codes.Internal {
+		t.Fatalf("internal status = %v, want %v", status.Code(internalErr), codes.Internal)
+	}
+	if got := status.Convert(internalErr).Message(); got != "internal server error" {
+		t.Fatalf("internal status message = %q, want generic internal error", got)
+	}
+}
+
+func TestServerConfigTextParserIsInstanceScoped(t *testing.T) {
+	oldParser := ConfigTextParser
+	ConfigTextParser = nil
+	t.Cleanup(func() { ConfigTextParser = oldParser })
+
+	parser := func(hostname string) ConfigTextParserFunc {
+		return func(string) (*model.RouterConfig, error) {
+			cfg := model.NewRouterConfig()
+			cfg.System = &model.SystemConfig{HostName: hostname}
+			return cfg, nil
+		}
+	}
+
+	first := NewServer(engine.NewEngine(nil, testLogger()), nil, testLogger())
+	second := NewServer(engine.NewEngine(nil, testLogger()), nil, testLogger())
+	first.SetConfigTextParser(parser("first"))
+	second.SetConfigTextParser(parser("second"))
+
+	firstCfg, err := first.parseConfigText("set system host-name ignored")
+	if err != nil {
+		t.Fatalf("first parseConfigText() error = %v", err)
+	}
+	secondCfg, err := second.parseConfigText("set system host-name ignored")
+	if err != nil {
+		t.Fatalf("second parseConfigText() error = %v", err)
+	}
+	if firstCfg.System.HostName != "first" {
+		t.Fatalf("first hostname = %q, want first", firstCfg.System.HostName)
+	}
+	if secondCfg.System.HostName != "second" {
+		t.Fatalf("second hostname = %q, want second", secondCfg.System.HostName)
+	}
+}
+
+func TestStateAdapterRedactsOperationalErrors(t *testing.T) {
+	oldVtysh := runOperationalVtyshCommand
+	runOperationalVtyshCommand = func(ctx context.Context, command string) (string, error) {
+		return "", errors.New("open /var/lib/frr/zebra.sock: permission denied")
+	}
+	t.Cleanup(func() { runOperationalVtyshCommand = oldVtysh })
+
+	srv := NewServer(engine.NewEngine(nil, testLogger()), &fakeStore{}, testLogger())
+	adapter := &stateServiceAdapter{server: srv}
+
+	_, err := adapter.GetRoutes(context.Background(), &apiv1.GetRoutesRequest{})
+	if status.Code(err) != codes.Internal {
+		t.Fatalf("GetRoutes() status = %v, want %v", status.Code(err), codes.Internal)
+	}
+	if got := status.Convert(err).Message(); got != "internal server error" {
+		t.Fatalf("GetRoutes() status message = %q, want generic internal error", got)
+	}
+	if strings.Contains(err.Error(), "/var/lib/frr/zebra.sock") {
+		t.Fatalf("GetRoutes() error leaked backend path: %v", err)
+	}
+
+	_, err = adapter.GetRoutes(context.Background(), &apiv1.GetRoutesRequest{PrefixFilter: "not-a-prefix"})
+	if status.Code(err) != codes.InvalidArgument {
+		t.Fatalf("GetRoutes(invalid prefix) status = %v, want %v", status.Code(err), codes.InvalidArgument)
+	}
+	if got := status.Convert(err).Message(); !strings.Contains(got, "invalid route prefix filter") {
+		t.Fatalf("GetRoutes(invalid prefix) message = %q, want input validation detail", got)
+	}
+}
+
+func TestConfigAdapterRedactsReadAndHistoryErrors(t *testing.T) {
+	srv := NewServer(engine.NewEngine(nil, testLogger()), &fakeStore{
+		listErr: errors.New("open /var/lib/arca-router/config.db: permission denied"),
+	}, testLogger())
+	adapter := &configServiceAdapter{server: srv}
+
+	_, err := adapter.GetCandidate(context.Background(), &apiv1.GetCandidateRequest{SessionId: "session-secret"})
+	if status.Code(err) != codes.NotFound {
+		t.Fatalf("GetCandidate() status = %v, want %v", status.Code(err), codes.NotFound)
+	}
+	if got := status.Convert(err).Message(); got != "configuration session not found" {
+		t.Fatalf("GetCandidate() status message = %q, want redacted session message", got)
+	}
+	if strings.Contains(err.Error(), "session-secret") {
+		t.Fatalf("GetCandidate() error leaked session ID: %v", err)
+	}
+
+	_, err = adapter.ListHistory(context.Background(), &apiv1.ListHistoryRequest{Limit: 10})
+	if status.Code(err) != codes.Internal {
+		t.Fatalf("ListHistory() status = %v, want %v", status.Code(err), codes.Internal)
+	}
+	if got := status.Convert(err).Message(); got != "internal server error" {
+		t.Fatalf("ListHistory() status message = %q, want generic internal error", got)
+	}
+	if strings.Contains(err.Error(), "/var/lib/arca-router/config.db") {
+		t.Fatalf("ListHistory() error leaked backend path: %v", err)
+	}
+
+	_, err = adapter.ListHistory(context.Background(), &apiv1.ListHistoryRequest{Limit: -1})
+	if status.Code(err) != codes.InvalidArgument {
+		t.Fatalf("ListHistory(invalid limit) status = %v, want %v", status.Code(err), codes.InvalidArgument)
+	}
+	if got := status.Convert(err).Message(); !strings.Contains(got, "invalid history limit") {
+		t.Fatalf("ListHistory(invalid limit) message = %q, want validation detail", got)
+	}
+}
+
+func TestConfigAdapterGetRunningIncludesCommitID(t *testing.T) {
+	eng := engine.NewEngine(nil, testLogger())
+	eng.InitializeRunning(&model.RouterConfig{
+		System:     &model.SystemConfig{HostName: "router1"},
+		Interfaces: map[string]*model.InterfaceConfig{},
+	}, 7)
+	st := &fakeStore{
+		listRecords: []*store.CommitRecord{{CommitID: "commit-7"}},
+	}
+	srv := NewServer(eng, st, testLogger())
+	adapter := &configServiceAdapter{server: srv}
+
+	resp, err := adapter.GetRunning(context.Background(), &apiv1.GetRunningRequest{})
+	if err != nil {
+		t.Fatalf("GetRunning() error = %v", err)
+	}
+	if got := resp.GetCommitId(); got != "commit-7" {
+		t.Fatalf("GetRunning() commit_id = %q, want commit-7", got)
+	}
+	if resp.GetVersion() != 7 || !strings.Contains(resp.GetConfigText(), "set system host-name router1") {
+		t.Fatalf("GetRunning() response = %#v, want router1 version 7", resp)
+	}
+	if st.listOpts == nil || st.listOpts.Limit != 1 {
+		t.Fatalf("ListCommits opts = %#v, want limit 1", st.listOpts)
+	}
+}
+
+func TestSessionAdapterRedactsSessionErrors(t *testing.T) {
+	srv := NewServer(engine.NewEngine(nil, testLogger()), &fakeStore{}, testLogger())
+	adapter := &sessionServiceAdapter{server: srv}
+
+	_, err := adapter.CloseSession(context.Background(), &apiv1.CloseSessionRequest{SessionId: "session-secret"})
+	if status.Code(err) != codes.NotFound {
+		t.Fatalf("CloseSession() status = %v, want %v", status.Code(err), codes.NotFound)
+	}
+	if got := status.Convert(err).Message(); got != "configuration session not found" {
+		t.Fatalf("CloseSession() status message = %q, want redacted session message", got)
+	}
+	if strings.Contains(err.Error(), "session-secret") {
+		t.Fatalf("CloseSession() error leaked session ID: %v", err)
+	}
+
+	session1, err := srv.CreateSession(context.Background(), "alice")
+	if err != nil {
+		t.Fatalf("CreateSession(session1) error = %v", err)
+	}
+	session2, err := srv.CreateSession(context.Background(), "bob")
+	if err != nil {
+		t.Fatalf("CreateSession(session2) error = %v", err)
+	}
+	if err := srv.AcquireLock(context.Background(), session1, "alice"); err != nil {
+		t.Fatalf("AcquireLock(session1) error = %v", err)
+	}
+
+	_, err = adapter.AcquireLock(context.Background(), &apiv1.AcquireLockRequest{SessionId: session2, User: "bob"})
+	if status.Code(err) != codes.FailedPrecondition {
+		t.Fatalf("AcquireLock(conflict) status = %v, want %v", status.Code(err), codes.FailedPrecondition)
+	}
+	if got := status.Convert(err).Message(); got != "configuration candidate is unavailable" {
+		t.Fatalf("AcquireLock(conflict) status message = %q, want generic candidate message", got)
+	}
+	if strings.Contains(err.Error(), session1) {
+		t.Fatalf("AcquireLock(conflict) error leaked lock owner session: %v", err)
+	}
 }
 
 func listenUnix(path string) (net.Listener, error) {
@@ -32,15 +285,20 @@ func listenUnix(path string) (net.Listener, error) {
 }
 
 type fakeStore struct {
-	commitID    string
-	prepareErr  error
-	prepareFn   func()
-	commitErr   error
-	saved       *model.ConfigSnapshot
-	aborted     bool
-	commits     map[string]*store.CommitRecord
-	listRecords []*store.CommitRecord
-	listCalls   int
+	commitID      string
+	prepareErr    error
+	prepareFn     func()
+	commitErr     error
+	getCommitErr  error
+	saved         *model.ConfigSnapshot
+	aborted       bool
+	commits       map[string]*store.CommitRecord
+	listRecords   []*store.CommitRecord
+	listErr       error
+	listCalls     int
+	listOpts      *store.ListOptions
+	auditOpts     *store.AuditOptions
+	correlationID string
 }
 
 type fakeInterfaceStateCollector struct {
@@ -106,6 +364,7 @@ func (f *fakeStore) PrepareCommit(ctx context.Context, snap *model.ConfigSnapsho
 		return nil, f.prepareErr
 	}
 	f.saved = snap
+	f.correlationID = correlation.ID(ctx)
 	if f.prepareFn != nil {
 		f.prepareFn()
 	}
@@ -113,11 +372,18 @@ func (f *fakeStore) PrepareCommit(ctx context.Context, snap *model.ConfigSnapsho
 }
 
 func (f *fakeStore) GetCommit(ctx context.Context, commitID string) (*store.CommitRecord, error) {
+	if f.getCommitErr != nil {
+		return nil, f.getCommitErr
+	}
 	return f.commits[commitID], nil
 }
 
 func (f *fakeStore) ListCommits(ctx context.Context, opts *store.ListOptions) ([]*store.CommitRecord, error) {
 	f.listCalls++
+	f.listOpts = opts
+	if f.listErr != nil {
+		return nil, f.listErr
+	}
 	return f.listRecords, nil
 }
 
@@ -126,6 +392,7 @@ func (f *fakeStore) AuditLog(ctx context.Context, event *store.AuditEvent) error
 }
 
 func (f *fakeStore) ListAuditEvents(ctx context.Context, opts *store.AuditOptions) ([]*store.AuditEvent, error) {
+	f.auditOpts = opts
 	return nil, nil
 }
 
@@ -166,7 +433,8 @@ func TestClientServerConfigFlow(t *testing.T) {
 		Interfaces: map[string]*model.InterfaceConfig{},
 	}, 1)
 
-	socketPath := t.TempDir() + "/routerd.sock"
+	socketPath := fmt.Sprintf("/tmp/arca-gc-%d.sock", time.Now().UnixNano())
+	t.Cleanup(func() { _ = os.Remove(socketPath) })
 	lis, err := listenUnix(socketPath)
 	if err != nil {
 		t.Fatalf("listenUnix() error = %v", err)
@@ -259,6 +527,20 @@ func TestClientServerConfigFlow(t *testing.T) {
 		len(cosInfo.Capabilities.Diagnostics) != 1 {
 		t.Fatalf("GetClassOfService() capabilities = %#v, want VPP QoS capability diagnostics", cosInfo.Capabilities)
 	}
+
+	oldVtysh := runOperationalVtyshCommand
+	runOperationalVtyshCommand = func(ctx context.Context, command string) (string, error) {
+		return command + "\n", nil
+	}
+	t.Cleanup(func() { runOperationalVtyshCommand = oldVtysh })
+	routeText, err := client.GetRouteText(ctx, "ospf", "")
+	if err != nil {
+		t.Fatalf("GetRouteText() error = %v", err)
+	}
+	if routeText != "show ip route ospf\n" {
+		t.Fatalf("GetRouteText() = %q, want diagnostic FRR route output", routeText)
+	}
+
 	diffText, hasChanges, err := client.Diff(ctx, sessionID)
 	if err != nil {
 		t.Fatalf("Diff() error = %v", err)
@@ -356,6 +638,145 @@ func TestClientServerConfigFlow(t *testing.T) {
 	}
 }
 
+func TestGetRunningRedactsCredentialMaterial(t *testing.T) {
+	eng := engine.NewEngine(nil, testLogger())
+	cfg := model.NewRouterConfig()
+	cfg.System = &model.SystemConfig{
+		HostName: "edge01",
+		Services: &model.SystemServicesConfig{
+			SNMP: &model.SNMPConfig{
+				Enabled:   true,
+				Community: "private-community",
+			},
+		},
+	}
+	cfg.Security = &model.SecurityConfig{
+		Users: map[string]*model.UserConfig{
+			"admin": {
+				Password: "plain-password",
+				Role:     "admin",
+			},
+		},
+	}
+	eng.InitializeRunning(cfg, 1)
+	srv := NewServer(eng, nil, testLogger())
+
+	text, version, err := srv.GetRunning(context.Background())
+	if err != nil {
+		t.Fatalf("GetRunning() error = %v", err)
+	}
+	if version != 1 || !strings.Contains(text, "set system host-name edge01") {
+		t.Fatalf("GetRunning() = (%q, %d), want hostname version 1", text, version)
+	}
+	for _, secret := range []string{"plain-password", "private-community", "$argon2id$"} {
+		if strings.Contains(text, secret) {
+			t.Fatalf("GetRunning() leaked %q:\n%s", secret, text)
+		}
+	}
+	if strings.Count(text, "<redacted>") != 2 {
+		t.Fatalf("GetRunning() =\n%s\nwant two redacted markers", text)
+	}
+
+	unredacted, version, err := srv.GetRunningUnredacted(context.Background())
+	if err != nil {
+		t.Fatalf("GetRunningUnredacted() error = %v", err)
+	}
+	if version != 1 {
+		t.Fatalf("GetRunningUnredacted() version = %d, want 1", version)
+	}
+	for _, secret := range []string{"private-community", "$argon2id$"} {
+		if !strings.Contains(unredacted, secret) {
+			t.Fatalf("GetRunningUnredacted() missing %q:\n%s", secret, unredacted)
+		}
+	}
+	if strings.Contains(unredacted, "<redacted>") {
+		t.Fatalf("GetRunningUnredacted() unexpectedly redacted secrets:\n%s", unredacted)
+	}
+}
+
+func TestCommitUsesSessionUserForAudit(t *testing.T) {
+	oldParser := ConfigTextParser
+	ConfigTextParser = func(text string) (*model.RouterConfig, error) {
+		cfg, err := pkgconfig.NewParser(strings.NewReader(text)).Parse()
+		if err != nil {
+			return nil, err
+		}
+		return model.FromLegacyConfig(cfg), nil
+	}
+	t.Cleanup(func() { ConfigTextParser = oldParser })
+
+	eng := engine.NewEngine(nil, testLogger())
+	eng.InitializeRunning(&model.RouterConfig{
+		System: &model.SystemConfig{HostName: "router1"},
+	}, 1)
+	st := &fakeStore{commitID: "commit-1"}
+	srv := NewServer(eng, st, testLogger())
+	ctx := context.Background()
+
+	sessionID, err := srv.CreateSession(ctx, "alice")
+	if err != nil {
+		t.Fatalf("CreateSession() error = %v", err)
+	}
+	if err := srv.AcquireLock(ctx, sessionID, "mallory"); err != nil {
+		t.Fatalf("AcquireLock() error = %v", err)
+	}
+	if err := srv.ReplaceCandidate(ctx, sessionID, "set system host-name router2"); err != nil {
+		t.Fatalf("ReplaceCandidate() error = %v", err)
+	}
+	if _, _, err := srv.Commit(ctx, sessionID, "mallory", "test"); err != nil {
+		t.Fatalf("Commit() error = %v", err)
+	}
+	if st.saved == nil || st.saved.Author != "alice" {
+		t.Fatalf("persisted author = %#v, want alice", st.saved)
+	}
+	if snap := eng.RunningSnapshot(); snap == nil || snap.Author != "alice" {
+		t.Fatalf("running snapshot author = %#v, want alice", snap)
+	}
+}
+
+func TestCommitPropagatesGRPCCorrelationID(t *testing.T) {
+	oldParser := ConfigTextParser
+	ConfigTextParser = func(text string) (*model.RouterConfig, error) {
+		cfg, err := pkgconfig.NewParser(strings.NewReader(text)).Parse()
+		if err != nil {
+			return nil, err
+		}
+		return model.FromLegacyConfig(cfg), nil
+	}
+	t.Cleanup(func() { ConfigTextParser = oldParser })
+
+	eng := engine.NewEngine(nil, testLogger())
+	eng.InitializeRunning(&model.RouterConfig{
+		System: &model.SystemConfig{HostName: "router1"},
+	}, 1)
+	st := &fakeStore{commitID: "commit-1"}
+	srv := NewServer(eng, st, testLogger())
+	ctx := context.Background()
+
+	sessionID, err := srv.CreateSession(ctx, "alice")
+	if err != nil {
+		t.Fatalf("CreateSession() error = %v", err)
+	}
+	if err := srv.AcquireLock(ctx, sessionID, "alice"); err != nil {
+		t.Fatalf("AcquireLock() error = %v", err)
+	}
+	if err := srv.ReplaceCandidate(ctx, sessionID, "set system host-name router2"); err != nil {
+		t.Fatalf("ReplaceCandidate() error = %v", err)
+	}
+
+	ctx = metadata.NewIncomingContext(ctx, metadata.Pairs(correlation.MetadataKey, "grpc-request-1"))
+	if _, err := (&configServiceAdapter{server: srv}).Commit(ctx, &apiv1.CommitRequest{
+		SessionId: sessionID,
+		User:      "alice",
+		Message:   "test",
+	}); err != nil {
+		t.Fatalf("Commit() error = %v", err)
+	}
+	if st.correlationID != "grpc-request-1" {
+		t.Fatalf("correlation ID = %q, want grpc-request-1", st.correlationID)
+	}
+}
+
 func TestSubscribeTelemetrySelectedSnapshots(t *testing.T) {
 	eng := engine.NewEngine(nil, testLogger())
 	eng.InitializeRunning(&model.RouterConfig{
@@ -447,6 +868,38 @@ func TestSubscribeTelemetryRouteScaleSnapshot(t *testing.T) {
 	}
 	if got.NextHop != "192.0.2.128" || got.Protocol != "bgp" || got.Metric != 127 || got.Interface != "ge0-0-127" || !got.Active {
 		t.Fatalf("route telemetry payload route = %#v, want generated BGP route attributes", got)
+	}
+}
+
+func TestSubscribeTelemetryRedactsPayloadErrors(t *testing.T) {
+	oldVtysh := runOperationalVtyshCommand
+	runOperationalVtyshCommand = func(ctx context.Context, command string) (string, error) {
+		return "", errors.New("open /var/lib/frr/zebra.sock: permission denied")
+	}
+	t.Cleanup(func() { runOperationalVtyshCommand = oldVtysh })
+
+	srv := NewServer(engine.NewEngine(nil, testLogger()), &fakeStore{}, testLogger())
+	var events []TelemetryEvent
+	err := srv.SubscribeTelemetry(context.Background(), []string{"/routes"}, 0, true, func(event TelemetryEvent) error {
+		events = append(events, event)
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("SubscribeTelemetry(/routes) error = %v", err)
+	}
+	if len(events) != 1 || events[0].EventType != telemetryEventTypeError {
+		t.Fatalf("events = %#v, want one redacted error event", events)
+	}
+
+	var payload telemetryErrorPayload
+	if err := json.Unmarshal([]byte(events[0].JSONPayload), &payload); err != nil {
+		t.Fatalf("telemetry error payload is invalid JSON: %v", err)
+	}
+	if payload.Error != telemetryPayloadErrorMessage {
+		t.Fatalf("telemetry error payload = %q, want redacted message", payload.Error)
+	}
+	if strings.Contains(events[0].JSONPayload, "/var/lib/frr/zebra.sock") {
+		t.Fatalf("telemetry error payload leaked backend path: %s", events[0].JSONPayload)
 	}
 }
 
@@ -580,6 +1033,83 @@ func TestSubscribeTelemetryRejectsUnsupportedPath(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "unsupported telemetry path") {
 		t.Fatalf("SubscribeTelemetry() error = %v, want unsupported path", err)
 	}
+}
+
+func TestTelemetryAdapterClassifiesUnsupportedPath(t *testing.T) {
+	srv := NewServer(engine.NewEngine(nil, testLogger()), &fakeStore{}, testLogger())
+	adapter := &telemetryServiceAdapter{server: srv}
+	stream := &fakeTelemetrySubscribeStream{}
+
+	err := adapter.SubscribeTelemetry(&apiv1.SubscribeTelemetryRequest{
+		Paths: []string{"/unsupported"},
+	}, stream)
+	if status.Code(err) != codes.InvalidArgument {
+		t.Fatalf("SubscribeTelemetry() status = %v, want %v", status.Code(err), codes.InvalidArgument)
+	}
+	if got := status.Convert(err).Message(); !strings.Contains(got, "unsupported telemetry path") {
+		t.Fatalf("SubscribeTelemetry() message = %q, want unsupported path detail", got)
+	}
+}
+
+func TestTelemetryAdapterRedactsSendErrors(t *testing.T) {
+	srv := NewServer(engine.NewEngine(nil, testLogger()), &fakeStore{}, testLogger())
+	adapter := &telemetryServiceAdapter{server: srv}
+	stream := &fakeTelemetrySubscribeStream{
+		sendErr: errors.New("send over /tmp/arca-routerd.sock failed with session-secret"),
+	}
+
+	err := adapter.SubscribeTelemetry(&apiv1.SubscribeTelemetryRequest{
+		Paths: []string{"/system"},
+		Once:  true,
+	}, stream)
+	if status.Code(err) != codes.Internal {
+		t.Fatalf("SubscribeTelemetry() status = %v, want %v", status.Code(err), codes.Internal)
+	}
+	if got := status.Convert(err).Message(); got != "internal server error" {
+		t.Fatalf("SubscribeTelemetry() message = %q, want generic internal error", got)
+	}
+	if strings.Contains(err.Error(), "/tmp/arca-routerd.sock") || strings.Contains(err.Error(), "session-secret") {
+		t.Fatalf("SubscribeTelemetry() error leaked send detail: %v", err)
+	}
+}
+
+type fakeTelemetrySubscribeStream struct {
+	ctx     context.Context
+	sendErr error
+	events  []*apiv1.TelemetryEvent
+}
+
+func (s *fakeTelemetrySubscribeStream) Send(event *apiv1.TelemetryEvent) error {
+	if s.sendErr != nil {
+		return s.sendErr
+	}
+	s.events = append(s.events, event)
+	return nil
+}
+
+func (s *fakeTelemetrySubscribeStream) SetHeader(metadata.MD) error {
+	return nil
+}
+
+func (s *fakeTelemetrySubscribeStream) SendHeader(metadata.MD) error {
+	return nil
+}
+
+func (s *fakeTelemetrySubscribeStream) SetTrailer(metadata.MD) {}
+
+func (s *fakeTelemetrySubscribeStream) Context() context.Context {
+	if s.ctx != nil {
+		return s.ctx
+	}
+	return context.Background()
+}
+
+func (s *fakeTelemetrySubscribeStream) SendMsg(any) error {
+	return nil
+}
+
+func (s *fakeTelemetrySubscribeStream) RecvMsg(any) error {
+	return io.EOF
 }
 
 func TestTelemetryPathCatalog(t *testing.T) {
@@ -1480,6 +2010,49 @@ func TestReleaseLockWaitsForInFlightCommit(t *testing.T) {
 	}
 }
 
+func TestSessionManagerExpiresAbandonedLock(t *testing.T) {
+	now := time.Unix(1700000000, 0)
+	mgr := newSessionManager(time.Minute, func() time.Time { return now })
+
+	abandonedID, err := mgr.Create("alice")
+	if err != nil {
+		t.Fatalf("Create(abandoned) error = %v", err)
+	}
+	if err := mgr.AcquireLock(abandonedID); err != nil {
+		t.Fatalf("AcquireLock(abandoned) error = %v", err)
+	}
+
+	now = now.Add(time.Minute + time.Second)
+	activeID, err := mgr.Create("bob")
+	if err != nil {
+		t.Fatalf("Create(active) error = %v", err)
+	}
+	if err := mgr.AcquireLock(activeID); err != nil {
+		t.Fatalf("AcquireLock(active) error = %v", err)
+	}
+	if _, err := mgr.Get(abandonedID); !errors.Is(err, ErrSessionNotFound) {
+		t.Fatalf("Get(abandoned) error = %v, want ErrSessionNotFound", err)
+	}
+}
+
+func TestSessionManagerRefreshesActiveSessionTTL(t *testing.T) {
+	now := time.Unix(1700000000, 0)
+	mgr := newSessionManager(time.Minute, func() time.Time { return now })
+
+	sessionID, err := mgr.Create("alice")
+	if err != nil {
+		t.Fatalf("Create() error = %v", err)
+	}
+	now = now.Add(45 * time.Second)
+	if _, err := mgr.Get(sessionID); err != nil {
+		t.Fatalf("Get() error = %v", err)
+	}
+	now = now.Add(45 * time.Second)
+	if err := mgr.AcquireLock(sessionID); err != nil {
+		t.Fatalf("AcquireLock() error = %v, want active session refreshed", err)
+	}
+}
+
 func TestCommitRejectsStaleCandidate(t *testing.T) {
 	oldParser := ConfigTextParser
 	ConfigTextParser = func(text string) (*model.RouterConfig, error) {
@@ -1518,7 +2091,7 @@ func TestCommitRejectsStaleCandidate(t *testing.T) {
 	}
 
 	_, _, err = srv.Commit(ctx, sessionID, "alice", "stale")
-	if err == nil || !strings.Contains(err.Error(), "candidate configuration is stale") {
+	if err == nil || !strings.Contains(err.Error(), "candidate configuration is stale") || !errors.Is(err, ErrCandidateConflict) {
 		t.Fatalf("Commit() error = %v, want stale candidate", err)
 	}
 	if st.saved != nil {
@@ -1569,7 +2142,7 @@ func TestCommitAbortsWhenCandidateStalesAfterPrepare(t *testing.T) {
 	}
 
 	_, _, err = srv.Commit(ctx, sessionID, "alice", "stale")
-	if err == nil || !strings.Contains(err.Error(), "candidate configuration is stale") {
+	if err == nil || !strings.Contains(err.Error(), "candidate configuration is stale") || !errors.Is(err, ErrCandidateConflict) {
 		t.Fatalf("Commit() error = %v, want stale candidate", err)
 	}
 	if !st.aborted {
@@ -1660,7 +2233,7 @@ func TestCommitRejectsNoopCandidate(t *testing.T) {
 	}
 
 	_, _, err = srv.Commit(ctx, sessionID, "alice", "noop")
-	if err == nil || !strings.Contains(err.Error(), "no configuration changes to commit") {
+	if err == nil || !strings.Contains(err.Error(), "no configuration changes to commit") || !errors.Is(err, ErrConfigInput) {
 		t.Fatalf("Commit() error = %v, want no changes", err)
 	}
 	if st.saved != nil {
@@ -1699,7 +2272,71 @@ func TestListHistoryRejectsNegativePagination(t *testing.T) {
 	}
 }
 
-func TestListHistoryIncludesConfigText(t *testing.T) {
+func TestListHistoryBoundsLimit(t *testing.T) {
+	eng := engine.NewEngine(nil, testLogger())
+	st := &fakeStore{}
+	srv := NewServer(eng, st, testLogger())
+	ctx := context.Background()
+
+	tests := []struct {
+		name      string
+		limit     int
+		wantLimit int
+	}{
+		{name: "default", limit: 0, wantLimit: maxListHistoryLimit},
+		{name: "within limit", limit: 25, wantLimit: 25},
+		{name: "above limit", limit: maxListHistoryLimit + 1, wantLimit: maxListHistoryLimit},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			st.listOpts = nil
+			if _, err := srv.ListHistory(ctx, tt.limit, 7); err != nil {
+				t.Fatalf("ListHistory() error = %v", err)
+			}
+			if st.listOpts == nil {
+				t.Fatal("ListHistory() did not call ListCommits")
+			}
+			if st.listOpts.Limit != tt.wantLimit || st.listOpts.Offset != 7 {
+				t.Fatalf("ListOptions = %+v, want limit %d offset 7", st.listOpts, tt.wantLimit)
+			}
+		})
+	}
+}
+
+func TestListAuditEventsBoundsLimit(t *testing.T) {
+	eng := engine.NewEngine(nil, testLogger())
+	st := &fakeStore{}
+	srv := NewServer(eng, st, testLogger())
+	ctx := context.Background()
+
+	tests := []struct {
+		name      string
+		limit     int
+		wantLimit int
+	}{
+		{name: "default", limit: 0, wantLimit: maxListAuditEventsLimit},
+		{name: "within limit", limit: 25, wantLimit: 25},
+		{name: "above limit", limit: maxListAuditEventsLimit + 1, wantLimit: maxListAuditEventsLimit},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			st.auditOpts = nil
+			if _, err := srv.ListAuditEvents(ctx, AuditLogOptions{Limit: tt.limit, Offset: 7}); err != nil {
+				t.Fatalf("ListAuditEvents() error = %v", err)
+			}
+			if st.auditOpts == nil {
+				t.Fatal("ListAuditEvents() did not call store")
+			}
+			if st.auditOpts.Limit != tt.wantLimit || st.auditOpts.Offset != 7 {
+				t.Fatalf("AuditOptions = %+v, want limit %d offset 7", st.auditOpts, tt.wantLimit)
+			}
+		})
+	}
+}
+
+func TestListHistoryOmitsConfigText(t *testing.T) {
 	eng := engine.NewEngine(nil, testLogger())
 	st := &fakeStore{
 		listRecords: []*store.CommitRecord{
@@ -1710,6 +2347,14 @@ func TestListHistoryIncludesConfigText(t *testing.T) {
 				Timestamp: time.Date(2026, 5, 17, 12, 0, 0, 0, time.UTC),
 				Config: &model.RouterConfig{
 					System: &model.SystemConfig{HostName: "router1"},
+					Security: &model.SecurityConfig{
+						Users: map[string]*model.UserConfig{
+							"admin": {
+								Password: "plain-password",
+								Role:     "admin",
+							},
+						},
+					},
 				},
 			},
 		},
@@ -1723,27 +2368,110 @@ func TestListHistoryIncludesConfigText(t *testing.T) {
 	if len(entries) != 1 {
 		t.Fatalf("ListHistory() entries = %d, want 1", len(entries))
 	}
-	if !strings.Contains(entries[0].ConfigText, "set system host-name router1") {
-		t.Fatalf("ListHistory() config text = %q, want archived set commands", entries[0].ConfigText)
+	if entries[0].ConfigText != "" {
+		t.Fatalf("ListHistory() config text = %q, want metadata-only history entry", entries[0].ConfigText)
 	}
 }
 
-func TestCommitInfosFromProtoIncludesConfigText(t *testing.T) {
+func TestGetCommitReturnsArchivedConfigText(t *testing.T) {
+	eng := engine.NewEngine(nil, testLogger())
+	st := &fakeStore{
+		commits: map[string]*store.CommitRecord{
+			"commit-1": {
+				CommitID:   "commit-1",
+				Author:     "alice",
+				Message:    "initial",
+				Timestamp:  time.Date(2026, 5, 17, 12, 0, 0, 0, time.UTC),
+				IsRollback: true,
+				ConfigText: "set system host-name router1\n",
+			},
+		},
+	}
+	srv := NewServer(eng, st, testLogger())
+
+	entry, err := srv.GetCommit(context.Background(), "commit-1")
+	if err != nil {
+		t.Fatalf("GetCommit() error = %v", err)
+	}
+	if entry.CommitID != "commit-1" || entry.User != "alice" || entry.Message != "initial" || !entry.IsRollback {
+		t.Fatalf("GetCommit() metadata = %#v", entry)
+	}
+	if entry.ConfigText != "set system host-name router1\n" {
+		t.Fatalf("GetCommit() config text = %q, want archived config text", entry.ConfigText)
+	}
+}
+
+func TestClientGetCommitReturnsArchiveDetail(t *testing.T) {
+	eng := engine.NewEngine(nil, testLogger())
+	st := &fakeStore{
+		commits: map[string]*store.CommitRecord{
+			"commit-old": {
+				CommitID:   "commit-old",
+				Author:     "alice",
+				Message:    "old config",
+				Timestamp:  time.Date(2026, 5, 17, 12, 0, 0, 0, time.UTC),
+				ConfigText: "set system host-name old\n",
+			},
+		},
+	}
+
+	socketPath := fmt.Sprintf("/tmp/arca-gc-detail-%d.sock", time.Now().UnixNano())
+	t.Cleanup(func() { _ = os.Remove(socketPath) })
+	lis, err := listenUnix(socketPath)
+	if err != nil {
+		t.Fatalf("listenUnix() error = %v", err)
+	}
+
+	srv := NewServer(eng, st, testLogger())
+	errCh := make(chan error, 1)
+	go func() {
+		errCh <- srv.Serve(lis)
+	}()
+	t.Cleanup(func() {
+		srv.Stop()
+		select {
+		case <-errCh:
+		case <-time.After(time.Second):
+			t.Fatal("server did not stop")
+		}
+	})
+
+	client, err := Dial(socketPath)
+	if err != nil {
+		t.Fatalf("Dial() error = %v", err)
+	}
+	defer func() { _ = client.Close() }()
+
+	entry, err := client.GetCommit(context.Background(), "commit-old")
+	if err != nil {
+		t.Fatalf("GetCommit() error = %v", err)
+	}
+	if entry.CommitID != "commit-old" || entry.User != "alice" || entry.Message != "old config" {
+		t.Fatalf("GetCommit() metadata = %#v", entry)
+	}
+	if entry.ConfigText != "set system host-name old\n" {
+		t.Fatalf("GetCommit() config text = %q, want archived config text", entry.ConfigText)
+	}
+}
+
+func TestCommitInfosFromProtoReturnsMetadataOnly(t *testing.T) {
 	infos := commitInfosFromProto([]*apiv1.CommitEntry{
 		{
-			CommitId:   "commit-1",
-			User:       "alice",
-			Timestamp:  time.Date(2026, 5, 17, 12, 0, 0, 0, time.UTC).Format(time.RFC3339Nano),
-			Message:    "initial",
-			ConfigText: "set system host-name router1",
+			CommitId:  "commit-1",
+			User:      "alice",
+			Timestamp: time.Date(2026, 5, 17, 12, 0, 0, 0, time.UTC).Format(time.RFC3339Nano),
+			Message:   "initial",
 		},
 	})
 
 	if len(infos) != 1 {
 		t.Fatalf("commitInfosFromProto() entries = %d, want 1", len(infos))
 	}
-	if infos[0].ConfigText != "set system host-name router1" {
-		t.Fatalf("commitInfosFromProto() config text = %q, want archived set commands", infos[0].ConfigText)
+	if infos[0].CommitID != "commit-1" || infos[0].User != "alice" || infos[0].Message != "initial" {
+		t.Fatalf("commitInfosFromProto() metadata = %#v", infos[0])
+	}
+	if infos[0].ConfigText != "" {
+		t.Fatalf("commitInfosFromProto() config text = %q, want metadata-only entry", infos[0].ConfigText)
 	}
 }
 
@@ -1817,6 +2545,93 @@ func TestReplaceCandidateReplacesExistingCandidate(t *testing.T) {
 	}
 	if !strings.Contains(got, "set system host-name restored") || strings.Contains(got, "dirty") {
 		t.Fatalf("candidate text = %q, want restored replacement without stale edits", got)
+	}
+}
+
+func TestReplaceCandidateWithBaseRejectsStaleExpectedVersion(t *testing.T) {
+	oldParser := ConfigTextParser
+	ConfigTextParser = func(text string) (*model.RouterConfig, error) {
+		cfg, err := pkgconfig.NewParser(strings.NewReader(text)).Parse()
+		if err != nil {
+			return nil, err
+		}
+		return model.FromLegacyConfig(cfg), nil
+	}
+	t.Cleanup(func() { ConfigTextParser = oldParser })
+
+	eng := engine.NewEngine(nil, testLogger())
+	eng.InitializeRunning(&model.RouterConfig{
+		System:     &model.SystemConfig{HostName: "running"},
+		Interfaces: map[string]*model.InterfaceConfig{},
+	}, 1)
+	srv := NewServer(eng, &fakeStore{commitID: "commit-1"}, testLogger())
+	ctx := context.Background()
+	sessionID, err := srv.CreateSession(ctx, "alice")
+	if err != nil {
+		t.Fatalf("CreateSession() error = %v", err)
+	}
+	if err := srv.AcquireLock(ctx, sessionID, "alice"); err != nil {
+		t.Fatalf("AcquireLock() error = %v", err)
+	}
+	if err := eng.Apply(ctx, &model.RouterConfig{
+		System:     &model.SystemConfig{HostName: "external"},
+		Interfaces: map[string]*model.InterfaceConfig{},
+	}, "bob", "external commit"); err != nil {
+		t.Fatalf("Apply() external error = %v", err)
+	}
+
+	err = srv.ReplaceCandidateWithBase(ctx, sessionID, "set system host-name restored", 1)
+	if err == nil || !strings.Contains(err.Error(), "candidate configuration is stale") || !errors.Is(err, ErrCandidateConflict) {
+		t.Fatalf("ReplaceCandidateWithBase() error = %v, want stale candidate", err)
+	}
+	got, err := srv.GetCandidate(ctx, sessionID)
+	if err != nil {
+		t.Fatalf("GetCandidate() error = %v", err)
+	}
+	if strings.Contains(got, "restored") {
+		t.Fatalf("candidate text = %q, want unchanged after stale replacement", got)
+	}
+}
+
+func TestReplaceCandidateAdapterUsesExpectedBaseVersion(t *testing.T) {
+	oldParser := ConfigTextParser
+	ConfigTextParser = func(text string) (*model.RouterConfig, error) {
+		cfg, err := pkgconfig.NewParser(strings.NewReader(text)).Parse()
+		if err != nil {
+			return nil, err
+		}
+		return model.FromLegacyConfig(cfg), nil
+	}
+	t.Cleanup(func() { ConfigTextParser = oldParser })
+
+	eng := engine.NewEngine(nil, testLogger())
+	eng.InitializeRunning(&model.RouterConfig{
+		System:     &model.SystemConfig{HostName: "running"},
+		Interfaces: map[string]*model.InterfaceConfig{},
+	}, 1)
+	srv := NewServer(eng, &fakeStore{commitID: "commit-1"}, testLogger())
+	ctx := context.Background()
+	sessionID, err := srv.CreateSession(ctx, "alice")
+	if err != nil {
+		t.Fatalf("CreateSession() error = %v", err)
+	}
+	if err := srv.AcquireLock(ctx, sessionID, "alice"); err != nil {
+		t.Fatalf("AcquireLock() error = %v", err)
+	}
+	if err := eng.Apply(ctx, &model.RouterConfig{
+		System:     &model.SystemConfig{HostName: "external"},
+		Interfaces: map[string]*model.InterfaceConfig{},
+	}, "bob", "external commit"); err != nil {
+		t.Fatalf("Apply() external error = %v", err)
+	}
+
+	_, err = (&configServiceAdapter{server: srv}).ReplaceCandidate(ctx, &apiv1.ReplaceCandidateRequest{
+		SessionId:           sessionID,
+		ConfigText:          "set system host-name restored",
+		ExpectedBaseVersion: 1,
+	})
+	if status.Code(err) != codes.FailedPrecondition {
+		t.Fatalf("ReplaceCandidate() status = %v, want %v", status.Code(err), codes.FailedPrecondition)
 	}
 }
 
@@ -2073,7 +2888,7 @@ func TestRollbackRejectsNoopTarget(t *testing.T) {
 	}
 
 	_, _, err = srv.Rollback(ctx, sessionID, "commit-old", "alice", "")
-	if err == nil || !strings.Contains(err.Error(), "rollback target matches running configuration") {
+	if err == nil || !strings.Contains(err.Error(), "rollback target matches running configuration") || !errors.Is(err, ErrConfigInput) {
 		t.Fatalf("Rollback() error = %v, want no changes", err)
 	}
 	if st.saved != nil {
@@ -2119,7 +2934,7 @@ func TestRollbackAbortsWhenCandidateStalesAfterPrepare(t *testing.T) {
 	}
 
 	_, _, err = srv.Rollback(ctx, sessionID, "commit-old", "alice", "")
-	if err == nil || !strings.Contains(err.Error(), "candidate configuration is stale") {
+	if err == nil || !strings.Contains(err.Error(), "candidate configuration is stale") || !errors.Is(err, ErrCandidateConflict) {
 		t.Fatalf("Rollback() error = %v, want stale candidate", err)
 	}
 	if !st.aborted {
@@ -2127,6 +2942,38 @@ func TestRollbackAbortsWhenCandidateStalesAfterPrepare(t *testing.T) {
 	}
 	if got := eng.Running().System.HostName; got != "netconf-router" {
 		t.Fatalf("running hostname = %q, want netconf-router", got)
+	}
+}
+
+func TestRollbackAdapterRedactsInternalErrors(t *testing.T) {
+	eng := engine.NewEngine(nil, testLogger())
+	eng.InitializeRunning(&model.RouterConfig{
+		System:     &model.SystemConfig{HostName: "router2"},
+		Interfaces: map[string]*model.InterfaceConfig{},
+	}, 2)
+	srv := NewServer(eng, &fakeStore{getCommitErr: errors.New("sqlite /var/lib/arca/config.db failed")}, testLogger())
+	ctx := context.Background()
+	sessionID, err := srv.CreateSession(ctx, "alice")
+	if err != nil {
+		t.Fatalf("CreateSession() error = %v", err)
+	}
+	if err := srv.AcquireLock(ctx, sessionID, "alice"); err != nil {
+		t.Fatalf("AcquireLock() error = %v", err)
+	}
+
+	_, err = (&configServiceAdapter{server: srv}).Rollback(ctx, &apiv1.RollbackRequest{
+		SessionId: sessionID,
+		CommitId:  "commit-old",
+		User:      "alice",
+	})
+	if status.Code(err) != codes.Internal {
+		t.Fatalf("Rollback() status = %v, want %v", status.Code(err), codes.Internal)
+	}
+	if got := status.Convert(err).Message(); got != "internal server error" {
+		t.Fatalf("Rollback() status message = %q, want generic internal error", got)
+	}
+	if strings.Contains(err.Error(), "/var/lib/arca/config.db") {
+		t.Fatalf("Rollback() error leaked backend path: %v", err)
 	}
 }
 
@@ -2228,7 +3075,7 @@ func TestApplyCandidateCommandReplacesV06ScalarAttributes(t *testing.T) {
 	candidate := strings.Join([]string{
 		"set system services web-ui port 8080",
 		"set system services prometheus port 9090",
-		"set system services snmp community public",
+		"set system services snmp community old-monitoring",
 		"set security netconf ssh port 830",
 		"set protocols vrrp group 10 priority 100",
 		"set routing-instances BLUE route-distinguisher 65000:100",
@@ -2254,7 +3101,7 @@ func TestApplyCandidateCommandReplacesV06ScalarAttributes(t *testing.T) {
 	for _, oldLine := range []string{
 		"set system services web-ui port 8080",
 		"set system services prometheus port 9090",
-		"set system services snmp community public",
+		"set system services snmp community old-monitoring",
 		"set security netconf ssh port 830",
 		"set protocols vrrp group 10 priority 100",
 		"set routing-instances BLUE route-distinguisher 65000:100",
