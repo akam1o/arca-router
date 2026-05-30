@@ -777,6 +777,10 @@ func buildGRPCServerOptions(f *daemonFlags) ([]googlegrpc.ServerOption, error) {
 	if err != nil {
 		return nil, err
 	}
+	allowedClientIDs, err := parseGRPCClientIdentities(f.grpcClientID)
+	if err != nil {
+		return nil, err
+	}
 	opts := []googlegrpc.ServerOption{googlegrpc.Creds(credentials.NewTLS(tlsConfig))}
 	clientRoles, err := nbgrpc.ParseTLSClientRoles(f.grpcClientRole)
 	if err != nil {
@@ -786,8 +790,8 @@ func buildGRPCServerOptions(f *daemonFlags) ([]googlegrpc.ServerOption, error) {
 		return nil, fmt.Errorf("--grpc-listen requires --grpc-client-role for gRPC authorization")
 	}
 	opts = append(opts,
-		googlegrpc.UnaryInterceptor(nbgrpc.NewTLSClientRoleUnaryInterceptor(clientRoles)),
-		googlegrpc.StreamInterceptor(nbgrpc.NewTLSClientRoleStreamInterceptor(clientRoles)),
+		googlegrpc.UnaryInterceptor(nbgrpc.NewTLSClientRoleUnaryInterceptor(clientRoles, allowedClientIDs...)),
+		googlegrpc.StreamInterceptor(nbgrpc.NewTLSClientRoleStreamInterceptor(clientRoles, allowedClientIDs...)),
 	)
 	return opts, nil
 }

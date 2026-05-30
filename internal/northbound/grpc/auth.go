@@ -107,10 +107,11 @@ func isValidGRPCRole(role string) bool {
 
 // NewTLSClientRoleUnaryInterceptor enforces method-level RBAC for TLS-authenticated
 // gRPC clients.
-func NewTLSClientRoleUnaryInterceptor(roles map[string]string) googlegrpc.UnaryServerInterceptor {
+func NewTLSClientRoleUnaryInterceptor(roles map[string]string, allowedIdentities ...string) googlegrpc.UnaryServerInterceptor {
 	authorizer := internalauth.NewAuthorizer()
+	allowed := grpcAllowedIdentitySet(allowedIdentities)
 	return func(ctx context.Context, req any, info *googlegrpc.UnaryServerInfo, handler googlegrpc.UnaryHandler) (any, error) {
-		if err := authorizeGRPCMethod(ctx, info.FullMethod, roles, authorizer); err != nil {
+		if err := authorizeGRPCMethod(ctx, info.FullMethod, roles, allowed, authorizer); err != nil {
 			return nil, err
 		}
 		return handler(ctx, req)
@@ -119,17 +120,18 @@ func NewTLSClientRoleUnaryInterceptor(roles map[string]string) googlegrpc.UnaryS
 
 // NewTLSClientRoleStreamInterceptor enforces method-level RBAC for streaming
 // gRPC methods.
-func NewTLSClientRoleStreamInterceptor(roles map[string]string) googlegrpc.StreamServerInterceptor {
+func NewTLSClientRoleStreamInterceptor(roles map[string]string, allowedIdentities ...string) googlegrpc.StreamServerInterceptor {
 	authorizer := internalauth.NewAuthorizer()
+	allowed := grpcAllowedIdentitySet(allowedIdentities)
 	return func(srv any, stream googlegrpc.ServerStream, info *googlegrpc.StreamServerInfo, handler googlegrpc.StreamHandler) error {
-		if err := authorizeGRPCMethod(stream.Context(), info.FullMethod, roles, authorizer); err != nil {
+		if err := authorizeGRPCMethod(stream.Context(), info.FullMethod, roles, allowed, authorizer); err != nil {
 			return err
 		}
 		return handler(srv, stream)
 	}
 }
 
-func authorizeGRPCMethod(ctx context.Context, method string, roles map[string]string, authorizer *internalauth.Authorizer) error {
+func authorizeGRPCMethod(ctx context.Context, method string, roles map[string]string, allowedIdentities map[string]struct{}, authorizer *internalauth.Authorizer) error {
 	if len(roles) == 0 {
 		return status.Error(codes.Unauthenticated, "gRPC client certificate role mapping is not configured")
 	}
@@ -137,7 +139,7 @@ func authorizeGRPCMethod(ctx context.Context, method string, roles map[string]st
 	if !ok {
 		return status.Errorf(codes.PermissionDenied, "gRPC method %s is not authorized", method)
 	}
-	role, ok := grpcTLSClientRole(ctx, roles)
+	role, ok := grpcTLSClientRole(ctx, roles, allowedIdentities)
 	if !ok {
 		return status.Error(codes.Unauthenticated, "gRPC client certificate identity is not mapped to a role")
 	}
@@ -147,12 +149,28 @@ func authorizeGRPCMethod(ctx context.Context, method string, roles map[string]st
 	return nil
 }
 
-func grpcTLSClientRole(ctx context.Context, roles map[string]string) (string, bool) {
+func grpcAllowedIdentitySet(identities []string) map[string]struct{} {
+	if len(identities) == 0 {
+		return nil
+	}
+	allowed := make(map[string]struct{}, len(identities))
+	for _, identity := range identities {
+		allowed[identity] = struct{}{}
+	}
+	return allowed
+}
+
+func grpcTLSClientRole(ctx context.Context, roles map[string]string, allowedIdentities map[string]struct{}) (string, bool) {
 	state, ok := grpcTLSConnectionState(ctx)
 	if !ok {
 		return "", false
 	}
 	for _, identity := range grpcTLSIdentities(state) {
+		if len(allowedIdentities) > 0 {
+			if _, ok := allowedIdentities[identity]; !ok {
+				continue
+			}
+		}
 		if role, ok := roles[identity]; ok {
 			return role, true
 		}

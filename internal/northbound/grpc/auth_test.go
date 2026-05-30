@@ -232,6 +232,31 @@ func TestTLSClientRoleUnaryInterceptorMatchesAnyCertificateIdentity(t *testing.T
 	}
 }
 
+func TestTLSClientRoleUnaryInterceptorRestrictsRoleToAllowedIdentity(t *testing.T) {
+	roles := map[string]string{"router-admin": internalauth.RoleAdmin}
+	interceptor := NewTLSClientRoleUnaryInterceptor(roles, "spiffe://arca-router/nms")
+	called := false
+
+	_, err := interceptor(
+		grpcAuthTestContext(t, grpcAuthTestCert{
+			CommonName: "router-admin",
+			URI:        "spiffe://arca-router/nms",
+		}),
+		nil,
+		&googlegrpc.UnaryServerInfo{FullMethod: "/arca.router.v1.ConfigService/Commit"},
+		func(context.Context, any) (any, error) {
+			called = true
+			return "ok", nil
+		},
+	)
+	if status.Code(err) != codes.Unauthenticated {
+		t.Fatalf("interceptor() status = %v, want Unauthenticated (err=%v)", status.Code(err), err)
+	}
+	if called {
+		t.Fatal("handler was called with an unallowed role identity")
+	}
+}
+
 func TestTLSClientRoleUnaryInterceptorRejectsUnmappedIdentity(t *testing.T) {
 	roles := map[string]string{"monitor": internalauth.RoleReadOnly}
 	interceptor := NewTLSClientRoleUnaryInterceptor(roles)
