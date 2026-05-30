@@ -195,8 +195,8 @@ func TestApplyErrorReportsRollbackSucceeded(t *testing.T) {
 	if !strings.Contains(err.Error(), "rollback succeeded") || !strings.Contains(err.Error(), "apply boom") {
 		t.Fatalf("Apply() error = %v, want rollback success and apply cause", err)
 	}
-	if first.rollbackCalls != 1 || second.rollbackCalls != 0 {
-		t.Fatalf("rollback calls first/second = %d/%d, want 1/0", first.rollbackCalls, second.rollbackCalls)
+	if first.rollbackCalls != 1 || second.rollbackCalls != 1 {
+		t.Fatalf("rollback calls first/second = %d/%d, want 1/1", first.rollbackCalls, second.rollbackCalls)
 	}
 	if got := eng.Running().System.HostName; got != "router1" {
 		t.Fatalf("engine running hostname = %q, want unchanged router1", got)
@@ -230,8 +230,8 @@ func TestApplyErrorReportsRollbackFailure(t *testing.T) {
 	if !strings.Contains(err.Error(), "rollback failed") || !strings.Contains(err.Error(), "undo failed") {
 		t.Fatalf("Apply() error = %v, want rollback failure detail", err)
 	}
-	if first.rollbackCalls != 1 || second.rollbackCalls != 0 {
-		t.Fatalf("rollback calls first/second = %d/%d, want 1/0", first.rollbackCalls, second.rollbackCalls)
+	if first.rollbackCalls != 1 || second.rollbackCalls != 1 {
+		t.Fatalf("rollback calls first/second = %d/%d, want 1/1", first.rollbackCalls, second.rollbackCalls)
 	}
 }
 
