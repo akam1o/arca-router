@@ -248,6 +248,64 @@ func TestApplyChangesReturnsRollbackErrors(t *testing.T) {
 	}
 }
 
+func TestEngineRollbackSkipsAlreadyRolledBackVPPApplyFailure(t *testing.T) {
+	ctx := context.Background()
+	client := pkgvpp.NewMockClient()
+	plugin := NewVPPPlugin(client, &device.HardwareConfig{
+		Interfaces: []device.PhysicalInterface{
+			{Name: "ge-0/0/0", PCI: "0000:03:00.0", Driver: "avf"},
+		},
+	}, testLogger())
+	if err := plugin.Init(ctx); err != nil {
+		t.Fatalf("Init() error = %v", err)
+	}
+	t.Cleanup(func() { _ = plugin.Close() })
+
+	oldCfg := model.NewRouterConfig()
+	oldCfg.Interfaces["ge-0/0/0"] = &model.InterfaceConfig{
+		Units: map[int]*model.Unit{
+			0: {Family: map[string]*model.AddressFamily{"inet": {Addresses: []string{"192.0.2.1/24"}}}},
+		},
+	}
+	if err := plugin.ApplyChanges(ctx, engine.ComputeDiff(model.NewRouterConfig(), oldCfg)); err != nil {
+		t.Fatalf("initial ApplyChanges() error = %v", err)
+	}
+	idx, ok := plugin.GetInterfaceIndex("ge-0/0/0")
+	if !ok {
+		t.Fatal("initial ApplyChanges() did not add interface index")
+	}
+
+	eng := engine.NewEngine([]engine.Plugin{plugin}, testLogger())
+	eng.InitializeRunning(oldCfg, 1)
+
+	newCfg := model.NewRouterConfig()
+	newCfg.Interfaces["ge-0/0/0"] = &model.InterfaceConfig{
+		Units: map[int]*model.Unit{
+			0: {Family: map[string]*model.AddressFamily{"inet": {Addresses: []string{"192.0.2.1/24", "192.0.2.2/24"}}}},
+		},
+	}
+	client.SetInterfaceAddressError = errors.New("address failed")
+
+	err := eng.Apply(ctx, newCfg, "test", "add address")
+	if err == nil {
+		t.Fatal("Apply() error = nil, want address failure")
+	}
+	var applyErr *engine.ApplyError
+	if !errors.As(err, &applyErr) {
+		t.Fatalf("Apply() error = %T, want *engine.ApplyError", err)
+	}
+	if !applyErr.RollbackAttempted || !applyErr.RollbackSucceeded {
+		t.Fatalf("rollback status attempted=%v succeeded=%v diagnostics=%v", applyErr.RollbackAttempted, applyErr.RollbackSucceeded, applyErr.RollbackDiagnostics)
+	}
+	iface, err := client.GetInterface(ctx, idx)
+	if err != nil {
+		t.Fatalf("GetInterface() error = %v", err)
+	}
+	if len(iface.Addresses) != 1 || !iface.Addresses[0].IP.Equal(net.ParseIP("192.0.2.1").To4()) {
+		t.Fatalf("addresses after rollback = %#v, want only 192.0.2.1/24", iface.Addresses)
+	}
+}
+
 func TestRollbackChangesRemovesAddedInterfaceIndex(t *testing.T) {
 	ctx := context.Background()
 	client := pkgvpp.NewMockClient()

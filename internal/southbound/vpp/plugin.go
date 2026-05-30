@@ -44,6 +44,10 @@ type VPPPlugin struct {
 	// removedInterfaces tracks interfaces disabled during the last apply.
 	removedInterfaces map[string]uint32
 
+	// applyFailureRolledBack is set when ApplyChanges already restored its own
+	// partial changes before returning an error.
+	applyFailureRolledBack bool
+
 	lcpReconciliation LCPReconciliationStatus
 	qosCapabilities   QoSCapabilityStatus
 }
@@ -175,14 +179,12 @@ func (p *VPPPlugin) ApplyChanges(ctx context.Context, diff *engine.ConfigDiff) e
 	// Track changes for potential rollback
 	var rollbackOps []func(context.Context) error
 	p.removedInterfaces = make(map[string]uint32)
+	p.applyFailureRolledBack = false
 
 	// 1. Create new interfaces
 	for name, ifaceCfg := range diff.InterfacesAdded {
 		if err := p.createInterface(ctx, name, ifaceCfg, &rollbackOps); err != nil {
-			return withRollbackError(
-				fmt.Errorf("create interface %s: %w", name, err),
-				p.executeRollback(ctx, rollbackOps),
-			)
+			return p.rollbackApplyError(ctx, fmt.Errorf("create interface %s: %w", name, err), rollbackOps)
 		}
 	}
 
@@ -191,10 +193,7 @@ func (p *VPPPlugin) ApplyChanges(ctx context.Context, diff *engine.ConfigDiff) e
 		var err error
 		tableAddressHandled, err = p.applyRoutingInstanceChanges(ctx, diff, &rollbackOps, false)
 		if err != nil {
-			return withRollbackError(
-				fmt.Errorf("update routing instance tables: %w", err),
-				p.executeRollback(ctx, rollbackOps),
-			)
+			return p.rollbackApplyError(ctx, fmt.Errorf("update routing instance tables: %w", err), rollbackOps)
 		}
 	}
 
@@ -204,16 +203,10 @@ func (p *VPPPlugin) ApplyChanges(ctx context.Context, diff *engine.ConfigDiff) e
 		}
 		swIfIndex, ok := p.ifaceIndex[name]
 		if !ok {
-			return withRollbackError(
-				fmt.Errorf("interface %s not found in VPP", name),
-				p.executeRollback(ctx, rollbackOps),
-			)
+			return p.rollbackApplyError(ctx, fmt.Errorf("interface %s not found in VPP", name), rollbackOps)
 		}
 		if err := p.applyAddresses(ctx, swIfIndex, ifaceCfg, &rollbackOps); err != nil {
-			return withRollbackError(
-				fmt.Errorf("apply interface %s addresses: %w", name, err),
-				p.executeRollback(ctx, rollbackOps),
-			)
+			return p.rollbackApplyError(ctx, fmt.Errorf("apply interface %s addresses: %w", name, err), rollbackOps)
 		}
 	}
 
@@ -223,59 +216,41 @@ func (p *VPPPlugin) ApplyChanges(ctx context.Context, diff *engine.ConfigDiff) e
 			continue
 		}
 		if err := p.applyInterfaceChanges(ctx, change, &rollbackOps); err != nil {
-			return withRollbackError(
-				fmt.Errorf("update interface %s: %w", change.Name, err),
-				p.executeRollback(ctx, rollbackOps),
-			)
+			return p.rollbackApplyError(ctx, fmt.Errorf("update interface %s: %w", change.Name, err), rollbackOps)
 		}
 	}
 
 	// 3. Apply MPLS forwarding state before interfaces are removed.
 	if diff.MPLSChanged {
 		if err := p.applyMPLSChanges(ctx, diff.OldMPLS, diff.NewMPLS, &rollbackOps); err != nil {
-			return withRollbackError(
-				fmt.Errorf("update MPLS interfaces: %w", err),
-				p.executeRollback(ctx, rollbackOps),
-			)
+			return p.rollbackApplyError(ctx, fmt.Errorf("update MPLS interfaces: %w", err), rollbackOps)
 		}
 	}
 
 	// 4. Apply class-of-service profile bindings before interfaces are removed.
 	if diff.ClassOfServiceChanged {
 		if err := p.applyClassOfServiceChanges(ctx, diff.OldClassOfService, diff.NewClassOfService, &rollbackOps); err != nil {
-			return withRollbackError(
-				fmt.Errorf("update class-of-service interfaces: %w", err),
-				p.executeRollback(ctx, rollbackOps),
-			)
+			return p.rollbackApplyError(ctx, fmt.Errorf("update class-of-service interfaces: %w", err), rollbackOps)
 		}
 	}
 
 	// 5. Apply EVPN/VXLAN overlay state before interfaces are removed.
 	if diff.EVPNChanged {
 		if err := p.applyEVPNChanges(ctx, diff, &rollbackOps); err != nil {
-			return withRollbackError(
-				fmt.Errorf("update EVPN/VXLAN dataplane: %w", err),
-				p.executeRollback(ctx, rollbackOps),
-			)
+			return p.rollbackApplyError(ctx, fmt.Errorf("update EVPN/VXLAN dataplane: %w", err), rollbackOps)
 		}
 	}
 
 	if diff.RoutingInstancesChanged {
 		if err := p.deleteStaleRoutingInstanceTables(ctx, diff, &rollbackOps); err != nil {
-			return withRollbackError(
-				fmt.Errorf("delete routing instance tables: %w", err),
-				p.executeRollback(ctx, rollbackOps),
-			)
+			return p.rollbackApplyError(ctx, fmt.Errorf("delete routing instance tables: %w", err), rollbackOps)
 		}
 	}
 
 	// 6. Remove interfaces (remove addresses, LCP, then disable)
 	for _, name := range diff.InterfacesRemoved {
 		if err := p.removeInterface(ctx, name, &rollbackOps); err != nil {
-			return withRollbackError(
-				fmt.Errorf("remove interface %s: %w", name, err),
-				p.executeRollback(ctx, rollbackOps),
-			)
+			return p.rollbackApplyError(ctx, fmt.Errorf("remove interface %s: %w", name, err), rollbackOps)
 		}
 	}
 
@@ -287,6 +262,12 @@ func (p *VPPPlugin) ApplyChanges(ctx context.Context, diff *engine.ConfigDiff) e
 func (p *VPPPlugin) RollbackChanges(ctx context.Context, diff *engine.ConfigDiff) error {
 	p.mu.Lock()
 	defer p.mu.Unlock()
+
+	if p.applyFailureRolledBack {
+		p.applyFailureRolledBack = false
+		p.updateLCPReconciliationLocked(ctx)
+		return nil
+	}
 
 	var rollbackErr error
 	if diff.MPLSChanged {
@@ -1305,6 +1286,14 @@ func (p *VPPPlugin) executeRollback(ctx context.Context, ops []func(context.Cont
 		}
 	}
 	return rollbackErr
+}
+
+func (p *VPPPlugin) rollbackApplyError(ctx context.Context, operationErr error, rollbackOps []func(context.Context) error) error {
+	rollbackErr := p.executeRollback(ctx, rollbackOps)
+	if rollbackErr == nil {
+		p.applyFailureRolledBack = true
+	}
+	return withRollbackError(operationErr, rollbackErr)
 }
 
 func withRollbackError(operationErr, rollbackErr error) error {
