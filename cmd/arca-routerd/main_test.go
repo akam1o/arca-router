@@ -132,6 +132,41 @@ func (p lifecycleTestPlugin) HealthCheck(ctx context.Context) error {
 	return nil
 }
 
+type initialApplyRecorderPlugin struct {
+	applyCount int
+	lastDiff   *engine.ConfigDiff
+}
+
+func (p *initialApplyRecorderPlugin) Name() string {
+	return "initial-recorder"
+}
+
+func (p *initialApplyRecorderPlugin) Init(ctx context.Context) error {
+	return nil
+}
+
+func (p *initialApplyRecorderPlugin) ValidateChanges(ctx context.Context, diff *engine.ConfigDiff) error {
+	return nil
+}
+
+func (p *initialApplyRecorderPlugin) ApplyChanges(ctx context.Context, diff *engine.ConfigDiff) error {
+	p.applyCount++
+	p.lastDiff = diff.Clone()
+	return nil
+}
+
+func (p *initialApplyRecorderPlugin) RollbackChanges(ctx context.Context, diff *engine.ConfigDiff) error {
+	return nil
+}
+
+func (p *initialApplyRecorderPlugin) Close() error {
+	return nil
+}
+
+func (p *initialApplyRecorderPlugin) HealthCheck(ctx context.Context) error {
+	return nil
+}
+
 func TestDaemonRuntimeCloseClosesPluginsInReverseInitOrder(t *testing.T) {
 	var closeLog []string
 	runtime := &daemonRuntime{
@@ -242,7 +277,8 @@ func TestLoadInitialConfigRejectsConfigOpenError(t *testing.T) {
 }
 
 func TestApplyInitialConfigPersistsFileStartupConfig(t *testing.T) {
-	eng := engine.NewEngine(nil, slog.Default())
+	recorder := &initialApplyRecorderPlugin{}
+	eng := engine.NewEngine([]engine.Plugin{recorder}, slog.Default())
 	st := &initialConfigStore{}
 	snap := model.NewSnapshot(&model.RouterConfig{
 		System:     &model.SystemConfig{HostName: "file-router"},
@@ -260,6 +296,12 @@ func TestApplyInitialConfigPersistsFileStartupConfig(t *testing.T) {
 	}
 	if got := eng.Running().System.HostName; got != "file-router" {
 		t.Fatalf("engine hostname = %q, want file-router", got)
+	}
+	if recorder.applyCount != 1 {
+		t.Fatalf("plugin apply count = %d, want 1", recorder.applyCount)
+	}
+	if recorder.lastDiff == nil || !recorder.lastDiff.SystemChanged {
+		t.Fatalf("plugin diff = %#v, want system change", recorder.lastDiff)
 	}
 }
 
@@ -280,9 +322,13 @@ func TestApplyInitialConfigPersistsEmptyStartupConfigAndCreatesSnapshot(t *testi
 }
 
 func TestApplyInitialConfigDoesNotPersistDatastoreStartupConfig(t *testing.T) {
-	eng := engine.NewEngine(nil, slog.Default())
+	recorder := &initialApplyRecorderPlugin{}
+	eng := engine.NewEngine([]engine.Plugin{recorder}, slog.Default())
 	st := &initialConfigStore{}
-	snap := model.NewSnapshot(model.NewRouterConfig(), 7, "system", "loaded from datastore")
+	snap := model.NewSnapshot(&model.RouterConfig{
+		System:     &model.SystemConfig{HostName: "stored-router"},
+		Interfaces: map[string]*model.InterfaceConfig{},
+	}, 7, "system", "loaded from datastore")
 
 	if err := applyInitialConfig(context.Background(), eng, st, snap, "datastore"); err != nil {
 		t.Fatalf("applyInitialConfig() error = %v", err)
@@ -292,6 +338,12 @@ func TestApplyInitialConfigDoesNotPersistDatastoreStartupConfig(t *testing.T) {
 	}
 	if running := eng.RunningSnapshot(); running == nil || running.Version != 7 {
 		t.Fatalf("running snapshot = %#v, want datastore version 7", running)
+	}
+	if got := eng.Running().System.HostName; got != "stored-router" {
+		t.Fatalf("engine hostname = %q, want stored-router", got)
+	}
+	if recorder.applyCount != 0 {
+		t.Fatalf("plugin apply count = %d, want 0", recorder.applyCount)
 	}
 }
 

@@ -1020,8 +1020,16 @@ func applyInitialConfig(ctx context.Context, eng *engine.Engine, st internalstor
 		return fmt.Errorf("initial configuration is nil")
 	}
 
+	if source == "datastore" {
+		if err := snap.Config.Validate(); err != nil {
+			return fmt.Errorf("validate datastore initial config: %w", err)
+		}
+		eng.InitializeRunning(snap.Config, initialSnapshotVersion(snap))
+		return nil
+	}
+
 	var prepared internalstore.PreparedCommit
-	if source != "datastore" && st != nil {
+	if st != nil {
 		var err error
 		prepared, err = st.PrepareCommit(ctx, snap)
 		if err != nil {
@@ -1035,11 +1043,6 @@ func applyInitialConfig(ctx context.Context, eng *engine.Engine, st internalstor
 			_ = prepared.Abort(context.Background())
 		}
 		return err
-	}
-
-	if source == "datastore" {
-		eng.InitializeRunning(snap.Config, initialSnapshotVersion(snap))
-		return nil
 	}
 
 	if prepared != nil {
